@@ -23,10 +23,7 @@ html {
 
 body {
   min-height: 100vh;
-  background-image:
-    linear-gradient(var(--admin-bg-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--admin-bg-grid) 1px, transparent 1px);
-  background-size: 36px 36px;
+  background: var(--admin-bg);
 }
 
 button,
@@ -294,6 +291,35 @@ h3 {
   font-size: 0.56rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.admin-operator-identity {
+  display: grid;
+  min-width: 0;
+  gap: 0.12rem;
+  text-align: right;
+}
+
+.admin-operator-identity strong {
+  overflow: hidden;
+  max-width: 14rem;
+  color: var(--admin-text-secondary);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-operator-identity span {
+  color: var(--admin-text-faint);
+  font-family: var(--admin-font-mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.admin-sign-out {
+  min-height: 2.5rem;
+  padding-inline: 0.8rem;
 }
 
 .admin-main {
@@ -709,6 +735,64 @@ h3 {
   margin-top: 2rem;
 }
 
+.admin-not-found:has(form[aria-label="Operator sign in"]) {
+  display: grid;
+  width: min(100%, 30rem);
+  min-height: 100vh;
+  align-content: center;
+  margin: 0 auto;
+  padding: 3rem 0;
+}
+
+.admin-not-found:has(form[aria-label="Operator sign in"]) h1 {
+  margin-top: 0.85rem;
+  font-size: clamp(3.2rem, 9vw, 5.3rem);
+}
+
+form[aria-label="Operator sign in"] {
+  gap: 1.1rem;
+  margin-top: 2.1rem;
+  padding: 1.5rem;
+  border-top: 3px solid var(--admin-accent);
+  background: var(--admin-surface-raised);
+  box-shadow: var(--admin-shadow-md);
+}
+
+form[aria-label="Operator sign in"] .admin-button {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.admin-session-gate {
+  display: grid;
+  width: min(calc(100% - 2rem), 34rem);
+  min-height: 100vh;
+  align-content: center;
+  gap: 1rem;
+  margin: 0 auto;
+  padding: 3rem 0;
+}
+
+.admin-session-gate h1 {
+  font-family: var(--admin-font-display);
+  font-size: clamp(2.8rem, 8vw, 4.6rem);
+  font-weight: 400;
+  letter-spacing: -0.048em;
+  line-height: 0.98;
+}
+
+.admin-session-gate p {
+  max-width: 30rem;
+  color: var(--admin-text-muted);
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.admin-session-gate .admin-button {
+  justify-self: start;
+  margin-top: 0.5rem;
+}
+
 .admin-dialog-shell {
   position: fixed;
   inset: 0;
@@ -818,6 +902,20 @@ h3 {
   font-size: 0.78rem;
 }
 
+form.admin-ledger .admin-section-heading {
+  display: grid;
+  grid-template-columns: minmax(14rem, 2fr) repeat(2, minmax(9rem, 1fr)) auto;
+  align-items: end;
+  padding-bottom: 0;
+}
+
+.admin-ledger__rows article p:has(.admin-button) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
 .admin-toast-viewport {
   position: fixed;
   z-index: 120;
@@ -919,6 +1017,19 @@ h3 {
   .admin-contract > p {
     margin-top: 1.5rem;
   }
+
+  form.admin-ledger .admin-section-heading {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-ledger[aria-labelledby="operators-ledger-title"] .admin-ledger__rows article {
+    grid-template-columns: 1.6rem minmax(0, 1fr);
+  }
+
+  .admin-ledger[aria-labelledby="operators-ledger-title"] .admin-status {
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 
 @media (max-width: 620px) {
@@ -938,6 +1049,15 @@ h3 {
   .admin-access-note {
     max-width: 10rem;
     text-align: center;
+  }
+
+  .admin-operator-identity {
+    max-width: 8.5rem;
+  }
+
+  .admin-sign-out {
+    min-height: 2.35rem;
+    padding-inline: 0.65rem;
   }
 
   .admin-main {
@@ -1007,6 +1127,22 @@ h3 {
 
   .admin-dialog__footer .admin-button {
     width: 100%;
+  }
+
+  form.admin-ledger .admin-section-heading {
+    grid-template-columns: 1fr;
+  }
+
+  form.admin-ledger .admin-button {
+    width: 100%;
+  }
+
+  .admin-not-found:has(form[aria-label="Operator sign in"]) {
+    padding-block: 2.2rem;
+  }
+
+  form[aria-label="Operator sign in"] {
+    padding: 1.15rem;
   }
 }
 

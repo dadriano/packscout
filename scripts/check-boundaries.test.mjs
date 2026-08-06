@@ -21,6 +21,8 @@ function createFixture(t) {
   mkdirSync(path.join(root, "apps", "frontend", "app"), { recursive: true });
   mkdirSync(path.join(root, "apps", "admin", "src"), { recursive: true });
   mkdirSync(path.join(root, "apps", "admin", "server"), { recursive: true });
+  mkdirSync(path.join(root, "packages", "contracts", "src"), { recursive: true });
+  mkdirSync(path.join(root, "packages", "services", "src"), { recursive: true });
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
 }
@@ -111,4 +113,28 @@ test("rejects admin browser imports that use the admin server package alias", (t
   const result = runChecker(root);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /no-cross-zone-package-imports/);
+});
+
+test("rejects server service imports from the admin browser", (t) => {
+  const root = createFixture(t);
+  writeFileSync(
+    path.join(root, "apps", "admin", "src", "App.tsx"),
+    'import { secretWorkflow } from "@packscout/services";\nexport const value = secretWorkflow;\n',
+  );
+
+  const result = runChecker(root);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /admin-client-no-server-packages/);
+});
+
+test("keeps the shared contracts package runtime neutral", (t) => {
+  const root = createFixture(t);
+  writeFileSync(
+    path.join(root, "packages", "contracts", "src", "index.ts"),
+    'import crypto from "node:crypto";\nexport const value = crypto;\n',
+  );
+
+  const result = runChecker(root);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /contracts-runtime-neutral/);
 });

@@ -3,6 +3,7 @@ import { getAdminHealth } from "../api/health";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge, type StatusTone } from "../components/StatusBadge";
+import { useSession } from "../providers/session";
 import { useToast } from "../providers/toast";
 
 type ServiceState = "checking" | "online" | "offline";
@@ -52,6 +53,7 @@ function serviceBadge(state: ServiceState) {
 
 export function OverviewPage() {
   const { showToast } = useToast();
+  const { status } = useSession();
   const [serviceState, setServiceState] = useState<ServiceState>("checking");
 
   useEffect(() => {
@@ -81,8 +83,8 @@ export function OverviewPage() {
     <div className="admin-page">
       <PageHeader
         eyebrow="Overview / 001"
-        title="A clean base for the work ahead."
-        description="The operator shell, API boundary, shared interaction patterns, and repository guardrails are in place without inventing product behavior before its contract exists."
+        title="Data operations, under control."
+        description="Protected operator access, stable service boundaries, and repository guardrails keep PackScout's provider work deliberate and auditable."
         actions={
           <button
             type="button"
@@ -115,10 +117,15 @@ export function OverviewPage() {
         <article>
           <span className="admin-metric__index">C</span>
           <div>
-            <small>Product modules</small>
-            <strong>Ready for definition</strong>
+            <small>Operator access</small>
+            <strong>
+              {status.phase === "authenticated" &&
+              status.session.membership.role === "admin"
+                ? "Administrator session"
+                : "Data operator session"}
+            </strong>
           </div>
-          <StatusBadge label="Unclaimed" tone="neutral" />
+          <StatusBadge label="Protected" tone="ready" />
         </article>
       </section>
 
@@ -151,15 +158,15 @@ export function OverviewPage() {
           <dl>
             <div>
               <dt>Authentication</dt>
-              <dd>Not configured</dd>
+              <dd>Session protected</dd>
             </div>
             <div>
               <dt>Persistence</dt>
-              <dd>Not selected</dd>
+              <dd>PostgreSQL owned</dd>
             </div>
             <div>
               <dt>Shared services</dt>
-              <dd>Add on genuine reuse</dd>
+              <dd>Contracts enforced</dd>
             </div>
           </dl>
           <p>
@@ -171,8 +178,8 @@ export function OverviewPage() {
 
       <EmptyState
         eyebrow="Next waypoint / 002"
-        title="No operator modules have been claimed yet."
-        description="Add the first real route when its actor, permissions, inputs, states, and service ownership are agreed. The shell can stay put while the product grows around it."
+        title="Provider operations are the next waypoint."
+        description="Configure and test a provider before activation, then follow each import through its durable evidence and current projection."
       />
     </div>
   );

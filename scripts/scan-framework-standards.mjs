@@ -47,6 +47,10 @@ if (optionErrors.length > 0) {
 const surfaces = [
   { name: "frontend", directory: "apps/frontend" },
   { name: "admin", directory: "apps/admin" },
+  { name: "worker", directory: "apps/worker" },
+  { name: "contracts", directory: "packages/contracts" },
+  { name: "database", directory: "packages/database" },
+  { name: "services", directory: "packages/services" },
 ];
 
 function surfaceForFile(relativePath) {

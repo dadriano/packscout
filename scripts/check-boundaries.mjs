@@ -20,6 +20,10 @@ const zones = new Map([
   ["frontend", path.join(repositoryRoot, "apps", "frontend")],
   ["admin-client", path.join(repositoryRoot, "apps", "admin", "src")],
   ["admin-server", path.join(repositoryRoot, "apps", "admin", "server")],
+  ["contracts", path.join(repositoryRoot, "packages", "contracts")],
+  ["services", path.join(repositoryRoot, "packages", "services")],
+  ["database", path.join(repositoryRoot, "packages", "database")],
+  ["worker", path.join(repositoryRoot, "apps", "worker")],
 ]);
 
 const sourceExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
@@ -207,6 +211,37 @@ function checkImport({
   }
 
   if (
+    sourceZone === "admin-client" &&
+    ["@packscout/services", "@packscout/database"].some((packageName) =>
+      isPackageSpecifier(specifier, packageName)
+    )
+  ) {
+    addViolation(
+      violations,
+      filePath,
+      "admin-client-no-server-packages",
+      specifier,
+      "Admin browser code may import browser-safe contracts, not server services or persistence.",
+    );
+  }
+
+  if (
+    sourceZone === "contracts" &&
+    (serverOnlySpecifier ||
+      ["@packscout/services", "@packscout/database"].some((packageName) =>
+        isPackageSpecifier(specifier, packageName)
+      ))
+  ) {
+    addViolation(
+      violations,
+      filePath,
+      "contracts-runtime-neutral",
+      specifier,
+      "Browser-safe contracts cannot depend on Node runtimes, services, or persistence.",
+    );
+  }
+
+  if (
     sourceZone === "frontend" &&
     isClientComponent(content) &&
     serverOnlySpecifier
@@ -230,6 +265,22 @@ function checkImport({
       "frontend-no-admin-server-runtime",
       specifier,
       "Frontend code must not depend on the admin server runtime.",
+    );
+  }
+
+  if (
+    sourceZone === "frontend" &&
+    isClientComponent(content) &&
+    ["@packscout/services", "@packscout/database"].some((packageName) =>
+      isPackageSpecifier(specifier, packageName)
+    )
+  ) {
+    addViolation(
+      violations,
+      filePath,
+      "frontend-client-no-server-packages",
+      specifier,
+      "Frontend client components may import browser-safe contracts, not server services or persistence.",
     );
   }
 }

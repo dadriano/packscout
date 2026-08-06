@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useTheme } from "../hooks/useTheme";
+import { useSession } from "../providers/session";
+import { useToast } from "../providers/toast";
 
-const navigation = [
-  {
-    title: "Workspace",
-    items: [{ to: "/", label: "Overview", index: "01" }],
-  },
-];
+const baseNavigation = [{ to: "/", label: "Overview", index: "01" }];
 
 function ThemeIcon({ dark }: { dark: boolean }) {
   return dark ? (
@@ -25,10 +22,20 @@ function ThemeIcon({ dark }: { dark: boolean }) {
 
 export function AdminLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { resolvedTheme, setTheme } = useTheme();
+  const { status, signOut } = useSession();
+  const { showToast } = useToast();
   const [navOpenedAt, setNavOpenedAt] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
   const navOpen = navOpenedAt === location.pathname;
-  useDocumentTitle(location.pathname === "/" ? "Overview" : "Not found");
+  const title =
+    location.pathname === "/"
+      ? "Overview"
+      : location.pathname === "/operators"
+        ? "Operators"
+        : "Not found";
+  useDocumentTitle(title);
 
   useEffect(() => {
     if (!navOpen) return;
@@ -38,6 +45,13 @@ export function AdminLayout() {
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
   }, [navOpen]);
+
+  if (status.phase !== "authenticated") return null;
+  const { session } = status;
+  const canManageOperators = session.permissions.includes("operators:manage");
+  const navigation = canManageOperators
+    ? [...baseNavigation, { to: "/operators", label: "Operators", index: "02" }]
+    : baseNavigation;
 
   return (
     <div className="admin-layout" data-nav-open={navOpen ? "true" : "false"}>
@@ -72,14 +86,13 @@ export function AdminLayout() {
         </div>
 
         <nav className="admin-sidebar__nav">
-          {navigation.map((section) => (
-            <section key={section.title} className="admin-nav-section">
-              <h2>{section.title}</h2>
-              {section.items.map((item) => (
+          <section className="admin-nav-section">
+            <h2>Workspace</h2>
+            {navigation.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}
-                  end
+                  end={item.to === "/"}
                   className={({ isActive }) =>
                     `admin-nav-link${isActive ? " is-active" : ""}`
                   }
@@ -88,17 +101,13 @@ export function AdminLayout() {
                   <span aria-hidden="true">{item.index}</span>
                   {item.label}
                 </NavLink>
-              ))}
-            </section>
-          ))}
+            ))}
+          </section>
         </nav>
 
         <div className="admin-sidebar__footer">
-          <span className="admin-eyebrow">Foundation state</span>
-          <p>
-            Authentication and persistence stay unclaimed until their contracts are
-            selected and tested.
-          </p>
+          <span className="admin-eyebrow">Active workspace</span>
+          <p>{session.membership.organizationName}</p>
         </div>
       </aside>
 
@@ -121,7 +130,30 @@ export function AdminLayout() {
             </div>
           </div>
           <div className="admin-topbar__end">
-            <span className="admin-access-note">Access controls pending</span>
+            <div className="admin-operator-identity">
+              <strong>{session.operator.displayName}</strong>
+              <span>
+                {session.membership.role === "admin"
+                  ? "Administrator"
+                  : "Data operator"}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="admin-button admin-button--secondary admin-sign-out"
+              disabled={signingOut}
+              onClick={() => {
+                setSigningOut(true);
+                void signOut()
+                  .then(() => navigate("/login", { replace: true }))
+                  .catch(() => {
+                    setSigningOut(false);
+                    showToast("Sign out failed. Try again.", "error");
+                  });
+              }}
+            >
+              {signingOut ? "Signing out…" : "Sign out"}
+            </button>
             <button
               type="button"
               className="admin-icon-button"

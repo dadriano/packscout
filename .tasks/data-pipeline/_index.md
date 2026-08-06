@@ -1,6 +1,6 @@
 # Feature: Data Pipeline
 
-**Progress:** 0/18 tasks complete
+**Progress:** 3/18 tasks complete
 
 ## Context
 
@@ -54,10 +54,10 @@ The repository currently has independent frontend and admin foundations but no a
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 001 | [Protect data operations](001-protect-data-operations.md) | large | todo | none |
-| 002 | [Establish the provider feed contract](002-establish-provider-feed-contract.md) | medium | todo | none |
-| 003 | [Persist source and canonical history](003-persist-source-and-canonical-history.md) | large | todo | 002 |
-| 004 | [Manage provider configurations](004-manage-provider-configurations.md) | large | todo | 001, 002, 003 |
+| 001 | [Protect data operations](001-protect-data-operations.md) | large | done | none |
+| 002 | [Establish the provider feed contract](002-establish-provider-feed-contract.md) | medium | done | none |
+| 003 | [Persist source and canonical history](003-persist-source-and-canonical-history.md) | large | done | 002 |
+| 004 | [Manage provider configurations](004-manage-provider-configurations.md) | large | in_progress | 001, 002, 003 |
 | 005 | [Import cursor pages idempotently](005-import-cursor-pages-idempotently.md) | large | todo | 002, 003, 004 |
 
 ### Projection and reliability
@@ -113,4 +113,4 @@ The repository currently has independent frontend and admin foundations but no a
 
 ## Next Action
 
-Open [data-pipeline/001](001-protect-data-operations.md) and [data-pipeline/002](002-establish-provider-feed-contract.md), assign one builder to each, and begin with their objectives, requirements, and acceptance criteria.
+Open [data-pipeline/004](004-manage-provider-configurations.md) and implement versioned provider configuration management on the protected service and persistence boundaries.

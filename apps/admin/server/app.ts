@@ -1,8 +1,23 @@
+import { randomUUID } from "node:crypto";
 import express, {
   type ErrorRequestHandler,
   type RequestHandler,
 } from "express";
+import type { AuthService } from "@packscout/services";
+import type { SessionCookiePolicy } from "./auth/cookies.ts";
 import { createHealthRouter } from "./routes/health.ts";
+import { createAuthRouter } from "./routes/auth.ts";
+import { createOperatorsRouter } from "./routes/operators.ts";
+
+export interface AdminAuthHttpDependencies {
+  service: AuthService;
+  cookiePolicy: SessionCookiePolicy;
+  sameOrigin: RequestHandler;
+}
+
+export interface AdminAppDependencies {
+  auth?: AdminAuthHttpDependencies;
+}
 
 const apiNotFound: RequestHandler = (_request, response) => {
   response.status(404).json({
@@ -42,13 +57,32 @@ const handleApiError: ErrorRequestHandler = (
   });
 };
 
-export function createAdminApp() {
+export function createAdminApp(dependencies: AdminAppDependencies = {}) {
   const app = express();
 
   app.disable("x-powered-by");
+  app.use((request, response, next) => {
+    const requestId = request.get("x-request-id")?.slice(0, 128) || randomUUID();
+    response.setHeader("X-Request-Id", requestId);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Referrer-Policy", "same-origin");
+    response.setHeader("X-Frame-Options", "DENY");
+    next();
+  });
   app.use(express.json({ limit: "1mb" }));
 
   app.use("/api/health", createHealthRouter());
+  if (dependencies.auth) {
+    const { service, cookiePolicy, sameOrigin } = dependencies.auth;
+    app.use(
+      "/api/auth",
+      createAuthRouter({ service, cookiePolicy, sameOrigin }),
+    );
+    app.use(
+      "/api/operators",
+      createOperatorsRouter({ service, cookiePolicy, sameOrigin }),
+    );
+  }
   app.use("/api", apiNotFound);
   app.use(handleApiError);
 

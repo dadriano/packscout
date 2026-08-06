@@ -5,7 +5,7 @@
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md)  
 **Blocks:** [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/009](009-calculate-estimated-ev.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -47,8 +47,16 @@ Every canonical revision links to its source record and contains `platform_key`,
 
 ## Acceptance Criteria
 
-- [ ] Reprocessing an unchanged page creates no duplicate canonical revisions, while changed source content creates a new revision and atomically advances the current projection.
-- [ ] Pulls or sales with missing or not-yet-known pack relationships persist successfully and link when a matching pack projection arrives later.
-- [ ] Raw pages and quarantine payloads can expire after ninety days without removing canonical history, current projections, run summaries, validation reasons, or audit evidence.
-- [ ] Canonical actor data contains no source username or raw wallet address, and raw payloads cannot be reached through browser-facing persistence operations.
-- [ ] Concurrent and failed writes preserve one active configuration per platform, one durable cursor checkpoint per configuration, consistent run counters, and tenant isolation.
+- [x] Reprocessing an unchanged page creates no duplicate canonical revisions, while changed source content creates a new revision and atomically advances the current projection.
+- [x] Pulls or sales with missing or not-yet-known pack relationships persist successfully and link when a matching pack projection arrives later.
+- [x] Raw pages and quarantine payloads can expire after ninety days without removing canonical history, current projections, run summaries, validation reasons, or audit evidence.
+- [x] Canonical actor data contains no source username or raw wallet address, and raw payloads cannot be reached through browser-facing persistence operations.
+- [x] Concurrent and failed writes preserve one active configuration per platform, one durable cursor checkpoint per configuration, consistent run counters, and tenant isolation.
+
+## Spec Compliance
+
+- The Drizzle schema and append-only migration create 21 PostgreSQL tables for provider history, protected evidence, outcomes, quarantine, canonical revisions/current pointers, auth, audit, and operational state.
+- Durable repositories implement idempotent raw/source acceptance, immutable canonical revision history, multi-projection provenance, unresolved relationship reconciliation, cursor/run consistency, and 90-day evidence expiry.
+- Composite tenant constraints, scoped repository guards, actor pseudonymization, canonical PII rejection, and the protected-evidence-only export enforce the required isolation and data boundary.
+- Embedded PostgreSQL integration tests prove replay/change behavior, deferred relationships, rollback consistency, retention, last-admin/session behavior, and cross-tenant rejection. Production PostgreSQL 16+ remains an environment deployment check, not a schema or code gap.
+- Database tests, migration check, lint, typecheck, build, framework ratchet, dependency boundaries, and the canonical verification gate pass.

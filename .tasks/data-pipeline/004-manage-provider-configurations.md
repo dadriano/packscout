@@ -5,7 +5,7 @@
 **Depends on:** [data-pipeline/001](001-protect-data-operations.md), [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/003](003-persist-source-and-canonical-history.md)  
 **Blocks:** [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md), [data-pipeline/011](011-manage-providers-in-admin.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** in_progress
 
 ## Objective
 

@@ -5,7 +5,7 @@
 **Depends on:** none  
 **Blocks:** [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/011](011-manage-providers-in-admin.md), [data-pipeline/012](012-operate-imports-in-admin.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -48,8 +48,16 @@ Account provisioning and credential rotation return the affected account identit
 
 ## Acceptance Criteria
 
-- [ ] Anonymous, disabled, data-operator, and administrator requests receive the authorization outcomes defined in the matrix, with direct boundary tests for every protected mutation.
-- [ ] Successful login regenerates the session, secure cookie behavior matches the environment, repeated failures are rate-limited, and error responses do not disclose account existence.
-- [ ] Account provisioning, credential rotation, role changes, disablement, logout, and server-side role rechecks work without exposing secrets to browser bundles, responses, logs, or audit payloads.
-- [ ] The login and restricted states are keyboard-operable, labelled, responsive, and announce validation or authentication failures accessibly.
-- [ ] Browser/server and frontend/admin boundaries remain intact and the repository's canonical verification gate passes.
+- [x] Anonymous, disabled, data-operator, and administrator requests receive the authorization outcomes defined in the matrix, with direct boundary tests for every protected mutation.
+- [x] Successful login regenerates the session, secure cookie behavior matches the environment, repeated failures are rate-limited, and error responses do not disclose account existence.
+- [x] Account provisioning, credential rotation, role changes, disablement, logout, and server-side role rechecks work without exposing secrets to browser bundles, responses, logs, or audit payloads.
+- [x] The login and restricted states are keyboard-operable, labelled, responsive, and announce validation or authentication failures accessibly.
+- [x] Browser/server and frontend/admin boundaries remain intact and the repository's canonical verification gate passes.
+
+## Spec Compliance
+
+- The admin runtime now composes durable PostgreSQL-backed operators, sessions, rate limits, and audit events behind service interfaces; the embedded local runtime uses the same schema and service boundary with an explicitly local first-admin fixture.
+- The authenticated HTTP boundary rechecks account status and role, rotates and revokes opaque sessions, enforces same-origin CSRF protection, and emits stable structured errors without credential or secret values.
+- Administrators can provision, rotate, re-role, and disable operators. Transactional persistence prevents removal of the last active administrator and revokes sessions on security changes.
+- Browser walkthroughs covered login, logout, desktop and mobile operator management, data-operator navigation restrictions, direct-route denial, keyboard dismissal, and responsive overflow.
+- Direct auth, route, client race-condition, persistence, boundary, lint, typecheck, build, and canonical framework checks pass.

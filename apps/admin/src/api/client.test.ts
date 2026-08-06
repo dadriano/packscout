@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AdminApiError, requestJson, type Fetcher } from "./client.ts";
+import {
+  AdminApiError,
+  requestJson,
+  setAdminCsrfToken,
+  subscribeToAuthRequired,
+  type Fetcher,
+} from "./client.ts";
 
 test("admin client sends JSON through the canonical API boundary", async () => {
   const fetcher: Fetcher = async (input, init) => {
@@ -65,4 +71,42 @@ test("admin client fails closed when a successful response is not JSON", async (
       return true;
     },
   );
+});
+
+test("admin client attaches the session CSRF token to every mutation", async () => {
+  setAdminCsrfToken("session-bound-csrf");
+  const fetcher: Fetcher = async (_input, init) => {
+    assert.equal(
+      new Headers(init?.headers).get("X-CSRF-Token"),
+      "session-bound-csrf",
+    );
+    return new Response(null, { status: 204 });
+  };
+
+  try {
+    await requestJson<void>("/operators/example", { method: "PATCH" }, fetcher);
+  } finally {
+    setAdminCsrfToken(null);
+  }
+});
+
+test("admin client announces session expiry for protected requests", async () => {
+  let notifications = 0;
+  const unsubscribe = subscribeToAuthRequired(() => {
+    notifications += 1;
+  });
+  const fetcher: Fetcher = async () =>
+    new Response(
+      JSON.stringify({ error: "Sign in required.", code: "AUTH_REQUIRED" }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    );
+
+  try {
+    await assert.rejects(() => requestJson("/operators", {}, fetcher));
+    assert.equal(notifications, 1);
+    await assert.rejects(() => requestJson("/auth/session", {}, fetcher));
+    assert.equal(notifications, 1);
+  } finally {
+    unsubscribe();
+  }
 });
