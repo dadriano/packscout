@@ -5,11 +5,7 @@
 **Depends on:** none  
 **Blocks:** [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Estimated scope:** medium  
-**Status:** not started
-
-## Start Here
-
-Turn one supplied `packscout-data` sample into a contract fixture that proves the outer `catalog`, `pulls`, and `sales` envelopes without encoding that platform's nested `data` shape into the shared contract.
+**Status:** todo
 
 ## Objective
 

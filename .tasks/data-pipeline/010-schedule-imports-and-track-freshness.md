@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md)  
 **Blocks:** [data-pipeline/011](011-manage-providers-in-admin.md), [data-pipeline/012](012-operate-imports-in-admin.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md), [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write the timing example for an enabled provider with a five-minute schedule and fifteen-minute stale threshold across a success, an overlapping trigger, two failures, a stale transition, and a recovery.
+**Status:** todo
 
 ## Objective
 

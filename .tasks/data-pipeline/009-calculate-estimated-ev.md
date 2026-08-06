@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md)  
 **Blocks:** [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md), [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write a worked calculation fixture with three complete probability buckets, midpoint values, USD pricing, a per-draw basis, and two draws per pack; record the expected gross estimate, EV percentage, coverage, and method evidence.
+**Status:** todo
 
 ## Objective
 

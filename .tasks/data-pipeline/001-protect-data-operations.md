@@ -5,11 +5,7 @@
 **Depends on:** none  
 **Blocks:** [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/011](011-manage-providers-in-admin.md), [data-pipeline/012](012-operate-imports-in-admin.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write the authorization matrix for anonymous users, administrators, and data operators, including the expected result for login, provider configuration, secret access, manual runs, retries, account management, and logout.
+**Status:** todo
 
 ## Objective
 

@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/001](001-protect-data-operations.md), [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Sketch the shortest administrator flow from an empty provider list to a tested and enabled Beezie configuration, including every loading, validation, secret, test, conflict, and success state.
+**Status:** todo
 
 ## Objective
 

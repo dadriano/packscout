@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md)  
 **Blocks:** [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/009](009-calculate-estimated-ev.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write the persistence invariant table for provider configuration revisions, cursor checkpoints, import runs, raw pages, raw records, quarantine entries, canonical revisions, current projections, and EV estimates.
+**Status:** todo
 
 ## Objective
 

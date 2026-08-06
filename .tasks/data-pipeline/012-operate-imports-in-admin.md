@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/001](001-protect-data-operations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/006](006-quarantine-and-retry-invalid-records.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write the operator walkthrough for a stale platform with an incomplete run: inspect health, open the run, understand the quarantined record, retry it, start a manual catch-up, and verify recovery.
+**Status:** todo
 
 ## Objective
 

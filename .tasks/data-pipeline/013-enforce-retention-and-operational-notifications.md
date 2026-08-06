@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/006](006-quarantine-and-retry-invalid-records.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write the event matrix for run failed, run incomplete, provider stale, provider recovered, quarantine resolved, and raw retention expired, including deduplication and the V1 admin-notification result.
+**Status:** todo
 
 ## Objective
 

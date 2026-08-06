@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/005](005-import-cursor-pages-idempotently.md)  
 **Blocks:** [data-pipeline/012](012-operate-imports-in-admin.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md), [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** medium  
-**Status:** not started
-
-## Start Here
-
-Create the quarantine lifecycle table for open, retrying, resolved, and expired records, including the cursor, run, raw-retention, permission, and audit behavior for every transition.
+**Status:** todo
 
 ## Objective
 

@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/010](010-schedule-imports-and-track-freshness.md), [data-pipeline/011](011-manage-providers-in-admin.md), [data-pipeline/012](012-operate-imports-in-admin.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Blocks:** none  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Create the launch scorecard with one row for each of the eight platforms and columns for connection test, full backfill, incremental resume, record reconciliation, EV evidence, freshness, quarantine recovery, and operator proof.
+**Status:** todo
 
 ## Objective
 
