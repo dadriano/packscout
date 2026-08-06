@@ -16,6 +16,7 @@
     "@packscout/contracts": "0.0.0"
   },
   "devDependencies": {
+    "@packscout/database": "0.0.0",
     "@types/node": "^20",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"

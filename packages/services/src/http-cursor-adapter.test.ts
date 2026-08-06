@@ -405,6 +405,9 @@ test("connection tests use the initial raw page and return bounded metadata", as
   assert.deepEqual(result, {
     ok: true,
     latencyMs: 7,
+    responseStatus: 200,
     recordCounts: { catalog: 1, pulls: 1, sales: 0 },
+    hasMore: false,
+    nextCursorPresent: true,
   });
 });

@@ -177,6 +177,7 @@ export interface ProviderTransportPageInput {
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
   readonly seenCursors?: ReadonlySet<string>;
+  readonly allowLocalHttp?: boolean;
   readonly signal?: AbortSignal;
 }
 
@@ -244,7 +245,10 @@ export type ProviderConnectionTestResult =
   | {
       readonly ok: true;
       readonly latencyMs: number;
+      readonly responseStatus: number;
       readonly recordCounts: ProviderConnectionRecordCounts;
+      readonly hasMore: boolean;
+      readonly nextCursorPresent: boolean;
     }
   | {
       readonly ok: false;

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   customType,
   foreignKey,
@@ -20,6 +21,7 @@ export const providerStateEnum = pgEnum("provider_state", [
   "draft",
   "active",
   "disabled",
+  "archived",
 ]);
 
 export const authModeEnum = pgEnum("provider_auth_mode", ["none", "bearer"]);
@@ -219,6 +221,14 @@ export const providerConnectionTests = pgTable(
       .references(() => providerConfigRevisions.id, { onDelete: "restrict" }),
     outcome: text("outcome").notNull(),
     latencyMs: integer("latency_ms"),
+    responseStatus: integer("response_status"),
+    recordCountsJson: jsonb("record_counts_json").$type<{
+      catalog: number;
+      pulls: number;
+      sales: number;
+    }>(),
+    hasMore: boolean("has_more"),
+    nextCursorPresent: boolean("next_cursor_present"),
     sanitizedCode: text("sanitized_code"),
     testedByActorKey: text("tested_by_actor_key").notNull(),
     testedAt: timestamp("tested_at", { withTimezone: true }).notNull().defaultNow(),
@@ -234,6 +244,14 @@ export const providerConnectionTests = pgTable(
         providerConfigRevisions.organizationId,
       ],
     }).onDelete("restrict"),
+    check(
+      "provider_connection_tests_latency_nonnegative",
+      sql`${table.latencyMs} is null or ${table.latencyMs} >= 0`,
+    ),
+    check(
+      "provider_connection_tests_response_status_valid",
+      sql`${table.responseStatus} is null or (${table.responseStatus} >= 100 and ${table.responseStatus} <= 599)`,
+    ),
   ],
 );
 
@@ -263,6 +281,7 @@ export const providerSecretVersions = pgTable(
       table.providerId,
       table.createdAt,
     ),
+    unique("provider_secret_versions_revision_unique").on(table.revisionId),
     foreignKey({
       name: "provider_secret_versions_revision_tenant_fk",
       columns: [table.revisionId, table.providerId, table.organizationId],

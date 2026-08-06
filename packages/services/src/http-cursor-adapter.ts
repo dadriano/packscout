@@ -131,8 +131,13 @@ function buildRequestUrl(input: ProviderTransportPageInput): URL {
   } catch {
     throw requestError("invalid_configuration", false);
   }
+  const hostname = canonicalHostname(url.hostname);
+  const localHttp =
+    input.allowLocalHttp === true &&
+    url.protocol === "http:" &&
+    (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1");
   if (
-    url.protocol !== "https:" ||
+    (url.protocol !== "https:" && !localHttp) ||
     url.username.length > 0 ||
     url.password.length > 0
   ) {
@@ -285,8 +290,16 @@ async function validateResolvedDestination(
   url: URL,
   resolveHost: ProviderDnsResolver,
   signal: AbortSignal,
+  allowLocalHttp: boolean,
 ): Promise<void> {
   const hostname = canonicalHostname(url.hostname);
+  if (
+    allowLocalHttp &&
+    url.protocol === "http:" &&
+    (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1")
+  ) {
+    return;
+  }
   if (isIP(hostname) !== 0) {
     if (!isPublicProviderAddress(hostname)) {
       throw requestError("destination_not_allowed", false);
@@ -368,15 +381,32 @@ export class HttpCursorAdapter implements ProviderTransportAdapter {
   ): Promise<ProviderConnectionTestResult> {
     const startedAt = this.#now();
     try {
-      const result = await this.fetchPage({ ...input, cursor: null });
+      const { page, responseStatus } = await this.#fetchPageWithMetadata({
+        ...input,
+        cursor: null,
+      });
+      if (page.invalidRecords.length > 0) {
+        return {
+          ok: false,
+          latencyMs: normalizedLatency(startedAt, this.#now()),
+          failure: failure("invalid_response", false, {
+            fieldPaths: page.invalidRecords.flatMap((record) =>
+              record.issues.map((issue) => issue.path),
+            ),
+          }),
+        };
+      }
       return {
         ok: true,
         latencyMs: normalizedLatency(startedAt, this.#now()),
+        responseStatus,
         recordCounts: {
-          catalog: result.rawPage.catalog.length,
-          pulls: result.rawPage.pulls.length,
-          sales: result.rawPage.sales.length,
+          catalog: page.rawPage.catalog.length,
+          pulls: page.rawPage.pulls.length,
+          sales: page.rawPage.sales.length,
         },
+        hasMore: page.rawPage.has_more,
+        nextCursorPresent: page.rawPage.next_cursor.length > 0,
       };
     } catch (error) {
       const normalized =
@@ -392,6 +422,10 @@ export class HttpCursorAdapter implements ProviderTransportAdapter {
   }
 
   async fetchPage(input: ProviderTransportPageInput) {
+    return (await this.#fetchPageWithMetadata(input)).page;
+  }
+
+  async #fetchPageWithMetadata(input: ProviderTransportPageInput) {
     validateRequestInput(input);
     const timeoutMs = requireBoundedInteger(
       input.timeoutMs,
@@ -410,6 +444,7 @@ export class HttpCursorAdapter implements ProviderTransportAdapter {
         url,
         this.#resolveHost,
         requestLifetime.signal,
+        input.allowLocalHttp === true,
       );
       const response = await this.#httpClient(url, {
         method: "GET",
@@ -439,7 +474,7 @@ export class HttpCursorAdapter implements ProviderTransportAdapter {
       if (!validated.success) {
         throw new ProviderFeedValidationError(validated.error.issues);
       }
-      return validated.data;
+      return { page: validated.data, responseStatus: response.status };
     } catch (error) {
       if (requestLifetime.didTimeOut()) throw requestError("timeout", true);
       if (error instanceof ProviderTransportRequestError) throw error;
