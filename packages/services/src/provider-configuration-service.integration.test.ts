@@ -327,6 +327,8 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       providerId,
       configRevisionId: firstRevisionId,
       trigger: "manual",
+      requestedByActorKey: "operator:admin",
+      state: "succeeded",
       createdAt: now,
     });
     await harness.database

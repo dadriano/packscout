@@ -27,6 +27,7 @@ test("real mapping and transport capabilities register through separate generic 
   const mappingRegistry = new ProviderMappingAdapterRegistry();
   mappingRegistry.register(mappingAdapter);
   assert.equal(mappingRegistry.resolve(mappingAdapter.key, platform), mappingAdapter);
+  assert.equal(mappingRegistry.resolveForPlatform(platform), mappingAdapter);
   assert.deepEqual(
     mappingRegistry.resolve(mappingAdapter.key, platform).mapPage({
       configuration: {
@@ -42,6 +43,7 @@ test("real mapping and transport capabilities register through separate generic 
         next_cursor: "fixture-complete",
         has_more: false,
       },
+      recordIndexes: { catalog: [], pulls: [], sales: [] },
     }),
     { outcomes: [] },
   );
@@ -118,4 +120,19 @@ test("duplicate, unknown, and executable-looking adapter keys fail closed", () =
         error.code === "invalid_adapter_key",
     );
   }
+});
+
+test("mapping registry permits exactly one mapper per platform", () => {
+  const registry = new ProviderMappingAdapterRegistry([new FixtureMappingAdapter()]);
+  assert.throws(
+    () =>
+      registry.register({
+        key: "another-mapper-v1",
+        platformKey: platform,
+        mapPage: () => ({ outcomes: [] }),
+      }),
+    (error) =>
+      error instanceof ProviderAdapterRegistryError &&
+      error.code === "duplicate_mapping_platform",
+  );
 });

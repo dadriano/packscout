@@ -199,9 +199,14 @@ export class PipelineSetupRepository<TQueryResult extends PgQueryResultHKT> {
     providerId: string;
     configRevisionId: string;
     trigger: "scheduled" | "manual" | "recovery";
+    requestedByActorKey?: string | null;
+    state?: "queued" | "running" | "succeeded" | "incomplete" | "failed";
     requestedCursor?: string | null;
     createdAt?: Date;
   }): Promise<string> {
+    if (input.trigger === "manual" && !input.requestedByActorKey) {
+      throw new TypeError("Manual import runs require a requested actor key.");
+    }
     const [configuration] = await this.database
       .select({ id: providerConfigRevisions.id })
       .from(providerConfigRevisions)

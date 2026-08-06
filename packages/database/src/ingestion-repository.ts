@@ -54,7 +54,15 @@ function addRetentionPeriod(at: Date, retentionDays: number): Date {
 }
 
 function emptyCounters(): RunCounters {
-  return { accepted: 0, duplicate: 0, quarantined: 0, pages: 0, records: 0 };
+  return {
+    accepted: 0,
+    duplicate: 0,
+    quarantined: 0,
+    pages: 0,
+    records: 0,
+    requestAttempts: 0,
+    transientRetries: 0,
+  };
 }
 
 export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHKT> {
@@ -124,8 +132,10 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
 
       let accepted = 0;
       let duplicate = 0;
+      let quarantined = 0;
       let newCanonicalRevisions = 0;
-      for (const sourceInput of input.records) {
+      for (const [sourcePosition, sourceInput] of input.records.entries()) {
+        const recordIndex = sourceInput.recordIndex ?? sourcePosition;
         const sourceHash = hashJson(sourceInput.payload);
         const [newSource] = await transaction
           .insert(sourceRecords)
@@ -167,39 +177,69 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
           .onConflictDoNothing();
 
         let sourceCreatedRevision = false;
-        for (const [projectionIndex, projection] of sourceInput.projections.entries()) {
-          const result = await this.upsertCanonicalRevision(transaction, {
-            organizationId: input.organizationId,
-            providerId: input.providerId,
-            configRevisionId: input.configRevisionId,
-            sourceRecordId,
-            projection,
-            projectionIndex,
-            acceptedAt: input.committedAt,
-          });
-          sourceCreatedRevision ||= result.created;
-          if (result.created) newCanonicalRevisions += 1;
+        if (!sourceInput.quarantine) {
+          for (const [projectionIndex, projection] of sourceInput.projections.entries()) {
+            const result = await this.upsertCanonicalRevision(transaction, {
+              organizationId: input.organizationId,
+              providerId: input.providerId,
+              configRevisionId: input.configRevisionId,
+              sourceRecordId,
+              projection,
+              projectionIndex,
+              acceptedAt: input.committedAt,
+            });
+            sourceCreatedRevision ||= result.created;
+            if (result.created) newCanonicalRevisions += 1;
+          }
         }
-        const outcome = sourceCreatedRevision || newSource ? "accepted" : "duplicate";
+        const outcome = sourceInput.quarantine
+          ? "quarantined"
+          : sourceCreatedRevision || newSource
+            ? "accepted"
+            : "duplicate";
         if (outcome === "accepted") accepted += 1;
-        else duplicate += 1;
+        else if (outcome === "duplicate") duplicate += 1;
+        else quarantined += 1;
         await transaction.insert(sourceRecordOutcomes).values({
           organizationId: input.organizationId,
           runId: input.runId,
           pageId: insertedPage.id,
           sourceRecordId,
           recordKind: sourceInput.recordKind,
+          recordIndex,
           externalId: sourceInput.externalId,
           outcome,
+          reasonCode: sourceInput.quarantine?.reasonCode,
           createdAt: input.committedAt,
         });
+        if (sourceInput.quarantine) {
+          await transaction.insert(quarantineRecords).values({
+            organizationId: input.organizationId,
+            providerId: input.providerId,
+            runId: input.runId,
+            pageId: insertedPage.id,
+            sourceRecordId,
+            recordKind: sourceInput.recordKind,
+            recordIndex,
+            externalId: sourceInput.externalId,
+            reasonCode: sourceInput.quarantine.reasonCode,
+            fieldPath: sourceInput.quarantine.fieldPath,
+            sanitizedSummary: sourceInput.quarantine.sanitizedSummary,
+            payloadJson: null,
+            expiresAt,
+            createdAt: input.committedAt,
+          });
+        }
       }
 
       for (const quarantine of input.quarantines ?? []) {
         await transaction.insert(quarantineRecords).values({
           organizationId: input.organizationId,
           providerId: input.providerId,
+          runId: input.runId,
+          pageId: insertedPage.id,
           recordKind: quarantine.recordKind,
+          recordIndex: quarantine.recordIndex,
           externalId: quarantine.externalId,
           reasonCode: quarantine.reasonCode,
           fieldPath: quarantine.fieldPath,
@@ -208,15 +248,32 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
           expiresAt,
           createdAt: input.committedAt,
         });
+        await transaction.insert(sourceRecordOutcomes).values({
+          organizationId: input.organizationId,
+          runId: input.runId,
+          pageId: insertedPage.id,
+          sourceRecordId: null,
+          recordKind: quarantine.recordKind,
+          recordIndex: quarantine.recordIndex,
+          externalId: quarantine.externalId,
+          outcome: "quarantined",
+          reasonCode: quarantine.reasonCode,
+          createdAt: input.committedAt,
+        });
       }
 
       const counters: RunCounters = {
         accepted: context.counters.accepted + accepted,
         duplicate: context.counters.duplicate + duplicate,
-        quarantined: context.counters.quarantined + (input.quarantines?.length ?? 0),
+        quarantined:
+          context.counters.quarantined +
+          quarantined +
+          (input.quarantines?.length ?? 0),
         pages: context.counters.pages + 1,
         records:
           context.counters.records + input.records.length + (input.quarantines?.length ?? 0),
+        requestAttempts: context.counters.requestAttempts ?? 0,
+        transientRetries: context.counters.transientRetries ?? 0,
       };
       await transaction
         .update(importRuns)
@@ -355,10 +412,24 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
 
   private async loadRunContext(
     database: PackscoutDatabase<TQueryResult>,
-    input: Pick<CommitPageInput, "organizationId" | "providerId" | "configRevisionId" | "runId">,
+    input: Pick<
+      CommitPageInput,
+      | "organizationId"
+      | "providerId"
+      | "configRevisionId"
+      | "runId"
+      | "committedAt"
+      | "workerId"
+    >,
   ): Promise<{ counters: RunCounters; platformKey: string }> {
     const [context] = await database
-      .select({ counters: importRuns.countersJson, platformKey: providerSources.platformKey })
+      .select({
+        counters: importRuns.countersJson,
+        platformKey: providerSources.platformKey,
+        state: importRuns.state,
+        leaseOwner: importRuns.leaseOwner,
+        leaseExpiresAt: importRuns.leaseExpiresAt,
+      })
       .from(importRuns)
       .innerJoin(
         providerSources,
@@ -389,6 +460,18 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
       throw new PersistenceError(
         "TENANT_SCOPE_VIOLATION",
         "Import run is outside the organization, provider, or configuration scope.",
+      );
+    }
+    if (
+      input.workerId !== undefined &&
+      (context.state !== "running" ||
+        context.leaseOwner !== input.workerId ||
+        !context.leaseExpiresAt ||
+        context.leaseExpiresAt < input.committedAt)
+    ) {
+      throw new PersistenceError(
+        "RUN_OWNERSHIP_LOST",
+        "The import run is not owned by this worker.",
       );
     }
     return { counters: context.counters ?? emptyCounters(), platformKey: context.platformKey };

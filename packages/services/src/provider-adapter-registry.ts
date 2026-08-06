@@ -8,6 +8,7 @@ const registrationKeyPattern = /^[a-z0-9](?:[a-z0-9_-]{0,126}[a-z0-9])?$/;
 
 export type ProviderAdapterRegistryErrorCode =
   | "duplicate_adapter_key"
+  | "duplicate_mapping_platform"
   | "invalid_adapter_capability"
   | "invalid_adapter_key"
   | "invalid_platform_key"
@@ -18,6 +19,7 @@ const registryErrorMessages: Readonly<
   Record<ProviderAdapterRegistryErrorCode, string>
 > = {
   duplicate_adapter_key: "Provider adapter key is already registered.",
+  duplicate_mapping_platform: "Provider platform already has a mapping adapter.",
   invalid_adapter_capability: "Provider adapter capability is invalid.",
   invalid_adapter_key: "Provider adapter key is invalid.",
   invalid_platform_key: "Provider platform key is invalid.",
@@ -76,6 +78,7 @@ function registryKeys(adapters: ReadonlyMap<string, ProviderAdapterIdentity>) {
 
 export class ProviderMappingAdapterRegistry {
   readonly #adapters = new Map<string, ProviderMappingAdapter>();
+  readonly #platformAdapters = new Map<string, ProviderMappingAdapter>();
 
   constructor(adapters: Iterable<ProviderMappingAdapter> = []) {
     for (const adapter of adapters) this.register(adapter);
@@ -89,7 +92,12 @@ export class ProviderMappingAdapterRegistry {
       throw new ProviderAdapterRegistryError("invalid_adapter_capability");
     }
     assertPlatformKey(adapter.platformKey);
+    const current = this.#platformAdapters.get(adapter.platformKey);
+    if (current && current.key !== adapter.key) {
+      throw new ProviderAdapterRegistryError("duplicate_mapping_platform");
+    }
     registerAdapter(this.#adapters, adapter);
+    this.#platformAdapters.set(adapter.platformKey, adapter);
     return this;
   }
 
@@ -98,6 +106,15 @@ export class ProviderMappingAdapterRegistry {
     const adapter = resolveAdapter(this.#adapters, key);
     if (adapter.platformKey !== platform) {
       throw new ProviderAdapterRegistryError("unsupported_adapter_platform");
+    }
+    return adapter;
+  }
+
+  resolveForPlatform(platform: string): ProviderMappingAdapter {
+    assertPlatformKey(platform);
+    const adapter = this.#platformAdapters.get(platform);
+    if (!adapter) {
+      throw new ProviderAdapterRegistryError("unknown_adapter_key");
     }
     return adapter;
   }

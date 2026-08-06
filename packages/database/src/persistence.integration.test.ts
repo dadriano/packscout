@@ -104,6 +104,8 @@ async function createPipelineHarness() {
     providerId: ids.provider,
     configRevisionId: ids.configuration,
     trigger: "manual",
+    requestedByActorKey: "operator:admin",
+    state: "succeeded",
     createdAt: committedAt,
   });
   return {
@@ -191,6 +193,7 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
     quarantines: [
       {
         recordKind: "sale",
+        recordIndex: 0,
         externalId: null,
         reasonCode: "MISSING_EXTERNAL_ID",
         fieldPath: "sales[0].external_id",
@@ -212,6 +215,7 @@ async function addRun(
     providerId: ids.provider,
     configRevisionId: ids.configuration,
     trigger: "recovery",
+    state: "succeeded",
     createdAt: new Date(committedAt.getTime() + 1_000),
   });
 }
@@ -236,6 +240,20 @@ test("empty migration builds PostgreSQL constraints including NULL cursor idempo
       .from(importPages)
       .where(eq(importPages.runId, ids.run));
     assert.equal(count?.count, 1);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("production page commits reject a worker without the active run lease", async () => {
+  const harness = await createPipelineHarness();
+  try {
+    await assert.rejects(
+      harness.ingestion.commitPage(initialPage({ workerId: "foreign-worker" })),
+      (error: unknown) =>
+        error instanceof PersistenceError && error.code === "RUN_OWNERSHIP_LOST",
+    );
+    assert.equal((await harness.database.select().from(importPages)).length, 0);
   } finally {
     await harness.close();
   }
@@ -479,7 +497,7 @@ test("90-day retention clears payloads but preserves canonical, outcomes, runs, 
       .select({ count: sql<number>`count(*)::integer` })
       .from(auditEvents);
     assert.equal(revisionCount?.count, 3);
-    assert.equal(outcomeCount?.count, 2);
+    assert.equal(outcomeCount?.count, 3);
     assert.equal(runCount?.count, 1);
     assert.ok((auditCount?.count ?? 0) >= 1);
   } finally {

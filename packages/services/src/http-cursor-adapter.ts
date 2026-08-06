@@ -46,7 +46,7 @@ function failure(
   retryable: boolean,
   details: Pick<
     NormalizedProviderTransportFailure,
-    "fieldPaths" | "httpStatus"
+    "fieldPaths" | "httpStatus" | "issueCodes"
   > = {},
 ): NormalizedProviderTransportFailure {
   return Object.freeze({ code, retryable, ...details });
@@ -57,7 +57,7 @@ function requestError(
   retryable: boolean,
   details?: Pick<
     NormalizedProviderTransportFailure,
-    "fieldPaths" | "httpStatus"
+    "fieldPaths" | "httpStatus" | "issueCodes"
   >,
 ): ProviderTransportRequestError {
   return new ProviderTransportRequestError(failure(code, retryable, details));
@@ -481,6 +481,7 @@ export class HttpCursorAdapter implements ProviderTransportAdapter {
       if (error instanceof ProviderFeedValidationError) {
         throw requestError("invalid_response", false, {
           fieldPaths: error.issues.map((issue) => issue.path),
+          issueCodes: error.issues.map((issue) => issue.code),
         });
       }
       throw requestError("network_error", true);

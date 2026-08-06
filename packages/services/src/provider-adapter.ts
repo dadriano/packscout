@@ -25,6 +25,7 @@ export interface ProviderConfigurationIdentity {
 export interface ProviderSourceIdentity {
   readonly platform: string;
   readonly recordKind: ProviderRecordKind;
+  readonly recordIndex: number;
   readonly externalId: string;
   readonly collectedAt: string;
   readonly sourceTimestamp: string;
@@ -147,6 +148,11 @@ export type ProviderRecordMappingOutcome =
 export interface ProviderMappingPageInput {
   readonly configuration: ProviderConfigurationIdentity;
   readonly page: ProviderFeedPageV1;
+  readonly recordIndexes: Readonly<{
+    catalog: readonly number[];
+    pulls: readonly number[];
+    sales: readonly number[];
+  }>;
 }
 
 export interface ProviderMappingOutput {
@@ -202,6 +208,7 @@ export interface NormalizedProviderTransportFailure {
   readonly retryable: boolean;
   readonly httpStatus?: number;
   readonly fieldPaths?: readonly string[];
+  readonly issueCodes?: readonly string[];
 }
 
 const failureMessages: Readonly<Record<ProviderTransportFailureCode, string>> = {
@@ -231,6 +238,9 @@ export class ProviderTransportRequestError extends Error {
       ...(failure.fieldPaths === undefined
         ? {}
         : { fieldPaths: Object.freeze([...failure.fieldPaths]) }),
+      ...(failure.issueCodes === undefined
+        ? {}
+        : { issueCodes: Object.freeze([...failure.issueCodes]) }),
     });
   }
 }
@@ -267,9 +277,21 @@ export interface ProviderTransportAdapter extends ProviderAdapterIdentity {
 }
 
 export type ProviderEnvelopeWithKind =
-  | { readonly recordKind: "catalog"; readonly envelope: CatalogEnvelopeV1 }
-  | { readonly recordKind: "pull"; readonly envelope: PullEnvelopeV1 }
-  | { readonly recordKind: "sale"; readonly envelope: SaleEnvelopeV1 };
+  | {
+      readonly recordKind: "catalog";
+      readonly recordIndex: number;
+      readonly envelope: CatalogEnvelopeV1;
+    }
+  | {
+      readonly recordKind: "pull";
+      readonly recordIndex: number;
+      readonly envelope: PullEnvelopeV1;
+    }
+  | {
+      readonly recordKind: "sale";
+      readonly recordIndex: number;
+      readonly envelope: SaleEnvelopeV1;
+    };
 
 export function sourceIdentityForEnvelope(
   input: ProviderEnvelopeWithKind,
@@ -283,6 +305,7 @@ export function sourceIdentityForEnvelope(
   return {
     platform: envelope.platform,
     recordKind: input.recordKind,
+    recordIndex: input.recordIndex,
     externalId: envelope.external_id,
     collectedAt: envelope.collected_at,
     sourceTimestamp,

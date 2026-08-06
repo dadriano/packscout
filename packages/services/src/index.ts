@@ -6,3 +6,6 @@ export * from "./provider-adapter.ts";
 export * from "./provider-configuration-service.ts";
 export * from "./provider-credential-cipher.ts";
 export * from "./provider-endpoint-policy.ts";
+export * from "./provider-import-page-planner.ts";
+export * from "./provider-import-service.ts";
+export * from "./provider-import-types.ts";

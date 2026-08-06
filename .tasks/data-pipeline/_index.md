@@ -1,6 +1,6 @@
 # Feature: Data Pipeline
 
-**Progress:** 4/18 tasks complete
+**Progress:** 5/18 tasks complete
 
 ## Context
 
@@ -58,7 +58,7 @@ The repository currently has independent frontend and admin foundations but no a
 | 002 | [Establish the provider feed contract](002-establish-provider-feed-contract.md) | medium | done | none |
 | 003 | [Persist source and canonical history](003-persist-source-and-canonical-history.md) | large | done | 002 |
 | 004 | [Manage provider configurations](004-manage-provider-configurations.md) | large | done | 001, 002, 003 |
-| 005 | [Import cursor pages idempotently](005-import-cursor-pages-idempotently.md) | large | in_progress | 002, 003, 004 |
+| 005 | [Import cursor pages idempotently](005-import-cursor-pages-idempotently.md) | large | done | 002, 003, 004 |
 
 ### Projection and reliability
 
@@ -113,4 +113,4 @@ The repository currently has independent frontend and admin foundations but no a
 
 ## Next Action
 
-Open [data-pipeline/005](005-import-cursor-pages-idempotently.md) and implement the shared durable cursor-page workflow before starting projection and reliability tracks.
+Build [data-pipeline/006](006-quarantine-and-retry-invalid-records.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), and [data-pipeline/010](010-schedule-imports-and-track-freshness.md) in parallel; complete [data-pipeline/009](009-calculate-estimated-ev.md) after catalog projection is ready.

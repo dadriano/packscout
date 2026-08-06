@@ -15,6 +15,13 @@
       "when": 1786052388154,
       "tag": "0001_yellow_warbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786053875329,
+      "tag": "0002_swift_surge",
+      "breakpoints": true
     }
   ]
 }

@@ -31,15 +31,21 @@ export interface CanonicalProjectionInput extends CanonicalIdentity {
 
 export interface AcceptedSourceRecordInput {
   recordKind: SourceRecordKind;
+  recordIndex?: number;
   externalId: string;
   sourceTime: Date;
   collectedAt: Date;
   payload: Record<string, unknown>;
   projections: readonly CanonicalProjectionInput[];
+  quarantine?: Omit<
+    QuarantinedRecordInput,
+    "payload" | "recordKind" | "recordIndex" | "externalId"
+  >;
 }
 
 export interface QuarantinedRecordInput {
   recordKind: SourceRecordKind;
+  recordIndex: number;
   externalId: string | null;
   reasonCode: string;
   fieldPath?: string;
@@ -60,6 +66,8 @@ export interface CommitPageInput {
   records: readonly AcceptedSourceRecordInput[];
   quarantines?: readonly QuarantinedRecordInput[];
   committedAt: Date;
+  /** Required by the production importer so stale or foreign workers cannot commit. */
+  workerId?: string;
 }
 
 export interface CommitPageResult {

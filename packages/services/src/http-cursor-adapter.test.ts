@@ -333,6 +333,7 @@ test("response size, JSON, and page-structure failures use bounded safe errors",
     code: "invalid_response",
     retryable: false,
     fieldPaths: ["sales"],
+    issueCodes: ["invalid_type"],
   });
   assert.doesNotMatch(
     `${invalidStructure.message} ${JSON.stringify(invalidStructure.failure)}`,
