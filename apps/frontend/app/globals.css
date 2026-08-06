@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --canvas: #f3efe4;
+  --paper: #fffdf7;
+  --ink: #19241e;
+  --pine: #1f4937;
+  --moss: #6c7a55;
+  --trail: #d85e35;
+  --line: rgba(25, 36, 30, 0.16);
+  --font-sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--canvas);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--trail);
+  color: #fffdf7;
+}
+
+.topography {
+  background-image:
+    repeating-radial-gradient(
+      ellipse at 86% 38%,
+      transparent 0 20px,
+      rgba(31, 73, 55, 0.07) 21px 22px,
+      transparent 23px 44px
+    );
+  mask-image: linear-gradient(to left, black 5%, transparent 76%);
+}
+
+.field-note::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 35px,
+    rgba(25, 36, 30, 0.08) 36px
+  );
+}
+
+@keyframes signal-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(216, 94, 53, 0.28);
+  }
+
+  50% {
+    box-shadow: 0 0 0 7px rgba(216, 94, 53, 0);
+  }
+}
+
+.signal-dot {
+  animation: signal-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signal-dot {
+    animation: none;
+  }
+}

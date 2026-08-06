@@ -1,0 +1,76 @@
+:root {
+  color-scheme: light;
+  --admin-font-sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --admin-font-display: "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  --admin-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --admin-bg: #eae9e3;
+  --admin-bg-grid: rgba(20, 28, 23, 0.045);
+  --admin-surface: #f8f7f2;
+  --admin-surface-raised: #fffefa;
+  --admin-surface-quiet: #f0efe9;
+  --admin-sidebar: #151c18;
+  --admin-sidebar-text: #f5f2e8;
+  --admin-sidebar-muted: rgba(245, 242, 232, 0.55);
+
+  --admin-text: #151c18;
+  --admin-text-secondary: #39433d;
+  --admin-text-muted: #68716b;
+  --admin-text-faint: #8b928d;
+  --admin-border: rgba(21, 28, 24, 0.15);
+  --admin-border-strong: rgba(21, 28, 24, 0.28);
+
+  --admin-accent: #2363d1;
+  --admin-accent-hover: #194da8;
+  --admin-accent-soft: rgba(35, 99, 209, 0.1);
+  --admin-accent-border: rgba(35, 99, 209, 0.28);
+  --admin-success: #2f7650;
+  --admin-success-soft: rgba(47, 118, 80, 0.11);
+  --admin-warning: #a96917;
+  --admin-warning-soft: rgba(169, 105, 23, 0.12);
+  --admin-danger: #ad4138;
+  --admin-danger-hover: #8c302a;
+  --admin-danger-soft: rgba(173, 65, 56, 0.11);
+
+  --admin-overlay: rgba(11, 15, 13, 0.6);
+  --admin-shadow-sm: 0 1px 2px rgba(20, 28, 23, 0.06);
+  --admin-shadow-md: 0 18px 45px rgba(20, 28, 23, 0.12);
+  --admin-radius-sm: 0.45rem;
+  --admin-radius: 0.8rem;
+  --admin-radius-lg: 1.25rem;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --admin-bg: #111713;
+  --admin-bg-grid: rgba(244, 241, 232, 0.035);
+  --admin-surface: #19211c;
+  --admin-surface-raised: #1e2721;
+  --admin-surface-quiet: #151c18;
+  --admin-sidebar: #0c110e;
+  --admin-sidebar-text: #f5f2e8;
+  --admin-sidebar-muted: rgba(245, 242, 232, 0.5);
+
+  --admin-text: #f5f2e8;
+  --admin-text-secondary: #d7d8d1;
+  --admin-text-muted: #a2aaa4;
+  --admin-text-faint: #7b857e;
+  --admin-border: rgba(245, 242, 232, 0.13);
+  --admin-border-strong: rgba(245, 242, 232, 0.24);
+
+  --admin-accent: #77a9ff;
+  --admin-accent-hover: #9fc1ff;
+  --admin-accent-soft: rgba(119, 169, 255, 0.13);
+  --admin-accent-border: rgba(119, 169, 255, 0.3);
+  --admin-success: #73bf91;
+  --admin-success-soft: rgba(115, 191, 145, 0.13);
+  --admin-warning: #e2a85d;
+  --admin-warning-soft: rgba(226, 168, 93, 0.14);
+  --admin-danger: #ef8a80;
+  --admin-danger-hover: #f4aaa3;
+  --admin-danger-soft: rgba(239, 138, 128, 0.14);
+
+  --admin-overlay: rgba(2, 4, 3, 0.75);
+  --admin-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --admin-shadow-md: 0 20px 50px rgba(0, 0, 0, 0.38);
+}

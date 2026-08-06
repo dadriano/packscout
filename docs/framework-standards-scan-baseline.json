@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "description": "Known framework findings. The ratchet rejects new findings and growth of tracked oversized modules.",
+  "command": "npm run scan:framework-standards:baseline",
+  "findingCount": 0,
+  "counts": {
+    "severity": {},
+    "surface": {}
+  },
+  "metrics": {
+    "growthTolerance": {
+      "lines": 40,
+      "percent": 2
+    },
+    "oversizedFiles": {}
+  },
+  "findings": []
+}

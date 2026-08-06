@@ -1,0 +1,40 @@
+name: Framework Standards
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify-framework:
+    name: Verify framework standards
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Use the repository npm version
+        run: |
+          npm_version="$(node -p "require('./package.json').packageManager")"
+          npm install --global "$npm_version"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify framework standards
+        run: npm run verify:framework
