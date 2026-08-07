@@ -5,7 +5,7 @@
 **Depends on:** [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md)  
 **Blocks:** [data-pipeline/011](011-manage-providers-in-admin.md), [data-pipeline/012](012-operate-imports-in-admin.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md), [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -47,8 +47,16 @@ The health projection returns provider identity, timing configuration, `freshnes
 
 ## Acceptance Criteria
 
-- [ ] Five-minute default and custom schedule fixtures start due runs exactly once across restart and multi-worker contention.
-- [ ] Active-run triggers coalesce, downtime produces one catch-up run, and manual plus scheduled triggers never overlap or diverge in ingestion behavior.
-- [ ] Custom stale thresholds transition from fresh to stale based on provider-head completion, then recover on the next head-reaching run.
-- [ ] Freshness and quality remain independent when a run reaches the head with quarantines, when failures occur without quarantines, and when old quarantines are later resolved.
-- [ ] Disabled and archived configurations stop future scheduling while an already-active revision-bound run can finish safely.
+- [x] Five-minute default and custom schedule fixtures start due runs exactly once across restart and multi-worker contention.
+- [x] Active-run triggers coalesce, downtime produces one catch-up run, and manual plus scheduled triggers never overlap or diverge in ingestion behavior.
+- [x] Custom stale thresholds transition from fresh to stale based on provider-head completion, then recover on the next head-reaching run.
+- [x] Freshness and quality remain independent when a run reaches the head with quarantines, when failures occur without quarantines, and when old quarantines are later resolved.
+- [x] Disabled and archived configurations stop future scheduling while an already-active revision-bound run can finish safely.
+
+## Spec Compliance
+
+- Automated: `packages/database/src/provider-scheduling-repository.test.ts` and `packages/database/src/import-run-queue-repository.test.ts` cover durable due-work ownership, defaults, lifecycle exclusion, restart recovery, and multi-worker contention.
+- Automated: `packages/services/src/provider-scheduler-service.test.ts`, `provider-health-service.test.ts`, and `provider-import-health-service.test.ts` cover coalescing, bounded catch-up, freshness recovery, and independent quality state.
+- Automated: `packages/services/src/provider-import-service.integration.test.ts` proves scheduled and manual requests use the same durable import path and revision-safe active-run semantics.
+- Automated: `apps/worker/src/provider-worker-runtime.test.ts` and `runtime-config.test.ts` cover queued manual pickup, expired-lease recovery, graceful shutdown, safe logging, five-minute configuration defaults, and bounded polling.
+- Verification: worker, database, and service lint, typecheck, tests, and builds passed; the canonical framework gate reached the concurrent admin build after every preceding lane passed.

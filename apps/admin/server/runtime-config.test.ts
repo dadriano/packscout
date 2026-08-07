@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   readAllowedOrigins,
+  readBase64Key,
   readPort,
   readPositiveDuration,
   readRequiredSecret,
@@ -35,4 +36,12 @@ test("admin security configuration fails closed and normalizes trusted origins",
     ["https://admin.packscout.test"],
   );
   assert.throws(() => readAllowedOrigins("not a url", [], "ORIGINS"), /ORIGINS/);
+});
+
+test("provider credential keys require canonical base64 with exactly 32 bytes", () => {
+  const encoded = Buffer.alloc(32, 7).toString("base64");
+  assert.deepEqual(readBase64Key(encoded, "PROVIDER_KEY"), Buffer.alloc(32, 7));
+  for (const invalid of [undefined, "not base64", Buffer.alloc(31).toString("base64")]) {
+    assert.throws(() => readBase64Key(invalid, "PROVIDER_KEY"), /PROVIDER_KEY/);
+  }
 });

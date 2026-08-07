@@ -8,11 +8,17 @@ import {
   DatabaseLoginAttemptLimiter,
   DrizzleAuthAuditSink,
   DrizzleAuthRepository,
+  DrizzleProviderConfigurationRepository,
+  DrizzleProviderHealthRepository,
 } from "@packscout/database";
 import { createAdminApp } from "./app.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
+import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
+import { createAdminOperationalRuntime } from "./operational-runtime.ts";
+import { createProviderAdminRuntime } from "./provider-runtime.ts";
 import {
   readAllowedOrigins,
+  readBase64Key,
   readPort,
   readPositiveDuration,
   readRequiredSecret,
@@ -54,6 +60,14 @@ const sessionSecret = readRequiredSecret(
   "PACKSCOUT_SESSION_HASHING_SECRET",
   32,
 );
+const providerCredentialKey = readBase64Key(
+  process.env.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64,
+  "PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64",
+);
+const providerActorKey = readBase64Key(
+  process.env.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
+  "PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64",
+);
 const allowedOrigins = readAllowedOrigins(
   process.env.PACKSCOUT_ADMIN_ALLOWED_ORIGINS,
   isDevelopment
@@ -63,6 +77,11 @@ const allowedOrigins = readAllowedOrigins(
 );
 const pool = new Pool({ connectionString: databaseUrl, max: 10 });
 const database = createNodePostgresDatabase(pool);
+const providerRepository = new DrizzleProviderConfigurationRepository(database);
+const operational = createAdminOperationalRuntime({
+  database,
+  actorPseudonymKey: providerActorKey,
+});
 const auth = await createAdminAuthRuntime({
   repository: new DrizzleAuthRepository(database),
   loginLimiter: new DatabaseLoginAttemptLimiter(database, {
@@ -79,6 +98,23 @@ const auth = await createAdminAuthRuntime({
 });
 const app = createAdminApp({
   auth,
+  providers: createProviderAdminRuntime({
+    repository: providerRepository,
+    healthRepository: new DrizzleProviderHealthRepository(database),
+    credentialKey: providerCredentialKey,
+    actorPseudonymKey: providerActorKey,
+    environment: isDevelopment ? "local" : "production",
+    operational,
+  }),
+  importOperations: createAdminImportOperationsRuntime({
+    database,
+    actorPseudonymKey: providerActorKey,
+    credentialKey: providerCredentialKey,
+    environment: isDevelopment ? "local" : "production",
+    operational,
+  }),
+  operationalAlerts: { alerts: operational.alerts },
+  operationalHealth: { health: operational.health },
 });
 
 if (isDevelopment) {

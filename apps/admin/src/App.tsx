@@ -10,6 +10,16 @@ import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OperatorsPage } from "./pages/OperatorsPage";
 import { OverviewPage } from "./pages/OverviewPage";
+import { ProviderDetailPage } from "./pages/ProviderDetailPage";
+import { ProviderFormPage } from "./pages/ProviderFormPage";
+import { ProvidersPage } from "./pages/ProvidersPage";
+import { OperationsPage } from "./pages/OperationsPage";
+import { QuarantineDetailPage } from "./pages/QuarantineDetailPage";
+import { QuarantinePage } from "./pages/QuarantinePage";
+import { RunDetailPage } from "./pages/RunDetailPage";
+import { RunsPage } from "./pages/RunsPage";
+import { AlertDetailPage } from "./pages/AlertDetailPage";
+import { AlertsPage } from "./pages/AlertsPage";
 import { useSession } from "./providers/session";
 
 function SessionLoading() {
@@ -70,6 +80,17 @@ export const appRoutes = (
       <Route path="/" element={<AdminLayout />}>
         <Route index element={<OverviewPage />} />
         <Route path="operators" element={<OperatorsPage />} />
+        <Route path="providers" element={<ProvidersPage />} />
+        <Route path="providers/new" element={<ProviderFormPage />} />
+        <Route path="providers/:providerId" element={<ProviderDetailPage />} />
+        <Route path="providers/:providerId/edit" element={<ProviderFormPage />} />
+        <Route path="operations" element={<OperationsPage />} />
+        <Route path="runs" element={<RunsPage />} />
+        <Route path="runs/:runId" element={<RunDetailPage />} />
+        <Route path="quarantine" element={<QuarantinePage />} />
+        <Route path="quarantine/:quarantineId" element={<QuarantineDetailPage />} />
+        <Route path="alerts" element={<AlertsPage />} />
+        <Route path="alerts/:alertId" element={<AlertDetailPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>

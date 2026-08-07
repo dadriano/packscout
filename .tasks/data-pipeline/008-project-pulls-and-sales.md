@@ -5,7 +5,7 @@
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md)  
 **Blocks:** [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md), [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -45,8 +45,15 @@ Known canonical sale categories are constrained and provider-neutral; the origin
 
 ## Acceptance Criteria
 
-- [ ] Linked, unlinked, null-link, out-of-page-link, empty-sales, null-amount, null-currency, known-event, and unknown-event fixtures import with the approved outcomes.
-- [ ] Later catalog arrival resolves pull and sale relationships without duplicating events or rewriting raw source evidence.
-- [ ] Replayed events are idempotent, corrected events create revisions, and source type plus canonical category remain distinguishable.
-- [ ] Canonical event records, API responses, logs, and audit entries contain no source username or raw wallet address while pseudonymous correlation remains stable within scope.
-- [ ] Invalid event records quarantine independently and never prevent unrelated valid pulls or sales from importing.
+- [x] Linked, unlinked, null-link, out-of-page-link, empty-sales, null-amount, null-currency, known-event, and unknown-event fixtures import with the approved outcomes.
+- [x] Later catalog arrival resolves pull and sale relationships without duplicating events or rewriting raw source evidence.
+- [x] Replayed events are idempotent, corrected events create revisions, and source type plus canonical category remain distinguishable.
+- [x] Canonical event records, API responses, logs, and audit entries contain no source username or raw wallet address while pseudonymous correlation remains stable within scope.
+- [x] Invalid event records quarantine independently and never prevent unrelated valid pulls or sales from importing.
+
+## Spec Compliance
+
+- Added provider-neutral pull and sale/lifecycle projectors with constrained canonical categories while preserving the original provider event type.
+- Kept nullable pack, asset, amount, currency, and transaction links explicit and recoverable through shared relationship commands.
+- Added provider-scoped HMAC actor pseudonyms that remain stable inside one organization/provider boundary without retaining usernames or raw wallet addresses.
+- Proved idempotent replay, correction history, late pack reconciliation, independent invalid outcomes, and protected persistence with service and PGlite integration tests.

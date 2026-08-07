@@ -14,6 +14,8 @@ import { SessionProvider } from "./providers/session";
 import { ToastProvider } from "./providers/toast";
 import "./theme.css";
 import "./index.css";
+import "./operations.css";
+import "./alerts.css";
 
 function RootProviders() {
   return (

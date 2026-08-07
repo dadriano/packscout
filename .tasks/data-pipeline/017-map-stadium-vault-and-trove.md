@@ -5,7 +5,7 @@
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/009](009-calculate-estimated-ev.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -51,8 +51,15 @@ EV candidates specify which active tier set was used, probability coverage, lowe
 
 ## Acceptance Criteria
 
-- [ ] Every valid envelope in `stadium_vault.json` and `trove.json` imports or idempotently repeats, including valid empty sales arrays.
-- [ ] Pack status, price, category, source time, pulls, top-pull or grail assets, and late relationships map to the documented canonical values.
-- [ ] Active complete tier distributions with supported bounds and basis calculate the documented estimate, including Trove cards-per-pack semantics.
-- [ ] Partial top lists, missing or ambiguous active odds, incomplete probabilities, invalid bounds, or ambiguous draw semantics preserve the pack with a stable unavailable reason.
-- [ ] Mapping changes remain provider-local and canonical actor data, logs, errors, metrics, notifications, and browser responses exclude raw identities and payloads.
+- [x] Every valid envelope in `stadium_vault.json` and `trove.json` imports or idempotently repeats, including valid empty sales arrays.
+- [x] Pack status, price, category, source time, pulls, top-pull or grail assets, and late relationships map to the documented canonical values.
+- [x] Active complete tier distributions with supported bounds and basis calculate the documented estimate, including Trove cards-per-pack semantics.
+- [x] Partial top lists, missing or ambiguous active odds, incomplete probabilities, invalid bounds, or ambiguous draw semantics preserve the pack with a stable unavailable reason.
+- [x] Mapping changes remain provider-local and canonical actor data, logs, errors, metrics, notifications, and browser responses exclude raw identities and payloads.
+
+## Spec Compliance
+
+- Added provider-local Stadium Vault effective/base-odds and Trove active-tier mappings with explicit completeness and draw semantics.
+- Projected all packs, 348 supporting top-pull/grail assets, 30 pulls, and valid empty sales without treating partial top lists as inventory coverage.
+- Verified exact supplied hashes and mapped/projected all 59 envelopes deterministically; every complete distribution calculates PackScout Estimated EV.
+- Kept Trove actor inputs behind the shared pseudonymizer and proved canonical output omits raw account identities and payloads.

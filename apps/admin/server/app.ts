@@ -8,6 +8,19 @@ import type { SessionCookiePolicy } from "./auth/cookies.ts";
 import { createHealthRouter } from "./routes/health.ts";
 import { createAuthRouter } from "./routes/auth.ts";
 import { createOperatorsRouter } from "./routes/operators.ts";
+import { createProvidersRouter, type ProvidersRouterDependencies } from "./routes/providers.ts";
+import {
+  createImportOperationsRouter,
+  type ImportOperationsRouterDependencies,
+} from "./routes/import-operations.ts";
+import {
+  createOperationalAlertsRouter,
+  type OperationalAlertsRouterDependencies,
+} from "./routes/operational-alerts.ts";
+import {
+  createOperationalHealthRouter,
+  type OperationalHealthRouterDependencies,
+} from "./routes/operational-health.ts";
 
 export interface AdminAuthHttpDependencies {
   service: AuthService;
@@ -17,6 +30,22 @@ export interface AdminAuthHttpDependencies {
 
 export interface AdminAppDependencies {
   auth?: AdminAuthHttpDependencies;
+  providers?: Omit<
+    ProvidersRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  importOperations?: Omit<
+    ImportOperationsRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  operationalAlerts?: Omit<
+    OperationalAlertsRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  operationalHealth?: Omit<
+    OperationalHealthRouterDependencies,
+    "auth" | "cookiePolicy"
+  >;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
@@ -82,6 +111,49 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
       "/api/operators",
       createOperatorsRouter({ service, cookiePolicy, sameOrigin }),
     );
+    if (dependencies.providers) {
+      app.use(
+        "/api/data-providers",
+        createProvidersRouter({
+          ...dependencies.providers,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.importOperations) {
+      app.use(
+        "/api",
+        createImportOperationsRouter({
+          ...dependencies.importOperations,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.operationalAlerts) {
+      app.use(
+        "/api/operational-alerts",
+        createOperationalAlertsRouter({
+          ...dependencies.operationalAlerts,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.operationalHealth) {
+      app.use(
+        "/api/operational-health",
+        createOperationalHealthRouter({
+          ...dependencies.operationalHealth,
+          auth: service,
+          cookiePolicy,
+        }),
+      );
+    }
   }
   app.use("/api", apiNotFound);
   app.use(handleApiError);

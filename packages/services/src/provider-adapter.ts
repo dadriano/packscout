@@ -51,6 +51,7 @@ export interface PseudonymousActorInput {
 }
 
 export interface AdapterMoney {
+  /** Provider amount in major currency units; canonical projection stores minor units. */
   readonly amount: number;
   readonly currency: string;
 }
@@ -70,17 +71,26 @@ export interface CanonicalPackCandidate extends ProviderAdapterCandidateBase {
   readonly description?: string | null;
   readonly category?: string | null;
   readonly availability: "active" | "disabled" | "sold_out" | "unknown";
+  readonly sourceStatus?: string | null;
   readonly price?: AdapterMoney | null;
   readonly imageUrls?: readonly string[];
   readonly providerReportedEv?: AdapterMoney | null;
+  readonly buybackPercent?: number | null;
+  readonly drawCount?: number | null;
 }
 
 export interface CatalogAssetCandidate extends ProviderAdapterCandidateBase {
   readonly candidateKind: "catalog_asset";
   readonly externalId: string;
+  readonly assetType?: string | null;
+  readonly relatedPackExternalId?: string | null;
+  readonly parentExternalId?: string | null;
   readonly name?: string | null;
   readonly category?: string | null;
+  readonly availability?: "active" | "disabled" | "sold_out" | "unknown";
+  readonly sourceStatus?: string | null;
   readonly estimatedValue?: AdapterMoney | null;
+  readonly valueSource?: string | null;
   readonly imageUrls?: readonly string[];
 }
 
@@ -90,6 +100,7 @@ export interface PullCandidate extends ProviderAdapterCandidateBase {
   readonly assetExternalId: string | null;
   readonly occurredAt: string;
   readonly value?: AdapterMoney | null;
+  readonly valueSource?: string | null;
   readonly pseudonymizationInputs: readonly PseudonymousActorInput[];
 }
 
@@ -98,26 +109,30 @@ export interface SaleCandidate extends ProviderAdapterCandidateBase {
   readonly eventType: string;
   readonly transactionKey: string;
   readonly assetExternalId: string | null;
+  readonly packExternalId?: string | null;
   readonly occurredAt: string;
   readonly amount: AdapterMoney | null;
   readonly pseudonymizationInputs: readonly PseudonymousActorInput[];
 }
 
 export interface ProbabilityBucketInput {
-  readonly label?: string;
-  readonly probabilityMinimum: number;
-  readonly probabilityMaximum: number;
-  readonly valueMinimum: number;
-  readonly valueMaximum: number;
+  readonly bucketId: string;
+  readonly evidenceKind: "probability_bucket" | "top_chase";
+  readonly label?: string | null;
+  readonly probability: number | null;
+  readonly lowerValue: number | null;
+  readonly upperValue: number | null;
 }
 
 export interface EvInputCandidate extends ProviderAdapterCandidateBase {
   readonly candidateKind: "ev_input";
+  readonly externalId: string;
   readonly packExternalId: string;
-  readonly currency: string;
-  readonly unitBasis: "per_draw" | "per_pack";
-  readonly drawCount: number;
-  readonly coverage: number;
+  readonly currency: string | null;
+  readonly unitBasis: "per_draw" | "per_pack" | null;
+  readonly drawCount: number | null;
+  readonly declaredCoverage: number | null;
+  readonly evidenceCompleteness: "complete" | "partial" | "unknown";
   readonly buckets: readonly ProbabilityBucketInput[];
 }
 

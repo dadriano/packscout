@@ -5,7 +5,7 @@
 **Depends on:** [data-pipeline/001](001-protect-data-operations.md), [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -48,8 +48,15 @@ Connection tests return fixed verdicts and bounded evidence. Lifecycle actions r
 
 ## Acceptance Criteria
 
-- [ ] An administrator can create, revise, test, enable, disable, and archive a provider through the admin while history and one-active-per-platform rules remain visible and enforced.
-- [ ] Bearer tokens never appear in reads, DOM state after save, errors, logs, toasts, or browser bundles; untouched secret fields preserve the stored credential.
-- [ ] Data operators can inspect provider health but cannot mutate configurations, secrets, or lifecycle through UI controls or direct requests.
-- [ ] Connection-test verdicts, enablement gating, revision conflicts, active-run consequences, loading, empty, error, success, and dirty states are complete and accessible.
-- [ ] Responsive browser smoke checks prove the workflow at desktop and mobile widths without page-level overflow or inaccessible dialogs.
+- [x] An administrator can create, revise, test, enable, disable, and archive a provider through the admin while history and one-active-per-platform rules remain visible and enforced.
+- [x] Bearer tokens never appear in reads, DOM state after save, errors, logs, toasts, or browser bundles; untouched secret fields preserve the stored credential.
+- [x] Data operators can inspect provider health but cannot mutate configurations, secrets, or lifecycle through UI controls or direct requests.
+- [x] Connection-test verdicts, enablement gating, revision conflicts, active-run consequences, loading, empty, error, success, and dirty states are complete and accessible.
+- [x] Responsive browser smoke checks prove the workflow at desktop and mobile widths without page-level overflow or inaccessible dialogs.
+
+## Spec Compliance
+
+- Added protected provider list, create, revision, connection-test, enable, disable, and archive routes plus responsive administrator pages within the existing shell.
+- Composed the real configuration repository, encrypted credential service, cursor transport registry, and provider-health projection in both production and embedded-local admin runtimes.
+- Preserved masked credential semantics, optimistic revision conflicts, enablement gates, separate freshness/quality states, and role-restricted mutation controls.
+- Proved the workflow through route/component suites and real browser creation plus sanitized connection-failure handling; desktop and narrow-screen smoke coverage reported no overflow or inaccessible dialogs.

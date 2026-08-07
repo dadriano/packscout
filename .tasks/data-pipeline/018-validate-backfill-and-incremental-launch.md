@@ -5,7 +5,7 @@
 **Depends on:** [data-pipeline/010](010-schedule-imports-and-track-freshness.md), [data-pipeline/011](011-manage-providers-in-admin.md), [data-pipeline/012](012-operate-imports-in-admin.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Blocks:** none  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -49,8 +49,17 @@ Deployment configuration provides endpoint and authentication values through ser
 
 ## Acceptance Criteria
 
-- [ ] All eight platform scorecard rows pass connection, backfill, incremental resume, idempotency, canonical reconciliation, EV evidence, freshness, and operator-flow checks.
-- [ ] Failure, quarantine, cursor, relationship, currency, empty-capability, stale, recovery, retention, notification, auth, role, and secret-handling scenarios match the approved outcomes.
-- [ ] Source-to-canonical reconciliation accounts for every valid sample record and every intentional unavailable or quarantined result without provider logic leaking into shared flows.
-- [ ] Focused contract, service, route, component, security, scheduler, retention, and browser tests pass with no raw identities, secrets, or payloads in output.
-- [ ] `npm run verify:framework` passes, and the handoff records the launch scorecard plus the exact remaining environment setup required for real provider credentials.
+- [x] All eight platform scorecard rows pass connection, backfill, incremental resume, idempotency, canonical reconciliation, EV evidence, freshness, and operator-flow checks.
+- [x] Failure, quarantine, cursor, relationship, currency, empty-capability, stale, recovery, retention, notification, auth, role, and secret-handling scenarios match the approved outcomes.
+- [x] Source-to-canonical reconciliation accounts for every valid sample record and every intentional unavailable or quarantined result without provider logic leaking into shared flows.
+- [x] Focused contract, service, route, component, security, scheduler, retention, and browser tests pass with no raw identities, secrets, or payloads in output.
+- [x] `npm run verify:framework` passes, and the handoff records the launch scorecard plus the exact remaining environment setup required for real provider credentials.
+
+## Spec Compliance
+
+- Added a manifest-driven launch harness that verifies sample hashes, exercises the production HTTP cursor adapter's non-importing connection path, and proves null-cursor backfill plus durable-head incremental resume for all eight platforms.
+- Reconciled 290 valid source records into 4,268 projection commands, 3,875 canonical creations, 393 revisions, 85 estimated EV results, and 40 explicit unavailable results; repeated, corrected, new, malformed, and non-advancing-cursor cases remain independently accountable.
+- Proved generic retry/recovery behavior for rate limits and timeouts, fail-closed authentication and cursor failures, automatic late relationship reconciliation, durable EV recomputation, freshness/quality recovery, retention, notification, auth, role, secret, and operator boundaries across the focused suites.
+- Recorded authenticated desktop and compact-width browser smoke for provider, run, quarantine, filters, pagination, dialogs, keyboard/focus behavior, and page-level overflow, backed by committed route and component tests.
+- The final `npm run verify:framework` gate passed framework checks, the zero-finding standards ratchet, lint, typecheck, 282 tests, and all builds.
+- Real endpoints, credentials, full-history counts, and real provider behavior remain explicitly **not run** and blocked on the exact preproduction/deployment steps in `docs/data-pipeline-launch-scorecard.md`; the committed evidence does not claim production launch approval.

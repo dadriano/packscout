@@ -354,6 +354,11 @@ test("unresolved pull relationships persist and reconcile when a pack arrives", 
       quarantines: [],
     });
     await harness.ingestion.commitPage(packPage);
+    const [linked] = await harness.database
+      .select({ targetId: canonicalRelationships.targetEntityId })
+      .from(canonicalRelationships)
+      .where(eq(canonicalRelationships.id, unresolved.id));
+    assert.ok(linked?.targetId);
     const reconciled = await harness.ingestion.reconcileRelationships({
       organizationId: ids.organization,
       target: {
@@ -363,12 +368,7 @@ test("unresolved pull relationships persist and reconcile when a pack arrives", 
       },
       resolvedAt: new Date(committedAt.getTime() + 2_000),
     });
-    assert.equal(reconciled, 1);
-    const [linked] = await harness.database
-      .select({ targetId: canonicalRelationships.targetEntityId })
-      .from(canonicalRelationships)
-      .where(eq(canonicalRelationships.id, unresolved.id));
-    assert.ok(linked?.targetId);
+    assert.equal(reconciled, 0);
   } finally {
     await harness.close();
   }

@@ -1,4 +1,14 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 import type { PackscoutDatabase } from "./database.ts";
 import {
@@ -48,12 +58,20 @@ export type RequestImportPersistenceResult =
   | { readonly kind: "created"; readonly run: PersistedImportRun }
   | { readonly kind: "active"; readonly run: PersistedImportRun }
   | { readonly kind: "not_found" }
-  | { readonly kind: "provider_unavailable" };
+  | { readonly kind: "provider_unavailable" }
+  | {
+      readonly kind: "revision_conflict";
+      readonly activeConfigurationRevisionId: string;
+    };
 
 export type ClaimImportPersistenceResult =
   | { readonly kind: "claimed"; readonly run: ClaimedImportRun }
   | { readonly kind: "not_found" }
   | { readonly kind: "not_claimable"; readonly run: PersistedImportRun };
+
+export type ClaimNextImportPersistenceResult =
+  | { readonly kind: "claimed"; readonly run: ClaimedImportRun }
+  | { readonly kind: "idle" };
 
 export type FinishImportPersistenceResult =
   | { readonly kind: "finished"; readonly run: PersistedImportRun }
@@ -90,6 +108,7 @@ export class DrizzleImportRunRepository<
     trigger: PersistedImportTrigger;
     requestedByActorKey: string | null;
     requestedAt: Date;
+    expectedConfigurationRevisionId?: string;
   }): Promise<RequestImportPersistenceResult> {
     return this.database.transaction(async (transaction) => {
       await transaction.execute(
@@ -112,6 +131,15 @@ export class DrizzleImportRunRepository<
       if (!provider) return { kind: "not_found" };
       if (provider.state !== "active" || !provider.activeRevisionId) {
         return { kind: "provider_unavailable" };
+      }
+      if (
+        input.expectedConfigurationRevisionId !== undefined &&
+        provider.activeRevisionId !== input.expectedConfigurationRevisionId
+      ) {
+        return {
+          kind: "revision_conflict",
+          activeConfigurationRevisionId: provider.activeRevisionId,
+        };
       }
       const [activeRevision] = await transaction
         .select({ testedAt: providerConfigRevisions.testedAt })
@@ -203,45 +231,40 @@ export class DrizzleImportRunRepository<
           lease?.expiresAt !== undefined &&
           lease.expiresAt <= input.claimedAt);
       if (!canClaim) return { kind: "not_claimable", run };
-      await transaction
-        .update(importRuns)
-        .set({
-          state: "running",
-          startedAt: run.startedAt ?? input.claimedAt,
-          heartbeatAt: input.claimedAt,
-          leaseOwner: input.workerId,
-          leaseExpiresAt: input.leaseExpiresAt,
-          attempt: sql`${importRuns.attempt} + 1`,
-        })
-        .where(
-          and(
-            eq(importRuns.organizationId, input.organizationId),
-            eq(importRuns.id, input.runId),
-          ),
-        );
-      const [checkpoint] = await transaction
-        .select({ cursor: providerCursorCheckpoints.cursor })
-        .from(providerCursorCheckpoints)
-        .where(
-          and(
-            eq(providerCursorCheckpoints.organizationId, input.organizationId),
-            eq(providerCursorCheckpoints.providerId, run.providerId),
-            eq(providerCursorCheckpoints.configRevisionId, run.configRevisionId),
-          ),
-        )
-        .limit(1);
-      const claimed = await this.loadRun(transaction, input.organizationId, input.runId);
-      if (!claimed) throw new Error("Claimed import run could not be loaded.");
       return {
         kind: "claimed",
-        run: {
-          ...claimed,
-          state: "running",
-          workerId: input.workerId,
-          leaseExpiresAt: input.leaseExpiresAt,
-          currentCursor: checkpoint?.cursor ?? null,
-          nextPageNumber: claimed.counters.pages + 1,
-        },
+        run: await this.persistClaim(transaction, run, input),
+      };
+    });
+  }
+
+  async claimNextRun(input: {
+    workerId: string;
+    claimedAt: Date;
+    leaseExpiresAt: Date;
+  }): Promise<ClaimNextImportPersistenceResult> {
+    this.assertLease(input.workerId, input.claimedAt, input.leaseExpiresAt);
+    return this.database.transaction(async (transaction) => {
+      const [candidate] = await transaction
+        .select()
+        .from(importRuns)
+        .where(
+          or(
+            eq(importRuns.state, "queued"),
+            and(
+              eq(importRuns.state, "running"),
+              isNotNull(importRuns.leaseExpiresAt),
+              lte(importRuns.leaseExpiresAt, input.claimedAt),
+            ),
+          ),
+        )
+        .orderBy(asc(importRuns.createdAt), asc(importRuns.id))
+        .limit(1)
+        .for("update", { skipLocked: true });
+      if (!candidate) return { kind: "idle" };
+      return {
+        kind: "claimed",
+        run: await this.persistClaim(transaction, this.toRun(candidate), input),
       };
     });
   }
@@ -381,6 +404,54 @@ export class DrizzleImportRunRepository<
     ) {
       throw new RangeError("Import run lease is invalid.");
     }
+  }
+
+  private async persistClaim(
+    database: PackscoutDatabase<TQueryResult>,
+    run: PersistedImportRun,
+    input: {
+      workerId: string;
+      claimedAt: Date;
+      leaseExpiresAt: Date;
+    },
+  ): Promise<ClaimedImportRun> {
+    await database
+      .update(importRuns)
+      .set({
+        state: "running",
+        startedAt: run.startedAt ?? input.claimedAt,
+        heartbeatAt: input.claimedAt,
+        leaseOwner: input.workerId,
+        leaseExpiresAt: input.leaseExpiresAt,
+        attempt: sql`${importRuns.attempt} + 1`,
+      })
+      .where(
+        and(
+          eq(importRuns.organizationId, run.organizationId),
+          eq(importRuns.id, run.id),
+        ),
+      );
+    const [checkpoint] = await database
+      .select({ cursor: providerCursorCheckpoints.cursor })
+      .from(providerCursorCheckpoints)
+      .where(
+        and(
+          eq(providerCursorCheckpoints.organizationId, run.organizationId),
+          eq(providerCursorCheckpoints.providerId, run.providerId),
+          eq(providerCursorCheckpoints.configRevisionId, run.configRevisionId),
+        ),
+      )
+      .limit(1);
+    const claimed = await this.loadRun(database, run.organizationId, run.id);
+    if (!claimed) throw new Error("Claimed import run could not be loaded.");
+    return {
+      ...claimed,
+      state: "running",
+      workerId: input.workerId,
+      leaseExpiresAt: input.leaseExpiresAt,
+      currentCursor: checkpoint?.cursor ?? null,
+      nextPageNumber: claimed.counters.pages + 1,
+    };
   }
 
   private async loadActiveRun(

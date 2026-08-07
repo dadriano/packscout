@@ -1,0 +1,3 @@
+ALTER TABLE "quarantine_records" ADD CONSTRAINT "quarantine_records_id_organization_unique" UNIQUE("id","organization_id");--> statement-breakpoint
+ALTER TABLE "quarantine_attempts" ADD CONSTRAINT "quarantine_attempts_quarantine_tenant_fk" FOREIGN KEY ("quarantine_id","organization_id") REFERENCES "public"."quarantine_records"("id","organization_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "quarantine_attempts" ADD CONSTRAINT "quarantine_attempts_source_tenant_fk" FOREIGN KEY ("source_record_id","organization_id") REFERENCES "public"."source_records"("id","organization_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint

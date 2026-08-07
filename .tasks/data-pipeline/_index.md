@@ -1,6 +1,6 @@
 # Feature: Data Pipeline
 
-**Progress:** 5/18 tasks complete
+**Progress:** 18/18 tasks complete
 
 ## Context
 
@@ -64,29 +64,29 @@ The repository currently has independent frontend and admin foundations but no a
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 006 | [Quarantine and retry invalid records](006-quarantine-and-retry-invalid-records.md) | medium | todo | 005 |
-| 007 | [Project catalog and inventory data](007-project-catalog-and-inventory-data.md) | large | todo | 002, 003, 005 |
-| 008 | [Project pulls and sales](008-project-pulls-and-sales.md) | large | todo | 002, 003, 005 |
-| 009 | [Calculate PackScout Estimated EV](009-calculate-estimated-ev.md) | large | todo | 003, 007 |
-| 010 | [Schedule imports and track freshness](010-schedule-imports-and-track-freshness.md) | large | todo | 003, 004, 005 |
+| 006 | [Quarantine and retry invalid records](006-quarantine-and-retry-invalid-records.md) | medium | done | 005 |
+| 007 | [Project catalog and inventory data](007-project-catalog-and-inventory-data.md) | large | done | 002, 003, 005 |
+| 008 | [Project pulls and sales](008-project-pulls-and-sales.md) | large | done | 002, 003, 005 |
+| 009 | [Calculate PackScout Estimated EV](009-calculate-estimated-ev.md) | large | done | 003, 007 |
+| 010 | [Schedule imports and track freshness](010-schedule-imports-and-track-freshness.md) | large | done | 003, 004, 005 |
 
 ### Operator experience and operations
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 011 | [Manage providers in the admin](011-manage-providers-in-admin.md) | large | todo | 001, 004, 010 |
-| 012 | [Operate imports in the admin](012-operate-imports-in-admin.md) | large | todo | 001, 005, 006, 010 |
-| 013 | [Enforce retention and operational notifications](013-enforce-retention-and-operational-notifications.md) | large | todo | 003, 005, 006, 010 |
+| 011 | [Manage providers in the admin](011-manage-providers-in-admin.md) | large | done | 001, 004, 010 |
+| 012 | [Operate imports in the admin](012-operate-imports-in-admin.md) | large | done | 001, 005, 006, 010 |
+| 013 | [Enforce retention and operational notifications](013-enforce-retention-and-operational-notifications.md) | large | done | 003, 005, 006, 010 |
 
 ### Provider mappings and launch
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 014 | [Map Beezie and ClutchPacks](014-map-beezie-and-clutchpacks.md) | large | todo | 002, 005, 007, 008, 009 |
-| 015 | [Map Collector Crypt and Courtyard](015-map-collector-crypt-and-courtyard.md) | large | todo | 002, 005, 007, 008, 009 |
-| 016 | [Map GameStop and Phygitals](016-map-gamestop-and-phygitals.md) | large | todo | 002, 005, 007, 008, 009 |
-| 017 | [Map Stadium Vault and Trove](017-map-stadium-vault-and-trove.md) | large | todo | 002, 005, 007, 008, 009 |
-| 018 | [Validate backfill and incremental launch](018-validate-backfill-and-incremental-launch.md) | large | todo | 010–017 |
+| 014 | [Map Beezie and ClutchPacks](014-map-beezie-and-clutchpacks.md) | large | done | 002, 005, 007, 008, 009 |
+| 015 | [Map Collector Crypt and Courtyard](015-map-collector-crypt-and-courtyard.md) | large | done | 002, 005, 007, 008, 009 |
+| 016 | [Map GameStop and Phygitals](016-map-gamestop-and-phygitals.md) | large | done | 002, 005, 007, 008, 009 |
+| 017 | [Map Stadium Vault and Trove](017-map-stadium-vault-and-trove.md) | large | done | 002, 005, 007, 008, 009 |
+| 018 | [Validate backfill and incremental launch](018-validate-backfill-and-incremental-launch.md) | large | done | 010–017 |
 
 ## Build Order
 
@@ -113,4 +113,4 @@ The repository currently has independent frontend and admin foundations but no a
 
 ## Next Action
 
-Build [data-pipeline/006](006-quarantine-and-retry-invalid-records.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), and [data-pipeline/010](010-schedule-imports-and-track-freshness.md) in parallel; complete [data-pipeline/009](009-calculate-estimated-ev.md) after catalog projection is ready.
+Use `docs/data-pipeline-launch-scorecard.md` to provision preproduction, run the real-provider deployment gate, reconcile real counts, and obtain administrator launch approval.

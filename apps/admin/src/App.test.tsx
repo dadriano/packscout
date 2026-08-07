@@ -65,5 +65,26 @@ test("data operators do not receive administrator navigation", () => {
 
   assert.match(html, /Data operator/);
   assert.doesNotMatch(html, /href="\/operators"/);
+  assert.match(html, /href="\/providers"/);
   assert.match(html, /aria-label="Admin navigation"/);
+});
+
+test("data operators can open provider health without receiving mutation controls", () => {
+  const html = renderRoute("/providers", session("data_operator"));
+
+  assert.match(html, /Data providers/);
+  assert.match(html, /Read-only access/);
+  assert.doesNotMatch(html, /Add provider/);
+});
+
+test("data operators receive pipeline status, run, quarantine, and alert navigation", () => {
+  const html = renderRoute("/runs", session("data_operator"));
+
+  assert.match(html, /Data pipeline/);
+  assert.match(html, /href="\/operations"/);
+  assert.match(html, /href="\/runs"/);
+  assert.match(html, /href="\/quarantine"/);
+  assert.match(html, /href="\/alerts"/);
+  assert.match(html, /Import runs/);
+  assert.doesNotMatch(html, /href="\/operators"/);
 });

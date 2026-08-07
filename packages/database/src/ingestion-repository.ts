@@ -2,6 +2,7 @@ import {
   and,
   asc,
   eq,
+  gt,
   inArray,
   isNotNull,
   isNull,
@@ -10,6 +11,7 @@ import {
 } from "drizzle-orm";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 import type { PackscoutDatabase } from "./database.ts";
+import { estimatedEvRecomputationRequestKey } from "./estimated-ev-recomputation-repository.ts";
 import type {
   CanonicalIdentity,
   CanonicalProjectionInput,
@@ -17,13 +19,18 @@ import type {
   CommitPageInput,
   CommitPageResult,
   CurrentProjection,
+  MaterializeAndProjectSourceRecordInput,
+  ProjectDerivedSourceRecordInput,
+  ProjectSourceRecordInput,
   RawEvidencePolicy,
 } from "./pipeline-types.ts";
 import { PersistenceError } from "./persistence-error.ts";
+import { quarantineAttempts } from "./schema/quarantine-retry.ts";
 import {
   canonicalEntities,
   canonicalRelationships,
   canonicalRevisions,
+  estimatedEvRecomputationRequests,
   importPages,
   importRuns,
   providerConfigRevisions,
@@ -47,6 +54,15 @@ const millisecondsPerDay = 24 * 60 * 60 * 1_000;
 interface CanonicalUpsertResult {
   revisionId: string;
   created: boolean;
+}
+
+interface ChangedPackInput {
+  readonly platformKey: string;
+  readonly packExternalId: string;
+}
+
+interface ChangedEvInput extends ChangedPackInput {
+  readonly evInputExternalId: string;
 }
 
 function addRetentionPeriod(at: Date, retentionDays: number): Date {
@@ -134,6 +150,8 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
       let duplicate = 0;
       let quarantined = 0;
       let newCanonicalRevisions = 0;
+      const changedPacks = new Map<string, ChangedPackInput>();
+      const changedEvInputs = new Map<string, ChangedEvInput>();
       for (const [sourcePosition, sourceInput] of input.records.entries()) {
         const recordIndex = sourceInput.recordIndex ?? sourcePosition;
         const sourceHash = hashJson(sourceInput.payload);
@@ -189,7 +207,14 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
               acceptedAt: input.committedAt,
             });
             sourceCreatedRevision ||= result.created;
-            if (result.created) newCanonicalRevisions += 1;
+            if (result.created) {
+              newCanonicalRevisions += 1;
+              this.recordEstimatedEvTrigger(
+                projection,
+                changedPacks,
+                changedEvInputs,
+              );
+            }
           }
         }
         const outcome = sourceInput.quarantine
@@ -262,6 +287,15 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         });
       }
 
+      await this.enqueueEstimatedEvRecomputations(transaction, {
+        organizationId: input.organizationId,
+        providerId: input.providerId,
+        configurationRevisionId: input.configRevisionId,
+        changedPacks: [...changedPacks.values()],
+        changedEvInputs: [...changedEvInputs.values()],
+        createdAt: input.committedAt,
+      });
+
       const counters: RunCounters = {
         accepted: context.counters.accepted + accepted,
         duplicate: context.counters.duplicate + duplicate,
@@ -309,6 +343,251 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         newCanonicalRevisions,
         duplicateSourceRecords: duplicate,
       };
+    });
+  }
+
+  async projectSourceRecord(
+    input: ProjectSourceRecordInput,
+  ): Promise<{ canonicalRevisionCount: number }> {
+    return this.database.transaction(async (transaction) => {
+      const [source] = await transaction
+        .select({ id: sourceRecords.id })
+        .from(sourceRecords)
+        .innerJoin(
+          quarantineRecords,
+          and(
+            eq(quarantineRecords.id, input.quarantineId),
+            eq(quarantineRecords.organizationId, sourceRecords.organizationId),
+            eq(quarantineRecords.providerId, sourceRecords.providerId),
+            eq(quarantineRecords.sourceRecordId, sourceRecords.id),
+          ),
+        )
+        .innerJoin(
+          quarantineAttempts,
+          and(
+            eq(quarantineAttempts.id, input.attemptId),
+            eq(quarantineAttempts.organizationId, sourceRecords.organizationId),
+            eq(quarantineAttempts.quarantineId, quarantineRecords.id),
+            eq(quarantineAttempts.state, "running"),
+          ),
+        )
+        .innerJoin(
+          providerConfigRevisions,
+          and(
+            eq(providerConfigRevisions.id, input.configurationRevisionId),
+            eq(providerConfigRevisions.organizationId, sourceRecords.organizationId),
+            eq(providerConfigRevisions.providerId, sourceRecords.providerId),
+          ),
+        )
+        .where(
+          and(
+            eq(sourceRecords.id, input.sourceRecordId),
+            eq(sourceRecords.organizationId, input.organizationId),
+            eq(sourceRecords.providerId, input.providerId),
+            eq(quarantineRecords.state, "open"),
+            gt(quarantineRecords.expiresAt, input.acceptedAt),
+          ),
+        )
+        .for("update", { of: sourceRecords })
+        .limit(1);
+      if (!source) {
+        throw new PersistenceError(
+          "TENANT_SCOPE_VIOLATION",
+          "Source record is outside the organization, provider, or configuration scope.",
+        );
+      }
+      let canonicalRevisionCount = 0;
+      for (const [projectionIndex, projection] of input.projections.entries()) {
+        const result = await this.upsertCanonicalRevision(transaction, {
+          organizationId: input.organizationId,
+          providerId: input.providerId,
+          configRevisionId: input.configurationRevisionId,
+          sourceRecordId: input.sourceRecordId,
+          projection,
+          projectionIndex,
+          acceptedAt: input.acceptedAt,
+        });
+        if (result.created) canonicalRevisionCount += 1;
+      }
+      return { canonicalRevisionCount };
+    });
+  }
+
+  async projectDerivedSourceRecord(
+    input: ProjectDerivedSourceRecordInput,
+  ): Promise<{ canonicalRevisionCount: number }> {
+    return this.database.transaction(async (transaction) => {
+      const [source] = await transaction
+        .select({ id: sourceRecords.id })
+        .from(sourceRecords)
+        .innerJoin(
+          providerConfigRevisions,
+          and(
+            eq(providerConfigRevisions.id, input.configurationRevisionId),
+            eq(providerConfigRevisions.organizationId, sourceRecords.organizationId),
+            eq(providerConfigRevisions.providerId, sourceRecords.providerId),
+          ),
+        )
+        .where(
+          and(
+            eq(sourceRecords.id, input.sourceRecordId),
+            eq(sourceRecords.organizationId, input.organizationId),
+            eq(sourceRecords.providerId, input.providerId),
+          ),
+        )
+        .for("update", { of: sourceRecords })
+        .limit(1);
+      if (!source) {
+        throw new PersistenceError(
+          "TENANT_SCOPE_VIOLATION",
+          "Derived projection source is outside the organization, provider, or configuration scope.",
+        );
+      }
+      let canonicalRevisionCount = 0;
+      for (const [projectionIndex, projection] of input.projections.entries()) {
+        const result = await this.upsertCanonicalRevision(transaction, {
+          organizationId: input.organizationId,
+          providerId: input.providerId,
+          configRevisionId: input.configurationRevisionId,
+          sourceRecordId: input.sourceRecordId,
+          projection,
+          projectionIndex,
+          acceptedAt: input.acceptedAt,
+        });
+        if (result.created) canonicalRevisionCount += 1;
+      }
+      return { canonicalRevisionCount };
+    });
+  }
+
+  async materializeAndProjectSourceRecord(
+    input: MaterializeAndProjectSourceRecordInput,
+  ): Promise<{ sourceRecordId: string; canonicalRevisionCount: number }> {
+    return this.database.transaction(async (transaction) => {
+      const [quarantine] = await transaction
+        .select({ sourceRecordId: quarantineRecords.sourceRecordId })
+        .from(quarantineRecords)
+        .innerJoin(
+          importRuns,
+          and(
+            eq(importRuns.id, quarantineRecords.runId),
+            eq(importRuns.organizationId, quarantineRecords.organizationId),
+            eq(importRuns.providerId, quarantineRecords.providerId),
+            eq(importRuns.configRevisionId, input.configurationRevisionId),
+          ),
+        )
+        .innerJoin(
+          quarantineAttempts,
+          and(
+            eq(quarantineAttempts.id, input.attemptId),
+            eq(
+              quarantineAttempts.organizationId,
+              quarantineRecords.organizationId,
+            ),
+            eq(quarantineAttempts.quarantineId, quarantineRecords.id),
+            eq(quarantineAttempts.state, "running"),
+          ),
+        )
+        .where(
+          and(
+            eq(quarantineRecords.id, input.quarantineId),
+            eq(quarantineRecords.organizationId, input.organizationId),
+            eq(quarantineRecords.providerId, input.providerId),
+            eq(quarantineRecords.runId, input.runId),
+            eq(quarantineRecords.pageId, input.pageId),
+            eq(quarantineRecords.recordKind, input.recordKind),
+            eq(quarantineRecords.state, "open"),
+            gt(quarantineRecords.expiresAt, input.acceptedAt),
+          ),
+        )
+        .for("update", { of: quarantineRecords })
+        .limit(1);
+      if (!quarantine) {
+        throw new PersistenceError(
+          "TENANT_SCOPE_VIOLATION",
+          "Quarantine record is outside the organization, provider, or configuration scope.",
+        );
+      }
+
+      let sourceRecordId = quarantine.sourceRecordId;
+      if (!sourceRecordId) {
+        const contentHash = hashJson(input.payload);
+        const [created] = await transaction
+          .insert(sourceRecords)
+          .values({
+            organizationId: input.organizationId,
+            providerId: input.providerId,
+            firstRunId: input.runId,
+            firstPageId: input.pageId,
+            recordKind: input.recordKind,
+            externalId: input.externalId,
+            sourceTime: input.sourceTime,
+            collectedAt: input.collectedAt,
+            payloadJson: input.payload,
+            contentHash,
+            expiresAt: input.expiresAt,
+            createdAt: input.acceptedAt,
+          })
+          .onConflictDoNothing()
+          .returning({ id: sourceRecords.id });
+        sourceRecordId =
+          created?.id ??
+          (await this.findSourceRecordId(transaction, {
+            organizationId: input.organizationId,
+            providerId: input.providerId,
+            recordKind: input.recordKind,
+            externalId: input.externalId,
+            sourceTime: input.sourceTime,
+            contentHash,
+          }));
+        await transaction
+          .insert(sourceRecordObservations)
+          .values({
+            sourceRecordId,
+            organizationId: input.organizationId,
+            runId: input.runId,
+            pageId: input.pageId,
+            observedAt: input.acceptedAt,
+          })
+          .onConflictDoNothing();
+        await transaction
+          .update(sourceRecordOutcomes)
+          .set({ sourceRecordId, externalId: input.externalId })
+          .where(
+            and(
+              eq(sourceRecordOutcomes.organizationId, input.organizationId),
+              eq(sourceRecordOutcomes.runId, input.runId),
+              eq(sourceRecordOutcomes.pageId, input.pageId),
+              eq(sourceRecordOutcomes.recordKind, input.recordKind),
+              eq(sourceRecordOutcomes.recordIndex, input.recordIndex),
+            ),
+          );
+        await transaction
+          .update(quarantineRecords)
+          .set({ sourceRecordId, externalId: input.externalId })
+          .where(
+            and(
+              eq(quarantineRecords.id, input.quarantineId),
+              eq(quarantineRecords.organizationId, input.organizationId),
+              isNull(quarantineRecords.sourceRecordId),
+            ),
+          );
+      }
+
+      let canonicalRevisionCount = 0;
+      for (const [projectionIndex, projection] of input.projections.entries()) {
+        const result = await this.upsertCanonicalRevision(transaction, {
+          organizationId: input.organizationId,
+          providerId: input.providerId,
+          configRevisionId: input.configurationRevisionId,
+          sourceRecordId,
+          projection,
+          projectionIndex,
+          acceptedAt: input.acceptedAt,
+        });
+        if (result.created) canonicalRevisionCount += 1;
+      }
+      return { sourceRecordId, canonicalRevisionCount };
     });
   }
 
@@ -408,6 +687,160 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
       )
       .returning({ id: canonicalRelationships.id });
     return reconciled.length;
+  }
+
+  private recordEstimatedEvTrigger(
+    projection: CanonicalProjectionInput,
+    changedPacks: Map<string, ChangedPackInput>,
+    changedEvInputs: Map<string, ChangedEvInput>,
+  ): void {
+    if (projection.recordKind === "pack") {
+      const changed = {
+        platformKey: projection.platformKey,
+        packExternalId: projection.externalId,
+      };
+      changedPacks.set(
+        `${changed.platformKey}\u0000${changed.packExternalId}`,
+        changed,
+      );
+      return;
+    }
+    if (projection.recordKind !== "ev_input") return;
+    const contentPackExternalId = projection.content.packExternalId;
+    const relatedPackExternalId = projection.relationships?.find(
+      (relationship) =>
+        relationship.relationshipKind === "supports_pack" &&
+        relationship.targetRecordKind === "pack" &&
+        relationship.targetPlatformKey === projection.platformKey,
+    )?.targetExternalId;
+    const packExternalId =
+      typeof contentPackExternalId === "string" &&
+      contentPackExternalId.trim().length > 0
+        ? contentPackExternalId
+        : relatedPackExternalId;
+    if (!packExternalId) return;
+    const changed = {
+      platformKey: projection.platformKey,
+      packExternalId,
+      evInputExternalId: projection.externalId,
+    };
+    changedEvInputs.set(
+      `${changed.platformKey}\u0000${changed.packExternalId}\u0000${changed.evInputExternalId}`,
+      changed,
+    );
+  }
+
+  private async enqueueEstimatedEvRecomputations(
+    database: PackscoutDatabase<TQueryResult>,
+    input: {
+      organizationId: string;
+      providerId: string;
+      configurationRevisionId: string;
+      changedPacks: readonly ChangedPackInput[];
+      changedEvInputs: readonly ChangedEvInput[];
+      createdAt: Date;
+    },
+  ): Promise<void> {
+    const targets = new Map<string, ChangedEvInput>();
+    const addTarget = (target: ChangedEvInput) => {
+      targets.set(
+        `${target.platformKey}\u0000${target.packExternalId}\u0000${target.evInputExternalId}`,
+        target,
+      );
+    };
+    input.changedEvInputs.forEach(addTarget);
+    for (const pack of input.changedPacks) {
+      const relatedInputs = await database
+        .select({ evInputExternalId: canonicalEntities.externalId })
+        .from(canonicalEntities)
+        .innerJoin(
+          canonicalRelationships,
+          and(
+            eq(canonicalRelationships.sourceEntityId, canonicalEntities.id),
+            eq(
+              canonicalRelationships.organizationId,
+              canonicalEntities.organizationId,
+            ),
+          ),
+        )
+        .where(
+          and(
+            eq(canonicalEntities.organizationId, input.organizationId),
+            eq(canonicalEntities.platformKey, pack.platformKey),
+            eq(canonicalEntities.recordKind, "ev_input"),
+            isNotNull(canonicalEntities.currentRevisionId),
+            eq(canonicalRelationships.relationshipKind, "supports_pack"),
+            eq(canonicalRelationships.targetPlatformKey, pack.platformKey),
+            eq(canonicalRelationships.targetRecordKind, "pack"),
+            eq(
+              canonicalRelationships.targetExternalId,
+              pack.packExternalId,
+            ),
+          ),
+        )
+        .orderBy(asc(canonicalEntities.externalId))
+        .limit(100);
+      if (relatedInputs.length === 0) {
+        addTarget({
+          ...pack,
+          // A pack-only request deliberately produces durable unavailable evidence.
+          evInputExternalId: pack.packExternalId,
+        });
+      } else {
+        relatedInputs.forEach(({ evInputExternalId }) =>
+          addTarget({ ...pack, evInputExternalId }),
+        );
+      }
+    }
+
+    for (const target of targets.values()) {
+      const [pack, evInput] = await Promise.all([
+        database
+          .select({ revisionId: canonicalEntities.currentRevisionId })
+          .from(canonicalEntities)
+          .where(
+            and(
+              eq(canonicalEntities.organizationId, input.organizationId),
+              eq(canonicalEntities.platformKey, target.platformKey),
+              eq(canonicalEntities.recordKind, "pack"),
+              eq(canonicalEntities.externalId, target.packExternalId),
+            ),
+          )
+          .limit(1),
+        database
+          .select({ revisionId: canonicalEntities.currentRevisionId })
+          .from(canonicalEntities)
+          .where(
+            and(
+              eq(canonicalEntities.organizationId, input.organizationId),
+              eq(canonicalEntities.platformKey, target.platformKey),
+              eq(canonicalEntities.recordKind, "ev_input"),
+              eq(canonicalEntities.externalId, target.evInputExternalId),
+            ),
+          )
+          .limit(1),
+      ]);
+      const identity = {
+        organizationId: input.organizationId,
+        platformKey: target.platformKey,
+        packExternalId: target.packExternalId,
+        evInputExternalId: target.evInputExternalId,
+        packRevisionId: pack[0]?.revisionId ?? null,
+        evInputRevisionId: evInput[0]?.revisionId ?? null,
+      };
+      await database
+        .insert(estimatedEvRecomputationRequests)
+        .values({
+          requestKey: estimatedEvRecomputationRequestKey(identity),
+          ...identity,
+          providerId: input.providerId,
+          configurationRevisionId: input.configurationRevisionId,
+          availableAt: input.createdAt,
+          createdAt: input.createdAt,
+          updatedAt: input.createdAt,
+        })
+        .onConflictDoNothing();
+    }
   }
 
   private async loadRunContext(
@@ -624,6 +1057,27 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
       projection: input.projection,
       createdAt: input.acceptedAt,
     });
+    await database
+      .update(canonicalRelationships)
+      .set({ targetEntityId: entity.id, resolvedAt: input.acceptedAt })
+      .where(
+        and(
+          eq(canonicalRelationships.organizationId, input.organizationId),
+          eq(
+            canonicalRelationships.targetPlatformKey,
+            input.projection.platformKey,
+          ),
+          eq(
+            canonicalRelationships.targetRecordKind,
+            input.projection.recordKind,
+          ),
+          eq(
+            canonicalRelationships.targetExternalId,
+            input.projection.externalId,
+          ),
+          isNull(canonicalRelationships.targetEntityId),
+        ),
+      );
     return result;
   }
 

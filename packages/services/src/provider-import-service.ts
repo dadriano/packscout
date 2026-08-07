@@ -25,6 +25,7 @@ import type {
   ClaimedProviderImportRun,
   ProviderImportPagePlanner,
   ProviderImportPageRepository,
+  ProviderImportQueueExecutionResult,
   ProviderImportRunRepository,
   ProviderImportRunSummary,
   ProviderImportRuntimeRevision,
@@ -78,6 +79,7 @@ export type ProviderImportRequest =
       readonly trigger: "manual";
       readonly providerId: string;
       readonly actor: ProviderActor;
+      readonly expectedConfigurationRevisionId: string;
     }
   | {
       readonly trigger: "scheduled";
@@ -308,19 +310,24 @@ export class ProviderImportService {
       trigger: input.trigger,
       requestedByActorKey,
       requestedAt: this.dependencies.clock.now(),
+      ...(input.trigger === "manual"
+        ? {
+            expectedConfigurationRevisionId:
+              input.expectedConfigurationRevisionId,
+          }
+        : {}),
     });
     if (result.kind === "created") {
       return { run: result.run, coalesced: false };
     }
     if (result.kind === "active") {
-      if (input.trigger === "scheduled") {
-        return { run: result.run, coalesced: true };
-      }
+      return { run: result.run, coalesced: true };
+    }
+    if (result.kind === "revision_conflict") {
       throw new ProviderImportServiceError(
-        "ACTIVE_IMPORT_RUN",
-        "A provider import is already active.",
+        "CONFIG_REVISION_CONFLICT",
+        "The active provider configuration changed. Refresh and try again.",
         409,
-        result.run,
       );
     }
     if (result.kind === "not_found") {
@@ -364,6 +371,22 @@ export class ProviderImportService {
       );
     }
     return this.executeClaimedRun(claim.run, claimedAt);
+  }
+
+  async executeNextImport(input: {
+    workerId: string;
+  }): Promise<ProviderImportQueueExecutionResult> {
+    const claimedAt = this.dependencies.clock.now();
+    const claim = await this.dependencies.runs.claimNextRun({
+      workerId: input.workerId,
+      claimedAt,
+      leaseExpiresAt: this.leaseExpiresAt(claimedAt),
+    });
+    if (claim.kind === "idle") return claim;
+    return {
+      kind: "executed",
+      run: await this.executeClaimedRun(claim.run, claimedAt),
+    };
   }
 
   private async executeClaimedRun(

@@ -3,7 +3,7 @@ import type {
   ProviderConnectionTestSummary,
   ProviderLifecycleState,
 } from "@packscout/contracts";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 import type { PackscoutDatabase } from "./database.ts";
 import {
@@ -237,6 +237,22 @@ export class DrizzleProviderConfigurationRepository<
     providerId: string,
   ): Promise<ProviderConfigurationSummary | null> {
     return this.loadSummary(this.database, organizationId, providerId);
+  }
+
+  async listProviders(
+    organizationId: string,
+  ): Promise<readonly ProviderConfigurationSummary[]> {
+    const providers = await this.database
+      .select({ id: providerSources.id })
+      .from(providerSources)
+      .where(eq(providerSources.organizationId, organizationId))
+      .orderBy(asc(providerSources.platformKey), asc(providerSources.id));
+    const summaries = await Promise.all(
+      providers.map(({ id }) => this.loadSummary(this.database, organizationId, id)),
+    );
+    return summaries.filter(
+      (summary): summary is ProviderConfigurationSummary => summary !== null,
+    );
   }
 
   async getRevisionForConnectionTest(input: {

@@ -21,6 +21,7 @@ export const canonicalRecordKindEnum = pgEnum("canonical_record_kind", [
   "platform",
   "pack",
   "catalog_asset",
+  "ev_input",
   "pull",
   "sale",
   "estimated_ev",

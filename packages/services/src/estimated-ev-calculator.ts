@@ -16,6 +16,7 @@ export type PackScoutEstimatedEvCurrencyTreatment =
   | "usd"
   | "verified_usd_stablecoin";
 export type PackScoutEstimatedEvLimitation =
+  | "incomplete_inventory"
   | "midpoint_value_ranges"
   | "provider_supplied_probabilities"
   | "verified_usd_stablecoin_at_parity";
@@ -28,6 +29,7 @@ export const PACKSCOUT_ESTIMATED_EV_UNAVAILABLE_REASON_ORDER = [
   "missing_probability",
   "invalid_probability",
   "incomplete_probability_coverage",
+  "incomplete_inventory",
   "missing_value_bound",
   "open_ended_value_range",
   "invalid_value_bound",
@@ -66,6 +68,8 @@ export interface CalculatePackScoutEstimatedEvInput {
   readonly distributionCurrency?: string | null;
   readonly unitBasis?: string | null;
   readonly drawCount?: number | null;
+  readonly declaredCoverage?: number | null;
+  readonly evidenceCompleteness: "complete" | "partial" | "unknown";
   readonly buckets?: readonly PackScoutEstimatedEvBucketInput[];
   readonly sourceAt?: string | null;
   /** Caller-supplied clock value keeps the calculation pure and reproducible. */
@@ -270,6 +274,17 @@ function coverageIsComplete(coverage: Rational): boolean {
   );
 }
 
+function rationalsAreWithinCoverageTolerance(
+  left: Rational,
+  right: Rational,
+): boolean {
+  const difference =
+    left.numerator * right.denominator >= right.numerator * left.denominator
+      ? left.numerator * right.denominator - right.numerator * left.denominator
+      : right.numerator * left.denominator - left.numerator * right.denominator;
+  return difference * 1_000_000n <= left.denominator * right.denominator;
+}
+
 function stableUnique(values: readonly string[]): readonly string[] {
   return Object.freeze([...new Set(values)]);
 }
@@ -346,6 +361,9 @@ export function calculatePackScoutEstimatedEv(
   const drawCount = isPositiveDrawCount(input.drawCount) ? input.drawCount : null;
   if (!drawCount) reasons.add("invalid_draw_count");
   if (buckets.length === 0) reasons.add("missing_probability_buckets");
+  if (input.evidenceCompleteness !== "complete") {
+    reasons.add("incomplete_inventory");
+  }
 
   let probabilityCoverage = ZERO_RATIONAL;
   let allProbabilitiesValid = buckets.length > 0;
@@ -443,6 +461,21 @@ export function calculatePackScoutEstimatedEv(
   ) {
     reasons.add("incomplete_probability_coverage");
   }
+  if (
+    buckets.length > 0 &&
+    allProbabilitiesValid &&
+    input.declaredCoverage !== null &&
+    input.declaredCoverage !== undefined &&
+    (!Number.isFinite(input.declaredCoverage) ||
+      input.declaredCoverage < 0 ||
+      input.declaredCoverage > 1 ||
+      !rationalsAreWithinCoverageTolerance(
+        probabilityCoverage,
+        rationalFromNumber(input.declaredCoverage),
+      ))
+  ) {
+    reasons.add("incomplete_probability_coverage");
+  }
 
   const sourceAt = isInstant(input.sourceAt) ? input.sourceAt : null;
   if (input.sourceAt === null || input.sourceAt === undefined || input.sourceAt === "") {
@@ -455,6 +488,9 @@ export function calculatePackScoutEstimatedEv(
     "midpoint_value_ranges",
     "provider_supplied_probabilities",
   ];
+  if (input.evidenceCompleteness !== "complete") {
+    limitations.push("incomplete_inventory");
+  }
   if (
     priceCurrencyTreatment === "verified_usd_stablecoin" ||
     distributionCurrencyTreatment === "verified_usd_stablecoin"

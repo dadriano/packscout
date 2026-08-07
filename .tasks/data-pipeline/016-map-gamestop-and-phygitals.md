@@ -5,7 +5,7 @@
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/009](009-calculate-estimated-ev.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -47,8 +47,15 @@ EV candidates declare normalized probability, bounds, currency, basis, draw coun
 
 ## Acceptance Criteria
 
-- [ ] Every valid envelope in `gamestop.json` and `phygitals.json` imports or idempotently repeats, including GameStop's empty sales and Phygitals' deeply nested event payloads.
-- [ ] GameStop levels and Phygitals variants become stable distinct packs with correct parent relationships and no duplicates across retry or nested-versus-standalone appearances.
-- [ ] Pulls resolve to the most specific supported pack without guessing, and unresolved source relationships remain available for later reconciliation.
-- [ ] Supported complete tier distributions calculate PackScout Estimated EV; incomplete, ambiguous, unsupported-currency, or partial-inventory inputs preserve the pack with an unavailable reason.
-- [ ] Provider-specific details remain isolated, provider EV stays separate, and canonical or browser-visible data excludes source usernames, raw wallets, and full raw payloads.
+- [x] Every valid envelope in `gamestop.json` and `phygitals.json` imports or idempotently repeats, including GameStop's empty sales and Phygitals' deeply nested event payloads.
+- [x] GameStop levels and Phygitals variants become stable distinct packs with correct parent relationships and no duplicates across retry or nested-versus-standalone appearances.
+- [x] Pulls resolve to the most specific supported pack without guessing, and unresolved source relationships remain available for later reconciliation.
+- [x] Supported complete tier distributions calculate PackScout Estimated EV; incomplete, ambiguous, unsupported-currency, or partial-inventory inputs preserve the pack with an unavailable reason.
+- [x] Provider-specific details remain isolated, provider EV stays separate, and canonical or browser-visible data excludes source usernames, raw wallets, and full raw payloads.
+
+## Spec Compliance
+
+- Added isolated GameStop category/level and Phygitals root/variant mappings with stable parent keys and deterministic nested-versus-standalone identities.
+- Resolved all supplied GameStop pulls using exact category, slug, name, and price evidence; retained Phygitals out-of-page pack relationships without guessing.
+- Kept chase lists as supporting evidence, provider EV separate, exact verified USDC buybacks explicit, and zero per-voucher draw semantics unavailable rather than synthetic.
+- Verified exact source hashes, every supplied envelope, full generic projection acceptance, complete GameStop EV calculation, Phygitals unavailable evidence, and canonical actor pseudonymization.

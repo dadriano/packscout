@@ -57,12 +57,24 @@ export type ProviderImportRequestPersistenceResult =
   | { readonly kind: "created"; readonly run: ProviderImportRunSummary }
   | { readonly kind: "active"; readonly run: ProviderImportRunSummary }
   | { readonly kind: "not_found" }
-  | { readonly kind: "provider_unavailable" };
+  | { readonly kind: "provider_unavailable" }
+  | {
+      readonly kind: "revision_conflict";
+      readonly activeConfigurationRevisionId: string;
+    };
 
 export type ProviderImportClaimPersistenceResult =
   | { readonly kind: "claimed"; readonly run: ClaimedProviderImportRun }
   | { readonly kind: "not_found" }
   | { readonly kind: "not_claimable"; readonly run: ProviderImportRunSummary };
+
+export type ProviderImportQueueClaimPersistenceResult =
+  | { readonly kind: "claimed"; readonly run: ClaimedProviderImportRun }
+  | { readonly kind: "idle" };
+
+export type ProviderImportQueueExecutionResult =
+  | { readonly kind: "executed"; readonly run: ProviderImportRunSummary }
+  | { readonly kind: "idle" };
 
 export type ProviderImportFinishPersistenceResult =
   | { readonly kind: "finished"; readonly run: ProviderImportRunSummary }
@@ -78,6 +90,7 @@ export interface ProviderImportRunRepository {
     trigger: ProviderImportTrigger;
     requestedByActorKey: string | null;
     requestedAt: Date;
+    expectedConfigurationRevisionId?: string;
   }): Promise<ProviderImportRequestPersistenceResult>;
   claimRun(input: {
     organizationId: string;
@@ -86,6 +99,11 @@ export interface ProviderImportRunRepository {
     claimedAt: Date;
     leaseExpiresAt: Date;
   }): Promise<ProviderImportClaimPersistenceResult>;
+  claimNextRun(input: {
+    workerId: string;
+    claimedAt: Date;
+    leaseExpiresAt: Date;
+  }): Promise<ProviderImportQueueClaimPersistenceResult>;
   renewLease(input: {
     organizationId: string;
     runId: string;
@@ -135,6 +153,7 @@ export type ProviderCanonicalRecordKind =
   | "platform"
   | "pack"
   | "catalog_asset"
+  | "ev_input"
   | "pull"
   | "sale"
   | "estimated_ev";
@@ -262,7 +281,7 @@ export type ProviderImportTerminalFailureCode =
   | "IMPORT_UNREACHABLE";
 
 export type ProviderImportServiceErrorCode =
-  | "ACTIVE_IMPORT_RUN"
+  | "CONFIG_REVISION_CONFLICT"
   | "IMPORT_RUN_NOT_CLAIMABLE"
   | "IMPORT_RUN_NOT_FOUND"
   | "PROVIDER_NOT_FOUND"

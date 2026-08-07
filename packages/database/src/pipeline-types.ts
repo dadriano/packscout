@@ -78,6 +78,45 @@ export interface CommitPageResult {
   duplicateSourceRecords: number;
 }
 
+export interface ProjectSourceRecordInput {
+  organizationId: string;
+  providerId: string;
+  configurationRevisionId: string;
+  quarantineId: string;
+  attemptId: string;
+  sourceRecordId: string;
+  projections: readonly CanonicalProjectionInput[];
+  acceptedAt: Date;
+}
+
+export interface ProjectDerivedSourceRecordInput {
+  organizationId: string;
+  providerId: string;
+  configurationRevisionId: string;
+  sourceRecordId: string;
+  projections: readonly CanonicalProjectionInput[];
+  acceptedAt: Date;
+}
+
+export interface MaterializeAndProjectSourceRecordInput {
+  organizationId: string;
+  providerId: string;
+  configurationRevisionId: string;
+  quarantineId: string;
+  attemptId: string;
+  runId: string;
+  pageId: string;
+  recordKind: SourceRecordKind;
+  recordIndex: number;
+  externalId: string;
+  sourceTime: Date;
+  collectedAt: Date;
+  payload: Record<string, unknown>;
+  expiresAt: Date;
+  projections: readonly CanonicalProjectionInput[];
+  acceptedAt: Date;
+}
+
 export interface CurrentProjection {
   identity: CanonicalIdentity;
   entityId: string;

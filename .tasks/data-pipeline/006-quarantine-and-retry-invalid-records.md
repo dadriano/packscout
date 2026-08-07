@@ -5,7 +5,7 @@
 **Depends on:** [data-pipeline/005](005-import-cursor-pages-idempotently.md)  
 **Blocks:** [data-pipeline/012](012-operate-imports-in-admin.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md), [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** medium  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -45,8 +45,15 @@ The retry service reads raw data through a protected server-only reference, reso
 
 ## Acceptance Criteria
 
-- [ ] A mixed page imports valid records, creates bounded quarantine entries for invalid records, advances the cursor, and records an incomplete run with accurate counts.
-- [ ] Retrying a repaired mapping resolves the entry and writes the canonical projection exactly once without changing the provider cursor or historical run result.
-- [ ] Repeated, concurrent, resolved, expired, unauthorized, and cross-tenant retry attempts return stable outcomes and preserve consistent attempt history.
-- [ ] Ninety-day expiry removes protected payload access while preserving non-sensitive audit metadata and an explicit expired state.
-- [ ] Browser responses, logs, metrics, notifications, and errors never contain full raw payloads, usernames, wallet addresses, or secrets.
+- [x] A mixed page imports valid records, creates bounded quarantine entries for invalid records, advances the cursor, and records an incomplete run with accurate counts.
+- [x] Retrying a repaired mapping resolves the entry and writes the canonical projection exactly once without changing the provider cursor or historical run result.
+- [x] Repeated, concurrent, resolved, expired, unauthorized, and cross-tenant retry attempts return stable outcomes and preserve consistent attempt history.
+- [x] Ninety-day expiry removes protected payload access while preserving non-sensitive audit metadata and an explicit expired state.
+- [x] Browser responses, logs, metrics, notifications, and errors never contain full raw payloads, usernames, wallet addresses, or secrets.
+
+## Spec Compliance
+
+- Added tenant-scoped, browser-safe quarantine list/detail/count contracts and bounded single/bulk retry commands for administrators and data operators.
+- Added durable retry attempts with one-running-attempt enforcement, explicit conflict/expired/resolved outcomes, and database-level tenant foreign keys.
+- Revalidated both linked records and previously unlinked invalid envelopes through the current mapper and shared projection boundary, materializing repaired source evidence exactly once without cursor or run mutation.
+- Added controllable retention expiry, deadline-race protection, safe audit metadata, and focused service/database integration coverage.

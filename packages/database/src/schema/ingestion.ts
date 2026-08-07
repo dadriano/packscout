@@ -425,6 +425,10 @@ export const quarantineRecords = pgTable(
       table.recordKind,
       table.recordIndex,
     ),
+    unique("quarantine_records_id_organization_unique").on(
+      table.id,
+      table.organizationId,
+    ),
     index("quarantine_records_organization_state_idx").on(
       table.organizationId,
       table.state,

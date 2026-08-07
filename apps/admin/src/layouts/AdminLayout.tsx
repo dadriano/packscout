@@ -34,6 +34,16 @@ export function AdminLayout() {
       ? "Overview"
       : location.pathname === "/operators"
         ? "Operators"
+        : location.pathname.startsWith("/providers")
+          ? "Data Providers"
+        : location.pathname.startsWith("/operations")
+          ? "Pipeline Status"
+        : location.pathname.startsWith("/runs")
+          ? "Import Runs"
+        : location.pathname.startsWith("/quarantine")
+          ? "Quarantine"
+        : location.pathname.startsWith("/alerts")
+          ? "Operational Alerts"
         : "Not found";
   useDocumentTitle(title);
 
@@ -49,9 +59,18 @@ export function AdminLayout() {
   if (status.phase !== "authenticated") return null;
   const { session } = status;
   const canManageOperators = session.permissions.includes("operators:manage");
-  const navigation = canManageOperators
-    ? [...baseNavigation, { to: "/operators", label: "Operators", index: "02" }]
-    : baseNavigation;
+  const canViewProviders = session.permissions.includes("providers:view");
+  const workspaceNavigation = [
+    ...baseNavigation,
+    ...(canManageOperators ? [{ to: "/operators", label: "Operators", index: "02" }] : []),
+  ];
+  const pipelineNavigation = [
+    ...(canViewProviders ? [{ to: "/operations", label: "Status", index: "01" }] : []),
+    ...(canViewProviders ? [{ to: "/providers", label: "Providers", index: "02" }] : []),
+    ...(canViewProviders ? [{ to: "/runs", label: "Import Runs", index: "03" }] : []),
+    ...(canViewProviders ? [{ to: "/quarantine", label: "Quarantine", index: "04" }] : []),
+    ...(canViewProviders ? [{ to: "/alerts", label: "Alerts", index: "05" }] : []),
+  ];
 
   return (
     <div className="admin-layout" data-nav-open={navOpen ? "true" : "false"}>
@@ -88,7 +107,7 @@ export function AdminLayout() {
         <nav className="admin-sidebar__nav">
           <section className="admin-nav-section">
             <h2>Workspace</h2>
-            {navigation.map((item) => (
+            {workspaceNavigation.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}
@@ -103,6 +122,22 @@ export function AdminLayout() {
                 </NavLink>
             ))}
           </section>
+          {pipelineNavigation.length > 0 ? (
+            <section className="admin-nav-section">
+              <h2>Data pipeline</h2>
+              {pipelineNavigation.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) => `admin-nav-link${isActive ? " is-active" : ""}`}
+                  onClick={() => setNavOpenedAt(null)}
+                >
+                  <span aria-hidden="true">{item.index}</span>
+                  {item.label}
+                </NavLink>
+              ))}
+            </section>
+          ) : null}
         </nav>
 
         <div className="admin-sidebar__footer">

@@ -40,6 +40,8 @@ function validInput(
     distributionCurrency: "USD",
     unitBasis: "per_pack",
     drawCount: 1,
+    declaredCoverage: 1,
+    evidenceCompleteness: "complete",
     buckets: [bucket()],
     sourceAt,
     calculatedAt,
@@ -277,6 +279,11 @@ test("every insufficient-input condition returns one constrained unavailable rea
       name: "incomplete coverage",
       reason: "incomplete_probability_coverage",
       input: validInput({ buckets: [bucket({ probability: 0.5 })] }),
+    },
+    {
+      name: "incomplete inventory",
+      reason: "incomplete_inventory",
+      input: validInput({ evidenceCompleteness: "partial" }),
     },
     {
       name: "missing bound",

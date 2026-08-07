@@ -134,6 +134,7 @@ class FixtureMappingAdapter implements ProviderMappingAdapter {
   readonly platformKey = platform;
 
   mapPage(input: Parameters<ProviderMappingAdapter["mapPage"]>[0]): ProviderMappingOutput {
+    assert.equal(input.configuration.adapterKey, this.key);
     const outcomes: ProviderMappingOutput["outcomes"][number][] = [];
     input.page.catalog.forEach((envelope, index) => {
       const recordSource = source(
@@ -192,8 +193,9 @@ class FixtureMappingAdapter implements ProviderMappingAdapter {
 }
 
 const projectionPort: ProviderProjectionPort = {
-  project: ({ source: recordSource }) =>
-    recordSource.externalId === "projection-bad"
+  project: ({ configuration, source: recordSource }) => {
+    assert.equal(configuration.adapterKey, "fixture-mapper-v1");
+    return recordSource.externalId === "projection-bad"
       ? { status: "invalid", reasonCode: "PROJECTION_SCHEMA_INVALID" }
       : {
           status: "accepted",
@@ -208,7 +210,8 @@ const projectionPort: ProviderProjectionPort = {
               sourceCollectedAt: new Date(recordSource.collectedAt),
             },
           ],
-        },
+        };
+  },
 };
 
 function catalog(externalId: string) {
@@ -377,21 +380,18 @@ test("manual and scheduled requests share one run while a disabled-after-start i
     assert.ok(requested);
     assert.ok(coalesced);
     assert.equal(coalesced.run.id, requested.run.id);
-    await assert.rejects(
-      harness.service.requestImport({
-        trigger: "manual",
-        providerId: ids.provider,
-        actor: {
-          organizationId: ids.organization,
-          operatorId: "admin",
-          role: "admin",
-        },
-      }),
-      (error: unknown) =>
-        error instanceof ProviderImportServiceError &&
-        error.code === "ACTIVE_IMPORT_RUN" &&
-        error.activeRun?.id === requested.run.id,
-    );
+    const manualDuplicate = await harness.service.requestImport({
+      trigger: "manual",
+      providerId: ids.provider,
+      expectedConfigurationRevisionId: ids.revision,
+      actor: {
+        organizationId: ids.organization,
+        operatorId: "admin",
+        role: "admin",
+      },
+    });
+    assert.equal(manualDuplicate.coalesced, true);
+    assert.equal(manualDuplicate.run.id, requested.run.id);
     await assert.rejects(
       harness.service.executeImport({
         organizationId: ids.otherOrganization,
@@ -453,6 +453,53 @@ test("manual and scheduled requests share one run while a disabled-after-start i
         error instanceof ProviderImportServiceError &&
         error.code === "PROVIDER_NOT_IMPORTABLE",
     );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("the shared import workflow claims and executes a queued manual run", async () => {
+  const harness = await createHarness(
+    new Map([
+      [
+        null,
+        {
+          catalog: [catalog("manual-queue-record")],
+          pulls: [],
+          sales: [],
+          next_cursor: "manual-queue-head",
+          has_more: false,
+        },
+      ],
+    ]),
+  );
+  try {
+    const requested = await harness.service.requestImport({
+      trigger: "manual",
+      providerId: ids.provider,
+      expectedConfigurationRevisionId: ids.revision,
+      actor: {
+        organizationId: ids.organization,
+        operatorId: "admin",
+        role: "admin",
+      },
+    });
+    assert.equal(requested.run.state, "queued");
+
+    const executed = await harness.service.executeNextImport({
+      workerId: "manual-queue-worker",
+    });
+
+    assert.equal(executed.kind, "executed");
+    if (executed.kind === "executed") {
+      assert.equal(executed.run.id, requested.run.id);
+      assert.equal(executed.run.trigger, "manual");
+      assert.equal(executed.run.state, "succeeded");
+      assert.equal(executed.run.reachedProviderHead, true);
+    }
+    assert.deepEqual(await harness.service.executeNextImport({
+      workerId: "manual-queue-worker",
+    }), { kind: "idle" });
   } finally {
     await harness.close();
   }

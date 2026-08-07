@@ -22,6 +22,34 @@
       "when": 1786053875329,
       "tag": "0002_swift_surge",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786055942534,
+      "tag": "0003_tricky_psynapse",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786055989334,
+      "tag": "0004_fuzzy_bromley",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786056934924,
+      "tag": "0005_bored_payback",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786060323911,
+      "tag": "0006_true_meteorite",
+      "breakpoints": true
     }
   ]
 }

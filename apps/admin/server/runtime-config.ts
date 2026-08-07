@@ -34,6 +34,24 @@ export function readRequiredSecret(
   return value;
 }
 
+export function readBase64Key(
+  value: string | undefined,
+  variableName: string,
+): Uint8Array {
+  const encoded = readRequiredSecret(value, variableName);
+  const normalized = encoded.trim();
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) {
+    throw new Error(`${variableName} must contain a base64-encoded 32-byte key.`);
+  }
+  const decoded = Buffer.from(normalized, "base64");
+  const canonicalInput = normalized.replace(/=+$/, "");
+  const canonicalDecoded = decoded.toString("base64").replace(/=+$/, "");
+  if (decoded.byteLength !== 32 || canonicalDecoded !== canonicalInput) {
+    throw new Error(`${variableName} must contain a base64-encoded 32-byte key.`);
+  }
+  return decoded;
+}
+
 export function readPositiveDuration(
   value: string | undefined,
   fallbackMs: number,

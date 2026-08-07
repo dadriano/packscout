@@ -169,10 +169,17 @@ export class DefaultProviderImportPagePlanner
     page: ProviderFeedValidatedPageV1;
   }): Promise<ProviderImportMappedPage> {
     const mapper = this.mappings.resolveForPlatform(input.configuration.platform);
+    // The immutable provider revision selects the transport adapter. Once the
+    // platform manifest selects its mapper, canonical provenance must use the
+    // mapper version instead of incorrectly labelling transport as mapping.
+    const mappingConfiguration = {
+      ...input.configuration,
+      adapterKey: mapper.key,
+    };
     let output: Awaited<ReturnType<typeof mapper.mapPage>>;
     try {
       output = await mapper.mapPage({
-        configuration: input.configuration,
+        configuration: mappingConfiguration,
         page: input.page.validPage,
         recordIndexes: recordIndexes(input.page),
       });
@@ -251,7 +258,7 @@ export class DefaultProviderImportPagePlanner
       }
       try {
         const projected = await this.projections.project({
-          configuration: input.configuration,
+          configuration: mappingConfiguration,
           source,
           candidates: outcome.candidates,
         });

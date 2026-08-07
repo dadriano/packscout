@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
@@ -8,12 +8,17 @@ import {
   DatabaseLoginAttemptLimiter,
   DrizzleAuthAuditSink,
   DrizzleAuthRepository,
+  DrizzleProviderConfigurationRepository,
+  DrizzleProviderHealthRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { createAdminApp } from "../../apps/admin/server/app.ts";
 import { createNodeAuthSecurity } from "../../apps/admin/server/auth/crypto.ts";
 import { createAdminAuthRuntime } from "../../apps/admin/server/auth/runtime.ts";
+import { createAdminImportOperationsRuntime } from "../../apps/admin/server/import-operations-runtime.ts";
+import { createAdminOperationalRuntime } from "../../apps/admin/server/operational-runtime.ts";
+import { createProviderAdminRuntime } from "../../apps/admin/server/provider-runtime.ts";
 import {
   readPort,
   readRequiredSecret,
@@ -74,6 +79,16 @@ async function main(): Promise<void> {
   }
 
   const origin = `http://127.0.0.1:${port}`;
+  const providerActorKey = createHash("sha256")
+    .update("packscout-local-provider-actor")
+    .digest();
+  const providerCredentialKey = createHash("sha256")
+    .update("packscout-local-provider-credential")
+    .digest();
+  const operational = createAdminOperationalRuntime({
+    database: harness.database,
+    actorPseudonymKey: providerActorKey,
+  });
   const auth = await createAdminAuthRuntime({
   repository,
   loginLimiter: new DatabaseLoginAttemptLimiter(harness.database, {
@@ -88,7 +103,26 @@ async function main(): Promise<void> {
   production: false,
   allowedOrigins: [origin, `http://localhost:${port}`],
 });
-  const app = createAdminApp({ auth });
+  const app = createAdminApp({
+    auth,
+    providers: createProviderAdminRuntime({
+      repository: new DrizzleProviderConfigurationRepository(harness.database),
+      healthRepository: new DrizzleProviderHealthRepository(harness.database),
+      credentialKey: providerCredentialKey,
+      actorPseudonymKey: providerActorKey,
+      environment: "local",
+      operational,
+    }),
+    importOperations: createAdminImportOperationsRuntime({
+      database: harness.database,
+      actorPseudonymKey: providerActorKey,
+      credentialKey: providerCredentialKey,
+      environment: "local",
+      operational,
+    }),
+    operationalAlerts: { alerts: operational.alerts },
+    operationalHealth: { health: operational.health },
+  });
   const adminRoot = path.join(repositoryRoot, "apps", "admin");
   const { createServer: createViteServer } = await import("vite");
   const hmrPort = readPort(
