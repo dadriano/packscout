@@ -28,6 +28,7 @@ export * from "./provider-import-types.ts";
 export * from "./provider-health-service.ts";
 export * from "./provider-projection-service.ts";
 export * from "./provider-scheduler-service.ts";
+export * from "./provider-stream-normalization.ts";
 export * from "./providers/beezie/mapper.ts";
 export * from "./providers/clutchpacks/mapper.ts";
 export * from "./providers/collector-crypt/mapper.ts";
