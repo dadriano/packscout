@@ -93,7 +93,7 @@ Audit metadata uses an allowlist and must not contain credentials, cookies, raw 
 ### Authentication
 
 - `POST /api/auth/login` accepts `{ email, password }`; returns `{ operator, membership, csrfToken }` and sets the session cookie.
-- `GET /api/auth/session` returns the current operator, organization membership, permissions, and a refreshed CSRF token.
+- `GET /api/auth/session` returns the current operator, organization membership, permissions, and the stable session-bound CSRF token without mutating session state.
 - `POST /api/auth/logout` revokes the current session and clears the cookie.
 - `POST /api/operators` and `PATCH /api/operators/:operatorId` are admin-only provisioning and role/state operations.
 

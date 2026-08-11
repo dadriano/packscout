@@ -79,6 +79,12 @@ export type FinishImportPersistenceResult =
   | { readonly kind: "ownership_lost" }
   | { readonly kind: "already_terminal"; readonly run: PersistedImportRun };
 
+interface LockedImportRun {
+  readonly run: PersistedImportRun;
+  readonly leaseOwner: string | null;
+  readonly leaseExpiresAt: Date | null;
+}
+
 const emptyCounters: RunCounters = {
   accepted: 0,
   duplicate: 0,
@@ -212,24 +218,18 @@ export class DrizzleImportRunRepository<
   }): Promise<ClaimImportPersistenceResult> {
     this.assertLease(input.workerId, input.claimedAt, input.leaseExpiresAt);
     return this.database.transaction(async (transaction) => {
-      const run = await this.lockRun(transaction, input.organizationId, input.runId);
-      if (!run) return { kind: "not_found" };
-      const [lease] = await transaction
-        .select({ owner: importRuns.leaseOwner, expiresAt: importRuns.leaseExpiresAt })
-        .from(importRuns)
-        .where(
-          and(
-            eq(importRuns.organizationId, input.organizationId),
-            eq(importRuns.id, input.runId),
-          ),
-        )
-        .limit(1);
+      const locked = await this.lockRun(
+        transaction,
+        input.organizationId,
+        input.runId,
+      );
+      if (!locked) return { kind: "not_found" };
+      const { run } = locked;
       const canClaim =
         run.state === "queued" ||
         (run.state === "running" &&
-          lease?.expiresAt !== null &&
-          lease?.expiresAt !== undefined &&
-          lease.expiresAt <= input.claimedAt);
+          locked.leaseExpiresAt !== null &&
+          locked.leaseExpiresAt <= input.claimedAt);
       if (!canClaim) return { kind: "not_claimable", run };
       return {
         kind: "claimed",
@@ -300,14 +300,14 @@ export class DrizzleImportRunRepository<
     transientRetry: boolean;
   }): Promise<boolean> {
     return this.database.transaction(async (transaction) => {
-      const run = await this.lockRun(transaction, input.organizationId, input.runId);
-      if (!run || run.state !== "running") return false;
-      const [owner] = await transaction
-        .select({ leaseOwner: importRuns.leaseOwner })
-        .from(importRuns)
-        .where(eq(importRuns.id, input.runId))
-        .limit(1);
-      if (owner?.leaseOwner !== input.workerId) return false;
+      const locked = await this.lockRun(
+        transaction,
+        input.organizationId,
+        input.runId,
+      );
+      if (!locked || locked.run.state !== "running") return false;
+      if (locked.leaseOwner !== input.workerId) return false;
+      const { run } = locked;
       const counters = {
         ...run.counters,
         requestAttempts: run.counters.requestAttempts + 1,
@@ -338,17 +338,17 @@ export class DrizzleImportRunRepository<
     finishedAt: Date;
   }): Promise<FinishImportPersistenceResult> {
     return this.database.transaction(async (transaction) => {
-      const run = await this.lockRun(transaction, input.organizationId, input.runId);
-      if (!run) return { kind: "not_found" };
+      const locked = await this.lockRun(
+        transaction,
+        input.organizationId,
+        input.runId,
+      );
+      if (!locked) return { kind: "not_found" };
+      const { run } = locked;
       if (run.state !== "running") {
         return { kind: "already_terminal", run };
       }
-      const [owner] = await transaction
-        .select({ leaseOwner: importRuns.leaseOwner })
-        .from(importRuns)
-        .where(eq(importRuns.id, input.runId))
-        .limit(1);
-      if (owner?.leaseOwner !== input.workerId) return { kind: "ownership_lost" };
+      if (locked.leaseOwner !== input.workerId) return { kind: "ownership_lost" };
       await transaction
         .update(importRuns)
         .set({
@@ -496,11 +496,25 @@ export class DrizzleImportRunRepository<
     database: PackscoutDatabase<TQueryResult>,
     organizationId: string,
     runId: string,
-  ): Promise<PersistedImportRun | null> {
-    await database.execute(
-      sql`select id from ${importRuns} where ${importRuns.id} = ${runId} and ${importRuns.organizationId} = ${organizationId} for update`,
-    );
-    return this.loadRun(database, organizationId, runId);
+  ): Promise<LockedImportRun | null> {
+    const [row] = await database
+      .select()
+      .from(importRuns)
+      .where(
+        and(
+          eq(importRuns.organizationId, organizationId),
+          eq(importRuns.id, runId),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    return row
+      ? {
+          run: this.toRun(row),
+          leaseOwner: row.leaseOwner,
+          leaseExpiresAt: row.leaseExpiresAt,
+        }
+      : null;
   }
 
   private toRun(row: typeof importRuns.$inferSelect): PersistedImportRun {

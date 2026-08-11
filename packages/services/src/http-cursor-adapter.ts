@@ -13,16 +13,18 @@ import {
   type ProviderTransportFailureCode,
   type ProviderTransportPageInput,
 } from "./provider-adapter.ts";
+import {
+  requestPinnedProviderHttp,
+  type PinnedProviderDestination,
+  type PinnedProviderHttpClient,
+} from "./pinned-provider-http-client.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
-export type ProviderHttpClient = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+export type ProviderHttpClient = PinnedProviderHttpClient;
 
 export type ProviderDnsResolver = (
   hostname: string,
@@ -291,20 +293,38 @@ async function validateResolvedDestination(
   resolveHost: ProviderDnsResolver,
   signal: AbortSignal,
   allowLocalHttp: boolean,
-): Promise<void> {
+): Promise<PinnedProviderDestination> {
   const hostname = canonicalHostname(url.hostname);
   if (
     allowLocalHttp &&
     url.protocol === "http:" &&
     (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1")
   ) {
-    return;
+    if (hostname === "localhost") {
+      let addresses: readonly string[];
+      try {
+        addresses = await resolveBeforeAbort(resolveHost, hostname, signal);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") throw error;
+        throw requestError("destination_resolution_failed", true);
+      }
+      if (
+        addresses.length === 0 ||
+        addresses.some(
+          (address) => address !== "127.0.0.1" && address !== "::1",
+        )
+      ) {
+        throw requestError("destination_not_allowed", false);
+      }
+      return { hostname, addresses };
+    }
+    return { hostname, addresses: [hostname] };
   }
   if (isIP(hostname) !== 0) {
     if (!isPublicProviderAddress(hostname)) {
       throw requestError("destination_not_allowed", false);
     }
-    return;
+    return { hostname, addresses: [hostname] };
   }
   let addresses: readonly string[];
   try {
@@ -319,6 +339,7 @@ async function validateResolvedDestination(
   if (addresses.some((address) => !isPublicProviderAddress(address))) {
     throw requestError("destination_not_allowed", false);
   }
+  return { hostname, addresses };
 }
 
 function isRetryableHttpStatus(status: number): boolean {
@@ -333,6 +354,7 @@ async function readBoundedResponse(
   if (contentLength !== null) {
     const declaredBytes = Number(contentLength);
     if (Number.isFinite(declaredBytes) && declaredBytes > maximumBytes) {
+      await response.body?.cancel().catch(() => undefined);
       throw requestError("response_too_large", false);
     }
   }
@@ -367,7 +389,7 @@ export class HttpCursorAdapter implements ProviderTransportAdapter {
 
   constructor(dependencies: HttpCursorAdapterDependencies = {}) {
     this.#httpClient =
-      dependencies.httpClient ?? globalThis.fetch.bind(globalThis);
+      dependencies.httpClient ?? requestPinnedProviderHttp;
     this.#resolveHost = dependencies.resolveHost ?? defaultDnsResolver;
     this.#now = dependencies.now ?? Date.now;
   }
@@ -440,19 +462,24 @@ export class HttpCursorAdapter implements ProviderTransportAdapter {
     const url = buildRequestUrl(input);
     const requestLifetime = createRequestLifetime(input.signal, timeoutMs);
     try {
-      await validateResolvedDestination(
+      const destination = await validateResolvedDestination(
         url,
         this.#resolveHost,
         requestLifetime.signal,
         input.allowLocalHttp === true,
       );
-      const response = await this.#httpClient(url, {
-        method: "GET",
-        headers: buildRequestHeaders(input),
-        redirect: "manual",
-        signal: requestLifetime.signal,
-      });
+      const response = await this.#httpClient(
+        url,
+        {
+          method: "GET",
+          headers: buildRequestHeaders(input),
+          redirect: "manual",
+          signal: requestLifetime.signal,
+        },
+        destination,
+      );
       if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
         throw requestError(
           "http_error",
           isRetryableHttpStatus(response.status),

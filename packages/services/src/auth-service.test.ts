@@ -48,7 +48,6 @@ interface RepositoryState {
   revokedTokens: string[];
   operatorUpdates: Array<Parameters<AuthRepository["updateOperator"]>[0]>;
   refreshed: Array<Parameters<AuthRepository["refreshSession"]>[0]>;
-  csrfReplacements: Array<Parameters<AuthRepository["replaceSessionCsrf"]>[0]>;
   provisionResult: ProvisionOperatorResult;
   updateResult: UpdateOperatorResult;
 }
@@ -61,7 +60,6 @@ function createRepository(): { repository: AuthRepository; state: RepositoryStat
     revokedTokens: [],
     operatorUpdates: [],
     refreshed: [],
-    csrfReplacements: [],
     provisionResult: { kind: "created", operator: summary() },
     updateResult: { kind: "updated", operator: summary() },
   };
@@ -77,9 +75,6 @@ function createRepository(): { repository: AuthRepository; state: RepositoryStat
     },
     async refreshSession(input) {
       state.refreshed.push(input);
-    },
-    async replaceSessionCsrf(input) {
-      state.csrfReplacements.push(input);
     },
     async revokeSessionByTokenHash(tokenHash) {
       state.revokedTokens.push(tokenHash);
@@ -180,6 +175,10 @@ test("login rotates the presented session and returns only browser-safe identity
   assert.equal(state.rotated.length, 1);
   assert.equal(state.rotated[0]?.previousTokenHash, "session:old-token");
   assert.notEqual(state.rotated[0]?.session.tokenHash, result.sessionToken);
+  assert.equal(
+    state.rotated[0]?.session.csrfHash,
+    `csrf:${result.session.csrfToken}`,
+  );
   assert.equal("password" in result.session.operator, false);
   assert.equal("passwordHash" in result.session.operator, false);
 });
@@ -242,6 +241,26 @@ test("repeated failures are rate limited by bounded pseudonymous buckets", async
   assert.equal(limited.retryAt?.toISOString(), "2026-08-06T12:00:30.000Z");
 });
 
+test("bounded login limiter evicts the least-recently-used bucket", async () => {
+  const limiter = new BoundedLoginAttemptLimiter({
+    windowMs: 60_000,
+    blockMs: 30_000,
+    maximumFailures: 1,
+    maximumBuckets: 2,
+  });
+  const at = (offsetMs: number) => new Date(now.getTime() + offsetMs);
+
+  await limiter.recordFailure(["oldest"], at(0));
+  await limiter.recordFailure(["newer"], at(1));
+  assert.ok(await limiter.retryAt(["oldest"], at(2)));
+
+  await limiter.recordFailure(["newest"], at(3));
+
+  assert.equal(await limiter.retryAt(["newer"], at(4)), null);
+  assert.ok(await limiter.retryAt(["oldest"], at(4)));
+  assert.ok(await limiter.retryAt(["newest"], at(4)));
+});
+
 test("successful login clears only its account bucket, not the network spray bucket", async () => {
   const { service, state } = createHarness();
   const failAs = async (email: string) => {
@@ -302,6 +321,62 @@ test("session resolution rechecks authoritative role and rejects disabled accoun
   );
   assert.equal(disabled.code, "AUTH_REQUIRED");
   assert.deepEqual(state.revokedTokens, ["session:session-token"]);
+});
+
+test("session bootstrap is read-only and keeps one CSRF token valid across tabs", async () => {
+  const { service, state } = createHarness();
+  state.authoritativeSession = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    emailNormalized: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active",
+    role: "admin",
+    csrfHash: "csrf:csrf:session-token",
+    idleExpiresAt: new Date(now.getTime() + 10_000),
+    absoluteExpiresAt: new Date(now.getTime() + 20_000),
+  };
+
+  const firstTab = await service.bootstrapSession("session-token");
+  const secondTab = await service.bootstrapSession("session-token");
+
+  assert.equal(firstTab.session.csrfToken, "csrf:session-token");
+  assert.equal(secondTab.session.csrfToken, firstTab.session.csrfToken);
+  assert.deepEqual(state.refreshed, []);
+  assert.deepEqual(state.revokedTokens, []);
+
+  const actor = await service.resolveSession({
+    sessionToken: "session-token",
+    csrfToken: firstTab.session.csrfToken,
+  });
+  assert.equal(actor.sessionId, "session-id");
+  assert.equal(state.refreshed.length, 1);
+});
+
+test("session bootstrap does not revoke an inactive authoritative session", async () => {
+  const { service, state } = createHarness();
+  state.authoritativeSession = {
+    sessionId: "disabled-session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    emailNormalized: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "disabled",
+    role: "admin",
+    csrfHash: "csrf:csrf:session-token",
+    idleExpiresAt: new Date(now.getTime() + 10_000),
+    absoluteExpiresAt: new Date(now.getTime() + 20_000),
+  };
+
+  const error = await captureServiceError(() =>
+    service.bootstrapSession("session-token"),
+  );
+  assert.equal(error.code, "AUTH_REQUIRED");
+  assert.deepEqual(state.refreshed, []);
+  assert.deepEqual(state.revokedTokens, []);
 });
 
 test("operator mutations are admin-only, revoke stale sessions, and keep audits secret-free", async () => {

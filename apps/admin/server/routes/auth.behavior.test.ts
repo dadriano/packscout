@@ -53,7 +53,10 @@ async function withServer(app: Express, run: (baseUrl: string) => Promise<void>)
   }
 }
 
-function createHarness(overrides: Partial<AuthRouterDependencies["service"]> = {}) {
+function createHarness(
+  overrides: Partial<AuthRouterDependencies["service"]> = {},
+  trustedProxies: readonly string[] = [],
+) {
   const calls = { logout: 0 };
   const service: AuthRouterDependencies["service"] = {
     async login() {
@@ -89,6 +92,9 @@ function createHarness(overrides: Partial<AuthRouterDependencies["service"]> = {
     maxAgeMs: 12 * 60 * 60 * 1_000,
   });
   const app = express();
+  if (trustedProxies.length > 0) {
+    app.set("trust proxy", [...trustedProxies]);
+  }
   app.use(express.json());
   app.use(
     "/api/auth",
@@ -152,6 +158,37 @@ test("login requires a trusted Origin before credential work", async () => {
   assert.equal(loginCalls, 0);
 });
 
+test("login uses a forwarded client address only from an explicitly trusted proxy", async () => {
+  const observedNetworks: string[] = [];
+  const service = {
+    async login(input: Parameters<AuthRouterDependencies["service"]["login"]>[0]) {
+      observedNetworks.push(input.networkIdentifier);
+      return { sessionToken: "rotated-session", session };
+    },
+  };
+  const requestLogin = async (baseUrl: string) => {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: trustedOrigin,
+        "X-Forwarded-For": "198.51.100.23",
+      },
+      body: JSON.stringify({ email: actor.email, password: "a password" }),
+    });
+    assert.equal(response.status, 200);
+  };
+
+  await withServer(createHarness(service).app, requestLogin);
+  assert.equal(observedNetworks[0], "127.0.0.1");
+
+  await withServer(
+    createHarness(service, ["127.0.0.1"]).app,
+    requestLogin,
+  );
+  assert.equal(observedNetworks[1], "198.51.100.23");
+});
+
 test("credential failures remain generic and rate limits use the stable contract", async () => {
   const generic = new AuthServiceError(
     "INVALID_CREDENTIALS",
@@ -201,7 +238,7 @@ test("credential failures remain generic and rate limits use the stable contract
   });
 });
 
-test("session lookup rejects anonymous requests and refreshes CSRF for a valid session", async () => {
+test("session lookup rejects anonymous requests and returns the current session", async () => {
   const { app, cookiePolicy } = createHarness();
   await withServer(app, async (baseUrl) => {
     const anonymous = await fetch(`${baseUrl}/api/auth/session`);

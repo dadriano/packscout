@@ -29,6 +29,7 @@ export interface AdminAuthHttpDependencies {
 }
 
 export interface AdminAppDependencies {
+  trustedProxies?: readonly string[];
   auth?: AdminAuthHttpDependencies;
   providers?: Omit<
     ProvidersRouterDependencies,
@@ -90,6 +91,9 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
   const app = express();
 
   app.disable("x-powered-by");
+  if (dependencies.trustedProxies?.length) {
+    app.set("trust proxy", [...dependencies.trustedProxies]);
+  }
   app.use((request, response, next) => {
     const requestId = request.get("x-request-id")?.slice(0, 128) || randomUUID();
     response.setHeader("X-Request-Id", requestId);

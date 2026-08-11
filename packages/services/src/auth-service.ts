@@ -154,7 +154,6 @@ export interface AuthRepository {
     lastSeenAt: Date;
     idleExpiresAt: Date;
   }): Promise<void>;
-  replaceSessionCsrf(input: { sessionId: string; csrfHash: string }): Promise<void>;
   revokeSessionByTokenHash(tokenHash: string, revokedAt: Date): Promise<void>;
   listOperators(
     organizationId: string,
@@ -343,7 +342,7 @@ export class AuthService {
     }
 
     const sessionToken = this.dependencies.random.token(32);
-    const csrfToken = this.dependencies.random.token(32);
+    const csrfToken = this.csrfTokenForSession(sessionToken);
     const sessionId = this.dependencies.random.id();
     const absoluteExpiresAt = new Date(
       now.getTime() + this.dependencies.config.sessionAbsoluteMs,
@@ -401,6 +400,16 @@ export class AuthService {
     sessionToken: string | undefined;
     csrfToken?: string;
   }): Promise<AuthenticatedActor> {
+    return this.resolveAuthoritativeSession(input, true);
+  }
+
+  private async resolveAuthoritativeSession(
+    input: {
+      sessionToken: string | undefined;
+      csrfToken?: string;
+    },
+    allowSessionWrites: boolean,
+  ): Promise<AuthenticatedActor> {
     if (!input.sessionToken) {
       throw new AuthServiceError(
         "AUTH_REQUIRED",
@@ -415,7 +424,7 @@ export class AuthService {
       now,
     );
     if (!record || record.state !== "active") {
-      if (record) {
+      if (record && allowSessionWrites) {
         await this.dependencies.repository.revokeSessionByTokenHash(tokenHash, now);
       }
       throw new AuthServiceError(
@@ -441,11 +450,13 @@ export class AuthService {
         now.getTime() + this.dependencies.config.sessionIdleMs,
       ),
     );
-    await this.dependencies.repository.refreshSession({
-      sessionId: record.sessionId,
-      lastSeenAt: now,
-      idleExpiresAt,
-    });
+    if (allowSessionWrites) {
+      await this.dependencies.repository.refreshSession({
+        sessionId: record.sessionId,
+        lastSeenAt: now,
+        idleExpiresAt,
+      });
+    }
     return {
       sessionId: record.sessionId,
       operatorId: record.operatorId,
@@ -467,17 +478,24 @@ export class AuthService {
   async bootstrapSession(
     sessionToken: string | undefined,
   ): Promise<{ actor: AuthenticatedActor; session: AuthSessionResponse }> {
-    const actor = await this.resolveSession({ sessionToken });
-    const csrfToken = this.dependencies.random.token(32);
-    await this.dependencies.repository.replaceSessionCsrf({
-      sessionId: actor.sessionId,
-      csrfHash: this.dependencies.csrfDigest.digest(csrfToken),
-    });
-    const refreshedActor = { ...actor, csrfToken };
+    const csrfToken = sessionToken
+      ? this.csrfTokenForSession(sessionToken)
+      : undefined;
+    const actor = await this.resolveAuthoritativeSession(
+      { sessionToken, csrfToken },
+      false,
+    );
     return {
-      actor: refreshedActor,
-      session: toSessionResponse(refreshedActor),
+      actor,
+      session: toSessionResponse(actor),
     };
+  }
+
+  private csrfTokenForSession(sessionToken: string): string {
+    // The production digest is a purpose-separated HMAC. This gives every tab
+    // the same CSRF token without exposing the HttpOnly session token or
+    // requiring a state-changing session bootstrap.
+    return this.dependencies.csrfDigest.digest(sessionToken);
   }
 
   requirePermission(
@@ -626,10 +644,17 @@ export class AuthService {
 interface RateBucket {
   failures: number[];
   blockedUntil: number | null;
-  touchedAt: number;
 }
 
+/**
+ * A bounded, process-local limiter for isolated tests and single-process tools.
+ * Its buckets are neither durable nor coordinated across replicas. Deployments
+ * that can restart or scale horizontally must inject a shared
+ * `LoginAttemptLimiter`; the admin runtime uses its database-backed limiter.
+ */
 export class BoundedLoginAttemptLimiter implements LoginAttemptLimiter {
+  // Map insertion order is the LRU queue: touches move a bucket to the tail,
+  // so the head can be evicted in O(1) amortized time.
   private readonly buckets = new Map<string, RateBucket>();
 
   constructor(
@@ -657,7 +682,7 @@ export class BoundedLoginAttemptLimiter implements LoginAttemptLimiter {
       const bucket = this.buckets.get(key);
       if (!bucket) continue;
       this.prune(bucket, nowMs);
-      bucket.touchedAt = nowMs;
+      this.markMostRecentlyUsed(key, bucket);
       latestBlock = Math.max(latestBlock, bucket.blockedUntil ?? 0);
     }
     return latestBlock > nowMs ? new Date(latestBlock) : null;
@@ -670,13 +695,13 @@ export class BoundedLoginAttemptLimiter implements LoginAttemptLimiter {
     const nowMs = now.getTime();
     let latestBlock = 0;
     for (const key of new Set(bucketKeys)) {
-      const bucket = this.getOrCreate(key, nowMs);
+      const bucket = this.getOrCreate(key);
       this.prune(bucket, nowMs);
       bucket.failures.push(nowMs);
-      bucket.touchedAt = nowMs;
       if (bucket.failures.length >= this.options.maximumFailures) {
         bucket.blockedUntil = nowMs + this.options.blockMs;
       }
+      this.markMostRecentlyUsed(key, bucket);
       latestBlock = Math.max(latestBlock, bucket.blockedUntil ?? 0);
     }
     this.enforceBound();
@@ -687,16 +712,20 @@ export class BoundedLoginAttemptLimiter implements LoginAttemptLimiter {
     for (const key of new Set(bucketKeys)) this.buckets.delete(key);
   }
 
-  private getOrCreate(key: string, nowMs: number): RateBucket {
+  private getOrCreate(key: string): RateBucket {
     const existing = this.buckets.get(key);
     if (existing) return existing;
     const created: RateBucket = {
       failures: [],
       blockedUntil: null,
-      touchedAt: nowMs,
     };
     this.buckets.set(key, created);
     return created;
+  }
+
+  private markMostRecentlyUsed(key: string, bucket: RateBucket): void {
+    this.buckets.delete(key);
+    this.buckets.set(key, bucket);
   }
 
   private prune(bucket: RateBucket, nowMs: number): void {
@@ -710,16 +739,9 @@ export class BoundedLoginAttemptLimiter implements LoginAttemptLimiter {
 
   private enforceBound(): void {
     while (this.buckets.size > this.options.maximumBuckets) {
-      let oldestKey: string | undefined;
-      let oldestTouchedAt = Number.POSITIVE_INFINITY;
-      for (const [key, bucket] of this.buckets) {
-        if (bucket.touchedAt < oldestTouchedAt) {
-          oldestKey = key;
-          oldestTouchedAt = bucket.touchedAt;
-        }
-      }
-      if (oldestKey === undefined) return;
-      this.buckets.delete(oldestKey);
+      const oldest = this.buckets.keys().next();
+      if (oldest.done) return;
+      this.buckets.delete(oldest.value);
     }
   }
 }

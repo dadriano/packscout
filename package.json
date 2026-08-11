@@ -74,8 +74,5 @@
   "devDependencies": {
     "concurrently": "^9.1.2",
     "tsx": "^4.19.2"
-  },
-  "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "4.62.3"
   }
 }

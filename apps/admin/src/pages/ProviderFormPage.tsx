@@ -85,6 +85,12 @@ export function ProviderFormPage() {
         actions={<Link className="admin-button admin-button--secondary" to={providerId ? `/providers/${providerId}` : "/providers"}>Cancel</Link>}
       />
       {loading ? <div className="provider-loading" aria-busy="true">Loading masked configuration…</div> : null}
+      {!loading && editing && !provider && error ? (
+        <div className="ops-error" role="alert">
+          <p>{error}</p>
+          <Link className="admin-button admin-button--secondary" to="/providers">Return to providers</Link>
+        </div>
+      ) : null}
       {!loading && (!editing || provider) ? <ProviderForm provider={provider ?? undefined} pending={pending} error={error} onDirtyChange={setDirty} onSubmit={save} /> : null}
       {conflict ? <button type="button" className="admin-button admin-button--secondary provider-conflict-reload" onClick={() => window.location.reload()}>Reload current configuration</button> : null}
     </div>

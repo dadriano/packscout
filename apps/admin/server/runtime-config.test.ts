@@ -6,6 +6,7 @@ import {
   readPort,
   readPositiveDuration,
   readRequiredSecret,
+  readTrustedProxies,
 } from "./runtime-config.ts";
 
 test("admin ports use a validated fallback", () => {
@@ -43,5 +44,34 @@ test("provider credential keys require canonical base64 with exactly 32 bytes", 
   assert.deepEqual(readBase64Key(encoded, "PROVIDER_KEY"), Buffer.alloc(32, 7));
   for (const invalid of [undefined, "not base64", Buffer.alloc(31).toString("base64")]) {
     assert.throws(() => readBase64Key(invalid, "PROVIDER_KEY"), /PROVIDER_KEY/);
+  }
+});
+
+test("trusted proxies accept only explicit IP addresses and bounded CIDR ranges", () => {
+  assert.deepEqual(
+    readTrustedProxies(undefined, "PACKSCOUT_ADMIN_TRUSTED_PROXIES"),
+    [],
+  );
+  assert.deepEqual(
+    readTrustedProxies(
+      "10.0.0.12, 10.0.0.0/24, 2001:db8::1/128, 10.0.0.12",
+      "PACKSCOUT_ADMIN_TRUSTED_PROXIES",
+    ),
+    ["10.0.0.12", "10.0.0.0/24", "2001:db8::1/128"],
+  );
+
+  for (const invalid of [
+    "*",
+    "true",
+    "loopback",
+    "0.0.0.0/0",
+    "::/0",
+    "10.0.0.0/33",
+    "2001:db8::/129",
+  ]) {
+    assert.throws(
+      () => readTrustedProxies(invalid, "PACKSCOUT_ADMIN_TRUSTED_PROXIES"),
+      /PACKSCOUT_ADMIN_TRUSTED_PROXIES/,
+    );
   }
 });

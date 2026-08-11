@@ -209,6 +209,29 @@ test("public IPv4 and IPv6 DNS answers can reach the allowlisted host", async ()
   }
 });
 
+test("the validated DNS result is passed to the request client as a connection pin", async () => {
+  let resolutionCount = 0;
+  const httpClient: ProviderHttpClient = async (input, _init, destination) => {
+    assert.equal(new URL(String(input)).hostname, providerHost);
+    assert.deepEqual(destination, {
+      hostname: providerHost,
+      addresses: [publicAddress],
+    });
+    return jsonResponse(validPage());
+  };
+  const adapter = new HttpCursorAdapter({
+    resolveHost: async () => {
+      resolutionCount += 1;
+      return [publicAddress];
+    },
+    httpClient,
+  });
+
+  await adapter.fetchPage(pageInput());
+
+  assert.equal(resolutionCount, 1);
+});
+
 test("a private IP endpoint is rejected directly even if a resolver claims it is public", async () => {
   let resolved = false;
   let requested = false;
@@ -266,8 +289,20 @@ test("DNS errors, empty answers, invalid answers, and mixed public/private answe
 test("HTTP and network failures are normalized without body or secret leakage", async () => {
   const secret = "fixture-do-not-leak";
   const rawBody = "fixture-raw-provider-body";
+  let responseBodyCancelled = false;
   const httpAdapter = createAdapter({
-    httpClient: async () => new Response(rawBody, { status: 503 }),
+    httpClient: async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(rawBody));
+          },
+          cancel() {
+            responseBodyCancelled = true;
+          },
+        }),
+        { status: 503 },
+      ),
   });
   const httpError = await captureRequestError(
     httpAdapter.fetchPage(
@@ -279,6 +314,7 @@ test("HTTP and network failures are normalized without body or secret leakage", 
     retryable: true,
     httpStatus: 503,
   });
+  assert.equal(responseBodyCancelled, true);
   const serialized = `${httpError.message} ${httpError.stack} ${JSON.stringify(httpError.failure)}`;
   assert.doesNotMatch(serialized, new RegExp(secret));
   assert.doesNotMatch(serialized, new RegExp(rawBody));
@@ -305,13 +341,31 @@ test("HTTP and network failures are normalized without body or secret leakage", 
 });
 
 test("response size, JSON, and page-structure failures use bounded safe errors", async () => {
+  let declaredOversizeBodyCancelled = false;
   const oversizedAdapter = createAdapter({
-    httpClient: async () => new Response("x".repeat(64)),
+    httpClient: async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            declaredOversizeBodyCancelled = true;
+          },
+        }),
+        { headers: { "content-length": "64" } },
+      ),
   });
   const oversized = await captureRequestError(
     oversizedAdapter.fetchPage(pageInput({ maxResponseBytes: 16 })),
   );
   assert.equal(oversized.failure.code, "response_too_large");
+  assert.equal(declaredOversizeBodyCancelled, true);
+
+  const streamedOversizedAdapter = createAdapter({
+    httpClient: async () => new Response("x".repeat(64)),
+  });
+  const streamedOversized = await captureRequestError(
+    streamedOversizedAdapter.fetchPage(pageInput({ maxResponseBytes: 16 })),
+  );
+  assert.equal(streamedOversized.failure.code, "response_too_large");
 
   const invalidJsonAdapter = createAdapter({
     httpClient: async () => new Response("{not-json}"),

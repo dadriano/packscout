@@ -203,6 +203,64 @@ test("a queued manual run is picked up without waiting for a provider schedule",
   ]);
 });
 
+test("queued ownership loss is recorded as contention and polling continues", async () => {
+  const events: ProviderWorkerLogEvent[] = [];
+  let schedulerCalls = 0;
+  let queueCalls = 0;
+  const runtime = new ProviderWorkerRuntime({
+    scheduler: {
+      async runOnce() {
+        schedulerCalls += 1;
+        return { kind: "idle" as const };
+      },
+    },
+    imports: {
+      async executeImport(): Promise<never> {
+        throw new Error("not reached");
+      },
+      async executeNextImport() {
+        queueCalls += 1;
+        if (queueCalls === 1) {
+          throw {
+            code: "RUN_OWNERSHIP_LOST",
+            message: "postgresql://worker:super-secret-token@db.test/data",
+          };
+        }
+        return { kind: "idle" as const };
+      },
+    },
+    retention: retentionRunner(),
+    logger: capturingLogger(events),
+    workerId: "worker:1",
+  });
+
+  const result = await runtime.runCycle();
+
+  assert.deepEqual(result, {
+    claims: 1,
+    executions: 0,
+    contentions: 1,
+    failures: 0,
+    reason: "idle",
+  });
+  assert.equal(schedulerCalls, 2);
+  assert.equal(queueCalls, 2);
+  assert.deepEqual(
+    events.find(({ event }) => event === "provider_import_contended"),
+    {
+      level: "info",
+      event: "provider_import_contended",
+      workerId: "worker:1",
+      failureCode: "RUN_OWNERSHIP_LOST",
+    },
+  );
+  assert.equal(
+    events.some(({ event }) => event === "provider_import_queue_failed"),
+    false,
+  );
+  assert.equal(JSON.stringify(events).includes("super-secret-token"), false);
+});
+
 test("a coalesced active run is attempted without treating lease contention as failure", async () => {
   const events: ProviderWorkerLogEvent[] = [];
   let schedulerCalls = 0;

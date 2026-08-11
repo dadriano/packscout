@@ -158,6 +158,33 @@ test("rounding is aggregate half-up for money and half-up to two percent decimal
   assert.equal(result.evPercent, 33.67);
 });
 
+test("large midpoint evidence is projected from the exact rational value", () => {
+  const lowerValueMinor = Number.MAX_SAFE_INTEGER - 2;
+  const upperValueMinor = Number.MAX_SAFE_INTEGER;
+  const expectedMidpointValueMinor = Number.MAX_SAFE_INTEGER - 1;
+  assert.equal(Number.isSafeInteger(lowerValueMinor + upperValueMinor), false);
+
+  const result = calculatePackScoutEstimatedEv(
+    validInput({
+      packPrice: {
+        valueMinor: expectedMidpointValueMinor,
+        currency: "USD",
+        sourceRevisionId: "price-revision-1",
+      },
+      buckets: [bucket({ lowerValueMinor, upperValueMinor })],
+    }),
+  );
+
+  assert.equal(result.status, "estimated");
+  if (result.status !== "estimated") assert.fail("Expected an estimate.");
+  assert.equal(result.grossValueMinor, expectedMidpointValueMinor);
+  assert.equal(result.evPercent, 100);
+  assert.equal(
+    result.evidence.includedBuckets[0]?.midpointValueMinor,
+    expectedMidpointValueMinor,
+  );
+});
+
 test("coverage tolerance is explicit and accepted distributions are not renormalized", () => {
   const withinTolerance = calculatePackScoutEstimatedEv(
     validInput({

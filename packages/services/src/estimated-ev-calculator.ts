@@ -245,6 +245,12 @@ function multiplyRationalByInteger(value: Rational, factor: bigint): Rational {
   return rational(value.numerator * factor, value.denominator);
 }
 
+function rationalToNumber(value: Rational): number {
+  const whole = value.numerator / value.denominator;
+  const remainder = value.numerator % value.denominator;
+  return Number(whole) + Number(remainder) / Number(value.denominator);
+}
+
 function roundRationalHalfUp(value: Rational): bigint {
   const quotient = value.numerator / value.denominator;
   const remainder = value.numerator % value.denominator;
@@ -448,7 +454,7 @@ export function calculatePackScoutEstimatedEv(
       includedBuckets.push({
         probability,
         probabilityFactor,
-        midpointValueMinor: lower / 2 + upper / 2,
+        midpointValueMinor: rationalToNumber(midpointValueFactor),
         midpointValueFactor,
         sourceRevisionId: revisionId,
       });

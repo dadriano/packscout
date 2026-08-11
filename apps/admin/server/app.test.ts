@@ -53,3 +53,11 @@ test("malformed JSON is rejected without leaking implementation details", async 
     });
   });
 });
+
+test("admin app trusts forwarded addresses only from configured proxy ranges", () => {
+  assert.equal(createAdminApp().get("trust proxy"), false);
+  assert.deepEqual(
+    createAdminApp({ trustedProxies: ["10.0.0.0/24"] }).get("trust proxy"),
+    ["10.0.0.0/24"],
+  );
+});

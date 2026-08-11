@@ -405,6 +405,7 @@ export class ProviderWorkerRuntime {
   private async processQueue(counts: {
     claims: number;
     executions: number;
+    contentions: number;
     failures: number;
   }): Promise<"failed" | "idle" | "processed"> {
     try {
@@ -416,7 +417,18 @@ export class ProviderWorkerRuntime {
       counts.executions += 1;
       this.logFinishedRun(result.run);
       return "processed";
-    } catch {
+    } catch (error) {
+      const code = contentionCode(error);
+      if (code !== null) {
+        counts.claims += 1;
+        counts.contentions += 1;
+        this.log({
+          level: "info",
+          event: "provider_import_contended",
+          failureCode: code,
+        });
+        return "processed";
+      }
       counts.failures += 1;
       this.log({
         level: "error",

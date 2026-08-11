@@ -48,7 +48,7 @@ export function createAuthRouter({
       const result = await service.login({
         normalizedEmail: parsed.data.email,
         password: parsed.data.password,
-        networkIdentifier: request.socket.remoteAddress ?? "unknown",
+        networkIdentifier: request.ip ?? request.socket.remoteAddress ?? "unknown",
         previousSessionToken: readCookie(
           request.get("cookie"),
           cookiePolicy.name,

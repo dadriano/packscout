@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql, type Logger } from "drizzle-orm";
 import type { PgliteQueryResultHKT } from "drizzle-orm/pglite";
 import {
   DrizzleAuthAuditSink,
@@ -24,6 +24,7 @@ import {
   providerCursorCheckpoints,
   providerSources,
   quarantineRecords,
+  sourceRecordObservations,
   sourceRecordOutcomes,
   sourceRecordProjectionRevisions,
   sourceRecords,
@@ -49,8 +50,20 @@ const committedAt = new Date("2026-01-01T00:00:00.000Z");
 const collectedAt = new Date("2025-12-31T23:59:00.000Z");
 const sourceTime = new Date("2025-12-31T23:58:00.000Z");
 
-async function createPipelineHarness() {
-  const harness = await createMigratedTestDatabase();
+class QueryCounter implements Logger {
+  queryCount = 0;
+
+  logQuery(): void {
+    this.queryCount += 1;
+  }
+
+  reset(): void {
+    this.queryCount = 0;
+  }
+}
+
+async function createPipelineHarness(options: { logger?: Logger } = {}) {
+  const harness = await createMigratedTestDatabase(options);
   const setup = new PipelineSetupRepository(harness.database);
   await setup.createOrganization({
     id: ids.organization,
@@ -311,6 +324,166 @@ test("unchanged replay is a no-op while changed content advances one current rev
       .select({ count: sql<number>`count(*)::integer` })
       .from(sourceRecordProjectionRevisions);
     assert.ok((projectionLinks?.count ?? 0) >= 4);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("large page commits batch writes while preserving evidence, projections, and record counts", async () => {
+  const queryCounter = new QueryCounter();
+  const harness = await createPipelineHarness({ logger: queryCounter });
+  try {
+    const recordCount = 550;
+    const records: CommitPageInput["records"] = Array.from(
+      { length: recordCount },
+      (_, index) => ({
+        recordKind: "catalog" as const,
+        externalId: `large-source-${index}`,
+        sourceTime,
+        collectedAt,
+        payload: { id: `large-source-${index}`, value: index },
+        projections: [
+          {
+            platformKey: "beezie",
+            recordKind: "catalog_asset" as const,
+            externalId: `large-asset-${index}`,
+            content: { name: `Asset ${index}` },
+            sourceUpdatedAt: sourceTime,
+            sourceCollectedAt: collectedAt,
+            relationships: [
+              {
+                relationshipKind: "belongs_to_platform",
+                targetPlatformKey: "beezie",
+                targetRecordKind: "platform" as const,
+                targetExternalId: "beezie-platform",
+              },
+            ],
+          },
+        ],
+        ...(index === recordCount - 1
+          ? {
+              quarantine: {
+                reasonCode: "INVALID_CATALOG_RECORD",
+                fieldPath: `catalog[${index}]`,
+                sanitizedSummary: "The catalog record failed validation.",
+              },
+            }
+          : {}),
+      }),
+    );
+    const page = initialPage({
+      payload: { kind: "large-page", recordCount },
+      records,
+      quarantines: [
+        {
+          recordKind: "pull",
+          recordIndex: recordCount,
+          externalId: null,
+          reasonCode: "INVALID_PULL_RECORD",
+          sanitizedSummary: "The pull record failed envelope validation.",
+          payload: { invalid: "pull" },
+        },
+        {
+          recordKind: "sale",
+          recordIndex: recordCount + 1,
+          externalId: null,
+          reasonCode: "INVALID_SALE_RECORD",
+          sanitizedSummary: "The sale record failed envelope validation.",
+          payload: { invalid: "sale" },
+        },
+      ],
+    });
+
+    queryCounter.reset();
+    const committed = await harness.ingestion.commitPage(page);
+    assert.equal(committed.newCanonicalRevisions, recordCount - 1);
+    assert.deepEqual(committed.counters, {
+      accepted: recordCount - 1,
+      duplicate: 0,
+      quarantined: 3,
+      pages: 1,
+      records: recordCount + 2,
+      requestAttempts: 0,
+      transientRetries: 0,
+    });
+    assert.ok(
+      queryCounter.queryCount < 80,
+      `large page commit issued ${queryCounter.queryCount} SQL statements`,
+    );
+
+    const [storedPage] = await harness.database
+      .select({ recordCounts: importPages.recordCountsJson })
+      .from(importPages)
+      .where(eq(importPages.id, committed.pageId));
+    assert.deepEqual(storedPage?.recordCounts, {
+      catalog: recordCount,
+      pulls: 1,
+      sales: 1,
+    });
+    const [sourceCount] = await harness.database
+      .select({ count: sql<number>`count(*)::integer` })
+      .from(sourceRecords);
+    const [observationCount] = await harness.database
+      .select({ count: sql<number>`count(*)::integer` })
+      .from(sourceRecordObservations);
+    const [outcomeCount] = await harness.database
+      .select({
+        count: sql<number>`count(*)::integer`,
+        linked: sql<number>`count(*) filter (where ${sourceRecordOutcomes.sourceRecordId} is not null)::integer`,
+        standalone: sql<number>`count(*) filter (where ${sourceRecordOutcomes.sourceRecordId} is null)::integer`,
+      })
+      .from(sourceRecordOutcomes);
+    const [quarantineCount] = await harness.database
+      .select({ count: sql<number>`count(*)::integer` })
+      .from(quarantineRecords);
+    const [revisionCount] = await harness.database
+      .select({ count: sql<number>`count(*)::integer` })
+      .from(canonicalRevisions);
+    const [projectionLinkCount] = await harness.database
+      .select({ count: sql<number>`count(*)::integer` })
+      .from(sourceRecordProjectionRevisions);
+    const [relationshipCount] = await harness.database
+      .select({ count: sql<number>`count(*)::integer` })
+      .from(canonicalRelationships);
+    assert.equal(sourceCount?.count, recordCount);
+    assert.equal(observationCount?.count, recordCount);
+    assert.equal(outcomeCount?.count, recordCount + 2);
+    assert.equal(outcomeCount?.linked, recordCount);
+    assert.equal(outcomeCount?.standalone, 2);
+    assert.equal(quarantineCount?.count, 3);
+    assert.equal(revisionCount?.count, recordCount - 1);
+    assert.equal(projectionLinkCount?.count, recordCount - 1);
+    assert.equal(relationshipCount?.count, recordCount - 1);
+
+    await addRun(harness.setup, ids.secondRun);
+    const replay = await harness.ingestion.commitPage({
+      ...page,
+      runId: ids.secondRun,
+      committedAt: new Date(committedAt.getTime() + 1_000),
+    });
+    assert.equal(replay.newCanonicalRevisions, 0);
+    assert.equal(replay.duplicateSourceRecords, recordCount - 1);
+    assert.deepEqual(replay.counters, {
+      accepted: 0,
+      duplicate: recordCount - 1,
+      quarantined: 3,
+      pages: 1,
+      records: recordCount + 2,
+      requestAttempts: 0,
+      transientRetries: 0,
+    });
+    const [sourcesAfterReplay] = await harness.database
+      .select({ count: sql<number>`count(*)::integer` })
+      .from(sourceRecords);
+    const [revisionsAfterReplay] = await harness.database
+      .select({ count: sql<number>`count(*)::integer` })
+      .from(canonicalRevisions);
+    const [observationsAfterReplay] = await harness.database
+      .select({ count: sql<number>`count(*)::integer` })
+      .from(sourceRecordObservations);
+    assert.equal(sourcesAfterReplay?.count, recordCount);
+    assert.equal(revisionsAfterReplay?.count, recordCount - 1);
+    assert.equal(observationsAfterReplay?.count, recordCount * 2);
   } finally {
     await harness.close();
   }

@@ -187,13 +187,6 @@ export class DrizzleAuthRepository<TQueryResult extends PgQueryResultHKT> {
       .where(and(eq(operatorSessions.id, input.sessionId), isNull(operatorSessions.revokedAt)));
   }
 
-  async replaceSessionCsrf(input: { sessionId: string; csrfHash: string }): Promise<void> {
-    await this.database
-      .update(operatorSessions)
-      .set({ csrfHash: input.csrfHash })
-      .where(and(eq(operatorSessions.id, input.sessionId), isNull(operatorSessions.revokedAt)));
-  }
-
   async revokeSessionByTokenHash(tokenHash: string, revokedAt: Date): Promise<void> {
     await this.database
       .update(operatorSessions)

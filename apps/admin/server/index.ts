@@ -22,6 +22,7 @@ import {
   readPort,
   readPositiveDuration,
   readRequiredSecret,
+  readTrustedProxies,
 } from "./runtime-config.ts";
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -75,6 +76,10 @@ const allowedOrigins = readAllowedOrigins(
     : [],
   "PACKSCOUT_ADMIN_ALLOWED_ORIGINS",
 );
+const trustedProxies = readTrustedProxies(
+  process.env.PACKSCOUT_ADMIN_TRUSTED_PROXIES,
+  "PACKSCOUT_ADMIN_TRUSTED_PROXIES",
+);
 const pool = new Pool({ connectionString: databaseUrl, max: 10 });
 const database = createNodePostgresDatabase(pool);
 const providerRepository = new DrizzleProviderConfigurationRepository(database);
@@ -97,6 +102,7 @@ const auth = await createAdminAuthRuntime({
   allowedOrigins,
 });
 const app = createAdminApp({
+  trustedProxies,
   auth,
   providers: createProviderAdminRuntime({
     repository: providerRepository,

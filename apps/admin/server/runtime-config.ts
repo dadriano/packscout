@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 const MIN_PORT = 1;
 const MAX_PORT = 65_535;
 
@@ -80,4 +82,38 @@ export function readAllowedOrigins(
   } catch {
     throw new Error(`${variableName} must contain valid comma-separated origins.`);
   }
+}
+
+export function readTrustedProxies(
+  value: string | undefined,
+  variableName: string,
+): string[] {
+  if (!value?.trim()) return [];
+
+  const candidates = value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  const invalidMessage =
+    `${variableName} must contain comma-separated IP addresses or CIDR ranges; ` +
+    "trust-all ranges are not allowed.";
+  const normalized = candidates.map((candidate) => {
+    const parts = candidate.split("/");
+    if (parts.length > 2) throw new Error(invalidMessage);
+
+    const address = parts[0] ?? "";
+    const family = isIP(address);
+    if (family === 0) throw new Error(invalidMessage);
+
+    const prefixValue = parts[1];
+    if (prefixValue === undefined) return address;
+    if (!/^\d+$/.test(prefixValue)) throw new Error(invalidMessage);
+
+    const prefix = Number(prefixValue);
+    const maximumPrefix = family === 4 ? 32 : 128;
+    if (prefix < 1 || prefix > maximumPrefix) {
+      throw new Error(invalidMessage);
+    }
+    return `${address}/${prefix}`;
+  });
+
+  if (normalized.length === 0) throw new Error(invalidMessage);
+  return [...new Set(normalized)];
 }
