@@ -7,7 +7,7 @@ export default typescriptEslint.config(
   eslint.configs.recommended,
   ...typescriptEslint.configs.recommended,
   {
-    files: ["src/**/*.ts", "drizzle.config.ts"],
+    files: ["src/**/*.ts", "prisma/**/*.ts", "drizzle.config.ts"],
     languageOptions: { globals: globals.node },
   },
 );

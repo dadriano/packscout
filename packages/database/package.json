@@ -11,14 +11,19 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
+    "lint": "eslint src prisma",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "prisma:validate": "PACKSCOUT_DATABASE_URL=postgresql://packscout:packscout@127.0.0.1:5432/packscout_validation prisma validate --schema prisma/schema.prisma",
+    "prisma:generate": "PACKSCOUT_DATABASE_URL=postgresql://packscout:packscout@127.0.0.1:5432/packscout_generation prisma generate --schema prisma/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "test:prisma-schema": "node --import tsx --test 'prisma/**/*.test.ts'",
     "migration:generate:local": "drizzle-kit generate",
     "migration:check:local": "drizzle-kit check"
   },
   "dependencies": {
     "@packscout/contracts": "0.0.0",
+    "@prisma/client": "^6.19.3",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.16.3"
   },
@@ -30,6 +35,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.17.0",
     "globals": "^15.14.0",
+    "prisma": "^6.19.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.19.1"
