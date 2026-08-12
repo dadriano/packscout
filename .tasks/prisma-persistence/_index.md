@@ -1,6 +1,6 @@
 # Feature: Prisma Persistence
 
-**Progress:** 2/8 tasks complete
+**Progress:** 3/8 tasks complete
 
 ## Context
 
@@ -61,7 +61,7 @@ The completed result starts from an empty PostgreSQL database, applies one clean
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 003 | [Preserve identity and provider controls](003-preserve-identity-and-provider-controls.md) | large | todo | 002 |
+| 003 | [Preserve identity and provider controls](003-preserve-identity-and-provider-controls.md) | large | done | 002 |
 | 004 | [Preserve import coordination and worker queues](004-preserve-import-coordination-and-worker-queues.md) | large | todo | 002 |
 | 005 | [Preserve ingestion and canonical history](005-preserve-ingestion-and-canonical-history.md) | large | todo | 002 |
 | 006 | [Preserve quarantine, retention, and operations](006-preserve-quarantine-retention-and-operations.md) | large | todo | 003, 004, 005 |

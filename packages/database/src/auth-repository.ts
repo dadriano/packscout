@@ -5,17 +5,12 @@ import type {
   OperatorState,
   OperatorSummary,
 } from "@packscout/contracts";
-import { and, asc, desc, eq, gt, ilike, isNull, or, sql } from "drizzle-orm";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import type { PackscoutDatabase } from "./database.ts";
-import {
-  authRateLimits,
-  auditEvents,
-  operatorMemberships,
-  operators,
-  operatorSessions,
-  organizations,
-} from "./schema/index.ts";
+import { Prisma } from "@prisma/client";
+import { PACKSCOUT_TRANSACTION_OPTIONS } from "./database.ts";
+import type {
+  PackscoutPrismaClient,
+  PackscoutQueryClient,
+} from "./database.ts";
 import { sanitizeAuthAuditMetadata } from "./security.ts";
 
 export interface CreateSessionRecord {
@@ -67,6 +62,13 @@ interface OperatorRow {
   updatedAt: Date;
 }
 
+interface LockedRateLimitRow {
+  bucket_key: string;
+  window_started_at: Date;
+  attempt_count: number;
+  blocked_until: Date | null;
+}
+
 function toOperatorSummary(row: OperatorRow, lastAccessAt: Date | null): OperatorSummary {
   return {
     id: row.id,
@@ -80,100 +82,133 @@ function toOperatorSummary(row: OperatorRow, lastAccessAt: Date | null): Operato
   };
 }
 
-export class DrizzleAuthRepository<TQueryResult extends PgQueryResultHKT> {
-  constructor(private readonly database: PackscoutDatabase<TQueryResult>) {}
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
+  );
+}
+
+export class DrizzleAuthRepository {
+  constructor(private readonly database: PackscoutPrismaClient) {}
 
   async findOperatorForLogin(normalizedEmail: string): Promise<LoginOperatorRecord | null> {
-    const [record] = await this.database
-      .select({
-        id: operators.id,
-        organizationId: organizations.id,
-        organizationName: organizations.name,
-        emailNormalized: operators.emailNormalized,
-        displayName: operators.displayName,
-        passwordHash: operators.passwordHash,
-        state: operators.state,
-        role: operatorMemberships.role,
-      })
-      .from(operators)
-      .innerJoin(operatorMemberships, eq(operatorMemberships.operatorId, operators.id))
-      .innerJoin(organizations, eq(organizations.id, operatorMemberships.organizationId))
-      .where(eq(operators.emailNormalized, normalizedEmail))
-      .orderBy(asc(organizations.createdAt), asc(organizations.id))
-      .limit(1);
-    return record ?? null;
+    const membership = await this.database.operator_memberships.findFirst({
+      where: { operators: { email_normalized: normalizedEmail } },
+      orderBy: [
+        { organizations: { created_at: "asc" } },
+        { organizations: { id: "asc" } },
+      ],
+      select: {
+        organization_id: true,
+        role: true,
+        organizations: { select: { name: true } },
+        operators: {
+          select: {
+            id: true,
+            email_normalized: true,
+            display_name: true,
+            password_hash: true,
+            state: true,
+          },
+        },
+      },
+    });
+    if (!membership) return null;
+    return {
+      id: membership.operators.id,
+      organizationId: membership.organization_id,
+      organizationName: membership.organizations.name,
+      emailNormalized: membership.operators.email_normalized,
+      displayName: membership.operators.display_name,
+      passwordHash: membership.operators.password_hash,
+      state: membership.operators.state,
+      role: membership.role,
+    };
   }
 
   async rotateSession(input: {
     previousTokenHash: string | null;
     session: CreateSessionRecord;
   }): Promise<void> {
-    await this.database.transaction(async (transaction) => {
+    await this.database.$transaction(async (transaction) => {
       if (input.previousTokenHash) {
-        await transaction
-          .update(operatorSessions)
-          .set({ revokedAt: input.session.createdAt })
-          .where(
-            and(
-              eq(operatorSessions.tokenHash, input.previousTokenHash),
-              isNull(operatorSessions.revokedAt),
-            ),
-          );
+        await transaction.operator_sessions.updateMany({
+          where: {
+            token_hash: input.previousTokenHash,
+            revoked_at: null,
+          },
+          data: { revoked_at: input.session.createdAt },
+        });
       }
-      const [membership] = await transaction
-        .select({ organizationId: operatorMemberships.organizationId })
-        .from(operatorMemberships)
-        .where(eq(operatorMemberships.operatorId, input.session.operatorId))
-        .orderBy(asc(operatorMemberships.createdAt), asc(operatorMemberships.id))
-        .limit(1);
-      if (!membership) throw new Error("Cannot create a session without an organization membership.");
-      await transaction.insert(operatorSessions).values({
-        ...input.session,
-        organizationId: membership.organizationId,
+      const membership = await transaction.operator_memberships.findFirst({
+        where: { operator_id: input.session.operatorId },
+        orderBy: [{ created_at: "asc" }, { id: "asc" }],
+        select: { organization_id: true },
       });
-    });
+      if (!membership) {
+        throw new Error("Cannot create a session without an organization membership.");
+      }
+      await transaction.operator_sessions.create({
+        data: {
+          id: input.session.id,
+          organization_id: membership.organization_id,
+          operator_id: input.session.operatorId,
+          token_hash: input.session.tokenHash,
+          csrf_hash: input.session.csrfHash,
+          created_at: input.session.createdAt,
+          last_seen_at: input.session.lastSeenAt,
+          idle_expires_at: input.session.idleExpiresAt,
+          absolute_expires_at: input.session.absoluteExpiresAt,
+        },
+      });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async findAuthoritativeSession(
     tokenHash: string,
     now: Date,
   ): Promise<AuthoritativeSessionRecord | null> {
-    const [record] = await this.database
-      .select({
-        sessionId: operatorSessions.id,
-        operatorId: operators.id,
-        organizationId: organizations.id,
-        organizationName: organizations.name,
-        id: operators.id,
-        emailNormalized: operators.emailNormalized,
-        displayName: operators.displayName,
-        passwordHash: operators.passwordHash,
-        state: operators.state,
-        role: operatorMemberships.role,
-        csrfHash: operatorSessions.csrfHash,
-        idleExpiresAt: operatorSessions.idleExpiresAt,
-        absoluteExpiresAt: operatorSessions.absoluteExpiresAt,
-      })
-      .from(operatorSessions)
-      .innerJoin(operators, eq(operators.id, operatorSessions.operatorId))
-      .innerJoin(
-        operatorMemberships,
-        and(
-          eq(operatorMemberships.operatorId, operators.id),
-          eq(operatorMemberships.organizationId, operatorSessions.organizationId),
-        ),
-      )
-      .innerJoin(organizations, eq(organizations.id, operatorSessions.organizationId))
-      .where(
-        and(
-          eq(operatorSessions.tokenHash, tokenHash),
-          isNull(operatorSessions.revokedAt),
-          gt(operatorSessions.idleExpiresAt, now),
-          gt(operatorSessions.absoluteExpiresAt, now),
-        ),
-      )
-      .limit(1);
-    return record ?? null;
+    const session = await this.database.operator_sessions.findFirst({
+      where: {
+        token_hash: tokenHash,
+        revoked_at: null,
+        idle_expires_at: { gt: now },
+        absolute_expires_at: { gt: now },
+      },
+      select: {
+        id: true,
+        csrf_hash: true,
+        idle_expires_at: true,
+        absolute_expires_at: true,
+        organizations: { select: { id: true, name: true } },
+        operators: {
+          select: {
+            id: true,
+            email_normalized: true,
+            display_name: true,
+            password_hash: true,
+            state: true,
+          },
+        },
+        operator_memberships: { select: { role: true } },
+      },
+    });
+    if (!session) return null;
+    return {
+      sessionId: session.id,
+      operatorId: session.operators.id,
+      id: session.operators.id,
+      organizationId: session.organizations.id,
+      organizationName: session.organizations.name,
+      emailNormalized: session.operators.email_normalized,
+      displayName: session.operators.display_name,
+      passwordHash: session.operators.password_hash,
+      state: session.operators.state,
+      role: session.operator_memberships.role,
+      csrfHash: session.csrf_hash,
+      idleExpiresAt: session.idle_expires_at,
+      absoluteExpiresAt: session.absolute_expires_at,
+    };
   }
 
   async refreshSession(input: {
@@ -181,59 +216,89 @@ export class DrizzleAuthRepository<TQueryResult extends PgQueryResultHKT> {
     lastSeenAt: Date;
     idleExpiresAt: Date;
   }): Promise<void> {
-    await this.database
-      .update(operatorSessions)
-      .set({ lastSeenAt: input.lastSeenAt, idleExpiresAt: input.idleExpiresAt })
-      .where(and(eq(operatorSessions.id, input.sessionId), isNull(operatorSessions.revokedAt)));
+    await this.database.operator_sessions.updateMany({
+      where: { id: input.sessionId, revoked_at: null },
+      data: {
+        last_seen_at: input.lastSeenAt,
+        idle_expires_at: input.idleExpiresAt,
+      },
+    });
   }
 
   async revokeSessionByTokenHash(tokenHash: string, revokedAt: Date): Promise<void> {
-    await this.database
-      .update(operatorSessions)
-      .set({ revokedAt })
-      .where(and(eq(operatorSessions.tokenHash, tokenHash), isNull(operatorSessions.revokedAt)));
+    await this.database.operator_sessions.updateMany({
+      where: { token_hash: tokenHash, revoked_at: null },
+      data: { revoked_at: revokedAt },
+    });
   }
 
   async revokeAllSessionsForOperator(operatorId: string, revokedAt: Date): Promise<void> {
-    await this.database
-      .update(operatorSessions)
-      .set({ revokedAt })
-      .where(and(eq(operatorSessions.operatorId, operatorId), isNull(operatorSessions.revokedAt)));
+    await this.database.operator_sessions.updateMany({
+      where: { operator_id: operatorId, revoked_at: null },
+      data: { revoked_at: revokedAt },
+    });
   }
 
   async listOperators(
     organizationId: string,
     query: ListOperatorsQuery,
   ): Promise<OperatorListResponse> {
-    const filters = [eq(operatorMemberships.organizationId, organizationId)];
-    if (query.cursor) filters.push(gt(operators.id, query.cursor));
-    if (query.role) filters.push(eq(operatorMemberships.role, query.role));
-    if (query.state) filters.push(eq(operators.state, query.state));
-    if (query.search) {
-      const search = `%${query.search.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-      filters.push(or(ilike(operators.emailNormalized, search), ilike(operators.displayName, search))!);
-    }
-
-    const records = await this.database
-      .select({
-        id: operators.id,
-        email: operators.emailNormalized,
-        displayName: operators.displayName,
-        state: operators.state,
-        role: operatorMemberships.role,
-        createdAt: operators.createdAt,
-        updatedAt: operators.updatedAt,
-      })
-      .from(operatorMemberships)
-      .innerJoin(operators, eq(operators.id, operatorMemberships.operatorId))
-      .where(and(...filters))
-      .orderBy(asc(operators.id))
-      .limit(query.limit + 1);
-    const visible = records.slice(0, query.limit);
-    const lastAccess = await this.lastAccessByOperator(visible.map((record) => record.id));
+    const memberships = await this.database.operator_memberships.findMany({
+      where: {
+        organization_id: organizationId,
+        ...(query.role ? { role: query.role } : {}),
+        operators: {
+          ...(query.cursor ? { id: { gt: query.cursor } } : {}),
+          ...(query.state ? { state: query.state } : {}),
+          ...(query.search
+            ? {
+                OR: [
+                  { email_normalized: { contains: query.search, mode: "insensitive" } },
+                  { display_name: { contains: query.search, mode: "insensitive" } },
+                ],
+              }
+            : {}),
+        },
+      },
+      orderBy: { operators: { id: "asc" } },
+      take: query.limit + 1,
+      select: {
+        role: true,
+        operators: {
+          select: {
+            id: true,
+            email_normalized: true,
+            display_name: true,
+            state: true,
+            created_at: true,
+            updated_at: true,
+          },
+        },
+      },
+    });
+    const visible = memberships.slice(0, query.limit);
+    const lastAccess = await this.lastAccessByOperator(
+      visible.map(({ operators: operator }) => operator.id),
+    );
     return {
-      items: visible.map((record) => toOperatorSummary(record, lastAccess.get(record.id) ?? null)),
-      nextCursor: records.length > query.limit ? visible.at(-1)?.id ?? null : null,
+      items: visible.map(({ role, operators: operator }) =>
+        toOperatorSummary(
+          {
+            id: operator.id,
+            email: operator.email_normalized,
+            displayName: operator.display_name,
+            state: operator.state,
+            role,
+            createdAt: operator.created_at,
+            updatedAt: operator.updated_at,
+          },
+          lastAccess.get(operator.id) ?? null,
+        ),
+      ),
+      nextCursor:
+        memberships.length > query.limit
+          ? visible.at(-1)?.operators.id ?? null
+          : null,
     };
   }
 
@@ -247,44 +312,48 @@ export class DrizzleAuthRepository<TQueryResult extends PgQueryResultHKT> {
     state: "active";
     now: Date;
   }): Promise<ProvisionOperatorResult> {
-    return this.database.transaction(async (transaction) => {
-      const inserted = await transaction
-        .insert(operators)
-        .values({
-          id: input.id,
-          emailNormalized: input.emailNormalized,
-          displayName: input.displayName,
-          passwordHash: input.passwordHash,
-          state: input.state,
-          createdAt: input.now,
-          updatedAt: input.now,
-        })
-        .onConflictDoNothing({ target: operators.emailNormalized })
-        .returning({ id: operators.id });
-      if (inserted.length === 0) return { kind: "email_conflict" };
-      await transaction.insert(operatorMemberships).values({
-        organizationId: input.organizationId,
-        operatorId: input.id,
-        role: input.role,
-        createdAt: input.now,
-        updatedAt: input.now,
-      });
-      return {
-        kind: "created",
-        operator: toOperatorSummary(
-          {
+    try {
+      return await this.database.$transaction(async (transaction) => {
+        await transaction.operators.create({
+          data: {
             id: input.id,
-            email: input.emailNormalized,
-            displayName: input.displayName,
+            email_normalized: input.emailNormalized,
+            display_name: input.displayName,
+            password_hash: input.passwordHash,
             state: input.state,
-            role: input.role,
-            createdAt: input.now,
-            updatedAt: input.now,
+            created_at: input.now,
+            updated_at: input.now,
           },
-          null,
-        ),
-      };
-    });
+        });
+        await transaction.operator_memberships.create({
+          data: {
+            organization_id: input.organizationId,
+            operator_id: input.id,
+            role: input.role,
+            created_at: input.now,
+            updated_at: input.now,
+          },
+        });
+        return {
+          kind: "created" as const,
+          operator: toOperatorSummary(
+            {
+              id: input.id,
+              email: input.emailNormalized,
+              displayName: input.displayName,
+              state: input.state,
+              role: input.role,
+              createdAt: input.now,
+              updatedAt: input.now,
+            },
+            null,
+          ),
+        };
+      }, PACKSCOUT_TRANSACTION_OPTIONS);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) return { kind: "email_conflict" };
+      throw error;
+    }
   }
 
   async updateOperator(input: {
@@ -296,75 +365,90 @@ export class DrizzleAuthRepository<TQueryResult extends PgQueryResultHKT> {
     state?: OperatorState;
     now: Date;
   }): Promise<UpdateOperatorResult> {
-    return this.database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select id from ${organizations} where ${organizations.id} = ${input.organizationId} for update`,
+    return this.database.$transaction(async (transaction) => {
+      await transaction.$queryRaw(
+        Prisma.sql`select id from organizations where id = ${input.organizationId}::uuid for update`,
       );
-      const [target] = await transaction
-        .select({
-          id: operators.id,
-          email: operators.emailNormalized,
-          displayName: operators.displayName,
-          state: operators.state,
-          role: operatorMemberships.role,
-          createdAt: operators.createdAt,
-          updatedAt: operators.updatedAt,
-        })
-        .from(operatorMemberships)
-        .innerJoin(operators, eq(operators.id, operatorMemberships.operatorId))
-        .where(
-          and(
-            eq(operatorMemberships.organizationId, input.organizationId),
-            eq(operators.id, input.operatorId),
-          ),
-        )
-        .limit(1);
-      if (!target) return { kind: "not_found" };
+      const membership = await transaction.operator_memberships.findUnique({
+        where: {
+          organization_id_operator_id: {
+            organization_id: input.organizationId,
+            operator_id: input.operatorId,
+          },
+        },
+        select: {
+          role: true,
+          operators: {
+            select: {
+              id: true,
+              email_normalized: true,
+              display_name: true,
+              state: true,
+              created_at: true,
+              updated_at: true,
+            },
+          },
+        },
+      });
+      if (!membership) return { kind: "not_found" };
+      const target = {
+        id: membership.operators.id,
+        email: membership.operators.email_normalized,
+        displayName: membership.operators.display_name,
+        state: membership.operators.state,
+        role: membership.role,
+        createdAt: membership.operators.created_at,
+        updatedAt: membership.operators.updated_at,
+      };
 
       const removesActiveAdmin =
         target.role === "admin" &&
         target.state === "active" &&
         (input.role === "data_operator" || input.state === "disabled");
       if (removesActiveAdmin) {
-        const [activeAdminCount] = await transaction
-          .select({ count: sql<number>`count(*)::integer` })
-          .from(operatorMemberships)
-          .innerJoin(operators, eq(operators.id, operatorMemberships.operatorId))
-          .where(
-            and(
-              eq(operatorMemberships.organizationId, input.organizationId),
-              eq(operatorMemberships.role, "admin"),
-              eq(operators.state, "active"),
-            ),
-          );
-        if ((activeAdminCount?.count ?? 0) <= 1) return { kind: "last_active_admin" };
+        const activeAdminCount = await transaction.operator_memberships.count({
+          where: {
+            organization_id: input.organizationId,
+            role: "admin",
+            operators: { state: "active" },
+          },
+        });
+        if (activeAdminCount <= 1) return { kind: "last_active_admin" };
       }
 
-      await transaction
-        .update(operators)
-        .set({
-          ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
-          ...(input.passwordHash === undefined ? {} : { passwordHash: input.passwordHash }),
+      await transaction.operators.update({
+        where: { id: input.operatorId },
+        data: {
+          ...(input.displayName === undefined
+            ? {}
+            : { display_name: input.displayName }),
+          ...(input.passwordHash === undefined
+            ? {}
+            : { password_hash: input.passwordHash }),
           ...(input.state === undefined ? {} : { state: input.state }),
-          updatedAt: input.now,
-        })
-        .where(eq(operators.id, input.operatorId));
+          updated_at: input.now,
+        },
+      });
       if (input.role !== undefined) {
-        await transaction
-          .update(operatorMemberships)
-          .set({ role: input.role, updatedAt: input.now })
-          .where(
-            and(
-              eq(operatorMemberships.organizationId, input.organizationId),
-              eq(operatorMemberships.operatorId, input.operatorId),
-            ),
-          );
+        await transaction.operator_memberships.update({
+          where: {
+            organization_id_operator_id: {
+              organization_id: input.organizationId,
+              operator_id: input.operatorId,
+            },
+          },
+          data: { role: input.role, updated_at: input.now },
+        });
       }
-      if (input.passwordHash !== undefined || input.role !== undefined || input.state !== undefined) {
-        await transaction
-          .update(operatorSessions)
-          .set({ revokedAt: input.now })
-          .where(and(eq(operatorSessions.operatorId, input.operatorId), isNull(operatorSessions.revokedAt)));
+      if (
+        input.passwordHash !== undefined ||
+        input.role !== undefined ||
+        input.state !== undefined
+      ) {
+        await transaction.operator_sessions.updateMany({
+          where: { operator_id: input.operatorId, revoked_at: null },
+          data: { revoked_at: input.now },
+        });
       }
       return {
         kind: "updated",
@@ -379,10 +463,12 @@ export class DrizzleAuthRepository<TQueryResult extends PgQueryResultHKT> {
           await this.lastAccessForOperator(transaction, input.operatorId),
         ),
       };
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  private async lastAccessByOperator(operatorIds: readonly string[]): Promise<Map<string, Date>> {
+  private async lastAccessByOperator(
+    operatorIds: readonly string[],
+  ): Promise<Map<string, Date>> {
     const result = new Map<string, Date>();
     for (const operatorId of operatorIds) {
       const access = await this.lastAccessForOperator(this.database, operatorId);
@@ -392,16 +478,15 @@ export class DrizzleAuthRepository<TQueryResult extends PgQueryResultHKT> {
   }
 
   private async lastAccessForOperator(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     operatorId: string,
   ): Promise<Date | null> {
-    const [record] = await database
-      .select({ lastSeenAt: operatorSessions.lastSeenAt })
-      .from(operatorSessions)
-      .where(eq(operatorSessions.operatorId, operatorId))
-      .orderBy(desc(operatorSessions.lastSeenAt))
-      .limit(1);
-    return record?.lastSeenAt ?? null;
+    const session = await database.operator_sessions.findFirst({
+      where: { operator_id: operatorId },
+      orderBy: { last_seen_at: "desc" },
+      select: { last_seen_at: true },
+    });
+    return session?.last_seen_at ?? null;
   }
 }
 
@@ -415,26 +500,28 @@ export interface AuthAuditEventInput {
   metadata: Readonly<Record<string, string | boolean | readonly string[]>>;
 }
 
-export class DrizzleAuthAuditSink<TQueryResult extends PgQueryResultHKT> {
-  constructor(private readonly database: PackscoutDatabase<TQueryResult>) {}
+export class DrizzleAuthAuditSink {
+  constructor(private readonly database: PackscoutPrismaClient) {}
 
   async append(event: AuthAuditEventInput): Promise<void> {
-    await this.database.insert(auditEvents).values({
-      organizationId: event.organizationId,
-      actorKey: event.actorId ?? "anonymous",
-      action: event.action,
-      subjectType: event.action.startsWith("operator.") ? "operator" : "session",
-      subjectId: event.subjectId,
-      outcome: event.outcome,
-      metadataJson: sanitizeAuthAuditMetadata(event.metadata),
-      occurredAt: event.occurredAt,
+    await this.database.audit_events.create({
+      data: {
+        organization_id: event.organizationId,
+        actor_key: event.actorId ?? "anonymous",
+        action: event.action,
+        subject_type: event.action.startsWith("operator.") ? "operator" : "session",
+        subject_id: event.subjectId,
+        outcome: event.outcome,
+        metadata_json: sanitizeAuthAuditMetadata(event.metadata) as Prisma.InputJsonValue,
+        occurred_at: event.occurredAt,
+      },
     });
   }
 }
 
-export class DatabaseLoginAttemptLimiter<TQueryResult extends PgQueryResultHKT> {
+export class DatabaseLoginAttemptLimiter {
   constructor(
-    private readonly database: PackscoutDatabase<TQueryResult>,
+    private readonly database: PackscoutPrismaClient,
     private readonly options: {
       windowMs: number;
       blockMs: number;
@@ -447,61 +534,74 @@ export class DatabaseLoginAttemptLimiter<TQueryResult extends PgQueryResultHKT> 
   }
 
   async retryAt(bucketKeys: readonly string[], now: Date): Promise<Date | null> {
+    const buckets = await this.database.auth_rate_limits.findMany({
+      where: { bucket_key: { in: [...new Set(bucketKeys)] } },
+      select: { blocked_until: true },
+    });
     let latest: Date | null = null;
-    for (const bucketKey of new Set(bucketKeys)) {
-      const [record] = await this.database
-        .select({ blockedUntil: authRateLimits.blockedUntil })
-        .from(authRateLimits)
-        .where(eq(authRateLimits.bucketKey, bucketKey))
-        .limit(1);
-      if (record?.blockedUntil && record.blockedUntil > now && (!latest || record.blockedUntil > latest)) {
-        latest = record.blockedUntil;
+    for (const bucket of buckets) {
+      if (
+        bucket.blocked_until &&
+        bucket.blocked_until > now &&
+        (!latest || bucket.blocked_until > latest)
+      ) {
+        latest = bucket.blocked_until;
       }
     }
     return latest;
   }
 
   async recordFailure(bucketKeys: readonly string[], now: Date): Promise<Date | null> {
-    return this.database.transaction(async (transaction) => {
+    return this.database.$transaction(async (transaction) => {
       let latest: Date | null = null;
       for (const bucketKey of new Set(bucketKeys)) {
-        await transaction
-          .insert(authRateLimits)
-          .values({ bucketKey, windowStartedAt: now, attemptCount: 0, updatedAt: now })
-          .onConflictDoNothing();
-        const [bucket] = await transaction
-          .select()
-          .from(authRateLimits)
-          .where(eq(authRateLimits.bucketKey, bucketKey))
-          .for("update")
-          .limit(1);
+        await transaction.$executeRaw(
+          Prisma.sql`
+            insert into auth_rate_limits (
+              bucket_key,
+              window_started_at,
+              attempt_count,
+              updated_at
+            ) values (${bucketKey}, ${now}, 0, ${now})
+            on conflict (bucket_key) do nothing
+          `,
+        );
+        const [bucket] = await transaction.$queryRaw<LockedRateLimitRow[]>(
+          Prisma.sql`
+            select bucket_key, window_started_at, attempt_count, blocked_until
+            from auth_rate_limits
+            where bucket_key = ${bucketKey}
+            for update
+          `,
+        );
         if (!bucket) continue;
-        const inWindow = now.getTime() - bucket.windowStartedAt.getTime() < this.options.windowMs;
-        const attemptCount = (inWindow ? bucket.attemptCount : 0) + 1;
+        const inWindow =
+          now.getTime() - bucket.window_started_at.getTime() < this.options.windowMs;
+        const attemptCount = (inWindow ? bucket.attempt_count : 0) + 1;
         const blockedUntil =
           attemptCount >= this.options.maximumFailures
             ? new Date(now.getTime() + this.options.blockMs)
-            : bucket.blockedUntil && bucket.blockedUntil > now
-              ? bucket.blockedUntil
+            : bucket.blocked_until && bucket.blocked_until > now
+              ? bucket.blocked_until
               : null;
-        await transaction
-          .update(authRateLimits)
-          .set({
-            windowStartedAt: inWindow ? bucket.windowStartedAt : now,
-            attemptCount,
-            blockedUntil,
-            updatedAt: now,
-          })
-          .where(eq(authRateLimits.bucketKey, bucketKey));
+        await transaction.auth_rate_limits.update({
+          where: { bucket_key: bucketKey },
+          data: {
+            window_started_at: inWindow ? bucket.window_started_at : now,
+            attempt_count: attemptCount,
+            blocked_until: blockedUntil,
+            updated_at: now,
+          },
+        });
         if (blockedUntil && (!latest || blockedUntil > latest)) latest = blockedUntil;
       }
       return latest;
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async clear(bucketKeys: readonly string[]): Promise<void> {
-    for (const bucketKey of new Set(bucketKeys)) {
-      await this.database.delete(authRateLimits).where(eq(authRateLimits.bucketKey, bucketKey));
-    }
+    await this.database.auth_rate_limits.deleteMany({
+      where: { bucket_key: { in: [...new Set(bucketKeys)] } },
+    });
   }
 }

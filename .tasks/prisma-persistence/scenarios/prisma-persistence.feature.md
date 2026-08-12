@@ -28,7 +28,7 @@ When one organization attempts to read, reference, mutate, or claim the other or
 Then the operation returns its stable missing or organization-scope outcome with no cross-organization side effect
 And credentials, raw actor identifiers, and protected payloads never enter canonical, operational, audit, or browser-safe results
 
-Coverage: Manual gap — tasks 003–006 must preserve direct organization-scope and sensitive-data coverage across repository, service, and admin integration suites.
+Coverage: Partially automated — task 003 covers identity, provider controls, secrets, and protected evidence with real PostgreSQL tenant, contention, atomic-audit, and browser-safe service assertions; tasks 004–006 complete the remaining persistence domains.
 
 ## Scenario Outline: Concurrent workers claim durable work exactly once
 
