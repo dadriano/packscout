@@ -108,7 +108,7 @@ When the real admin, worker, service integration, and embedded local composition
 Then supported workflows use the shared Prisma persistence package without changed service or HTTP behavior
 And shutdown releases the Prisma database client cleanly
 
-Coverage: Manual gap — task 007 must preserve real composition, lifecycle, boundary, and smoke coverage.
+Coverage: Automated — real admin and worker composition tests, service integrations, Prisma lifecycle tests, and the embedded local smoke flow cover clean startup, preserved behavior, sanitized failure, signal handling, and client shutdown.
 
 ## Scenario: No executable Drizzle implementation remains
 

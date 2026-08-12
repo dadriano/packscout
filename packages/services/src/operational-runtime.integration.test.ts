@@ -5,7 +5,6 @@ import type {
   OperationalNotification,
 } from "@packscout/contracts";
 import { DrizzleAdminNotificationPublisher } from "@packscout/database";
-import { organizations } from "@packscout/database/schema";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { createOperationalRuntime } from "./operational-runtime.ts";
 import type {
@@ -29,11 +28,13 @@ class CapturePublisher implements NotificationPublisher {
 test("runtime composition persists durable alerts and adds sinks without pipeline branches", async () => {
   const harness = await createMigratedTestDatabase();
   try {
-    await harness.database.insert(organizations).values({
-      id: organizationId,
-      slug: "operational-runtime",
-      name: "Operational Runtime",
-      createdAt: occurredAt,
+    await harness.database.organizations.create({
+      data: {
+        id: organizationId,
+        slug: "operational-runtime",
+        name: "Operational Runtime",
+        created_at: occurredAt,
+      },
     });
     const durable = new DrizzleAdminNotificationPublisher(harness.database);
     const capture = new CapturePublisher();

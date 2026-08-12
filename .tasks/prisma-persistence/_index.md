@@ -1,6 +1,6 @@
 # Feature: Prisma Persistence
 
-**Progress:** 6/8 tasks complete
+**Progress:** 7/8 tasks complete
 
 ## Context
 
@@ -70,7 +70,7 @@ The completed result starts from an empty PostgreSQL database, applies one clean
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 007 | [Cut over PackScout runtimes](007-cut-over-packscout-runtimes.md) | large | todo | 003, 004, 005, 006 |
+| 007 | [Cut over PackScout runtimes](007-cut-over-packscout-runtimes.md) | large | done | 003, 004, 005, 006 |
 | 008 | [Remove Drizzle and prove the clean cutover](008-remove-drizzle-and-prove-clean-cutover.md) | large | todo | 007 |
 
 ## Build Order

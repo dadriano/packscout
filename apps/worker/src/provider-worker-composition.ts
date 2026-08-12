@@ -5,7 +5,7 @@ import {
   DrizzleProviderHealthRepository,
   DrizzleProviderScheduleRepository,
   IngestionPersistenceRepository,
-  type createNodePostgresDatabase,
+  type PackscoutPrismaClient,
 } from "@packscout/database";
 import {
   AesGcmProviderCredentialCipher,
@@ -32,7 +32,6 @@ import {
   type ProviderWorkerLogger,
 } from "./provider-worker-runtime.ts";
 
-type NodePostgresDatabase = ReturnType<typeof createNodePostgresDatabase>;
 type RuntimeConfiguration = Pick<
   ProviderWorkerConfiguration,
   | "actorPseudonymKey"
@@ -50,7 +49,7 @@ type RuntimeConfiguration = Pick<
 
 export interface ProviderWorkerCompositionInput {
   readonly configuration: RuntimeConfiguration;
-  readonly database: NodePostgresDatabase;
+  readonly database: PackscoutPrismaClient;
   readonly logger: ProviderWorkerLogger;
   readonly observability: OperationalObservability;
 }

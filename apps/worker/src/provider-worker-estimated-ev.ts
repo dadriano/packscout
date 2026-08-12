@@ -1,6 +1,6 @@
 import {
   DrizzleEstimatedEvRecomputationRepository,
-  type createNodePostgresDatabase,
+  type PackscoutPrismaClient,
 } from "@packscout/database";
 import {
   CanonicalEstimatedEvProjectionRepository,
@@ -11,10 +11,8 @@ import {
   type ProviderClock,
 } from "@packscout/services";
 
-type NodePostgresDatabase = ReturnType<typeof createNodePostgresDatabase>;
-
 export interface ProviderWorkerEstimatedEvInput {
-  readonly database: NodePostgresDatabase;
+  readonly database: PackscoutPrismaClient;
   readonly canonical: EstimatedEvCanonicalHistoryPort;
   readonly reporter: Pick<PipelineOperationalReporter, "calculation">;
   readonly clock: ProviderClock;

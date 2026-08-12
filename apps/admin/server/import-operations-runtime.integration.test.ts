@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
+import { userInfo } from "node:os";
 import { test } from "node:test";
 import type { Express } from "express";
-import { eq } from "drizzle-orm";
 import {
   DatabaseLoginAttemptLimiter,
   DrizzleAuthAuditSink,
@@ -10,11 +12,6 @@ import {
   IngestionPersistenceRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
-import {
-  importRuns,
-  quarantineAttempts,
-  quarantineRecords,
-} from "@packscout/database/schema";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { createAdminApp } from "./app.ts";
 import { createNodeAuthSecurity } from "./auth/crypto.ts";
@@ -34,6 +31,63 @@ const now = new Date("2026-08-06T12:00:00.000Z");
 const sessionSecret = "admin-runtime-session-secret-at-least-32-bytes";
 const password = "correct horse battery staple";
 const rawSecret = "Bearer never-return private-user 0xprivate-wallet";
+
+async function reserveFreePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+  return port;
+}
+
+async function childDatabaseUrl(
+  database: Awaited<ReturnType<typeof createMigratedTestDatabase>>["database"],
+): Promise<string> {
+  const [current] = await database.$queryRaw<Array<{ databaseName: string }>>`
+    select current_database() as "databaseName"
+  `;
+  if (!current) throw new Error("Test database identity is unavailable.");
+  const configured = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL;
+  const adminUrl = new URL(
+    configured ??
+      `postgresql://${encodeURIComponent(userInfo().username)}@127.0.0.1:5432/postgres`,
+  );
+  adminUrl.pathname = `/${current.databaseName}`;
+  adminUrl.search = "";
+  adminUrl.hash = "";
+  return adminUrl.toString();
+}
+
+function waitForChildOutput(
+  child: ChildProcess,
+  marker: string,
+): Promise<{ readOutput(): string }> {
+  let output = "";
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("Admin entrypoint did not report startup."));
+    }, 15_000);
+    const onData = (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+      if (!output.includes(marker)) return;
+      clearTimeout(timeout);
+      resolve({ readOutput: () => output });
+    };
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      if (!output.includes(marker)) {
+        reject(new Error("Admin entrypoint exited before startup."));
+      }
+    });
+  });
+}
 
 async function withServer(app: Express, run: (baseUrl: string) => Promise<void>) {
   const server = app.listen(0, "127.0.0.1");
@@ -143,16 +197,16 @@ async function createHarness() {
     }],
     committedAt: new Date(now.getTime() + 10_000),
   });
-  await harness.database
-    .update(importRuns)
-    .set({
+  await harness.database.import_runs.update({
+    where: { id: ids.run },
+    data: {
       state: "incomplete",
-      startedAt: new Date(now.getTime() + 1_000),
-      finishedAt: new Date(now.getTime() + 20_000),
-      failureCode: "IMPORT_MAPPING_FAILED",
-      failureSummary: `unsafe ${rawSecret}`,
-    })
-    .where(eq(importRuns.id, ids.run));
+      started_at: new Date(now.getTime() + 1_000),
+      finished_at: new Date(now.getTime() + 20_000),
+      failure_code: "IMPORT_MAPPING_FAILED",
+      failure_summary: `unsafe ${rawSecret}`,
+    },
+  });
 
   const authRepository = new DrizzleAuthRepository(harness.database);
   const security = createNodeAuthSecurity(sessionSecret);
@@ -193,10 +247,10 @@ async function createHarness() {
       environment: "test",
     }),
   });
-  const [quarantine] = await harness.database
-    .select({ id: quarantineRecords.id })
-    .from(quarantineRecords)
-    .where(eq(quarantineRecords.organizationId, ids.organization));
+  const quarantine = await harness.database.quarantine_records.findFirst({
+    where: { organization_id: ids.organization },
+    select: { id: true },
+  });
   assert.ok(quarantine);
   return { ...harness, app, quarantineId: quarantine.id };
 }
@@ -255,13 +309,16 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
       );
       assert.equal(retry.status, 200);
       const retryBody = await retry.json() as { outcome: { outcome: string } };
-      const [attempt] = await harness.database
-        .select({
-          failureCode: quarantineAttempts.failureCode,
-          summary: quarantineAttempts.sanitizedSummary,
-        })
-        .from(quarantineAttempts)
-        .where(eq(quarantineAttempts.quarantineId, harness.quarantineId));
+      const attemptRecord = await harness.database.quarantine_attempts.findFirst({
+        where: { quarantine_id: harness.quarantineId },
+        select: { failure_code: true, sanitized_summary: true },
+      });
+      const attempt = attemptRecord
+        ? {
+            failureCode: attemptRecord.failure_code,
+            summary: attemptRecord.sanitized_summary,
+          }
+        : null;
       assert.equal(
         retryBody.outcome.outcome,
         "resolved",
@@ -324,6 +381,57 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
       );
     });
   } finally {
+    await harness.close();
+  }
+});
+
+test("admin entrypoint starts Prisma before listening and closes cleanly on SIGTERM", async () => {
+  const harness = await createMigratedTestDatabase();
+  let child: ChildProcess | undefined;
+  try {
+    const databaseUrl = await childDatabaseUrl(harness.database);
+    const port = await reserveFreePort();
+    child = spawn(
+      process.execPath,
+      ["--import", "tsx", "apps/admin/server/index.ts"],
+      {
+        cwd: new URL("../../..", import.meta.url),
+        env: {
+          ...process.env,
+          NODE_ENV: "production",
+          PACKSCOUT_DATABASE_URL: databaseUrl,
+          PACKSCOUT_ADMIN_PORT: String(port),
+          PACKSCOUT_ADMIN_ALLOWED_ORIGINS: origin,
+          PACKSCOUT_SESSION_HASHING_SECRET: sessionSecret,
+          PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64: Buffer.alloc(32, 7).toString(
+            "base64",
+          ),
+          PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64: Buffer.alloc(32, 9).toString(
+            "base64",
+          ),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const startup = await waitForChildOutput(
+      child,
+      `Packscout Admin is available at http://localhost:${port}`,
+    );
+    assert.equal(startup.readOutput().includes(databaseUrl), false);
+    const exitPromise = new Promise<{
+      code: number | null;
+      signal: NodeJS.Signals | null;
+    }>((resolve) => {
+      child!.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    assert.equal(child.kill("SIGTERM"), true);
+    const exit = await exitPromise;
+    assert.deepEqual(exit, { code: 0, signal: null });
+    child = undefined;
+  } finally {
+    if (child?.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
     await harness.close();
   }
 });
