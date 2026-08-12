@@ -1,6 +1,6 @@
 # Feature: Prisma Persistence
 
-**Progress:** 1/8 tasks complete
+**Progress:** 2/8 tasks complete
 
 ## Context
 
@@ -55,7 +55,7 @@ The completed result starts from an empty PostgreSQL database, applies one clean
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
 | 001 | [Establish the clean Prisma data model](001-establish-clean-prisma-data-model.md) | large | done | none |
-| 002 | [Establish the Prisma runtime and test foundation](002-establish-prisma-runtime-and-test-foundation.md) | large | todo | 001 |
+| 002 | [Establish the Prisma runtime and test foundation](002-establish-prisma-runtime-and-test-foundation.md) | large | done | 001 |
 
 ## Tasks: Persistence Domains
 

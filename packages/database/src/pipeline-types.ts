@@ -1,11 +1,32 @@
-import type {
-  canonicalRecordKindEnum,
-  recordKindEnum,
-  RunCounters,
-} from "./schema/index.ts";
+export const sourceRecordKinds = ["catalog", "pull", "sale"] as const;
+export type SourceRecordKind = (typeof sourceRecordKinds)[number];
 
-export type SourceRecordKind = (typeof recordKindEnum.enumValues)[number];
-export type CanonicalRecordKind = (typeof canonicalRecordKindEnum.enumValues)[number];
+export const canonicalRecordKinds = [
+  "platform",
+  "pack",
+  "catalog_asset",
+  "ev_input",
+  "pull",
+  "sale",
+  "estimated_ev",
+] as const;
+export type CanonicalRecordKind = (typeof canonicalRecordKinds)[number];
+
+export interface RunCounters {
+  accepted: number;
+  duplicate: number;
+  quarantined: number;
+  pages: number;
+  records: number;
+  requestAttempts: number;
+  transientRetries: number;
+}
+
+export interface RecordCounts {
+  catalog: number;
+  pulls: number;
+  sales: number;
+}
 
 export interface CanonicalIdentity {
   platformKey: string;

@@ -5,7 +5,7 @@
 **Depends on:** [prisma-persistence/001](001-establish-clean-prisma-data-model.md)  
 **Blocks:** [prisma-persistence/003](003-preserve-identity-and-provider-controls.md), [prisma-persistence/004](004-preserve-import-coordination-and-worker-queues.md), [prisma-persistence/005](005-preserve-ingestion-and-canonical-history.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -53,14 +53,21 @@ Task `007` receives explicit runtime startup and shutdown behavior plus supporte
 
 ## Acceptance Criteria
 
-- [ ] A clean install can generate and validate the Prisma client before database consumers typecheck or build.
-- [ ] Production and test clients connect, transact, close, and surface startup failures predictably without leaking connection details.
-- [ ] Integration tests apply the real clean migrations in isolated PostgreSQL state and prove constraint, transaction, contention, and rollback behavior.
-- [ ] Test fixtures and shared domain types no longer require Drizzle schema or query-helper imports.
-- [ ] Prisma generation, migration validation, focused persistence tests, and lifecycle checks are reached by `npm run verify:framework`.
+- [x] A clean install can generate and validate the Prisma client before database consumers typecheck or build.
+- [x] Production and test clients connect, transact, close, and surface startup failures predictably without leaking connection details.
+- [x] Integration tests apply the real clean migrations in isolated PostgreSQL state and prove constraint, transaction, contention, and rollback behavior.
+- [x] Test fixtures and shared domain types no longer require Drizzle schema or query-helper imports.
+- [x] Prisma generation, migration validation, focused persistence tests, and lifecycle checks are reached by `npm run verify:framework`.
 
 ## Verification
 
 - Exercise client startup, successful transaction, rollback, connection failure, and graceful shutdown through direct tests.
 - Run representative database, service, admin, and worker integration tests through the new isolated PostgreSQL harness.
 - Run the migration, generation, boundary, dependency, lint, and typecheck checks included by `npm run verify:framework`.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: added one explicit Prisma lifecycle, one PostgreSQL 16 migration-backed integration harness, ORM-neutral pipeline types, Prisma setup fixtures, and canonical generation and verification commands
+- Divergences: none; temporary legacy repository and runtime scaffolding remains only for the dependent cutover tasks and is removed by task `008`
+- Verification: `check:prisma` with four schema-parity tests, three lifecycle and contention tests, and one setup and tenant-scope test; database lint; boundary, script, dependency, and framework-ratchet checks
