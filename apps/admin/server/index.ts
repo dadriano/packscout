@@ -108,6 +108,7 @@ function closeHttpServer(server: Server | undefined): Promise<void> {
 const databaseLifecycle = createPrismaClientLifecycle({ databaseUrl });
 let server: Server | undefined;
 let developmentServer: ViteDevServer | undefined;
+let shutdownPromise: Promise<void> | undefined;
 
 try {
   await databaseLifecycle.start();
@@ -180,6 +181,8 @@ try {
 
   server = app.listen(port);
   await waitForListening(server);
+  process.once("SIGINT", handleShutdownSignal);
+  process.once("SIGTERM", handleShutdownSignal);
   console.log(`Packscout Admin is available at http://localhost:${port}`);
 } catch (error) {
   await closeHttpServer(server).catch(() => undefined);
@@ -187,8 +190,6 @@ try {
   await databaseLifecycle.close().catch(() => undefined);
   throw error;
 }
-
-let shutdownPromise: Promise<void> | undefined;
 
 function shutDown(): Promise<void> {
   shutdownPromise ??= (async () => {
@@ -219,6 +220,3 @@ function handleShutdownSignal(): void {
     process.exitCode = 1;
   });
 }
-
-process.once("SIGINT", handleShutdownSignal);
-process.once("SIGTERM", handleShutdownSignal);
