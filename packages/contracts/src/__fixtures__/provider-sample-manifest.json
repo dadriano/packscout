@@ -1,0 +1,240 @@
+{
+  "version": 1,
+  "hashAlgorithm": "sha256",
+  "shapeAlgorithm": "recursive-key-and-json-type-v1",
+  "outerStructure": {
+    "pageKeySets": [
+      ["catalog", "pulls", "sales"]
+    ],
+    "recordKeySets": {
+      "catalog": [
+        ["collected_at", "data", "external_id", "platform", "updated_at"]
+      ],
+      "pulls": [
+        [
+          "collected_at",
+          "data",
+          "external_id",
+          "occurred_at",
+          "pack_external_id",
+          "platform"
+        ]
+      ],
+      "sales": [
+        [
+          "amount",
+          "collected_at",
+          "currency",
+          "data",
+          "event_type",
+          "external_id",
+          "occurred_at",
+          "platform",
+          "tx_hash"
+        ]
+      ]
+    }
+  },
+  "samples": [
+    {
+      "name": "beezie",
+      "file": "beezie.json",
+      "contentSha256": "92cfae82960d0b829d5405f2ecb63a34cfb9ca679e412981d50d069a91a7d21e",
+      "counts": { "catalog": 4, "pulls": 15, "sales": 15 },
+      "recordShapes": {
+        "catalog": {
+          "sha256": "a6835f14ad6539071ef2c75ba837dc4739c7ac4a0a839bc2efbf767d3f4f2660",
+          "uniqueShapeCount": 3
+        },
+        "pulls": {
+          "sha256": "baa69d5f653d0bc9d691c32f29664a539714e27ba474f83f07ecfcd785db0d22",
+          "uniqueShapeCount": 1
+        },
+        "sales": {
+          "sha256": "ac99725adb0cccd1b5e116af1507fa284a28d8e7f7c1338fc802599f246258b6",
+          "uniqueShapeCount": 1
+        }
+      },
+      "nullableFields": {
+        "pullPackExternalId": true,
+        "saleAmount": false,
+        "saleCurrency": false
+      }
+    },
+    {
+      "name": "clutchpacks",
+      "file": "clutchpacks.json",
+      "contentSha256": "6f7f76a26e21233e62f07e56b58b45ab9b17ce083e1db915704c5237d1b76fba",
+      "counts": { "catalog": 14, "pulls": 15, "sales": 15 },
+      "recordShapes": {
+        "catalog": {
+          "sha256": "8130bb972e63e69059eaf6fb9ee281e55f044474762578b2491d3016822dad96",
+          "uniqueShapeCount": 2
+        },
+        "pulls": {
+          "sha256": "a8bb4fbb1828f1f3cde51e199eca63467941f283632ae265e131aef0d49f01b7",
+          "uniqueShapeCount": 2
+        },
+        "sales": {
+          "sha256": "fb05f40411e55080d3b7d2d803e114e23da6ba5d2b0b4896392491cd2358223b",
+          "uniqueShapeCount": 2
+        }
+      },
+      "nullableFields": {
+        "pullPackExternalId": true,
+        "saleAmount": true,
+        "saleCurrency": true
+      }
+    },
+    {
+      "name": "collector_crypt",
+      "file": "collector_crypt.json",
+      "contentSha256": "2e3eddcccc5aa1dbe6c435bae7f17e6d08811eff418104b2d1ed26ed0eb84064",
+      "counts": { "catalog": 14, "pulls": 15, "sales": 15 },
+      "recordShapes": {
+        "catalog": {
+          "sha256": "2e7c76dc6da91af19be23f37a902d91c140d6a61fed836648562c80f95d66668",
+          "uniqueShapeCount": 12
+        },
+        "pulls": {
+          "sha256": "c3d69ad71d176ee333815576dc5a30dfeca660f34b68532cd9ebdc1b3c40393a",
+          "uniqueShapeCount": 3
+        },
+        "sales": {
+          "sha256": "30c8c7df7032dc75abce9d8426feb12589bda1d9292dae7388e987d639e804e6",
+          "uniqueShapeCount": 4
+        }
+      },
+      "nullableFields": {
+        "pullPackExternalId": false,
+        "saleAmount": true,
+        "saleCurrency": true
+      }
+    },
+    {
+      "name": "courtyard",
+      "file": "courtyard.json",
+      "contentSha256": "20021fca6c69d10f539788e11e8ed41aad835fd7e4de6d52ce7119c6d477ecd7",
+      "counts": { "catalog": 11, "pulls": 15, "sales": 15 },
+      "recordShapes": {
+        "catalog": {
+          "sha256": "b920b12483408aff44ca684e81d4f64bb89869589cd5090f0876ca46b7d3aa8b",
+          "uniqueShapeCount": 6
+        },
+        "pulls": {
+          "sha256": "3676e511076299edbe7f35ee4e401e19cca0efbfe7f8d018b7e9479b32d017d2",
+          "uniqueShapeCount": 2
+        },
+        "sales": {
+          "sha256": "fa05e98dc89da05e5af3eeb2a15071474739eb172f8c7ed43d1cfea487f8b601",
+          "uniqueShapeCount": 2
+        }
+      },
+      "nullableFields": {
+        "pullPackExternalId": false,
+        "saleAmount": true,
+        "saleCurrency": true
+      }
+    },
+    {
+      "name": "gamestop",
+      "file": "gamestop.json",
+      "contentSha256": "06ef8dda43b26095b11b430e814f4a3b7a1e727bdca0ecf47354cef1ee93bb4f",
+      "counts": { "catalog": 8, "pulls": 15, "sales": 0 },
+      "recordShapes": {
+        "catalog": {
+          "sha256": "f3c9b2718482493a3a17d8f49e202dd7bed44481ae1c11de74b35cc7f1d08b37",
+          "uniqueShapeCount": 2
+        },
+        "pulls": {
+          "sha256": "e8bdc28ac239268f705337427eaa292c10f2e57e3b35c6e5400e76bfdae5e9eb",
+          "uniqueShapeCount": 1
+        },
+        "sales": {
+          "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "uniqueShapeCount": 0
+        }
+      },
+      "nullableFields": {
+        "pullPackExternalId": false,
+        "saleAmount": false,
+        "saleCurrency": false
+      }
+    },
+    {
+      "name": "phygitals",
+      "file": "phygitals.json",
+      "contentSha256": "3620d97462090454c8cc1867a408255445a3219fe0917ac2a4b8cc5973bb8c23",
+      "counts": { "catalog": 15, "pulls": 15, "sales": 15 },
+      "recordShapes": {
+        "catalog": {
+          "sha256": "82525e9d8e2ba067143c90f0c5a14f823d492371ec632bfd8ef85ad306f6ae9d",
+          "uniqueShapeCount": 9
+        },
+        "pulls": {
+          "sha256": "02ddf7e26cf3e7a9cea9d3a4e3c5cab51e5b8e087c4bfab3db7ffd4c086aa9be",
+          "uniqueShapeCount": 8
+        },
+        "sales": {
+          "sha256": "4be57cc9ad55bb888f0132f3b45287bebbdcdce501780875fab87228c313178d",
+          "uniqueShapeCount": 6
+        }
+      },
+      "nullableFields": {
+        "pullPackExternalId": false,
+        "saleAmount": false,
+        "saleCurrency": false
+      }
+    },
+    {
+      "name": "stadium_vault",
+      "file": "stadium_vault.json",
+      "contentSha256": "fe5c90c64f48b18ecfc5d6863c8f3b2e11d1fae5764dfa773531c59d8efc026a",
+      "counts": { "catalog": 14, "pulls": 15, "sales": 0 },
+      "recordShapes": {
+        "catalog": {
+          "sha256": "0ca669a1a52b2d1cd5f9028b956c178eb1d435b02007f95958e3ed1f579b1f3a",
+          "uniqueShapeCount": 11
+        },
+        "pulls": {
+          "sha256": "d49414c8e4d6ea8bf276e95d2b31a88b7ac40416d9c05320b27ec192351df020",
+          "uniqueShapeCount": 4
+        },
+        "sales": {
+          "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "uniqueShapeCount": 0
+        }
+      },
+      "nullableFields": {
+        "pullPackExternalId": false,
+        "saleAmount": false,
+        "saleCurrency": false
+      }
+    },
+    {
+      "name": "trove",
+      "file": "trove.json",
+      "contentSha256": "cadc01c597744075ca8f0be891672d288df013dd8e61f182647614ce20b50a3b",
+      "counts": { "catalog": 15, "pulls": 15, "sales": 0 },
+      "recordShapes": {
+        "catalog": {
+          "sha256": "9e5edad52c68b7ba3fd8fdc8d1e8af88299d5dd8e0fa900339ae46b677463aa5",
+          "uniqueShapeCount": 3
+        },
+        "pulls": {
+          "sha256": "e716a364ca46e3b69e2e7832f6b044d3d96b31498dd1b129eac33aa16c2e1eeb",
+          "uniqueShapeCount": 6
+        },
+        "sales": {
+          "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "uniqueShapeCount": 0
+        }
+      },
+      "nullableFields": {
+        "pullPackExternalId": false,
+        "saleAmount": false,
+        "saleCurrency": false
+      }
+    }
+  ]
+}

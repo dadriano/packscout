@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md)  
 **Blocks:** [data-pipeline/009](009-calculate-estimated-ev.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md), [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Map the supplied catalog examples into three conceptual outputs—purchasable pack, supporting catalog asset, and rejected record—and document the stable identity and relationship rule for each.
+**Status:** done
 
 ## Objective
 
@@ -51,8 +47,15 @@ A catalog asset projection exposes stable source identity, asset type, related p
 
 ## Acceptance Criteria
 
-- [ ] Mixed catalog fixtures produce the correct pack, parent, variant, card, price-record, and inventory-asset projections without provider logic in shared persistence.
-- [ ] Independently purchasable nested variants remain distinct, stable pack rows and keep their parent relationship across repeated imports and source updates.
-- [ ] Equivalent records are idempotent, changed records create history, explicit provider statuses update current availability, and page omission never deletes a pack.
-- [ ] Partial inventory, top-chase-only data, missing bounds, and incomplete probability coverage keep the pack available while producing explicit EV-readiness evidence.
-- [ ] Source provenance and late relationship reconciliation work across all canonical catalog kinds without leaking raw payloads to browser callers.
+- [x] Mixed catalog fixtures produce the correct pack, parent, variant, card, price-record, and inventory-asset projections without provider logic in shared persistence.
+- [x] Independently purchasable nested variants remain distinct, stable pack rows and keep their parent relationship across repeated imports and source updates.
+- [x] Equivalent records are idempotent, changed records create history, explicit provider statuses update current availability, and page omission never deletes a pack.
+- [x] Partial inventory, top-chase-only data, missing bounds, and incomplete probability coverage keep the pack available while producing explicit EV-readiness evidence.
+- [x] Source provenance and late relationship reconciliation work across all canonical catalog kinds without leaking raw payloads to browser callers.
+
+## Spec Compliance
+
+- Added provider-neutral pack, supporting-asset, and EV-input projection contracts with explicit nullable fields, minor-unit money, normalized currencies, provenance, and separate provider EV.
+- Preserved nested purchasable variants and late-resolvable parent/pack relationships as stable canonical identities.
+- Represented probability evidence, top chases, declared coverage, and inventory completeness independently so insufficient evidence never hides an otherwise valid pack.
+- Routed all outputs through the existing idempotent canonical history and relationship persistence boundary without raw-field leakage or platform branches.

@@ -5,11 +5,7 @@
 **Depends on:** none  
 **Blocks:** [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Estimated scope:** medium  
-**Status:** not started
-
-## Start Here
-
-Turn one supplied `packscout-data` sample into a contract fixture that proves the outer `catalog`, `pulls`, and `sales` envelopes without encoding that platform's nested `data` shape into the shared contract.
+**Status:** done
 
 ## Objective
 
@@ -59,8 +55,16 @@ The shared adapter boundary accepts a validated `ProviderPage` plus provider con
 
 ## Acceptance Criteria
 
-- [ ] Contract fixtures derived from all eight sample files validate their outer envelopes, including empty sales arrays, nullable pull relationships, nullable sale amounts or currencies, and opaque nested data.
-- [ ] Missing arrays, malformed timestamps, platform mismatches, invalid amounts, non-object data, and non-advancing continuing cursors fail with stable field-level errors.
-- [ ] Provider-specific keys do not appear in generic orchestration branches, and a test adapter can be registered without modifying the ingestion workflow.
-- [ ] Request construction omits the cursor for an initial backfill, preserves opaque cursor bytes thereafter, and supports authentication modes `none` and `bearer` without exposing the secret.
-- [ ] The contract remains runtime-neutral and usable by persistence, scheduling, admin APIs, and tests through intentional public boundaries.
+- [x] Contract fixtures derived from all eight sample files validate their outer envelopes, including empty sales arrays, nullable pull relationships, nullable sale amounts or currencies, and opaque nested data.
+- [x] Missing arrays, malformed timestamps, platform mismatches, invalid amounts, non-object data, and non-advancing continuing cursors fail with stable field-level errors.
+- [x] Provider-specific keys do not appear in generic orchestration branches, and a test adapter can be registered without modifying the ingestion workflow.
+- [x] Request construction omits the cursor for an initial backfill, preserves opaque cursor bytes thereafter, and supports authentication modes `none` and `bearer` without exposing the secret.
+- [x] The contract remains runtime-neutral and usable by persistence, scheduling, admin APIs, and tests through intentional public boundaries.
+
+## Spec Compliance
+
+- A PII-free structural/hash manifest proves coverage of the eight supplied source files without copying source payloads into the repository; the local verifier matches all eight exact file hashes and structural signatures.
+- Page-structure validation is separated from per-record validation so a mixed-quality page can retain protected raw evidence, import valid records, and emit stable invalid-record outcomes for quarantine.
+- Mapping and transport adapter contracts and registries are capability-specific, platform-aware, runtime-neutral, and free of provider-name branching.
+- The HTTP cursor transport preserves opaque cursors, supports `none` and `bearer`, constructs authorization only after exact-host and DNS/IP policy checks, and returns stable transport failures.
+- Contract and service tests, lint, typecheck, dependency boundaries, standards ratchet, sample-manifest verification, and the canonical framework gate pass.

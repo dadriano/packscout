@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/006](006-quarantine-and-retry-invalid-records.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write the event matrix for run failed, run incomplete, provider stale, provider recovered, quarantine resolved, and raw retention expired, including deduplication and the V1 admin-notification result.
+**Status:** done
 
 ## Objective
 
@@ -52,8 +48,16 @@ Retention operations accept a cutoff and bounded batch size and return selected,
 
 ## Acceptance Criteria
 
-- [ ] A controllable-clock test proves protected raw and quarantine payloads expire at ninety days while canonical history, projections, run summaries, reasons, hashes, and audit evidence remain.
-- [ ] Open quarantines become expired, resolved entries retain their resolution metadata, and repeated cleanup is idempotent and tenant-scoped.
-- [ ] Failure, incomplete, stale, recovery, quarantine, and retention events produce deduplicated in-admin notifications through one provider-neutral interface.
-- [ ] Metrics and protected operational detail distinguish freshness, quality, retry, calculation availability, notification, and retention outcomes without leaking sensitive data.
-- [ ] Adding a test notification sink requires no change to ingestion, scheduling, calculation, retention, or provider-mapping branches.
+- [x] A controllable-clock test proves protected raw and quarantine payloads expire at ninety days while canonical history, projections, run summaries, reasons, hashes, and audit evidence remain.
+- [x] Open quarantines become expired, resolved entries retain their resolution metadata, and repeated cleanup is idempotent and tenant-scoped.
+- [x] Failure, incomplete, stale, recovery, quarantine, and retention events produce deduplicated in-admin notifications through one provider-neutral interface.
+- [x] Metrics and protected operational detail distinguish freshness, quality, retry, calculation availability, notification, and retention outcomes without leaking sensitive data.
+- [x] Adding a test notification sink requires no change to ingestion, scheduling, calculation, retention, or provider-mapping branches.
+
+## Spec Compliance
+
+- Added tenant-scoped, bounded, restart-safe protected-payload retention with exact ninety-day expiry, active-retry exclusion, durable execution evidence, round-robin tenant discovery, and worker-cycle composition.
+- Added provider-neutral operational events, durable in-admin alert deduplication/recovery, shallow liveness, protected dependency detail, and safe structured log/metric reporting for imports, freshness, quarantine, EV availability, notifications, and retention.
+- Composed the same operational hooks into worker imports, provider-health reads, quarantine retries, and retention without allowing notification or observability failures to rewrite pipeline outcomes.
+- Proved the notification abstraction accepts an additional test sink without provider, ingestion, scheduling, calculation, retention, or mapping branches.
+- Verification: 27 focused database, service, retention, notification, operational-runtime, worker-composition, and observability tests passed; admin route and component checks cover protected alert and health access.

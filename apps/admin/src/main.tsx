@@ -10,16 +10,21 @@ import {
 import { appRoutes } from "./App";
 import { ThemeProvider } from "./hooks/useTheme";
 import { ConfirmProvider } from "./providers/confirm";
+import { SessionProvider } from "./providers/session";
 import { ToastProvider } from "./providers/toast";
 import "./theme.css";
 import "./index.css";
+import "./operations.css";
+import "./alerts.css";
 
 function RootProviders() {
   return (
     <ThemeProvider>
       <ToastProvider>
         <ConfirmProvider>
-          <Outlet />
+          <SessionProvider>
+            <Outlet />
+          </SessionProvider>
         </ConfirmProvider>
       </ToastProvider>
     </ThemeProvider>

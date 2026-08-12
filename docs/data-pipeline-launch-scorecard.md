@@ -1,0 +1,135 @@
+# Data Pipeline Launch Scorecard
+
+**Evidence date:** 2026-08-06
+
+**Fixture and controllable-mock gate:** PASS
+
+**Repository `npm run verify:framework` gate:** PASS
+
+**Real-provider deployment gate:** NOT RUN — this document is not production launch approval
+
+## Evidence boundary
+
+This scorecard records local test evidence for all eight mapping-manifest platforms. The harness uses the supplied representative payload files, verifies their manifest-pinned SHA-256 hashes before parsing, and keeps their raw bytes outside the repository and test output. It then composes the production HTTP cursor adapter's non-importing connection path, generic feed contract, mapping registry, import-page planner, projection services, EV calculator, and a test-only controllable cursor endpoint and durable ledger.
+
+The evidence is fixture/mock evidence only. It does not prove provider connectivity, real full-history completeness, real cursor behavior, persisted run/configuration IDs, deployment security, or production readiness. No bearer credential, raw payload, user identity, wallet, or account identifier is recorded here.
+
+Fixture configuration and run IDs are `N/A`: the launch harness intentionally does not create database-backed configuration or run records. Its stable fixture labels are not deployment identities.
+
+## Fixture and mock scorecard
+
+`C/P/S` means catalog/pull/sale source records. `Backfill C/R/U` means canonical projection commands that created, revised, or left unchanged a canonical identity during the initial page. Multiple projection commands may target one identity, so command count is reconciled to outcomes rather than assumed to equal the final unique-identity count. `Replay/correction/new` is source-version accounting for the incremental page.
+
+| Platform | Mock connection | Source C/P/S | Mapped / quarantined | Projection commands | Backfill C/R/U | Canonical identities, initial → incremental | Incremental replay/correction/new | Incremental canonical C/R | EV estimated / unavailable | Fixture verdict |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Beezie | PASS | 4/15/15 | 34/0 | 257 | 257/0/0 | 257 → 258 | 1/1/1 | 1/1 | 4/0 | PASS |
+| ClutchPacks | PASS | 14/15/15 | 44/0 | 1,206 | 951/255/0 | 951 → 952 | 1/1/1 | 1/1 | 6/8 | PASS |
+| Collector Crypt | PASS | 14/15/15 | 44/0 | 331 | 288/43/0 | 288 → 289 | 1/1/1 | 1/1 | 7/0 | PASS |
+| Courtyard | PASS | 11/15/15 | 41/0 | 299 | 285/14/0 | 285 → 286 | 1/1/1 | 1/1 | 4/4 | PASS |
+| GameStop | PASS | 8/15/0 | 23/0 | 1,213 | 1,213/0/0 | 1,213 → 1,214 | 1/1/1 | 1/1 | 35/10 | PASS |
+| Phygitals | PASS | 15/15/15 | 45/0 | 526 | 524/2/0 | 524 → 525 | 1/1/1 | 1/1 | 0/18 | PASS |
+| Stadium Vault | PASS | 14/15/0 | 29/0 | 211 | 147/64/0 | 147 → 148 | 1/1/1 | 1/1 | 14/0 | PASS |
+| Trove | PASS | 15/15/0 | 30/0 | 225 | 210/15/0 | 210 → 211 | 1/1/1 | 1/1 | 15/0 | PASS |
+| **Total** | **8/8 PASS** | **95/120/75** | **290/0** | **4,268** | **3,875/393/0** | **3,875 → 3,883** | **8/8/8** | **8/8** | **85/40** | **PASS** |
+
+The harness proves the following for every platform without a platform branch outside the mapper manifest:
+
+1. The production HTTP cursor adapter performs a non-importing initial-page connection request for each platform, removes any configured cursor, sends the correct platform parameter, validates the response, and returns bounded counts.
+2. The initial import request supplies no cursor and accepts every valid representative source record.
+3. Reconstructing the runner around the same test ledger resumes from the previously committed fixture head.
+4. An incremental page containing an exact replay, a changed version of the same pull, and a new pull identity yields one replay, one correction, one new source identity, one canonical revision, and one canonical creation.
+5. A later mixed page keeps its valid replay moving while quarantining one malformed record. Across the eight platforms, eight malformed records are quarantined independently and all eight fixture cursors advance to the next safe head.
+6. A response with `has_more: true` and a non-advancing cursor is rejected with `cursor_not_advanced` for every platform.
+7. Every initial projection command is reconciled: 4,268 commands equal 3,875 canonical creations plus 393 same-page revisions plus zero unchanged writes.
+8. Canonical evidence is fingerprinted deterministically, actor references use the HMAC pseudonymizer, and the captured canonical ledger is checked for raw identity field names.
+
+The fixture cursor progression is `no cursor → fixture head v1 → fixture head v2 → fixture head v3`. These are test-only safe labels, not previews of provider cursors.
+
+## EV availability evidence
+
+EV totals count mapped EV inputs, not source records. A PackScout estimate appears only when the mapped distribution meets the supported calculation contract. Packs remain mappable when an estimate is unavailable.
+
+| Platform | Unavailable count | Observed unavailable reasons |
+| --- | ---: | --- |
+| ClutchPacks | 8 | `incomplete_inventory`, `incomplete_probability_coverage` |
+| Courtyard | 4 | `incomplete_inventory`, `missing_probability_buckets` |
+| GameStop | 10 | `incomplete_probability_coverage` |
+| Phygitals | 18 | `ambiguous_unit_basis`, `incomplete_inventory`, `incomplete_probability_coverage`, `invalid_draw_count` |
+
+Beezie, Collector Crypt, Stadium Vault, and Trove have no unavailable EV result in the representative files. This is not evidence that an upstream full history contains no incomplete distribution.
+
+## Controllable failure and recovery evidence
+
+Each outcome below is exercised once per manifest platform through the same generic test-only transport sequence, for 32 scenario executions total.
+
+| Mock condition | Normalized evidence | Expected final state | Attempts per platform | Executions |
+| --- | --- | --- | ---: | ---: |
+| HTTP 429 followed by a valid page | retryable `http_error` | recovered | 2 | 8 |
+| Timeout followed by a valid page | retryable `timeout` | recovered | 2 | 8 |
+| HTTP 401 | non-retryable `http_error` | failed closed | 1 | 8 |
+| Cursor-safety contract failure | non-retryable `invalid_response` with `cursor_not_advanced` | failed closed | 1 | 8 |
+
+This proves the generic retry decision in the launch harness. It does not claim that a real provider emitted or recovered from any of these conditions.
+
+## Shared provider-neutral release evidence
+
+The platform rows use the same shared runtime boundaries, so the following gates apply to every row without duplicating provider-specific orchestration. These checks complement the fixture harness; they do not convert mock evidence into real-provider evidence.
+
+| Release concern | Committed evidence | Local verdict |
+| --- | --- | --- |
+| Empty sales, null relationships, unknown event types, nullable values, unsupported currencies, incomplete odds, and mapper drift | Provider mapper fixture and drift tests under `packages/services/src/providers` plus the table-driven EV calculator tests | PASS |
+| Atomic page durability, restart resume, cursor safety, quarantine continuation, and immutable history | `provider-import-service.integration.test.ts`, `persistence.integration.test.ts`, and `quarantine-service.test.ts` | PASS |
+| Late relationship reconciliation | Database and event-projection integration tests prove catalog arrival resolves older links atomically and repeated reconciliation is idempotent | PASS |
+| Durable EV recomputation | Database queue and worker processor integration tests prove relevant input changes enqueue atomically, concurrent claims are disjoint, restarts recover leases, equivalent inputs deduplicate, and unavailable results persist | PASS |
+| Five-minute scheduling, freshness, stale recovery, and independent quality state | Provider scheduling, worker runtime, provider health, and operational runtime tests | PASS |
+| Ninety-day retention, alert deduplication, notification abstraction, and safe telemetry | Database operations, retention service/coordinator, operational events, alert service, and worker composition tests | PASS |
+| Admin authentication, roles, secrets, provider lifecycle, manual conflicts, pagination, retries, and sanitized diagnostics | Admin auth/operator/provider/import/alert route tests plus the real admin-composition integration test | PASS |
+| Operator interface | Admin component and route tests plus authenticated desktop and compact-width browser smoke covering navigation, dialogs, filters, focusable controls, and page-level overflow | PASS |
+
+The durable EV row is valid only after the repository-wide gate recorded below passes with the final queue composition.
+
+## Real-provider deployment gate
+
+| Platform | Endpoint/configuration | Connection test | No-cursor full history | Durable-head incremental | Real reconciliation | Launch state |
+| --- | --- | --- | --- | --- | --- | --- |
+| Beezie | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
+| ClutchPacks | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
+| Collector Crypt | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
+| Courtyard | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
+| GameStop | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
+| Phygitals | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
+| Stadium Vault | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
+| Trove | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
+
+## Exact remaining environment and launch setup
+
+1. Provision a PostgreSQL 16 deployment with current migrations and an organization containing the approved administrator and data-operator accounts.
+2. Supply the admin and worker runtimes with `PACKSCOUT_DATABASE_URL`, distinct 32-byte base64 `PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64` and `PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64` values, the worker's `PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION`, and the admin's `PACKSCOUT_SESSION_HASHING_SECRET`. Set `PACKSCOUT_ADMIN_TRUSTED_PROXIES` to the exact comma-separated proxy IP addresses or CIDR ranges when the admin runs behind a reverse proxy; leave it unset for a direct connection so forwarded client-address headers remain untrusted. Set `PACKSCOUT_ESTIMATED_EV_VERIFIED_USD_STABLECOINS` only after financial/data approval, using a comma-separated allowlist of uppercase 2–12 character currency identifiers (maximum 32; no `USD`, duplicates, spaces, or lowercase); unset or empty trusts no stablecoins. Supply normal runtime origin, session, worker identity, pool, and polling settings for the target environment. Secrets must stay in deployment secret storage and out of commands, logs, screenshots, and this scorecard.
+3. Confirm an approved endpoint for each of the eight platform keys. Each endpoint must support the `platform` query parameter, the optional opaque `cursor` query parameter, and the v1 response envelope with catalog, pull, and sale arrays, `next_cursor`, and `has_more`. Confirm endpoint host allowlisting, DNS behavior, maximum response size, timeout, rate limits, pagination order, cursor expiry, and full-history start semantics with the provider.
+4. Create one server-side provider configuration per platform using transport adapter `http-cursor-v1`, the approved endpoint, authentication mode `none` or `bearer`, a deployment-supplied bearer secret when required, a 300-second schedule, and a 900-second stale threshold. Do not activate a configuration until its non-importing connection test succeeds.
+5. In preproduction, run each provider from a null cursor until `has_more` is false. Record the persisted configuration revision ID, sanitized run ID, bounded cursor references, per-kind source totals, canonical created/revised/unchanged totals, quarantine totals, unresolved relationships, EV estimated/unavailable totals, provider-head time, freshness, quality, and notification state.
+6. Run a real incremental import from each persisted head. Obtain upstream-approved examples of an exact replay, a correction, and a new record; verify idempotency, immutable historical run evidence, canonical revision/creation, relationship reconciliation, independent quarantine retry, and safe cursor advancement.
+7. Exercise real-environment timeout, rate-limit, authentication failure, malformed/poison record, stale/recovery, retention, notification deduplication, credential masking, permission, login-throttling, session-revocation, manual-run conflict, and operator browser flows. Record only sanitized stable codes, counts, and bounded identifiers.
+8. Resolve every real count difference and define numeric release thresholds for quarantine rate and unresolved relationships. Run focused environment checks and `npm run verify:framework`; an authorized administrator must review the persisted evidence before enabling the five-minute incremental schedules.
+
+## Reproducing the fixture evidence
+
+The representative files are intentionally external to the repository. Point the test at the approved directory; if the files are absent, the sample-dependent test reports a skip rather than manufacturing evidence.
+
+```bash
+PACKSCOUT_PROVIDER_SAMPLES=/absolute/path/to/approved/provider-samples \
+  node --import tsx --test \
+  packages/services/src/providers/provider-launch-harness.test.ts
+```
+
+The focused verification for this scorecard is:
+
+```bash
+npm run lint --workspace=@packscout/services
+npm run typecheck --workspace=@packscout/services
+PACKSCOUT_PROVIDER_SAMPLES=/absolute/path/to/approved/provider-samples \
+  node --import tsx --test \
+  packages/services/src/providers/provider-launch-harness.test.ts
+```
+
+The final integrated `npm run verify:framework` run passed on 2026-08-06: framework ownership/dependency/document/script checks, zero new standards findings, lint, typecheck, 282 tests, and production builds all completed successfully.

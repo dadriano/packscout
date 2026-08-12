@@ -1,12 +1,4 @@
 {
   "minimumSeverity": "high",
-  "exceptions": [
-    {
-      "id": "GHSA-qwww-vcr4-c8h2",
-      "package": "react-router",
-      "reason": "The advisory applies only to unstable React Server Components APIs; Packscout Admin is a browser-only SPA and does not use those APIs. Remove when a patched React Router 7 release is available or the stack is deliberately upgraded.",
-      "owner": "framework-foundation",
-      "expires": "2026-10-31"
-    }
-  ]
+  "exceptions": []
 }

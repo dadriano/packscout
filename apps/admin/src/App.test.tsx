@@ -1,0 +1,90 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import type { AuthSessionResponse } from "@packscout/contracts";
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter, Routes } from "react-router-dom";
+import { appRoutes } from "./App.tsx";
+import { ThemeProvider } from "./hooks/useTheme.tsx";
+import { ConfirmProvider } from "./providers/confirm.tsx";
+import { SessionProvider } from "./providers/session.tsx";
+import { ToastProvider } from "./providers/toast.tsx";
+
+function session(role: "admin" | "data_operator"): AuthSessionResponse {
+  return {
+    operator: {
+      id: "00000000-0000-4000-8000-000000000001",
+      email: "operator@packscout.test",
+      displayName: "Morgan Scout",
+      state: "active",
+    },
+    membership: {
+      organizationId: "00000000-0000-4000-8000-000000000010",
+      organizationName: "PackScout",
+      role,
+    },
+    permissions:
+      role === "admin"
+        ? ["operators:manage", "providers:view", "providers:manage"]
+        : ["providers:view", "imports:start", "imports:retry"],
+    csrfToken: "csrf-test-token",
+  };
+}
+
+function renderRoute(path: string, authSession: AuthSessionResponse): string {
+  Object.assign(globalThis, { React });
+  return renderToStaticMarkup(
+    <React.Fragment>
+    <ThemeProvider>
+      <ToastProvider>
+        <ConfirmProvider>
+          <SessionProvider initialSession={authSession}>
+            <MemoryRouter initialEntries={[path]}>
+              <Routes>{appRoutes}</Routes>
+            </MemoryRouter>
+          </SessionProvider>
+        </ConfirmProvider>
+      </ToastProvider>
+    </ThemeProvider>
+    </React.Fragment>,
+  );
+}
+
+test("authenticated shell exposes identity, logout, and admin-only operator navigation", () => {
+  const html = renderRoute("/operators", session("admin"));
+
+  assert.match(html, /Morgan Scout/);
+  assert.match(html, /Administrator/);
+  assert.match(html, />Sign out</);
+  assert.match(html, /href="\/operators"/);
+  assert.match(html, /Operator access/);
+});
+
+test("data operators do not receive administrator navigation", () => {
+  const html = renderRoute("/", session("data_operator"));
+
+  assert.match(html, /Data operator/);
+  assert.doesNotMatch(html, /href="\/operators"/);
+  assert.match(html, /href="\/providers"/);
+  assert.match(html, /aria-label="Admin navigation"/);
+});
+
+test("data operators can open provider health without receiving mutation controls", () => {
+  const html = renderRoute("/providers", session("data_operator"));
+
+  assert.match(html, /Data providers/);
+  assert.match(html, /Read-only access/);
+  assert.doesNotMatch(html, /Add provider/);
+});
+
+test("data operators receive pipeline status, run, quarantine, and alert navigation", () => {
+  const html = renderRoute("/runs", session("data_operator"));
+
+  assert.match(html, /Data pipeline/);
+  assert.match(html, /href="\/operations"/);
+  assert.match(html, /href="\/runs"/);
+  assert.match(html, /href="\/quarantine"/);
+  assert.match(html, /href="\/alerts"/);
+  assert.match(html, /Import runs/);
+  assert.doesNotMatch(html, /href="\/operators"/);
+});

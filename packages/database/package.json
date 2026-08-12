@@ -1,0 +1,37 @@
+{
+  "name": "@packscout/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protected-evidence": "./src/protected-evidence.ts",
+    "./schema": "./src/schema/index.ts",
+    "./test-support": "./src/test-support.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "migration:generate:local": "drizzle-kit generate",
+    "migration:check:local": "drizzle-kit check"
+  },
+  "dependencies": {
+    "@packscout/contracts": "0.0.0",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.4",
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9.17.0",
+    "globals": "^15.14.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.19.1"
+  }
+}

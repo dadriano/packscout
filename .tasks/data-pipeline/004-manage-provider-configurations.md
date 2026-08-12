@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/001](001-protect-data-operations.md), [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/003](003-persist-source-and-canonical-history.md)  
 **Blocks:** [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md), [data-pipeline/011](011-manage-providers-in-admin.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write the configuration state-transition table for draft, tested, enabled, disabled, and archived revisions, including which role can perform each transition and what happens to scheduled or active runs.
+**Status:** done
 
 ## Objective
 
@@ -50,8 +46,16 @@ The adapter resolver receives an enabled configuration revision and a server-onl
 
 ## Acceptance Criteria
 
-- [ ] Configuration validation rejects unknown adapters, invalid endpoints, invalid timing values, missing bearer secrets, and conflicting active configurations with stable errors.
-- [ ] A successful connection test validates the first page without creating raw data, canonical data, a run, or a cursor checkpoint; failed tests cannot enable the revision.
-- [ ] Enabling a replacement version preserves prior configuration and run provenance and leaves exactly one enabled configuration for the platform.
-- [ ] Disabling or archiving stops future scheduling, lets an active revision-bound run finish, and never reveals or deletes the bearer secret history improperly.
-- [ ] Administrator and data-operator permissions, tenant scope, secret masking, optimistic conflicts, and audit behavior have direct boundary tests.
+- [x] Configuration validation rejects unknown adapters, invalid endpoints, invalid timing values, missing bearer secrets, and conflicting active configurations with stable errors.
+- [x] A successful connection test validates the first page without creating raw data, canonical data, a run, or a cursor checkpoint; failed tests cannot enable the revision.
+- [x] Enabling a replacement version preserves prior configuration and run provenance and leaves exactly one enabled configuration for the platform.
+- [x] Disabling or archiving stops future scheduling, lets an active revision-bound run finish, and never reveals or deletes the bearer secret history improperly.
+- [x] Administrator and data-operator permissions, tenant scope, secret masking, optimistic conflicts, and audit behavior have direct boundary tests.
+
+## Spec Compliance
+
+- Strict public DTOs and stable service errors validate adapter/platform identities, endpoint policy, authentication decisions, timing bounds, lifecycle commands, and optimistic revision IDs.
+- Credentials use AES-256-GCM with organization/provider/revision-bound authenticated data and a versioned keyring; reads expose only `hasBearerSecret`, while retired immutable revision credentials remain available to already-bound runtime work.
+- The configuration repository preserves immutable revisions, serializes replacement races, records bounded connection-test evidence, activates only the exact currently tested revision, retains cursor/run provenance, and stops future scheduling on disable/archive.
+- Connection testing resolves the registered transport, derives one exact allowed host, uses bounded time/body limits, and proves it creates no run, cursor, raw page, source record, or canonical revision.
+- Direct integration tests cover admin/data-operator roles, tenant hiding, unsafe endpoints, unknown adapters, duplicate platforms, failed/repeated tests, optimistic conflicts, replacements, running prior revisions, lifecycle transitions, secret masking, and audit safety. Focused contracts/services/database checks and the append-only migration gate pass.

@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/004](004-manage-provider-configurations.md)  
 **Blocks:** [data-pipeline/006](006-quarantine-and-retry-invalid-records.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md), [data-pipeline/012](012-operate-imports-in-admin.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Describe one complete run timeline from an enabled provider with no cursor through two backfill pages and a terminal `has_more: false` response, naming every durable checkpoint before the next external request begins.
+**Status:** done
 
 ## Objective
 
@@ -55,8 +51,16 @@ For each page the workflow publishes durable facts in this order: raw page accep
 
 ## Acceptance Criteria
 
-- [ ] A no-cursor provider backfills multiple pages to `has_more: false`, stores every raw page before acknowledgement, and resumes the next run from the final opaque cursor.
-- [ ] Replaying a page or retrying after a crash produces no duplicate current records or revisions and leaves cursor, page, run, and counters consistent.
-- [ ] Valid records commit while invalid records enter quarantine, the cursor advances, and the terminal run becomes incomplete rather than blocked or falsely successful.
-- [ ] Authentication failure, rate limiting, timeout, unreachable endpoint, invalid JSON, invalid page contract, non-advancing cursor, and persistence failure produce distinct stable outcomes without leaking secrets or raw data.
-- [ ] Manual and scheduled triggers share one workflow, overlapping execution is prevented, and disabling a configuration permits only its already-active run to finish.
+- [x] A no-cursor provider backfills multiple pages to `has_more: false`, stores every raw page before acknowledgement, and resumes the next run from the final opaque cursor.
+- [x] Replaying a page or retrying after a crash produces no duplicate current records or revisions and leaves cursor, page, run, and counters consistent.
+- [x] Valid records commit while invalid records enter quarantine, the cursor advances, and the terminal run becomes incomplete rather than blocked or falsely successful.
+- [x] Authentication failure, rate limiting, timeout, unreachable endpoint, invalid JSON, invalid page contract, non-advancing cursor, and persistence failure produce distinct stable outcomes without leaking secrets or raw data.
+- [x] Manual and scheduled triggers share one workflow, overlapping execution is prevented, and disabling a configuration permits only its already-active run to finish.
+
+## Spec Compliance
+
+- `ProviderImportService` owns one workflow for manual and scheduled requests, database-enforced active-run exclusivity, lease claim/reclaim, immutable configuration resolution, bounded transient retry, cursor walking, safe terminal classification, and provider-head completion.
+- The Drizzle run repository persists actors, leases, attempts, request/retry counters, checkpoints, head state, and bounded failures. Its partial unique index serializes queued/running work and tenant-scoped compare-and-set operations reject foreign or stale workers.
+- The page planner validates exact mapper/source correspondence and delegates provider-neutral candidates through a projection port. Valid-but-unmappable records store protected source evidence once and link quarantine/outcome rows; invalid envelopes use stable page/kind/record-index identity with nullable source IDs.
+- `commitPage` atomically writes raw evidence, valid outcomes, linked quarantines, canonical commands, run counters, and the opaque next cursor only under active worker ownership. Crash-after-commit recovery resumes from the durable checkpoint without replaying source history.
+- Integration tests cover two-page backfill/resume, overlap/coalescing, tenant denial, disable-after-start, mixed page outcomes, ownership loss, bounded retry, distinct sanitized transport/cursor/persistence failures, and no raw/audit leakage. Services 43/43 and database 8/8 tests plus lint, typecheck, migration, boundary, dependency, script, ratchet, and diff checks pass.

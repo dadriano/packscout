@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md)  
 **Blocks:** [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md), [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write a worked calculation fixture with three complete probability buckets, midpoint values, USD pricing, a per-draw basis, and two draws per pack; record the expected gross estimate, EV percentage, coverage, and method evidence.
+**Status:** done
 
 ## Objective
 
@@ -66,8 +62,17 @@ The calculator is deterministic for the same inputs and method version and has n
 
 ## Acceptance Criteria
 
-- [ ] Complete per-pack and per-draw fixtures produce the documented midpoint estimate and EV percentage with deterministic rounding and evidence.
-- [ ] Incomplete probabilities, invalid bounds, open-ended buckets, unsupported currency, unknown token, missing price, invalid draw count, and ambiguous basis produce unavailable results with stable reasons.
-- [ ] Provider-reported EV remains unchanged and separately identifiable whether PackScout EV is estimated or unavailable.
-- [ ] Relevant source changes create calculation history, equivalent inputs are idempotent, and every result identifies method version, source revisions, coverage, source time, and calculation time.
-- [ ] Tests prove the shared calculator is provider-neutral and never labels a result exact or calls an external valuation or currency service.
+- [x] Complete per-pack and per-draw fixtures produce the documented midpoint estimate and EV percentage with deterministic rounding and evidence.
+- [x] Incomplete probabilities, invalid bounds, open-ended buckets, unsupported currency, unknown token, missing price, invalid draw count, and ambiguous basis produce unavailable results with stable reasons.
+- [x] Provider-reported EV remains unchanged and separately identifiable whether PackScout EV is estimated or unavailable.
+- [x] Relevant source changes create calculation history, equivalent inputs are idempotent, and every result identifies method version, source revisions, coverage, source time, and calculation time.
+- [x] Tests prove the shared calculator is provider-neutral and never labels a result exact or calls an external valuation or currency service.
+
+## Spec Compliance
+
+- Added a deterministic integer/rational midpoint calculator with aggregate half-up rounding, explicit probability tolerance, per-pack/per-draw semantics, and allowlisted USD/stablecoin policy.
+- Made incomplete inventory, missing/open bounds, incomplete coverage, unsupported currencies, ambiguous basis, invalid draw count, and missing price explicit unavailable reasons instead of synthetic values.
+- Persisted source-linked `estimated_ev` canonical revisions with method/version, input manifest, fingerprint, coverage, timestamps, limitations, and a browser-safe explanation DTO.
+- Proved relevant-input and method changes revise history, equivalent inputs remain idempotent, and provider-reported EV stays separate from PackScout Estimated EV.
+- Enqueued changed pack and EV-input revision pairs atomically with page persistence, then composed bounded, lease-based, restart-safe worker processing through the shared calculator and canonical history repository.
+- Made verified USD-stablecoin parity an explicit fail-closed worker configuration; no stablecoin is trusted when the deployment allowlist is unset.

@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/009](009-calculate-estimated-ev.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Turn `collector_crypt.json` and `courtyard.json` into sanitized contract fixtures and prove that one source catalog array can produce both purchasable packs and supporting card or price-asset records.
+**Status:** done
 
 ## Objective
 
@@ -51,8 +47,15 @@ EV candidates identify exactly which source buckets, values, currencies, basis, 
 
 ## Acceptance Criteria
 
-- [ ] Every valid envelope in `collector_crypt.json` and `courtyard.json` imports or idempotently repeats with cards, price records, packs, pulls, and sales classified correctly.
-- [ ] Purchasable packs remain distinct from supporting assets, source relationships resolve when possible, and out-of-page references remain recoverable.
-- [ ] Complete supported Courtyard or Collector Crypt distributions calculate the midpoint estimate, while partial top lists, incomplete weights, ambiguous basis, or unsupported values produce stable unavailable evidence.
-- [ ] Provider EV, expected value, or target EV never substitutes for PackScout Estimated EV and remains separately labelled with source time.
-- [ ] Provider-specific parsing remains isolated and canonical actor, error, log, metric, notification, and browser data contain no raw identity or payload leakage.
+- [x] Every valid envelope in `collector_crypt.json` and `courtyard.json` imports or idempotently repeats with cards, price records, packs, pulls, and sales classified correctly.
+- [x] Purchasable packs remain distinct from supporting assets, source relationships resolve when possible, and out-of-page references remain recoverable.
+- [x] Complete supported Courtyard or Collector Crypt distributions calculate the midpoint estimate, while partial top lists, incomplete weights, ambiguous basis, or unsupported values produce stable unavailable evidence.
+- [x] Provider EV, expected value, or target EV never substitutes for PackScout Estimated EV and remains separately labelled with source time.
+- [x] Provider-specific parsing remains isolated and canonical actor, error, log, metric, notification, and browser data contain no raw identity or payload leakage.
+
+## Spec Compliance
+
+- Added provider-local classification for Collector Crypt cards and gachas plus Courtyard price records and packs, keeping source prefixes outside generic code.
+- Projected inventory, odds, top-item evidence, pulls, sales, nullable relationships, and token-currency limitations through shared candidates with pseudonymous actors.
+- Verified exact supplied source hashes and mapped/projected all 44 Collector Crypt and 41 Courtyard envelopes deterministically.
+- Proved provider-reported EV remains separate and complete supported buckets calculate through the provider-neutral PackScout estimator.

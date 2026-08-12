@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/009](009-calculate-estimated-ev.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Turn `beezie.json` and `clutchpacks.json` into sanitized contract fixtures and list the source fields that map to pack identity, price, availability, probability buckets, values, pulls, sales, and unavailable-EV evidence.
+**Status:** done
 
 ## Objective
 
@@ -51,8 +47,15 @@ EV candidate output follows the shared bucket contract and declares currency, ba
 
 ## Acceptance Criteria
 
-- [ ] Every valid catalog, pull, and sale envelope in `beezie.json` and `clutchpacks.json` imports or idempotently repeats, and intentionally empty or nullable fields do not become false errors.
-- [ ] Prices, statuses, event categories, transaction identities, source times, supporting assets, and null pack links map to the documented canonical values.
-- [ ] Complete supported bucket fixtures calculate PackScout Estimated EV; incomplete coverage, ambiguous basis, invalid numbers, or unverified currency keep the pack with a stable unavailable reason.
-- [ ] Provider-reported values remain separate, raw fields remain replayable for ninety days, and canonical actor data contains no username or raw wallet address.
-- [ ] Adding or changing either mapping requires no provider-name branch in generic ingestion, persistence, scheduling, quarantine, calculation, or notification behavior.
+- [x] Every valid catalog, pull, and sale envelope in `beezie.json` and `clutchpacks.json` imports or idempotently repeats, and intentionally empty or nullable fields do not become false errors.
+- [x] Prices, statuses, event categories, transaction identities, source times, supporting assets, and null pack links map to the documented canonical values.
+- [x] Complete supported bucket fixtures calculate PackScout Estimated EV; incomplete coverage, ambiguous basis, invalid numbers, or unverified currency keep the pack with a stable unavailable reason.
+- [x] Provider-reported values remain separate, raw fields remain replayable for ninety days, and canonical actor data contains no username or raw wallet address.
+- [x] Adding or changing either mapping requires no provider-name branch in generic ingestion, persistence, scheduling, quarantine, calculation, or notification behavior.
+
+## Spec Compliance
+
+- Added isolated Beezie and ClutchPacks mapping adapters with stable source identities, deterministic numeric parsing, source-specific failure codes, and no provider branches in shared orchestration.
+- Mapped micro-USDC evidence, packs, supporting assets, null relationships, pulls, sales, and provider-reported values while keeping unverified currencies explicit.
+- Verified the supplied source hashes and mapped/projected all 34 Beezie and 44 ClutchPacks envelopes, including complete and unavailable EV outcomes.
+- Registered both adapters through the shared eight-platform manifest and proved canonical actor output excludes source usernames and wallets.

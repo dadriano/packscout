@@ -1,10 +1,6 @@
 # Feature: Data Pipeline
 
-## Start Here
-
-Open [data-pipeline/001](001-protect-data-operations.md) and [data-pipeline/002](002-establish-provider-feed-contract.md) in parallel. The first checkpoint is a reviewed access-control contract plus an executable feed-contract test built from the supplied sample envelopes.
-
-**Progress:** 0/18 tasks complete
+**Progress:** 18/18 tasks complete
 
 ## Context
 
@@ -58,39 +54,39 @@ The repository currently has independent frontend and admin foundations but no a
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 001 | [Protect data operations](001-protect-data-operations.md) | large | not started | none |
-| 002 | [Establish the provider feed contract](002-establish-provider-feed-contract.md) | medium | not started | none |
-| 003 | [Persist source and canonical history](003-persist-source-and-canonical-history.md) | large | not started | 002 |
-| 004 | [Manage provider configurations](004-manage-provider-configurations.md) | large | not started | 001, 002, 003 |
-| 005 | [Import cursor pages idempotently](005-import-cursor-pages-idempotently.md) | large | not started | 002, 003, 004 |
+| 001 | [Protect data operations](001-protect-data-operations.md) | large | done | none |
+| 002 | [Establish the provider feed contract](002-establish-provider-feed-contract.md) | medium | done | none |
+| 003 | [Persist source and canonical history](003-persist-source-and-canonical-history.md) | large | done | 002 |
+| 004 | [Manage provider configurations](004-manage-provider-configurations.md) | large | done | 001, 002, 003 |
+| 005 | [Import cursor pages idempotently](005-import-cursor-pages-idempotently.md) | large | done | 002, 003, 004 |
 
 ### Projection and reliability
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 006 | [Quarantine and retry invalid records](006-quarantine-and-retry-invalid-records.md) | medium | not started | 005 |
-| 007 | [Project catalog and inventory data](007-project-catalog-and-inventory-data.md) | large | not started | 002, 003, 005 |
-| 008 | [Project pulls and sales](008-project-pulls-and-sales.md) | large | not started | 002, 003, 005 |
-| 009 | [Calculate PackScout Estimated EV](009-calculate-estimated-ev.md) | large | not started | 003, 007 |
-| 010 | [Schedule imports and track freshness](010-schedule-imports-and-track-freshness.md) | large | not started | 003, 004, 005 |
+| 006 | [Quarantine and retry invalid records](006-quarantine-and-retry-invalid-records.md) | medium | done | 005 |
+| 007 | [Project catalog and inventory data](007-project-catalog-and-inventory-data.md) | large | done | 002, 003, 005 |
+| 008 | [Project pulls and sales](008-project-pulls-and-sales.md) | large | done | 002, 003, 005 |
+| 009 | [Calculate PackScout Estimated EV](009-calculate-estimated-ev.md) | large | done | 003, 007 |
+| 010 | [Schedule imports and track freshness](010-schedule-imports-and-track-freshness.md) | large | done | 003, 004, 005 |
 
 ### Operator experience and operations
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 011 | [Manage providers in the admin](011-manage-providers-in-admin.md) | large | not started | 001, 004, 010 |
-| 012 | [Operate imports in the admin](012-operate-imports-in-admin.md) | large | not started | 001, 005, 006, 010 |
-| 013 | [Enforce retention and operational notifications](013-enforce-retention-and-operational-notifications.md) | large | not started | 003, 005, 006, 010 |
+| 011 | [Manage providers in the admin](011-manage-providers-in-admin.md) | large | done | 001, 004, 010 |
+| 012 | [Operate imports in the admin](012-operate-imports-in-admin.md) | large | done | 001, 005, 006, 010 |
+| 013 | [Enforce retention and operational notifications](013-enforce-retention-and-operational-notifications.md) | large | done | 003, 005, 006, 010 |
 
 ### Provider mappings and launch
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 014 | [Map Beezie and ClutchPacks](014-map-beezie-and-clutchpacks.md) | large | not started | 002, 005, 007, 008, 009 |
-| 015 | [Map Collector Crypt and Courtyard](015-map-collector-crypt-and-courtyard.md) | large | not started | 002, 005, 007, 008, 009 |
-| 016 | [Map GameStop and Phygitals](016-map-gamestop-and-phygitals.md) | large | not started | 002, 005, 007, 008, 009 |
-| 017 | [Map Stadium Vault and Trove](017-map-stadium-vault-and-trove.md) | large | not started | 002, 005, 007, 008, 009 |
-| 018 | [Validate backfill and incremental launch](018-validate-backfill-and-incremental-launch.md) | large | not started | 010–017 |
+| 014 | [Map Beezie and ClutchPacks](014-map-beezie-and-clutchpacks.md) | large | done | 002, 005, 007, 008, 009 |
+| 015 | [Map Collector Crypt and Courtyard](015-map-collector-crypt-and-courtyard.md) | large | done | 002, 005, 007, 008, 009 |
+| 016 | [Map GameStop and Phygitals](016-map-gamestop-and-phygitals.md) | large | done | 002, 005, 007, 008, 009 |
+| 017 | [Map Stadium Vault and Trove](017-map-stadium-vault-and-trove.md) | large | done | 002, 005, 007, 008, 009 |
+| 018 | [Validate backfill and incremental launch](018-validate-backfill-and-incremental-launch.md) | large | done | 010–017 |
 
 ## Build Order
 
@@ -117,4 +113,4 @@ The repository currently has independent frontend and admin foundations but no a
 
 ## Next Action
 
-Open [data-pipeline/001](001-protect-data-operations.md) and [data-pipeline/002](002-establish-provider-feed-contract.md), assign one builder to each, and complete their Start Here actions.
+Use `docs/data-pipeline-launch-scorecard.md` to provision preproduction, run the real-provider deployment gate, reconcile real counts, and obtain administrator launch approval.

@@ -5,11 +5,7 @@
 **Depends on:** [data-pipeline/001](001-protect-data-operations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/006](006-quarantine-and-retry-invalid-records.md), [data-pipeline/010](010-schedule-imports-and-track-freshness.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** not started
-
-## Start Here
-
-Write the operator walkthrough for a stale platform with an incomplete run: inspect health, open the run, understand the quarantined record, retry it, start a manual catch-up, and verify recovery.
+**Status:** done
 
 ## Objective
 
@@ -52,8 +48,17 @@ Cursor previews are bounded display strings, not inputs for browser-controlled c
 
 ## Acceptance Criteria
 
-- [ ] Admin and data-operator users can move from provider status to run detail and quarantine resolution with accurate counts, timestamps, immutable run state, and current quality state.
-- [ ] Manual runs use the shared ingestion workflow, show active conflicts clearly, and recover stale status only after reaching the provider head.
-- [ ] Single and bounded-batch quarantine retries expose per-record progress and outcomes without rewinding cursors or changing historical run state.
-- [ ] Full raw payloads, usernames, wallet addresses, bearer tokens, and unbounded error bodies never reach browser responses, rendered state, or client logs.
-- [ ] Desktop and mobile browser smoke checks cover navigation, filters, pagination, dialogs, live status feedback, keyboard flow, focus, and no page-level overflow.
+- [x] Admin and data-operator users can move from provider status to run detail and quarantine resolution with accurate counts, timestamps, immutable run state, and current quality state.
+- [x] Manual runs use the shared ingestion workflow, show active conflicts clearly, and recover stale status only after reaching the provider head.
+- [x] Single and bounded-batch quarantine retries expose per-record progress and outcomes without rewinding cursors or changing historical run state.
+- [x] Full raw payloads, usernames, wallet addresses, bearer tokens, and unbounded error bodies never reach browser responses, rendered state, or client logs.
+- [x] Desktop and mobile browser smoke checks cover navigation, filters, pagination, dialogs, live status feedback, keyboard flow, focus, and no page-level overflow.
+
+## Spec Compliance
+
+- Automated: `packages/database/src/admin-operation-read-repository.integration.test.ts` proves tenant-scoped keyset pagination, grouped run/page/outcome counters, bounded run detail, quarantine filters, and atomic expected-revision manual-run creation.
+- Automated: `apps/admin/server/import-operations-runtime.integration.test.ts` composes the real transport revision, platform manifest mapper, canonical projection, persistence, manual-run coalescing, and independent quarantine resolution.
+- Automated: `apps/admin/server/routes/import-operations.behavior.test.ts` covers auth, roles, tenant scope, validation, rate limits, manual conflicts, bounded retry batches, safe DTOs, and secret/raw-identity exclusion.
+- Automated: `apps/admin/src/components/operations/OperationLedgers.test.tsx` and `apps/admin/src/App.test.tsx` cover independent freshness/quality state, immutable run outcomes, expired retry controls, and data-operator navigation.
+- Browser: authenticated desktop and compact-width smoke passes covered provider status, run and quarantine navigation, filters, pagination controls, dialog flows, focusable controls, and no page-level horizontal overflow.
+- Verification: admin lint, typecheck, 50 tests, production build, and boundary checks passed.

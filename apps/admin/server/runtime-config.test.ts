@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readPort } from "./runtime-config.ts";
+import {
+  readAllowedOrigins,
+  readBase64Key,
+  readPort,
+  readPositiveDuration,
+  readRequiredSecret,
+  readTrustedProxies,
+} from "./runtime-config.ts";
 
 test("admin ports use a validated fallback", () => {
   assert.equal(readPort(undefined, 5101, "PACKSCOUT_ADMIN_PORT"), 5101);
@@ -12,6 +19,59 @@ test("admin ports fail closed on invalid values", () => {
     assert.throws(
       () => readPort(value, 5101, "PACKSCOUT_ADMIN_PORT"),
       /PACKSCOUT_ADMIN_PORT must be an integer between 1 and 65535/,
+    );
+  }
+});
+
+test("admin security configuration fails closed and normalizes trusted origins", () => {
+  assert.equal(readRequiredSecret("x".repeat(32), "SECRET", 32).length, 32);
+  assert.throws(() => readRequiredSecret("short", "SECRET", 32), /SECRET/);
+  assert.equal(readPositiveDuration(undefined, 60_000, "IDLE_MS"), 60_000);
+  assert.throws(() => readPositiveDuration("0", 60_000, "IDLE_MS"), /IDLE_MS/);
+  assert.deepEqual(
+    readAllowedOrigins(
+      "https://admin.packscout.test/path, https://admin.packscout.test",
+      [],
+      "ORIGINS",
+    ),
+    ["https://admin.packscout.test"],
+  );
+  assert.throws(() => readAllowedOrigins("not a url", [], "ORIGINS"), /ORIGINS/);
+});
+
+test("provider credential keys require canonical base64 with exactly 32 bytes", () => {
+  const encoded = Buffer.alloc(32, 7).toString("base64");
+  assert.deepEqual(readBase64Key(encoded, "PROVIDER_KEY"), Buffer.alloc(32, 7));
+  for (const invalid of [undefined, "not base64", Buffer.alloc(31).toString("base64")]) {
+    assert.throws(() => readBase64Key(invalid, "PROVIDER_KEY"), /PROVIDER_KEY/);
+  }
+});
+
+test("trusted proxies accept only explicit IP addresses and bounded CIDR ranges", () => {
+  assert.deepEqual(
+    readTrustedProxies(undefined, "PACKSCOUT_ADMIN_TRUSTED_PROXIES"),
+    [],
+  );
+  assert.deepEqual(
+    readTrustedProxies(
+      "10.0.0.12, 10.0.0.0/24, 2001:db8::1/128, 10.0.0.12",
+      "PACKSCOUT_ADMIN_TRUSTED_PROXIES",
+    ),
+    ["10.0.0.12", "10.0.0.0/24", "2001:db8::1/128"],
+  );
+
+  for (const invalid of [
+    "*",
+    "true",
+    "loopback",
+    "0.0.0.0/0",
+    "::/0",
+    "10.0.0.0/33",
+    "2001:db8::/129",
+  ]) {
+    assert.throws(
+      () => readTrustedProxies(invalid, "PACKSCOUT_ADMIN_TRUSTED_PROXIES"),
+      /PACKSCOUT_ADMIN_TRUSTED_PROXIES/,
     );
   }
 });
