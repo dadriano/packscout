@@ -31,6 +31,31 @@ const ids = {
   secret: "00000000-0000-4000-8000-000000000040",
 } as const;
 
+async function endPoolFully(pool: Pool): Promise<void> {
+  const expectedRemovals = pool.totalCount;
+  if (expectedRemovals === 0) {
+    await pool.end();
+    return;
+  }
+
+  let removalCount = 0;
+  let resolveRemovals: (() => void) | undefined;
+  const removals = new Promise<void>((resolve) => {
+    resolveRemovals = resolve;
+  });
+  const onRemove = () => {
+    removalCount += 1;
+    if (removalCount === expectedRemovals) resolveRemovals?.();
+  };
+  pool.on("remove", onRemove);
+  try {
+    await pool.end();
+    await removals;
+  } finally {
+    pool.off("remove", onRemove);
+  }
+}
+
 async function createDisposableDatabase(): Promise<{
   db: Pool;
   databaseUrl: string;
@@ -53,9 +78,12 @@ async function createDisposableDatabase(): Promise<{
     db,
     databaseUrl: databaseUrl.toString(),
     stop: async () => {
-      await db.end();
-      await admin.query(`drop database if exists "${databaseName}" with (force)`);
-      await admin.end();
+      try {
+        await endPoolFully(db);
+        await admin.query(`drop database if exists "${databaseName}" with (force)`);
+      } finally {
+        await endPoolFully(admin);
+      }
     },
   };
 }
