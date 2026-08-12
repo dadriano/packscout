@@ -7,10 +7,10 @@ import type { ViteDevServer } from "vite";
 import {
   createPrismaClientLifecycle,
   DatabaseLoginAttemptLimiter,
-  DrizzleAuthAuditSink,
-  DrizzleAuthRepository,
-  DrizzleProviderConfigurationRepository,
-  DrizzleProviderHealthRepository,
+  PrismaAuthAuditSink,
+  PrismaAuthRepository,
+  PrismaProviderConfigurationRepository,
+  PrismaProviderHealthRepository,
 } from "@packscout/database";
 import { createAdminApp } from "./app.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
@@ -112,19 +112,19 @@ let developmentServer: ViteDevServer | undefined;
 try {
   await databaseLifecycle.start();
   const database = databaseLifecycle.client;
-  const providerRepository = new DrizzleProviderConfigurationRepository(database);
+  const providerRepository = new PrismaProviderConfigurationRepository(database);
   const operational = createAdminOperationalRuntime({
     database,
     actorPseudonymKey: providerActorKey,
   });
   const auth = await createAdminAuthRuntime({
-    repository: new DrizzleAuthRepository(database),
+    repository: new PrismaAuthRepository(database),
     loginLimiter: new DatabaseLoginAttemptLimiter(database, {
       windowMs: 15 * 60 * 1_000,
       blockMs: 15 * 60 * 1_000,
       maximumFailures: 8,
     }),
-    audit: new DrizzleAuthAuditSink(database),
+    audit: new PrismaAuthAuditSink(database),
     sessionSecret,
     sessionIdleMs,
     sessionAbsoluteMs,
@@ -136,7 +136,7 @@ try {
     auth,
     providers: createProviderAdminRuntime({
       repository: providerRepository,
-      healthRepository: new DrizzleProviderHealthRepository(database),
+      healthRepository: new PrismaProviderHealthRepository(database),
       credentialKey: providerCredentialKey,
       actorPseudonymKey: providerActorKey,
       environment: isDevelopment ? "local" : "production",

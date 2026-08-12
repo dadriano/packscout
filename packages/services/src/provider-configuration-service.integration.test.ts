@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { CreateProviderRequest } from "@packscout/contracts";
 import {
-  DrizzleProviderConfigurationRepository,
+  PrismaProviderConfigurationRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
@@ -174,7 +174,7 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       name: "Other",
     });
     const adapter = new TrackingTransportAdapter();
-    const repository = new DrizzleProviderConfigurationRepository(
+    const repository = new PrismaProviderConfigurationRepository(
       harness.database,
     );
     const credentialCipher = new AesGcmProviderCredentialCipher({
@@ -484,7 +484,7 @@ test("failed connection tests stay sanitized and cannot enable a revision", asyn
       name: "PackScout",
     });
     const service = new ProviderConfigurationService({
-      repository: new DrizzleProviderConfigurationRepository(harness.database),
+      repository: new PrismaProviderConfigurationRepository(harness.database),
       adapters: new ProviderTransportAdapterRegistry([
         new AuthenticationFailureAdapter(),
       ]),

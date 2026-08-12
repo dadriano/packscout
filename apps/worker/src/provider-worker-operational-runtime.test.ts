@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DrizzleAdminNotificationPublisher,
+  PrismaAdminNotificationPublisher,
   PipelineSetupRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
@@ -128,7 +128,7 @@ test("worker operational composition durably alerts on a terminal failed run", a
 
     assert.equal(result, failedRun);
     assert.equal(healthInputs.length, 1);
-    const alerts = new DrizzleAdminNotificationPublisher(harness.database);
+    const alerts = new PrismaAdminNotificationPublisher(harness.database);
     const summaries = await alerts.listAlerts({
       organizationId: ids.organization,
       state: "active",

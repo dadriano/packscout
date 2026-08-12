@@ -11,7 +11,7 @@ Define the common cursor-feed contract and durable persistence model that make p
 
 ## Current System Context
 
-- PackScout has no selected database, migration system, provider configuration, or import tables.
+- PackScout uses PostgreSQL with Prisma ORM, Prisma Client, and Prisma Migrate for its persistence boundary.
 - The eight supplied JSON samples all contain `catalog`, `pulls`, and `sales` arrays.
 - Each outer record has PackScout metadata, while provider-specific fields remain nested in `data`.
 - Sales are absent in the GameStop, Stadium Vault, and Trove samples, and nullable values occur in otherwise valid records.
@@ -21,9 +21,11 @@ Define the common cursor-feed contract and durable persistence model that make p
 
 ### Persistence choice
 
-Use PostgreSQL 16 or newer with Drizzle ORM and SQL migrations. PostgreSQL supplies transactional page commits, JSONB raw evidence, partial uniqueness, row-level locking, keyset pagination, and durable worker coordination without introducing a second queueing datastore.
+Use PostgreSQL 16 or newer with Prisma ORM, Prisma Client, and Prisma Migrate. The Prisma schema is the application data model and checked-in Prisma migration SQL is the database history. PostgreSQL supplies transactional page commits, JSONB raw evidence, partial uniqueness, row-level locking, keyset pagination, and durable worker coordination without introducing a second queueing datastore.
 
-This is a proposed implementation choice because the repository has no current persistence dependency. Re-evaluate only if deployment constraints cannot support PostgreSQL.
+Use generated Prisma Client for tenant-scoped CRUD, relations, keyset reads, bounded batches, and interactive transactions. Keep PostgreSQL-native locks and set-based operations behind organization-scoped repositories, using parameterized `Prisma.sql` with `$queryRaw` or `$executeRaw` only where Prisma Client cannot express the required atomic or bounded behavior. Never use the unsafe raw APIs with dynamic or untrusted input.
+
+Create reviewed Prisma migration SQL for database invariants the Prisma schema cannot express directly, including check constraints and partial indexes. Migration-from-empty and integration tests must prove those invariants; `db push` is not a deployment workflow.
 
 ### Feed contract
 
@@ -70,9 +72,10 @@ A repeated record links to its existing source record and does not create duplic
 
 ### Database ownership
 
-- Add Drizzle schema modules for organizations, providers, configurations, secrets, runs, pages, raw records, and quarantine.
-- Keep SQL migrations append-only after merge and expose environment-specific migration commands.
-- Add repository methods that always require `organizationId` and use transactions for activation and page commit.
+- Add Prisma models for organizations, providers, configurations, secrets, runs, pages, raw records, and quarantine under `packages/database/prisma/schema.prisma`.
+- Keep Prisma migrations append-only after merge, preserving reviewed PostgreSQL-only constraints and indexes, and expose environment-specific migration commands.
+- Add repository methods that always require `organizationId`, use generated Prisma Client by default, and use interactive transactions for activation and page commit.
+- Encapsulate approved parameterized raw SQL inside `packages/database`; callers do not issue ad hoc SQL.
 - Add fixture builders from the eight sample files without copying sample payloads into production code.
 
 ## Database / Schema Changes

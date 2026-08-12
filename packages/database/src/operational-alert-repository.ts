@@ -89,7 +89,7 @@ function eventMatches(
   );
 }
 
-export class DrizzleAdminNotificationPublisher {
+export class PrismaAdminNotificationPublisher {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async publish(

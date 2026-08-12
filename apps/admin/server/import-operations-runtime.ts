@@ -1,11 +1,11 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
-  DrizzleAdminImportRunRepository,
-  DrizzleAdminProviderOperationRepository,
-  DrizzleImportRunRepository,
-  DrizzleProviderConfigurationRepository,
-  DrizzleProviderHealthRepository,
-  DrizzleQuarantineRepository,
+  PrismaAdminImportRunRepository,
+  PrismaAdminProviderOperationRepository,
+  PrismaImportRunRepository,
+  PrismaProviderConfigurationRepository,
+  PrismaProviderHealthRepository,
+  PrismaQuarantineRepository,
   IngestionPersistenceRepository,
   type AdminImportRunRecord,
   type AdminImportRunState,
@@ -37,7 +37,7 @@ import type {
 } from "./routes/import-operations.ts";
 
 type AdminOperationsDatabase = ConstructorParameters<
-  typeof DrizzleAdminImportRunRepository
+  typeof PrismaAdminImportRunRepository
 >[0];
 
 export interface AdminImportOperationsRuntimeInput {
@@ -230,11 +230,11 @@ export function createAdminImportOperationsRuntime(
 ): Omit<ImportOperationsRouterDependencies, "auth" | "cookiePolicy" | "sameOrigin"> {
   const clock = { now: () => new Date() };
   const keyer = actorKeyer(input.actorPseudonymKey);
-  const providerReads = new DrizzleAdminProviderOperationRepository(input.database);
-  const runReads = new DrizzleAdminImportRunRepository(input.database);
-  const quarantineRepository = new DrizzleQuarantineRepository(input.database);
+  const providerReads = new PrismaAdminProviderOperationRepository(input.database);
+  const runReads = new PrismaAdminImportRunRepository(input.database);
+  const quarantineRepository = new PrismaQuarantineRepository(input.database);
   const health = new ProviderHealthService(
-    new DrizzleProviderHealthRepository(input.database),
+    new PrismaProviderHealthRepository(input.database),
     clock,
     input.operational,
   );
@@ -250,8 +250,8 @@ export function createAdminImportOperationsRuntime(
     ),
   );
   const imports = new ProviderImportService({
-    runs: new DrizzleImportRunRepository(input.database),
-    revisions: new DrizzleProviderConfigurationRepository(input.database),
+    runs: new PrismaImportRunRepository(input.database),
+    revisions: new PrismaProviderConfigurationRepository(input.database),
     pages: ingestion,
     transportAdapters: new ProviderTransportAdapterRegistry([
       new HttpCursorAdapter(),

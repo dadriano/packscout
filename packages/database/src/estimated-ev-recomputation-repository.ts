@@ -90,7 +90,7 @@ function boundedInteger(
   return value;
 }
 
-export class DrizzleEstimatedEvRecomputationRepository
+export class PrismaEstimatedEvRecomputationRepository
   implements EstimatedEvRecomputationQueuePort
 {
   constructor(private readonly database: PackscoutPrismaClient) {}

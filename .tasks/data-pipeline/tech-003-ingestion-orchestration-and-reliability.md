@@ -23,7 +23,11 @@ Define how PackScout schedules provider work, walks cursor pages safely, retries
 
 Run one stateless `apps/worker` process type. Each worker polls for due providers and queued operations, claims work in a short transaction using `FOR UPDATE SKIP LOCKED`, writes a worker lease and heartbeat, then performs network and projection work outside the claim transaction.
 
+Implement the atomic claim as a parameterized PostgreSQL query through the Prisma transaction client because generated Prisma Client operations do not expose `SKIP LOCKED`.
+
 Enforce one queued or running import per provider with a partial unique index. Manual triggers return the existing active run when deduplicated rather than creating parallel work.
+
+Create the partial index in reviewed Prisma migration SQL and verify it in migration integration tests.
 
 ### Run lifecycle
 

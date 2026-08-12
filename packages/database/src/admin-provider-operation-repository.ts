@@ -9,7 +9,7 @@ export interface AdminProviderOperationPage {
   readonly hasMore: boolean;
 }
 
-export class DrizzleAdminProviderOperationRepository {
+export class PrismaAdminProviderOperationRepository {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async listPage(input: {

@@ -3,11 +3,11 @@ import globals from "globals";
 import typescriptEslint from "typescript-eslint";
 
 export default typescriptEslint.config(
-  { ignores: ["dist/**", "drizzle/**"] },
+  { ignores: ["dist/**"] },
   eslint.configs.recommended,
   ...typescriptEslint.configs.recommended,
   {
-    files: ["src/**/*.ts", "prisma/**/*.ts", "drizzle.config.ts"],
+    files: ["src/**/*.ts", "prisma/**/*.ts"],
     languageOptions: { globals: globals.node },
   },
 );

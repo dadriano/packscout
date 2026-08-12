@@ -7,10 +7,10 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
   DatabaseLoginAttemptLimiter,
-  DrizzleAuthAuditSink,
-  DrizzleAuthRepository,
-  DrizzleProviderConfigurationRepository,
-  DrizzleProviderHealthRepository,
+  PrismaAuthAuditSink,
+  PrismaAuthRepository,
+  PrismaProviderConfigurationRepository,
+  PrismaProviderHealthRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
       slug: "packscout-local",
       name: "PackScout Local",
     });
-    const repository = new DrizzleAuthRepository(harness.database);
+    const repository = new PrismaAuthRepository(harness.database);
     const security = createNodeAuthSecurity(sessionSecret);
     const provisioned = await repository.provisionOperator({
       id: randomUUID(),
@@ -155,7 +155,7 @@ async function main(): Promise<void> {
         blockMs: 15 * 60 * 1_000,
         maximumFailures: 8,
       }),
-      audit: new DrizzleAuthAuditSink(harness.database),
+      audit: new PrismaAuthAuditSink(harness.database),
       sessionSecret,
       sessionIdleMs: 60 * 60 * 1_000,
       sessionAbsoluteMs: 12 * 60 * 60 * 1_000,
@@ -165,8 +165,8 @@ async function main(): Promise<void> {
     const app = createAdminApp({
       auth,
       providers: createProviderAdminRuntime({
-        repository: new DrizzleProviderConfigurationRepository(harness.database),
-        healthRepository: new DrizzleProviderHealthRepository(harness.database),
+        repository: new PrismaProviderConfigurationRepository(harness.database),
+        healthRepository: new PrismaProviderHealthRepository(harness.database),
         credentialKey: providerCredentialKey,
         actorPseudonymKey: providerActorKey,
         environment: "local",

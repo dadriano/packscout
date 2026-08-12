@@ -11,7 +11,7 @@ export interface PersistedOperationalHealthSnapshot {
   readonly latestRetentionFailureCode: string | null;
 }
 
-export class DrizzleOperationalHealthRepository {
+export class PrismaOperationalHealthRepository {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async loadSnapshot(input: {

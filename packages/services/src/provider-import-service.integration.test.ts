@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DrizzleImportRunRepository,
-  DrizzleProviderConfigurationRepository,
+  PrismaImportRunRepository,
+  PrismaProviderConfigurationRepository,
   IngestionPersistenceRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
@@ -281,7 +281,7 @@ async function createHarness(
     activatedAt: clock.now(),
     nextRunAt: clock.now(),
   });
-  const runs = new DrizzleImportRunRepository(harness.database);
+  const runs = new PrismaImportRunRepository(harness.database);
   const ingestion = new IngestionPersistenceRepository(harness.database, {
     retentionDays: 90,
     actorPseudonymKey: "fixture-pseudonym-key",
@@ -290,7 +290,7 @@ async function createHarness(
   let nextId = 100;
   const service = new ProviderImportService({
     runs,
-    revisions: new DrizzleProviderConfigurationRepository(harness.database),
+    revisions: new PrismaProviderConfigurationRepository(harness.database),
     pages: options.pageRepository?.(ingestion as never) ?? ingestion,
     transportAdapters: new ProviderTransportAdapterRegistry([transport]),
     pagePlanner: new DefaultProviderImportPagePlanner(

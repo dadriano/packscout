@@ -13,7 +13,7 @@ The real admin, worker, service integration, and embedded local runtimes use the
 
 ## Context
 
-The admin server, provider worker, operational worker paths, EV worker, retention worker, and embedded local admin currently construct a PostgreSQL pool and Drizzle-backed repositories. Test compositions across database, services, admin, and worker packages also create the current migrated database directly.
+At the start of this task, the admin server, provider worker, operational worker paths, EV worker, retention worker, and embedded local admin constructed a PostgreSQL pool and repositories from the prior persistence stack. Test compositions across database, services, admin, and worker packages also created that migrated database directly.
 
 Tasks `003` through `006` prove each Prisma persistence domain in isolation. This task owns shared application composition and public database-package exports so parallel repository work does not create conflicting runtime wiring or transitional aliases.
 
@@ -68,5 +68,5 @@ Task `008` receives a runtime that no longer executes Drizzle. It may then remov
 
 - Related specs reviewed: none
 - Alignment: admin, worker, service integration, and embedded local compositions now start through the shared Prisma lifecycle and inject the Prisma-backed repositories while preserving ORM-neutral service and HTTP contracts
-- Divergences: repository class names remain transitional until task `008` removes the final Drizzle terminology and artifacts; no runtime executes Drizzle or a legacy migration path
+- Divergences: none; task `008` removed the temporary repository class names and all legacy executable artifacts after the runtime cutover
 - Verification: Prisma schema and lifecycle checks pass; service typecheck, 134 tests, and lint pass; admin typecheck, 63 tests, and lint pass; worker typecheck, 19 tests, and lint pass; boundary and script checks pass; the embedded local admin starts successfully against a clean migrated database

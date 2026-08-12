@@ -7,6 +7,7 @@ import type {
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
 import { PACKSCOUT_TRANSACTION_OPTIONS } from "./database.ts";
+import { isPrismaUniqueConstraintError } from "./prisma-error.ts";
 import type {
   PackscoutPrismaClient,
   PackscoutQueryClient,
@@ -82,13 +83,7 @@ function toOperatorSummary(row: OperatorRow, lastAccessAt: Date | null): Operato
   };
 }
 
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
-  );
-}
-
-export class DrizzleAuthRepository {
+export class PrismaAuthRepository {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async findOperatorForLogin(normalizedEmail: string): Promise<LoginOperatorRecord | null> {
@@ -351,7 +346,14 @@ export class DrizzleAuthRepository {
         };
       }, PACKSCOUT_TRANSACTION_OPTIONS);
     } catch (error) {
-      if (isUniqueConstraintError(error)) return { kind: "email_conflict" };
+      if (
+        isPrismaUniqueConstraintError(error, {
+          fields: ["email_normalized"],
+          constraintNames: ["operators_email_normalized_unique"],
+        })
+      ) {
+        return { kind: "email_conflict" };
+      }
       throw error;
     }
   }
@@ -500,7 +502,7 @@ export interface AuthAuditEventInput {
   metadata: Readonly<Record<string, string | boolean | readonly string[]>>;
 }
 
-export class DrizzleAuthAuditSink {
+export class PrismaAuthAuditSink {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async append(event: AuthAuditEventInput): Promise<void> {

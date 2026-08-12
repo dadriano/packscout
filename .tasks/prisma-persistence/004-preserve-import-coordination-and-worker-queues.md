@@ -69,5 +69,5 @@ Task `007` composes the Prisma implementations into the worker and admin runtime
 
 - Related specs reviewed: none
 - Alignment: converted import ownership, scheduling, provider health, and estimated-EV recomputation queues to Prisma while retaining parameterized PostgreSQL locking and claim semantics
-- Divergences: public repository class names remain transitional until the coordinated runtime and cleanup tasks; no compatibility reads or writes were introduced
+- Divergences: none; coordinated runtime and cleanup tasks removed the temporary repository names without introducing compatibility reads or writes
 - Verification: seven real PostgreSQL tests with independent Prisma clients cover coalescing, disjoint claims, lease recovery, stale ownership, atomic counters, schedule cadence, tenant-scoped health, retry timing, and EV terminal outcomes; focused lint and strict TypeScript pass

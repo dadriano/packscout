@@ -5,7 +5,7 @@
 **Depends on:** [prisma-persistence/007](007-cut-over-packscout-runtimes.md)  
 **Blocks:** none  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -53,14 +53,21 @@ No interface is supplied for upgrading an existing Drizzle database, operating b
 
 ## Acceptance Criteria
 
-- [ ] No executable source, package manifest, lockfile selection, export, script, configuration, schema module, migration artifact, or runtime import retains Drizzle.
-- [ ] A clean checkout installs, generates Prisma artifacts, provisions an empty database, validates parity, starts real runtimes, and completes their smoke flows.
-- [ ] The full behavioral matrix preserves tenant, security, transaction, contention, replay, retention, EV, operations, lifecycle, and statement-budget outcomes.
-- [ ] Reset and provisioning documentation clearly excludes existing-data preservation and requires an explicitly confirmed disposable target.
-- [ ] `npm run verify:framework` passes with no new exception, skipped critical regression, compatibility path, or weakened repository rule.
+- [x] No executable source, package manifest, lockfile selection, export, script, configuration, schema module, migration artifact, or runtime import retains Drizzle.
+- [x] A clean checkout installs, generates Prisma artifacts, provisions an empty database, validates parity, starts real runtimes, and completes their smoke flows.
+- [x] The full behavioral matrix preserves tenant, security, transaction, contention, replay, retention, EV, operations, lifecycle, and statement-budget outcomes.
+- [x] Reset and provisioning documentation clearly excludes existing-data preservation and requires an explicitly confirmed disposable target.
+- [x] `npm run verify:framework` passes with no new exception, skipped critical regression, compatibility path, or weakened repository rule.
 
 ## Verification
 
 - Search executable source, manifests, exports, scripts, configuration, and migration directories for remaining Drizzle implementation references.
 - Rehearse install, generation, clean migration, parity inspection, runtime startup, smoke flows, repeated migration validation, and shutdown from a clean checkout.
 - Run all focused persistence and runtime suites followed by `npm run verify:framework` and record only sanitized evidence.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: removed the legacy ORM dependencies, schema exports, factory, configuration, migrations, metadata, package commands, runtime names, and lockfile entries; Prisma is the sole executable persistence and migration path
+- Divergences: none; PostgreSQL-native constraints and parameterized locking and batch queries remain encapsulated behind the Prisma persistence boundary as planned
+- Verification: `npm ci` completed with Prisma generation and zero audit findings; a newly created PostgreSQL 16 database applied the migration, a repeated deploy was a no-op, and the disposable target was removed; schema parity compares all check expressions and partial-index predicates; runtime startup rejects missing or mismatched migration readiness; the Prisma-only guard scanned 341 executable files; `npm run verify:framework` passed all checks, lint, typecheck, tests, statement-budget coverage, and production builds with zero framework findings

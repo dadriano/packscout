@@ -1,9 +1,4 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import type { Pool, PoolClient } from "pg";
-import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import type { PgDatabase } from "drizzle-orm/pg-core";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import * as schema from "./schema/index.ts";
 
 export type PackscoutPrismaClient = PrismaClient;
 export type PackscoutTransactionClient = Prisma.TransactionClient;
@@ -32,6 +27,54 @@ export const PACKSCOUT_TRANSACTION_OPTIONS = Object.freeze({
   timeout: 30_000,
 });
 
+const EXPECTED_MIGRATION = Object.freeze({
+  name: "20260812000000_clean_baseline",
+  checksum: "41576f412f2ff33b12db7d6dcffb19fa88a6c40a09a9ed7200b9904377428a10",
+  tableCount: 28,
+});
+
+interface MigrationReadinessRow {
+  migrationName: string;
+  checksum: string;
+  finishedAt: Date | null;
+  rolledBackAt: Date | null;
+  tableCount: number;
+}
+
+async function assertMigrationReadiness(
+  client: PackscoutPrismaClient,
+): Promise<void> {
+  const rows = await client.$queryRaw<MigrationReadinessRow[]>(Prisma.sql`
+    select migration.migration_name as "migrationName",
+           migration.checksum,
+           migration.finished_at as "finishedAt",
+           migration.rolled_back_at as "rolledBackAt",
+           (
+             select count(*)::integer
+             from pg_class table_class
+             join pg_namespace table_schema
+               on table_schema.oid = table_class.relnamespace
+             where table_schema.nspname = 'public'
+               and table_class.relkind = 'r'
+               and table_class.relname <> '_prisma_migrations'
+           ) as "tableCount"
+    from public."_prisma_migrations" as migration
+    where migration.migration_name = ${EXPECTED_MIGRATION.name}
+    order by migration.started_at desc
+    limit 1
+  `);
+  const migration = rows[0];
+  if (
+    !migration
+    || migration.checksum !== EXPECTED_MIGRATION.checksum
+    || migration.finishedAt === null
+    || migration.rolledBackAt !== null
+    || migration.tableCount !== EXPECTED_MIGRATION.tableCount
+  ) {
+    throw new Error("schema not ready");
+  }
+}
+
 /**
  * Owns exactly one server-side Prisma client. Construction is side-effect free;
  * callers explicitly start the connection and always close it during shutdown.
@@ -49,9 +92,20 @@ export function createPrismaClientLifecycle(
 
   const start = async (): Promise<void> => {
     if (closed) throw new Error("PackScout database lifecycle is closed.");
-    startPromise ??= client.$connect().catch(() => {
+    startPromise ??= (async () => {
+      try {
+        await client.$connect();
+      } catch {
+        throw new Error("PackScout database connection failed.");
+      }
+      try {
+        await assertMigrationReadiness(client);
+      } catch {
+        throw new Error("PackScout database schema is not ready.");
+      }
+    })().catch((error: unknown) => {
       startPromise = undefined;
-      throw new Error("PackScout database connection failed.");
+      throw error;
     });
     await startPromise;
   };
@@ -82,18 +136,4 @@ export function createPrismaClientLifecycle(
       return closePromise;
     },
   };
-}
-
-// Temporary cutover scaffolding. Task 008 removes the Drizzle surface after all
-// repositories and application compositions use the Prisma lifecycle above.
-export type PackscoutSchema = typeof schema;
-export type PackscoutDatabase<TQueryResult extends PgQueryResultHKT> = PgDatabase<
-  TQueryResult,
-  PackscoutSchema
->;
-
-export function createNodePostgresDatabase(
-  client: Pool | PoolClient,
-): NodePgDatabase<PackscoutSchema> {
-  return drizzle(client, { schema });
 }

@@ -104,3 +104,28 @@ test("startup failures are stable and do not expose connection details", async (
     await lifecycle.close();
   }
 });
+
+test("startup fails closed when the expected Prisma migration is not ready", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await harness.client.$executeRaw`
+      delete from public."_prisma_migrations"
+      where migration_name = '20260812000000_clean_baseline'
+    `;
+    const lifecycle = harness.createClientLifecycle();
+    try {
+      await assert.rejects(
+        lifecycle.start(),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(error.message, "PackScout database schema is not ready.");
+          return true;
+        },
+      );
+    } finally {
+      await lifecycle.close();
+    }
+  } finally {
+    await harness.close();
+  }
+});

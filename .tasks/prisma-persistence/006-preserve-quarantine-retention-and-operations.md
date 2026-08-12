@@ -69,5 +69,5 @@ Task `007` composes these implementations into admin and worker runtimes after d
 
 - Related specs reviewed: none
 - Alignment: converted quarantine recovery, protected-payload retention, operational alerts and health, and admin read models to the shared Prisma boundary while retaining parameterized PostgreSQL claims and locks
-- Divergences: public repository names remain transitional for the coordinated runtime cutover; behavior and service contracts are unchanged and there is no compatibility persistence path
+- Divergences: none; the coordinated runtime cutover removed the temporary repository names while keeping behavior and service contracts unchanged
 - Verification: all 39 database tests pass, including independent-client retry and retention contention, stale and foreign ownership, protected-evidence exemptions, pagination and tenant filters, alert deduplication/recovery, and sanitized failures; database typecheck and lint pass

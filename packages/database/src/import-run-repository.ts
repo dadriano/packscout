@@ -114,7 +114,7 @@ function normalizeCounters(counters: Prisma.JsonValue): RunCounters {
   };
 }
 
-export class DrizzleImportRunRepository {
+export class PrismaImportRunRepository {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async requestRun(input: {

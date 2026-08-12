@@ -69,5 +69,5 @@ Tasks `004` and `006` consume the committed run, quarantine, health, and EV work
 
 - Related specs reviewed: none
 - Alignment: migrated atomic ingestion, source and canonical history, projections, relationships, quarantines, EV requests, counters, and cursor checkpoints to one Prisma transaction with parameterized set-based PostgreSQL operations
-- Divergences: none; public repository naming remains transitional until tasks `007` and `008`, with no dual persistence path
+- Divergences: none; tasks `007` and `008` completed the runtime wiring and removed the temporary repository names with no dual persistence path
 - Verification: ten real PostgreSQL persistence tests and seven service integration tests cover ownership, rollback, independent-client revision contention, replay, crash recovery, tenant isolation, provenance, relationships, and EV history; the 550-record page commits in 32 statements against the fewer-than-80 budget

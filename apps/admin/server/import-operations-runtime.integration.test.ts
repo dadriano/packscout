@@ -7,8 +7,8 @@ import { test } from "node:test";
 import type { Express } from "express";
 import {
   DatabaseLoginAttemptLimiter,
-  DrizzleAuthAuditSink,
-  DrizzleAuthRepository,
+  PrismaAuthAuditSink,
+  PrismaAuthRepository,
   IngestionPersistenceRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
@@ -208,7 +208,7 @@ async function createHarness() {
     },
   });
 
-  const authRepository = new DrizzleAuthRepository(harness.database);
+  const authRepository = new PrismaAuthRepository(harness.database);
   const security = createNodeAuthSecurity(sessionSecret);
   const provisioned = await authRepository.provisionOperator({
     id: ids.operator,
@@ -228,7 +228,7 @@ async function createHarness() {
       blockMs: 60_000,
       maximumFailures: 5,
     }),
-    audit: new DrizzleAuthAuditSink(harness.database),
+    audit: new PrismaAuthAuditSink(harness.database),
     sessionSecret,
     sessionIdleMs: 60 * 60_000,
     sessionAbsoluteMs: 12 * 60 * 60_000,

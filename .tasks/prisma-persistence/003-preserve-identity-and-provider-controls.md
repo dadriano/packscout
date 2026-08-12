@@ -69,5 +69,5 @@ Task `007` may compose these implementations into application runtimes after the
 
 - Related specs reviewed: none
 - Alignment: converted identity, sessions, durable login throttling, provider configuration, encrypted-secret history, audit, and protected-evidence access to the shared Prisma client and transaction contract
-- Divergences: public repository class names are retained temporarily so task `007` can cut runtime composition over without changing service ports; task `008` removes transitional persistence naming
+- Divergences: none; task `007` preserved service ports during composition and task `008` removed the temporary persistence naming
 - Verification: three real PostgreSQL identity, contention, tenant, session, and evidence tests; two provider configuration service integration tests; database and service lint; secret-safe audit assertions

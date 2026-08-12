@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DatabaseLoginAttemptLimiter,
-  DrizzleAuthAuditSink,
-  DrizzleAuthRepository,
+  PrismaAuthAuditSink,
+  PrismaAuthRepository,
 } from "./auth-repository.ts";
 import { PersistenceError } from "./persistence-error.ts";
+import { PrismaProviderConfigurationRepository } from "./provider-configuration-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 import { ProtectedEvidenceRepository } from "./protected-evidence.ts";
@@ -52,7 +53,7 @@ test("identity mutations preserve tenant scope, session invalidation, and the fi
       slug: "identity-other",
       name: "Identity Other",
     });
-    const repository = new DrizzleAuthRepository(harness.database);
+    const repository = new PrismaAuthRepository(harness.database);
 
     assert.equal(
       (
@@ -98,6 +99,19 @@ test("identity mutations preserve tenant scope, session invalidation, and the fi
         })
       ).kind,
       "email_conflict",
+    );
+    await assert.rejects(
+      repository.provisionOperator({
+        id: firstOperatorId,
+        organizationId,
+        emailNormalized: "id-collision@example.test",
+        displayName: "ID Collision",
+        passwordHash: "argon2id:id-collision",
+        role: "data_operator",
+        state: "active",
+        now,
+      }),
+      /Unique constraint failed/,
     );
 
     assert.deepEqual(await repository.findOperatorForLogin("first@example.test"), {
@@ -215,7 +229,7 @@ test("identity mutations preserve tenant scope, session invalidation, and the fi
     assert.equal(listed.items.length, 1);
     assert.ok(listed.nextCursor);
 
-    const audit = new DrizzleAuthAuditSink(harness.database);
+    const audit = new PrismaAuthAuditSink(harness.database);
     await audit.append({
       organizationId: null,
       actorId: null,
@@ -248,6 +262,79 @@ test("identity mutations preserve tenant scope, session invalidation, and the fi
     assert.doesNotMatch(
       JSON.stringify(await harness.database.audit_events.findMany()),
       /must-not-persist|argon2id:|token:|csrf:/,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("provider conflicts map only the organization platform identity", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const setup = new PipelineSetupRepository(harness.database);
+    await setup.createOrganization({
+      id: organizationId,
+      slug: "provider-conflict-main",
+      name: "Provider Conflict Main",
+    });
+    const repository = new PrismaProviderConfigurationRepository(harness.database);
+    const base = {
+      organizationId,
+      displayName: "Provider",
+      adapterKey: "http-cursor-v1",
+      endpoint: "https://provider.example/feed",
+      authMode: "none" as const,
+      scheduleSeconds: 300,
+      staleAfterSeconds: 900,
+      encryptedCredential: null,
+      actorKey: "actor:admin",
+      now,
+    };
+    assert.equal(
+      (
+        await repository.createProvider({
+          ...base,
+          providerId,
+          revisionId,
+          platformKey: "first-platform",
+        })
+      ).kind,
+      "created",
+    );
+    assert.equal(
+      (
+        await repository.createProvider({
+          ...base,
+          providerId: "00000000-0000-4000-8000-000000000113",
+          revisionId: "00000000-0000-4000-8000-000000000114",
+          platformKey: "first-platform",
+        })
+      ).kind,
+      "platform_conflict",
+    );
+    await assert.rejects(
+      repository.createProvider({
+        ...base,
+        providerId,
+        revisionId: "00000000-0000-4000-8000-000000000115",
+        platformKey: "different-platform",
+      }),
+      /Unique constraint failed/,
+    );
+    await assert.rejects(
+      repository.createProvider({
+        ...base,
+        providerId: "00000000-0000-4000-8000-000000000116",
+        revisionId,
+        platformKey: "revision-id-collision",
+      }),
+      /Unique constraint failed/,
+    );
+    assert.equal(
+      await harness.database.provider_sources.count({
+        where: { platform_key: "revision-id-collision" },
+      }),
+      0,
     );
   } finally {
     await harness.close();

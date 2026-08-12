@@ -348,14 +348,34 @@ export function assertSchemaParity(
       `${tableName} foreign keys drifted`,
     );
     assert.deepEqual(
-      Object.fromEntries(Object.entries(actualTable.indexes).map(([name, index]) => [name, { ...index, where: index.where === null ? null : "present" }])),
-      Object.fromEntries(Object.entries(expectedTable.indexes).map(([name, index]) => [name, { ...index, where: index.where === null ? null : "present" }])),
+      Object.fromEntries(
+        Object.entries(actualTable.indexes).map(([name, index]) => [
+          name,
+          { ...index, where: normalizeSql(index.where) },
+        ]),
+      ),
+      Object.fromEntries(
+        Object.entries(expectedTable.indexes).map(([name, index]) => [
+          name,
+          { ...index, where: normalizeSql(index.where) },
+        ]),
+      ),
       `${tableName} indexes drifted`,
     );
     assert.deepEqual(
-      Object.keys(actualTable.checkConstraints),
-      Object.keys(expectedTable.checkConstraints),
-      `${tableName} check constraint inventory drifted`,
+      Object.fromEntries(
+        Object.entries(actualTable.checkConstraints).map(([name, constraint]) => [
+          name,
+          normalizeSql(constraint.value),
+        ]),
+      ),
+      Object.fromEntries(
+        Object.entries(expectedTable.checkConstraints).map(([name, constraint]) => [
+          name,
+          normalizeSql(constraint.value),
+        ]),
+      ),
+      `${tableName} check constraints drifted`,
     );
   }
 }

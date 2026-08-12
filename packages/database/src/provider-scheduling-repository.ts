@@ -62,7 +62,7 @@ export function projectProviderRunHealth(
   };
 }
 
-export class DrizzleProviderScheduleRepository {
+export class PrismaProviderScheduleRepository {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async claimDueProvider(input: {
@@ -218,7 +218,7 @@ export class DrizzleProviderScheduleRepository {
   }
 }
 
-export class DrizzleProviderHealthRepository {
+export class PrismaProviderHealthRepository {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async recordRunOutcome(input: {

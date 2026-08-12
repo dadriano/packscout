@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DrizzleImportRunRepository } from "./import-run-repository.ts";
+import { PrismaImportRunRepository } from "./import-run-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
 test("concurrent requests coalesce without changing immutable run evidence", async () => {
@@ -65,8 +65,8 @@ test("concurrent requests coalesce without changing immutable run evidence", asy
     });
 
     const independentClient = await context.createIndependentClient();
-    const first = new DrizzleImportRunRepository(context.client);
-    const second = new DrizzleImportRunRepository(independentClient);
+    const first = new PrismaImportRunRepository(context.client);
+    const second = new PrismaImportRunRepository(independentClient);
     const results = await Promise.all([
       first.requestRun({
         organizationId,
@@ -197,8 +197,8 @@ test("queued manual runs have one durable owner and recover after lease expiry",
       },
     });
     const independentClient = await context.createIndependentClient();
-    const firstRepository = new DrizzleImportRunRepository(context.client);
-    const secondRepository = new DrizzleImportRunRepository(independentClient);
+    const firstRepository = new PrismaImportRunRepository(context.client);
+    const secondRepository = new PrismaImportRunRepository(independentClient);
     const claimedAt = new Date("2026-08-06T12:00:01.000Z");
     const leaseExpiresAt = new Date("2026-08-06T12:02:01.000Z");
     const raced = await Promise.all([

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DrizzleProviderHealthRepository,
-  DrizzleProviderScheduleRepository,
+  PrismaProviderHealthRepository,
+  PrismaProviderScheduleRepository,
   projectProviderRunHealth,
 } from "./provider-scheduling-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
@@ -55,8 +55,8 @@ test("database claims serialize workers, preserve cadence, and recover expired l
     });
 
     const independentClient = await context.createIndependentClient();
-    const repository = new DrizzleProviderScheduleRepository(context.client);
-    const contenderRepository = new DrizzleProviderScheduleRepository(
+    const repository = new PrismaProviderScheduleRepository(context.client);
+    const contenderRepository = new PrismaProviderScheduleRepository(
       independentClient,
     );
     const [firstClaim, secondClaim] = await Promise.all([
@@ -194,8 +194,8 @@ test("provider health mutations serialize and remain tenant scoped", async () =>
       },
     });
     const independentClient = await context.createIndependentClient();
-    const first = new DrizzleProviderHealthRepository(context.client);
-    const second = new DrizzleProviderHealthRepository(independentClient);
+    const first = new PrismaProviderHealthRepository(context.client);
+    const second = new PrismaProviderHealthRepository(independentClient);
     await Promise.all([
       first.recordRunOutcome({
         organizationId,

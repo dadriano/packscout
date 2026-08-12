@@ -1,10 +1,10 @@
 # Feature: Prisma Persistence
 
-**Progress:** 7/8 tasks complete
+**Progress:** 8/8 tasks complete
 
 ## Context
 
-PackScout currently persists authentication, provider configuration, ingestion history, canonical records, worker coordination, quarantine, retention, and operational state through Drizzle. The product is still early enough to replace that foundation without preserving any existing database data or replaying the seven Drizzle migrations.
+PackScout now persists authentication, provider configuration, ingestion history, canonical records, worker coordination, quarantine, retention, and operational state through Prisma. Because the product was early, this feature replaced the prior foundation without preserving existing database data or replaying its seven migrations.
 
 This feature establishes Prisma as PackScout's only ORM and migration system. PostgreSQL remains the canonical system of record, and the cutover must preserve the current database contract and observable behavior rather than redesigning the product. The current contract contains 28 tables, 18 enums, 322 columns, 44 indexes, 19 unique constraints, 119 foreign keys, and 55 check constraints. Those constraints protect tenant isolation, immutable history, active-work exclusivity, lease ownership, and safe state transitions.
 
@@ -71,7 +71,7 @@ The completed result starts from an empty PostgreSQL database, applies one clean
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
 | 007 | [Cut over PackScout runtimes](007-cut-over-packscout-runtimes.md) | large | done | 003, 004, 005, 006 |
-| 008 | [Remove Drizzle and prove the clean cutover](008-remove-drizzle-and-prove-clean-cutover.md) | large | todo | 007 |
+| 008 | [Remove Drizzle and prove the clean cutover](008-remove-drizzle-and-prove-clean-cutover.md) | large | done | 007 |
 
 ## Build Order
 
@@ -101,4 +101,4 @@ The completed result starts from an empty PostgreSQL database, applies one clean
 
 ## Next Action
 
-Run `/tasks-to-tech-specs prisma-persistence` to map these outcomes onto the repository's Prisma schema, migration, repository, runtime, and test boundaries before implementation.
+Review and merge the ready implementation pull request after its checks and review feedback are complete.

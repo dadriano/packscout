@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DrizzleEstimatedEvRecomputationRepository,
+  PrismaEstimatedEvRecomputationRepository,
   IngestionPersistenceRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
@@ -158,7 +158,7 @@ async function setup() {
     retentionDays: 90,
     actorPseudonymKey: new Uint8Array(32).fill(4),
   });
-  const queue = new DrizzleEstimatedEvRecomputationRepository(harness.database);
+  const queue = new PrismaEstimatedEvRecomputationRepository(harness.database);
   const availability: string[] = [];
   const service = new PackScoutEstimatedEvService(
     new CanonicalEstimatedEvProjectionRepository(persistence),

@@ -81,7 +81,7 @@ function uuidList(values: readonly string[]): Prisma.Sql {
   return Prisma.join(values.map((value) => Prisma.sql`${value}::uuid`));
 }
 
-export class DrizzleAdminImportRunRepository {
+export class PrismaAdminImportRunRepository {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async listPage(input: {

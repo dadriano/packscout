@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DrizzleAuthAuditSink,
-  DrizzleAuthRepository,
+  PrismaAuthAuditSink,
+  PrismaAuthRepository,
 } from "./auth-repository.ts";
 import {
   IngestionPersistenceRepository,
@@ -691,7 +691,7 @@ test("auth repository keeps last-admin checks tenant-scoped and revokes sessions
     const setup = new PipelineSetupRepository(harness.database);
     await setup.createOrganization({ id: ids.organization, slug: "packscout", name: "PackScout" });
     await setup.createOrganization({ id: ids.otherOrganization, slug: "other", name: "Other" });
-    const repository = new DrizzleAuthRepository(harness.database);
+    const repository = new PrismaAuthRepository(harness.database);
     const now = new Date("2026-08-06T12:00:00.000Z");
     assert.equal(
       (await repository.provisionOperator({
@@ -762,7 +762,7 @@ test("auth repository keeps last-admin checks tenant-scoped and revokes sessions
     });
     assert.ok(session?.revoked_at);
 
-    const audit = new DrizzleAuthAuditSink(harness.database);
+    const audit = new PrismaAuthAuditSink(harness.database);
     await audit.append({
       organizationId: null,
       actorId: null,

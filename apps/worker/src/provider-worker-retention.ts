@@ -1,4 +1,4 @@
-import { DrizzleProtectedPayloadRetentionRepository } from "@packscout/database";
+import { PrismaProtectedPayloadRetentionRepository } from "@packscout/database";
 import {
   ProtectedPayloadRetentionCoordinator,
   ProtectedPayloadRetentionService,
@@ -10,7 +10,7 @@ import {
 } from "@packscout/services";
 
 type RetentionDatabase = ConstructorParameters<
-  typeof DrizzleProtectedPayloadRetentionRepository
+  typeof PrismaProtectedPayloadRetentionRepository
 >[0];
 
 export interface ProviderWorkerRetentionInput {
@@ -25,7 +25,7 @@ export interface ProviderWorkerRetentionInput {
 export function createProviderWorkerRetentionCoordinator(
   input: ProviderWorkerRetentionInput,
 ): ProtectedPayloadRetentionCoordinator {
-  const repository = new DrizzleProtectedPayloadRetentionRepository(
+  const repository = new PrismaProtectedPayloadRetentionRepository(
     input.database,
     input.clock,
   );

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DrizzleEstimatedEvRecomputationRepository,
+  PrismaEstimatedEvRecomputationRepository,
   estimatedEvRecomputationRequestKey,
   type EstimatedEvRecomputationIdentity,
 } from "./estimated-ev-recomputation-repository.ts";
@@ -87,10 +87,10 @@ test("EV workers claim disjoint work, recover leases, and reject stale acknowled
     });
 
     const independentClient = await harness.createIndependentClient();
-    const firstQueue = new DrizzleEstimatedEvRecomputationRepository(
+    const firstQueue = new PrismaEstimatedEvRecomputationRepository(
       harness.client,
     );
-    const secondQueue = new DrizzleEstimatedEvRecomputationRepository(
+    const secondQueue = new PrismaEstimatedEvRecomputationRepository(
       independentClient,
     );
     const claimedAt = new Date("2026-08-06T12:00:01.000Z");

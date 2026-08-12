@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execFile } from "node:child_process";
+import { userInfo } from "node:os";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
@@ -16,7 +17,7 @@ const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const schemaPath = fileURLToPath(new URL("./schema.prisma", import.meta.url));
 const prismaExecutable = fileURLToPath(new URL("../../../node_modules/prisma/build/index.js", import.meta.url));
 const adminDatabaseUrl = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL
-  ?? "postgresql://lains@127.0.0.1:5432/postgres";
+  ?? `postgresql://${encodeURIComponent(userInfo().username)}@127.0.0.1:5432/postgres`;
 let databaseSequence = 0;
 
 const ids = {
@@ -121,6 +122,24 @@ test("the checked-in Prisma migration provisions the complete catalog for Prisma
     const manifest = await loadSchemaParityManifest();
     const catalog = await inspectSchema(harness.db);
     assertSchemaParity(catalog, manifest);
+
+    const weakenedCheck = structuredClone(manifest);
+    weakenedCheck.tables.import_runs!.checkConstraints.import_runs_attempt_nonnegative = {
+      value: "attempt >= -1",
+    };
+    assert.throws(
+      () => assertSchemaParity(catalog, weakenedCheck),
+      /import_runs check constraints drifted/,
+    );
+
+    const weakenedPartialIndex = structuredClone(manifest);
+    weakenedPartialIndex.tables.import_runs!.indexes.import_runs_provider_active_unique!.where =
+      "state = 'queued'";
+    assert.throws(
+      () => assertSchemaParity(catalog, weakenedPartialIndex),
+      /import_runs indexes drifted/,
+    );
+
     assert.equal(await harness.prisma.organizations.count(), 0);
     const repeatedDeploy = await execFileAsync(
       process.execPath,

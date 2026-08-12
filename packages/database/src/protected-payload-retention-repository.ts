@@ -34,7 +34,7 @@ function duration(startedAt: Date, finishedAt: Date): number {
   return Math.max(0, finishedAt.getTime() - startedAt.getTime());
 }
 
-export class DrizzleProtectedPayloadRetentionRepository {
+export class PrismaProtectedPayloadRetentionRepository {
   constructor(
     private readonly database: PackscoutPrismaClient,
     private readonly clock: RetentionClock,

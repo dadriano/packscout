@@ -13,7 +13,7 @@ Every PackScout persistence task can use one production-ready Prisma client, tra
 
 ## Context
 
-The current database package exposes a Drizzle database factory, schema exports, transaction types, migration scripts, and an in-process migrated test database. Seventeen database, service, admin, worker, and local-runtime test files depend on that foundation. Several tests exercise real constraints, competing workers, atomic rollback, and a bounded large-page statement count.
+At the start of the cutover, the database package exposed the prior database factory, schema exports, transaction types, migration scripts, and an in-process migrated test database. Seventeen database, service, admin, worker, and local-runtime test files depended on that foundation. Several tests exercised real constraints, competing workers, atomic rollback, and a bounded large-page statement count.
 
 Replacing only repository queries would leave production lifecycle, migration validation, test isolation, and performance evidence unresolved. This task creates the shared foundation before domain repositories migrate so parallel builders do not invent incompatible clients, transactions, or fixtures.
 

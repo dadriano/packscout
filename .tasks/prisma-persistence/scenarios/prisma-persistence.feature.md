@@ -1,6 +1,6 @@
 # Feature: Prisma Persistence Cutover
 
-Status: approved planning contract — implementation not started
+Status: implemented and verified
 Owner: prisma-persistence
 
 ## Scenario: A clean environment is provisioned only from Prisma history
@@ -28,7 +28,7 @@ When one organization attempts to read, reference, mutate, or claim the other or
 Then the operation returns its stable missing or organization-scope outcome with no cross-organization side effect
 And credentials, raw actor identifiers, and protected payloads never enter canonical, operational, audit, or browser-safe results
 
-Coverage: Partially automated — task 003 covers identity, provider controls, secrets, and protected evidence with real PostgreSQL tenant, contention, atomic-audit, and browser-safe service assertions; tasks 004–006 complete the remaining persistence domains.
+Coverage: Automated — real PostgreSQL suites cover identity, provider controls, secrets, protected evidence, every worker and persistence domain, cross-organization rejection, atomic audit, and browser-safe service projections.
 
 ## Scenario Outline: Concurrent workers claim durable work exactly once
 
@@ -117,4 +117,4 @@ When dependency, source, migration, build, and framework checks run
 Then executable source, manifests, exports, scripts, configuration, schemas, and migration artifacts contain no Drizzle implementation
 And there is no dual-read, dual-write, legacy migration, or compatibility path
 
-Coverage: Manual gap — task 008 must add the final removal check and pass `npm run verify:framework` from a clean checkout.
+Coverage: Automated — the Prisma-only executable-surface guard scans source, manifests, exports, scripts, configuration, and the lockfile; clean install, migration parity, repeated deploy, runtime smoke, and the canonical framework verifier all pass.

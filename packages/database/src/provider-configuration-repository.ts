@@ -9,6 +9,7 @@ import type {
   PackscoutPrismaClient,
   PackscoutQueryClient,
 } from "./database.ts";
+import { isPrismaUniqueConstraintError } from "./prisma-error.ts";
 
 export interface StoredProviderCredential {
   readonly ciphertext: Uint8Array;
@@ -93,13 +94,7 @@ function endpointHost(endpoint: string): string {
   }
 }
 
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
-  );
-}
-
-export class DrizzleProviderConfigurationRepository {
+export class PrismaProviderConfigurationRepository {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async createProvider(
@@ -158,7 +153,14 @@ export class DrizzleProviderConfigurationRepository {
         };
       }, PACKSCOUT_TRANSACTION_OPTIONS);
     } catch (error) {
-      if (isUniqueConstraintError(error)) return { kind: "platform_conflict" };
+      if (
+        isPrismaUniqueConstraintError(error, {
+          fields: ["organization_id", "platform_key"],
+          constraintNames: ["provider_sources_organization_platform_unique"],
+        })
+      ) {
+        return { kind: "platform_conflict" };
+      }
       throw error;
     }
   }

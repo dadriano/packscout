@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DrizzleAdminImportRunRepository } from "./admin-import-run-repository.ts";
-import { DrizzleAdminProviderOperationRepository } from "./admin-provider-operation-repository.ts";
-import { DrizzleImportRunRepository } from "./import-run-repository.ts";
+import { PrismaAdminImportRunRepository } from "./admin-import-run-repository.ts";
+import { PrismaAdminProviderOperationRepository } from "./admin-provider-operation-repository.ts";
+import { PrismaImportRunRepository } from "./import-run-repository.ts";
 import { IngestionPersistenceRepository } from "./ingestion-repository.ts";
-import { DrizzleQuarantineRepository } from "./quarantine-repository.ts";
+import { PrismaQuarantineRepository } from "./quarantine-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
@@ -206,7 +206,7 @@ async function seed() {
 test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile run outcomes", async () => {
   const harness = await seed();
   try {
-    const providers = new DrizzleAdminProviderOperationRepository(harness.database);
+    const providers = new PrismaAdminProviderOperationRepository(harness.database);
     const firstProviders = await providers.listPage({
       organizationId: ids.organization,
       limit: 1,
@@ -244,7 +244,7 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
       RangeError,
     );
 
-    const runs = new DrizzleAdminImportRunRepository(harness.database);
+    const runs = new PrismaAdminImportRunRepository(harness.database);
     const firstRuns = await runs.listPage({
       organizationId: ids.organization,
       providerId: ids.provider,
@@ -314,7 +314,7 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
 test("quarantine keysets apply run, kind, reason, and effective-state filters before bounding", async () => {
   const harness = await seed();
   try {
-    const repository = new DrizzleQuarantineRepository(harness.database);
+    const repository = new PrismaQuarantineRepository(harness.database);
     const entry = await harness.database.quarantine_records.findFirst({
       where: { organization_id: ids.organization },
       select: { id: true },
@@ -357,7 +357,7 @@ test("quarantine keysets apply run, kind, reason, and effective-state filters be
 test("manual run persistence validates the expected active revision under the provider lock", async () => {
   const harness = await seed();
   try {
-    const repository = new DrizzleImportRunRepository(harness.database);
+    const repository = new PrismaImportRunRepository(harness.database);
     const stale = await repository.requestRun({
       organizationId: ids.organization,
       providerId: ids.secondProvider,

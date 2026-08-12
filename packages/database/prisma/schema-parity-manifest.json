@@ -1,5 +1,5 @@
 {
-  "source": "packages/database/drizzle/meta/0006_snapshot.json",
+  "source": "approved pre-cutover catalog contract",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
     "migration": "packages/database/prisma/migrations/20260812000000_clean_baseline/migration.sql"
@@ -434,19 +434,19 @@
       },
       "checkConstraints": {
         "admin_alerts_acknowledgement_pair": {
-          "value": ""
+          "value": "((acknowledged_by_actor_key IS NULL) = (acknowledged_at IS NULL))"
         },
         "admin_alerts_copy_bounded": {
-          "value": ""
+          "value": "((length(dedupe_key) >= 1) AND (length(dedupe_key) <= 256) AND ((length(recovery_key) >= 1) AND (length(recovery_key) <= 256)) AND ((length(title) >= 1) AND (length(title) <= 160)) AND ((length(summary) >= 1) AND (length(summary) <= 500)))"
         },
         "admin_alerts_counts_positive": {
-          "value": ""
+          "value": "((occurrence_count > 0) AND (reopened_count >= 0))"
         },
         "admin_alerts_resolution_pair": {
-          "value": ""
+          "value": "((resolved_by_actor_key IS NULL) = (resolved_at IS NULL))"
         },
         "admin_alerts_run_provider_required": {
-          "value": ""
+          "value": "((run_id IS NULL) OR (provider_id IS NOT NULL))"
         }
       }
     },
@@ -585,7 +585,7 @@
       "foreignKeys": {},
       "checkConstraints": {
         "auth_rate_limits_attempt_count_nonnegative": {
-          "value": ""
+          "value": "(attempt_count >= 0)"
         }
       }
     },
@@ -702,10 +702,10 @@
       },
       "checkConstraints": {
         "canonical_entities_external_not_blank": {
-          "value": ""
+          "value": "(length(TRIM(BOTH FROM external_id)) > 0)"
         },
         "canonical_entities_platform_not_blank": {
-          "value": ""
+          "value": "(length(TRIM(BOTH FROM platform_key)) > 0)"
         }
       }
     },
@@ -1071,7 +1071,7 @@
       },
       "checkConstraints": {
         "canonical_revisions_revision_positive": {
-          "value": ""
+          "value": "(revision_number > 0)"
         }
       }
     },
@@ -1399,25 +1399,25 @@
       },
       "checkConstraints": {
         "estimated_ev_recomputation_attempt_nonnegative": {
-          "value": ""
+          "value": "(attempt_count >= 0)"
         },
         "estimated_ev_recomputation_claim_consistent": {
-          "value": ""
+          "value": "(((state = 'running'::estimated_ev_recomputation_state) AND (claimed_by IS NOT NULL) AND (claim_token IS NOT NULL) AND (claim_expires_at IS NOT NULL)) OR ((state <> 'running'::estimated_ev_recomputation_state) AND (claimed_by IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL)))"
         },
         "estimated_ev_recomputation_claimed_by_bounded": {
-          "value": ""
+          "value": "((claimed_by IS NULL) OR (length(claimed_by) <= 256))"
         },
         "estimated_ev_recomputation_completion_consistent": {
-          "value": ""
+          "value": "(((state = 'completed'::estimated_ev_recomputation_state) AND (result_status IS NOT NULL) AND (calculation_revision_id IS NOT NULL) AND (completed_at IS NOT NULL)) OR ((state <> 'completed'::estimated_ev_recomputation_state) AND (result_status IS NULL) AND (calculation_revision_id IS NULL) AND (completed_at IS NULL)))"
         },
         "estimated_ev_recomputation_failure_bounded": {
-          "value": ""
+          "value": "((failure_code IS NULL) OR (length(failure_code) <= 128))"
         },
         "estimated_ev_recomputation_identity_not_blank": {
-          "value": ""
+          "value": "((length(TRIM(BOTH FROM platform_key)) > 0) AND (length(TRIM(BOTH FROM pack_external_id)) > 0) AND (length(TRIM(BOTH FROM ev_input_external_id)) > 0))"
         },
         "estimated_ev_recomputation_request_key_sha256": {
-          "value": ""
+          "value": "(length(request_key) = 64)"
         }
       }
     },
@@ -1618,10 +1618,10 @@
       },
       "checkConstraints": {
         "import_pages_cursors_bounded": {
-          "value": ""
+          "value": "(((requested_cursor IS NULL) OR (length(requested_cursor) <= 2048)) AND ((next_cursor IS NULL) OR (length(next_cursor) <= 2048)))"
         },
         "import_pages_page_number_positive": {
-          "value": ""
+          "value": "(page_number > 0)"
         }
       }
     },
@@ -1784,7 +1784,7 @@
             "provider_id"
           ],
           "unique": true,
-          "where": "\"import_runs\".\"state\" in ('queued', 'running')"
+          "where": "(state = ANY (ARRAY['queued'::import_run_state, 'running'::import_run_state]))"
         }
       },
       "uniqueConstraints": {
@@ -1871,22 +1871,22 @@
       },
       "checkConstraints": {
         "import_runs_attempt_nonnegative": {
-          "value": ""
+          "value": "(attempt >= 0)"
         },
         "import_runs_failure_bounded": {
-          "value": ""
+          "value": "(((failure_code IS NULL) OR (length(failure_code) <= 128)) AND ((failure_summary IS NULL) OR (length(failure_summary) <= 500)))"
         },
         "import_runs_final_cursor_bounded": {
-          "value": ""
+          "value": "((final_cursor IS NULL) OR (length(final_cursor) <= 2048))"
         },
         "import_runs_lease_owner_bounded": {
-          "value": ""
+          "value": "((lease_owner IS NULL) OR (length(lease_owner) <= 256))"
         },
         "import_runs_manual_actor_required": {
-          "value": ""
+          "value": "((trigger <> 'manual'::import_trigger) OR (requested_by_actor_key IS NOT NULL))"
         },
         "import_runs_requested_cursor_bounded": {
-          "value": ""
+          "value": "((requested_cursor IS NULL) OR (length(requested_cursor) <= 2048))"
         }
       }
     },
@@ -2101,10 +2101,10 @@
       },
       "checkConstraints": {
         "operational_events_copy_bounded": {
-          "value": ""
+          "value": "((length(dedupe_key) >= 1) AND (length(dedupe_key) <= 256) AND ((length(recovery_key) >= 1) AND (length(recovery_key) <= 256)) AND ((length(title) >= 1) AND (length(title) <= 160)) AND ((length(summary) >= 1) AND (length(summary) <= 500)))"
         },
         "operational_events_run_provider_required": {
-          "value": ""
+          "value": "((run_id IS NULL) OR (provider_id IS NOT NULL))"
         }
       }
     },
@@ -2276,7 +2276,7 @@
             "token_hash"
           ],
           "unique": false,
-          "where": "\"operator_sessions\".\"revoked_at\" is null"
+          "where": "(revoked_at IS NULL)"
         },
         "operator_sessions_operator_idx": {
           "columns": [
@@ -2334,7 +2334,7 @@
       },
       "checkConstraints": {
         "operator_sessions_expiry_order": {
-          "value": ""
+          "value": "((idle_expires_at <= absolute_expires_at) AND (created_at <= idle_expires_at))"
         }
       }
     },
@@ -2403,10 +2403,10 @@
       "foreignKeys": {},
       "checkConstraints": {
         "operators_display_name_not_blank": {
-          "value": ""
+          "value": "(length(TRIM(BOTH FROM display_name)) > 0)"
         },
         "operators_email_is_normalized": {
-          "value": ""
+          "value": "(email_normalized = lower(TRIM(BOTH FROM email_normalized)))"
         }
       }
     },
@@ -2606,10 +2606,10 @@
       },
       "checkConstraints": {
         "provider_config_revisions_schedule_safe": {
-          "value": ""
+          "value": "(schedule_seconds >= 60)"
         },
         "provider_config_revisions_stale_positive": {
-          "value": ""
+          "value": "(stale_after_seconds > 0)"
         }
       }
     },
@@ -2770,10 +2770,10 @@
       },
       "checkConstraints": {
         "provider_connection_tests_latency_nonnegative": {
-          "value": ""
+          "value": "((latency_ms IS NULL) OR (latency_ms >= 0))"
         },
         "provider_connection_tests_response_status_valid": {
-          "value": ""
+          "value": "((response_status IS NULL) OR ((response_status >= 100) AND (response_status <= 599)))"
         }
       }
     },
@@ -2911,7 +2911,7 @@
       },
       "checkConstraints": {
         "provider_cursor_checkpoints_cursor_bounded": {
-          "value": ""
+          "value": "((cursor IS NULL) OR (length(cursor) <= 2048))"
         }
       }
     },
@@ -3065,22 +3065,22 @@
       },
       "checkConstraints": {
         "provider_health_states_calculation_active_complete": {
-          "value": ""
+          "value": "((NOT calculation_warning_active) OR ((latest_calculation_warning_at IS NOT NULL) AND (calculation_warning_severity IS NOT NULL)))"
         },
         "provider_health_states_calculation_severity_known": {
-          "value": ""
+          "value": "((calculation_warning_severity IS NULL) OR (calculation_warning_severity = ANY (ARRAY['warning'::text, 'degraded'::text])))"
         },
         "provider_health_states_failure_code_bounded": {
-          "value": ""
+          "value": "((latest_failure_code IS NULL) OR ((length(latest_failure_code) >= 1) AND (length(latest_failure_code) <= 128)))"
         },
         "provider_health_states_failure_count_nonnegative": {
-          "value": ""
+          "value": "(consecutive_failures >= 0)"
         },
         "provider_health_states_mapping_active_complete": {
-          "value": ""
+          "value": "((NOT mapping_warning_active) OR ((latest_mapping_warning_at IS NOT NULL) AND (mapping_warning_severity IS NOT NULL)))"
         },
         "provider_health_states_mapping_severity_known": {
-          "value": ""
+          "value": "((mapping_warning_severity IS NULL) OR (mapping_warning_severity = ANY (ARRAY['warning'::text, 'degraded'::text])))"
         }
       }
     },
@@ -3268,13 +3268,13 @@
       },
       "checkConstraints": {
         "provider_schedules_claim_owner_bounded": {
-          "value": ""
+          "value": "((claim_owner IS NULL) OR ((length(claim_owner) >= 1) AND (length(claim_owner) <= 256)))"
         },
         "provider_schedules_claim_pair": {
-          "value": ""
+          "value": "((claim_owner IS NULL) = (claim_expires_at IS NULL))"
         },
         "provider_schedules_outcome_known": {
-          "value": ""
+          "value": "((last_outcome IS NULL) OR (last_outcome = ANY (ARRAY['started'::text, 'coalesced'::text, 'not_enabled'::text])))"
         }
       }
     },
@@ -3422,7 +3422,7 @@
       },
       "checkConstraints": {
         "provider_secret_versions_key_version_positive": {
-          "value": ""
+          "value": "(key_version > 0)"
         }
       }
     },
@@ -3537,7 +3537,7 @@
       },
       "checkConstraints": {
         "provider_sources_platform_key_not_blank": {
-          "value": ""
+          "value": "(length(TRIM(BOTH FROM platform_key)) > 0)"
         }
       }
     },
@@ -3634,7 +3634,7 @@
             "quarantine_id"
           ],
           "unique": true,
-          "where": "\"quarantine_attempts\".\"state\" = 'running'"
+          "where": "(state = 'running'::quarantine_attempt_state)"
         },
         "quarantine_attempts_organization_quarantine_started_idx": {
           "columns": [
@@ -3710,13 +3710,13 @@
       },
       "checkConstraints": {
         "quarantine_attempts_actor_key_bounded": {
-          "value": ""
+          "value": "((length(requested_by_actor_key) >= 1) AND (length(requested_by_actor_key) <= 256))"
         },
         "quarantine_attempts_failure_bounded": {
-          "value": ""
+          "value": "(((failure_code IS NULL) OR (length(failure_code) <= 128)) AND ((field_path IS NULL) OR (length(field_path) <= 256)) AND ((sanitized_summary IS NULL) OR (length(sanitized_summary) <= 500)))"
         },
         "quarantine_attempts_revision_count_nonnegative": {
-          "value": ""
+          "value": "((canonical_revision_count IS NULL) OR (canonical_revision_count >= 0))"
         }
       }
     },
@@ -4000,7 +4000,7 @@
       },
       "checkConstraints": {
         "quarantine_records_record_index_nonnegative": {
-          "value": ""
+          "value": "(record_index >= 0)"
         }
       }
     },
@@ -4160,13 +4160,13 @@
       },
       "checkConstraints": {
         "retention_executions_batch_size_bounded": {
-          "value": ""
+          "value": "((batch_size >= 1) AND (batch_size <= 10000))"
         },
         "retention_executions_counts_nonnegative": {
-          "value": ""
+          "value": "((selected_count >= 0) AND (expired_count >= 0) AND (already_expired_count >= 0) AND (failed_count >= 0) AND (remaining_count >= 0) AND (pages_expired_count >= 0) AND (source_records_expired_count >= 0) AND (quarantines_expired_count >= 0))"
         },
         "retention_executions_failure_bounded": {
-          "value": ""
+          "value": "(((failure_code IS NULL) OR ((length(failure_code) >= 1) AND (length(failure_code) <= 128))) AND ((sanitized_summary IS NULL) OR ((length(sanitized_summary) >= 1) AND (length(sanitized_summary) <= 500))))"
         }
       }
     },
@@ -4487,7 +4487,7 @@
       },
       "checkConstraints": {
         "source_record_outcomes_record_index_nonnegative": {
-          "value": ""
+          "value": "(record_index >= 0)"
         }
       }
     },
@@ -4611,7 +4611,7 @@
       },
       "checkConstraints": {
         "source_record_projection_revisions_projection_index_nonnegative": {
-          "value": ""
+          "value": "(projection_index >= 0)"
         }
       }
     },
@@ -4812,7 +4812,7 @@
       },
       "checkConstraints": {
         "source_records_external_id_not_blank": {
-          "value": ""
+          "value": "(length(TRIM(BOTH FROM external_id)) > 0)"
         }
       }
     }

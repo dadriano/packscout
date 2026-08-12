@@ -55,8 +55,8 @@ Every canonical revision links to its source record and contains `platform_key`,
 
 ## Spec Compliance
 
-- The Drizzle schema and append-only migration create 21 PostgreSQL tables for provider history, protected evidence, outcomes, quarantine, canonical revisions/current pointers, auth, audit, and operational state.
+- The persistence schema and append-only PostgreSQL migrations create the tables for provider history, protected evidence, outcomes, quarantine, canonical revisions/current pointers, auth, audit, and operational state.
 - Durable repositories implement idempotent raw/source acceptance, immutable canonical revision history, multi-projection provenance, unresolved relationship reconciliation, cursor/run consistency, and 90-day evidence expiry.
 - Composite tenant constraints, scoped repository guards, actor pseudonymization, canonical PII rejection, and the protected-evidence-only export enforce the required isolation and data boundary.
 - Embedded PostgreSQL integration tests prove replay/change behavior, deferred relationships, rollback consistency, retention, last-admin/session behavior, and cross-tenant rejection. Production PostgreSQL 16+ remains an environment deployment check, not a schema or code gap.
-- Database tests, migration check, lint, typecheck, build, framework ratchet, dependency boundaries, and the canonical verification gate pass.
+- Database tests, Prisma migration and parity checks, lint, typecheck, build, framework ratchet, dependency boundaries, and the canonical verification gate pass.

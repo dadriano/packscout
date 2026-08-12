@@ -5,16 +5,18 @@ Status: current target layout
 ## Dependency direction
 
 ```text
-frontend UI -> frontend server/API adapters -> future services -> persistence or external APIs
-admin UI -> apps/admin/src/api -> Express adapters -> future services -> persistence or external APIs
+frontend UI -> frontend server/API adapters -> services -> persistence or external APIs
+admin UI -> apps/admin/src/api -> Express adapters -> services -> Prisma repositories -> PostgreSQL
+worker -> provider adapters -> services -> Prisma repositories -> PostgreSQL
 ```
 
 | Source | May depend on | Must not depend on |
 |---|---|---|
-| `frontend` server files | Next server APIs, browser-safe contracts, future server services | Admin code |
+| `frontend` server files | Next server APIs, browser-safe contracts, server services | Admin code |
 | Frontend client components | React, browser-safe helpers and contracts | Node modules, Express, `next/server`, admin code |
 | `apps/admin/src` | React, React Router, browser-safe helpers, `apps/admin/src/api` | Express, dotenv, Node modules, `apps/admin/server`, frontend code |
-| `apps/admin/server` | Express, Node modules, future server services | Admin React modules, frontend code |
+| `apps/admin/server` | Express, Node modules, server services, database package | Admin React modules, frontend code |
+| `apps/worker` | Node modules, server services, database package, provider adapters | Browser application code |
 
 ## Frontend feature slice
 
@@ -43,13 +45,14 @@ apps/admin/src/hooks/<feature>/                     # Admin browser state
 
 The Express adapter parses and validates transport inputs. Reusable workflows should not be duplicated in the route when another surface needs them.
 
-## Future shared packages
+## Shared packages
 
 Do not create empty symmetry. Add packages only when real behavior needs a canonical home:
 
 ```text
 packages/services/src/<domain>-service.ts      # Server use cases and persistence orchestration
 packages/contracts/src/<domain>.ts             # Pure cross-surface contracts
+packages/database/src/<domain>-repository.ts   # Prisma-backed server persistence
 ```
 
 Each package must expose public exports and participate in the root workspace. Browser-safe and server-only entry points must remain distinct.
@@ -60,7 +63,7 @@ Each package must expose public exports and participate in the root workspace. B
 |---|---|---|---|
 | Browser to frontend API | Frontend response types | Frontend route and client helper | Route and client behavior tests |
 | Admin UI to Express | `apps/admin/src/api` contract | Admin route and client helper | Route and page/component tests |
-| Multiple transports to one workflow | Future service public API | Service plus thin adapters | Service tests first, adapter tests second |
+| Multiple transports to one workflow | Service public API | Service plus thin adapters | Service tests first, adapter tests second |
 
 ## Shift-left order
 

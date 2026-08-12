@@ -1,5 +1,5 @@
 import {
-  DrizzleEstimatedEvRecomputationRepository,
+  PrismaEstimatedEvRecomputationRepository,
   type PackscoutPrismaClient,
 } from "@packscout/database";
 import {
@@ -27,7 +27,7 @@ export function createProviderWorkerEstimatedEvProcessor(
     input.canonical,
   );
   return new EstimatedEvRecomputationProcessor(
-    new DrizzleEstimatedEvRecomputationRepository(input.database),
+    new PrismaEstimatedEvRecomputationRepository(input.database),
     new PackScoutEstimatedEvService(projections, input.reporter),
     input.clock,
     {

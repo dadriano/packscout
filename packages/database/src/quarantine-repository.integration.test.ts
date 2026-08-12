@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { IngestionPersistenceRepository } from "./ingestion-repository.ts";
 import { PersistenceError } from "./persistence-error.ts";
-import { DrizzleQuarantineRepository } from "./quarantine-repository.ts";
+import { PrismaQuarantineRepository } from "./quarantine-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
@@ -130,7 +130,7 @@ async function createHarness() {
   return {
     ...harness,
     ingestion,
-    repository: new DrizzleQuarantineRepository(harness.database),
+    repository: new PrismaQuarantineRepository(harness.database),
     quarantine,
     catalog,
   };
@@ -140,7 +140,7 @@ test("quarantine retry claims atomically, materializes repaired evidence, and pr
   const harness = await createHarness();
   try {
     const independentClient = await harness.createIndependentClient();
-    const competingRepository = new DrizzleQuarantineRepository(independentClient);
+    const competingRepository = new PrismaQuarantineRepository(independentClient);
     const beforeRunRecord = await harness.database.import_runs.findUnique({
       where: { id: ids.run },
       select: { state: true, counters_json: true },
@@ -732,7 +732,7 @@ test("independent expiry workers claim disjoint evidence while a running retry s
       ],
     });
     const independentClient = await harness.createIndependentClient();
-    const independentRepository = new DrizzleQuarantineRepository(independentClient);
+    const independentRepository = new PrismaQuarantineRepository(independentClient);
     const expiredAt = new Date("2026-11-05T00:00:00.000Z");
     const expiredCounts = await Promise.all([
       harness.repository.expireEvidence({

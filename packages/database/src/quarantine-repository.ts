@@ -142,7 +142,7 @@ function uuid(value: string): Prisma.Sql {
   return Prisma.sql`cast(${value} as uuid)`;
 }
 
-export class DrizzleQuarantineRepository {
+export class PrismaQuarantineRepository {
   constructor(private readonly database: PackscoutPrismaClient) {}
 
   async listEntries(

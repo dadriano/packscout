@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { OperationalNotification } from "@packscout/contracts";
 import { IngestionPersistenceRepository } from "./ingestion-repository.ts";
-import { DrizzleAdminNotificationPublisher } from "./operational-alert-repository.ts";
-import { DrizzleOperationalHealthRepository } from "./operational-health-repository.ts";
-import { DrizzleProtectedPayloadRetentionRepository } from "./protected-payload-retention-repository.ts";
+import { PrismaAdminNotificationPublisher } from "./operational-alert-repository.ts";
+import { PrismaOperationalHealthRepository } from "./operational-health-repository.ts";
+import { PrismaProtectedPayloadRetentionRepository } from "./protected-payload-retention-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
@@ -239,7 +239,7 @@ async function createHarness() {
 test("bounded retention is tenant-scoped, restart-safe, and preserves permanent evidence", async () => {
   const harness = await createHarness();
   try {
-    const retention = new DrizzleProtectedPayloadRetentionRepository(
+    const retention = new PrismaProtectedPayloadRetentionRepository(
       harness.database,
       harness.clock,
     );
@@ -446,7 +446,7 @@ test("bounded retention is tenant-scoped, restart-safe, and preserves permanent 
 test("retention discovery returns only tenants whose policy deadlines are due", async () => {
   const harness = await createHarness();
   try {
-    const retention = new DrizzleProtectedPayloadRetentionRepository(
+    const retention = new PrismaProtectedPayloadRetentionRepository(
       harness.database,
       harness.clock,
     );
@@ -490,11 +490,11 @@ test("concurrent retention executions claim disjoint evidence without double exp
   const harness = await createHarness();
   try {
     const independentClient = await harness.createIndependentClient();
-    const firstRetention = new DrizzleProtectedPayloadRetentionRepository(
+    const firstRetention = new PrismaProtectedPayloadRetentionRepository(
       harness.database,
       harness.clock,
     );
-    const secondRetention = new DrizzleProtectedPayloadRetentionRepository(
+    const secondRetention = new PrismaProtectedPayloadRetentionRepository(
       independentClient,
       harness.clock,
     );
@@ -580,7 +580,7 @@ function event(input: {
 test("admin alerts deduplicate, resolve, reopen, and preserve safe occurrence history", async () => {
   const harness = await createHarness();
   try {
-    const publisher = new DrizzleAdminNotificationPublisher(harness.database);
+    const publisher = new PrismaAdminNotificationPublisher(harness.database);
     const eventOne = event({
       id: "61000000-0000-4000-8000-000000000001",
       kind: "run_failed",
@@ -731,7 +731,7 @@ test("admin alerts deduplicate, resolve, reopen, and preserve safe occurrence hi
       }),
     );
 
-    const health = await new DrizzleOperationalHealthRepository(
+    const health = await new PrismaOperationalHealthRepository(
       harness.database,
     ).loadSnapshot({ organizationId: ids.organization, checkedAt: cutoffAt });
     assert.equal(health.configuredProviderCount, 1);
@@ -769,7 +769,7 @@ test("retention skips every protected payload needed by a running quarantine ret
         started_at: cutoffAt,
       },
     });
-    const retention = new DrizzleProtectedPayloadRetentionRepository(
+    const retention = new PrismaProtectedPayloadRetentionRepository(
       harness.database,
       harness.clock,
     );
@@ -845,7 +845,7 @@ test("retention skips every protected payload needed by a running quarantine ret
 test("retention failure evidence is stable and never stores thrown provider material", async () => {
   const harness = await createHarness();
   try {
-    const repository = new DrizzleProtectedPayloadRetentionRepository(
+    const repository = new PrismaProtectedPayloadRetentionRepository(
       harness.database,
       harness.clock,
     );
