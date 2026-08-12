@@ -6,23 +6,11 @@ import {
   IngestionPersistenceRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
-import {
-  auditEvents,
-  canonicalRevisions,
-  importPages,
-  importRuns,
-  providerCursorCheckpoints,
-  providerSources,
-  quarantineRecords,
-  sourceRecordOutcomes,
-  sourceRecords,
-} from "@packscout/database/schema";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import {
   safeValidateProviderFeedPageV1,
   type ProviderFeedPageStructureV1,
 } from "@packscout/contracts";
-import { eq, isNotNull, isNull } from "drizzle-orm";
 import {
   ProviderMappingAdapterRegistry,
   ProviderTransportAdapterRegistry,
@@ -240,7 +228,7 @@ async function createHarness(
   options: {
     onFetch?: () => Promise<void>;
     pageRepository?: (
-      repository: IngestionPersistenceRepository<never>,
+      repository: IngestionPersistenceRepository,
     ) => ProviderImportPageRepository;
   } = {},
 ) {
@@ -357,10 +345,10 @@ test("manual and scheduled requests share one run while a disabled-after-start i
   harness.transport.onFetch = async () => {
     if (disabled) return;
     disabled = true;
-    await harness.database
-      .update(providerSources)
-      .set({ state: "disabled", nextRunAt: null })
-      .where(eq(providerSources.id, ids.provider));
+    await harness.database.provider_sources.update({
+      where: { id: ids.provider },
+      data: { state: "disabled", next_run_at: null },
+    });
   };
   try {
     const raced = await Promise.all([
@@ -419,27 +407,25 @@ test("manual and scheduled requests share one run while a disabled-after-start i
       transientRetries: 0,
     });
     assert.deepEqual(harness.transport.requests, [null, "opaque-page-2"]);
-    const [checkpoint] = await harness.database
-      .select({ cursor: providerCursorCheckpoints.cursor })
-      .from(providerCursorCheckpoints)
-      .where(eq(providerCursorCheckpoints.configRevisionId, ids.revision));
+    const checkpoint = await harness.database.provider_cursor_checkpoints.findUnique({
+      where: { config_revision_id: ids.revision },
+      select: { cursor: true },
+    });
     assert.equal(checkpoint?.cursor, "opaque-head");
-    assert.equal((await harness.database.select().from(importPages)).length, 2);
-    assert.equal((await harness.database.select().from(sourceRecords)).length, 4);
-    assert.equal((await harness.database.select().from(canonicalRevisions)).length, 2);
-    assert.equal((await harness.database.select().from(sourceRecordOutcomes)).length, 5);
-    const linkedQuarantines = await harness.database
-      .select()
-      .from(quarantineRecords)
-      .where(isNotNull(quarantineRecords.sourceRecordId));
-    const unlinkedQuarantines = await harness.database
-      .select()
-      .from(quarantineRecords)
-      .where(isNull(quarantineRecords.sourceRecordId));
+    assert.equal(await harness.database.import_pages.count(), 2);
+    assert.equal(await harness.database.source_records.count(), 4);
+    assert.equal(await harness.database.canonical_revisions.count(), 2);
+    assert.equal(await harness.database.source_record_outcomes.count(), 5);
+    const linkedQuarantines = await harness.database.quarantine_records.findMany({
+      where: { source_record_id: { not: null } },
+    });
+    const unlinkedQuarantines = await harness.database.quarantine_records.findMany({
+      where: { source_record_id: null },
+    });
     assert.equal(linkedQuarantines.length, 2);
     assert.equal(unlinkedQuarantines.length, 1);
-    assert.equal(unlinkedQuarantines[0]?.recordIndex, 2);
-    const audits = await harness.database.select().from(auditEvents);
+    assert.equal(unlinkedQuarantines[0]?.record_index, 2);
+    const audits = await harness.database.audit_events.findMany();
     const serializedAudits = JSON.stringify(audits);
     assert.equal(serializedAudits.includes("display"), false);
     assert.equal(serializedAudits.includes("provider.example"), false);
@@ -557,10 +543,14 @@ test("a crash after atomic page commit resumes from the durable opaque cursor wi
         error instanceof ProviderImportServiceError &&
         error.code === "RUN_OWNERSHIP_LOST",
     );
-    const [interrupted] = await harness.database
-      .select({ state: importRuns.state, cursor: importRuns.finalCursor })
-      .from(importRuns)
-      .where(eq(importRuns.id, requested.run.id));
+    const interruptedRecord = await harness.database.import_runs.findUnique({
+      where: { id: requested.run.id },
+      select: { state: true, final_cursor: true },
+    });
+    const interrupted = interruptedRecord && {
+      state: interruptedRecord.state,
+      cursor: interruptedRecord.final_cursor,
+    };
     assert.deepEqual(interrupted, { state: "running", cursor: "opaque-resume" });
     harness.clock.advance(20_001);
     const finished = await harness.service.executeImport({
@@ -571,9 +561,9 @@ test("a crash after atomic page commit resumes from the durable opaque cursor wi
     assert.equal(finished.state, "succeeded");
     assert.equal(finished.finalCursor, "opaque-final");
     assert.deepEqual(harness.transport.requests, [null, "opaque-resume"]);
-    assert.equal((await harness.database.select().from(importPages)).length, 2);
-    assert.equal((await harness.database.select().from(sourceRecords)).length, 2);
-    assert.equal((await harness.database.select().from(canonicalRevisions)).length, 2);
+    assert.equal(await harness.database.import_pages.count(), 2);
+    assert.equal(await harness.database.source_records.count(), 2);
+    assert.equal(await harness.database.canonical_revisions.count(), 2);
     const next = await harness.service.requestImport({
       trigger: "scheduled",
       organizationId: ids.organization,
@@ -660,7 +650,7 @@ test("transport failures retain distinct sanitized terminal codes and retry only
       );
       assert.equal(failed.failureSummary?.includes("secret.response.body"), false);
     }
-    const audits = JSON.stringify(await harness.database.select().from(auditEvents));
+    const audits = JSON.stringify(await harness.database.audit_events.findMany());
     assert.equal(audits.includes("secret.response.body"), false);
   } finally {
     await harness.close();
@@ -702,13 +692,16 @@ test("a page persistence failure leaves the checkpoint untouched and records onl
     assert.equal(failed.state, "failed");
     assert.equal(failed.failureCode, "IMPORT_PERSISTENCE_FAILED");
     assert.equal(failed.failureSummary?.includes(rawFailure), false);
-    assert.equal((await harness.database.select().from(importPages)).length, 0);
-    const [checkpoint] = await harness.database
-      .select({ cursor: providerCursorCheckpoints.cursor })
-      .from(providerCursorCheckpoints)
-      .where(eq(providerCursorCheckpoints.configRevisionId, ids.revision));
+    assert.equal(await harness.database.import_pages.count(), 0);
+    const checkpoint = await harness.database.provider_cursor_checkpoints.findUnique({
+      where: { config_revision_id: ids.revision },
+      select: { cursor: true },
+    });
     assert.equal(checkpoint?.cursor, null);
-    assert.equal(JSON.stringify(await harness.database.select().from(auditEvents)).includes(rawFailure), false);
+    assert.equal(
+      JSON.stringify(await harness.database.audit_events.findMany()).includes(rawFailure),
+      false,
+    );
   } finally {
     await harness.close();
   }

@@ -5,7 +5,7 @@
 **Depends on:** [prisma-persistence/002](002-establish-prisma-runtime-and-test-foundation.md)  
 **Blocks:** [prisma-persistence/006](006-preserve-quarantine-retention-and-operations.md), [prisma-persistence/007](007-cut-over-packscout-runtimes.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -53,14 +53,21 @@ Tasks `004` and `006` consume the committed run, quarantine, health, and EV work
 
 ## Acceptance Criteria
 
-- [ ] A valid mixed page makes all evidence, outcomes, canonical history, relationships, EV work, counters, and its cursor visible together exactly once.
-- [ ] Failure, stale ownership, foreign ownership, and conflicting page replay leave no partial page writes or cursor movement.
-- [ ] Identical replay, changed content, same-page relationships, later relationship reconciliation, and cross-run replay preserve current identity and revision semantics.
-- [ ] Direct cross-organization operations fail without leaking or linking protected evidence, source records, canonical records, or relationships.
-- [ ] A 550-record page remains below 80 database statements and passes evidence, counter, chunk-boundary, rollback, and replay assertions.
+- [x] A valid mixed page makes all evidence, outcomes, canonical history, relationships, EV work, counters, and its cursor visible together exactly once.
+- [x] Failure, stale ownership, foreign ownership, and conflicting page replay leave no partial page writes or cursor movement.
+- [x] Identical replay, changed content, same-page relationships, later relationship reconciliation, and cross-run replay preserve current identity and revision semantics.
+- [x] Direct cross-organization operations fail without leaking or linking protected evidence, source records, canonical records, or relationships.
+- [x] A 550-record page remains below 80 database statements and passes evidence, counter, chunk-boundary, rollback, and replay assertions.
 
 ## Verification
 
 - Run focused persistence and import-service scenarios for page idempotency, crash recovery, ownership loss, atomic rollback, revision ordering, relationship reconciliation, and quarantine accounting.
 - Run real PostgreSQL contention and chunk-boundary tests, including the measured 550-record statement-budget regression.
 - Run affected database, service, and worker lint, typecheck, and integration checks through `npm run verify:framework`.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: migrated atomic ingestion, source and canonical history, projections, relationships, quarantines, EV requests, counters, and cursor checkpoints to one Prisma transaction with parameterized set-based PostgreSQL operations
+- Divergences: none; public repository naming remains transitional until tasks `007` and `008`, with no dual persistence path
+- Verification: ten real PostgreSQL persistence tests and seven service integration tests cover ownership, rollback, independent-client revision contention, replay, crash recovery, tenant isolation, provenance, relationships, and EV history; the 550-record page commits in 32 statements against the fewer-than-80 budget

@@ -1,22 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import type { PackscoutDatabase } from "./database.ts";
+import { Prisma } from "@prisma/client";
+import type { PackscoutQueryClient } from "./database.ts";
 import type {
   CanonicalProjectionInput,
   CommitPageInput,
   RawEvidencePolicy,
+  SourceRecordKind,
 } from "./pipeline-types.ts";
-import {
-  canonicalEntities,
-  canonicalRelationships,
-  canonicalRevisions,
-  quarantineRecords,
-  sourceRecordObservations,
-  sourceRecordOutcomes,
-  sourceRecordProjectionRevisions,
-  sourceRecords,
-} from "./schema/index.ts";
 import {
   assertCanonicalActorDataSafe,
   hashJson,
@@ -70,6 +60,76 @@ interface PreparedCanonicalProjection extends CanonicalProjectionWriteInput {
   readonly provenanceHash: string;
 }
 
+interface ExistingCanonicalRevision {
+  readonly id: string;
+  readonly entityId: string;
+  readonly revisionNumber: number;
+  readonly contentHash: string;
+  readonly provenanceHash: string;
+}
+
+interface CanonicalRevisionInsert extends ExistingCanonicalRevision {
+  readonly organizationId: string;
+  readonly sourceRecordId: string;
+  readonly content: Record<string, unknown>;
+  readonly provenance: Record<string, unknown>;
+  readonly actorKey: string | null;
+  readonly sourceUpdatedAt: Date;
+  readonly sourceCollectedAt: Date;
+  readonly acceptedAt: Date;
+}
+
+interface ProjectionLinkInsert {
+  readonly sourceRecordId: string;
+  readonly canonicalRevisionId: string;
+  readonly organizationId: string;
+  readonly projectionIndex: number;
+  readonly createdAt: Date;
+}
+
+interface RelationshipInsert {
+  readonly organizationId: string;
+  readonly sourceEntityId: string;
+  readonly relationshipKind: string;
+  readonly targetPlatformKey: string;
+  readonly targetRecordKind: CanonicalProjectionInput["recordKind"];
+  readonly targetExternalId: string | null;
+  readonly targetEntityId: string | null;
+  readonly createdAt: Date;
+  readonly resolvedAt: Date | null;
+}
+
+interface SourceOutcomeInsert {
+  readonly organizationId: string;
+  readonly runId: string;
+  readonly pageId: string;
+  readonly sourceRecordId: string | null;
+  readonly recordKind: SourceRecordKind;
+  readonly recordIndex: number;
+  readonly externalId: string | null;
+  readonly outcome: "accepted" | "duplicate" | "quarantined";
+  readonly reasonCode: string | null;
+  readonly createdAt: Date;
+}
+
+interface QuarantineInsert {
+  readonly organizationId: string;
+  readonly providerId: string;
+  readonly runId: string;
+  readonly pageId: string;
+  readonly sourceRecordId: string | null;
+  readonly recordKind: SourceRecordKind;
+  readonly recordIndex: number;
+  readonly externalId: string | null;
+  readonly reasonCode: string;
+  readonly fieldPath: string | null;
+  readonly sanitizedSummary: string;
+  readonly payload: unknown;
+  readonly hasStandalonePayload: boolean;
+  readonly expiresAt: Date;
+  readonly createdAt: Date;
+}
+
 export interface PageRecordBatchResult {
   readonly accepted: number;
   readonly duplicate: number;
@@ -90,8 +150,20 @@ function compareKeys(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function jsonValue(value: unknown): Prisma.Sql {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new TypeError("Persistence JSON values must be serializable.");
+  }
+  return Prisma.sql`cast(${serialized} as jsonb)`;
+}
+
+function uuid(value: string): Prisma.Sql {
+  return Prisma.sql`cast(${value} as uuid)`;
+}
+
 function sourceIdentityKey(input: {
-  recordKind: CommitPageInput["records"][number]["recordKind"];
+  recordKind: SourceRecordKind;
   externalId: string;
   sourceTime: Date;
   contentHash: string;
@@ -118,8 +190,8 @@ function canonicalRevisionKey(input: {
   return [input.entityId, input.contentHash, input.provenanceHash].join("\u0000");
 }
 
-async function resolveSourceRecords<TQueryResult extends PgQueryResultHKT>(
-  database: PackscoutDatabase<TQueryResult>,
+async function resolveSourceRecords(
+  database: PackscoutQueryClient,
   input: CommitPageInput,
   prepared: readonly PreparedSourceRecord[],
   pageId: string,
@@ -137,31 +209,39 @@ async function resolveSourceRecords<TQueryResult extends PgQueryResultHKT>(
   );
   const createdIdentityKeys = new Set<string>();
   for (const batch of batches(uniqueRecords)) {
-    const inserted = await database
-      .insert(sourceRecords)
-      .values(
-        batch.map((record) => ({
-          organizationId: input.organizationId,
-          providerId: input.providerId,
-          firstRunId: input.runId,
-          firstPageId: pageId,
-          recordKind: record.input.recordKind,
-          externalId: record.input.externalId,
-          sourceTime: record.input.sourceTime,
-          collectedAt: record.input.collectedAt,
-          payloadJson: record.input.payload,
-          contentHash: record.contentHash,
-          expiresAt,
-          createdAt: input.committedAt,
-        })),
+    const rows = batch.map((record) => Prisma.sql`(
+      ${uuid(input.organizationId)},
+      ${uuid(input.providerId)},
+      ${uuid(input.runId)},
+      ${uuid(pageId)},
+      cast(${record.input.recordKind} as public.source_record_kind),
+      ${record.input.externalId},
+      ${record.input.sourceTime},
+      ${record.input.collectedAt},
+      ${jsonValue(record.input.payload)},
+      ${record.contentHash},
+      ${expiresAt},
+      ${input.committedAt}
+    )`);
+    const inserted = await database.$queryRaw<Array<{
+      recordKind: SourceRecordKind;
+      externalId: string;
+      sourceTime: Date;
+      contentHash: string;
+    }>>(Prisma.sql`
+      insert into public.source_records (
+        organization_id, provider_id, first_run_id, first_page_id,
+        record_kind, external_id, source_time, collected_at, payload_json,
+        content_hash, expires_at, created_at
       )
-      .onConflictDoNothing()
-      .returning({
-        recordKind: sourceRecords.recordKind,
-        externalId: sourceRecords.externalId,
-        sourceTime: sourceRecords.sourceTime,
-        contentHash: sourceRecords.contentHash,
-      });
+      values ${Prisma.join(rows)}
+      on conflict do nothing
+      returning
+        record_kind::text as "recordKind",
+        external_id as "externalId",
+        source_time as "sourceTime",
+        content_hash as "contentHash"
+    `);
     for (const record of inserted) {
       createdIdentityKeys.add(sourceIdentityKey(record));
     }
@@ -169,31 +249,32 @@ async function resolveSourceRecords<TQueryResult extends PgQueryResultHKT>(
 
   const resolvedByIdentity = new Map<string, string>();
   for (const batch of batches(uniqueRecords)) {
-    const resolved = await database
-      .select({
-        id: sourceRecords.id,
-        recordKind: sourceRecords.recordKind,
-        externalId: sourceRecords.externalId,
-        sourceTime: sourceRecords.sourceTime,
-        contentHash: sourceRecords.contentHash,
-      })
-      .from(sourceRecords)
-      .where(
-        and(
-          eq(sourceRecords.organizationId, input.organizationId),
-          eq(sourceRecords.providerId, input.providerId),
-          or(
-            ...batch.map((record) =>
-              and(
-                eq(sourceRecords.recordKind, record.input.recordKind),
-                eq(sourceRecords.externalId, record.input.externalId),
-                eq(sourceRecords.sourceTime, record.input.sourceTime),
-                eq(sourceRecords.contentHash, record.contentHash),
-              ),
-            ),
-          ),
-        ),
-      );
+    const identities = batch.map((record) => Prisma.sql`(
+      cast(${record.input.recordKind} as public.source_record_kind),
+      ${record.input.externalId},
+      ${record.input.sourceTime},
+      ${record.contentHash}
+    )`);
+    const resolved = await database.$queryRaw<Array<{
+      id: string;
+      recordKind: SourceRecordKind;
+      externalId: string;
+      sourceTime: Date;
+      contentHash: string;
+    }>>(Prisma.sql`
+      select
+        id,
+        record_kind::text as "recordKind",
+        external_id as "externalId",
+        source_time as "sourceTime",
+        content_hash as "contentHash"
+      from public.source_records
+      where organization_id = ${uuid(input.organizationId)}
+        and provider_id = ${uuid(input.providerId)}
+        and (record_kind, external_id, source_time, content_hash) in (
+          values ${Prisma.join(identities)}
+        )
+    `);
     for (const record of resolved) {
       resolvedByIdentity.set(sourceIdentityKey(record), record.id);
     }
@@ -210,8 +291,8 @@ async function resolveSourceRecords<TQueryResult extends PgQueryResultHKT>(
   });
 }
 
-async function loadCanonicalEntities<TQueryResult extends PgQueryResultHKT>(
-  database: PackscoutDatabase<TQueryResult>,
+async function loadCanonicalEntities(
+  database: PackscoutQueryClient,
   organizationId: string,
   identities: readonly CanonicalEntityIdentity[],
   acceptedAt: Date,
@@ -226,49 +307,44 @@ async function loadCanonicalEntities<TQueryResult extends PgQueryResultHKT>(
   if (uniqueIdentities.length === 0) return new Map();
 
   for (const batch of batches(uniqueIdentities)) {
-    await database
-      .insert(canonicalEntities)
-      .values(
-        batch.map((identity) => ({
-          organizationId,
-          ...identity,
-          createdAt: acceptedAt,
-          updatedAt: acceptedAt,
-        })),
+    const rows = batch.map((identity) => Prisma.sql`(
+      ${uuid(organizationId)},
+      ${identity.platformKey},
+      cast(${identity.recordKind} as public.canonical_record_kind),
+      ${identity.externalId},
+      ${acceptedAt},
+      ${acceptedAt}
+    )`);
+    await database.$executeRaw(Prisma.sql`
+      insert into public.canonical_entities (
+        organization_id, platform_key, record_kind, external_id, created_at, updated_at
       )
-      .onConflictDoNothing();
+      values ${Prisma.join(rows)}
+      on conflict do nothing
+    `);
   }
 
   const entitiesByIdentity = new Map<string, CanonicalEntityRecord>();
   for (const batch of batches(uniqueIdentities)) {
-    const entities = await database
-      .select({
-        id: canonicalEntities.id,
-        platformKey: canonicalEntities.platformKey,
-        recordKind: canonicalEntities.recordKind,
-        externalId: canonicalEntities.externalId,
-      })
-      .from(canonicalEntities)
-      .where(
-        and(
-          eq(canonicalEntities.organizationId, organizationId),
-          or(
-            ...batch.map((identity) =>
-              and(
-                eq(canonicalEntities.platformKey, identity.platformKey),
-                eq(canonicalEntities.recordKind, identity.recordKind),
-                eq(canonicalEntities.externalId, identity.externalId),
-              ),
-            ),
-          ),
-        ),
-      )
-      .orderBy(
-        asc(canonicalEntities.platformKey),
-        asc(canonicalEntities.recordKind),
-        asc(canonicalEntities.externalId),
-      )
-      .for("update");
+    const rows = batch.map((identity) => Prisma.sql`(
+      ${identity.platformKey},
+      cast(${identity.recordKind} as public.canonical_record_kind),
+      ${identity.externalId}
+    )`);
+    const entities = await database.$queryRaw<CanonicalEntityRecord[]>(Prisma.sql`
+      select
+        id,
+        platform_key as "platformKey",
+        record_kind::text as "recordKind",
+        external_id as "externalId"
+      from public.canonical_entities
+      where organization_id = ${uuid(organizationId)}
+        and (platform_key, record_kind, external_id) in (
+          values ${Prisma.join(rows)}
+        )
+      order by platform_key, record_kind, external_id
+      for update
+    `);
     for (const entity of entities) {
       entitiesByIdentity.set(canonicalIdentityKey(entity), entity);
     }
@@ -279,8 +355,8 @@ async function loadCanonicalEntities<TQueryResult extends PgQueryResultHKT>(
   return entitiesByIdentity;
 }
 
-async function loadRelationshipTargets<TQueryResult extends PgQueryResultHKT>(
-  database: PackscoutDatabase<TQueryResult>,
+async function loadRelationshipTargets(
+  database: PackscoutQueryClient,
   organizationId: string,
   identities: readonly CanonicalEntityIdentity[],
   knownEntities: ReadonlyMap<string, CanonicalEntityRecord>,
@@ -292,28 +368,23 @@ async function loadRelationshipTargets<TQueryResult extends PgQueryResultHKT>(
     if (!targets.has(key)) missingByIdentity.set(key, identity);
   }
   for (const batch of batches([...missingByIdentity.values()])) {
-    const records = await database
-      .select({
-        id: canonicalEntities.id,
-        platformKey: canonicalEntities.platformKey,
-        recordKind: canonicalEntities.recordKind,
-        externalId: canonicalEntities.externalId,
-      })
-      .from(canonicalEntities)
-      .where(
-        and(
-          eq(canonicalEntities.organizationId, organizationId),
-          or(
-            ...batch.map((identity) =>
-              and(
-                eq(canonicalEntities.platformKey, identity.platformKey),
-                eq(canonicalEntities.recordKind, identity.recordKind),
-                eq(canonicalEntities.externalId, identity.externalId),
-              ),
-            ),
-          ),
-        ),
-      );
+    const rows = batch.map((identity) => Prisma.sql`(
+      ${identity.platformKey},
+      cast(${identity.recordKind} as public.canonical_record_kind),
+      ${identity.externalId}
+    )`);
+    const records = await database.$queryRaw<CanonicalEntityRecord[]>(Prisma.sql`
+      select
+        id,
+        platform_key as "platformKey",
+        record_kind::text as "recordKind",
+        external_id as "externalId"
+      from public.canonical_entities
+      where organization_id = ${uuid(organizationId)}
+        and (platform_key, record_kind, external_id) in (
+          values ${Prisma.join(rows)}
+        )
+    `);
     for (const record of records) {
       targets.set(canonicalIdentityKey(record), record);
     }
@@ -321,10 +392,8 @@ async function loadRelationshipTargets<TQueryResult extends PgQueryResultHKT>(
   return targets;
 }
 
-export async function writeCanonicalProjectionBatch<
-  TQueryResult extends PgQueryResultHKT,
->(
-  database: PackscoutDatabase<TQueryResult>,
+export async function writeCanonicalProjectionBatch(
+  database: PackscoutQueryClient,
   policy: RawEvidencePolicy,
   inputs: readonly CanonicalProjectionWriteInput[],
 ): Promise<CanonicalProjectionWriteResult[]> {
@@ -371,19 +440,19 @@ export async function writeCanonicalProjectionBatch<
   });
 
   const entityIds = [...new Set(prepared.map(({ entityId }) => entityId))];
-  const existingRevisions = [];
+  const existingRevisions: ExistingCanonicalRevision[] = [];
   for (const batch of batches(entityIds)) {
     existingRevisions.push(
-      ...(await database
-        .select({
-          id: canonicalRevisions.id,
-          entityId: canonicalRevisions.entityId,
-          revisionNumber: canonicalRevisions.revisionNumber,
-          contentHash: canonicalRevisions.contentHash,
-          provenanceHash: canonicalRevisions.provenanceHash,
-        })
-        .from(canonicalRevisions)
-        .where(inArray(canonicalRevisions.entityId, batch))),
+      ...(await database.$queryRaw<ExistingCanonicalRevision[]>(Prisma.sql`
+        select
+          id,
+          entity_id as "entityId",
+          revision_number as "revisionNumber",
+          content_hash as "contentHash",
+          provenance_hash as "provenanceHash"
+        from public.canonical_revisions
+        where entity_id in (${Prisma.join(batch.map(uuid))})
+      `)),
     );
   }
   const revisionsByIdentity = new Map(
@@ -400,7 +469,7 @@ export async function writeCanonicalProjectionBatch<
     );
   }
 
-  const revisionsToInsert: (typeof canonicalRevisions.$inferInsert)[] = [];
+  const revisionsToInsert: CanonicalRevisionInsert[] = [];
   const currentRevisionByEntity = new Map<string, string>();
   const results: CanonicalProjectionWriteResult[] = [];
   for (const projection of prepared) {
@@ -414,22 +483,15 @@ export async function writeCanonicalProjectionBatch<
     const revisionNumber =
       (latestRevisionNumberByEntity.get(projection.entityId) ?? 0) + 1;
     latestRevisionNumberByEntity.set(projection.entityId, revisionNumber);
-    revisionsByIdentity.set(revisionKey, {
-      id: revisionId,
-      entityId: projection.entityId,
-      revisionNumber,
-      contentHash: projection.contentHash,
-      provenanceHash: projection.provenanceHash,
-    });
-    revisionsToInsert.push({
+    const revision: CanonicalRevisionInsert = {
       id: revisionId,
       organizationId: projection.organizationId,
       entityId: projection.entityId,
       revisionNumber,
       sourceRecordId: projection.sourceRecordId,
-      contentJson: projection.projection.content,
+      content: projection.projection.content,
       contentHash: projection.contentHash,
-      provenanceJson: projection.provenance,
+      provenance: projection.provenance,
       provenanceHash: projection.provenanceHash,
       actorKey: projection.projection.sourceActorIdentifier
         ? pseudonymizeProviderActor({
@@ -441,30 +503,53 @@ export async function writeCanonicalProjectionBatch<
       sourceUpdatedAt: projection.projection.sourceUpdatedAt,
       sourceCollectedAt: projection.projection.sourceCollectedAt,
       acceptedAt: projection.acceptedAt,
-    });
+    };
+    revisionsByIdentity.set(revisionKey, revision);
+    revisionsToInsert.push(revision);
     currentRevisionByEntity.set(projection.entityId, revisionId);
     results.push({ revisionId, created: true });
   }
 
   for (const batch of batches(revisionsToInsert)) {
-    await database.insert(canonicalRevisions).values(batch);
+    const rows = batch.map((revision) => Prisma.sql`(
+      ${uuid(revision.id)},
+      ${uuid(revision.organizationId)},
+      ${uuid(revision.entityId)},
+      ${revision.revisionNumber},
+      ${uuid(revision.sourceRecordId)},
+      ${jsonValue(revision.content)},
+      ${revision.contentHash},
+      ${jsonValue(revision.provenance)},
+      ${revision.provenanceHash},
+      ${revision.actorKey},
+      ${revision.sourceUpdatedAt},
+      ${revision.sourceCollectedAt},
+      ${revision.acceptedAt}
+    )`);
+    await database.$executeRaw(Prisma.sql`
+      insert into public.canonical_revisions (
+        id, organization_id, entity_id, revision_number, source_record_id,
+        content_json, content_hash, provenance_json, provenance_hash, actor_key,
+        source_updated_at, source_collected_at, accepted_at
+      )
+      values ${Prisma.join(rows)}
+    `);
   }
   for (const batch of batches([...currentRevisionByEntity.entries()])) {
     const rows = batch.map(([entityId, revisionId]) =>
-      sql`(${entityId}::uuid, ${revisionId}::uuid)`,
+      Prisma.sql`(${uuid(entityId)}, ${uuid(revisionId)})`,
     );
-    await database.execute(sql`
-      update ${canonicalEntities}
-      set
-        current_revision_id = revisions.revision_id,
-        updated_at = ${scope.acceptedAt}
-      from (values ${sql.join(rows, sql`, `)}) as revisions(entity_id, revision_id)
-      where ${canonicalEntities.id} = revisions.entity_id
-        and ${canonicalEntities.organizationId} = ${scope.organizationId}
+    await database.$executeRaw(Prisma.sql`
+      update public.canonical_entities as entity
+      set current_revision_id = revisions.revision_id,
+          updated_at = ${scope.acceptedAt}
+      from (values ${Prisma.join(rows)}) as revisions(entity_id, revision_id)
+      where entity.id = revisions.entity_id
+        and entity.organization_id = ${uuid(scope.organizationId)}
     `);
   }
 
-  const projectionLinks = prepared.map((projection, index) => ({
+  const projectionLinks: ProjectionLinkInsert[] = prepared.map((projection, index) => ({
     sourceRecordId: projection.sourceRecordId,
     canonicalRevisionId: results[index]!.revisionId,
     organizationId: projection.organizationId,
@@ -472,10 +557,21 @@ export async function writeCanonicalProjectionBatch<
     createdAt: projection.acceptedAt,
   }));
   for (const batch of batches(projectionLinks)) {
-    await database
-      .insert(sourceRecordProjectionRevisions)
-      .values(batch)
-      .onConflictDoNothing();
+    const rows = batch.map((link) => Prisma.sql`(
+      ${uuid(link.sourceRecordId)},
+      ${uuid(link.canonicalRevisionId)},
+      ${uuid(link.organizationId)},
+      ${link.projectionIndex},
+      ${link.createdAt}
+    )`);
+    await database.$executeRaw(Prisma.sql`
+      insert into public.source_record_projection_revisions (
+        source_record_id, canonical_revision_id, organization_id,
+        projection_index, created_at
+      )
+      values ${Prisma.join(rows)}
+      on conflict do nothing
+    `);
   }
 
   const relationshipTargets = prepared.flatMap(({ projection }) =>
@@ -493,7 +589,7 @@ export async function writeCanonicalProjectionBatch<
     relationshipTargets,
     entitiesByIdentity,
   );
-  const relationships = prepared.flatMap((projection) => {
+  const relationships: RelationshipInsert[] = prepared.flatMap((projection) => {
     const sourceEntity = entitiesByIdentity.get(
       canonicalIdentityKey(projection.projection),
     );
@@ -522,37 +618,53 @@ export async function writeCanonicalProjectionBatch<
     });
   });
   for (const batch of batches(relationships)) {
-    await database
-      .insert(canonicalRelationships)
-      .values(batch)
-      .onConflictDoNothing();
+    const rows = batch.map((relationship) => Prisma.sql`(
+      ${uuid(relationship.organizationId)},
+      ${uuid(relationship.sourceEntityId)},
+      ${relationship.relationshipKind},
+      ${relationship.targetPlatformKey},
+      cast(${relationship.targetRecordKind} as public.canonical_record_kind),
+      ${relationship.targetExternalId},
+      ${relationship.targetEntityId ? uuid(relationship.targetEntityId) : Prisma.sql`null::uuid`},
+      ${relationship.createdAt},
+      ${relationship.resolvedAt}
+    )`);
+    await database.$executeRaw(Prisma.sql`
+      insert into public.canonical_relationships (
+        organization_id, source_entity_id, relationship_kind,
+        target_platform_key, target_record_kind, target_external_id,
+        target_entity_id, created_at, resolved_at
+      )
+      values ${Prisma.join(rows)}
+      on conflict do nothing
+    `);
   }
 
   for (const batch of batches([...entitiesByIdentity.values()])) {
-    const rows = batch.map((entity) =>
-      sql`(${entity.platformKey}::text, ${entity.recordKind}::text, ${entity.externalId}::text, ${entity.id}::uuid)`,
-    );
-    await database.execute(sql`
-      update ${canonicalRelationships}
-      set
-        target_entity_id = targets.entity_id,
-        resolved_at = ${scope.acceptedAt}
-      from (values ${sql.join(rows, sql`, `)})
+    const rows = batch.map((entity) => Prisma.sql`(
+      ${entity.platformKey},
+      cast(${entity.recordKind} as public.canonical_record_kind),
+      ${entity.externalId},
+      ${uuid(entity.id)}
+    )`);
+    await database.$executeRaw(Prisma.sql`
+      update public.canonical_relationships as relationship
+      set target_entity_id = targets.entity_id,
+          resolved_at = ${scope.acceptedAt}
+      from (values ${Prisma.join(rows)})
         as targets(platform_key, record_kind, external_id, entity_id)
-      where ${canonicalRelationships.organizationId} = ${scope.organizationId}
-        and ${canonicalRelationships.targetEntityId} is null
-        and ${canonicalRelationships.targetPlatformKey} = targets.platform_key
-        and ${canonicalRelationships.targetRecordKind}::text = targets.record_kind
-        and ${canonicalRelationships.targetExternalId} = targets.external_id
+      where relationship.organization_id = ${uuid(scope.organizationId)}
+        and relationship.target_entity_id is null
+        and relationship.target_platform_key = targets.platform_key
+        and relationship.target_record_kind = targets.record_kind
+        and relationship.target_external_id = targets.external_id
     `);
   }
   return results;
 }
 
-export async function persistPageRecordsInBatches<
-  TQueryResult extends PgQueryResultHKT,
->(
-  database: PackscoutDatabase<TQueryResult>,
+export async function persistPageRecordsInBatches(
+  database: PackscoutQueryClient,
   policy: RawEvidencePolicy,
   input: CommitPageInput,
   pageId: string,
@@ -576,7 +688,13 @@ export async function persistPageRecordsInBatches<
     expiresAt,
   );
 
-  const observationByIdentity = new Map<string, (typeof sourceRecordObservations.$inferInsert)>();
+  const observationByIdentity = new Map<string, {
+    sourceRecordId: string;
+    organizationId: string;
+    runId: string;
+    pageId: string;
+    observedAt: Date;
+  }>();
   for (const record of resolved) {
     const key = [record.sourceRecordId, input.runId, pageId].join("\u0000");
     observationByIdentity.set(key, {
@@ -588,10 +706,20 @@ export async function persistPageRecordsInBatches<
     });
   }
   for (const batch of batches([...observationByIdentity.values()])) {
-    await database
-      .insert(sourceRecordObservations)
-      .values(batch)
-      .onConflictDoNothing();
+    const rows = batch.map((observation) => Prisma.sql`(
+      ${uuid(observation.sourceRecordId)},
+      ${uuid(observation.organizationId)},
+      ${uuid(observation.runId)},
+      ${uuid(observation.pageId)},
+      ${observation.observedAt}
+    )`);
+    await database.$executeRaw(Prisma.sql`
+      insert into public.source_record_observations (
+        source_record_id, organization_id, run_id, page_id, observed_at
+      )
+      values ${Prisma.join(rows)}
+      on conflict do nothing
+    `);
   }
 
   const projectionWrites = resolved.flatMap((record) =>
@@ -624,8 +752,8 @@ export async function persistPageRecordsInBatches<
   let accepted = 0;
   let duplicate = 0;
   let quarantined = 0;
-  const outcomeRows: (typeof sourceRecordOutcomes.$inferInsert)[] = [];
-  const quarantineRows: (typeof quarantineRecords.$inferInsert)[] = [];
+  const outcomeRows: SourceOutcomeInsert[] = [];
+  const quarantineRows: QuarantineInsert[] = [];
   for (const record of resolved) {
     const outcome = record.input.quarantine
       ? "quarantined"
@@ -644,7 +772,7 @@ export async function persistPageRecordsInBatches<
       recordIndex: record.recordIndex,
       externalId: record.input.externalId,
       outcome,
-      reasonCode: record.input.quarantine?.reasonCode,
+      reasonCode: record.input.quarantine?.reasonCode ?? null,
       createdAt: input.committedAt,
     });
     if (record.input.quarantine) {
@@ -658,9 +786,10 @@ export async function persistPageRecordsInBatches<
         recordIndex: record.recordIndex,
         externalId: record.input.externalId,
         reasonCode: record.input.quarantine.reasonCode,
-        fieldPath: record.input.quarantine.fieldPath,
+        fieldPath: record.input.quarantine.fieldPath ?? null,
         sanitizedSummary: record.input.quarantine.sanitizedSummary,
-        payloadJson: null,
+        payload: null,
+        hasStandalonePayload: false,
         expiresAt,
         createdAt: input.committedAt,
       });
@@ -672,13 +801,15 @@ export async function persistPageRecordsInBatches<
       providerId: input.providerId,
       runId: input.runId,
       pageId,
+      sourceRecordId: null,
       recordKind: quarantine.recordKind,
       recordIndex: quarantine.recordIndex,
       externalId: quarantine.externalId,
       reasonCode: quarantine.reasonCode,
-      fieldPath: quarantine.fieldPath,
+      fieldPath: quarantine.fieldPath ?? null,
       sanitizedSummary: quarantine.sanitizedSummary,
-      payloadJson: quarantine.payload,
+      payload: quarantine.payload,
+      hasStandalonePayload: true,
       expiresAt,
       createdAt: input.committedAt,
     });
@@ -696,10 +827,51 @@ export async function persistPageRecordsInBatches<
     });
   }
   for (const batch of batches(outcomeRows)) {
-    await database.insert(sourceRecordOutcomes).values(batch);
+    const rows = batch.map((outcome) => Prisma.sql`(
+      ${uuid(outcome.organizationId)},
+      ${uuid(outcome.runId)},
+      ${uuid(outcome.pageId)},
+      ${outcome.sourceRecordId ? uuid(outcome.sourceRecordId) : Prisma.sql`null::uuid`},
+      cast(${outcome.recordKind} as public.source_record_kind),
+      ${outcome.recordIndex},
+      ${outcome.externalId},
+      cast(${outcome.outcome} as public.source_record_outcome),
+      ${outcome.reasonCode},
+      ${outcome.createdAt}
+    )`);
+    await database.$executeRaw(Prisma.sql`
+      insert into public.source_record_outcomes (
+        organization_id, run_id, page_id, source_record_id, record_kind,
+        record_index, external_id, outcome, reason_code, created_at
+      )
+      values ${Prisma.join(rows)}
+    `);
   }
   for (const batch of batches(quarantineRows)) {
-    await database.insert(quarantineRecords).values(batch);
+    const rows = batch.map((quarantine) => Prisma.sql`(
+      ${uuid(quarantine.organizationId)},
+      ${uuid(quarantine.providerId)},
+      ${uuid(quarantine.runId)},
+      ${uuid(quarantine.pageId)},
+      ${quarantine.sourceRecordId ? uuid(quarantine.sourceRecordId) : Prisma.sql`null::uuid`},
+      cast(${quarantine.recordKind} as public.source_record_kind),
+      ${quarantine.recordIndex},
+      ${quarantine.externalId},
+      ${quarantine.reasonCode},
+      ${quarantine.fieldPath},
+      ${quarantine.sanitizedSummary},
+      ${quarantine.hasStandalonePayload ? jsonValue(quarantine.payload) : Prisma.sql`null::jsonb`},
+      ${quarantine.expiresAt},
+      ${quarantine.createdAt}
+    )`);
+    await database.$executeRaw(Prisma.sql`
+      insert into public.quarantine_records (
+        organization_id, provider_id, run_id, page_id, source_record_id,
+        record_kind, record_index, external_id, reason_code, field_path,
+        sanitized_summary, payload_json, expires_at, created_at
+      )
+      values ${Prisma.join(rows)}
+    `);
   }
   return {
     accepted,

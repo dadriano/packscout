@@ -64,7 +64,7 @@ Examples:
 | belongs to the caller | any persistence step fails | none of the page writes remain visible | remain unchanged |
 | is missing, expired, or foreign | the page is submitted | no page write becomes visible and ownership loss is reported | remain unchanged |
 
-Coverage: Manual gap — task 005 must preserve atomic page-commit, rollback, and ownership tests in the Prisma integration harness.
+Coverage: Automated — real PostgreSQL integration tests cover valid atomic commits, rollback, and missing, stale, or foreign ownership with unchanged checkpoints.
 
 ## Scenario Outline: Replays preserve one truthful history
 
@@ -81,7 +81,7 @@ Examples:
 | the same idempotency key with conflicting page content | a stable conflict is returned and stored state is unchanged |
 | changed content for the same external identity | exactly one new source and canonical revision becomes current while prior history remains available |
 
-Coverage: Manual gap — task 005 must preserve replay, revision-history, and crash-recovery integration tests.
+Coverage: Automated — persistence and provider-import integration tests cover idempotent and conflicting replays, ordered revisions, independent-client contention, and crash recovery from the durable cursor.
 
 ## Scenario: Large page commits remain bounded
 
@@ -90,7 +90,7 @@ When the page is committed
 Then evidence, projections, observations, outcomes, counters, and replay behavior remain correct
 And the commit issues fewer than 80 database statements
 
-Coverage: Manual gap — task 005 must retain the measured large-page statement-budget regression.
+Coverage: Automated — the real PostgreSQL 550-record regression verifies all evidence and replay semantics and currently commits in 32 SQL statements.
 
 ## Scenario: Quarantine, retention, and operations remain recoverable
 

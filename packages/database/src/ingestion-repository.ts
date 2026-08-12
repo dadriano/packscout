@@ -1,17 +1,9 @@
+import { Prisma } from "@prisma/client";
 import {
-  and,
-  asc,
-  eq,
-  gt,
-  inArray,
-  isNotNull,
-  isNull,
-  lte,
-  or,
-  sql,
-} from "drizzle-orm";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import type { PackscoutDatabase } from "./database.ts";
+  PACKSCOUT_TRANSACTION_OPTIONS,
+  type PackscoutPrismaClient,
+  type PackscoutQueryClient,
+} from "./database.ts";
 import { estimatedEvRecomputationRequestKey } from "./estimated-ev-recomputation-repository.ts";
 import {
   persistPageRecordsInBatches,
@@ -28,28 +20,14 @@ import type {
   ProjectDerivedSourceRecordInput,
   ProjectSourceRecordInput,
   RawEvidencePolicy,
+  RunCounters,
+  SourceRecordKind,
 } from "./pipeline-types.ts";
 import { PersistenceError } from "./persistence-error.ts";
-import { quarantineAttempts } from "./schema/quarantine-retry.ts";
-import {
-  canonicalEntities,
-  canonicalRelationships,
-  canonicalRevisions,
-  estimatedEvRecomputationRequests,
-  importPages,
-  importRuns,
-  providerConfigRevisions,
-  providerCursorCheckpoints,
-  providerSources,
-  quarantineRecords,
-  sourceRecordObservations,
-  sourceRecordOutcomes,
-  sourceRecords,
-  type RunCounters,
-} from "./schema/index.ts";
 import { hashJson } from "./security.ts";
 
 const millisecondsPerDay = 24 * 60 * 60 * 1_000;
+const maximumRowsPerWrite = 500;
 
 interface ChangedPackInput {
   readonly platformKey: string;
@@ -58,6 +36,19 @@ interface ChangedPackInput {
 
 interface ChangedEvInput extends ChangedPackInput {
   readonly evInputExternalId: string;
+}
+
+interface CanonicalRevisionRow {
+  entityId: string;
+  revisionId: string;
+  revisionNumber: number;
+  content: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+  actorKey: string | null;
+  sourceRecordId: string;
+  sourceUpdatedAt: Date;
+  sourceCollectedAt: Date;
+  acceptedAt: Date;
 }
 
 function addRetentionPeriod(at: Date, retentionDays: number): Date {
@@ -76,9 +67,29 @@ function emptyCounters(): RunCounters {
   };
 }
 
-export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHKT> {
+function jsonValue(value: unknown): Prisma.Sql {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new TypeError("Persistence JSON values must be serializable.");
+  }
+  return Prisma.sql`cast(${serialized} as jsonb)`;
+}
+
+function uuid(value: string): Prisma.Sql {
+  return Prisma.sql`cast(${value} as uuid)`;
+}
+
+function batches<T>(values: readonly T[]): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += maximumRowsPerWrite) {
+    result.push(values.slice(index, index + maximumRowsPerWrite));
+  }
+  return result;
+}
+
+export class IngestionPersistenceRepository {
   constructor(
-    private readonly database: PackscoutDatabase<TQueryResult>,
+    private readonly database: PackscoutPrismaClient,
     private readonly policy: RawEvidencePolicy,
   ) {
     if (policy.retentionDays !== 90) {
@@ -87,50 +98,48 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
   }
 
   async commitPage(input: CommitPageInput): Promise<CommitPageResult> {
-    return this.database.transaction(async (transaction) => {
+    return this.database.$transaction(async (transaction) => {
       const context = await this.loadRunContext(transaction, input);
       const payloadHash = hashJson(input.payload);
       const expiresAt = addRetentionPeriod(input.committedAt, this.policy.retentionDays);
-      const recordKindCount = (recordKind: "catalog" | "pull" | "sale") =>
+      const recordKindCount = (recordKind: SourceRecordKind) =>
         input.records.filter((record) => record.recordKind === recordKind).length +
         (input.quarantines ?? []).filter(
           (quarantine) => quarantine.recordKind === recordKind,
         ).length;
-      const recordCountsJson = {
+      const recordCounts = {
         catalog: recordKindCount("catalog"),
         pulls: recordKindCount("pull"),
         sales: recordKindCount("sale"),
       };
-      const [insertedPage] = await transaction
-        .insert(importPages)
-        .values({
-          organizationId: input.organizationId,
-          providerId: input.providerId,
-          runId: input.runId,
-          pageNumber: input.pageNumber,
-          requestedCursor: input.requestedCursor,
-          nextCursor: input.nextCursor,
-          hasMore: input.hasMore,
-          payloadJson: input.payload,
-          payloadHash,
-          recordCountsJson,
-          committedAt: input.committedAt,
-          expiresAt,
-        })
-        .onConflictDoNothing()
-        .returning({ id: importPages.id });
+      const insertedPages = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        insert into public.import_pages (
+          organization_id, provider_id, run_id, page_number, requested_cursor,
+          next_cursor, has_more, payload_json, payload_hash, record_counts_json,
+          committed_at, expires_at
+        ) values (
+          ${uuid(input.organizationId)}, ${uuid(input.providerId)}, ${uuid(input.runId)},
+          ${input.pageNumber}, ${input.requestedCursor}, ${input.nextCursor}, ${input.hasMore},
+          ${jsonValue(input.payload)}, ${payloadHash}, ${jsonValue(recordCounts)},
+          ${input.committedAt}, ${expiresAt}
+        )
+        on conflict do nothing
+        returning id
+      `);
+      const insertedPage = insertedPages[0];
       if (!insertedPage) {
-        const [existingPage] = await transaction
-          .select({ id: importPages.id, payloadHash: importPages.payloadHash })
-          .from(importPages)
-          .where(
-            and(
-              eq(importPages.organizationId, input.organizationId),
-              eq(importPages.runId, input.runId),
-              eq(importPages.pageNumber, input.pageNumber),
-            ),
-          )
-          .limit(1);
+        const existingPages = await transaction.$queryRaw<Array<{
+          id: string;
+          payloadHash: string;
+        }>>(Prisma.sql`
+          select id, payload_hash as "payloadHash"
+          from public.import_pages
+          where organization_id = ${uuid(input.organizationId)}
+            and run_id = ${uuid(input.runId)}
+            and page_number = ${input.pageNumber}
+          limit 1
+        `);
+        const existingPage = existingPages[0];
         if (!existingPage || existingPage.payloadHash !== payloadHash) {
           throw new PersistenceError(
             "IDEMPOTENCY_CONFLICT",
@@ -158,7 +167,6 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
       for (const projection of persisted.createdCanonicalProjections) {
         this.recordEstimatedEvTrigger(projection, changedPacks, changedEvInputs);
       }
-
       await this.enqueueEstimatedEvRecomputations(transaction, {
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -181,33 +189,27 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         requestAttempts: context.counters.requestAttempts ?? 0,
         transientRetries: context.counters.transientRetries ?? 0,
       };
-      await transaction
-        .update(importRuns)
-        .set({ finalCursor: input.nextCursor, countersJson: counters })
-        .where(
-          and(
-            eq(importRuns.id, input.runId),
-            eq(importRuns.organizationId, input.organizationId),
-          ),
-        );
-      await transaction
-        .insert(providerCursorCheckpoints)
-        .values({
-          configRevisionId: input.configRevisionId,
-          organizationId: input.organizationId,
-          providerId: input.providerId,
-          cursor: input.nextCursor,
-          advancedByRunId: input.runId,
-          updatedAt: input.committedAt,
-        })
-        .onConflictDoUpdate({
-          target: providerCursorCheckpoints.configRevisionId,
-          set: {
-            cursor: input.nextCursor,
-            advancedByRunId: input.runId,
-            updatedAt: input.committedAt,
-          },
-        });
+      await transaction.$executeRaw(Prisma.sql`
+        update public.import_runs
+        set final_cursor = ${input.nextCursor},
+            counters_json = ${jsonValue(counters)}
+        where id = ${uuid(input.runId)}
+          and organization_id = ${uuid(input.organizationId)}
+      `);
+      await transaction.$executeRaw(Prisma.sql`
+        insert into public.provider_cursor_checkpoints (
+          config_revision_id, organization_id, provider_id, cursor,
+          advanced_by_run_id, updated_at
+        ) values (
+          ${uuid(input.configRevisionId)}, ${uuid(input.organizationId)},
+          ${uuid(input.providerId)}, ${input.nextCursor}, ${uuid(input.runId)},
+          ${input.committedAt}
+        )
+        on conflict (config_revision_id) do update
+        set cursor = excluded.cursor,
+            advanced_by_run_id = excluded.advanced_by_run_id,
+            updated_at = excluded.updated_at
+      `);
       return {
         kind: "committed",
         pageId: insertedPage.id,
@@ -215,54 +217,39 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         newCanonicalRevisions: persisted.newCanonicalRevisions,
         duplicateSourceRecords: persisted.duplicate,
       };
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async projectSourceRecord(
     input: ProjectSourceRecordInput,
   ): Promise<{ canonicalRevisionCount: number }> {
-    return this.database.transaction(async (transaction) => {
-      const [source] = await transaction
-        .select({ id: sourceRecords.id })
-        .from(sourceRecords)
-        .innerJoin(
-          quarantineRecords,
-          and(
-            eq(quarantineRecords.id, input.quarantineId),
-            eq(quarantineRecords.organizationId, sourceRecords.organizationId),
-            eq(quarantineRecords.providerId, sourceRecords.providerId),
-            eq(quarantineRecords.sourceRecordId, sourceRecords.id),
-          ),
-        )
-        .innerJoin(
-          quarantineAttempts,
-          and(
-            eq(quarantineAttempts.id, input.attemptId),
-            eq(quarantineAttempts.organizationId, sourceRecords.organizationId),
-            eq(quarantineAttempts.quarantineId, quarantineRecords.id),
-            eq(quarantineAttempts.state, "running"),
-          ),
-        )
-        .innerJoin(
-          providerConfigRevisions,
-          and(
-            eq(providerConfigRevisions.id, input.configurationRevisionId),
-            eq(providerConfigRevisions.organizationId, sourceRecords.organizationId),
-            eq(providerConfigRevisions.providerId, sourceRecords.providerId),
-          ),
-        )
-        .where(
-          and(
-            eq(sourceRecords.id, input.sourceRecordId),
-            eq(sourceRecords.organizationId, input.organizationId),
-            eq(sourceRecords.providerId, input.providerId),
-            eq(quarantineRecords.state, "open"),
-            gt(quarantineRecords.expiresAt, input.acceptedAt),
-          ),
-        )
-        .for("update", { of: sourceRecords })
-        .limit(1);
-      if (!source) {
+    return this.database.$transaction(async (transaction) => {
+      const sources = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        select source.id
+        from public.source_records as source
+        join public.quarantine_records as quarantine
+          on quarantine.id = ${uuid(input.quarantineId)}
+         and quarantine.organization_id = source.organization_id
+         and quarantine.provider_id = source.provider_id
+         and quarantine.source_record_id = source.id
+        join public.quarantine_attempts as attempt
+          on attempt.id = ${uuid(input.attemptId)}
+         and attempt.organization_id = source.organization_id
+         and attempt.quarantine_id = quarantine.id
+         and attempt.state = 'running'
+        join public.provider_config_revisions as revision
+          on revision.id = ${uuid(input.configurationRevisionId)}
+         and revision.organization_id = source.organization_id
+         and revision.provider_id = source.provider_id
+        where source.id = ${uuid(input.sourceRecordId)}
+          and source.organization_id = ${uuid(input.organizationId)}
+          and source.provider_id = ${uuid(input.providerId)}
+          and quarantine.state = 'open'
+          and quarantine.expires_at > ${input.acceptedAt}
+        for update of source
+        limit 1
+      `);
+      if (!sources[0]) {
         throw new PersistenceError(
           "TENANT_SCOPE_VIOLATION",
           "Source record is outside the organization, provider, or configuration scope.",
@@ -281,37 +268,28 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
           acceptedAt: input.acceptedAt,
         })),
       );
-      return {
-        canonicalRevisionCount: results.filter(({ created }) => created).length,
-      };
-    });
+      return { canonicalRevisionCount: results.filter(({ created }) => created).length };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async projectDerivedSourceRecord(
     input: ProjectDerivedSourceRecordInput,
   ): Promise<{ canonicalRevisionCount: number }> {
-    return this.database.transaction(async (transaction) => {
-      const [source] = await transaction
-        .select({ id: sourceRecords.id })
-        .from(sourceRecords)
-        .innerJoin(
-          providerConfigRevisions,
-          and(
-            eq(providerConfigRevisions.id, input.configurationRevisionId),
-            eq(providerConfigRevisions.organizationId, sourceRecords.organizationId),
-            eq(providerConfigRevisions.providerId, sourceRecords.providerId),
-          ),
-        )
-        .where(
-          and(
-            eq(sourceRecords.id, input.sourceRecordId),
-            eq(sourceRecords.organizationId, input.organizationId),
-            eq(sourceRecords.providerId, input.providerId),
-          ),
-        )
-        .for("update", { of: sourceRecords })
-        .limit(1);
-      if (!source) {
+    return this.database.$transaction(async (transaction) => {
+      const sources = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        select source.id
+        from public.source_records as source
+        join public.provider_config_revisions as revision
+          on revision.id = ${uuid(input.configurationRevisionId)}
+         and revision.organization_id = source.organization_id
+         and revision.provider_id = source.provider_id
+        where source.id = ${uuid(input.sourceRecordId)}
+          and source.organization_id = ${uuid(input.organizationId)}
+          and source.provider_id = ${uuid(input.providerId)}
+        for update of source
+        limit 1
+      `);
+      if (!sources[0]) {
         throw new PersistenceError(
           "TENANT_SCOPE_VIOLATION",
           "Derived projection source is outside the organization, provider, or configuration scope.",
@@ -330,54 +308,41 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
           acceptedAt: input.acceptedAt,
         })),
       );
-      return {
-        canonicalRevisionCount: results.filter(({ created }) => created).length,
-      };
-    });
+      return { canonicalRevisionCount: results.filter(({ created }) => created).length };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async materializeAndProjectSourceRecord(
     input: MaterializeAndProjectSourceRecordInput,
   ): Promise<{ sourceRecordId: string; canonicalRevisionCount: number }> {
-    return this.database.transaction(async (transaction) => {
-      const [quarantine] = await transaction
-        .select({ sourceRecordId: quarantineRecords.sourceRecordId })
-        .from(quarantineRecords)
-        .innerJoin(
-          importRuns,
-          and(
-            eq(importRuns.id, quarantineRecords.runId),
-            eq(importRuns.organizationId, quarantineRecords.organizationId),
-            eq(importRuns.providerId, quarantineRecords.providerId),
-            eq(importRuns.configRevisionId, input.configurationRevisionId),
-          ),
-        )
-        .innerJoin(
-          quarantineAttempts,
-          and(
-            eq(quarantineAttempts.id, input.attemptId),
-            eq(
-              quarantineAttempts.organizationId,
-              quarantineRecords.organizationId,
-            ),
-            eq(quarantineAttempts.quarantineId, quarantineRecords.id),
-            eq(quarantineAttempts.state, "running"),
-          ),
-        )
-        .where(
-          and(
-            eq(quarantineRecords.id, input.quarantineId),
-            eq(quarantineRecords.organizationId, input.organizationId),
-            eq(quarantineRecords.providerId, input.providerId),
-            eq(quarantineRecords.runId, input.runId),
-            eq(quarantineRecords.pageId, input.pageId),
-            eq(quarantineRecords.recordKind, input.recordKind),
-            eq(quarantineRecords.state, "open"),
-            gt(quarantineRecords.expiresAt, input.acceptedAt),
-          ),
-        )
-        .for("update", { of: quarantineRecords })
-        .limit(1);
+    return this.database.$transaction(async (transaction) => {
+      const quarantines = await transaction.$queryRaw<Array<{
+        sourceRecordId: string | null;
+      }>>(Prisma.sql`
+        select quarantine.source_record_id as "sourceRecordId"
+        from public.quarantine_records as quarantine
+        join public.import_runs as run
+          on run.id = quarantine.run_id
+         and run.organization_id = quarantine.organization_id
+         and run.provider_id = quarantine.provider_id
+         and run.config_revision_id = ${uuid(input.configurationRevisionId)}
+        join public.quarantine_attempts as attempt
+          on attempt.id = ${uuid(input.attemptId)}
+         and attempt.organization_id = quarantine.organization_id
+         and attempt.quarantine_id = quarantine.id
+         and attempt.state = 'running'
+        where quarantine.id = ${uuid(input.quarantineId)}
+          and quarantine.organization_id = ${uuid(input.organizationId)}
+          and quarantine.provider_id = ${uuid(input.providerId)}
+          and quarantine.run_id = ${uuid(input.runId)}
+          and quarantine.page_id = ${uuid(input.pageId)}
+          and quarantine.record_kind = cast(${input.recordKind} as public.source_record_kind)
+          and quarantine.state = 'open'
+          and quarantine.expires_at > ${input.acceptedAt}
+        for update of quarantine
+        limit 1
+      `);
+      const quarantine = quarantines[0];
       if (!quarantine) {
         throw new PersistenceError(
           "TENANT_SCOPE_VIOLATION",
@@ -388,66 +353,60 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
       let sourceRecordId = quarantine.sourceRecordId;
       if (!sourceRecordId) {
         const contentHash = hashJson(input.payload);
-        const [created] = await transaction
-          .insert(sourceRecords)
-          .values({
-            organizationId: input.organizationId,
-            providerId: input.providerId,
-            firstRunId: input.runId,
-            firstPageId: input.pageId,
-            recordKind: input.recordKind,
-            externalId: input.externalId,
-            sourceTime: input.sourceTime,
-            collectedAt: input.collectedAt,
-            payloadJson: input.payload,
-            contentHash,
-            expiresAt: input.expiresAt,
-            createdAt: input.acceptedAt,
-          })
-          .onConflictDoNothing()
-          .returning({ id: sourceRecords.id });
-        sourceRecordId =
-          created?.id ??
-          (await this.findSourceRecordId(transaction, {
+        const createdSources = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          insert into public.source_records (
+            organization_id, provider_id, first_run_id, first_page_id,
+            record_kind, external_id, source_time, collected_at, payload_json,
+            content_hash, expires_at, created_at
+          ) values (
+            ${uuid(input.organizationId)}, ${uuid(input.providerId)},
+            ${uuid(input.runId)}, ${uuid(input.pageId)},
+            cast(${input.recordKind} as public.source_record_kind),
+            ${input.externalId}, ${input.sourceTime}, ${input.collectedAt},
+            ${jsonValue(input.payload)}, ${contentHash}, ${input.expiresAt},
+            ${input.acceptedAt}
+          )
+          on conflict do nothing
+          returning id
+        `);
+        sourceRecordId = createdSources[0]?.id ?? await this.findSourceRecordId(
+          transaction,
+          {
             organizationId: input.organizationId,
             providerId: input.providerId,
             recordKind: input.recordKind,
             externalId: input.externalId,
             sourceTime: input.sourceTime,
             contentHash,
-          }));
-        await transaction
-          .insert(sourceRecordObservations)
-          .values({
-            sourceRecordId,
-            organizationId: input.organizationId,
-            runId: input.runId,
-            pageId: input.pageId,
-            observedAt: input.acceptedAt,
-          })
-          .onConflictDoNothing();
-        await transaction
-          .update(sourceRecordOutcomes)
-          .set({ sourceRecordId, externalId: input.externalId })
-          .where(
-            and(
-              eq(sourceRecordOutcomes.organizationId, input.organizationId),
-              eq(sourceRecordOutcomes.runId, input.runId),
-              eq(sourceRecordOutcomes.pageId, input.pageId),
-              eq(sourceRecordOutcomes.recordKind, input.recordKind),
-              eq(sourceRecordOutcomes.recordIndex, input.recordIndex),
-            ),
-          );
-        await transaction
-          .update(quarantineRecords)
-          .set({ sourceRecordId, externalId: input.externalId })
-          .where(
-            and(
-              eq(quarantineRecords.id, input.quarantineId),
-              eq(quarantineRecords.organizationId, input.organizationId),
-              isNull(quarantineRecords.sourceRecordId),
-            ),
-          );
+          },
+        );
+        await transaction.$executeRaw(Prisma.sql`
+          insert into public.source_record_observations (
+            source_record_id, organization_id, run_id, page_id, observed_at
+          ) values (
+            ${uuid(sourceRecordId)}, ${uuid(input.organizationId)},
+            ${uuid(input.runId)}, ${uuid(input.pageId)}, ${input.acceptedAt}
+          )
+          on conflict do nothing
+        `);
+        await transaction.$executeRaw(Prisma.sql`
+          update public.source_record_outcomes
+          set source_record_id = ${uuid(sourceRecordId)},
+              external_id = ${input.externalId}
+          where organization_id = ${uuid(input.organizationId)}
+            and run_id = ${uuid(input.runId)}
+            and page_id = ${uuid(input.pageId)}
+            and record_kind = cast(${input.recordKind} as public.source_record_kind)
+            and record_index = ${input.recordIndex}
+        `);
+        await transaction.$executeRaw(Prisma.sql`
+          update public.quarantine_records
+          set source_record_id = ${uuid(sourceRecordId)},
+              external_id = ${input.externalId}
+          where id = ${uuid(input.quarantineId)}
+            and organization_id = ${uuid(input.organizationId)}
+            and source_record_id is null
+        `);
       }
 
       const results = await writeCanonicalProjectionBatch(
@@ -467,70 +426,74 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         sourceRecordId,
         canonicalRevisionCount: results.filter(({ created }) => created).length,
       };
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async getCurrentProjection(
     organizationId: string,
     identity: CanonicalIdentity,
   ): Promise<CurrentProjection | null> {
-    const [record] = await this.database
-      .select({
-        entityId: canonicalEntities.id,
-        revisionId: canonicalRevisions.id,
-        revisionNumber: canonicalRevisions.revisionNumber,
-        content: canonicalRevisions.contentJson,
-        provenance: canonicalRevisions.provenanceJson,
-        actorKey: canonicalRevisions.actorKey,
-        sourceUpdatedAt: canonicalRevisions.sourceUpdatedAt,
-        sourceCollectedAt: canonicalRevisions.sourceCollectedAt,
-        acceptedAt: canonicalRevisions.acceptedAt,
-      })
-      .from(canonicalEntities)
-      .innerJoin(
-        canonicalRevisions,
-        eq(canonicalRevisions.id, canonicalEntities.currentRevisionId),
-      )
-      .where(
-        and(
-          eq(canonicalEntities.organizationId, organizationId),
-          eq(canonicalEntities.platformKey, identity.platformKey),
-          eq(canonicalEntities.recordKind, identity.recordKind),
-          eq(canonicalEntities.externalId, identity.externalId),
-        ),
-      )
-      .limit(1);
-    return record ? { ...record, identity } : null;
+    const records = await this.database.$queryRaw<CanonicalRevisionRow[]>(Prisma.sql`
+      select
+        entity.id as "entityId",
+        revision.id as "revisionId",
+        revision.revision_number as "revisionNumber",
+        revision.content_json as content,
+        revision.provenance_json as provenance,
+        revision.actor_key as "actorKey",
+        revision.source_record_id as "sourceRecordId",
+        revision.source_updated_at as "sourceUpdatedAt",
+        revision.source_collected_at as "sourceCollectedAt",
+        revision.accepted_at as "acceptedAt"
+      from public.canonical_entities as entity
+      join public.canonical_revisions as revision
+        on revision.id = entity.current_revision_id
+      where entity.organization_id = ${uuid(organizationId)}
+        and entity.platform_key = ${identity.platformKey}
+        and entity.record_kind = cast(${identity.recordKind} as public.canonical_record_kind)
+        and entity.external_id = ${identity.externalId}
+      limit 1
+    `);
+    const record = records[0];
+    if (!record) return null;
+    return {
+      identity,
+      entityId: record.entityId,
+      revisionId: record.revisionId,
+      revisionNumber: record.revisionNumber,
+      content: record.content,
+      provenance: record.provenance,
+      actorKey: record.actorKey,
+      sourceUpdatedAt: record.sourceUpdatedAt,
+      sourceCollectedAt: record.sourceCollectedAt,
+      acceptedAt: record.acceptedAt,
+    };
   }
 
   async listCanonicalRevisions(
     organizationId: string,
     identity: CanonicalIdentity,
   ): Promise<CanonicalRevisionRecord[]> {
-    const records = await this.database
-      .select({
-        entityId: canonicalEntities.id,
-        revisionId: canonicalRevisions.id,
-        revisionNumber: canonicalRevisions.revisionNumber,
-        content: canonicalRevisions.contentJson,
-        provenance: canonicalRevisions.provenanceJson,
-        actorKey: canonicalRevisions.actorKey,
-        sourceRecordId: canonicalRevisions.sourceRecordId,
-        sourceUpdatedAt: canonicalRevisions.sourceUpdatedAt,
-        sourceCollectedAt: canonicalRevisions.sourceCollectedAt,
-        acceptedAt: canonicalRevisions.acceptedAt,
-      })
-      .from(canonicalEntities)
-      .innerJoin(canonicalRevisions, eq(canonicalRevisions.entityId, canonicalEntities.id))
-      .where(
-        and(
-          eq(canonicalEntities.organizationId, organizationId),
-          eq(canonicalEntities.platformKey, identity.platformKey),
-          eq(canonicalEntities.recordKind, identity.recordKind),
-          eq(canonicalEntities.externalId, identity.externalId),
-        ),
-      )
-      .orderBy(asc(canonicalRevisions.revisionNumber));
+    const records = await this.database.$queryRaw<CanonicalRevisionRow[]>(Prisma.sql`
+      select
+        entity.id as "entityId",
+        revision.id as "revisionId",
+        revision.revision_number as "revisionNumber",
+        revision.content_json as content,
+        revision.provenance_json as provenance,
+        revision.actor_key as "actorKey",
+        revision.source_record_id as "sourceRecordId",
+        revision.source_updated_at as "sourceUpdatedAt",
+        revision.source_collected_at as "sourceCollectedAt",
+        revision.accepted_at as "acceptedAt"
+      from public.canonical_entities as entity
+      join public.canonical_revisions as revision on revision.entity_id = entity.id
+      where entity.organization_id = ${uuid(organizationId)}
+        and entity.platform_key = ${identity.platformKey}
+        and entity.record_kind = cast(${identity.recordKind} as public.canonical_record_kind)
+        and entity.external_id = ${identity.externalId}
+      order by revision.revision_number
+    `);
     return records.map((record) => ({ ...record, identity }));
   }
 
@@ -539,32 +502,28 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
     target: CanonicalIdentity;
     resolvedAt: Date;
   }): Promise<number> {
-    const [targetEntity] = await this.database
-      .select({ id: canonicalEntities.id })
-      .from(canonicalEntities)
-      .where(
-        and(
-          eq(canonicalEntities.organizationId, input.organizationId),
-          eq(canonicalEntities.platformKey, input.target.platformKey),
-          eq(canonicalEntities.recordKind, input.target.recordKind),
-          eq(canonicalEntities.externalId, input.target.externalId),
-        ),
-      )
-      .limit(1);
-    if (!targetEntity) return 0;
-    const reconciled = await this.database
-      .update(canonicalRelationships)
-      .set({ targetEntityId: targetEntity.id, resolvedAt: input.resolvedAt })
-      .where(
-        and(
-          eq(canonicalRelationships.organizationId, input.organizationId),
-          eq(canonicalRelationships.targetPlatformKey, input.target.platformKey),
-          eq(canonicalRelationships.targetRecordKind, input.target.recordKind),
-          eq(canonicalRelationships.targetExternalId, input.target.externalId),
-          isNull(canonicalRelationships.targetEntityId),
-        ),
-      )
-      .returning({ id: canonicalRelationships.id });
+    const targets = await this.database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      select id
+      from public.canonical_entities
+      where organization_id = ${uuid(input.organizationId)}
+        and platform_key = ${input.target.platformKey}
+        and record_kind = cast(${input.target.recordKind} as public.canonical_record_kind)
+        and external_id = ${input.target.externalId}
+      limit 1
+    `);
+    const target = targets[0];
+    if (!target) return 0;
+    const reconciled = await this.database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      update public.canonical_relationships
+      set target_entity_id = ${uuid(target.id)},
+          resolved_at = ${input.resolvedAt}
+      where organization_id = ${uuid(input.organizationId)}
+        and target_platform_key = ${input.target.platformKey}
+        and target_record_kind = cast(${input.target.recordKind} as public.canonical_record_kind)
+        and target_external_id = ${input.target.externalId}
+        and target_entity_id is null
+      returning id
+    `);
     return reconciled.length;
   }
 
@@ -578,10 +537,7 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         platformKey: projection.platformKey,
         packExternalId: projection.externalId,
       };
-      changedPacks.set(
-        `${changed.platformKey}\u0000${changed.packExternalId}`,
-        changed,
-      );
+      changedPacks.set(`${changed.platformKey}\u0000${changed.packExternalId}`, changed);
       return;
     }
     if (projection.recordKind !== "ev_input") return;
@@ -593,8 +549,7 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         relationship.targetPlatformKey === projection.platformKey,
     )?.targetExternalId;
     const packExternalId =
-      typeof contentPackExternalId === "string" &&
-      contentPackExternalId.trim().length > 0
+      typeof contentPackExternalId === "string" && contentPackExternalId.trim().length > 0
         ? contentPackExternalId
         : relatedPackExternalId;
     if (!packExternalId) return;
@@ -610,7 +565,7 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
   }
 
   private async enqueueEstimatedEvRecomputations(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     input: {
       organizationId: string;
       providerId: string;
@@ -629,63 +584,43 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
     };
     input.changedEvInputs.forEach(addTarget);
     const relatedByPack = new Map<string, string[]>();
-    for (let offset = 0; offset < input.changedPacks.length; offset += 500) {
-      const batch = input.changedPacks.slice(offset, offset + 500);
-      if (batch.length === 0) continue;
-      const rankedRelatedInputs = database
-        .select({
-          platformKey: canonicalRelationships.targetPlatformKey,
-          packExternalId: canonicalRelationships.targetExternalId,
-          evInputExternalId: canonicalEntities.externalId,
-          relationshipRank: sql<number>`row_number() over (
-            partition by ${canonicalRelationships.targetPlatformKey}, ${canonicalRelationships.targetExternalId}
-            order by ${canonicalEntities.externalId}
-          )`.as("relationship_rank"),
-        })
-        .from(canonicalEntities)
-        .innerJoin(
-          canonicalRelationships,
-          and(
-            eq(canonicalRelationships.sourceEntityId, canonicalEntities.id),
-            eq(
-              canonicalRelationships.organizationId,
-              canonicalEntities.organizationId,
-            ),
-          ),
+    for (const batch of batches(input.changedPacks)) {
+      const rows = batch.map((pack) => Prisma.sql`(
+        ${pack.platformKey}, ${pack.platformKey}, ${pack.packExternalId}
+      )`);
+      const relatedInputs = await database.$queryRaw<Array<{
+        platformKey: string;
+        packExternalId: string | null;
+        evInputExternalId: string;
+      }>>(Prisma.sql`
+        with ranked_related_inputs as (
+          select
+            relationship.target_platform_key as "platformKey",
+            relationship.target_external_id as "packExternalId",
+            entity.external_id as "evInputExternalId",
+            row_number() over (
+              partition by relationship.target_platform_key, relationship.target_external_id
+              order by entity.external_id
+            ) as relationship_rank
+          from public.canonical_entities as entity
+          join public.canonical_relationships as relationship
+            on relationship.source_entity_id = entity.id
+           and relationship.organization_id = entity.organization_id
+          where entity.organization_id = ${uuid(input.organizationId)}
+            and entity.record_kind = 'ev_input'
+            and entity.current_revision_id is not null
+            and relationship.relationship_kind = 'supports_pack'
+            and relationship.target_record_kind = 'pack'
+            and (
+              entity.platform_key,
+              relationship.target_platform_key,
+              relationship.target_external_id
+            ) in (values ${Prisma.join(rows)})
         )
-        .where(
-          and(
-            eq(canonicalEntities.organizationId, input.organizationId),
-            eq(canonicalEntities.recordKind, "ev_input"),
-            isNotNull(canonicalEntities.currentRevisionId),
-            eq(canonicalRelationships.relationshipKind, "supports_pack"),
-            eq(canonicalRelationships.targetRecordKind, "pack"),
-            or(
-              ...batch.map((pack) =>
-                and(
-                  eq(canonicalEntities.platformKey, pack.platformKey),
-                  eq(
-                    canonicalRelationships.targetPlatformKey,
-                    pack.platformKey,
-                  ),
-                  eq(
-                    canonicalRelationships.targetExternalId,
-                    pack.packExternalId,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        )
-        .as("ranked_related_inputs");
-      const relatedInputs = await database
-        .select({
-          platformKey: rankedRelatedInputs.platformKey,
-          packExternalId: rankedRelatedInputs.packExternalId,
-          evInputExternalId: rankedRelatedInputs.evInputExternalId,
-        })
-        .from(rankedRelatedInputs)
-        .where(lte(rankedRelatedInputs.relationshipRank, 100));
+        select "platformKey", "packExternalId", "evInputExternalId"
+        from ranked_related_inputs
+        where relationship_rank <= 100
+      `);
       for (const related of relatedInputs) {
         if (!related.packExternalId) continue;
         const key = `${related.platformKey}\u0000${related.packExternalId}`;
@@ -699,54 +634,41 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
       const relatedInputs =
         relatedByPack.get(`${pack.platformKey}\u0000${pack.packExternalId}`) ?? [];
       if (relatedInputs.length === 0) {
-        // A pack-only request deliberately produces durable unavailable evidence.
         addTarget({ ...pack, evInputExternalId: pack.packExternalId });
       } else {
-        relatedInputs.forEach((evInputExternalId) =>
-          addTarget({ ...pack, evInputExternalId }),
-        );
+        relatedInputs.forEach((evInputExternalId) => addTarget({ ...pack, evInputExternalId }));
       }
     }
 
     const targetValues = [...targets.values()];
     const revisionByIdentity = new Map<string, string | null>();
     const revisionIdentities = targetValues.flatMap((target) => [
-      {
-        platformKey: target.platformKey,
-        recordKind: "pack" as const,
-        externalId: target.packExternalId,
-      },
-      {
-        platformKey: target.platformKey,
-        recordKind: "ev_input" as const,
-        externalId: target.evInputExternalId,
-      },
+      { platformKey: target.platformKey, recordKind: "pack" as const, externalId: target.packExternalId },
+      { platformKey: target.platformKey, recordKind: "ev_input" as const, externalId: target.evInputExternalId },
     ]);
-    for (let offset = 0; offset < revisionIdentities.length; offset += 500) {
-      const batch = revisionIdentities.slice(offset, offset + 500);
-      if (batch.length === 0) continue;
-      const revisions = await database
-        .select({
-          platformKey: canonicalEntities.platformKey,
-          recordKind: canonicalEntities.recordKind,
-          externalId: canonicalEntities.externalId,
-          revisionId: canonicalEntities.currentRevisionId,
-        })
-        .from(canonicalEntities)
-        .where(
-          and(
-            eq(canonicalEntities.organizationId, input.organizationId),
-            or(
-              ...batch.map((identity) =>
-                and(
-                  eq(canonicalEntities.platformKey, identity.platformKey),
-                  eq(canonicalEntities.recordKind, identity.recordKind),
-                  eq(canonicalEntities.externalId, identity.externalId),
-                ),
-              ),
-            ),
-          ),
-        );
+    for (const batch of batches(revisionIdentities)) {
+      const rows = batch.map((identity) => Prisma.sql`(
+        ${identity.platformKey},
+        cast(${identity.recordKind} as public.canonical_record_kind),
+        ${identity.externalId}
+      )`);
+      const revisions = await database.$queryRaw<Array<{
+        platformKey: string;
+        recordKind: string;
+        externalId: string;
+        revisionId: string | null;
+      }>>(Prisma.sql`
+        select
+          platform_key as "platformKey",
+          record_kind::text as "recordKind",
+          external_id as "externalId",
+          current_revision_id as "revisionId"
+        from public.canonical_entities
+        where organization_id = ${uuid(input.organizationId)}
+          and (platform_key, record_kind, external_id) in (
+            values ${Prisma.join(rows)}
+          )
+      `);
       for (const revision of revisions) {
         revisionByIdentity.set(
           `${revision.platformKey}\u0000${revision.recordKind}\u0000${revision.externalId}`,
@@ -762,9 +684,7 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         packExternalId: target.packExternalId,
         evInputExternalId: target.evInputExternalId,
         packRevisionId:
-          revisionByIdentity.get(
-            `${target.platformKey}\u0000pack\u0000${target.packExternalId}`,
-          ) ?? null,
+          revisionByIdentity.get(`${target.platformKey}\u0000pack\u0000${target.packExternalId}`) ?? null,
         evInputRevisionId:
           revisionByIdentity.get(
             `${target.platformKey}\u0000ev_input\u0000${target.evInputExternalId}`,
@@ -780,17 +700,29 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         updatedAt: input.createdAt,
       };
     });
-    for (let offset = 0; offset < requests.length; offset += 500) {
-      const batch = requests.slice(offset, offset + 500);
-      await database
-        .insert(estimatedEvRecomputationRequests)
-        .values(batch)
-        .onConflictDoNothing();
+    for (const batch of batches(requests)) {
+      const rows = batch.map((request) => Prisma.sql`(
+        ${request.requestKey}, ${uuid(request.organizationId)},
+        ${uuid(request.providerId)}, ${uuid(request.configurationRevisionId)},
+        ${request.platformKey}, ${request.packExternalId}, ${request.evInputExternalId},
+        ${request.packRevisionId ? uuid(request.packRevisionId) : Prisma.sql`null::uuid`},
+        ${request.evInputRevisionId ? uuid(request.evInputRevisionId) : Prisma.sql`null::uuid`},
+        ${request.availableAt}, ${request.createdAt}, ${request.updatedAt}
+      )`);
+      await database.$executeRaw(Prisma.sql`
+        insert into public.estimated_ev_recomputation_requests (
+          request_key, organization_id, provider_id, configuration_revision_id,
+          platform_key, pack_external_id, ev_input_external_id,
+          pack_revision_id, ev_input_revision_id, available_at, created_at, updated_at
+        )
+        values ${Prisma.join(rows)}
+        on conflict do nothing
+      `);
     }
   }
 
   private async loadRunContext(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     input: Pick<
       CommitPageInput,
       | "organizationId"
@@ -801,40 +733,35 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
       | "workerId"
     >,
   ): Promise<{ counters: RunCounters; platformKey: string }> {
-    const [context] = await database
-      .select({
-        counters: importRuns.countersJson,
-        platformKey: providerSources.platformKey,
-        state: importRuns.state,
-        leaseOwner: importRuns.leaseOwner,
-        leaseExpiresAt: importRuns.leaseExpiresAt,
-      })
-      .from(importRuns)
-      .innerJoin(
-        providerSources,
-        and(
-          eq(providerSources.id, importRuns.providerId),
-          eq(providerSources.organizationId, importRuns.organizationId),
-        ),
-      )
-      .innerJoin(
-        providerConfigRevisions,
-        and(
-          eq(providerConfigRevisions.id, importRuns.configRevisionId),
-          eq(providerConfigRevisions.providerId, importRuns.providerId),
-          eq(providerConfigRevisions.organizationId, importRuns.organizationId),
-        ),
-      )
-      .where(
-        and(
-          eq(importRuns.id, input.runId),
-          eq(importRuns.organizationId, input.organizationId),
-          eq(importRuns.providerId, input.providerId),
-          eq(importRuns.configRevisionId, input.configRevisionId),
-        ),
-      )
-      .for("update", { of: importRuns })
-      .limit(1);
+    const contexts = await database.$queryRaw<Array<{
+      counters: RunCounters;
+      platformKey: string;
+      state: string;
+      leaseOwner: string | null;
+      leaseExpiresAt: Date | null;
+    }>>(Prisma.sql`
+      select
+        run.counters_json as counters,
+        provider.platform_key as "platformKey",
+        run.state::text as state,
+        run.lease_owner as "leaseOwner",
+        run.lease_expires_at as "leaseExpiresAt"
+      from public.import_runs as run
+      join public.provider_sources as provider
+        on provider.id = run.provider_id
+       and provider.organization_id = run.organization_id
+      join public.provider_config_revisions as revision
+        on revision.id = run.config_revision_id
+       and revision.provider_id = run.provider_id
+       and revision.organization_id = run.organization_id
+      where run.id = ${uuid(input.runId)}
+        and run.organization_id = ${uuid(input.organizationId)}
+        and run.provider_id = ${uuid(input.providerId)}
+        and run.config_revision_id = ${uuid(input.configRevisionId)}
+      for update of run
+      limit 1
+    `);
+    const context = contexts[0];
     if (!context) {
       throw new PersistenceError(
         "TENANT_SCOPE_VIOLATION",
@@ -853,42 +780,42 @@ export class IngestionPersistenceRepository<TQueryResult extends PgQueryResultHK
         "The import run is not owned by this worker.",
       );
     }
-    return { counters: context.counters ?? emptyCounters(), platformKey: context.platformKey };
+    return {
+      counters: context.counters ?? emptyCounters(),
+      platformKey: context.platformKey,
+    };
   }
 
   private async findSourceRecordId(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     identity: {
       organizationId: string;
       providerId: string;
-      recordKind: "catalog" | "pull" | "sale";
+      recordKind: SourceRecordKind;
       externalId: string;
       sourceTime: Date;
       contentHash: string;
     },
   ): Promise<string> {
-    const [record] = await database
-      .select({ id: sourceRecords.id })
-      .from(sourceRecords)
-      .where(
-        and(
-          eq(sourceRecords.organizationId, identity.organizationId),
-          eq(sourceRecords.providerId, identity.providerId),
-          eq(sourceRecords.recordKind, identity.recordKind),
-          eq(sourceRecords.externalId, identity.externalId),
-          eq(sourceRecords.sourceTime, identity.sourceTime),
-          eq(sourceRecords.contentHash, identity.contentHash),
-        ),
-      )
-      .limit(1);
+    const records = await database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      select id
+      from public.source_records
+      where organization_id = ${uuid(identity.organizationId)}
+        and provider_id = ${uuid(identity.providerId)}
+        and record_kind = cast(${identity.recordKind} as public.source_record_kind)
+        and external_id = ${identity.externalId}
+        and source_time = ${identity.sourceTime}
+        and content_hash = ${identity.contentHash}
+      limit 1
+    `);
+    const record = records[0];
     if (!record) throw new Error("Source record conflict could not be resolved.");
     return record.id;
   }
-
 }
 
-export class RetentionRepository<TQueryResult extends PgQueryResultHKT> {
-  constructor(private readonly database: PackscoutDatabase<TQueryResult>) {}
+export class RetentionRepository {
+  constructor(private readonly database: PackscoutPrismaClient) {}
 
   async expireRawEvidence(input: {
     organizationId: string;
@@ -899,66 +826,64 @@ export class RetentionRepository<TQueryResult extends PgQueryResultHKT> {
     if (!Number.isInteger(input.batchSize) || input.batchSize < 1 || input.batchSize > 10_000) {
       throw new RangeError("Retention batch size must be between 1 and 10000.");
     }
-    return this.database.transaction(async (transaction) => {
-      const pageIds = await transaction
-        .select({ id: importPages.id })
-        .from(importPages)
-        .where(
-          and(
-            eq(importPages.organizationId, input.organizationId),
-            lte(importPages.expiresAt, input.before),
-            isNotNull(importPages.payloadJson),
-          ),
-        )
-        .orderBy(asc(importPages.expiresAt))
-        .limit(input.batchSize);
-      const sourceIds = await transaction
-        .select({ id: sourceRecords.id })
-        .from(sourceRecords)
-        .where(
-          and(
-            eq(sourceRecords.organizationId, input.organizationId),
-            lte(sourceRecords.expiresAt, input.before),
-            isNotNull(sourceRecords.payloadJson),
-          ),
-        )
-        .orderBy(asc(sourceRecords.expiresAt))
-        .limit(input.batchSize);
-      const quarantineIds = await transaction
-        .select({ id: quarantineRecords.id })
-        .from(quarantineRecords)
-        .where(
-          and(
-            eq(quarantineRecords.organizationId, input.organizationId),
-            lte(quarantineRecords.expiresAt, input.before),
-            isNotNull(quarantineRecords.payloadJson),
-          ),
-        )
-        .orderBy(asc(quarantineRecords.expiresAt))
-        .limit(input.batchSize);
+    return this.database.$transaction(async (transaction) => {
+      const pageIds = await transaction.import_pages.findMany({
+        where: {
+          organization_id: input.organizationId,
+          expires_at: { lte: input.before },
+          payload_json: { not: Prisma.DbNull },
+        },
+        orderBy: { expires_at: "asc" },
+        take: input.batchSize,
+        select: { id: true },
+      });
+      const sourceIds = await transaction.source_records.findMany({
+        where: {
+          organization_id: input.organizationId,
+          expires_at: { lte: input.before },
+          payload_json: { not: Prisma.DbNull },
+        },
+        orderBy: { expires_at: "asc" },
+        take: input.batchSize,
+        select: { id: true },
+      });
+      const quarantineIds = await transaction.quarantine_records.findMany({
+        where: {
+          organization_id: input.organizationId,
+          expires_at: { lte: input.before },
+          payload_json: { not: Prisma.DbNull },
+        },
+        orderBy: { expires_at: "asc" },
+        take: input.batchSize,
+        select: { id: true },
+      });
       if (pageIds.length > 0) {
-        await transaction
-          .update(importPages)
-          .set({ payloadJson: null, payloadExpiredAt: input.expiredAt })
-          .where(inArray(importPages.id, pageIds.map(({ id }) => id)));
+        await transaction.import_pages.updateMany({
+          where: { id: { in: pageIds.map(({ id }) => id) } },
+          data: { payload_json: Prisma.DbNull, payload_expired_at: input.expiredAt },
+        });
       }
       if (sourceIds.length > 0) {
-        await transaction
-          .update(sourceRecords)
-          .set({ payloadJson: null, payloadExpiredAt: input.expiredAt })
-          .where(inArray(sourceRecords.id, sourceIds.map(({ id }) => id)));
+        await transaction.source_records.updateMany({
+          where: { id: { in: sourceIds.map(({ id }) => id) } },
+          data: { payload_json: Prisma.DbNull, payload_expired_at: input.expiredAt },
+        });
       }
       if (quarantineIds.length > 0) {
-        await transaction
-          .update(quarantineRecords)
-          .set({ payloadJson: null, payloadExpiredAt: input.expiredAt, state: "expired" })
-          .where(inArray(quarantineRecords.id, quarantineIds.map(({ id }) => id)));
+        await transaction.quarantine_records.updateMany({
+          where: { id: { in: quarantineIds.map(({ id }) => id) } },
+          data: {
+            payload_json: Prisma.DbNull,
+            payload_expired_at: input.expiredAt,
+            state: "expired",
+          },
+        });
       }
       return {
         pages: pageIds.length,
         sourceRecords: sourceIds.length,
         quarantines: quarantineIds.length,
       };
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 }

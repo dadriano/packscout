@@ -4,12 +4,7 @@ import {
   IngestionPersistenceRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
-import {
-  canonicalRelationships,
-  canonicalRevisions,
-} from "@packscout/database/schema";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
-import { eq } from "drizzle-orm";
 import type {
   ProviderConfigurationIdentity,
   ProviderSourceIdentity,
@@ -211,11 +206,11 @@ test("event projections remain idempotent, preserve corrections, protect actors,
       ],
       committedAt: new Date("2026-08-06T10:05:00.000Z"),
     });
-    const [relationship] = await harness.database
-      .select({ targetEntityId: canonicalRelationships.targetEntityId })
-      .from(canonicalRelationships)
-      .where(eq(canonicalRelationships.targetExternalId, "pack-late"));
-    assert.ok(relationship?.targetEntityId);
+    const relationship = await harness.database.canonical_relationships.findFirst({
+      where: { target_external_id: "pack-late" },
+      select: { target_entity_id: true },
+    });
+    assert.ok(relationship?.target_entity_id);
     assert.equal(
       await persistence.reconcileRelationships({
         organizationId: ids.organization,
@@ -255,10 +250,7 @@ test("event projections remain idempotent, preserve corrections, protect actors,
       ],
       committedAt: new Date("2026-08-06T10:07:00.000Z"),
     });
-    const revisions = await harness.database
-      .select({ id: canonicalRevisions.id })
-      .from(canonicalRevisions);
-    assert.equal(revisions.length, 3);
+    assert.equal(await harness.database.canonical_revisions.count(), 3);
     assert.equal(
       (await persistence.listCanonicalRevisions(ids.organization, {
         platformKey: "fixture",

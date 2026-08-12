@@ -5,9 +5,7 @@ import {
   PersistenceError,
   PipelineSetupRepository,
 } from "@packscout/database";
-import { canonicalRelationships } from "@packscout/database/schema";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
-import { eq } from "drizzle-orm";
 import { CatalogProjectionService } from "./catalog-projection-service.ts";
 import {
   PACKSCOUT_ESTIMATED_EV_METHOD_VERSION,
@@ -338,11 +336,11 @@ test("estimated EV revisions are source-linked, explainable, idempotent, and res
     assert.equal(typeof manifest.packRevisionId, "string");
     assert.equal(typeof manifest.evInputRevisionId, "string");
 
-    const [relationship] = await harness.database
-      .select({ targetExternalId: canonicalRelationships.targetExternalId })
-      .from(canonicalRelationships)
-      .where(eq(canonicalRelationships.relationshipKind, "estimates_pack"));
-    assert.equal(relationship?.targetExternalId, "pack-1");
+    const relationship = await harness.database.canonical_relationships.findFirst({
+      where: { relationship_kind: "estimates_pack" },
+      select: { target_external_id: true },
+    });
+    assert.equal(relationship?.target_external_id, "pack-1");
     assert.deepEqual(
       await harness.service.explain({
         organizationId: ids.organization,
