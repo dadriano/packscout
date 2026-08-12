@@ -17,7 +17,7 @@ Produce and adopt the evidence-backed live provider contract that ingestion and 
 
 ## Context
 
-The current provider draft describes three record streams with `record_id`, `collected_at`, nullable `occurred_at`, raw `data`, and stream-specific relationship fields. The open data-pipeline PR expects a combined `catalog/pulls/sales` page with different identifiers and timestamps. Its canonical history, quarantine, and EV architecture remain useful, but its inbound V1 envelope cannot accept the draft unchanged.
+The current provider draft describes three record streams with `record_id`, `collected_at`, nullable `occurred_at`, raw `data`, and stream-specific relationship fields. The data-pipeline foundation merged through PR #1 expects a combined `catalog/pulls/sales` page with different identifiers and timestamps. Its canonical history, quarantine, and EV architecture remain useful, but its inbound V1 envelope cannot accept the draft unchanged.
 
 This is a bounded contract task. The provider’s observed API behavior determines transport details; the approved product behavior and data ownership in the feature index do not change.
 

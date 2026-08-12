@@ -72,6 +72,22 @@ recorded seed operation stay immutable. No credential or public URL is
 written to a tracked file or browser bundle beyond the required public Convex
 origin.
 
+### Cloud development catalog
+
+The PackScout frontend can also read the project development deployment at
+`https://abundant-puffin-373.convex.cloud`. Keep that public browser URL in the
+ignored `apps/frontend/.env.development.local` file:
+
+```dotenv
+NEXT_PUBLIC_CONVEX_URL=https://abundant-puffin-373.convex.cloud
+```
+
+Then run `npm run dev:frontend`. Next.js loads the development-only file from
+the frontend workspace, while production builds remain unconfigured until an
+explicit production origin and matching security configuration are supplied.
+The local seed commands above stay local-only and continue to refuse cloud
+deployments and deploy keys.
+
 ## Verification
 
 ```bash

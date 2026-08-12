@@ -94,12 +94,12 @@ This task does not create a new data contract. It verifies that the shell and ta
 ## Build Status
 
 - Implemented: responsive shell, filters, four-KPI grid, internal table overflow, side/bottom-to-modal inspector placement, semantic metrics/tables/tabs/status/glossary controls, focus trap/return, Escape handling, and reduced-motion-aware styling.
-- Verified: real-browser review at 1440×1000 and 390×844 against the local Convex seed confirms visible Mock data labeling, search and noninitial-row selection, no page-level overflow, owned table scrolling, readable KPIs/filters/actions/Learn, modal focus entry/containment/Escape/return, and zero console or hydration warnings.
+- Verified: real-browser review at 1440×1000 and 390×844 against the local Convex seed confirms visible Mock data labeling, search and noninitial-row selection, no page-level overflow, owned table scrolling, readable KPIs/filters/actions/Learn, modal focus entry/containment/Escape/return, and zero console or hydration warnings. Cloud-development browser smoke separately confirms visible mock provenance, search, and selection against the HTTPS `abundant-puffin-373` read path.
 - Blocked: dependencies `006`–`010` remain blocked. A complete keyboard-only run of every V1 action plus recorded automated contrast, 200% zoom/increased-text, and reduced-motion evidence is still required before this task can be done.
 
 ## Spec Compliance
 
 - Related specs reviewed: repack-dashboard/tech-003, repack-dashboard/tech-004, repack-dashboard/ux-001, repack-dashboard/ux-002, repack-dashboard/ux-003, repack-dashboard/ux-004, repack-dashboard/ux-005
 - Alignment: the implemented layouts and semantics follow the required desktop master-detail, mobile sheet, internal-table-overflow, visible text/sign meaning, theme parity, and focus lifecycle.
-- Divergences: Browser inspection supplied local Convex-backed evidence, but the specified full Playwright artifact matrix and complete keyboard/zoom/contrast/reduced-motion audit do not yet exist.
+- Divergences: Browser inspection supplied local and cloud-development Convex-backed evidence, but the specified full Playwright artifact matrix and complete keyboard/zoom/contrast/reduced-motion audit do not yet exist.
 - Verification: frontend tests/typecheck/lint/build plus browser checks at the two responsive viewports recorded green for the checked criteria; explicit remaining gaps are listed above.

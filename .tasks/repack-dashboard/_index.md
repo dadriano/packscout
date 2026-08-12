@@ -10,7 +10,7 @@ Open `repack-dashboard/001`, collect one sanitized page example for each provide
 
 PackScout gives repack buyers one public place to answer: “Which current pack offers the strongest estimated value?” V1 combines a catalog Overview, a complete All Packs table, a selected-pack inspector, and three educational guides. The supplied matched light and dark dashboard comps are the visual source of truth; the approved purple PackScout logo kit is the brand source of truth.
 
-The open data-pipeline PR establishes durable canonical history, quarantine, provider isolation, and PackScout Estimated EV. Its current aggregate feed boundary does not accept the newer provider draft unchanged, and it does not publish a public read model. V1 therefore includes an evidence-backed replacement of that unlaunched feed boundary and a sanitized catalog-snapshot handoff before frontend query work.
+Merged data-pipeline PR #1 establishes durable canonical history, quarantine, provider isolation, and PackScout Estimated EV. Its current aggregate feed boundary does not accept the newer provider draft unchanged, and it does not publish a public read model. V1 therefore includes an evidence-backed replacement of that unlaunched feed boundary and a sanitized catalog-snapshot handoff before frontend query work.
 
 ## Source Authority
 
@@ -93,9 +93,9 @@ The open data-pipeline PR establishes durable canonical history, quarantine, pro
 
 ## External Dependencies
 
-- Data-pipeline PR #1 supplies the canonical history and EV foundation after its review/merge process completes.
+- Merged data-pipeline PR #1 supplies the canonical history and EV foundation on `main`.
 - The stream provider must supply sanitized real page envelopes and cursor behavior for `catalog`, `pulls`, and `trades`.
-- A non-production frontend Convex cloud deployment and server-held publication credentials must exist before live snapshot publication. The connected external-agent scope currently exposes neither credential reads nor secret injection, so it cannot supply that deployment or key.
+- The Convex development deployment `abundant-puffin-373` now exists and serves the seeded mock catalog. Server-held HMAC publication credentials plus the canonical staging, reconciliation, and activation workflow are still required before live snapshot publication.
 - Platform owners must approve public display names, logos, listing hosts, promo codes, and referral parameters.
 - Real provider launch evidence must pass before the UI labels the catalog live.
 
@@ -165,7 +165,7 @@ Open `001-lock-live-data-handoff.md`, capture one sanitized real response page f
 ## Current Build Handoff
 
 - Done: `004` establishes the complete `apps/frontend` PackScout shell, routes, theme, search, freshness region, and not-found behavior.
-- Implemented and locally verified but dependency-blocked: the public DTO/read-query foundation, metric presentation, Overview, All Packs, inspector/actions, Learn content, public states, responsive layouts, and strict frontend telemetry/security boundaries. The frontend now always reads Convex; a deterministic internal local seed writes one mock snapshot with 9 packs (8 active and 6 Overview opportunities), one bounded query shard, matching bounded detail arrays, and an operation receipt. `dataSource` is required as `mock` or `canonical`, and the shell visibly labels the seeded source as mock data.
-- Local workflow evidence: the guarded local-only seed returns `created` on first run and `unchanged` on replay without duplicate rows, refuses production/cloud-key/canonical/conflicting/partial targets, and is paired with a local launcher. Desktop and mobile browser QA covers mock labeling, search, row selection, and inspector updates against Convex-backed data.
-- Live blockers: the provider transport/page/cursor evidence for `001`; the adopted V2 cutover, dual-approved PostgreSQL public configuration, and cloud Convex publication/HMAC path for `002`; a non-production cloud Convex deployment/key (not available through the returned external-agent scope), activated canonical snapshots, and reactive `preloadQuery`/`usePreloadedQuery` integration for `003`; and durable telemetry/observability, edge enforcement, real 1,500/10,000-pack scale, preproduction/performance evidence, and owner approvals for `012`.
+- Implemented and verified in local and cloud development but dependency-blocked: the public DTO/read-query foundation, metric presentation, Overview, All Packs, inspector/actions, Learn content, public states, responsive layouts, and strict frontend telemetry/security boundaries. The frontend always reads Convex; a deterministic internal development seed writes one mock snapshot with 9 packs (8 active and 6 Overview opportunities), one bounded query shard, matching bounded detail arrays, and an operation receipt. `dataSource` is required as `mock` or `canonical`, and the shell visibly labels the seeded source as mock data.
+- Development workflow evidence: the catalog functions are deployed to `abundant-puffin-373`; the guarded seed returned `created` on its first cloud-development run and `unchanged` on replay without duplicate rows. The frontend server read the deployment over its HTTPS Convex URL, and browser smoke verified visible mock provenance, catalog search, row selection, and inspector replacement. Existing desktop/mobile browser QA also covers mock labeling, search, row selection, and inspector updates against the local Convex backend.
+- Live blockers: the provider transport/page/cursor evidence for `001`; the adopted V2 cutover, dual-approved PostgreSQL public configuration, and authenticated Convex publication/HMAC path for `002`; activated canonical snapshots and reactive `preloadQuery`/`usePreloadedQuery` integration for `003`; and durable telemetry/observability, edge enforcement, real 1,500/10,000-pack scale, preproduction/performance evidence, and owner approvals for `012`.
 - Status rule: locally implemented UI slices remain `blocked` when an upstream task or launch-evidence acceptance contract is unmet; no task below claims real-provider or live-launch readiness.

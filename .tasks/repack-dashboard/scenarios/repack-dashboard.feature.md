@@ -1,6 +1,6 @@
 # Feature: PackScout Repack Dashboard V1
 
-Status: active build handoff — local Convex-backed mock frontend/read-model slices implemented; live publication and launch evidence blocked
+Status: active build handoff — local and cloud-development Convex-backed mock frontend/read-model slices implemented; canonical publication and launch evidence blocked
 Owner: product build
 
 ## Scenario: A buyer opens a coherent market overview
@@ -10,7 +10,7 @@ When the buyer opens Dashboard Overview without filters
 Then four KPI cards, six EV-dollar-ranked opportunities, platform summaries, category summaries, and the first selected pack come from one coherent result
 And sold-out, disabled, and unavailable-EV packs do not enter Top Opportunities
 
-Coverage: Automated local coverage — the deterministic internal Convex seed creates 9 packs, and `convex/publicCatalog.test.ts` plus seed tests prove one bundle with 8 active packs, 6 opportunities, and bounded aligned details. Overview presentation tests and desktop/mobile browser QA prove summary/selection rendering with a visible Mock data label; an activated canonical cloud snapshot and reactive delivery remain blocked.
+Coverage: Automated plus development-browser coverage — the deterministic internal Convex seed creates 9 packs, and `convex/publicCatalog.test.ts` plus seed tests prove one bundle with 8 active packs, 6 opportunities, and bounded aligned details. Overview presentation tests and desktop/mobile local browser QA prove summary/selection rendering; the functions deployed to `abundant-puffin-373` and HTTPS cloud-development browser smoke additionally prove server reads, visible Mock data provenance, search, and selection. An activated canonical snapshot and reactive delivery remain blocked.
 
 ## Scenario: The provider stream contract is adopted without a compatibility path
 
@@ -29,7 +29,7 @@ When batches are retried or the replacement fails count or hash reconciliation
 Then no partial replacement becomes public and the complete active snapshot remains readable
 And replaying an identical complete publication creates no duplicate public records
 
-Coverage: Blocked — strict `CatalogSnapshotV1` fixtures and active-snapshot read tests exist. The guarded internal local seed proves deterministic one-transaction creation plus idempotent `created`/`unchanged` replay and refuses canonical, conflicting, or partial state, but it is not the PostgreSQL ledger/config authority, HMAC publisher, cloud Convex lifecycle, staged activation, reconciliation, or rollback implementation.
+Coverage: Blocked — strict `CatalogSnapshotV1` fixtures and active-snapshot read tests exist. The guarded internal development seed proves deterministic one-transaction creation plus idempotent `created`/`unchanged` replay locally and on `abundant-puffin-373`, and refuses canonical, conflicting, or partial state. It is not the PostgreSQL ledger/config authority, HMAC publisher, canonical cloud lifecycle, staged activation, reconciliation, or rollback implementation.
 
 ## Scenario: A buyer searches the full catalog
 
@@ -38,7 +38,7 @@ When the buyer searches by pack, platform, or category
 Then All Packs returns relevance-ordered results in cursor pages of up to 25 rows
 And clearing search restores the prior accepted metric sort
 
-Coverage: Automated local coverage — Convex relevance/cursor tests and frontend canonical URL-state/table tests prove the search behavior; desktop/mobile browser QA searches the 9-pack local Convex snapshot and updates selection from bounded row-aligned details, while cloud reactive preload and live cursor evidence remain blocked.
+Coverage: Automated plus development-browser coverage — Convex relevance/cursor tests and frontend canonical URL-state/table tests prove the search behavior; desktop/mobile browser QA searches the 9-pack local Convex snapshot and updates selection from bounded row-aligned details. HTTPS browser smoke proves search and selection against the same mock snapshot on `abundant-puffin-373`, while reactive preload and live cursor evidence remain blocked.
 
 ## Scenario: A buyer filters and sorts All Packs
 
@@ -47,7 +47,7 @@ When the buyer applies multiple platforms, multiple categories, a price range, a
 Then only matching rows appear with deterministic ordering and all twelve comparison fields
 And refresh, back, and forward restore the accepted query state
 
-Coverage: Automated local coverage — Convex filter/facet/price/sort/cursor tests, URL restoration tests, exact twelve-column table tests, and desktop/mobile search/selection/internal-overflow browser evidence against the local seed are green; live cloud pagination and reactive replacement evidence remain open.
+Coverage: Automated plus development-browser coverage — Convex filter/facet/price/sort/cursor tests, URL restoration tests, exact twelve-column table tests, and desktop/mobile search/selection/internal-overflow browser evidence against the local seed are green. Cloud-development search and selection are also green; cloud pagination and reactive replacement evidence remain open.
 
 ## Scenario: Invalid public input fails safely
 
@@ -83,7 +83,7 @@ When the buyer selects it
 Then Overview updates its side inspector, All Packs updates its bottom preview, and narrow screens open an accessible modal sheet
 And closing the narrow-screen inspector returns focus to the selected row
 
-Coverage: Automated plus browser coverage — one shared inspector powers side, bottom, and modal-sheet placements from the bounded details returned with each Convex result; desktop/mobile noninitial-row selection proves inspector replacement, focus entry, containment, Escape close, and focus return. Reactive removal recovery against cloud Convex remains open.
+Coverage: Automated plus browser coverage — one shared inspector powers side, bottom, and modal-sheet placements from the bounded details returned with each Convex result; desktop/mobile local noninitial-row selection proves inspector replacement, focus entry, containment, Escape close, and focus return, while cloud-development selection proves replacement through the HTTPS deployed read path. Reactive removal recovery against canonical Convex data remains open.
 
 ## Scenario: A buyer copies a public promo code
 
@@ -173,4 +173,4 @@ When they are exercised at 1440×1000 and 390×844 by keyboard and pointer
 Then all controls, tables, tooltips, sheets, states, and content remain readable and operable
 And the All Packs table scrolls inside its region with no page-level overflow, console error, or hydration warning
 
-Coverage: Partial browser coverage — 1440×1000 and 390×844 reviews against the Convex-backed mock snapshot confirm visible mock provenance, search and selection, responsive content, internal-only table overflow, sheet focus/Escape return, and zero console/hydration warnings; full keyboard-only, contrast, 200% zoom/increased-text, reduced-motion, Playwright, and preproduction artifact evidence remains open.
+Coverage: Partial browser coverage — 1440×1000 and 390×844 local reviews against the Convex-backed mock snapshot confirm visible mock provenance, search and selection, responsive content, internal-only table overflow, sheet focus/Escape return, and zero console/hydration warnings. HTTPS cloud-development smoke separately confirms visible mock provenance, search, and selection from `abundant-puffin-373`; full keyboard-only, contrast, 200% zoom/increased-text, reduced-motion, Playwright, and preproduction artifact evidence remains open.

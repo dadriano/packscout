@@ -108,12 +108,12 @@ The table passes selected `PackSummary` data to `repack-dashboard/008`; actions 
 ## Build Status
 
 - Implemented: canonical URL-backed search/facets/price/sort/cursor state, the exact twelve-column All Packs table, relevance mode, unavailable-last sort affordances, result range/pagination, selected bottom preview, and narrow-screen inspector sheet under `apps/frontend`. The page consumes Convex list results with a bounded detail array aligned one-to-one to the current rows; all 9 seeded packs, including the sold-out record, remain discoverable.
-- Verified: public read-model/seed tests cover filtering, relevance, contextual facets, sorting, price semantics, cursors, and row/detail coherence; frontend tests cover exact columns, sort state, sold-out actions, URL normalization/history state, and first-page resets. Desktop/mobile browser QA covers search, row selection, inspector updates, and owned table overflow against the local Convex backend.
-- Blocked: task `003` has no activated/reactive canonical cloud snapshot. The live cursor/history flow and reactive replacement still require recorded end-to-end evidence against the cloud read model.
+- Verified: public read-model/seed tests cover filtering, relevance, contextual facets, sorting, price semantics, cursors, and row/detail coherence; frontend tests cover exact columns, sort state, sold-out actions, URL normalization/history state, and first-page resets. Desktop/mobile browser QA covers search, row selection, inspector updates, and owned table overflow against the local Convex backend; cloud-development browser smoke confirms search, row selection, and inspector updates through the HTTPS `abundant-puffin-373` read path.
+- Blocked: task `003` has no activated/reactive canonical cloud snapshot. The live cursor/history flow and reactive replacement still require recorded end-to-end evidence against the canonical cloud read model.
 
 ## Spec Compliance
 
 - Related specs reviewed: repack-dashboard/tech-002, repack-dashboard/tech-003, repack-dashboard/tech-004, repack-dashboard/ux-001, repack-dashboard/ux-002, repack-dashboard/ux-003, repack-dashboard/ux-005
-- Alignment: the local catalog implements the specified twelve fields, explicit search submission, URL-restorable state, relevance-only search order, bounded cursor navigation, optional-value retention, sold-out behavior, and owned horizontal overflow.
+- Alignment: the catalog implements the specified twelve fields, explicit search submission, URL-restorable state, relevance-only search order, bounded cursor navigation, optional-value retention, sold-out behavior, and owned horizontal overflow.
 - Divergences: initial/replacement reads use the non-reactive Convex route boundary from task `003`; live `usePreloadedQuery` replacement and cloud-backed cursor continuity remain open.
-- Verification: contracts/Convex query and seed tests, All Packs/query-state tests, frontend typecheck/lint/build, and desktop/mobile search/selection/overflow/inspector review recorded green.
+- Verification: contracts/Convex query and seed tests, All Packs/query-state tests, frontend typecheck/lint/build, desktop/mobile local search/selection/overflow/inspector review, and cloud-development search/selection smoke recorded green.
