@@ -78,6 +78,7 @@ function successfulDashboardBundle(): DashboardBundle {
       },
     },
     opportunities: [publicPackSummaryFromDetail(selectedPack)],
+    details: [selectedPack],
     platformSummaries: [
       {
         key: "collector_crypt",
@@ -121,6 +122,7 @@ function successfulListPage(): ListPublicPacksPage {
   return {
     metadata: snapshot.metadata,
     rows,
+    details: [snapshot.packs[0]!, snapshot.packs[2]!, snapshot.packs[1]!],
     selectedPack: snapshot.packs[0]!,
     selectedPackEligible: true,
     facets: contextualFacets,
@@ -306,6 +308,7 @@ test("dashboard DTOs require eligible EV-ranked opportunities and coherent selec
   const soldOut = successfulDashboardBundle();
   const snapshot = buildSyntheticCatalogSnapshotV1();
   soldOut.opportunities = [publicPackSummaryFromDetail(snapshot.packs[2]!)];
+  soldOut.details = [snapshot.packs[2]!];
   soldOut.selectedPack = snapshot.packs[2]!;
   assert.equal(dashboardBundleSchema.safeParse(soldOut).success, false);
 
@@ -317,6 +320,7 @@ test("dashboard DTOs require eligible EV-ranked opportunities and coherent selec
   unavailable.opportunities = [
     publicPackSummaryFromDetail(snapshot.packs[1]!),
   ];
+  unavailable.details = [snapshot.packs[1]!];
   unavailable.selectedPack = snapshot.packs[1]!;
   assert.equal(dashboardBundleSchema.safeParse(unavailable).success, false);
 });
@@ -342,11 +346,19 @@ test("list page DTOs bind range, selection, and snapshot-reset state", () => {
 
   const emptyWithCursor = successfulListPage();
   emptyWithCursor.rows = [];
+  emptyWithCursor.details = [];
   emptyWithCursor.selectedPack = null;
   emptyWithCursor.selectedPackEligible = false;
   emptyWithCursor.range = { start: 0, end: 0, total: 0 };
   emptyWithCursor.nextCursor = "impossible-next";
   assert.equal(listPublicPacksPageSchema.safeParse(emptyWithCursor).success, false);
+
+  const incoherentDetails = successfulListPage();
+  incoherentDetails.details.reverse();
+  assert.equal(
+    listPublicPacksPageSchema.safeParse(incoherentDetails).success,
+    false,
+  );
 });
 
 test("contextual facets keep selected zero-count values but remain canonical", () => {

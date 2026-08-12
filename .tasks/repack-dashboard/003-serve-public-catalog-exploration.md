@@ -117,13 +117,13 @@ Facet counts are navigational counts, not global catalog totals: Platform ignore
 
 ## Build Status
 
-- Implemented: strict public result unions and query inputs; four bounded Convex read queries; coherent Overview aggregation; deterministic relevance, filters, contextual facets, null-last sorts, query-bound cursors, snapshot reset/expiry handling, and snapshot-bound detail; canonical URL parsing/serialization and server route normalization.
-- Verified: public contract tests, nine `convex-test` read-model scenarios, frontend URL-state/table tests, generated Convex types, and local route integration all recorded green.
-- Blocked: task `002` has no activated cloud snapshot. Route data currently uses a server `fetchQuery`/explicit development fixture boundary rather than the required cloud-backed one-composite `preloadQuery` plus reactive `usePreloadedQuery`; representative cloud row/byte/latency budgets are also unmeasured.
+- Implemented: strict public result unions and query inputs; four bounded Convex read queries; coherent Overview aggregation; deterministic relevance, filters, contextual facets, null-last sorts, query-bound cursors, snapshot reset/expiry handling, and snapshot-bound detail; canonical URL parsing/serialization and server route normalization. Dashboard and list results now include bounded detail arrays aligned one-to-one with their opportunity/row summaries, and frontend routes always read Convex with no in-process demo-data bypass.
+- Verified: public contract tests, Convex read-model and mock-seed scenarios, frontend URL-state/table tests, generated Convex types, and local route integration all recorded green. The seeded lane returns 8 active packs and 6 Overview opportunities from 9 total packs, with matching details; desktop/mobile browser QA covers search and noninitial-row selection against the local Convex backend.
+- Blocked: task `002` has no activated canonical cloud snapshot. No non-production cloud Convex deployment/key is available through the returned external-agent scope, and the route still uses server `fetchQuery` rather than the required cloud-backed one-composite `preloadQuery` plus reactive `usePreloadedQuery`; representative cloud row/byte/latency budgets are also unmeasured.
 
 ## Spec Compliance
 
 - Related specs reviewed: repack-dashboard/tech-002, repack-dashboard/tech-003, repack-dashboard/tech-004, repack-dashboard/ux-001, repack-dashboard/ux-002, repack-dashboard/ux-003, repack-dashboard/ux-005
 - Alignment: local query contracts and Convex functions implement the specified validation, active-snapshot coherence, search, facets, price, ordering, cursor, selection, and sanitized application outcomes.
-- Divergences: the temporary server `fetchQuery` integration is non-reactive and intentionally does not claim the spec's preload/subscription contract; it must be replaced after a real cloud publication boundary exists.
-- Verification: contracts tests, `npm run test:convex`, frontend query-state tests, typecheck/lint/build, and browser-loaded local fixture routes recorded green; live Convex scale and reactive replacement remain unverified.
+- Divergences: the server `fetchQuery` integration is Convex-backed but non-reactive and intentionally does not claim the spec's preload/subscription contract; it must be replaced after a real cloud publication boundary exists.
+- Verification: contracts tests, `npm run test:convex`, frontend query-state tests, typecheck/lint/build, local seed replay, and browser-loaded local Convex routes recorded green; live Convex scale and reactive replacement remain unverified.

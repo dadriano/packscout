@@ -91,13 +91,13 @@ The inspector consumes `PackDetail`, `SnapshotMetadata`, and the shared `MetricP
 
 ## Build Status
 
-- Implemented: one placement-neutral inspector rendered as Overview side panel, All Packs bottom preview, and narrow native-dialog sheet; shared metric/chase states; neutral image fallback; promo/manual-copy logic; and allowlisted outbound URL construction.
-- Verified: inspector presentation tests cover calculation time, coverage, and all chase variants; action tests cover exact referral replacement, blocked destinations, and clipboard fallback; browser review confirms narrow sheet focus containment, Escape close, and focus return to the selected row.
+- Implemented: one placement-neutral inspector rendered as Overview side panel, All Packs bottom preview, and narrow native-dialog sheet; shared metric/chase states; neutral image fallback; promo/manual-copy logic; and allowlisted outbound URL construction. Selected details now come from bounded detail arrays returned with the same Convex query result as each visible summary.
+- Verified: inspector presentation tests cover calculation time, coverage, and all chase variants; action tests cover exact referral replacement, blocked destinations, and clipboard fallback. Desktop/mobile browser QA against the local Convex seed confirms noninitial-row selection, inspector replacement, narrow sheet focus containment, Escape close, and focus return.
 - Blocked: tasks `003`, `006`, and `007` are not complete. No live approved platform configuration or reactive cloud snapshot exists, and real-browser clipboard failure/success plus reactive selection recovery have not been recorded.
 
 ## Spec Compliance
 
 - Related specs reviewed: repack-dashboard/tech-002, repack-dashboard/tech-003, repack-dashboard/tech-004, repack-dashboard/ux-003, repack-dashboard/ux-005
 - Alignment: the shared inspector follows the required content order, non-compositional EV summary, three chase states, approved-action-only boundary, side/bottom/sheet placements, and modal focus lifecycle.
-- Divergences: action tests use frontend-safe fixture configuration; no live dual-approved listing configuration or reactive point query is claimed.
-- Verification: metric/inspector/action tests, frontend typecheck/lint/build, and desktop/mobile sheet browser checks recorded green; live clipboard and reactive-removal evidence remains open.
+- Divergences: action tests and local browser QA use the deterministic mock snapshot's non-production platform configuration; no live dual-approved listing configuration or reactive point query is claimed.
+- Verification: metric/inspector/action and Convex row/detail coherence tests, frontend typecheck/lint/build, and desktop/mobile sheet browser checks recorded green; live clipboard and reactive-removal evidence remains open.

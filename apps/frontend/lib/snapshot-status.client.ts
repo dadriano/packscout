@@ -1,9 +1,12 @@
+import type { SnapshotMetadata } from "@packscout/contracts";
+
 export type SnapshotStatusValue =
   | { readonly state: "loading" }
   | { readonly state: "unavailable" }
   | {
       readonly state: "fresh" | "delayed";
       readonly updatedAt: string;
+      readonly dataSource: SnapshotMetadata["dataSource"];
     };
 
 export type SnapshotStatusPresentation = Readonly<{
@@ -56,6 +59,20 @@ export function presentSnapshotStatus(
     dateStyle: "medium",
     timeStyle: "long",
   }).format(new Date(status.updatedAt));
+
+  if (status.dataSource === "mock") {
+    return {
+      exactLabel:
+        status.state === "delayed"
+          ? `Mock catalog data is delayed. Last updated ${exactTime}`
+          : `Mock catalog data updated ${exactTime}`,
+      state: status.state,
+      visibleLabel:
+        status.state === "delayed"
+          ? `Mock data delayed · ${relativeTime}`
+          : `Mock data · Updated ${relativeTime}`,
+    };
+  }
 
   return {
     exactLabel:

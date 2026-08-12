@@ -23,6 +23,7 @@ function rejectionMessages(input: unknown): readonly string[] {
 test("the synthetic CatalogSnapshotV1 fixture covers truthful public states", () => {
   const snapshot = buildSyntheticCatalogSnapshotV1();
 
+  assert.equal(snapshot.metadata.dataSource, "canonical");
   assert.equal(snapshot.metadata.sourceWatermark, "catalog.42-pulls.17-trades.9");
   assert.equal(snapshot.metadata.publicConfigRevision, 6);
   assert.equal(snapshot.platformConfigs.length, 2);
@@ -150,6 +151,12 @@ test("money, reason codes, config revisions, and watermarks stay constrained", (
   const unsafeWatermark = structuredClone(buildSyntheticCatalogSnapshotV1());
   unsafeWatermark.metadata.sourceWatermark = "catalog cursor with spaces";
   assert.equal(safeParseCatalogSnapshotV1(unsafeWatermark).success, false);
+
+  const unknownSource = structuredClone(
+    buildSyntheticCatalogSnapshotV1(),
+  ) as unknown as { metadata: { dataSource: string } };
+  unknownSource.metadata.dataSource = "frontend_fixture";
+  assert.equal(safeParseCatalogSnapshotV1(unknownSource).success, false);
 });
 
 test("public links and images are HTTPS, exact-host, and config-approved", () => {

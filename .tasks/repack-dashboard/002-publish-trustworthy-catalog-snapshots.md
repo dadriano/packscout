@@ -176,13 +176,13 @@ Every money value uses integer minor units with an explicit currency. Every opti
 
 ## Build Status
 
-- Implemented: strict browser-safe `CatalogSnapshotV1`/public DTO schemas, a synthetic two-platform fixture covering estimated, unavailable, sold-out, and missing-image records, protected-field scanning, exact materialized metric validation, approved-host/action validation, and fresh/delayed/unavailable read-state contracts.
-- Verified: contracts tests prove protected fields are rejected, sold-out Pack Links are invalid, money/basis-point consistency is exact, public reason codes are bounded, and action/media hosts must match the copied approved configuration.
-- Blocked: task `001` has not produced an adopted V2 canonical handoff. There is no dual-approved PostgreSQL public configuration, publication ledger/manifest-block authority, cloud Convex deployment, HMAC key set, publisher, activation lifecycle, recovery path, or real publication evidence.
+- Implemented: strict browser-safe `CatalogSnapshotV1`/public DTO schemas with required `dataSource: "canonical" | "mock"`; protected-field scanning; exact materialized metric validation; approved-host/action validation; and fresh/delayed/unavailable read-state contracts. A deterministic internal Convex mutation provides a local-only mock lane with one complete snapshot, 9 packs, one query shard, singleton state, and one publication-operation receipt; it refuses disabled, production, canonical-active, conflicting, and partial targets before replacing data.
+- Verified: contracts tests prove protected fields are rejected, sold-out Pack Links are invalid, money/basis-point consistency is exact, public reason codes are bounded, and action/media hosts must match the copied approved configuration. Local seed tests and command evidence prove exact 9-pack creation, one operation receipt, and idempotent `created` then `unchanged` outcomes with no duplicate rows.
+- Blocked: task `001` has not produced an adopted V2 canonical handoff. There is no dual-approved PostgreSQL public configuration, publication ledger/manifest-block authority, non-production cloud Convex deployment/key, HMAC key set, publisher, activation lifecycle, recovery path, or real publication evidence. The connected external-agent capability set exposes no credential-read or secret-injection action, so it cannot clear the cloud credential blocker.
 
 ## Spec Compliance
 
 - Related specs reviewed: repack-dashboard/tech-001, repack-dashboard/tech-002, repack-dashboard/tech-003, repack-dashboard/tech-004, repack-dashboard/ux-001, repack-dashboard/ux-002, repack-dashboard/ux-003, repack-dashboard/ux-005
-- Alignment: the implemented runtime-neutral snapshot contract follows the specified public-only identities, money/reason vocabulary, action/media allowlisting, immutable metadata, and safe frontend shape.
-- Divergences: none in the contract slice; publication, PostgreSQL configuration approval, Convex lifecycle/authentication, retention, rollback, and admin workflow remain unimplemented rather than being simulated locally.
-- Verification: `@packscout/contracts` snapshot/public-catalog tests and the local Convex/read-model suites recorded green; no cloud publication or real-backend evidence exists.
+- Alignment: the implemented runtime-neutral snapshot contract follows the specified public-only identities, money/reason vocabulary, action/media allowlisting, immutable metadata, explicit data provenance, and safe frontend shape.
+- Divergences: the internal mock seed is deliberately local-only and is not a substitute for the canonical PostgreSQL ledger, authenticated publisher, staged activation, reconciliation, rollback, retention, or admin workflow.
+- Verification: `@packscout/contracts` snapshot/public-catalog tests, local Convex/read-model suites, and local seed create/replay proof recorded green; no cloud publication or real-backend evidence exists.

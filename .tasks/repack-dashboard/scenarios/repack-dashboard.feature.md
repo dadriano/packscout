@@ -1,6 +1,6 @@
 # Feature: PackScout Repack Dashboard V1
 
-Status: active build handoff — local frontend/read-model slices implemented; live publication and launch evidence blocked
+Status: active build handoff — local Convex-backed mock frontend/read-model slices implemented; live publication and launch evidence blocked
 Owner: product build
 
 ## Scenario: A buyer opens a coherent market overview
@@ -10,7 +10,7 @@ When the buyer opens Dashboard Overview without filters
 Then four KPI cards, six EV-dollar-ranked opportunities, platform summaries, category summaries, and the first selected pack come from one coherent result
 And sold-out, disabled, and unavailable-EV packs do not enter Top Opportunities
 
-Coverage: Automated local coverage — `convex/publicCatalog.test.ts` proves one active-only bundle and `overview-presentation.test.ts` plus browser review prove the four-KPI/six-opportunity/summaries/selection rendering; blocked until an activated cloud snapshot supplies the bundle reactively.
+Coverage: Automated local coverage — the deterministic internal Convex seed creates 9 packs, and `convex/publicCatalog.test.ts` plus seed tests prove one bundle with 8 active packs, 6 opportunities, and bounded aligned details. Overview presentation tests and desktop/mobile browser QA prove summary/selection rendering with a visible Mock data label; an activated canonical cloud snapshot and reactive delivery remain blocked.
 
 ## Scenario: The provider stream contract is adopted without a compatibility path
 
@@ -29,7 +29,7 @@ When batches are retried or the replacement fails count or hash reconciliation
 Then no partial replacement becomes public and the complete active snapshot remains readable
 And replaying an identical complete publication creates no duplicate public records
 
-Coverage: Blocked — strict `CatalogSnapshotV1` fixtures and active-snapshot read tests exist, but no PostgreSQL ledger/config authority, HMAC publisher, cloud Convex lifecycle, atomic activation, replay, reconciliation, or rollback implementation exists.
+Coverage: Blocked — strict `CatalogSnapshotV1` fixtures and active-snapshot read tests exist. The guarded internal local seed proves deterministic one-transaction creation plus idempotent `created`/`unchanged` replay and refuses canonical, conflicting, or partial state, but it is not the PostgreSQL ledger/config authority, HMAC publisher, cloud Convex lifecycle, staged activation, reconciliation, or rollback implementation.
 
 ## Scenario: A buyer searches the full catalog
 
@@ -38,7 +38,7 @@ When the buyer searches by pack, platform, or category
 Then All Packs returns relevance-ordered results in cursor pages of up to 25 rows
 And clearing search restores the prior accepted metric sort
 
-Coverage: Automated local coverage — Convex relevance/cursor tests and frontend canonical URL-state/table tests prove the search behavior; local browser review covers the All Packs surface, while cloud reactive preload and live cursor evidence remain blocked.
+Coverage: Automated local coverage — Convex relevance/cursor tests and frontend canonical URL-state/table tests prove the search behavior; desktop/mobile browser QA searches the 9-pack local Convex snapshot and updates selection from bounded row-aligned details, while cloud reactive preload and live cursor evidence remain blocked.
 
 ## Scenario: A buyer filters and sorts All Packs
 
@@ -47,7 +47,7 @@ When the buyer applies multiple platforms, multiple categories, a price range, a
 Then only matching rows appear with deterministic ordering and all twelve comparison fields
 And refresh, back, and forward restore the accepted query state
 
-Coverage: Automated local coverage — Convex filter/facet/price/sort/cursor tests, URL restoration tests, exact twelve-column table tests, and browser-owned horizontal overflow evidence are green; live cloud pagination and complete nested-action browser evidence remain open.
+Coverage: Automated local coverage — Convex filter/facet/price/sort/cursor tests, URL restoration tests, exact twelve-column table tests, and desktop/mobile search/selection/internal-overflow browser evidence against the local seed are green; live cloud pagination and reactive replacement evidence remain open.
 
 ## Scenario: Invalid public input fails safely
 
@@ -74,7 +74,7 @@ When it appears in All Packs or the inspector
 Then each missing field uses its approved unavailable or fallback presentation
 And no zero metric, fake image, placeholder action, Net EV, fee, or shipping value is rendered
 
-Coverage: Automated local coverage — strict snapshot fixtures, public-state components, pack/chase presentation tests, production-disabled fixture mode, and browser partial-state review prove non-invented fallbacks; real publisher/config evidence remains blocked.
+Coverage: Automated local coverage — strict snapshot contracts, deterministic Convex mock records, public-state components, pack/chase presentation tests, and browser partial-state review prove non-invented fallbacks. `dataSource` is required as mock or canonical, mock data is visibly labeled, and public reads fail closed for mock snapshots in production; real publisher/config evidence remains blocked.
 
 ## Scenario: A buyer inspects a pack without losing context
 
@@ -83,7 +83,7 @@ When the buyer selects it
 Then Overview updates its side inspector, All Packs updates its bottom preview, and narrow screens open an accessible modal sheet
 And closing the narrow-screen inspector returns focus to the selected row
 
-Coverage: Automated plus browser coverage — one shared inspector powers side, bottom, and modal-sheet placements; selection tests and 390×844 browser review prove focus entry, containment, Escape close, and focus return. Reactive removal recovery against cloud Convex remains open.
+Coverage: Automated plus browser coverage — one shared inspector powers side, bottom, and modal-sheet placements from the bounded details returned with each Convex result; desktop/mobile noninitial-row selection proves inspector replacement, focus entry, containment, Escape close, and focus return. Reactive removal recovery against cloud Convex remains open.
 
 ## Scenario: A buyer copies a public promo code
 
@@ -137,7 +137,7 @@ When a buyer opens Dashboard
 Then PackScout shows `Pack data is temporarily unavailable.` with Retry
 And no KPI zero, sample pack, fake image, promo, or Pack Link is rendered while Learn remains available
 
-Coverage: Automated local coverage — missing-snapshot query outcomes, page recovery components, and production fixture-mode tests prove the exact Retry copy with no invented values while local Learn content remains available; cloud no-snapshot recovery is not yet exercised.
+Coverage: Automated local coverage — missing-snapshot query outcomes and page recovery components prove the exact Retry copy with no invented values while local Learn content remains available; public-read tests additionally fail closed when a mock snapshot is active in production. Cloud no-snapshot recovery is not yet exercised.
 
 ## Scenario: A valid query can return no matches
 
@@ -146,7 +146,7 @@ When no public pack matches the constraints
 Then PackScout summarizes the constraints, offers Clear filters, and closes the inspector
 And clearing restores the complete accepted query without treating the catalog as unavailable
 
-Coverage: Automated local coverage — query/filter fixtures and no-match state components preserve constraints, clear to canonical defaults, and close/fall back selection; live reactive replacement and full focus evidence remain open.
+Coverage: Automated local coverage — Convex query/filter tests and no-match state components preserve constraints, clear to canonical defaults, and close/fall back selection; desktop/mobile local-seed browser QA covers search and selection, while live reactive replacement and full focus evidence remain open.
 
 ## Scenario: A buyer learns before opening a pack
 
@@ -173,4 +173,4 @@ When they are exercised at 1440×1000 and 390×844 by keyboard and pointer
 Then all controls, tables, tooltips, sheets, states, and content remain readable and operable
 And the All Packs table scrolls inside its region with no page-level overflow, console error, or hydration warning
 
-Coverage: Partial browser coverage — exact-comp, 1440×1000, and 390×844 light/dark reviews confirm responsive content, internal-only table overflow, sheet focus/Escape return, and zero console/hydration warnings; full keyboard-only, contrast, 200% zoom/increased-text, reduced-motion, Playwright, and preproduction artifact evidence remains open.
+Coverage: Partial browser coverage — 1440×1000 and 390×844 reviews against the Convex-backed mock snapshot confirm visible mock provenance, search and selection, responsive content, internal-only table overflow, sheet focus/Escape return, and zero console/hydration warnings; full keyboard-only, contrast, 200% zoom/increased-text, reduced-motion, Playwright, and preproduction artifact evidence remains open.

@@ -14,38 +14,28 @@ import {
   type ListPublicPacksResult,
 } from "@packscout/contracts";
 import { api } from "../../../convex/_generated/api";
-import {
-  buildDemoCatalogPage,
-  buildDemoDashboard,
-  catalogDemoIsEnabled,
-} from "./catalog-demo-data.server";
+import { readPublicConvexOrigin } from "./security-policy.server";
 
-function convexUrl(): string | null {
-  const value = process.env.NEXT_PUBLIC_CONVEX_URL?.trim();
-  if (!value) return null;
+type PublicCatalogEnvironment = Readonly<{
+  NODE_ENV?: string;
+  NEXT_PUBLIC_CONVEX_URL?: string;
+}>;
+
+function convexUrl(environment: PublicCatalogEnvironment = process.env): string | null {
   try {
-    const parsed = new URL(value);
-    if (
-      parsed.username ||
-      parsed.password ||
-      (parsed.protocol !== "https:" && parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost")
-    ) {
-      return null;
-    }
-    return parsed.origin;
+    return readPublicConvexOrigin(environment);
   } catch {
     return null;
   }
 }
 
-export function publicCatalogLiveReadsConfigured(): boolean {
-  return convexUrl() !== null;
+export function publicCatalogReadsConfigured(
+  environment: PublicCatalogEnvironment = process.env,
+): boolean {
+  return convexUrl(environment) !== null;
 }
 
 export async function readPublicShellStatus(): Promise<GetPublicShellStatusResult> {
-  if (catalogDemoIsEnabled()) {
-    return { ok: true, data: { metadata: buildDemoDashboard().metadata } };
-  }
   const url = convexUrl();
   if (url === null) return publicReadError("SNAPSHOT_UNAVAILABLE");
   try {
@@ -60,9 +50,6 @@ export async function readPublicShellStatus(): Promise<GetPublicShellStatusResul
 export async function readDashboardBundle(
   input: DashboardQueryInput,
 ): Promise<GetDashboardBundleResult> {
-  if (catalogDemoIsEnabled()) {
-    return { ok: true, data: buildDemoDashboard(input) };
-  }
   const url = convexUrl();
   if (url === null) return publicReadError("SNAPSHOT_UNAVAILABLE");
   try {
@@ -77,9 +64,6 @@ export async function readDashboardBundle(
 export async function readPublicPacks(
   input: ListPublicPacksInput,
 ): Promise<ListPublicPacksResult> {
-  if (catalogDemoIsEnabled()) {
-    return { ok: true, data: buildDemoCatalogPage(input) };
-  }
   const url = convexUrl();
   if (url === null) return publicReadError("SNAPSHOT_UNAVAILABLE");
   try {

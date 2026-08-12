@@ -206,6 +206,7 @@ function buildSnapshot(
   return parseCatalogSnapshotV1({
     metadata: {
       schemaVersion: "catalog_snapshot_v1",
+      dataSource: "canonical",
       publicationId,
       sourceWatermark: "synthetic.catalog.42",
       manifestFingerprint: "4".repeat(64),
@@ -418,6 +419,9 @@ describe("public catalog read model", () => {
       packId(3),
       packId(4),
     ]);
+    expect(parsed.data.details.map((pack) => pack.publicPackId)).toEqual(
+      parsed.data.opportunities.map((pack) => pack.publicPackId),
+    );
     expect(parsed.data.selectedPack?.publicPackId).toBe(packId(1));
     expect(parsed.data.opportunities).not.toContainEqual(
       expect.objectContaining({ availability: "sold_out" }),
@@ -482,6 +486,9 @@ describe("public catalog read model", () => {
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
       expect(parsed.data.range.total).toBe(5);
+      expect(parsed.data.details.map((pack) => pack.publicPackId)).toEqual(
+        parsed.data.rows.map((pack) => pack.publicPackId),
+      );
       expect(parsed.data.rows.map((pack) => pack.publicPackId)).not.toContain(
         packId(5),
       );

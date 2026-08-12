@@ -4,6 +4,7 @@ import {
   publicFacetKeySchema,
   publicPackDetailSchema,
   publicPackIdSchema,
+  publicPackSummaryFromDetail,
   publicPackSummarySchema,
   publicPlatformKeySchema,
   publicSha256Schema,
@@ -431,6 +432,7 @@ export const dashboardBundleSchema = z
     metadata: snapshotMetadataSchema,
     kpis: dashboardKpisSchema,
     opportunities: z.array(publicPackSummarySchema).max(6),
+    details: z.array(publicPackDetailSchema).max(6),
     platformSummaries: z.array(catalogSummarySchema).max(5),
     categorySummaries: z.array(catalogSummarySchema).max(5),
     facets: contextualCatalogFacetsSchema,
@@ -439,6 +441,22 @@ export const dashboardBundleSchema = z
   })
   .strict()
   .superRefine((bundle, context) => {
+    if (
+      bundle.opportunities.length !== bundle.details.length ||
+      bundle.opportunities.some(
+        (summary, index) =>
+          JSON.stringify(summary) !==
+          JSON.stringify(
+            publicPackSummaryFromDetail(bundle.details[index]!),
+          ),
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["details"],
+        message: "public_dashboard.opportunity_details_mismatch",
+      });
+    }
     bundle.opportunities.forEach((pack, index) => {
       if (
         pack.availability !== "active" ||
@@ -533,6 +551,7 @@ export const listPublicPacksPageSchema = z
   .object({
     metadata: snapshotMetadataSchema,
     rows: z.array(publicPackSummarySchema).max(PUBLIC_CATALOG_MAX_PAGE_SIZE),
+    details: z.array(publicPackDetailSchema).max(PUBLIC_CATALOG_MAX_PAGE_SIZE),
     selectedPack: publicPackDetailSchema.nullable(),
     selectedPackEligible: z.boolean(),
     facets: contextualCatalogFacetsSchema,
@@ -545,6 +564,20 @@ export const listPublicPacksPageSchema = z
   })
   .strict()
   .superRefine((page, context) => {
+    if (
+      page.rows.length !== page.details.length ||
+      page.rows.some(
+        (summary, index) =>
+          JSON.stringify(summary) !==
+          JSON.stringify(publicPackSummaryFromDetail(page.details[index]!)),
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["details"],
+        message: "public_catalog.row_details_mismatch",
+      });
+    }
     const visibleCount =
       page.range.total === 0 ? 0 : page.range.end - page.range.start + 1;
     if (visibleCount !== page.rows.length) {

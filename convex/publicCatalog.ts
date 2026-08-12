@@ -1,7 +1,7 @@
 import {
   getPublicPackInputSchema,
   publicPackDetailSchema,
-  publicPackSummarySchema,
+  publicPackSummaryFromDetail,
   publicReadError,
   snapshotMetadataSchema,
   type DashboardBundle,
@@ -13,12 +13,11 @@ import {
   type ListPublicPacksResult,
   type PublicCatalogFilters,
   type PublicPackDetail,
-  type PublicPackSummary,
   type SnapshotMetadata,
 } from "@packscout/contracts";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { query, type QueryCtx } from "./_generated/server";
+import { env, query, type QueryCtx } from "./_generated/server";
 import {
   MAX_QUERY_SHARDS,
   MAX_ROWS_PER_QUERY_SHARD,
@@ -40,6 +39,15 @@ type ActiveCatalog = {
   readonly snapshot: Doc<"catalogSnapshots">;
   readonly metadata: SnapshotMetadata;
 };
+
+function dataSourceIsReadable(metadata: SnapshotMetadata): boolean {
+  if (metadata.dataSource === "canonical") return true;
+  return (
+    env.PACKSCOUT_RUNTIME_ENVIRONMENT === "local" ||
+    env.PACKSCOUT_RUNTIME_ENVIRONMENT === "development" ||
+    env.PACKSCOUT_RUNTIME_ENVIRONMENT === "preproduction"
+  );
+}
 
 function success<T>(data: T): { readonly ok: true; readonly data: T } {
   return { ok: true, data };
@@ -87,7 +95,7 @@ async function loadActiveCatalog(ctx: QueryCtx): Promise<ActiveCatalog | null> {
     freshness: state.freshness,
     delayedSourceCount: state.delayedSourceCount,
   });
-  return metadataResult.success
+  return metadataResult.success && dataSourceIsReadable(metadataResult.data)
     ? { state, snapshot, metadata: metadataResult.data }
     : null;
 }
@@ -154,7 +162,7 @@ async function loadPackDetails(
   ctx: QueryCtx,
   snapshotId: Id<"catalogSnapshots">,
   rows: readonly CatalogQueryRow[],
-): Promise<readonly PublicPackDetail[] | null> {
+): Promise<PublicPackDetail[] | null> {
   const details: PublicPackDetail[] = [];
   for (const row of rows) {
     const detail = await loadPackDetail(ctx, snapshotId, row.publicPackId);
@@ -162,39 +170,6 @@ async function loadPackDetails(
     details.push(detail);
   }
   return details;
-}
-
-function packSummary(detail: PublicPackDetail): PublicPackSummary {
-  const {
-    description: _description,
-    actions: _actions,
-    topChase,
-    estimatedEv,
-    ...base
-  } = detail;
-  const {
-    coverage: _coverage,
-    limitations: _limitations,
-    ...estimatedEvSummary
-  } = estimatedEv;
-  const summaryTopChase =
-    topChase.status === "unavailable"
-      ? topChase
-      : {
-          ...topChase,
-          value: {
-            publicChaseId: topChase.value.publicChaseId,
-            name: topChase.value.name,
-            displayMoney: topChase.value.displayMoney,
-            usdComparison: topChase.value.usdComparison,
-            primaryImage: topChase.value.primaryImage,
-          },
-        };
-  return publicPackSummarySchema.parse({
-    ...base,
-    estimatedEv: estimatedEvSummary,
-    topChase: summaryTopChase,
-  });
 }
 
 function selectionsAreKnown(
@@ -432,7 +407,8 @@ export const getDashboardBundle = query({
         medianEvPercent: medianBasisPoints(matchingRows),
         highestChaseValue: highestChase(matchingRows),
       },
-      opportunities: opportunityDetails.map(packSummary),
+      opportunities: opportunityDetails.map(publicPackSummaryFromDetail),
+      details: opportunityDetails,
       platformSummaries: catalogSummaries(matchingRows, "platform"),
       categorySummaries: catalogSummaries(matchingRows, "category"),
       facets: contextualFacets(
@@ -584,7 +560,8 @@ export const listPublicPacks = query({
         : null;
     const data: ListPublicPacksPage = {
       metadata: active.metadata,
-      rows: pageDetails.map(packSummary),
+      rows: pageDetails.map(publicPackSummaryFromDetail),
+      details: pageDetails,
       selectedPack,
       selectedPackEligible: selectedPack !== null,
       facets: contextualFacets(

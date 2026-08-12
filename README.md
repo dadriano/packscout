@@ -42,6 +42,36 @@ PACKSCOUT_FRONTEND_PORT=5150 npm run dev
 PACKSCOUT_ADMIN_PORT=5151 PACKSCOUT_ADMIN_HMR_PORT=5152 npm run dev:admin
 ```
 
+### Local Convex mock catalog
+
+The dashboard can use the deterministic nine-pack catalog in a local Convex
+deployment. Start or configure Convex locally first so the ignored root
+`.env.local` contains a loopback `CONVEX_URL` (or
+`NEXT_PUBLIC_CONVEX_URL`). Then run:
+
+```bash
+# Push the current Convex functions and seed once. Replays refresh freshness.
+npm run seed:mock-catalog:local
+
+# Seed, supervise local Convex, then start the frontend after it is ready.
+npm run dev:frontend:mock:local
+```
+
+The standalone seed command is one-shot and does not keep the local backend
+running. The combined development command keeps the Convex backend alive for
+the full frontend session, watches Convex functions, waits for backend
+readiness before starting Next.js, and stops the supervised session on Ctrl+C
+or a termination signal.
+
+Both commands refuse cloud/self-hosted URLs and deploy keys. The seed is an
+internal Convex mutation, runs only when its temporary local enable flag is
+present, refuses an active canonical catalog or partial/conflicting mock state,
+and removes the enable flag before exiting. An unchanged replay advances only
+the catalog observation timestamps; the snapshot, packs, shard, pointer, and
+recorded seed operation stay immutable. No credential or public URL is
+written to a tracked file or browser bundle beyond the required public Convex
+origin.
+
 ## Verification
 
 ```bash

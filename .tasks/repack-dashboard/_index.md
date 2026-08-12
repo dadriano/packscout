@@ -95,7 +95,7 @@ The open data-pipeline PR establishes durable canonical history, quarantine, pro
 
 - Data-pipeline PR #1 supplies the canonical history and EV foundation after its review/merge process completes.
 - The stream provider must supply sanitized real page envelopes and cursor behavior for `catalog`, `pulls`, and `trades`.
-- A frontend Convex deployment and server-held publication credentials must exist before live snapshot publication.
+- A non-production frontend Convex cloud deployment and server-held publication credentials must exist before live snapshot publication. The connected external-agent scope currently exposes neither credential reads nor secret injection, so it cannot supply that deployment or key.
 - Platform owners must approve public display names, logos, listing hosts, promo codes, and referral parameters.
 - Real provider launch evidence must pass before the UI labels the catalog live.
 
@@ -165,6 +165,7 @@ Open `001-lock-live-data-handoff.md`, capture one sanitized real response page f
 ## Current Build Handoff
 
 - Done: `004` establishes the complete `apps/frontend` PackScout shell, routes, theme, search, freshness region, and not-found behavior.
-- Implemented and locally verified but dependency-blocked: the public DTO/read-query foundation, metric presentation, Overview, All Packs, inspector/actions, Learn content, public states, responsive layouts, and strict frontend telemetry/security boundaries.
-- Live blockers: the provider transport/page/cursor evidence for `001`; the adopted V2 cutover, dual-approved PostgreSQL public configuration, and cloud Convex publication/HMAC path for `002`; activated cloud snapshots and reactive `preloadQuery`/`usePreloadedQuery` integration for `003`; and durable telemetry/observability, edge enforcement, real scale/preproduction/performance evidence, and owner approvals for `012`.
+- Implemented and locally verified but dependency-blocked: the public DTO/read-query foundation, metric presentation, Overview, All Packs, inspector/actions, Learn content, public states, responsive layouts, and strict frontend telemetry/security boundaries. The frontend now always reads Convex; a deterministic internal local seed writes one mock snapshot with 9 packs (8 active and 6 Overview opportunities), one bounded query shard, matching bounded detail arrays, and an operation receipt. `dataSource` is required as `mock` or `canonical`, and the shell visibly labels the seeded source as mock data.
+- Local workflow evidence: the guarded local-only seed returns `created` on first run and `unchanged` on replay without duplicate rows, refuses production/cloud-key/canonical/conflicting/partial targets, and is paired with a local launcher. Desktop and mobile browser QA covers mock labeling, search, row selection, and inspector updates against Convex-backed data.
+- Live blockers: the provider transport/page/cursor evidence for `001`; the adopted V2 cutover, dual-approved PostgreSQL public configuration, and cloud Convex publication/HMAC path for `002`; a non-production cloud Convex deployment/key (not available through the returned external-agent scope), activated canonical snapshots, and reactive `preloadQuery`/`usePreloadedQuery` integration for `003`; and durable telemetry/observability, edge enforcement, real 1,500/10,000-pack scale, preproduction/performance evidence, and owner approvals for `012`.
 - Status rule: locally implemented UI slices remain `blocked` when an upstream task or launch-evidence acceptance contract is unmet; no task below claims real-provider or live-launch readiness.

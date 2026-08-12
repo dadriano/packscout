@@ -61,33 +61,40 @@ test("builds a production nonce policy from only exact configured origins", () =
   assert.equal(policy.includes("*.convex.cloud"), false);
 });
 
-test("allows only explicit loopback Convex HTTP and WS origins in development", () => {
-  const configuration = readPublicSecurityConfiguration({
+test("allows exact cloud HTTPS/WSS and loopback HTTP/WS origins in development", () => {
+  const loopbackConfiguration = readPublicSecurityConfiguration({
     NODE_ENV: "development",
     NEXT_PUBLIC_CONVEX_URL: "http://127.0.0.1:3210",
   });
-  const policy = buildContentSecurityPolicy({
+  const loopbackPolicy = buildContentSecurityPolicy({
     nonce: "abcdefghijklmnopqrstuvwx",
-    configuration,
+    configuration: loopbackConfiguration,
   });
 
-  assert.deepEqual(directiveSources(policy, "connect-src"), [
+  assert.deepEqual(directiveSources(loopbackPolicy, "connect-src"), [
     "'self'",
     "http://127.0.0.1:3210",
     "ws://127.0.0.1:3210",
   ]);
   assert.equal(
-    directiveSources(policy, "script-src").includes("'unsafe-eval'"),
+    directiveSources(loopbackPolicy, "script-src").includes("'unsafe-eval'"),
     true,
   );
-  assert.throws(
-    () =>
-      readPublicSecurityConfiguration({
-        NODE_ENV: "development",
-        NEXT_PUBLIC_CONVEX_URL: "https://fixture-deployment.convex.cloud",
-      }),
-    /Development Convex URL|exact origins/,
-  );
+
+  const cloudConfiguration = readPublicSecurityConfiguration({
+    NODE_ENV: "development",
+    NEXT_PUBLIC_CONVEX_URL: "https://fixture-deployment.convex.cloud",
+  });
+  const cloudPolicy = buildContentSecurityPolicy({
+    nonce: "abcdefghijklmnopqrstuvwx",
+    configuration: cloudConfiguration,
+  });
+  assert.deepEqual(directiveSources(cloudPolicy, "connect-src"), [
+    "'self'",
+    "https://fixture-deployment.convex.cloud",
+    "wss://fixture-deployment.convex.cloud",
+  ]);
+
   assert.throws(
     () =>
       readPublicSecurityConfiguration({
@@ -96,6 +103,26 @@ test("allows only explicit loopback Convex HTTP and WS origins in development", 
       }),
     /loopback origin with a port/,
   );
+
+  for (const value of [
+    "https://person:secret@fixture-deployment.convex.cloud",
+    "https://fixture-deployment.convex.cloud/path",
+    "https://fixture-deployment.convex.cloud?query=1",
+    "https://fixture-deployment.convex.cloud#fragment",
+    "https://fixture-deployment.convex.cloud:443",
+    "https://fixture-deployment.convex.cloud:8443",
+    "https://nested.fixture-deployment.convex.cloud",
+  ]) {
+    assert.throws(
+      () =>
+        readPublicSecurityConfiguration({
+          NODE_ENV: "development",
+          NEXT_PUBLIC_CONVEX_URL: value,
+        }),
+      /Development Convex URL|exact origins/,
+      value,
+    );
+  }
 });
 
 test("keeps an unconfigured local or production-mode build self-only", () => {
@@ -143,7 +170,7 @@ test("fails closed for partial or malformed production configuration", () => {
         NEXT_PUBLIC_CONVEX_URL: "http://fixture-deployment.convex.cloud",
         PACKSCOUT_PUBLIC_ORIGIN_SET_HASH: emptyHash,
       }),
-    /exact origins/,
+    /exact origins|use HTTPS/,
   );
 
   for (const value of [

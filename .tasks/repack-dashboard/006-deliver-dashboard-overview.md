@@ -93,13 +93,13 @@ Filter submission emits the normalized public query state. “View all packs” 
 
 ## Build Status
 
-- Implemented: the comp-aligned four-KPI Overview, filter band, six-row opportunity table, two current-catalog summaries, deterministic local selection, and responsive side/sheet inspector, all under `apps/frontend`.
-- Verified: Convex query tests prove coherent active-only aggregation/ranking; presentation tests prove four KPIs, provider order, selection fallback, and summary scaling; browser review confirms matched light/dark content and the desktop/mobile hierarchy.
-- Blocked: tasks `003` and `005` remain blocked. The route has no activated/reactive cloud snapshot, and draft/Apply/Reset end-to-end interaction has not been recorded against that live coherent data source.
+- Implemented: the comp-aligned four-KPI Overview, filter band, six-row opportunity table, two current-catalog summaries, deterministic local selection, and responsive side/sheet inspector, all under `apps/frontend`. The route consumes one Convex dashboard bundle plus its bounded, aligned opportunity-detail array and visibly labels a mock-backed snapshot.
+- Verified: Convex query/seed tests prove coherent aggregation and ranking from the deterministic 9-pack catalog: 8 active packs and 6 Overview opportunities. Presentation tests prove four KPIs, provider order, selection fallback, and summary scaling; desktop/mobile browser QA confirms the hierarchy and selection-driven inspector against local Convex data.
+- Blocked: tasks `003` and `005` remain blocked. The route has no activated/reactive canonical cloud snapshot, and draft/Apply/Reset end-to-end interaction has not been recorded against that live coherent data source.
 
 ## Spec Compliance
 
 - Related specs reviewed: repack-dashboard/tech-002, repack-dashboard/tech-003, repack-dashboard/tech-004, repack-dashboard/ux-002, repack-dashboard/ux-003, repack-dashboard/ux-005
 - Alignment: the local Overview follows the specified one-bundle hierarchy, four KPI parity, EV-dollar-ranked opportunities, current-catalog summaries, filter serialization, and side-to-sheet responsive placement.
-- Divergences: local fixture mode is explicit and non-production; the route currently uses the non-reactive server read boundary documented in task `003`, so live Apply/replacement and snapshot-reactivity acceptance remains open.
-- Verification: Convex/read-contract tests, Overview presentation tests, frontend typecheck/lint/build, and 1440×1000/390×844 browser review in light and dark recorded green for the implemented slice.
+- Divergences: the explicitly labeled local mock snapshot exercises the real Convex read path but is not canonical provider data; the non-reactive server boundary documented in task `003` leaves live Apply/replacement and snapshot-reactivity acceptance open.
+- Verification: Convex/read-contract and seed tests, Overview presentation tests, frontend typecheck/lint/build, and 1440×1000/390×844 browser review recorded green for the implemented slice.

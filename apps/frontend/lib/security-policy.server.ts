@@ -17,6 +17,11 @@ type SecurityEnvironment = Readonly<{
   PACKSCOUT_PUBLIC_ORIGIN_SET_HASH?: string;
 }>;
 
+type ConvexSecurityEnvironment = Pick<
+  SecurityEnvironment,
+  "NODE_ENV" | "NEXT_PUBLIC_CONVEX_URL"
+>;
+
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const CONVEX_HOST_PATTERN =
   /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.convex\.cloud$/;
@@ -63,11 +68,18 @@ function parseConvexOrigins(
   if (value === null) {
     return { convexHttpOrigin: null, convexWebSocketOrigin: null };
   }
-  if (environment === "production") {
+  const parsedUrl = (() => {
+    try {
+      return new URL(value);
+    } catch {
+      throw new Error("Public security configuration contains an invalid URL.");
+    }
+  })();
+  if (parsedUrl.protocol === "https:") {
     const parsed = exactOrigin(value, "https:");
     if (parsed.port !== "" || !CONVEX_HOST_PATTERN.test(parsed.hostname)) {
       throw new Error(
-        "Production Convex URL must be one exact deployment origin.",
+        `${environment === "production" ? "Production" : "Development"} Convex URL must be one exact cloud deployment origin.`,
       );
     }
     return {
@@ -77,6 +89,9 @@ function parseConvexOrigins(
   }
 
   const parsed = exactOrigin(value, "http:");
+  if (environment === "production") {
+    throw new Error("Production Convex URL must use HTTPS.");
+  }
   if (
     (parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") ||
     parsed.port === ""
@@ -89,6 +104,14 @@ function parseConvexOrigins(
     convexHttpOrigin: parsed.origin,
     convexWebSocketOrigin: `ws://${parsed.host}`,
   };
+}
+
+export function readPublicConvexOrigin(
+  environment: ConvexSecurityEnvironment = process.env,
+): string | null {
+  const mode = resolveEnvironment(environment.NODE_ENV);
+  const value = configuredValue(environment.NEXT_PUBLIC_CONVEX_URL);
+  return parseConvexOrigins(value, mode).convexHttpOrigin;
 }
 
 function parseImageOrigins(value: string | null): readonly string[] {

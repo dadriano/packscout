@@ -35,10 +35,11 @@ export function ShellStatusReporter({ status }: { status: SnapshotStatusValue })
   const context = useContext(SnapshotStatusContext);
   const state = status.state;
   const updatedAt = "updatedAt" in status ? status.updatedAt : undefined;
+  const dataSource = "dataSource" in status ? status.dataSource : undefined;
 
   useEffect(() => {
     context?.setStatus(status);
-  }, [context, state, status, updatedAt]);
+  }, [context, dataSource, state, status, updatedAt]);
 
   return null;
 }
@@ -54,6 +55,7 @@ export function SnapshotStatus() {
       aria-live="polite"
       aria-atomic="true"
       className="snapshot-status"
+      data-source={"dataSource" in status ? status.dataSource : undefined}
       data-state={presentation.state}
       role="status"
     >

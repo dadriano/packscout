@@ -104,12 +104,12 @@ Public result and field states use the same vocabulary:
 ## Build Status
 
 - Implemented: stable loading geometry, page-level unavailable/empty recovery, no-match constraint summary/Clear filters, field fallbacks, delayed/retained-result status, bounded live feedback, and predictable inspector fallback components under `apps/frontend`.
-- Verified: catalog-state tests cover the approved public vocabulary, pending/retry outcomes, retained failures, result announcements, and constraint summaries; production demo-data tests prove sample data is explicit opt-in and impossible in production; browser review covers loaded/responsive states.
+- Verified: catalog-state tests cover the approved public vocabulary, pending/retry outcomes, retained failures, result announcements, and constraint summaries. Mock-seed/public-read tests prove `dataSource` is explicit, mock reads fail closed in production, the seed refuses unsafe targets, and the shell presents a visible Mock data label; desktop/mobile browser QA covers loaded, search, and selection states from local Convex.
 - Blocked: upstream route/data tasks are blocked. No activated reactive snapshot can yet prove delayed-to-fresh recovery, Retry context preservation, or the complete Apply/pagination/clipboard/refresh announcement sequence.
 
 ## Spec Compliance
 
 - Related specs reviewed: repack-dashboard/tech-002, repack-dashboard/tech-003, repack-dashboard/tech-004, repack-dashboard/ux-001, repack-dashboard/ux-002, repack-dashboard/ux-003, repack-dashboard/ux-004, repack-dashboard/ux-005
 - Alignment: the local state primitives use the specified public vocabulary, retain safe content, distinguish no-match/empty/unavailable, omit invented actions and metrics, and sanitize all buyer-facing copy.
-- Divergences: reactive recovery remains represented as a frontend boundary but cannot be integrated/proven without the cloud preload/subscription path from task `003`.
-- Verification: catalog-state/demo/read tests, frontend typecheck/lint/build, and responsive loaded-state browser review recorded green; live recovery sequences remain open.
+- Divergences: reactive recovery remains represented as a frontend boundary but cannot be integrated/proven without the cloud preload/subscription path from task `003`; the local launcher and mock label do not substitute for that evidence.
+- Verification: catalog-state, seed/read, and status-label tests, frontend typecheck/lint/build, and responsive local-Convex browser review recorded green; live recovery sequences remain open.

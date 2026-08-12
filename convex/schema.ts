@@ -226,6 +226,7 @@ export const publicPackDetailValidator = v.object({
 
 export const snapshotMetadataValidator = v.object({
   schemaVersion: v.literal("catalog_snapshot_v1"),
+  dataSource: v.union(v.literal("canonical"), v.literal("mock")),
   publicationId: v.string(),
   sourceWatermark: sha256Validator,
   manifestFingerprint: sha256Validator,

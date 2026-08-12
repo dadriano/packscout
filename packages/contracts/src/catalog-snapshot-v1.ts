@@ -589,6 +589,7 @@ export type PublicPlatformConfig = z.infer<typeof publicPlatformConfigSchema>;
 export const snapshotMetadataSchema = z
   .object({
     schemaVersion: z.literal(CATALOG_SNAPSHOT_SCHEMA_VERSION),
+    dataSource: z.enum(["canonical", "mock"]),
     publicationId: z.uuid(),
     sourceWatermark: sourceWatermarkSchema,
     manifestFingerprint: sha256Schema,
@@ -648,6 +649,47 @@ export const snapshotMetadataSchema = z
   });
 
 export type SnapshotMetadata = z.infer<typeof snapshotMetadataSchema>;
+
+export function publicPackSummaryFromDetail(
+  pack: PublicPackDetail,
+): PublicPackSummary {
+  const summaryTopChase =
+    pack.topChase.status === "unavailable"
+      ? pack.topChase
+      : {
+          ...pack.topChase,
+          value: {
+            publicChaseId: pack.topChase.value.publicChaseId,
+            name: pack.topChase.value.name,
+            displayMoney: pack.topChase.value.displayMoney,
+            usdComparison: pack.topChase.value.usdComparison,
+            primaryImage: pack.topChase.value.primaryImage,
+          },
+        };
+  return publicPackSummarySchema.parse({
+    publicPackId: pack.publicPackId,
+    platformKey: pack.platformKey,
+    platformDisplayName: pack.platformDisplayName,
+    platformLogoUrl: pack.platformLogoUrl,
+    category: pack.category,
+    name: pack.name,
+    availability: pack.availability,
+    price: pack.price,
+    estimatedEv: {
+      grossEv: pack.estimatedEv.grossEv,
+      grossReturn: pack.estimatedEv.grossReturn,
+      evDollars: pack.estimatedEv.evDollars,
+      evPercent: pack.estimatedEv.evPercent,
+      calculatedAt: pack.estimatedEv.calculatedAt,
+    },
+    buyback: pack.buyback,
+    primaryImage: pack.primaryImage,
+    topChase: summaryTopChase,
+    actionAvailability: pack.actionAvailability,
+    sourceFirstSeenAt: pack.sourceFirstSeenAt,
+    sourceCollectedAt: pack.sourceCollectedAt,
+  });
+}
 
 export const catalogFacetSchema = z
   .object({

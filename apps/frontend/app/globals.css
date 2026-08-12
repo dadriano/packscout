@@ -160,7 +160,7 @@ a {
 .app-header__inner {
   display: grid;
   grid-template-areas: "brand search navigation status theme";
-  grid-template-columns: 168px minmax(270px, 420px) minmax(210px, 1fr) minmax(194px, auto) 72px;
+  grid-template-columns: 168px minmax(270px, 420px) minmax(210px, 1fr) minmax(220px, auto) 72px;
   align-items: center;
   gap: clamp(0.8rem, 1.6vw, 1.6rem);
   width: min(100%, 1536px);
@@ -347,7 +347,7 @@ a {
   grid-template-columns: 9px minmax(0, 1fr);
   align-items: center;
   gap: 0.58rem;
-  width: 194px;
+  width: 220px;
   min-height: 2rem;
   color: var(--color-text-muted);
   font-size: 0.77rem;

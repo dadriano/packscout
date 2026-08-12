@@ -3,9 +3,9 @@ import Link from "next/link";
 import { DashboardPageHeader } from "@/components/shell/DashboardPageHeader";
 import { ShellStatusReporter } from "@/components/shell/SnapshotStatus.client";
 import { CatalogRouteRecovery, EmptyCatalog } from "@/components/catalog-state";
-import { catalogDemoIsEnabled, demoPackDetails } from "@/lib/catalog-demo-data.server";
 import { parseAllPacksRouteQuery, type NextSearchParams } from "@/lib/catalog-route-state.server";
 import { readPublicPacks } from "@/lib/public-catalog.server";
+import { snapshotStatusFromMetadata } from "@/lib/public-shell-status";
 import { AllPacksClient } from "./AllPacksClient.client";
 
 export const metadata: Metadata = {
@@ -44,14 +44,7 @@ export default async function AllPacksPage({
     );
   }
 
-  const status = result.data.metadata.freshness === "delayed"
-    ? { state: "delayed" as const, updatedAt: result.data.metadata.lastSuccessfulObservationAt }
-    : { state: "fresh" as const, updatedAt: result.data.metadata.lastSuccessfulObservationAt };
-  const details = catalogDemoIsEnabled()
-    ? demoPackDetails()
-    : result.data.selectedPack
-      ? [result.data.selectedPack]
-      : [];
+  const status = snapshotStatusFromMetadata(result.data.metadata);
 
   return (
     <>
@@ -61,7 +54,7 @@ export default async function AllPacksPage({
         <EmptyCatalog />
       ) : (
         <AllPacksClient
-          details={details}
+          details={result.data.details}
           key={`${result.data.metadata.publicationId}:${result.data.range.start}:${result.data.queryFingerprint}`}
           page={result.data}
           query={parsed.query}

@@ -8,6 +8,9 @@
  * @module
  */
 
+import type * as catalogCanonicalHash from "../catalogCanonicalHash.js";
+import type * as mockCatalogFixture from "../mockCatalogFixture.js";
+import type * as mockCatalogSeed from "../mockCatalogSeed.js";
 import type * as publicCatalog from "../publicCatalog.js";
 import type * as publicCatalogValidation from "../publicCatalogValidation.js";
 
@@ -18,6 +21,9 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  catalogCanonicalHash: typeof catalogCanonicalHash;
+  mockCatalogFixture: typeof mockCatalogFixture;
+  mockCatalogSeed: typeof mockCatalogSeed;
   publicCatalog: typeof publicCatalog;
   publicCatalogValidation: typeof publicCatalogValidation;
 }>;

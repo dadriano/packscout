@@ -1,10 +1,9 @@
 import {
   parseCatalogSnapshotV1,
-  publicPackSummarySchema,
   type CatalogSnapshotV1,
-  type PublicPackDetail,
-  type PublicPackSummary,
 } from "../catalog-snapshot-v1.ts";
+
+export { publicPackSummaryFromDetail } from "../catalog-snapshot-v1.ts";
 
 function available<T>(value: T) {
   return { status: "available" as const, value, reason: null, nullRank: 0 as const };
@@ -187,6 +186,7 @@ export function buildSyntheticCatalogSnapshotV1(): CatalogSnapshotV1 {
   return parseCatalogSnapshotV1({
     metadata: {
       schemaVersion: "catalog_snapshot_v1",
+      dataSource: "canonical",
       publicationId: "20000000-0000-4000-8000-000000000001",
       sourceWatermark: "catalog.42-pulls.17-trades.9",
       manifestFingerprint: "4".repeat(64),
@@ -217,47 +217,5 @@ export function buildSyntheticCatalogSnapshotV1(): CatalogSnapshotV1 {
         { key: "uncategorized", label: "Uncategorized", packCount: 1 },
       ],
     },
-  });
-}
-
-export function publicPackSummaryFromDetail(
-  pack: PublicPackDetail,
-): PublicPackSummary {
-  const { topChase } = pack;
-  const summaryTopChase =
-    topChase.status === "unavailable"
-      ? topChase
-      : {
-          ...topChase,
-          value: {
-            publicChaseId: topChase.value.publicChaseId,
-            name: topChase.value.name,
-            displayMoney: topChase.value.displayMoney,
-            usdComparison: topChase.value.usdComparison,
-            primaryImage: topChase.value.primaryImage,
-          },
-        };
-  return publicPackSummarySchema.parse({
-    publicPackId: pack.publicPackId,
-    platformKey: pack.platformKey,
-    platformDisplayName: pack.platformDisplayName,
-    platformLogoUrl: pack.platformLogoUrl,
-    category: pack.category,
-    name: pack.name,
-    availability: pack.availability,
-    price: pack.price,
-    estimatedEv: {
-      grossEv: pack.estimatedEv.grossEv,
-      grossReturn: pack.estimatedEv.grossReturn,
-      evDollars: pack.estimatedEv.evDollars,
-      evPercent: pack.estimatedEv.evPercent,
-      calculatedAt: pack.estimatedEv.calculatedAt,
-    },
-    buyback: pack.buyback,
-    primaryImage: pack.primaryImage,
-    topChase: summaryTopChase,
-    actionAvailability: pack.actionAvailability,
-    sourceFirstSeenAt: pack.sourceFirstSeenAt,
-    sourceCollectedAt: pack.sourceCollectedAt,
   });
 }
