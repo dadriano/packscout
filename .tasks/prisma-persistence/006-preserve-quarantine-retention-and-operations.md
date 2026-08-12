@@ -5,7 +5,7 @@
 **Depends on:** [prisma-persistence/003](003-preserve-identity-and-provider-controls.md), [prisma-persistence/004](004-preserve-import-coordination-and-worker-queues.md), [prisma-persistence/005](005-preserve-ingestion-and-canonical-history.md)  
 **Blocks:** [prisma-persistence/007](007-cut-over-packscout-runtimes.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -53,14 +53,21 @@ Task `007` composes these implementations into admin and worker runtimes after d
 
 ## Acceptance Criteria
 
-- [ ] Quarantine creation, listing, detail, one-running-attempt enforcement, retry success or failure, and attempt history preserve their current organization-scoped outcomes.
-- [ ] Concurrent quarantine and retention workers claim disjoint work, recover expired claims, reject stale owners, and produce no duplicate completed effects.
-- [ ] Retention expires only eligible protected payloads while preserving permanent evidence and all required durable history.
-- [ ] Operational reads, filters, cursors, alerts, occurrence history, acknowledgement, resolution, and recovery remain deterministic and restart-safe.
-- [ ] Browser-safe results, logs, failures, events, and alerts expose no secret, raw payload, raw actor identity, or cross-organization data.
+- [x] Quarantine creation, listing, detail, one-running-attempt enforcement, retry success or failure, and attempt history preserve their current organization-scoped outcomes.
+- [x] Concurrent quarantine and retention workers claim disjoint work, recover expired claims, reject stale owners, and produce no duplicate completed effects.
+- [x] Retention expires only eligible protected payloads while preserving permanent evidence and all required durable history.
+- [x] Operational reads, filters, cursors, alerts, occurrence history, acknowledgement, resolution, and recovery remain deterministic and restart-safe.
+- [x] Browser-safe results, logs, failures, events, and alerts expose no secret, raw payload, raw actor identity, or cross-organization data.
 
 ## Verification
 
 - Run focused quarantine, retry, retention, admin-read, operational-event, alert, and health repository and service suites.
 - Run real PostgreSQL contention, stale-owner, keyset-pagination, cross-organization, permanent-evidence, deduplication, and sensitive-data regressions.
 - Run affected database, service, admin, and worker checks through `npm run verify:framework`.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: converted quarantine recovery, protected-payload retention, operational alerts and health, and admin read models to the shared Prisma boundary while retaining parameterized PostgreSQL claims and locks
+- Divergences: public repository names remain transitional for the coordinated runtime cutover; behavior and service contracts are unchanged and there is no compatibility persistence path
+- Verification: all 39 database tests pass, including independent-client retry and retention contention, stale and foreign ownership, protected-evidence exemptions, pagination and tenant filters, alert deduplication/recovery, and sanitized failures; database typecheck and lint pass

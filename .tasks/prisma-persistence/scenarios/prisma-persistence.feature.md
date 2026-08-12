@@ -47,7 +47,7 @@ Examples:
 | quarantine retry |
 | retention evidence batch |
 
-Coverage: Partially automated — task 004 uses independent Prisma clients on real PostgreSQL for scheduled provider work, queued import work, and estimated-EV recomputation; task 006 completes quarantine-retry and retention contention.
+Coverage: Automated — independent Prisma clients on real PostgreSQL cover scheduled provider work, queued imports, estimated-EV recomputation, quarantine retries, and protected-evidence retention.
 
 ## Scenario Outline: A provider page commit is all-or-nothing
 
@@ -99,7 +99,7 @@ When workers retry invalid data, expire eligible protected payloads, and operato
 Then claims, history, counters, canonical records, and operator-safe summaries remain consistent across restarts
 And permanent evidence, protected payload boundaries, alert deduplication, and organization scope remain enforced
 
-Coverage: Manual gap — task 006 must preserve quarantine, retention, alert, health, pagination, and restart integration coverage.
+Coverage: Automated — database integration suites cover quarantine, retention, alerts, health, tenant-scoped keysets, independent-worker claims, permanent and in-flight evidence exemptions, replay, and safe diagnostics.
 
 ## Scenario: Real runtimes use the shared Prisma persistence boundary
 

@@ -1,13 +1,4 @@
-import { and, count, desc, eq, ne } from "drizzle-orm";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import type { PackscoutDatabase } from "./database.ts";
-import { providerConfigRevisions, providerSources } from "./schema/core.ts";
-import { quarantineRecords } from "./schema/ingestion.ts";
-import {
-  adminAlerts,
-  retentionExecutions,
-} from "./schema/operations.ts";
-import { providerHealthStates } from "./schema/scheduling.ts";
+import type { PackscoutPrismaClient } from "./database.ts";
 
 export interface PersistedOperationalHealthSnapshot {
   readonly configuredProviderCount: number;
@@ -20,128 +11,130 @@ export interface PersistedOperationalHealthSnapshot {
   readonly latestRetentionFailureCode: string | null;
 }
 
-export class DrizzleOperationalHealthRepository<
-  TQueryResult extends PgQueryResultHKT,
-> {
-  constructor(private readonly database: PackscoutDatabase<TQueryResult>) {}
+export class DrizzleOperationalHealthRepository {
+  constructor(private readonly database: PackscoutPrismaClient) {}
 
   async loadSnapshot(input: {
     organizationId: string;
     checkedAt: Date;
   }): Promise<PersistedOperationalHealthSnapshot> {
-    const providers = await this.database
-      .select({
-        id: providerSources.id,
-        state: providerSources.state,
-        staleAfterSeconds: providerConfigRevisions.staleAfterSeconds,
-        lastHeadReachedAt: providerHealthStates.lastHeadReachedAt,
-        consecutiveFailures: providerHealthStates.consecutiveFailures,
-        mappingWarning: providerHealthStates.mappingWarningActive,
-        calculationWarning: providerHealthStates.calculationWarningActive,
-      })
-      .from(providerSources)
-      .leftJoin(
-        providerConfigRevisions,
-        and(
-          eq(providerConfigRevisions.id, providerSources.activeRevisionId),
-          eq(
-            providerConfigRevisions.organizationId,
-            providerSources.organizationId,
-          ),
-        ),
-      )
-      .leftJoin(
-        providerHealthStates,
-        and(
-          eq(providerHealthStates.providerId, providerSources.id),
-          eq(
-            providerHealthStates.organizationId,
-            providerSources.organizationId,
-          ),
-        ),
-      )
-      .where(
-        and(
-          eq(providerSources.organizationId, input.organizationId),
-          ne(providerSources.state, "archived"),
-        ),
-      );
-    const openQuarantines = await this.database
-      .select({ providerId: quarantineRecords.providerId, value: count() })
-      .from(quarantineRecords)
-      .where(
-        and(
-          eq(quarantineRecords.organizationId, input.organizationId),
-          eq(quarantineRecords.state, "open"),
-        ),
-      )
-      .groupBy(quarantineRecords.providerId);
+    const providers = await this.database.provider_sources.findMany({
+      where: {
+        organization_id: input.organizationId,
+        state: { not: "archived" },
+      },
+      select: {
+        id: true,
+        state: true,
+        active_revision_id: true,
+      },
+    });
+    const providerIds = providers.map(({ id }) => id);
+    const activeRevisionIds = [
+      ...new Set(
+        providers.flatMap(({ active_revision_id: id }) => (id ? [id] : [])),
+      ),
+    ];
+    const revisions = activeRevisionIds.length === 0
+      ? []
+      : await this.database.provider_config_revisions.findMany({
+          where: {
+            organization_id: input.organizationId,
+            id: { in: activeRevisionIds },
+          },
+          select: { id: true, stale_after_seconds: true },
+        });
+    const healthStates = providerIds.length === 0
+      ? []
+      : await this.database.provider_health_states.findMany({
+          where: {
+            organization_id: input.organizationId,
+            provider_id: { in: providerIds },
+          },
+          select: {
+            provider_id: true,
+            last_head_reached_at: true,
+            consecutive_failures: true,
+            mapping_warning_active: true,
+            calculation_warning_active: true,
+          },
+        });
+    const openQuarantines = await this.database.quarantine_records.findMany({
+      where: {
+        organization_id: input.organizationId,
+        state: "open",
+      },
+      distinct: ["provider_id"],
+      select: { provider_id: true },
+    });
     const quarantineProviders = new Set(
-      openQuarantines
-        .filter(({ value }) => Number(value) > 0)
-        .map(({ providerId }) => providerId),
+      openQuarantines.map(({ provider_id: providerId }) => providerId),
+    );
+    const revisionsById = new Map(
+      revisions.map((revision) => [revision.id, revision] as const),
+    );
+    const healthByProviderId = new Map(
+      healthStates.map((health) => [health.provider_id, health] as const),
     );
     let staleProviderCount = 0;
     let degradedProviderCount = 0;
     let failedProviderCount = 0;
     for (const provider of providers) {
+      const health = healthByProviderId.get(provider.id);
+      const revision = provider.active_revision_id
+        ? revisionsById.get(provider.active_revision_id)
+        : undefined;
       if (provider.state === "active") {
-        const staleAfterMs = (provider.staleAfterSeconds ?? 900) * 1_000;
+        const staleAfterMs = (revision?.stale_after_seconds ?? 900) * 1_000;
         if (
-          !provider.lastHeadReachedAt ||
-          input.checkedAt.getTime() - provider.lastHeadReachedAt.getTime() >
+          !health?.last_head_reached_at ||
+          input.checkedAt.getTime() - health.last_head_reached_at.getTime() >
             staleAfterMs
         ) {
           staleProviderCount += 1;
         }
       }
-      if ((provider.consecutiveFailures ?? 0) > 0) failedProviderCount += 1;
+      if ((health?.consecutive_failures ?? 0) > 0) failedProviderCount += 1;
       if (
-        provider.mappingWarning ||
-        provider.calculationWarning ||
+        health?.mapping_warning_active ||
+        health?.calculation_warning_active ||
         quarantineProviders.has(provider.id)
       ) {
         degradedProviderCount += 1;
       }
     }
-    const [activeAlerts] = await this.database
-      .select({ value: count() })
-      .from(adminAlerts)
-      .where(
-        and(
-          eq(adminAlerts.organizationId, input.organizationId),
-          ne(adminAlerts.state, "resolved"),
-        ),
-      );
-    const [latestRetention] = await this.database
-      .select({
-        state: retentionExecutions.state,
-        failureCode: retentionExecutions.failureCode,
-        finishedAt: retentionExecutions.finishedAt,
-      })
-      .from(retentionExecutions)
-      .where(
-        and(
-          eq(retentionExecutions.organizationId, input.organizationId),
-          ne(retentionExecutions.state, "running"),
-        ),
-      )
-      .orderBy(desc(retentionExecutions.startedAt), desc(retentionExecutions.id))
-      .limit(1);
+    const activeAlertCount = await this.database.admin_alerts.count({
+      where: {
+        organization_id: input.organizationId,
+        state: { not: "resolved" },
+      },
+    });
+    const latestRetention = await this.database.retention_executions.findFirst({
+      where: {
+        organization_id: input.organizationId,
+        state: { not: "running" },
+      },
+      orderBy: [{ started_at: "desc" }, { id: "desc" }],
+      select: {
+        state: true,
+        failure_code: true,
+        finished_at: true,
+      },
+    });
     return {
       configuredProviderCount: providers.length,
       staleProviderCount,
       degradedProviderCount,
       failedProviderCount,
-      activeAlertCount: Number(activeAlerts?.value ?? 0),
+      activeAlertCount,
       latestRetentionState:
         latestRetention?.state === "succeeded"
           ? "succeeded"
           : latestRetention?.state === "failed"
             ? "failed"
             : "never_run",
-      latestRetentionAt: latestRetention?.finishedAt ?? null,
-      latestRetentionFailureCode: latestRetention?.failureCode ?? null,
+      latestRetentionAt: latestRetention?.finished_at ?? null,
+      latestRetentionFailureCode: latestRetention?.failure_code ?? null,
     };
   }
 }

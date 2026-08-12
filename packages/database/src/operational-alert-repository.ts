@@ -7,14 +7,16 @@ import {
   type NotificationPublishResult,
   type OperationalNotification,
 } from "@packscout/contracts";
-import { and, desc, eq, ne, or, sql } from "drizzle-orm";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import type { PackscoutDatabase } from "./database.ts";
-import { auditEvents } from "./schema/core.ts";
 import {
-  adminAlerts,
-  operationalEvents,
-} from "./schema/operations.ts";
+  Prisma,
+  type admin_alerts as AlertRow,
+  type operational_events as OperationalEventRow,
+} from "@prisma/client";
+import {
+  PACKSCOUT_TRANSACTION_OPTIONS,
+  type PackscoutPrismaClient,
+  type PackscoutTransactionClient,
+} from "./database.ts";
 
 const recoveryKinds = new Set<OperationalNotification["kind"]>([
   "provider_recovered",
@@ -22,7 +24,12 @@ const recoveryKinds = new Set<OperationalNotification["kind"]>([
   "retention_recovered",
 ]);
 
-type AlertRow = typeof adminAlerts.$inferSelect;
+interface LockedAlertRow {
+  readonly id: string;
+  readonly state: AdminAlertState;
+  readonly acknowledged_by_actor_key: string | null;
+  readonly acknowledged_at: Date | null;
+}
 
 function toSummary(row: AlertRow): AdminAlertSummary {
   return {
@@ -32,22 +39,58 @@ function toSummary(row: AlertRow): AdminAlertSummary {
     state: row.state,
     title: row.title,
     summary: row.summary,
-    providerId: row.providerId,
-    runId: row.runId,
-    quarantineId: row.quarantineId,
-    firstSeenAt: row.firstSeenAt.toISOString(),
-    lastSeenAt: row.lastSeenAt.toISOString(),
-    occurrenceCount: row.occurrenceCount,
-    reopenedCount: row.reopenedCount,
-    acknowledgedAt: row.acknowledgedAt?.toISOString() ?? null,
-    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    providerId: row.provider_id,
+    runId: row.run_id,
+    quarantineId: row.quarantine_id,
+    firstSeenAt: row.first_seen_at.toISOString(),
+    lastSeenAt: row.last_seen_at.toISOString(),
+    occurrenceCount: row.occurrence_count,
+    reopenedCount: row.reopened_count,
+    acknowledgedAt: row.acknowledged_at?.toISOString() ?? null,
+    resolvedAt: row.resolved_at?.toISOString() ?? null,
   };
 }
 
-export class DrizzleAdminNotificationPublisher<
-  TQueryResult extends PgQueryResultHKT,
-> {
-  constructor(private readonly database: PackscoutDatabase<TQueryResult>) {}
+function evidenceMatches(
+  stored: Prisma.JsonValue,
+  expected: OperationalNotification["evidence"],
+): boolean {
+  if (stored === null || Array.isArray(stored) || typeof stored !== "object") {
+    return false;
+  }
+  const storedKeys = Object.keys(stored).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  if (
+    storedKeys.length !== expectedKeys.length ||
+    storedKeys.some((key, index) => key !== expectedKeys[index])
+  ) {
+    return false;
+  }
+  return expectedKeys.every((key) => stored[key] === expected[key as keyof typeof expected]);
+}
+
+function eventMatches(
+  stored: OperationalEventRow,
+  event: OperationalNotification,
+): boolean {
+  return (
+    stored.organization_id === event.organizationId &&
+    stored.kind === event.kind &&
+    stored.severity === event.severity &&
+    stored.provider_id === event.providerId &&
+    stored.run_id === event.runId &&
+    stored.quarantine_id === event.quarantineId &&
+    stored.dedupe_key === event.dedupeKey &&
+    stored.recovery_key === event.recoveryKey &&
+    stored.title === event.title &&
+    stored.summary === event.summary &&
+    stored.occurred_at.getTime() === new Date(event.occurredAt).getTime() &&
+    evidenceMatches(stored.evidence_json, event.evidence)
+  );
+}
+
+export class DrizzleAdminNotificationPublisher {
+  constructor(private readonly database: PackscoutPrismaClient) {}
 
   async publish(
     input: OperationalNotification,
@@ -61,57 +104,36 @@ export class DrizzleAdminNotificationPublisher<
       };
     }
     const event = parsed.data;
-    return this.database.transaction(async (transaction) => {
-      const [insertedEvent] = await transaction
-        .insert(operationalEvents)
-        .values({
-          id: event.id,
-          organizationId: event.organizationId,
-          kind: event.kind,
-          severity: event.severity,
-          providerId: event.providerId,
-          runId: event.runId,
-          quarantineId: event.quarantineId,
-          dedupeKey: event.dedupeKey,
-          recoveryKey: event.recoveryKey,
-          title: event.title,
-          summary: event.summary,
-          evidenceJson: event.evidence,
-          occurredAt: new Date(event.occurredAt),
-        })
-        .onConflictDoNothing()
-        .returning({ id: operationalEvents.id });
-      if (!insertedEvent) {
-        const [existingEvent] = await transaction
-          .select({ id: operationalEvents.id })
-          .from(operationalEvents)
-          .where(
-            and(
-              eq(operationalEvents.id, event.id),
-              eq(operationalEvents.organizationId, event.organizationId),
-            ),
-          )
-          .limit(1);
-        if (!existingEvent) {
+    return this.database.$transaction(async (transaction) => {
+      const insertedEvents = await transaction.operational_events.createManyAndReturn({
+        data: [this.eventValues(event)],
+        skipDuplicates: true,
+        select: { id: true },
+      });
+      if (insertedEvents.length === 0) {
+        const existingEvent = await transaction.operational_events.findFirst({
+          where: {
+            id: event.id,
+            organization_id: event.organizationId,
+          },
+        });
+        if (!existingEvent || !eventMatches(existingEvent, event)) {
           return {
             status: "failed",
             alertId: null,
             failureCode: "OPERATIONAL_EVENT_ID_CONFLICT",
           };
         }
-        const [alert] = await transaction
-          .select({ id: adminAlerts.id })
-          .from(adminAlerts)
-          .where(
-            and(
-              eq(adminAlerts.organizationId, event.organizationId),
-              or(
-                eq(adminAlerts.latestEventId, event.id),
-                eq(adminAlerts.dedupeKey, event.dedupeKey),
-              ),
-            ),
-          )
-          .limit(1);
+        const alert = await transaction.admin_alerts.findFirst({
+          where: {
+            organization_id: event.organizationId,
+            OR: [
+              { latest_event_id: event.id },
+              { dedupe_key: event.dedupeKey },
+            ],
+          },
+          select: { id: true },
+        });
         return {
           status: recoveryKinds.has(event.kind) ? "resolved" : "deduplicated",
           alertId: alert?.id ?? null,
@@ -120,42 +142,39 @@ export class DrizzleAdminNotificationPublisher<
       }
 
       if (recoveryKinds.has(event.kind)) {
-        const active = await transaction
-          .select({ id: adminAlerts.id })
-          .from(adminAlerts)
-          .where(
-            and(
-              eq(adminAlerts.organizationId, event.organizationId),
-              eq(adminAlerts.recoveryKey, event.recoveryKey),
-              ne(adminAlerts.state, "resolved"),
-            ),
-          )
-          .for("update");
+        const active = await transaction.$queryRaw<readonly { id: string }[]>(
+          Prisma.sql`
+            select id
+            from admin_alerts
+            where organization_id = ${event.organizationId}::uuid
+              and recovery_key = ${event.recoveryKey}
+              and state <> 'resolved'::admin_alert_state
+            for update
+          `,
+        );
         if (active.length > 0) {
-          await transaction
-            .update(adminAlerts)
-            .set({
-              latestEventId: event.id,
+          await transaction.admin_alerts.updateMany({
+            where: {
+              organization_id: event.organizationId,
+              recovery_key: event.recoveryKey,
+              state: { not: "resolved" },
+            },
+            data: {
+              latest_event_id: event.id,
               kind: event.kind,
               severity: event.severity,
               state: "resolved",
               title: event.title,
               summary: event.summary,
-              providerId: event.providerId,
-              runId: event.runId,
-              quarantineId: event.quarantineId,
-              lastSeenAt: new Date(event.occurredAt),
-              occurrenceCount: sql`${adminAlerts.occurrenceCount} + 1`,
-              resolvedByActorKey: "system:recovery",
-              resolvedAt: new Date(event.occurredAt),
-            })
-            .where(
-              and(
-                eq(adminAlerts.organizationId, event.organizationId),
-                eq(adminAlerts.recoveryKey, event.recoveryKey),
-                ne(adminAlerts.state, "resolved"),
-              ),
-            );
+              provider_id: event.providerId,
+              run_id: event.runId,
+              quarantine_id: event.quarantineId,
+              last_seen_at: new Date(event.occurredAt),
+              occurrence_count: { increment: 1 },
+              resolved_by_actor_key: "system:recovery",
+              resolved_at: new Date(event.occurredAt),
+            },
+          });
           return {
             status: "resolved",
             alertId: active[0]?.id ?? null,
@@ -167,25 +186,19 @@ export class DrizzleAdminNotificationPublisher<
         return { status: "resolved", alertId: null, failureCode: null };
       }
 
-      const [current] = await transaction
-        .select()
-        .from(adminAlerts)
-        .where(
-          and(
-            eq(adminAlerts.organizationId, event.organizationId),
-            eq(adminAlerts.dedupeKey, event.dedupeKey),
-          ),
-        )
-        .limit(1)
-        .for("update");
+      const [current] = await this.lockAlertByDedupeKey(
+        transaction,
+        event.organizationId,
+        event.dedupeKey,
+      );
       if (!current) {
-        const [created] = await transaction
-          .insert(adminAlerts)
-          .values(this.alertValues(event, false))
-          .onConflictDoNothing()
-          .returning({ id: adminAlerts.id });
-        if (created) {
-          return { status: "accepted", alertId: created.id, failureCode: null };
+        const created = await transaction.admin_alerts.createManyAndReturn({
+          data: [this.alertValues(event, false)],
+          skipDuplicates: true,
+          select: { id: true },
+        });
+        if (created[0]) {
+          return { status: "accepted", alertId: created[0].id, failureCode: null };
         }
       }
       const alertId = await this.createOrUpdateAlert(transaction, event, false);
@@ -194,7 +207,7 @@ export class DrizzleAdminNotificationPublisher<
         alertId,
         failureCode: null,
       };
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async listAlerts(input: {
@@ -205,14 +218,14 @@ export class DrizzleAdminNotificationPublisher<
     if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
       throw new RangeError("Alert list limit must be between 1 and 100.");
     }
-    const filters = [eq(adminAlerts.organizationId, input.organizationId)];
-    if (input.state) filters.push(eq(adminAlerts.state, input.state));
-    const rows = await this.database
-      .select()
-      .from(adminAlerts)
-      .where(and(...filters))
-      .orderBy(desc(adminAlerts.lastSeenAt), desc(adminAlerts.id))
-      .limit(input.limit);
+    const rows = await this.database.admin_alerts.findMany({
+      where: {
+        organization_id: input.organizationId,
+        ...(input.state ? { state: input.state } : {}),
+      },
+      orderBy: [{ last_seen_at: "desc" }, { id: "desc" }],
+      take: input.limit,
+    });
     return rows.map(toSummary);
   }
 
@@ -220,37 +233,31 @@ export class DrizzleAdminNotificationPublisher<
     organizationId: string,
     alertId: string,
   ): Promise<AdminAlertDetail | null> {
-    const [alert] = await this.database
-      .select()
-      .from(adminAlerts)
-      .where(
-        and(
-          eq(adminAlerts.organizationId, organizationId),
-          eq(adminAlerts.id, alertId),
-        ),
-      )
-      .limit(1);
+    const alert = await this.database.admin_alerts.findFirst({
+      where: { organization_id: organizationId, id: alertId },
+    });
     if (!alert) return null;
-    const events = await this.database
-      .select({
-        id: operationalEvents.id,
-        kind: operationalEvents.kind,
-        severity: operationalEvents.severity,
-        occurredAt: operationalEvents.occurredAt,
-        evidence: operationalEvents.evidenceJson,
-      })
-      .from(operationalEvents)
-      .where(
-        and(
-          eq(operationalEvents.organizationId, organizationId),
-          eq(operationalEvents.recoveryKey, alert.recoveryKey),
-        ),
-      )
-      .orderBy(desc(operationalEvents.occurredAt), desc(operationalEvents.id))
-      .limit(100);
+    const events = await this.database.operational_events.findMany({
+      where: {
+        organization_id: organizationId,
+        recovery_key: alert.recovery_key,
+      },
+      orderBy: [{ occurred_at: "desc" }, { id: "desc" }],
+      take: 100,
+      select: {
+        id: true,
+        kind: true,
+        severity: true,
+        occurred_at: true,
+        evidence_json: true,
+      },
+    });
     const occurrences: AdminAlertOccurrence[] = events.map((event) => ({
-      ...event,
-      occurredAt: event.occurredAt.toISOString(),
+      id: event.id,
+      kind: event.kind,
+      severity: event.severity,
+      occurredAt: event.occurred_at.toISOString(),
+      evidence: event.evidence_json as OperationalNotification["evidence"],
     }));
     return { ...toSummary(alert), occurrences };
   }
@@ -280,80 +287,95 @@ export class DrizzleAdminNotificationPublisher<
   }
 
   private async createOrUpdateAlert(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutTransactionClient,
     event: OperationalNotification,
     resolved: boolean,
   ): Promise<string | null> {
-    const [existing] = await database
-      .select()
-      .from(adminAlerts)
-      .where(
-        and(
-          eq(adminAlerts.organizationId, event.organizationId),
-          eq(adminAlerts.dedupeKey, event.dedupeKey),
-        ),
-      )
-      .limit(1)
-      .for("update");
+    const [existing] = await this.lockAlertByDedupeKey(
+      database,
+      event.organizationId,
+      event.dedupeKey,
+    );
     if (!existing) {
-      const [created] = await database
-        .insert(adminAlerts)
-        .values(this.alertValues(event, resolved))
-        .returning({ id: adminAlerts.id });
-      return created?.id ?? null;
+      const created = await database.admin_alerts.create({
+        data: this.alertValues(event, resolved),
+        select: { id: true },
+      });
+      return created.id;
     }
     const reopening = !resolved && existing.state === "resolved";
-    const [updated] = await database
-      .update(adminAlerts)
-      .set({
-        latestEventId: event.id,
+    const updated = await database.admin_alerts.updateManyAndReturn({
+      where: {
+        organization_id: event.organizationId,
+        id: existing.id,
+      },
+      data: {
+        latest_event_id: event.id,
         kind: event.kind,
         severity: event.severity,
         state: resolved ? "resolved" : reopening ? "active" : existing.state,
-        recoveryKey: event.recoveryKey,
+        recovery_key: event.recoveryKey,
         title: event.title,
         summary: event.summary,
-        providerId: event.providerId,
-        runId: event.runId,
-        quarantineId: event.quarantineId,
-        lastSeenAt: new Date(event.occurredAt),
-        occurrenceCount: sql`${adminAlerts.occurrenceCount} + 1`,
-        reopenedCount: reopening
-          ? sql`${adminAlerts.reopenedCount} + 1`
-          : adminAlerts.reopenedCount,
-        acknowledgedByActorKey: reopening ? null : existing.acknowledgedByActorKey,
-        acknowledgedAt: reopening ? null : existing.acknowledgedAt,
-        resolvedByActorKey: resolved ? "system:recovery" : null,
-        resolvedAt: resolved ? new Date(event.occurredAt) : null,
-      })
-      .where(
-        and(
-          eq(adminAlerts.organizationId, event.organizationId),
-          eq(adminAlerts.id, existing.id),
-        ),
-      )
-      .returning({ id: adminAlerts.id });
-    return updated?.id ?? null;
+        provider_id: event.providerId,
+        run_id: event.runId,
+        quarantine_id: event.quarantineId,
+        last_seen_at: new Date(event.occurredAt),
+        occurrence_count: { increment: 1 },
+        ...(reopening ? { reopened_count: { increment: 1 } } : {}),
+        acknowledged_by_actor_key: reopening
+          ? null
+          : existing.acknowledged_by_actor_key,
+        acknowledged_at: reopening ? null : existing.acknowledged_at,
+        resolved_by_actor_key: resolved ? "system:recovery" : null,
+        resolved_at: resolved ? new Date(event.occurredAt) : null,
+      },
+      select: { id: true },
+    });
+    return updated[0]?.id ?? null;
   }
 
-  private alertValues(event: OperationalNotification, resolved: boolean) {
+  private eventValues(
+    event: OperationalNotification,
+  ): Prisma.operational_eventsCreateManyInput {
     return {
-      organizationId: event.organizationId,
-      latestEventId: event.id,
+      id: event.id,
+      organization_id: event.organizationId,
       kind: event.kind,
       severity: event.severity,
-      state: resolved ? "resolved" as const : "active" as const,
-      dedupeKey: event.dedupeKey,
-      recoveryKey: event.recoveryKey,
+      provider_id: event.providerId,
+      run_id: event.runId,
+      quarantine_id: event.quarantineId,
+      dedupe_key: event.dedupeKey,
+      recovery_key: event.recoveryKey,
       title: event.title,
       summary: event.summary,
-      providerId: event.providerId,
-      runId: event.runId,
-      quarantineId: event.quarantineId,
-      firstSeenAt: new Date(event.occurredAt),
-      lastSeenAt: new Date(event.occurredAt),
-      resolvedByActorKey: resolved ? "system:recovery" : null,
-      resolvedAt: resolved ? new Date(event.occurredAt) : null,
+      evidence_json: event.evidence,
+      occurred_at: new Date(event.occurredAt),
+    };
+  }
+
+  private alertValues(
+    event: OperationalNotification,
+    resolved: boolean,
+  ): Prisma.admin_alertsCreateManyInput {
+    return {
+      organization_id: event.organizationId,
+      latest_event_id: event.id,
+      kind: event.kind,
+      severity: event.severity,
+      state: resolved ? "resolved" : "active",
+      dedupe_key: event.dedupeKey,
+      recovery_key: event.recoveryKey,
+      title: event.title,
+      summary: event.summary,
+      provider_id: event.providerId,
+      run_id: event.runId,
+      quarantine_id: event.quarantineId,
+      first_seen_at: new Date(event.occurredAt),
+      last_seen_at: new Date(event.occurredAt),
+      resolved_by_actor_key: resolved ? "system:recovery" : null,
+      resolved_at: resolved ? new Date(event.occurredAt) : null,
     };
   }
 
@@ -364,51 +386,62 @@ export class DrizzleAdminNotificationPublisher<
     acknowledgedAt: Date;
     target: "acknowledged" | "resolved";
   }): Promise<AdminAlertSummary | null> {
-    return this.database.transaction(async (transaction) => {
-      const [current] = await transaction
-        .select()
-        .from(adminAlerts)
-        .where(
-          and(
-            eq(adminAlerts.organizationId, input.organizationId),
-            eq(adminAlerts.id, input.alertId),
-          ),
-        )
-        .limit(1)
-        .for("update");
+    return this.database.$transaction(async (transaction) => {
+      const [current] = await transaction.$queryRaw<readonly LockedAlertRow[]>(
+        Prisma.sql`
+          select id, state, acknowledged_by_actor_key, acknowledged_at
+          from admin_alerts
+          where organization_id = ${input.organizationId}::uuid
+            and id = ${input.alertId}::uuid
+          for update
+        `,
+      );
       if (!current) return null;
       const resolved = input.target === "resolved";
-      const [updated] = await transaction
-        .update(adminAlerts)
-        .set({
+      const updated = await transaction.admin_alerts.updateManyAndReturn({
+        where: {
+          organization_id: input.organizationId,
+          id: input.alertId,
+        },
+        data: {
           state: input.target,
-          acknowledgedByActorKey: resolved
-            ? current.acknowledgedByActorKey
+          acknowledged_by_actor_key: resolved
+            ? current.acknowledged_by_actor_key
             : input.actorKey,
-          acknowledgedAt: resolved
-            ? current.acknowledgedAt
+          acknowledged_at: resolved
+            ? current.acknowledged_at
             : input.acknowledgedAt,
-          resolvedByActorKey: resolved ? input.actorKey : null,
-          resolvedAt: resolved ? input.acknowledgedAt : null,
-        })
-        .where(
-          and(
-            eq(adminAlerts.organizationId, input.organizationId),
-            eq(adminAlerts.id, input.alertId),
-          ),
-        )
-        .returning();
-      await transaction.insert(auditEvents).values({
-        organizationId: input.organizationId,
-        actorKey: input.actorKey,
-        action: `provider.alert.${input.target}`,
-        subjectType: "admin_alert",
-        subjectId: input.alertId,
-        outcome: "success",
-        metadataJson: { state: input.target },
-        occurredAt: input.acknowledgedAt,
+          resolved_by_actor_key: resolved ? input.actorKey : null,
+          resolved_at: resolved ? input.acknowledgedAt : null,
+        },
       });
-      return updated ? toSummary(updated) : null;
-    });
+      await transaction.audit_events.create({
+        data: {
+          organization_id: input.organizationId,
+          actor_key: input.actorKey,
+          action: `provider.alert.${input.target}`,
+          subject_type: "admin_alert",
+          subject_id: input.alertId,
+          outcome: "success",
+          metadata_json: { state: input.target },
+          occurred_at: input.acknowledgedAt,
+        },
+      });
+      return updated[0] ? toSummary(updated[0]) : null;
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
+  private lockAlertByDedupeKey(
+    transaction: PackscoutTransactionClient,
+    organizationId: string,
+    dedupeKey: string,
+  ): Promise<readonly LockedAlertRow[]> {
+    return transaction.$queryRaw<readonly LockedAlertRow[]>(Prisma.sql`
+      select id, state, acknowledged_by_actor_key, acknowledged_at
+      from admin_alerts
+      where organization_id = ${organizationId}::uuid
+        and dedupe_key = ${dedupeKey}
+      for update
+    `);
   }
 }

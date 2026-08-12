@@ -1,30 +1,12 @@
+import { Prisma } from "@prisma/client";
 import {
-  and,
-  asc,
-  desc,
-  eq,
-  inArray,
-  lt,
-  lte,
-  ne,
-  notExists,
-  or,
-  sql,
-} from "drizzle-orm";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import type { PackscoutDatabase } from "./database.ts";
-import { quarantineAttempts } from "./schema/quarantine-retry.ts";
-import {
-  auditEvents,
-  importPages,
-  importRuns,
-  providerConfigRevisions,
-  providerSources,
-  quarantineRecords,
-  sourceRecords,
-} from "./schema/index.ts";
+  PACKSCOUT_TRANSACTION_OPTIONS,
+  type PackscoutPrismaClient,
+  type PackscoutQueryClient,
+} from "./database.ts";
 
 type QuarantineState = "open" | "retrying" | "resolved" | "expired";
+type StoredQuarantineState = "open" | "resolved" | "expired";
 type RecordKind = "catalog" | "pull" | "sale";
 
 export interface PersistedQuarantineEntry {
@@ -134,7 +116,7 @@ interface QuarantineRow {
   reasonCode: string;
   fieldPath: string | null;
   sanitizedSummary: string;
-  state: "open" | "resolved" | "expired";
+  state: StoredQuarantineState;
   retryCount: number;
   createdAt: Date;
   lastRetryAt: Date | null;
@@ -142,10 +124,26 @@ interface QuarantineRow {
   resolvedAt: Date | null;
 }
 
-export class DrizzleQuarantineRepository<
-  TQueryResult extends PgQueryResultHKT,
-> {
-  constructor(private readonly database: PackscoutDatabase<TQueryResult>) {}
+interface QuarantineCountRow {
+  outstanding: number;
+  retrying: number;
+  resolved: number;
+  expired: number;
+}
+
+interface ExpiryClaimRow {
+  id: string;
+  state: StoredQuarantineState;
+  sourceRecordId: string | null;
+  pageId: string;
+}
+
+function uuid(value: string): Prisma.Sql {
+  return Prisma.sql`cast(${value} as uuid)`;
+}
+
+export class DrizzleQuarantineRepository {
+  constructor(private readonly database: PackscoutPrismaClient) {}
 
   async listEntries(
     organizationId: string,
@@ -168,75 +166,72 @@ export class DrizzleQuarantineRepository<
     if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 100) {
       throw new RangeError("Quarantine page limit is invalid.");
     }
-    const filters = [eq(quarantineRecords.organizationId, organizationId)];
-    if (query.providerId) filters.push(eq(quarantineRecords.providerId, query.providerId));
-    if (query.runId) filters.push(eq(quarantineRecords.runId, query.runId));
-    if (query.recordKind) filters.push(eq(quarantineRecords.recordKind, query.recordKind));
-    if (query.reasonCode) filters.push(eq(quarantineRecords.reasonCode, query.reasonCode));
-    const runningAttempt = sql`exists (
+    const filters: Prisma.Sql[] = [
+      Prisma.sql`quarantine.organization_id = ${uuid(organizationId)}`,
+    ];
+    if (query.providerId) {
+      filters.push(Prisma.sql`quarantine.provider_id = ${uuid(query.providerId)}`);
+    }
+    if (query.runId) {
+      filters.push(Prisma.sql`quarantine.run_id = ${uuid(query.runId)}`);
+    }
+    if (query.recordKind) {
+      filters.push(
+        Prisma.sql`quarantine.record_kind = cast(${query.recordKind} as public.source_record_kind)`,
+      );
+    }
+    if (query.reasonCode) {
+      filters.push(Prisma.sql`quarantine.reason_code = ${query.reasonCode}`);
+    }
+    const runningAttempt = Prisma.sql`exists (
       select 1
-      from ${quarantineAttempts}
-      where ${quarantineAttempts.organizationId} = ${quarantineRecords.organizationId}
-        and ${quarantineAttempts.quarantineId} = ${quarantineRecords.id}
-        and ${quarantineAttempts.state} = 'running'
+      from public.quarantine_attempts as attempt
+      where attempt.organization_id = quarantine.organization_id
+        and attempt.quarantine_id = quarantine.id
+        and attempt.state = 'running'
     )`;
-    if (query.state === "resolved") filters.push(eq(quarantineRecords.state, "resolved"));
+    if (query.state === "resolved") {
+      filters.push(Prisma.sql`quarantine.state = 'resolved'`);
+    }
     if (query.state === "expired") {
-      filters.push(sql`(${quarantineRecords.state} = 'expired' or (${quarantineRecords.state} = 'open' and ${quarantineRecords.expiresAt} <= ${now}))`);
+      filters.push(
+        Prisma.sql`(
+          quarantine.state = 'expired'
+          or (quarantine.state = 'open' and quarantine.expires_at <= ${now})
+        )`,
+      );
     }
     if (query.state === "open") {
-      filters.push(eq(quarantineRecords.state, "open"));
-      filters.push(sql`${quarantineRecords.expiresAt} > ${now}`);
-      filters.push(sql`not (${runningAttempt})`);
+      filters.push(Prisma.sql`quarantine.state = 'open'`);
+      filters.push(Prisma.sql`quarantine.expires_at > ${now}`);
+      filters.push(Prisma.sql`not (${runningAttempt})`);
     }
     if (query.state === "retrying") {
-      filters.push(eq(quarantineRecords.state, "open"));
-      filters.push(sql`${quarantineRecords.expiresAt} > ${now}`);
+      filters.push(Prisma.sql`quarantine.state = 'open'`);
+      filters.push(Prisma.sql`quarantine.expires_at > ${now}`);
       filters.push(runningAttempt);
     }
     if (query.before) {
-      filters.push(
-        or(
-          lt(quarantineRecords.createdAt, query.before.createdAt),
-          and(
-            eq(quarantineRecords.createdAt, query.before.createdAt),
-            lt(quarantineRecords.id, query.before.id),
-          ),
-        )!,
-      );
+      filters.push(Prisma.sql`(
+        quarantine.created_at < ${query.before.createdAt}
+        or (
+          quarantine.created_at = ${query.before.createdAt}
+          and quarantine.id < ${uuid(query.before.id)}
+        )
+      )`);
     }
-    const rows = await this.database
-      .select(this.selection())
-      .from(quarantineRecords)
-      .innerJoin(
-        importRuns,
-        and(
-          eq(importRuns.id, quarantineRecords.runId),
-          eq(importRuns.organizationId, quarantineRecords.organizationId),
-        ),
-      )
-      .innerJoin(
-        providerSources,
-        and(
-          eq(providerSources.id, quarantineRecords.providerId),
-          eq(providerSources.organizationId, quarantineRecords.organizationId),
-        ),
-      )
-      .innerJoin(
-        providerConfigRevisions,
-        and(
-          eq(providerConfigRevisions.id, importRuns.configRevisionId),
-          eq(providerConfigRevisions.organizationId, importRuns.organizationId),
-        ),
-      )
-      .where(and(...filters))
-      .orderBy(desc(quarantineRecords.createdAt), desc(quarantineRecords.id))
-      .limit(query.limit + 1);
-    const entries: PersistedQuarantineEntry[] = [];
-    for (const row of rows.slice(0, query.limit)) {
-      const entry = await this.toEntry(this.database, row, now);
-      entries.push(entry);
-    }
+
+    const rows = await this.database.$queryRaw<QuarantineRow[]>(Prisma.sql`
+      ${this.quarantineSelection()}
+      where ${Prisma.join(filters, " and ")}
+      order by quarantine.created_at desc, quarantine.id desc
+      limit ${query.limit + 1}
+    `);
+    const entries = await Promise.all(
+      rows
+        .slice(0, query.limit)
+        .map((row) => this.toEntry(this.database, row, now)),
+    );
     return { items: entries, hasMore: rows.length > query.limit };
   }
 
@@ -253,26 +248,34 @@ export class DrizzleQuarantineRepository<
     organizationId: string,
     quarantineId: string,
   ): Promise<readonly PersistedQuarantineAttempt[]> {
-    return this.database
-      .select({
-        id: quarantineAttempts.id,
-        state: quarantineAttempts.state,
-        failureCode: quarantineAttempts.failureCode,
-        fieldPath: quarantineAttempts.fieldPath,
-        sanitizedSummary: quarantineAttempts.sanitizedSummary,
-        canonicalRevisionCount: quarantineAttempts.canonicalRevisionCount,
-        startedAt: quarantineAttempts.startedAt,
-        finishedAt: quarantineAttempts.finishedAt,
-      })
-      .from(quarantineAttempts)
-      .where(
-        and(
-          eq(quarantineAttempts.organizationId, organizationId),
-          eq(quarantineAttempts.quarantineId, quarantineId),
-        ),
-      )
-      .orderBy(desc(quarantineAttempts.startedAt), desc(quarantineAttempts.id))
-      .limit(100);
+    const attempts = await this.database.quarantine_attempts.findMany({
+      where: {
+        organization_id: organizationId,
+        quarantine_id: quarantineId,
+      },
+      orderBy: [{ started_at: "desc" }, { id: "desc" }],
+      take: 100,
+      select: {
+        id: true,
+        state: true,
+        failure_code: true,
+        field_path: true,
+        sanitized_summary: true,
+        canonical_revision_count: true,
+        started_at: true,
+        finished_at: true,
+      },
+    });
+    return attempts.map((attempt) => ({
+      id: attempt.id,
+      state: attempt.state,
+      failureCode: attempt.failure_code,
+      fieldPath: attempt.field_path,
+      sanitizedSummary: attempt.sanitized_summary,
+      canonicalRevisionCount: attempt.canonical_revision_count,
+      startedAt: attempt.started_at,
+      finishedAt: attempt.finished_at,
+    }));
   }
 
   async countEntries(
@@ -284,36 +287,41 @@ export class DrizzleQuarantineRepository<
     resolved: number;
     expired: number;
   }> {
-    const runningAttempt = sql`exists (
-      select 1
-      from ${quarantineAttempts}
-      where ${quarantineAttempts.organizationId} = ${quarantineRecords.organizationId}
-        and ${quarantineAttempts.quarantineId} = ${quarantineRecords.id}
-        and ${quarantineAttempts.state} = 'running'
-    )`;
-    const [counts] = await this.database
-      .select({
-        outstanding: sql<number>`cast(count(*) filter (
-          where ${quarantineRecords.state} = 'open'
-            and ${quarantineRecords.expiresAt} > ${now}
-            and not (${runningAttempt})
-        ) as integer)`,
-        retrying: sql<number>`cast(count(*) filter (
-          where ${quarantineRecords.state} = 'open'
-            and ${quarantineRecords.expiresAt} > ${now}
-            and ${runningAttempt}
-        ) as integer)`,
-        resolved: sql<number>`cast(count(*) filter (
-          where ${quarantineRecords.state} = 'resolved'
-        ) as integer)`,
-        expired: sql<number>`cast(count(*) filter (
-          where ${quarantineRecords.state} = 'expired'
-            or (${quarantineRecords.state} = 'open' and ${quarantineRecords.expiresAt} <= ${now})
-        ) as integer)`,
-      })
-      .from(quarantineRecords)
-      .where(eq(quarantineRecords.organizationId, organizationId));
-    return counts ?? { outstanding: 0, retrying: 0, resolved: 0, expired: 0 };
+    const rows = await this.database.$queryRaw<QuarantineCountRow[]>(Prisma.sql`
+      select
+        cast(count(*) filter (
+          where quarantine.state = 'open'
+            and quarantine.expires_at > ${now}
+            and not exists (
+              select 1
+              from public.quarantine_attempts as attempt
+              where attempt.organization_id = quarantine.organization_id
+                and attempt.quarantine_id = quarantine.id
+                and attempt.state = 'running'
+            )
+        ) as integer) as outstanding,
+        cast(count(*) filter (
+          where quarantine.state = 'open'
+            and quarantine.expires_at > ${now}
+            and exists (
+              select 1
+              from public.quarantine_attempts as attempt
+              where attempt.organization_id = quarantine.organization_id
+                and attempt.quarantine_id = quarantine.id
+                and attempt.state = 'running'
+            )
+        ) as integer) as retrying,
+        cast(count(*) filter (
+          where quarantine.state = 'resolved'
+        ) as integer) as resolved,
+        cast(count(*) filter (
+          where quarantine.state = 'expired'
+             or (quarantine.state = 'open' and quarantine.expires_at <= ${now})
+        ) as integer) as expired
+      from public.quarantine_records as quarantine
+      where quarantine.organization_id = ${uuid(organizationId)}
+    `);
+    return rows[0] ?? { outstanding: 0, retrying: 0, resolved: 0, expired: 0 };
   }
 
   async claimRetry(input: {
@@ -323,10 +331,14 @@ export class DrizzleQuarantineRepository<
     actorKey: string;
     claimedAt: Date;
   }): Promise<PersistedQuarantineClaimResult> {
-    return this.database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select id from ${quarantineRecords} where ${quarantineRecords.id} = ${input.quarantineId} and ${quarantineRecords.organizationId} = ${input.organizationId} for update`,
-      );
+    return this.database.$transaction(async (transaction) => {
+      await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`
+        select id
+        from public.quarantine_records
+        where id = ${uuid(input.quarantineId)}
+          and organization_id = ${uuid(input.organizationId)}
+        for update
+      `);
       const row = await this.loadRow(
         transaction,
         input.organizationId,
@@ -370,27 +382,27 @@ export class DrizzleQuarantineRepository<
           entry: { ...current, state: "expired" },
         };
       }
-      await transaction.insert(quarantineAttempts).values({
-        id: input.attemptId,
-        organizationId: input.organizationId,
-        quarantineId: input.quarantineId,
-        sourceRecordId: row.sourceRecordId,
-        state: "running",
-        requestedByActorKey: input.actorKey,
-        startedAt: input.claimedAt,
+      await transaction.quarantine_attempts.create({
+        data: {
+          id: input.attemptId,
+          organization_id: input.organizationId,
+          quarantine_id: input.quarantineId,
+          source_record_id: row.sourceRecordId,
+          state: "running",
+          requested_by_actor_key: input.actorKey,
+          started_at: input.claimedAt,
+        },
       });
-      await transaction
-        .update(quarantineRecords)
-        .set({
-          retryCount: sql`${quarantineRecords.retryCount} + 1`,
-          lastRetryAt: input.claimedAt,
-        })
-        .where(
-          and(
-            eq(quarantineRecords.organizationId, input.organizationId),
-            eq(quarantineRecords.id, input.quarantineId),
-          ),
-        );
+      await transaction.quarantine_records.updateMany({
+        where: {
+          organization_id: input.organizationId,
+          id: input.quarantineId,
+        },
+        data: {
+          retry_count: { increment: 1 },
+          last_retry_at: input.claimedAt,
+        },
+      });
       const claimed = await this.getEntryFrom(
         transaction,
         input.organizationId,
@@ -398,8 +410,13 @@ export class DrizzleQuarantineRepository<
         input.claimedAt,
       );
       if (!claimed) throw new Error("Claimed quarantine entry could not be loaded.");
-      return { kind: "claimed", attemptId: input.attemptId, entry: claimed, evidence };
-    });
+      return {
+        kind: "claimed",
+        attemptId: input.attemptId,
+        entry: claimed,
+        evidence,
+      };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async completeRetry(input: {
@@ -449,78 +466,89 @@ export class DrizzleQuarantineRepository<
     expiredAt: Date;
     batchSize: number;
   }): Promise<number> {
-    if (!Number.isInteger(input.batchSize) || input.batchSize < 1 || input.batchSize > 10_000) {
+    if (
+      !Number.isInteger(input.batchSize) ||
+      input.batchSize < 1 ||
+      input.batchSize > 10_000
+    ) {
       throw new RangeError("Quarantine expiry batch size is invalid.");
     }
-    return this.database.transaction(async (transaction) => {
-      const records = await transaction
-        .select({
-          id: quarantineRecords.id,
-          state: quarantineRecords.state,
-          sourceRecordId: quarantineRecords.sourceRecordId,
-          pageId: quarantineRecords.pageId,
-        })
-        .from(quarantineRecords)
-        .where(
-          and(
-            eq(quarantineRecords.organizationId, input.organizationId),
-            ne(quarantineRecords.state, "expired"),
-            lte(quarantineRecords.expiresAt, input.before),
-            notExists(
-              transaction
-                .select({ id: quarantineAttempts.id })
-                .from(quarantineAttempts)
-                .where(
-                  and(
-                    eq(quarantineAttempts.quarantineId, quarantineRecords.id),
-                    eq(quarantineAttempts.state, "running"),
-                  ),
-                ),
-            ),
-          ),
-        )
-        .orderBy(asc(quarantineRecords.expiresAt), asc(quarantineRecords.id))
-        .limit(input.batchSize)
-        .for("update", { skipLocked: true });
+    return this.database.$transaction(async (transaction) => {
+      const records = await transaction.$queryRaw<ExpiryClaimRow[]>(Prisma.sql`
+        select
+          quarantine.id,
+          quarantine.state,
+          quarantine.source_record_id as "sourceRecordId",
+          quarantine.page_id as "pageId"
+        from public.quarantine_records as quarantine
+        where quarantine.organization_id = ${uuid(input.organizationId)}
+          and quarantine.state <> 'expired'
+          and quarantine.expires_at <= ${input.before}
+          and not exists (
+            select 1
+            from public.quarantine_attempts as attempt
+            where attempt.quarantine_id = quarantine.id
+              and attempt.state = 'running'
+          )
+        order by quarantine.expires_at, quarantine.id
+        for update of quarantine skip locked
+        limit ${input.batchSize}
+      `);
       if (records.length === 0) return 0;
       const quarantineIds = records.map(({ id }) => id);
-      await transaction
-        .update(quarantineRecords)
-        .set({ payloadJson: null, payloadExpiredAt: input.expiredAt })
-        .where(inArray(quarantineRecords.id, quarantineIds));
+      await transaction.quarantine_records.updateMany({
+        where: {
+          organization_id: input.organizationId,
+          id: { in: quarantineIds },
+        },
+        data: {
+          payload_json: Prisma.DbNull,
+          payload_expired_at: input.expiredAt,
+        },
+      });
       const unresolvedIds = records
         .filter(({ state }) => state === "open")
         .map(({ id }) => id);
       if (unresolvedIds.length > 0) {
-        await transaction
-          .update(quarantineRecords)
-          .set({ state: "expired" })
-          .where(inArray(quarantineRecords.id, unresolvedIds));
+        await transaction.quarantine_records.updateMany({
+          where: {
+            organization_id: input.organizationId,
+            id: { in: unresolvedIds },
+          },
+          data: { state: "expired" },
+        });
       }
-      const sourceIds = records
-        .flatMap(({ sourceRecordId }) => sourceRecordId ? [sourceRecordId] : []);
-      if (sourceIds.length > 0) {
-        await transaction
-          .update(sourceRecords)
-          .set({ payloadJson: null, payloadExpiredAt: input.expiredAt })
-          .where(
-            and(
-              eq(sourceRecords.organizationId, input.organizationId),
-              inArray(sourceRecords.id, sourceIds),
-            ),
-          );
-      }
-      await transaction
-        .update(importPages)
-        .set({ payloadJson: null, payloadExpiredAt: input.expiredAt })
-        .where(
-          and(
-            eq(importPages.organizationId, input.organizationId),
-            inArray(importPages.id, records.map(({ pageId }) => pageId)),
+      const sourceIds = [
+        ...new Set(
+          records.flatMap(({ sourceRecordId }) =>
+            sourceRecordId ? [sourceRecordId] : [],
           ),
-        );
+        ),
+      ];
+      if (sourceIds.length > 0) {
+        await transaction.source_records.updateMany({
+          where: {
+            organization_id: input.organizationId,
+            id: { in: sourceIds },
+          },
+          data: {
+            payload_json: Prisma.DbNull,
+            payload_expired_at: input.expiredAt,
+          },
+        });
+      }
+      await transaction.import_pages.updateMany({
+        where: {
+          organization_id: input.organizationId,
+          id: { in: [...new Set(records.map(({ pageId }) => pageId))] },
+        },
+        data: {
+          payload_json: Prisma.DbNull,
+          payload_expired_at: input.expiredAt,
+        },
+      });
       return records.length;
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   private async finishAttempt(input: {
@@ -535,10 +563,14 @@ export class DrizzleQuarantineRepository<
     sanitizedSummary: string;
     canonicalRevisionCount: number;
   }): Promise<PersistedQuarantineEntry | null> {
-    return this.database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select id from ${quarantineRecords} where ${quarantineRecords.id} = ${input.quarantineId} and ${quarantineRecords.organizationId} = ${input.organizationId} for update`,
-      );
+    return this.database.$transaction(async (transaction) => {
+      await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`
+        select id
+        from public.quarantine_records
+        where id = ${uuid(input.quarantineId)}
+          and organization_id = ${uuid(input.organizationId)}
+        for update
+      `);
       const row = await this.loadRow(
         transaction,
         input.organizationId,
@@ -549,29 +581,28 @@ export class DrizzleQuarantineRepository<
         row.state === "expired" ||
         (row.state === "open" && row.expiresAt <= input.completedAt);
       const effectiveState = evidenceExpired ? "failed" : input.state;
-      const [attempt] = await transaction
-        .update(quarantineAttempts)
-        .set({
-          sourceRecordId: row.sourceRecordId,
+      const updated = await transaction.quarantine_attempts.updateMany({
+        where: {
+          id: input.attemptId,
+          organization_id: input.organizationId,
+          quarantine_id: input.quarantineId,
+          state: "running",
+        },
+        data: {
+          source_record_id: row.sourceRecordId,
           state: effectiveState,
-          failureCode: evidenceExpired ? "EVIDENCE_EXPIRED" : input.failureCode,
-          fieldPath: evidenceExpired ? null : input.fieldPath,
-          sanitizedSummary: evidenceExpired
+          failure_code: evidenceExpired ? "EVIDENCE_EXPIRED" : input.failureCode,
+          field_path: evidenceExpired ? null : input.fieldPath,
+          sanitized_summary: evidenceExpired
             ? "Retained source evidence expired before retry completion."
             : input.sanitizedSummary,
-          canonicalRevisionCount: evidenceExpired ? 0 : input.canonicalRevisionCount,
-          finishedAt: input.completedAt,
-        })
-        .where(
-          and(
-            eq(quarantineAttempts.id, input.attemptId),
-            eq(quarantineAttempts.organizationId, input.organizationId),
-            eq(quarantineAttempts.quarantineId, input.quarantineId),
-            eq(quarantineAttempts.state, "running"),
-          ),
-        )
-        .returning({ id: quarantineAttempts.id });
-      if (!attempt) {
+          canonical_revision_count: evidenceExpired
+            ? 0
+            : input.canonicalRevisionCount,
+          finished_at: input.completedAt,
+        },
+      });
+      if (updated.count === 0) {
         return this.getEntryFrom(
           transaction,
           input.organizationId,
@@ -587,31 +618,38 @@ export class DrizzleQuarantineRepository<
           input.completedAt,
         );
       } else if (input.state === "succeeded") {
-        await transaction
-          .update(quarantineRecords)
-          .set({ state: "resolved", resolvedAt: input.completedAt })
-          .where(
-            and(
-              eq(quarantineRecords.organizationId, input.organizationId),
-              eq(quarantineRecords.id, input.quarantineId),
-              eq(quarantineRecords.state, "open"),
-            ),
-          );
+        await transaction.quarantine_records.updateMany({
+          where: {
+            organization_id: input.organizationId,
+            id: input.quarantineId,
+            state: "open",
+          },
+          data: {
+            state: "resolved",
+            resolved_at: input.completedAt,
+          },
+        });
       }
-      await transaction.insert(auditEvents).values({
-        organizationId: input.organizationId,
-        actorKey: input.actorKey,
-        action: "provider.quarantine.retry",
-        subjectType: "quarantine_record",
-        subjectId: input.quarantineId,
-        outcome: effectiveState === "succeeded" ? "success" : "failure",
-        metadataJson: {
-          attemptId: input.attemptId,
-          result: effectiveState,
-          failureCode: evidenceExpired ? "EVIDENCE_EXPIRED" : input.failureCode,
-          canonicalRevisionCount: evidenceExpired ? 0 : input.canonicalRevisionCount,
+      await transaction.audit_events.create({
+        data: {
+          organization_id: input.organizationId,
+          actor_key: input.actorKey,
+          action: "provider.quarantine.retry",
+          subject_type: "quarantine_record",
+          subject_id: input.quarantineId,
+          outcome: effectiveState === "succeeded" ? "success" : "failure",
+          metadata_json: {
+            attemptId: input.attemptId,
+            result: effectiveState,
+            failureCode: evidenceExpired
+              ? "EVIDENCE_EXPIRED"
+              : input.failureCode,
+            canonicalRevisionCount: evidenceExpired
+              ? 0
+              : input.canonicalRevisionCount,
+          },
+          occurred_at: input.completedAt,
         },
-        occurredAt: input.completedAt,
       });
       return this.getEntryFrom(
         transaction,
@@ -619,37 +657,34 @@ export class DrizzleQuarantineRepository<
         input.quarantineId,
         input.completedAt,
       );
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   private async loadEvidence(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     organizationId: string,
     row: QuarantineRow,
     now: Date,
   ): Promise<PersistedProtectedQuarantineEvidence | null> {
     if (row.sourceRecordId) {
-      const [source] = await database
-        .select({
-          payload: sourceRecords.payloadJson,
-          recordKind: sourceRecords.recordKind,
-          externalId: sourceRecords.externalId,
-          sourceTime: sourceRecords.sourceTime,
-          collectedAt: sourceRecords.collectedAt,
-          expiresAt: sourceRecords.expiresAt,
-        })
-        .from(sourceRecords)
-        .where(
-          and(
-            eq(sourceRecords.organizationId, organizationId),
-            eq(sourceRecords.providerId, row.providerId),
-            eq(sourceRecords.id, row.sourceRecordId),
-          ),
-        )
-        .limit(1);
-      if (!source?.payload || source.expiresAt <= now) return null;
+      const source = await database.source_records.findFirst({
+        where: {
+          organization_id: organizationId,
+          provider_id: row.providerId,
+          id: row.sourceRecordId,
+        },
+        select: {
+          payload_json: true,
+          record_kind: true,
+          external_id: true,
+          source_time: true,
+          collected_at: true,
+          expires_at: true,
+        },
+      });
+      if (!source?.payload_json || source.expires_at <= now) return null;
       return {
-        rawRecord: source.payload,
+        rawRecord: source.payload_json,
         organizationId,
         sourceRecordId: row.sourceRecordId,
         runId: row.runId,
@@ -659,11 +694,11 @@ export class DrizzleQuarantineRepository<
         expiresAt: row.expiresAt,
         source: {
           platform: row.platformKey,
-          recordKind: source.recordKind,
+          recordKind: source.record_kind,
           recordIndex: row.recordIndex,
-          externalId: source.externalId,
-          collectedAt: source.collectedAt.toISOString(),
-          sourceTimestamp: source.sourceTime.toISOString(),
+          externalId: source.external_id,
+          collectedAt: source.collected_at.toISOString(),
+          sourceTimestamp: source.source_time.toISOString(),
         },
         configuration: {
           providerId: row.providerId,
@@ -673,19 +708,16 @@ export class DrizzleQuarantineRepository<
         },
       };
     }
-    const [page] = await database
-      .select({ payload: importPages.payloadJson, expiresAt: importPages.expiresAt })
-      .from(importPages)
-      .where(
-        and(
-          eq(importPages.organizationId, organizationId),
-          eq(importPages.id, row.pageId),
-        ),
-      )
-      .limit(1);
-    if (!page?.payload || page.expiresAt <= now) return null;
+    const page = await database.import_pages.findFirst({
+      where: {
+        organization_id: organizationId,
+        id: row.pageId,
+      },
+      select: { payload_json: true, expires_at: true },
+    });
+    if (!page?.payload_json || page.expires_at <= now) return null;
     const rawRecord = this.recordFromPage(
-      page.payload,
+      page.payload_json,
       row.recordKind,
       row.recordIndex,
     );
@@ -717,61 +749,56 @@ export class DrizzleQuarantineRepository<
   }
 
   private async markExpired(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     quarantineId: string,
     organizationId: string,
     expiredAt: Date,
   ): Promise<void> {
-    const [record] = await database
-      .select({
-        pageId: quarantineRecords.pageId,
-        sourceRecordId: quarantineRecords.sourceRecordId,
-      })
-      .from(quarantineRecords)
-      .where(
-        and(
-          eq(quarantineRecords.organizationId, organizationId),
-          eq(quarantineRecords.id, quarantineId),
-        ),
-      )
-      .limit(1);
+    const record = await database.quarantine_records.findFirst({
+      where: { organization_id: organizationId, id: quarantineId },
+      select: { page_id: true, source_record_id: true },
+    });
     if (!record) return;
-    await database
-      .update(quarantineRecords)
-      .set({ state: "expired", payloadJson: null, payloadExpiredAt: expiredAt })
-      .where(
-        and(
-          eq(quarantineRecords.organizationId, organizationId),
-          eq(quarantineRecords.id, quarantineId),
-          eq(quarantineRecords.state, "open"),
-        ),
-      );
-    await database
-      .update(importPages)
-      .set({ payloadJson: null, payloadExpiredAt: expiredAt })
-      .where(
-        and(
-          eq(importPages.organizationId, organizationId),
-          eq(importPages.id, record.pageId),
-          lte(importPages.expiresAt, expiredAt),
-        ),
-      );
-    if (record.sourceRecordId) {
-      await database
-        .update(sourceRecords)
-        .set({ payloadJson: null, payloadExpiredAt: expiredAt })
-        .where(
-          and(
-            eq(sourceRecords.organizationId, organizationId),
-            eq(sourceRecords.id, record.sourceRecordId),
-            lte(sourceRecords.expiresAt, expiredAt),
-          ),
-        );
+    await database.quarantine_records.updateMany({
+      where: {
+        organization_id: organizationId,
+        id: quarantineId,
+        state: "open",
+      },
+      data: {
+        state: "expired",
+        payload_json: Prisma.DbNull,
+        payload_expired_at: expiredAt,
+      },
+    });
+    await database.import_pages.updateMany({
+      where: {
+        organization_id: organizationId,
+        id: record.page_id,
+        expires_at: { lte: expiredAt },
+      },
+      data: {
+        payload_json: Prisma.DbNull,
+        payload_expired_at: expiredAt,
+      },
+    });
+    if (record.source_record_id) {
+      await database.source_records.updateMany({
+        where: {
+          organization_id: organizationId,
+          id: record.source_record_id,
+          expires_at: { lte: expiredAt },
+        },
+        data: {
+          payload_json: Prisma.DbNull,
+          payload_expired_at: expiredAt,
+        },
+      });
     }
   }
 
   private async getEntryFrom(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     organizationId: string,
     quarantineId: string,
     now: Date,
@@ -781,71 +808,43 @@ export class DrizzleQuarantineRepository<
   }
 
   private async loadRow(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     organizationId: string,
     quarantineId: string,
   ): Promise<QuarantineRow | null> {
-    const [row] = await database
-      .select(this.selection())
-      .from(quarantineRecords)
-      .innerJoin(
-        importRuns,
-        and(
-          eq(importRuns.id, quarantineRecords.runId),
-          eq(importRuns.organizationId, quarantineRecords.organizationId),
-        ),
-      )
-      .innerJoin(
-        providerSources,
-        and(
-          eq(providerSources.id, quarantineRecords.providerId),
-          eq(providerSources.organizationId, quarantineRecords.organizationId),
-        ),
-      )
-      .innerJoin(
-        providerConfigRevisions,
-        and(
-          eq(providerConfigRevisions.id, importRuns.configRevisionId),
-          eq(providerConfigRevisions.organizationId, importRuns.organizationId),
-        ),
-      )
-      .where(
-        and(
-          eq(quarantineRecords.organizationId, organizationId),
-          eq(quarantineRecords.id, quarantineId),
-        ),
-      )
-      .limit(1);
-    return row ?? null;
+    const rows = await database.$queryRaw<QuarantineRow[]>(Prisma.sql`
+      ${this.quarantineSelection()}
+      where quarantine.organization_id = ${uuid(organizationId)}
+        and quarantine.id = ${uuid(quarantineId)}
+      limit 1
+    `);
+    return rows[0] ?? null;
   }
 
   private async toEntry(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     row: QuarantineRow,
     now: Date,
   ): Promise<PersistedQuarantineEntry> {
-    const [running] = await database
-      .select({ id: quarantineAttempts.id })
-      .from(quarantineAttempts)
-      .where(
-        and(
-          eq(quarantineAttempts.organizationId, row.organizationId),
-          eq(quarantineAttempts.quarantineId, row.id),
-          eq(quarantineAttempts.state, "running"),
-        ),
-      )
-      .limit(1);
-    const [resolved] = await database
-      .select({ summary: quarantineAttempts.sanitizedSummary })
-      .from(quarantineAttempts)
-      .where(
-        and(
-          eq(quarantineAttempts.quarantineId, row.id),
-          eq(quarantineAttempts.state, "succeeded"),
-        ),
-      )
-      .orderBy(desc(quarantineAttempts.finishedAt))
-      .limit(1);
+    const [running, resolved] = await Promise.all([
+      database.quarantine_attempts.findFirst({
+        where: {
+          organization_id: row.organizationId,
+          quarantine_id: row.id,
+          state: "running",
+        },
+        select: { id: true },
+      }),
+      database.quarantine_attempts.findFirst({
+        where: {
+          organization_id: row.organizationId,
+          quarantine_id: row.id,
+          state: "succeeded",
+        },
+        orderBy: [{ finished_at: "desc" }, { id: "desc" }],
+        select: { sanitized_summary: true },
+      }),
+    ]);
     const state: QuarantineState =
       row.state === "resolved"
         ? "resolved"
@@ -854,32 +853,47 @@ export class DrizzleQuarantineRepository<
           : running
             ? "retrying"
             : "open";
-    return { ...row, state, resolutionSummary: resolved?.summary ?? null };
+    return {
+      ...row,
+      state,
+      resolutionSummary: resolved?.sanitized_summary ?? null,
+    };
   }
 
-  private selection() {
-    return {
-      id: quarantineRecords.id,
-      organizationId: quarantineRecords.organizationId,
-      providerId: quarantineRecords.providerId,
-      configurationRevisionId: importRuns.configRevisionId,
-      platformKey: providerSources.platformKey,
-      adapterKey: providerConfigRevisions.adapterKey,
-      runId: quarantineRecords.runId,
-      pageId: quarantineRecords.pageId,
-      sourceRecordId: quarantineRecords.sourceRecordId,
-      recordKind: quarantineRecords.recordKind,
-      recordIndex: quarantineRecords.recordIndex,
-      externalId: quarantineRecords.externalId,
-      reasonCode: quarantineRecords.reasonCode,
-      fieldPath: quarantineRecords.fieldPath,
-      sanitizedSummary: quarantineRecords.sanitizedSummary,
-      state: quarantineRecords.state,
-      retryCount: quarantineRecords.retryCount,
-      createdAt: quarantineRecords.createdAt,
-      lastRetryAt: quarantineRecords.lastRetryAt,
-      expiresAt: quarantineRecords.expiresAt,
-      resolvedAt: quarantineRecords.resolvedAt,
-    };
+  private quarantineSelection(): Prisma.Sql {
+    return Prisma.sql`
+      select
+        quarantine.id,
+        quarantine.organization_id as "organizationId",
+        quarantine.provider_id as "providerId",
+        run.config_revision_id as "configurationRevisionId",
+        provider.platform_key as "platformKey",
+        revision.adapter_key as "adapterKey",
+        quarantine.run_id as "runId",
+        quarantine.page_id as "pageId",
+        quarantine.source_record_id as "sourceRecordId",
+        quarantine.record_kind as "recordKind",
+        quarantine.record_index as "recordIndex",
+        quarantine.external_id as "externalId",
+        quarantine.reason_code as "reasonCode",
+        quarantine.field_path as "fieldPath",
+        quarantine.sanitized_summary as "sanitizedSummary",
+        quarantine.state,
+        quarantine.retry_count as "retryCount",
+        quarantine.created_at as "createdAt",
+        quarantine.last_retry_at as "lastRetryAt",
+        quarantine.expires_at as "expiresAt",
+        quarantine.resolved_at as "resolvedAt"
+      from public.quarantine_records as quarantine
+      join public.import_runs as run
+        on run.id = quarantine.run_id
+       and run.organization_id = quarantine.organization_id
+      join public.provider_sources as provider
+        on provider.id = quarantine.provider_id
+       and provider.organization_id = quarantine.organization_id
+      join public.provider_config_revisions as revision
+        on revision.id = run.config_revision_id
+       and revision.organization_id = run.organization_id
+    `;
   }
 }

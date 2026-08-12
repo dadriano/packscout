@@ -1,22 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { OperationalNotification } from "@packscout/contracts";
-import { and, eq } from "drizzle-orm";
 import { IngestionPersistenceRepository } from "./ingestion-repository.ts";
 import { DrizzleAdminNotificationPublisher } from "./operational-alert-repository.ts";
 import { DrizzleOperationalHealthRepository } from "./operational-health-repository.ts";
 import { DrizzleProtectedPayloadRetentionRepository } from "./protected-payload-retention-repository.ts";
-import {
-  auditEvents,
-  canonicalRevisions,
-  importPages,
-  importRuns,
-  operationalEvents,
-  quarantineAttempts,
-  quarantineRecords,
-  retentionExecutions,
-  sourceRecords,
-} from "./schema/index.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
@@ -207,34 +195,37 @@ async function createHarness() {
     }],
     committedAt: new Date(committedAt.getTime() + 1_000),
   });
-  const quarantines = await harness.database
-    .select({
-      id: quarantineRecords.id,
-      sourceRecordId: quarantineRecords.sourceRecordId,
-    })
-    .from(quarantineRecords)
-    .where(eq(quarantineRecords.organizationId, ids.organization));
-  const resolved = quarantines.find(({ sourceRecordId }) => sourceRecordId !== null);
-  const open = quarantines.find(({ sourceRecordId }) => sourceRecordId === null);
+  const quarantines = await harness.client.quarantine_records.findMany({
+    where: { organization_id: ids.organization },
+    select: { id: true, source_record_id: true },
+  });
+  const resolved = quarantines.find(
+    ({ source_record_id: sourceRecordId }) => sourceRecordId !== null,
+  );
+  const open = quarantines.find(
+    ({ source_record_id: sourceRecordId }) => sourceRecordId === null,
+  );
   if (!resolved || !open) throw new Error("Quarantine fixtures were not created.");
   const resolvedAt = new Date(committedAt.getTime() + 2_000);
-  await harness.database
-    .update(quarantineRecords)
-    .set({ state: "resolved", resolvedAt })
-    .where(eq(quarantineRecords.id, resolved.id));
-  await harness.database.insert(quarantineAttempts).values({
-    id: ids.attempt,
-    organizationId: ids.organization,
-    quarantineId: open.id,
-    sourceRecordId: null,
-    state: "failed",
-    requestedByActorKey: "actor:operator",
-    failureCode: "ENVELOPE_VALIDATION_FAILED",
-    fieldPath: "external_id",
-    sanitizedSummary: "Retained evidence still fails envelope validation.",
-    canonicalRevisionCount: 0,
-    startedAt: resolvedAt,
-    finishedAt: resolvedAt,
+  await harness.client.quarantine_records.update({
+    where: { id: resolved.id },
+    data: { state: "resolved", resolved_at: resolvedAt },
+  });
+  await harness.client.quarantine_attempts.create({
+    data: {
+      id: ids.attempt,
+      organization_id: ids.organization,
+      quarantine_id: open.id,
+      source_record_id: null,
+      state: "failed",
+      requested_by_actor_key: "actor:operator",
+      failure_code: "ENVELOPE_VALIDATION_FAILED",
+      field_path: "external_id",
+      sanitized_summary: "Retained evidence still fails envelope validation.",
+      canonical_revision_count: 0,
+      started_at: resolvedAt,
+      finished_at: resolvedAt,
+    },
   });
   return {
     ...harness,
@@ -252,18 +243,30 @@ test("bounded retention is tenant-scoped, restart-safe, and preserves permanent 
       harness.database,
       harness.clock,
     );
-    const sourceBefore = await harness.database
-      .select({ id: sourceRecords.id, hash: sourceRecords.contentHash })
-      .from(sourceRecords);
-    const pagesBefore = await harness.database
-      .select({ id: importPages.id, hash: importPages.payloadHash })
-      .from(importPages);
-    const [runBefore] = await harness.database
-      .select({ state: importRuns.state, counters: importRuns.countersJson })
-      .from(importRuns)
-      .where(eq(importRuns.id, ids.run));
-    const canonicalBefore = await harness.database.select().from(canonicalRevisions);
-    const attemptsBefore = await harness.database.select().from(quarantineAttempts);
+    const sourceBefore = (
+      await harness.client.source_records.findMany({
+        select: { id: true, content_hash: true },
+      })
+    ).map(({ id, content_hash: hash }) => ({ id, hash }));
+    const pagesBefore = (
+      await harness.client.import_pages.findMany({
+        select: { id: true, payload_hash: true },
+      })
+    ).map(({ id, payload_hash: hash }) => ({ id, hash }));
+    const runBeforeRecord = await harness.client.import_runs.findUniqueOrThrow({
+      where: { id: ids.run },
+      select: { state: true, counters_json: true },
+    });
+    const runBefore = {
+      state: runBeforeRecord.state,
+      counters: runBeforeRecord.counters_json,
+    };
+    const canonicalBefore = await harness.client.canonical_revisions.findMany({
+      orderBy: { id: "asc" },
+    });
+    const attemptsBefore = await harness.client.quarantine_attempts.findMany({
+      orderBy: { id: "asc" },
+    });
 
     const foreign = await retention.expireBatch({
       executionId: ids.otherRetention,
@@ -273,10 +276,12 @@ test("bounded retention is tenant-scoped, restart-safe, and preserves permanent 
       startedAt: cutoffAt,
     });
     assert.equal(foreign.result.selected, 0);
-    const afterForeign = await harness.database
-      .select({ id: quarantineRecords.id, payload: quarantineRecords.payloadJson })
-      .from(quarantineRecords)
-      .where(eq(quarantineRecords.organizationId, ids.organization));
+    const afterForeign = (
+      await harness.client.quarantine_records.findMany({
+        where: { organization_id: ids.organization },
+        select: { id: true, payload_json: true },
+      })
+    ).map(({ id, payload_json: payload }) => ({ id, payload }));
     assert.equal(
       afterForeign.find(({ id }) => id === harness.open.id)?.payload !== null,
       true,
@@ -338,15 +343,25 @@ test("bounded retention is tenant-scoped, restart-safe, and preserves permanent 
     assert.equal(fourth.result.alreadyExpired, 5);
     assert.equal(fourth.result.remaining, 0);
 
-    const quarantinesAfter = await harness.database
-      .select({
-        id: quarantineRecords.id,
-        state: quarantineRecords.state,
-        reason: quarantineRecords.reasonCode,
-        resolvedAt: quarantineRecords.resolvedAt,
-        payload: quarantineRecords.payloadJson,
+    const quarantinesAfter = (
+      await harness.client.quarantine_records.findMany({
+        select: {
+          id: true,
+          state: true,
+          reason_code: true,
+          resolved_at: true,
+          payload_json: true,
+        },
       })
-      .from(quarantineRecords);
+    ).map(
+      ({ id, state, reason_code: reason, resolved_at: resolvedAt, payload_json: payload }) => ({
+        id,
+        state,
+        reason,
+        resolvedAt,
+        payload,
+      }),
+    );
     assert.deepEqual(
       quarantinesAfter.find(({ id }) => id === harness.open.id),
       {
@@ -368,42 +383,59 @@ test("bounded retention is tenant-scoped, restart-safe, and preserves permanent 
       },
     );
     assert.equal(
-      (await harness.database.select().from(sourceRecords)).every(
-        ({ payloadJson }) => payloadJson === null,
+      (await harness.client.source_records.findMany()).every(
+        ({ payload_json: payload }) => payload === null,
       ),
       true,
     );
     assert.equal(
-      (await harness.database.select().from(importPages)).every(
-        ({ payloadJson }) => payloadJson === null,
+      (await harness.client.import_pages.findMany()).every(
+        ({ payload_json: payload }) => payload === null,
       ),
       true,
     );
     assert.deepEqual(
-      (await harness.database
-        .select({ id: sourceRecords.id, hash: sourceRecords.contentHash })
-        .from(sourceRecords)).toSorted((left, right) => left.id.localeCompare(right.id)),
+      (
+        await harness.client.source_records.findMany({
+          select: { id: true, content_hash: true },
+        })
+      )
+        .map(({ id, content_hash: hash }) => ({ id, hash }))
+        .toSorted((left, right) => left.id.localeCompare(right.id)),
       sourceBefore.toSorted((left, right) => left.id.localeCompare(right.id)),
     );
     assert.deepEqual(
-      (await harness.database
-        .select({ id: importPages.id, hash: importPages.payloadHash })
-        .from(importPages)).toSorted((left, right) => left.id.localeCompare(right.id)),
+      (
+        await harness.client.import_pages.findMany({
+          select: { id: true, payload_hash: true },
+        })
+      )
+        .map(({ id, payload_hash: hash }) => ({ id, hash }))
+        .toSorted((left, right) => left.id.localeCompare(right.id)),
       pagesBefore.toSorted((left, right) => left.id.localeCompare(right.id)),
     );
-    assert.deepEqual(await harness.database.select().from(canonicalRevisions), canonicalBefore);
-    assert.deepEqual(await harness.database.select().from(quarantineAttempts), attemptsBefore);
     assert.deepEqual(
-      (await harness.database
-        .select({ state: importRuns.state, counters: importRuns.countersJson })
-        .from(importRuns)
-        .where(eq(importRuns.id, ids.run)))[0],
+      await harness.client.canonical_revisions.findMany({ orderBy: { id: "asc" } }),
+      canonicalBefore,
+    );
+    assert.deepEqual(
+      await harness.client.quarantine_attempts.findMany({ orderBy: { id: "asc" } }),
+      attemptsBefore,
+    );
+    const runAfterRecord = await harness.client.import_runs.findUniqueOrThrow({
+      where: { id: ids.run },
+      select: { state: true, counters_json: true },
+    });
+    assert.deepEqual(
+      { state: runAfterRecord.state, counters: runAfterRecord.counters_json },
       runBefore,
     );
-    const retentionAudits = await harness.database
-      .select({ metadata: auditEvents.metadataJson })
-      .from(auditEvents)
-      .where(eq(auditEvents.action, "provider.retention.expire"));
+    const retentionAudits = (
+      await harness.client.audit_events.findMany({
+        where: { action: "provider.retention.expire" },
+        select: { metadata_json: true },
+      })
+    ).map(({ metadata_json: metadata }) => ({ metadata }));
     assert.equal(retentionAudits.length, 5);
     assert.equal(JSON.stringify(retentionAudits).includes(sensitive), false);
   } finally {
@@ -457,19 +489,24 @@ test("retention discovery returns only tenants whose policy deadlines are due", 
 test("concurrent retention executions claim disjoint evidence without double expiry", async () => {
   const harness = await createHarness();
   try {
-    const retention = new DrizzleProtectedPayloadRetentionRepository(
+    const independentClient = await harness.createIndependentClient();
+    const firstRetention = new DrizzleProtectedPayloadRetentionRepository(
       harness.database,
       harness.clock,
     );
+    const secondRetention = new DrizzleProtectedPayloadRetentionRepository(
+      independentClient,
+      harness.clock,
+    );
     const results = await Promise.all([
-      retention.expireBatch({
+      firstRetention.expireBatch({
         executionId: ids.retentionOne,
         organizationId: ids.organization,
         cutoffAt,
         batchSize: 3,
         startedAt: cutoffAt,
       }),
-      retention.expireBatch({
+      secondRetention.expireBatch({
         executionId: ids.retentionTwo,
         organizationId: ids.organization,
         cutoffAt,
@@ -482,20 +519,20 @@ test("concurrent retention executions claim disjoint evidence without double exp
       5,
     );
     assert.equal(
-      (await harness.database.select().from(importPages)).every(
-        ({ payloadJson }) => payloadJson === null,
+      (await harness.client.import_pages.findMany()).every(
+        ({ payload_json: payload }) => payload === null,
       ),
       true,
     );
     assert.equal(
-      (await harness.database.select().from(sourceRecords)).every(
-        ({ payloadJson }) => payloadJson === null,
+      (await harness.client.source_records.findMany()).every(
+        ({ payload_json: payload }) => payload === null,
       ),
       true,
     );
     assert.equal(
-      (await harness.database.select().from(quarantineRecords)).every(
-        ({ payloadJson }) => payloadJson === null,
+      (await harness.client.quarantine_records.findMany()).every(
+        ({ payload_json: payload }) => payload === null,
       ),
       true,
     );
@@ -667,28 +704,30 @@ test("admin alerts deduplicate, resolve, reopen, and preserve safe occurrence hi
       evidence: { outcome: "RETENTION_RECOVERED" },
       occurredAt: new Date(committedAt.getTime() + 7_000).toISOString(),
     })).status, "resolved");
-    assert.equal((await harness.database.select().from(operationalEvents)).length, 10);
+    assert.equal(await harness.client.operational_events.count(), 10);
     const rendered = JSON.stringify({
       reopened,
-      events: await harness.database.select().from(operationalEvents),
+      events: await harness.client.operational_events.findMany(),
     });
     assert.equal(rendered.includes(sensitive), false);
 
     await assert.rejects(
-      harness.database.insert(operationalEvents).values({
-        id: "61000000-0000-4000-8000-000000000006",
-        organizationId: ids.otherOrganization,
-        kind: "run_failed",
-        severity: "critical",
-        providerId: ids.provider,
-        runId: ids.run,
-        quarantineId: null,
-        dedupeKey: "cross-tenant-event",
-        recoveryKey: "cross-tenant-event",
-        title: "Cross tenant",
-        summary: "This write must fail.",
-        evidenceJson: {},
-        occurredAt: committedAt,
+      harness.client.operational_events.create({
+        data: {
+          id: "61000000-0000-4000-8000-000000000006",
+          organization_id: ids.otherOrganization,
+          kind: "run_failed",
+          severity: "critical",
+          provider_id: ids.provider,
+          run_id: ids.run,
+          quarantine_id: null,
+          dedupe_key: "cross-tenant-event",
+          recovery_key: "cross-tenant-event",
+          title: "Cross tenant",
+          summary: "This write must fail.",
+          evidence_json: {},
+          occurred_at: committedAt,
+        },
       }),
     );
 
@@ -706,26 +745,29 @@ test("admin alerts deduplicate, resolve, reopen, and preserve safe occurrence hi
 test("retention skips every protected payload needed by a running quarantine retry", async () => {
   const harness = await createHarness();
   try {
-    const [linked] = await harness.database
-      .select({
-        sourceRecordId: quarantineRecords.sourceRecordId,
-        pageId: quarantineRecords.pageId,
-      })
-      .from(quarantineRecords)
-      .where(eq(quarantineRecords.id, harness.resolved.id));
+    const linkedRecord = await harness.client.quarantine_records.findUniqueOrThrow({
+      where: { id: harness.resolved.id },
+      select: { source_record_id: true, page_id: true },
+    });
+    const linked = {
+      sourceRecordId: linkedRecord.source_record_id,
+      pageId: linkedRecord.page_id,
+    };
     if (!linked?.sourceRecordId) throw new Error("Linked quarantine was not created.");
-    await harness.database
-      .update(quarantineRecords)
-      .set({ state: "open", resolvedAt: null })
-      .where(eq(quarantineRecords.id, harness.resolved.id));
-    await harness.database.insert(quarantineAttempts).values({
-      id: ids.runningAttempt,
-      organizationId: ids.organization,
-      quarantineId: harness.resolved.id,
-      sourceRecordId: linked.sourceRecordId,
-      state: "running",
-      requestedByActorKey: "actor:operator",
-      startedAt: cutoffAt,
+    await harness.client.quarantine_records.update({
+      where: { id: harness.resolved.id },
+      data: { state: "open", resolved_at: null },
+    });
+    await harness.client.quarantine_attempts.create({
+      data: {
+        id: ids.runningAttempt,
+        organization_id: ids.organization,
+        quarantine_id: harness.resolved.id,
+        source_record_id: linked.sourceRecordId,
+        state: "running",
+        requested_by_actor_key: "actor:operator",
+        started_at: cutoffAt,
+      },
     });
     const retention = new DrizzleProtectedPayloadRetentionRepository(
       harness.database,
@@ -745,21 +787,24 @@ test("retention skips every protected payload needed by a running quarantine ret
       }),
       [],
     );
-    const [protectedSource] = await harness.database
-      .select({ payload: sourceRecords.payloadJson })
-      .from(sourceRecords)
-      .where(eq(sourceRecords.id, linked.sourceRecordId));
-    const [protectedPage] = await harness.database
-      .select({ payload: importPages.payloadJson })
-      .from(importPages)
-      .where(eq(importPages.id, linked.pageId));
-    assert.notEqual(protectedSource?.payload, null);
-    assert.notEqual(protectedPage?.payload, null);
+    const protectedSource = await harness.client.source_records.findUniqueOrThrow({
+      where: { id: linked.sourceRecordId },
+      select: { payload_json: true },
+    });
+    const protectedPage = await harness.client.import_pages.findUniqueOrThrow({
+      where: { id: linked.pageId },
+      select: { payload_json: true },
+    });
+    assert.notEqual(protectedSource.payload_json, null);
+    assert.notEqual(protectedPage.payload_json, null);
 
-    await harness.database
-      .update(quarantineAttempts)
-      .set({ state: "failed", finishedAt: new Date(cutoffAt.getTime() + 100) })
-      .where(eq(quarantineAttempts.id, ids.runningAttempt));
+    await harness.client.quarantine_attempts.update({
+      where: { id: ids.runningAttempt },
+      data: {
+        state: "failed",
+        finished_at: new Date(cutoffAt.getTime() + 100),
+      },
+    });
     assert.deepEqual(
       await retention.discoverEligibleOrganizations({
         cutoffAt,
@@ -775,17 +820,21 @@ test("retention skips every protected payload needed by a running quarantine ret
       startedAt: cutoffAt,
     });
     assert.equal(
-      (await harness.database
-        .select({ payload: sourceRecords.payloadJson })
-        .from(sourceRecords)
-        .where(eq(sourceRecords.id, linked.sourceRecordId)))[0]?.payload,
+      (
+        await harness.client.source_records.findUniqueOrThrow({
+          where: { id: linked.sourceRecordId },
+          select: { payload_json: true },
+        })
+      ).payload_json,
       null,
     );
     assert.equal(
-      (await harness.database
-        .select({ payload: importPages.payloadJson })
-        .from(importPages)
-        .where(eq(importPages.id, linked.pageId)))[0]?.payload,
+      (
+        await harness.client.import_pages.findUniqueOrThrow({
+          where: { id: linked.pageId },
+          select: { payload_json: true },
+        })
+      ).payload_json,
       null,
     );
   } finally {
@@ -810,18 +859,19 @@ test("retention failure evidence is stable and never stores thrown provider mate
       failureCode: sensitive,
     });
     assert.equal(failure.failed, 1);
-    const [stored] = await harness.database
-      .select({
-        code: retentionExecutions.failureCode,
-        summary: retentionExecutions.sanitizedSummary,
-      })
-      .from(retentionExecutions)
-      .where(
-        and(
-          eq(retentionExecutions.organizationId, ids.organization),
-          eq(retentionExecutions.id, ids.retentionOne),
-        ),
-      );
+    const storedRecord = await harness.client.retention_executions.findFirst({
+      where: {
+        organization_id: ids.organization,
+        id: ids.retentionOne,
+      },
+      select: { failure_code: true, sanitized_summary: true },
+    });
+    const stored = storedRecord
+      ? {
+          code: storedRecord.failure_code,
+          summary: storedRecord.sanitized_summary,
+        }
+      : null;
     assert.equal(stored?.code, "RETENTION_FAILED");
     assert.equal(JSON.stringify(stored).includes(sensitive), false);
     await assert.rejects(
@@ -836,10 +886,12 @@ test("retention failure evidence is stable and never stores thrown provider mate
       }),
     );
     assert.equal(
-      (await harness.database
-        .select({ organizationId: retentionExecutions.organizationId })
-        .from(retentionExecutions)
-        .where(eq(retentionExecutions.id, ids.retentionOne)))[0]?.organizationId,
+      (
+        await harness.client.retention_executions.findUniqueOrThrow({
+          where: { id: ids.retentionOne },
+          select: { organization_id: true },
+        })
+      ).organization_id,
       ids.organization,
     );
   } finally {
