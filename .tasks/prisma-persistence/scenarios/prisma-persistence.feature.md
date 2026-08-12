@@ -47,7 +47,7 @@ Examples:
 | quarantine retry |
 | retention evidence batch |
 
-Coverage: Manual gap — tasks 004 and 006 must preserve real PostgreSQL contention tests with independent clients.
+Coverage: Partially automated — task 004 uses independent Prisma clients on real PostgreSQL for scheduled provider work, queued import work, and estimated-EV recomputation; task 006 completes quarantine-retry and retention contention.
 
 ## Scenario Outline: A provider page commit is all-or-nothing
 

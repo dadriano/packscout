@@ -5,7 +5,7 @@
 **Depends on:** [prisma-persistence/002](002-establish-prisma-runtime-and-test-foundation.md)  
 **Blocks:** [prisma-persistence/006](006-preserve-quarantine-retention-and-operations.md), [prisma-persistence/007](007-cut-over-packscout-runtimes.md)  
 **Estimated scope:** large  
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -53,14 +53,21 @@ Task `007` composes the Prisma implementations into the worker and admin runtime
 
 ## Acceptance Criteria
 
-- [ ] Manual and scheduled imports preserve active-run exclusivity, coalescing, leasing, recovery, counters, and stale-owner rejection under concurrent workers.
-- [ ] Concurrent schedulers and EV workers claim disjoint eligible work without duplicate processing or indefinite blocking.
-- [ ] Provider disablement, lease expiry, retry exhaustion, restart, and terminal completion preserve their current durable outcomes.
-- [ ] EV requests coalesce and recompute without mixing provider-reported values with PackScout calculations or losing provenance.
-- [ ] Cross-organization and foreign-owner operations fail without changing queue, schedule, health, checkpoint, or EV state.
+- [x] Manual and scheduled imports preserve active-run exclusivity, coalescing, leasing, recovery, counters, and stale-owner rejection under concurrent workers.
+- [x] Concurrent schedulers and EV workers claim disjoint eligible work without duplicate processing or indefinite blocking.
+- [x] Provider disablement, lease expiry, retry exhaustion, restart, and terminal completion preserve their current durable outcomes.
+- [x] EV requests coalesce and recompute without mixing provider-reported values with PackScout calculations or losing provenance.
+- [x] Cross-organization and foreign-owner operations fail without changing queue, schedule, health, checkpoint, or EV state.
 
 ## Verification
 
 - Run focused import-run, scheduling, health, and EV repository and service suites through the Prisma integration harness.
 - Run real PostgreSQL contention tests with multiple clients for disjoint claims, active-run uniqueness, lease recovery, coalescing, stale ownership, and restart safety.
 - Run affected worker and service lint, typecheck, and integration checks through `npm run verify:framework`.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: converted import ownership, scheduling, provider health, and estimated-EV recomputation queues to Prisma while retaining parameterized PostgreSQL locking and claim semantics
+- Divergences: public repository class names remain transitional until the coordinated runtime and cleanup tasks; no compatibility reads or writes were introduced
+- Verification: seven real PostgreSQL tests with independent Prisma clients cover coalescing, disjoint claims, lease recovery, stale ownership, atomic counters, schedule cadence, tenant-scoped health, retry timing, and EV terminal outcomes; focused lint and strict TypeScript pass
