@@ -1,8 +1,8 @@
-import type { PublicPackActions } from "@packscout/contracts";
+import type { PublicRepackActions } from "@packscout/contracts";
 
-type PublicPackLink = NonNullable<PublicPackActions["packLink"]>;
+type PublicRepackLink = NonNullable<PublicRepackActions["repackLink"]>;
 
-export type OutboundPackLinkResult =
+export type OutboundRepackLinkResult =
   | { readonly ok: true; readonly href: string }
   | {
       readonly ok: false;
@@ -19,23 +19,23 @@ export type PromoClipboardResult =
 
 export type ClipboardWriter = (text: string) => Promise<void>;
 
-export function buildPublishedPackHref(
-  packLink: PublicPackLink | undefined,
+export function buildPublishedRepackHref(
+  repackLink: PublicRepackLink | undefined,
   availability: "active" | "sold_out",
-): OutboundPackLinkResult {
+): OutboundRepackLinkResult {
   if (availability === "sold_out") {
     return Object.freeze({ ok: false, code: "SOLD_OUT" });
   }
-  if (!packLink) {
+  if (!repackLink) {
     return Object.freeze({ ok: false, code: "MISSING_LINK" });
   }
 
   if (
-    packLink.listingUrl.length > 2_048 ||
-    packLink.listingHost.length === 0 ||
-    packLink.listingHost.length > 253 ||
-    packLink.listingHost !== packLink.listingHost.toLowerCase() ||
-    /[*/@?#]/.test(packLink.listingHost)
+    repackLink.listingUrl.length > 2_048 ||
+    repackLink.listingHost.length === 0 ||
+    repackLink.listingHost.length > 253 ||
+    repackLink.listingHost !== repackLink.listingHost.toLowerCase() ||
+    /[*/@?#]/.test(repackLink.listingHost)
   ) {
     return Object.freeze({ ok: false, code: "UNAPPROVED_ORIGIN" });
   }
@@ -43,10 +43,10 @@ export function buildPublishedPackHref(
   let listing: URL;
   let approvedOrigin: string;
   try {
-    listing = new URL(packLink.listingUrl);
-    const approved = new URL(`https://${packLink.listingHost}`);
+    listing = new URL(repackLink.listingUrl);
+    const approved = new URL(`https://${repackLink.listingHost}`);
     if (
-      approved.host !== packLink.listingHost ||
+      approved.host !== repackLink.listingHost ||
       approved.pathname !== "/" ||
       approved.search !== "" ||
       approved.hash !== ""
@@ -66,11 +66,11 @@ export function buildPublishedPackHref(
     return Object.freeze({ ok: false, code: "UNAPPROVED_ORIGIN" });
   }
 
-  if (packLink.referralParameters.length > 8) {
+  if (repackLink.referralParameters.length > 8) {
     return Object.freeze({ ok: false, code: "INVALID_REFERRAL_CONFIG" });
   }
   const referralNames = new Set<string>();
-  for (const parameter of packLink.referralParameters) {
+  for (const parameter of repackLink.referralParameters) {
     if (
       !/^[A-Za-z0-9._~-]{1,64}$/.test(parameter.name) ||
       parameter.value.trim().length === 0 ||

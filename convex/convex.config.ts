@@ -11,6 +11,8 @@ export default defineApp({
         v.literal("production"),
       ),
     ),
-    PACKSCOUT_MOCK_CATALOG_SEED_ENABLED: v.optional(v.literal("1")),
+    PACKSCOUT_MOCK_DATA_RELEASE_SEED_ENABLED: v.optional(v.literal("1")),
+    PACKSCOUT_MOCK_HEAT_SIMULATION_ENABLED: v.optional(v.literal("1")),
+    PACKSCOUT_PUBLIC_ORIGIN_SET_HASH: v.optional(v.string()),
   },
 });

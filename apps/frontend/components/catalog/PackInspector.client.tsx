@@ -10,19 +10,22 @@ import {
   useState,
 } from "react";
 import type {
-  PublicPackDetail,
-  SnapshotMetadata,
+  DataReleaseMetadata,
+  PublicRepackChase,
+  PublicRepackViewDetail,
 } from "@packscout/contracts";
 import { EstimatedEvMetrics } from "@/components/metrics/EstimatedEvMetrics";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
   presentBuyback,
-  presentEstimatedEv,
+  presentPackScoutEv,
+  presentVendorReportedEv,
 } from "@/lib/metric-presentation";
 import { EXPECTED_VALUE_ARTICLE_HREF } from "@/lib/metric-vocabulary";
 import { CatalogImage } from "./CatalogImage.client";
+import { RepackHeatDetails } from "./RepackHeatDetails";
 import {
-  buildPublishedPackHref,
+  buildPublishedRepackHref,
   copyPublicPromoCode,
   type ClipboardWriter,
 } from "./pack-actions.client";
@@ -30,41 +33,43 @@ import {
   presentEstimateCoverage,
   presentEstimateTiming,
   presentTopChase,
+  presentVendorReportedObservation,
 } from "./pack-inspector-presentation";
-import { presentPackPrice } from "./overview-presentation";
+import { presentRepackPrice } from "./overview-presentation";
 import styles from "./PackInspector.module.css";
 
 export type InspectorActionOutcome =
   | Readonly<{
       name: "promo_copied";
-      publicPackId: string;
-      platformKey: string;
+      publicRepackId: string;
+      vendorKey: string;
       outcome: "clipboard" | "manual_fallback";
     }>
   | Readonly<{
-      name: "pack_link_opened";
-      publicPackId: string;
-      platformKey: string;
+      name: "repack_link_opened";
+      publicRepackId: string;
+      vendorKey: string;
       outcome: "opened";
     }>;
 
-export type PackInspectorProps = Readonly<{
-  pack: PublicPackDetail;
-  metadata: SnapshotMetadata;
+export type RepackInspectorProps = Readonly<{
+  repack: PublicRepackViewDetail;
+  metadata: DataReleaseMetadata;
   placement?: "side" | "preview" | "sheet";
   clipboardWriter?: ClipboardWriter | null;
   onActionOutcome?: (outcome: InspectorActionOutcome) => void;
   onClose?: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
+  highlightedChase?: PublicRepackChase | null;
 }>;
 
 type PartnerActionsProps = Pick<
-  PackInspectorProps,
+  RepackInspectorProps,
   "clipboardWriter" | "onActionOutcome"
-> & { readonly pack: PublicPackDetail };
+> & { readonly repack: PublicRepackViewDetail };
 
 function PartnerActions({
-  pack,
+  repack,
   clipboardWriter,
   onActionOutcome,
 }: PartnerActionsProps) {
@@ -72,10 +77,10 @@ function PartnerActions({
     "idle" | "copied" | "manual"
   >("idle");
   const manualCodeRef = useRef<HTMLInputElement>(null);
-  const promo = pack.actions.promo;
-  const outbound = buildPublishedPackHref(
-    pack.actions.packLink,
-    pack.availability,
+  const promo = repack.actions.promo;
+  const outbound = buildPublishedRepackHref(
+    repack.actions.repackLink,
+    repack.availability,
   );
 
   async function copyPromo() {
@@ -88,8 +93,8 @@ function PartnerActions({
       setCopyState("copied");
       onActionOutcome?.({
         name: "promo_copied",
-        publicPackId: pack.publicPackId,
-        platformKey: pack.platformKey,
+        publicRepackId: repack.publicRepackId,
+        vendorKey: repack.vendorKey,
         outcome: "clipboard",
       });
       return;
@@ -97,8 +102,8 @@ function PartnerActions({
     setCopyState("manual");
     onActionOutcome?.({
       name: "promo_copied",
-      publicPackId: pack.publicPackId,
-      platformKey: pack.platformKey,
+      publicRepackId: repack.publicRepackId,
+      vendorKey: repack.vendorKey,
       outcome: "manual_fallback",
     });
     requestAnimationFrame(() => {
@@ -110,9 +115,9 @@ function PartnerActions({
   function reportOutboundOpen() {
     queueMicrotask(() => {
       onActionOutcome?.({
-        name: "pack_link_opened",
-        publicPackId: pack.publicPackId,
-        platformKey: pack.platformKey,
+        name: "repack_link_opened",
+        publicRepackId: repack.publicRepackId,
+        vendorKey: repack.vendorKey,
         outcome: "opened",
       });
     });
@@ -121,8 +126,8 @@ function PartnerActions({
   if (!promo && !outbound.ok && outbound.code !== "SOLD_OUT") return null;
 
   return (
-    <section aria-labelledby={`partner-actions-${pack.publicPackId}`} className={styles.actions}>
-      <h3 className="sr-only" id={`partner-actions-${pack.publicPackId}`}>
+    <section aria-labelledby={`partner-actions-${repack.publicRepackId}`} className={styles.actions}>
+      <h3 className="sr-only" id={`partner-actions-${repack.publicRepackId}`}>
         Partner actions
       </h3>
 
@@ -160,45 +165,56 @@ function PartnerActions({
             rel="noopener noreferrer"
             target="_blank"
           >
-            Open pack
+            Open repack
             <span aria-hidden="true">↗</span>
             <span className="sr-only"> in a new tab</span>
           </a>
-          <p>Opens the provider listing in a new tab.</p>
+          <p>Opens the vendor listing in a new tab.</p>
         </div>
       ) : outbound.code === "SOLD_OUT" ? (
         <div className={styles.openPackGroup}>
           <button className={styles.openPack} disabled type="button">
-            Open pack
+            Open repack
           </button>
-          <p>This pack is sold out.</p>
+          <p>This repack is sold out.</p>
         </div>
       ) : null}
     </section>
   );
 }
 
-export function PackInspector({
-  pack,
+export function RepackInspector({
+  repack,
   metadata,
   placement = "side",
   clipboardWriter,
   onActionOutcome,
   onClose,
   returnFocusRef,
-}: PackInspectorProps) {
+  highlightedChase,
+}: RepackInspectorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const price = presentPackPrice(pack.price);
-  const estimatedEv = presentEstimatedEv({
-    packPrice: pack.price.usdComparison,
-    estimatedEv: pack.estimatedEv,
+  const price = presentRepackPrice(repack.price);
+  const packScoutEv = presentPackScoutEv({
+    repackPrice: repack.price.usdComparison,
+    estimate: repack.evEstimates.packScout,
   });
-  const buyback = presentBuyback(pack.buyback);
-  const timing = presentEstimateTiming(pack.estimatedEv, metadata);
-  const coverage = presentEstimateCoverage(pack.estimatedEv.coverage);
-  const chase = presentTopChase(pack.topChase);
-  const headingId = `pack-inspector-${placement}-${pack.publicPackId}`;
+  const vendorEv = presentVendorReportedEv(repack.evEstimates.vendorReported);
+  const vendorObservation = presentVendorReportedObservation(vendorEv.observedAt);
+  const buyback = presentBuyback(repack.buyback);
+  const timing = presentEstimateTiming(repack.evEstimates.packScout, metadata);
+  const coverage = presentEstimateCoverage(repack.contentSummary);
+  const showsDesiredChase = highlightedChase !== undefined;
+  const chaseValueLabel = showsDesiredChase
+    ? "Desired Chase Value"
+    : "Top Chase Value";
+  const chase = presentTopChase(
+    showsDesiredChase ? highlightedChase ?? null : repack.topChase,
+    showsDesiredChase ? "Desired chase match" : "Top chase",
+    chaseValueLabel,
+  );
+  const headingId = `repack-inspector-${placement}-${repack.publicRepackId}`;
 
   useEffect(() => {
     if (placement !== "sheet") return;
@@ -249,7 +265,7 @@ export function PackInspector({
     <>
       {placement === "sheet" ? (
         <button
-          aria-label="Close pack details"
+          aria-label="Close repack details"
           autoFocus
           className={styles.closeButton}
           onClick={closeSheet}
@@ -262,32 +278,36 @@ export function PackInspector({
 
       <header className={styles.hero}>
         <CatalogImage
-          fallbackAlt={pack.name}
-          image={pack.primaryImage}
+          fallbackAlt={repack.name}
+          image={repack.primaryImage}
           variant="pack"
         />
         <div className={styles.identity}>
-          <span className={styles.availability} data-state={pack.availability}>
-            {pack.availability === "active" ? "Available" : "Sold out"}
+          <span className={styles.availability} data-state={repack.availability}>
+            {repack.availability === "active" ? "Available" : "Sold out"}
           </span>
-          <p className={styles.category}>{pack.category}</p>
+          <p className={styles.category}>
+            {repack.categories.length > 0
+              ? repack.categories.map(({ label }) => label).join(" · ")
+              : "Uncategorized"}
+          </p>
           <h2 className={styles.packName} id={headingId}>
-            {pack.name}
+            {repack.name}
           </h2>
-          <p className={styles.platform}>
-            {pack.platformLogoUrl ? (
+          <p className={styles.vendor}>
+            {repack.vendorLogoUrl ? (
               <CatalogImage
                 decorative
                 fallback="none"
-                fallbackAlt={`${pack.platformDisplayName} logo`}
+                fallbackAlt={`${repack.vendorDisplayName} logo`}
                 image={{
-                  url: pack.platformLogoUrl,
-                  alt: `${pack.platformDisplayName} logo`,
+                  url: repack.vendorLogoUrl,
+                  alt: `${repack.vendorDisplayName} logo`,
                 }}
-                variant="platform"
+                variant="vendor"
               />
             ) : null}
-            <span>Offered by {pack.platformDisplayName}</span>
+            <span>Offered by {repack.vendorDisplayName}</span>
           </p>
           <p className={styles.price}>
             <span aria-hidden="true">{price.displayValue}</span>
@@ -300,7 +320,37 @@ export function PackInspector({
       </header>
 
       <div className={styles.sectionBlock}>
-        <EstimatedEvMetrics compact presentation={estimatedEv} />
+        <EstimatedEvMetrics compact presentation={packScoutEv} />
+        <div className={styles.vendorEstimate}>
+          <div className={styles.sectionHeading}>
+            <h3>Vendor-reported EV</h3>
+            <span>Reported by vendor</span>
+          </div>
+          <div className={styles.vendorEstimateMetrics}>
+            <MetricValue
+              compact
+              metric={vendorEv.evPercent}
+              showReason={false}
+              showSemanticState={false}
+            />
+            <MetricValue
+              compact
+              metric={vendorEv.reportedGrossEv}
+              showReason={false}
+              showSemanticState={false}
+            />
+          </div>
+          {vendorEv.reasonCopy ? (
+            <p className={styles.vendorEstimateReason}>{vendorEv.reasonCopy}</p>
+          ) : null}
+          {vendorObservation ? (
+            <p className={styles.vendorEstimateContext}>
+              <time dateTime={vendorObservation.observedAt}>
+                {vendorObservation.label}
+              </time>
+            </p>
+          ) : null}
+        </div>
         <div className={styles.buybackMetric}>
           <MetricValue compact metric={buyback} />
         </div>
@@ -314,11 +364,11 @@ export function PackInspector({
             )}
           </p>
           <p>
-            <time dateTime={timing.dataAsOf}>{timing.snapshotLabel}</time>
+            <time dateTime={timing.dataAsOf}>{timing.releaseLabel}</time>
           </p>
-          {pack.estimatedEv.limitations.length > 0 ? (
+          {packScoutEv.confidence.limitations.length > 0 ? (
             <ul className={styles.limitations}>
-              {pack.estimatedEv.limitations.map((limitation) => (
+              {packScoutEv.confidence.limitations.map((limitation) => (
                 <li key={limitation}>{limitation}</li>
               ))}
             </ul>
@@ -330,10 +380,19 @@ export function PackInspector({
         </div>
       </div>
 
-      <section aria-labelledby={`top-chase-${pack.publicPackId}`} className={styles.chase}>
+      <RepackHeatDetails
+        headingId={`recent-heat-${repack.publicRepackId}`}
+        heat={repack.heat}
+      />
+
+      <section aria-labelledby={`top-chase-${repack.publicRepackId}`} className={styles.chase}>
         <div className={styles.sectionHeading}>
-          <h3 id={`top-chase-${pack.publicPackId}`}>Top chase</h3>
-          <span>Supported representative value</span>
+          <h3 id={`top-chase-${repack.publicRepackId}`}>
+            {showsDesiredChase ? "Desired chase match" : "Top chase"}
+          </h3>
+          <span>
+            {chaseValueLabel}
+          </span>
         </div>
         {chase.availability === "available" ? (
           <div className={styles.chaseContent}>
@@ -347,6 +406,11 @@ export function PackInspector({
             <div aria-hidden="true">
               <p className={styles.chaseName}>{chase.name}</p>
               <p className={styles.chaseValue}>{chase.displayValue}</p>
+              {chase.valueAvailability === "unavailable" ? (
+                <p className={styles.chaseValueReason}>{chase.reasonCopy}</p>
+              ) : null}
+              <p className={styles.chaseEvidence}>{chase.evidenceLabel}</p>
+              <p className={styles.chaseEvidence}>{chase.matchConfidenceLabel}</p>
             </div>
           </div>
         ) : (
@@ -360,9 +424,9 @@ export function PackInspector({
 
       <PartnerActions
         clipboardWriter={clipboardWriter}
-        key={pack.publicPackId}
+        key={repack.publicRepackId}
         onActionOutcome={onActionOutcome}
-        pack={pack}
+        repack={repack}
       />
     </>
   );
@@ -373,7 +437,7 @@ export function PackInspector({
         aria-labelledby={headingId}
         className={styles.inspector}
         data-placement="sheet"
-        data-state={estimatedEv.semanticState}
+        data-state={packScoutEv.semanticState}
         onCancel={handleSheetCancel}
         onKeyDown={handleSheetKeys}
         ref={dialogRef}
@@ -388,7 +452,7 @@ export function PackInspector({
       aria-labelledby={headingId}
       className={styles.inspector}
       data-placement={placement}
-      data-state={estimatedEv.semanticState}
+      data-state={packScoutEv.semanticState}
       role="complementary"
     >
       {content}

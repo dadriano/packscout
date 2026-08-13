@@ -1,20 +1,22 @@
 import type {
-  PublicAvailabilityReason,
-  PublicBuyback,
-  PublicEstimatedEv,
-  PublicMoney,
-  PublicPrice,
-  PublicSignedUsdMoney,
-  PublicTopChaseSummary,
-  PublicUsdMoney,
+  PackScoutEv,
+  PublicRepackChase,
+  PublicRepackSummary,
+  VendorReportedEv,
 } from "@packscout/contracts";
 import {
   getPublicReasonCopy,
   METRIC_TRUST_COPY,
   type GlossaryFieldKey,
+  type PublicMetricReason,
 } from "./metric-vocabulary";
+import { presentConfidenceLimitations } from "./confidence-limitations";
 
 const PRESENTATION_LOCALE = "en-US" as const;
+
+type PublicMoney = Readonly<{ minorUnits: number; currency: string }>;
+type PublicPrice = PublicRepackSummary["price"];
+type PublicBuyback = PublicRepackSummary["buyback"];
 
 export type MetricSemanticState =
   | "positive"
@@ -40,7 +42,7 @@ export type UnavailableMetricValue = Readonly<{
   glossaryKey: GlossaryFieldKey;
   semanticState: "unavailable";
   semanticLabel: "Unavailable";
-  reason: PublicAvailabilityReason;
+  reason: PublicMetricReason;
   reasonCopy: string;
 }>;
 
@@ -48,7 +50,7 @@ export type MetricValuePresentation =
   | AvailableMetricValue
   | UnavailableMetricValue;
 
-export type EstimatedEvPresentation = Readonly<{
+export type PackScoutEvPresentation = Readonly<{
   availability: "available" | "unavailable";
   semanticState: MetricSemanticState;
   semanticLabel: "Positive" | "Neutral" | "Negative" | "Unavailable";
@@ -57,21 +59,31 @@ export type EstimatedEvPresentation = Readonly<{
   evDollars: MetricValuePresentation;
   evPercent: MetricValuePresentation;
   grossEv: MetricValuePresentation;
-  packPrice: MetricValuePresentation;
+  repackPrice: MetricValuePresentation;
+  confidence: ConfidencePresentation;
 }>;
 
-export type EstimatedEvPresentationInput = Readonly<{
-  packPrice: PublicPrice["usdComparison"];
-  estimatedEv: Pick<
-    PublicEstimatedEv,
-    "grossEv" | "evDollars" | "evPercent"
-  >;
+export type VendorReportedEvPresentation = Readonly<{
+  availability: "available" | "unavailable";
+  accessibleLabel: string;
+  reasonCopy?: string;
+  evPercent: MetricValuePresentation;
+  reportedGrossEv: MetricValuePresentation;
+  observedAt: string | null;
 }>;
 
-type EstimateUnavailableReason = Extract<
-  PublicAvailabilityReason,
-  "ESTIMATE_INPUT_INCOMPLETE" | "PRICE_UNAVAILABLE" | "CURRENCY_UNSUPPORTED"
->;
+export type ConfidencePresentation = Readonly<{
+  availability: "available" | "unavailable";
+  band: "low" | "medium" | "high" | null;
+  displayValue: string;
+  accessibleLabel: string;
+  limitations: readonly string[];
+}>;
+
+export type PackScoutEvPresentationInput = Readonly<{
+  repackPrice: PublicPrice["usdComparison"];
+  estimate: PackScoutEv;
+}>;
 
 export class MetricPresentationConsistencyError extends Error {
   readonly issues: readonly string[];
@@ -96,14 +108,28 @@ export function formatMoneyMinorUnits(
   money: Pick<PublicMoney, "minorUnits" | "currency">,
   options: Readonly<{ signed?: boolean }> = {},
 ): string {
-  const formatter = currencyFormatter(
-    money.currency,
-    options.signed === true,
-    money.minorUnits === 0,
-  );
-  const fractionDigits =
-    formatter.resolvedOptions().maximumFractionDigits ?? 2;
-  return formatter.format(money.minorUnits / 10 ** fractionDigits);
+  try {
+    const formatter = currencyFormatter(
+      money.currency,
+      options.signed === true,
+      money.minorUnits === 0,
+    );
+    const fractionDigits =
+      formatter.resolvedOptions().maximumFractionDigits ?? 2;
+    return formatter.format(money.minorUnits / 10 ** fractionDigits);
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    const sign = money.minorUnits < 0
+      ? "-"
+      : options.signed === true && money.minorUnits > 0
+        ? "+"
+        : "";
+    const amount = new Intl.NumberFormat(PRESENTATION_LOCALE, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Math.abs(money.minorUnits) / 100);
+    return `${sign}${money.currency} ${amount}`;
+  }
 }
 
 export function formatBasisPoints(
@@ -164,16 +190,14 @@ function availableMetric(
     accessibleLabel: stateLabel
       ? `${label}: ${displayValue}. ${stateLabel}.`
       : `${label}: ${displayValue}.`,
-    ...(state
-      ? { semanticState: state, semanticLabel: stateLabel }
-      : {}),
+    ...(state ? { semanticState: state, semanticLabel: stateLabel } : {}),
   });
 }
 
 function unavailableMetric(
   label: string,
   glossaryKey: GlossaryFieldKey,
-  reason: PublicAvailabilityReason,
+  reason: PublicMetricReason,
 ): UnavailableMetricValue {
   const reasonCopy = getPublicReasonCopy(reason);
   return Object.freeze({
@@ -189,100 +213,10 @@ function unavailableMetric(
   });
 }
 
-function expectedEstimateUnavailableReason(
-  input: EstimatedEvPresentationInput,
-): EstimateUnavailableReason | null {
-  const { packPrice, estimatedEv } = input;
-  if (
-    packPrice.status === "unavailable" &&
-    packPrice.reason === "PRICE_UNAVAILABLE"
-  ) {
-    return "PRICE_UNAVAILABLE";
-  }
-  if (
-    (packPrice.status === "unavailable" &&
-      packPrice.reason === "CURRENCY_UNSUPPORTED") ||
-    (estimatedEv.grossEv.status === "unavailable" &&
-      estimatedEv.grossEv.reason === "CURRENCY_UNSUPPORTED")
-  ) {
-    return "CURRENCY_UNSUPPORTED";
-  }
-  if (estimatedEv.grossEv.status === "unavailable") {
-    return "ESTIMATE_INPUT_INCOMPLETE";
-  }
-  return null;
-}
-
-export function metricPresentationConsistencyIssues(
-  input: EstimatedEvPresentationInput,
-): readonly string[] {
-  const { packPrice, estimatedEv } = input;
-  const { grossEv, evDollars, evPercent } = estimatedEv;
-  const issues: string[] = [];
-
-  for (const [field, value] of [
-    ["packPrice", packPrice],
-    ["grossEv", grossEv],
-    ["evDollars", evDollars],
-  ] as const) {
-    if (value.status === "available") {
-      if (!Number.isSafeInteger(value.value.minorUnits)) {
-        issues.push(`${field} must use safe integer minor units`);
-      }
-      if (value.value.currency !== "USD") {
-        issues.push(`${field} must use canonical USD comparison money`);
-      }
-    }
-  }
-  if (
-    evPercent.status === "available" &&
-    !Number.isSafeInteger(evPercent.value.basisPoints)
-  ) {
-    issues.push("evPercent must use safe integer basis points");
-  }
-
-  const expectedReason = expectedEstimateUnavailableReason(input);
-  if (expectedReason === null) {
-    if (
-      packPrice.status !== "available" ||
-      grossEv.status !== "available" ||
-      evDollars.status !== "available" ||
-      evPercent.status !== "available"
-    ) {
-      issues.push("the available estimate bundle is incomplete");
-    } else {
-      const expectedMinorUnits =
-        grossEv.value.minorUnits - packPrice.value.minorUnits;
-      if (evDollars.value.minorUnits !== expectedMinorUnits) {
-        issues.push("EV $ must equal Gross EV minus Pack Price");
-      }
-    }
-  } else {
-    if (
-      evDollars.status !== "unavailable" ||
-      evDollars.reason !== expectedReason
-    ) {
-      issues.push("EV $ availability reason does not match source evidence");
-    }
-    if (
-      evPercent.status !== "unavailable" ||
-      evPercent.reason !== expectedReason
-    ) {
-      issues.push("EV % availability reason does not match source evidence");
-    }
-  }
-
-  return Object.freeze(issues);
-}
-
-function shouldThrowForConsistencyIssue(): boolean {
-  return process.env.NODE_ENV !== "production";
-}
-
 function availableMoneyMetric(
   label: string,
   glossaryKey: GlossaryFieldKey,
-  money: PublicUsdMoney | PublicSignedUsdMoney,
+  money: PublicMoney,
   options: Readonly<{
     signed?: boolean;
     state?: Exclude<MetricSemanticState, "unavailable">;
@@ -296,105 +230,118 @@ function availableMoneyMetric(
   );
 }
 
-function unavailablePresentation(
-  reason: EstimateUnavailableReason,
-): EstimatedEvPresentation {
+function packScoutReason(estimate: PackScoutEv): PublicMetricReason {
+  return estimate.status === "unavailable"
+    ? estimate.reason
+    : "ESTIMATE_UNAVAILABLE";
+}
+
+export function packScoutMetricConsistencyIssues(
+  input: PackScoutEvPresentationInput,
+): readonly string[] {
+  if (input.estimate.status === "unavailable") return Object.freeze([]);
+  const { metrics } = input.estimate;
+  const issues: string[] = [];
+  for (const [field, value] of [
+    ["grossEv", metrics.grossEv.minorUnits],
+    ["evDollars", metrics.evDollars.minorUnits],
+    ["grossReturnBasisPoints", metrics.grossReturnBasisPoints],
+    ["evPercentBasisPoints", metrics.evPercentBasisPoints],
+  ] as const) {
+    if (!Number.isSafeInteger(value)) issues.push(`${field} must be a safe integer`);
+  }
+  if (
+    metrics.evPercentBasisPoints !== metrics.grossReturnBasisPoints - 10_000
+  ) {
+    issues.push("PackScout EV percent must equal gross return minus 100%");
+  }
+  if (input.repackPrice.status === "available") {
+    const expected =
+      metrics.grossEv.minorUnits - input.repackPrice.value.minorUnits;
+    if (metrics.evDollars.minorUnits !== expected) {
+      issues.push("PackScout EV $ must equal Gross EV minus Repack Price");
+    }
+  }
+  return Object.freeze(issues);
+}
+
+function unavailablePackScoutPresentation(
+  reason: PublicMetricReason,
+  repackPrice: PublicPrice["usdComparison"],
+): PackScoutEvPresentation {
   const reasonCopy = getPublicReasonCopy(reason);
-  const evDollars = unavailableMetric("EV $", "evDollars", reason);
-  const evPercent = unavailableMetric("EV %", "evPercent", reason);
-  const grossEv = unavailableMetric("Gross EV", "grossEv", reason);
-  const packPrice = unavailableMetric("Pack Price", "packPrice", reason);
+  const metricReason = reason === "ESTIMATE_INPUT_INCOMPLETE"
+    ? "ESTIMATE_INPUT_INCOMPLETE"
+    : reason;
   return Object.freeze({
     availability: "unavailable" as const,
     semanticState: "unavailable" as const,
     semanticLabel: "Unavailable" as const,
     reasonCopy,
-    evDollars,
-    evPercent,
-    grossEv,
-    packPrice,
+    evDollars: unavailableMetric("PackScout EV $", "evDollars", metricReason),
+    evPercent: unavailableMetric("PackScout EV %", "evPercent", metricReason),
+    grossEv: unavailableMetric("PackScout Gross EV", "grossEv", metricReason),
+    repackPrice:
+      repackPrice.status === "available"
+        ? availableMoneyMetric("Repack Price", "repackPrice", repackPrice.value)
+        : unavailableMetric("Repack Price", "repackPrice", repackPrice.reason),
+    confidence: presentPackScoutConfidence(null),
     accessibleLabel: `${METRIC_TRUST_COPY.estimateLabel}: Unavailable. ${reasonCopy}`,
   });
 }
 
-export function presentEstimatedEv(
-  input: EstimatedEvPresentationInput,
-): EstimatedEvPresentation {
-  const issues = metricPresentationConsistencyIssues(input);
+export function presentPackScoutEv(
+  input: PackScoutEvPresentationInput,
+): PackScoutEvPresentation {
+  const issues = packScoutMetricConsistencyIssues(input);
   if (issues.length > 0) {
-    if (shouldThrowForConsistencyIssue()) {
+    if (process.env.NODE_ENV !== "production") {
       throw new MetricPresentationConsistencyError(issues);
     }
-    return unavailablePresentation("ESTIMATE_INPUT_INCOMPLETE");
+    return unavailablePackScoutPresentation(
+      "ESTIMATE_INPUT_INCOMPLETE",
+      input.repackPrice,
+    );
+  }
+  if (input.estimate.status === "unavailable") {
+    return unavailablePackScoutPresentation(
+      packScoutReason(input.estimate),
+      input.repackPrice,
+    );
   }
 
-  const expectedReason = expectedEstimateUnavailableReason(input);
-  const { packPrice, estimatedEv } = input;
-  if (expectedReason !== null) {
-    const evDollars = unavailableMetric("EV $", "evDollars", expectedReason);
-    const evPercent = unavailableMetric("EV %", "evPercent", expectedReason);
-    const grossEv =
-      estimatedEv.grossEv.status === "available"
-        ? availableMoneyMetric("Gross EV", "grossEv", estimatedEv.grossEv.value)
-        : unavailableMetric(
-            "Gross EV",
-            "grossEv",
-            estimatedEv.grossEv.reason,
-          );
-    const presentedPackPrice =
-      packPrice.status === "available"
-        ? availableMoneyMetric("Pack Price", "packPrice", packPrice.value)
-        : unavailableMetric("Pack Price", "packPrice", packPrice.reason);
-    const reasonCopy = getPublicReasonCopy(expectedReason);
-    return Object.freeze({
-      availability: "unavailable" as const,
-      semanticState: "unavailable" as const,
-      semanticLabel: "Unavailable" as const,
-      reasonCopy,
-      evDollars,
-      evPercent,
-      grossEv,
-      packPrice: presentedPackPrice,
-      accessibleLabel: `${METRIC_TRUST_COPY.estimateLabel}: Unavailable. ${reasonCopy}`,
-    });
-  }
-
-  if (
-    packPrice.status !== "available" ||
-    estimatedEv.grossEv.status !== "available" ||
-    estimatedEv.evDollars.status !== "available" ||
-    estimatedEv.evPercent.status !== "available"
-  ) {
-    return unavailablePresentation("ESTIMATE_INPUT_INCOMPLETE");
-  }
-
-  const state = semanticStateForSignedBasisPoints(
-    estimatedEv.evPercent.value.basisPoints,
-  );
+  const { metrics, confidence } = input.estimate;
+  const state = semanticStateForSignedBasisPoints(metrics.evPercentBasisPoints);
   const stateLabel = semanticLabel(state);
   const evDollars = availableMoneyMetric(
-    "EV $",
+    "PackScout EV $",
     "evDollars",
-    estimatedEv.evDollars.value,
+    metrics.evDollars,
     { signed: true, state },
   );
   const evPercent = availableMetric(
-    "EV %",
-    formatSignedEvPercent(estimatedEv.evPercent.value.basisPoints),
+    "PackScout EV %",
+    formatSignedEvPercent(metrics.evPercentBasisPoints),
     "evPercent",
     state,
   );
   const grossEv = availableMoneyMetric(
-    "Gross EV",
+    "PackScout Gross EV",
     "grossEv",
-    estimatedEv.grossEv.value,
+    metrics.grossEv,
   );
-  const presentedPackPrice = availableMoneyMetric(
-    "Pack Price",
-    "packPrice",
-    packPrice.value,
-  );
-
+  const repackPrice = input.repackPrice.status === "available"
+    ? availableMoneyMetric(
+        "Repack Price",
+        "repackPrice",
+        input.repackPrice.value,
+      )
+    : unavailableMetric(
+        "Repack Price",
+        "repackPrice",
+        input.repackPrice.reason,
+      );
+  const confidencePresentation = presentPackScoutConfidence(confidence);
   return Object.freeze({
     availability: "available" as const,
     semanticState: state,
@@ -402,28 +349,138 @@ export function presentEstimatedEv(
     evDollars,
     evPercent,
     grossEv,
-    packPrice: presentedPackPrice,
+    repackPrice,
+    confidence: confidencePresentation,
     accessibleLabel: [
       METRIC_TRUST_COPY.estimateLabel,
       stateLabel,
       evPercent.accessibleLabel,
       evDollars.accessibleLabel,
       grossEv.accessibleLabel,
-      presentedPackPrice.accessibleLabel,
+      repackPrice.accessibleLabel,
+      confidencePresentation.accessibleLabel,
     ].join(" "),
   });
 }
 
-export function presentSignedEvPercent(
-  value: PublicEstimatedEv["evPercent"],
-): MetricValuePresentation {
-  if (value.status === "unavailable") {
-    return unavailableMetric("EV %", "evPercent", value.reason);
+export function presentPackScoutConfidence(
+  confidence: Extract<PackScoutEv, { status: "available" }>["confidence"] | null,
+): ConfidencePresentation {
+  if (confidence === null) {
+    return Object.freeze({
+      availability: "unavailable" as const,
+      band: null,
+      displayValue: "Unavailable",
+      accessibleLabel: "PackScout EV confidence: Unavailable.",
+      limitations: Object.freeze([]),
+    });
   }
-  const state = semanticStateForSignedBasisPoints(value.value.basisPoints);
+  const band = confidence.band;
+  const score = formatBasisPoints(confidence.scoreBasisPoints, {
+    maximumFractionDigits: 0,
+  });
+  const limitations = presentConfidenceLimitations(confidence.limitationCodes);
+  return Object.freeze({
+    availability: "available" as const,
+    band,
+    displayValue: `${band[0]!.toUpperCase()}${band.slice(1)} · ${score}`,
+    accessibleLabel: [
+      `PackScout EV confidence: ${band}, ${score}.`,
+      "Confidence describes reliability, not return.",
+      ...(limitations.length > 0
+        ? [`Limitations: ${limitations.join(" ")}`]
+        : []),
+    ].join(" "),
+    limitations,
+  });
+}
+
+function vendorReason(estimate: VendorReportedEv): PublicMetricReason {
+  if (estimate.status === "available") return "ESTIMATE_UNAVAILABLE";
+  return estimate.reason;
+}
+
+function vendorComparisonReason(estimate: VendorReportedEv): string {
+  if (estimate.status === "available") return "";
+  if (estimate.reason === "PRICE_UNAVAILABLE") {
+    return "Vendor EV percentage unavailable because the repack price is unavailable.";
+  }
+  if (estimate.reason === "CURRENCY_UNSUPPORTED") {
+    return "Vendor EV percentage unavailable because the reported currency cannot be compared in USD.";
+  }
+  return getPublicReasonCopy(estimate.reason);
+}
+
+export function presentVendorReportedEv(
+  estimate: VendorReportedEv,
+): VendorReportedEvPresentation {
+  if (estimate.status === "unavailable") {
+    const reason = vendorReason(estimate);
+    const reasonCopy = vendorComparisonReason(estimate);
+    const reportedGrossEv = estimate.displayMoney === null
+      ? unavailableMetric(
+          "Vendor-reported Gross EV",
+          "vendorReportedEv",
+          reason,
+        )
+      : availableMoneyMetric(
+          "Vendor-reported Gross EV",
+          "vendorReportedEv",
+          estimate.displayMoney,
+        );
+    const evPercent = unavailableMetric(
+      "Vendor-reported EV %",
+      "vendorReportedEv",
+      reason,
+    );
+    return Object.freeze({
+      availability: "unavailable" as const,
+      reasonCopy,
+      evPercent,
+      reportedGrossEv,
+      observedAt: estimate.observedAt,
+      accessibleLabel: `Vendor-reported EV. ${reportedGrossEv.accessibleLabel} ${evPercent.accessibleLabel} ${reasonCopy}`,
+    });
+  }
+  const state = semanticStateForSignedBasisPoints(
+    estimate.metrics.evPercentBasisPoints,
+  );
+  const evPercent = availableMetric(
+    "Vendor-reported EV %",
+    formatSignedEvPercent(estimate.metrics.evPercentBasisPoints),
+    "vendorReportedEv",
+    state,
+  );
+  const reportedGrossEv = availableMoneyMetric(
+    "Vendor-reported Gross EV",
+    "vendorReportedEv",
+    estimate.displayMoney,
+  );
+  return Object.freeze({
+    availability: "available" as const,
+    evPercent,
+    reportedGrossEv,
+    observedAt: estimate.observedAt,
+    accessibleLabel: `Vendor-reported EV. ${reportedGrossEv.accessibleLabel} ${evPercent.accessibleLabel}`,
+  });
+}
+
+export function presentPackScoutEvPercent(
+  estimate: PackScoutEv,
+): MetricValuePresentation {
+  if (estimate.status === "unavailable") {
+    return unavailableMetric(
+      "PackScout EV %",
+      "evPercent",
+      estimate.reason,
+    );
+  }
+  const state = semanticStateForSignedBasisPoints(
+    estimate.metrics.evPercentBasisPoints,
+  );
   return availableMetric(
-    "EV %",
-    formatSignedEvPercent(value.value.basisPoints),
+    "PackScout EV %",
+    formatSignedEvPercent(estimate.metrics.evPercentBasisPoints),
     "evPercent",
     state,
   );
@@ -446,25 +503,27 @@ export function presentBuyback(
 }
 
 export function presentTopChaseValue(
-  topChase: PublicTopChaseSummary,
+  topChase: PublicRepackChase | null,
+  label: "Top Chase Value" | "Desired Chase Value" = "Top Chase Value",
 ): MetricValuePresentation {
-  if (topChase.status === "unavailable") {
+  const valuation = topChase?.collectible.valuation;
+  if (valuation === null || valuation === undefined) {
     return unavailableMetric(
-      "Top Chase Value",
+      label,
       "topChaseValue",
-      topChase.reason,
+      "VALUATION_UNAVAILABLE",
     );
   }
-  if (topChase.value.usdComparison.status === "unavailable") {
+  if (valuation.usdComparison.status === "unavailable") {
     return unavailableMetric(
-      "Top Chase Value",
+      label,
       "topChaseValue",
-      topChase.value.usdComparison.reason,
+      valuation.usdComparison.reason,
     );
   }
   return availableMoneyMetric(
-    "Top Chase Value",
+    label,
     "topChaseValue",
-    topChase.value.usdComparison.value,
+    valuation.usdComparison.value,
   );
 }

@@ -13,9 +13,9 @@ const NOW = Date.parse("2026-08-11T20:00:00.000Z");
 const PACK_ID = "beab33e4-20cf-5c41-9d31-2e616a34c113";
 
 const VALID_EVENT = {
-  schemaVersion: "anonymous-product-event-v1",
+  schemaVersion: "anonymous-product-event-v2",
   eventId: "5e1b8a78-1577-4abc-8e26-495e2e5fdabc",
-  snapshotVersion: "snapshot:v1",
+  publicReleaseId: "20000000-0000-4000-8000-000000000002",
   occurredAt: "2026-08-11T19:59:00.000Z",
   name: "dashboard_view",
   surface: "overview",
@@ -140,7 +140,7 @@ test("rejects malformed JSON, arrays, unknown keys, and invalid event time", asy
     JSON.stringify({ ...VALID_EVENT, q: "query-sentinel" }),
     JSON.stringify({ ...VALID_EVENT, occurredAt: "2026-08-11T19:54:59.999Z" }),
     JSON.stringify({ ...VALID_EVENT, occurredAt: "2026-08-11T20:01:00.001Z" }),
-    JSON.stringify({ ...VALID_EVENT, publicPackId: PACK_ID }),
+    JSON.stringify({ ...VALID_EVENT, publicRepackId: PACK_ID }),
   ];
   for (const body of bodies) {
     const response = await handler()(request(body));
@@ -165,7 +165,7 @@ test("rejects invalid UTF-8 before JSON parsing", async () => {
   assert.equal((await responseBody(response)).code, "INVALID_EVENT");
 });
 
-test("requires published snapshot and subject context without leaking details", async () => {
+test("requires a published release and subject context without leaking details", async () => {
   const response = await handler({ context: "invalid" })(request());
   assert.equal(response.status, 400);
   assert.deepEqual(await responseBody(response), {
@@ -177,11 +177,11 @@ test("requires published snapshot and subject context without leaking details", 
   const subjectEvent = {
     schemaVersion: VALID_EVENT.schemaVersion,
     eventId: VALID_EVENT.eventId,
-    snapshotVersion: VALID_EVENT.snapshotVersion,
+    publicReleaseId: VALID_EVENT.publicReleaseId,
     occurredAt: VALID_EVENT.occurredAt,
     name: "promo_copied",
-    publicPackId: PACK_ID,
-    platformKey: "collector_crypt",
+    publicRepackId: PACK_ID,
+    vendorKey: "collector_crypt",
     outcome: "clipboard",
   };
   const accepted = await handler()(request(JSON.stringify(subjectEvent)));

@@ -1,15 +1,24 @@
-import type { PublicAvailabilityReason } from "@packscout/contracts";
-
 export const EXPECTED_VALUE_ARTICLE_HREF = "/learn/expected-value" as const;
 
+export type PublicMetricReason =
+  | "PRICE_UNAVAILABLE"
+  | "CURRENCY_UNSUPPORTED"
+  | "ESTIMATE_INPUT_INCOMPLETE"
+  | "ESTIMATE_UNAVAILABLE"
+  | "BUYBACK_UNAVAILABLE"
+  | "VALUATION_UNAVAILABLE"
+  | "NOT_REPORTED";
+
 export const METRIC_TRUST_COPY = Object.freeze({
-  dashboardDisclaimer: "Estimated EV · Not financial advice.",
-  estimateLabel: "PackScout Estimated EV",
+  dashboardDisclaimer: "PackScout EV · Estimated · Not financial advice.",
+  estimateLabel: "PackScout EV",
   financialDisclaimer: "Not financial advice.",
   longRunExplanation:
-    "EV is a long-run estimate. It does not predict the contents or outcome of one pack.",
+    "EV is a long-run estimate. It does not predict the contents or outcome of one repack.",
   sourceExplanation:
-    "Provider-reported values and PackScout estimates are different sources.",
+    "Vendor-reported EV and PackScout EV are separate estimates and are never averaged.",
+  confidenceExplanation:
+    "Confidence describes the reliability of PackScout's estimate, not whether its EV is positive or negative.",
   unavailableExplanation:
     "Unavailable means PackScout does not have enough supported evidence to show the value.",
 });
@@ -17,26 +26,31 @@ export const METRIC_TRUST_COPY = Object.freeze({
 export const PUBLIC_REASON_COPY = Object.freeze({
   ESTIMATE_INPUT_INCOMPLETE:
     "Estimate unavailable: supported evidence is incomplete.",
-  PRICE_UNAVAILABLE: "Estimate unavailable: pack price is unavailable.",
+  PRICE_UNAVAILABLE: "Estimate unavailable: repack price is unavailable.",
   CURRENCY_UNSUPPORTED: "Estimate unavailable: currency is not supported.",
+  ESTIMATE_UNAVAILABLE: "Estimate unavailable.",
   BUYBACK_UNAVAILABLE:
     "Buyback unavailable: supported coverage is not available.",
-  CHASE_UNAVAILABLE: "Top chase value unavailable.",
-} satisfies Readonly<Record<PublicAvailabilityReason, string>>);
+  VALUATION_UNAVAILABLE: "Collectible value unavailable.",
+  NOT_REPORTED: "The vendor has not reported an EV estimate.",
+} satisfies Readonly<Record<PublicMetricReason, string>>);
 
 export type GlossaryFieldKey =
-  | "platform"
+  | "vendor"
   | "category"
-  | "pack"
-  | "packPrice"
+  | "repack"
+  | "heat"
+  | "repackPrice"
   | "evDollars"
   | "evPercent"
+  | "evConfidence"
+  | "vendorReportedEv"
   | "buybackPercent"
   | "grossEv"
   | "topChase"
   | "topChaseValue"
   | "promoCode"
-  | "packLink";
+  | "repackLink";
 
 export type GlossaryDefinition = Readonly<{
   key: GlossaryFieldKey;
@@ -48,33 +62,40 @@ export type GlossaryDefinition = Readonly<{
 
 export const COMPARISON_GLOSSARY = Object.freeze([
   {
-    key: "platform",
-    label: "Platform",
-    definition: "The marketplace or provider offering the pack",
+    key: "vendor",
+    label: "Vendor",
+    definition: "The vendor offering the repack",
     enabledByDefault: true,
   },
   {
     key: "category",
     label: "Category",
-    definition: "The collectible family represented by the pack",
+    definition: "A subject branch represented by the repack",
     enabledByDefault: true,
   },
   {
-    key: "pack",
-    label: "Pack",
-    definition: "The provider’s public listing name",
+    key: "repack",
+    label: "Repack",
+    definition: "The vendor’s public repack or gacha listing name",
     enabledByDefault: true,
   },
   {
-    key: "packPrice",
-    label: "Pack Price",
-    definition: "The amount charged to open or buy the pack",
+    key: "heat",
+    label: "Heat",
+    definition:
+      "A timing signal comparing recent activity with this repack’s own baseline. Heat does not mean profit, positive EV, or a predicted outcome.",
+    enabledByDefault: true,
+  },
+  {
+    key: "repackPrice",
+    label: "Repack Price",
+    definition: "The amount charged to open or buy the repack",
     enabledByDefault: true,
   },
   {
     key: "evDollars",
     label: "EV $",
-    definition: "PackScout Gross EV minus Pack Price",
+    definition: "PackScout Gross EV minus Repack Price",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -82,7 +103,23 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "evPercent",
     label: "EV %",
     definition:
-      "The percentage PackScout Gross EV is above or below Pack Price",
+      "The percentage PackScout Gross EV is above or below Repack Price",
+    enabledByDefault: true,
+    learnHref: EXPECTED_VALUE_ARTICLE_HREF,
+  },
+  {
+    key: "evConfidence",
+    label: "EV Confidence",
+    definition:
+      "How reliable PackScout considers its EV estimate based on supported evidence; it does not indicate whether EV is positive",
+    enabledByDefault: true,
+    learnHref: EXPECTED_VALUE_ARTICLE_HREF,
+  },
+  {
+    key: "vendorReportedEv",
+    label: "Vendor-reported EV",
+    definition:
+      "An EV estimate reported by the vendor and kept separate from PackScout EV",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -90,7 +127,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "buybackPercent",
     label: "Buyback %",
     definition:
-      "Provider-supported buyback coverage relative to Pack Price, supplied directly or derived from documented provider terms",
+      "Vendor-supported buyback coverage relative to Repack Price, reported directly or derived by PackScout from documented terms",
     enabledByDefault: true,
   },
   {
@@ -118,13 +155,13 @@ export const COMPARISON_GLOSSARY = Object.freeze([
   {
     key: "promoCode",
     label: "Promo Code",
-    definition: "A public platform-approved code available to copy",
+    definition: "A public vendor-approved code available to copy",
     enabledByDefault: true,
   },
   {
-    key: "packLink",
-    label: "Pack Link",
-    definition: "The tracked outbound link to the provider listing",
+    key: "repackLink",
+    label: "Repack Link",
+    definition: "The tracked outbound link to the vendor listing",
     enabledByDefault: true,
   },
 ] as const satisfies readonly GlossaryDefinition[]);
@@ -144,7 +181,7 @@ export function getGlossaryDefinition(
 }
 
 export function getPublicReasonCopy(
-  reason: PublicAvailabilityReason,
+  reason: PublicMetricReason,
 ): string {
   return PUBLIC_REASON_COPY[reason];
 }

@@ -77,7 +77,7 @@ export function StablePlaceholder({
 export function CatalogLoading({
   surface = "overview",
 }: {
-  surface?: "overview" | "all-packs";
+  surface?: "overview" | "all-repacks";
 }) {
   return (
     <section

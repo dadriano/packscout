@@ -27,7 +27,7 @@ test("keeps exactly three version-controlled guides in the approved order", () =
         slug: "expected-value",
         title: "What is Expected Value (EV)?",
         description:
-          "How PackScout estimates long-run value and why one result can differ.",
+          "How vendor-reported EV, PackScout EV, and confidence support informed comparisons.",
       },
       {
         slug: "repack-red-flags",
@@ -55,19 +55,19 @@ test("uses the shared Dashboard vocabulary for Expected Value education", () => 
       {
         key: "evDollars",
         label: "EV $",
-        definition: "PackScout Gross EV minus Pack Price",
+        definition: "PackScout Gross EV minus Repack Price",
       },
       {
         key: "evPercent",
         label: "EV %",
         definition:
-          "The percentage PackScout Gross EV is above or below Pack Price",
+          "The percentage PackScout Gross EV is above or below Repack Price",
       },
       {
         key: "buybackPercent",
         label: "Buyback %",
         definition:
-          "Provider-supported buyback coverage relative to Pack Price, supplied directly or derived from documented provider terms",
+          "Vendor-supported buyback coverage relative to Repack Price, reported directly or derived by PackScout from documented terms",
       },
       {
         key: "topChase",
@@ -83,6 +83,8 @@ test("uses the shared Dashboard vocabulary for Expected Value education", () => 
   const evCopy = JSON.stringify(evGuide);
   assert.match(evCopy, /long-run estimate/i);
   assert.ok(evCopy.includes(METRIC_TRUST_COPY.longRunExplanation));
+  assert.ok(evCopy.includes(METRIC_TRUST_COPY.sourceExplanation));
+  assert.ok(evCopy.includes(METRIC_TRUST_COPY.confidenceExplanation));
   assert.ok(evCopy.includes(METRIC_TRUST_COPY.unavailableExplanation));
   assert.equal(evGuide.relatedLink.href, "/");
 });

@@ -1,7 +1,8 @@
 import type {
-  PublicEstimatedEv,
-  PublicTopChaseDetail,
-  SnapshotMetadata,
+  DataReleaseMetadata,
+  PackScoutEv,
+  PublicRepackChase,
+  PublicRepackSummary,
 } from "@packscout/contracts";
 import {
   formatBasisPoints,
@@ -22,17 +23,19 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
 export type TopChasePresentation =
   | Readonly<{
       availability: "available";
+      valueAvailability: "available" | "unavailable";
       name: string;
       displayValue: string;
       accessibleLabel: string;
-      image: NonNullable<
-        Extract<PublicTopChaseDetail, { status: "available" }>["value"]["primaryImage"]
-      > | null;
+      image: PublicRepackChase["collectible"]["primaryImage"];
       observedAt: string;
+      evidenceLabel: string;
+      matchConfidenceLabel: string;
+      reasonCopy?: string;
     }>
   | Readonly<{
       availability: "unavailable";
-      name: "Top chase unavailable";
+      name: string;
       displayValue: "Unavailable";
       accessibleLabel: string;
       image: null;
@@ -44,78 +47,124 @@ export function formatPublicTimestamp(timestamp: string): string {
 }
 
 export function presentEstimateTiming(
-  estimatedEv: Pick<PublicEstimatedEv, "calculatedAt">,
-  metadata: SnapshotMetadata,
+  estimate: PackScoutEv,
+  metadata: DataReleaseMetadata,
 ): Readonly<{
   calculatedLabel: string;
   calculatedAt: string | null;
-  snapshotLabel: string;
+  releaseLabel: string;
   dataAsOf: string;
 }> {
   return Object.freeze({
     calculatedLabel:
-      estimatedEv.calculatedAt === null
+      estimate.calculatedAt === null
         ? "Estimate date unavailable"
-        : `Estimate as of ${formatPublicTimestamp(estimatedEv.calculatedAt)}`,
-    calculatedAt: estimatedEv.calculatedAt,
-    snapshotLabel: `Catalog data as of ${formatPublicTimestamp(metadata.dataAsOf)}`,
+        : `PackScout EV calculated ${formatPublicTimestamp(estimate.calculatedAt)}`,
+    calculatedAt: estimate.calculatedAt,
+    releaseLabel: `Repack data as of ${formatPublicTimestamp(metadata.dataAsOf)}`,
     dataAsOf: metadata.dataAsOf,
   });
 }
 
 export function presentEstimateCoverage(
-  coverage: PublicEstimatedEv["coverage"],
+  contentSummary: PublicRepackSummary["contentSummary"],
 ): string {
-  if (coverage.probabilityCoverageBasisPoints === null) {
-    return coverage.evidenceCompleteness === "unknown"
+  if (contentSummary.probabilityCoverageBasisPoints === null) {
+    return contentSummary.evidenceCompleteness === "unknown"
       ? "Supported evidence coverage is unavailable."
       : "Supported evidence coverage is not quantified.";
   }
   const coverageLabel = formatBasisPoints(
-    coverage.probabilityCoverageBasisPoints,
+    contentSummary.probabilityCoverageBasisPoints,
     { minimumFractionDigits: 0, maximumFractionDigits: 2 },
   );
-  if (coverage.evidenceCompleteness === "complete") {
+  if (contentSummary.evidenceCompleteness === "complete") {
     return `Supported evidence covers ${coverageLabel} of modeled outcomes.`;
   }
-  if (coverage.evidenceCompleteness === "partial") {
+  if (contentSummary.evidenceCompleteness === "partial") {
     return `Supported evidence covers ${coverageLabel} of modeled outcomes; some evidence is incomplete.`;
   }
   return `Supported evidence coverage is ${coverageLabel}; completeness is unknown.`;
 }
 
+export function presentVendorReportedObservation(
+  observedAt: string | null,
+): Readonly<{ label: string; observedAt: string }> | null {
+  if (observedAt === null) return null;
+  return Object.freeze({
+    label: `Vendor EV observed ${formatPublicTimestamp(observedAt)}`,
+    observedAt,
+  });
+}
+
+export function presentChaseMatchEvidence(
+  chase: PublicRepackChase,
+): Readonly<{
+  evidenceLabel: string;
+  matchConfidenceLabel: string;
+  accessibleLabel: string;
+}> {
+  let label: string;
+  if (
+    chase.evidenceKinds.includes("vendor_inventory") ||
+    chase.evidenceKinds.includes("vendor_odds") ||
+    chase.evidenceKinds.includes("vendor_featured_chase")
+  ) {
+    label = "Confirmed by vendor evidence";
+  } else if (chase.evidenceKinds.includes("historical_pull_inference")) {
+    label = "Inferred from historical pulls";
+  } else if (chase.evidenceKinds.includes("packscout_resolved")) {
+    label = "Resolved by PackScout";
+  } else {
+    label = "Possible match based on name evidence";
+  }
+  const matchConfidenceLabel = `${chase.matchConfidence.band} chase-match confidence`;
+  return Object.freeze({
+    evidenceLabel: label,
+    matchConfidenceLabel,
+    accessibleLabel: `${label}. ${matchConfidenceLabel}.`,
+  });
+}
+
 export function presentTopChase(
-  topChase: PublicTopChaseDetail,
+  topChase: PublicRepackChase | null,
+  label = "Top chase",
+  valueLabel = "Top Chase Value",
 ): TopChasePresentation {
-  if (topChase.status === "unavailable") {
-    const reasonCopy = getPublicReasonCopy(topChase.reason);
+  const valuation = topChase?.collectible.valuation;
+  const money = valuation?.displayMoney ??
+    (valuation?.usdComparison.status === "available"
+      ? valuation.usdComparison.value
+      : null);
+  if (topChase === null) {
+    const reasonCopy = getPublicReasonCopy("VALUATION_UNAVAILABLE");
     return Object.freeze({
       availability: "unavailable" as const,
-      name: "Top chase unavailable" as const,
+      name: `${label} unavailable`,
       displayValue: "Unavailable" as const,
-      accessibleLabel: `Top chase unavailable. ${reasonCopy}`,
+      accessibleLabel: `${label} unavailable. ${reasonCopy}`,
       image: null,
       reasonCopy,
     });
   }
 
-  const value = topChase.value;
-  const money =
-    value.displayMoney ??
-    (value.usdComparison.status === "available"
-      ? value.usdComparison.value
-      : null);
-  if (!money) {
-    const reasonCopy =
-      value.usdComparison.status === "unavailable"
-        ? getPublicReasonCopy(value.usdComparison.reason)
-        : getPublicReasonCopy("CHASE_UNAVAILABLE");
+  const match = presentChaseMatchEvidence(topChase);
+  if (money === null) {
+    const reasonCopy = getPublicReasonCopy(
+      valuation?.usdComparison.status === "unavailable"
+        ? valuation.usdComparison.reason
+        : "VALUATION_UNAVAILABLE",
+    );
     return Object.freeze({
-      availability: "unavailable" as const,
-      name: "Top chase unavailable" as const,
+      availability: "available" as const,
+      valueAvailability: "unavailable" as const,
+      name: topChase.collectible.name,
       displayValue: "Unavailable" as const,
-      accessibleLabel: `Top chase unavailable. ${reasonCopy}`,
-      image: null,
+      accessibleLabel: `${label}: ${topChase.collectible.name}. ${valueLabel}: Unavailable. ${reasonCopy} ${match.accessibleLabel}`,
+      image: topChase.collectible.primaryImage,
+      observedAt: topChase.observedAt,
+      evidenceLabel: match.evidenceLabel,
+      matchConfidenceLabel: match.matchConfidenceLabel,
       reasonCopy,
     });
   }
@@ -123,10 +172,13 @@ export function presentTopChase(
   const displayValue = formatMoneyMinorUnits(money);
   return Object.freeze({
     availability: "available" as const,
-    name: value.name,
+    valueAvailability: "available" as const,
+    name: topChase.collectible.name,
     displayValue,
-    accessibleLabel: `Top chase: ${value.name}. Supported representative value ${displayValue}.`,
-    image: value.primaryImage,
-    observedAt: value.observedAt,
+    accessibleLabel: `${label}: ${topChase.collectible.name}. ${valueLabel}: ${displayValue}. ${match.accessibleLabel}`,
+    image: topChase.collectible.primaryImage,
+    observedAt: topChase.observedAt,
+    evidenceLabel: match.evidenceLabel,
+    matchConfidenceLabel: match.matchConfidenceLabel,
   });
 }

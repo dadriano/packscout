@@ -18,12 +18,12 @@ export type TelemetryTransport = Readonly<{
   fetch?: typeof fetch;
 }>;
 
-function eventBase(snapshotVersion: string) {
+function eventBase(publicReleaseId: string) {
   try {
     return {
       schemaVersion: TELEMETRY_SCHEMA_VERSION,
       eventId: globalThis.crypto.randomUUID(),
-      snapshotVersion,
+      publicReleaseId,
       occurredAt: new Date().toISOString(),
     } as const;
   } catch {
@@ -33,7 +33,7 @@ function eventBase(snapshotVersion: string) {
 
 export function queryLengthBucket(
   length: number,
-): EventNamed<"catalog_search">["queryLengthBucket"] | null {
+): EventNamed<"repack_search">["queryLengthBucket"] | null {
   if (!Number.isSafeInteger(length) || length < 1 || length > 120) return null;
   if (length <= 20) return "1-20";
   if (length <= 60) return "21-60";
@@ -42,7 +42,7 @@ export function queryLengthBucket(
 
 export function resultCountBucket(
   count: number,
-): EventNamed<"catalog_search">["resultCountBucket"] | null {
+): EventNamed<"repack_search">["resultCountBucket"] | null {
   if (!Number.isSafeInteger(count) || count < 0) return null;
   if (count === 0) return "0";
   if (count <= 25) return "1-25";
@@ -51,29 +51,29 @@ export function resultCountBucket(
 }
 
 export function createDashboardViewEvent(input: Readonly<{
-  snapshotVersion: string;
+  publicReleaseId: string;
   surface: EventNamed<"dashboard_view">["surface"];
 }>): EventNamed<"dashboard_view"> | null {
-  const base = eventBase(input.snapshotVersion);
+  const base = eventBase(input.publicReleaseId);
   return base
     ? { ...base, name: "dashboard_view", surface: input.surface, outcome: "rendered" }
     : null;
 }
 
-export function createCatalogSearchEvent(input: Readonly<{
-  snapshotVersion: string;
+export function createRepackSearchEvent(input: Readonly<{
+  publicReleaseId: string;
   queryLength: number;
   resultCount: number;
-  outcome: EventNamed<"catalog_search">["outcome"];
-}>): EventNamed<"catalog_search"> | null {
-  const base = eventBase(input.snapshotVersion);
+  outcome: EventNamed<"repack_search">["outcome"];
+}>): EventNamed<"repack_search"> | null {
+  const base = eventBase(input.publicReleaseId);
   const queryBucket = queryLengthBucket(input.queryLength);
   const resultBucket = resultCountBucket(input.resultCount);
   return base && queryBucket && resultBucket
     ? {
         ...base,
-        name: "catalog_search",
-        surface: "all_packs",
+        name: "repack_search",
+        surface: "all_repacks",
         outcome: input.outcome,
         queryLengthBucket: queryBucket,
         resultCountBucket: resultBucket,
@@ -82,18 +82,18 @@ export function createCatalogSearchEvent(input: Readonly<{
 }
 
 export function createFiltersAppliedEvent(input: Readonly<{
-  snapshotVersion: string;
+  publicReleaseId: string;
   surface: EventNamed<"filters_applied">["surface"];
   outcome: EventNamed<"filters_applied">["outcome"];
   activeFilterCount: number;
   resultCount: number;
 }>): EventNamed<"filters_applied"> | null {
-  const base = eventBase(input.snapshotVersion);
+  const base = eventBase(input.publicReleaseId);
   const resultBucket = resultCountBucket(input.resultCount);
   if (
     !base ||
     !resultBucket ||
-    ![0, 1, 2, 3].includes(input.activeFilterCount)
+    ![0, 1, 2, 3, 4].includes(input.activeFilterCount)
   ) {
     return null;
   }
@@ -102,29 +102,29 @@ export function createFiltersAppliedEvent(input: Readonly<{
     name: "filters_applied",
     surface: input.surface,
     outcome: input.outcome,
-    activeFilterCount: input.activeFilterCount as 0 | 1 | 2 | 3,
+    activeFilterCount: input.activeFilterCount as 0 | 1 | 2 | 3 | 4,
     resultCountBucket: resultBucket,
   };
 }
 
 export function createPromoCopiedEvent(input: Readonly<{
-  snapshotVersion: string;
-  publicPackId: string;
-  platformKey: string;
+  publicReleaseId: string;
+  publicRepackId: string;
+  vendorKey: string;
   outcome: EventNamed<"promo_copied">["outcome"];
 }>): EventNamed<"promo_copied"> | null {
-  const base = eventBase(input.snapshotVersion);
+  const base = eventBase(input.publicReleaseId);
   return base ? { ...base, name: "promo_copied", ...input } : null;
 }
 
-export function createPackLinkOpenedEvent(input: Readonly<{
-  snapshotVersion: string;
-  publicPackId: string;
-  platformKey: string;
-  outcome: EventNamed<"pack_link_opened">["outcome"];
-}>): EventNamed<"pack_link_opened"> | null {
-  const base = eventBase(input.snapshotVersion);
-  return base ? { ...base, name: "pack_link_opened", ...input } : null;
+export function createRepackLinkOpenedEvent(input: Readonly<{
+  publicReleaseId: string;
+  publicRepackId: string;
+  vendorKey: string;
+  outcome: EventNamed<"repack_link_opened">["outcome"];
+}>): EventNamed<"repack_link_opened"> | null {
+  const base = eventBase(input.publicReleaseId);
+  return base ? { ...base, name: "repack_link_opened", ...input } : null;
 }
 
 export function createPublicReadFailureBeacon(

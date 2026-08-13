@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readLocalConvexConfiguration } from "./seed-convex-mock-catalog.mjs";
+import { readLocalConvexConfiguration } from "./seed-convex-mock-data-release.mjs";
 import { waitForLoopbackService } from "./start-frontend-with-convex-mock.mjs";
 
 const repositoryRoot = path.resolve(

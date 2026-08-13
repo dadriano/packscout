@@ -88,7 +88,7 @@ function CatalogSearchForm({ initialQuery }: { initialQuery: string }) {
       <div className="catalog-search__control">
         <SearchIcon />
         <label className="catalog-search__label" htmlFor="global-catalog-search">
-          Search packs
+          Search repacks
         </label>
         <input
           aria-keyshortcuts="Meta+K Control+K"
@@ -98,7 +98,7 @@ function CatalogSearchForm({ initialQuery }: { initialQuery: string }) {
           maxLength={120}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={handleFieldKeyDown}
-          placeholder="Search packs, platforms, categories…"
+        placeholder="Search repacks, vendors, categories…"
           ref={fieldRef}
           type="search"
           value={query}
@@ -111,7 +111,7 @@ function CatalogSearchForm({ initialQuery }: { initialQuery: string }) {
         Search catalog
       </button>
       <span className="sr-only" aria-live="polite">
-        {isPending ? "Opening All Packs results" : ""}
+        {isPending ? "Opening All Repacks results" : ""}
       </span>
     </form>
   );

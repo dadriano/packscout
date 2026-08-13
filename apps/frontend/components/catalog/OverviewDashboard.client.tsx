@@ -7,7 +7,7 @@ import { CatalogSummaries } from "./CatalogSummaries";
 import { OpportunityTable } from "./OpportunityTable.client";
 import { OverviewKpis } from "./OverviewKpis";
 import {
-  PackInspector,
+  RepackInspector,
   type InspectorActionOutcome,
 } from "./PackInspector.client";
 import { resolveOverviewSelection } from "./overview-presentation";
@@ -16,7 +16,7 @@ import styles from "./OverviewDashboard.module.css";
 type OverviewDashboardProps = Readonly<{
   bundle: DashboardBundle;
   controls?: ReactNode;
-  selectedPublicPackId?: string | null;
+  selectedPublicRepackId?: string | null;
   inspectorPlacement?: "side" | "preview" | "sheet";
   inspectorOpen?: boolean;
   clipboardWriter?: ClipboardWriter | null;
@@ -24,7 +24,7 @@ type OverviewDashboardProps = Readonly<{
   onCloseInspector?: () => void;
   onInspectorAction?: (outcome: InspectorActionOutcome) => void;
   onSelectOpportunity: (
-    publicPackId: string,
+    publicRepackId: string,
     trigger: HTMLButtonElement,
   ) => void;
 }>;
@@ -32,7 +32,7 @@ type OverviewDashboardProps = Readonly<{
 export function OverviewDashboard({
   bundle,
   controls,
-  selectedPublicPackId,
+  selectedPublicRepackId,
   inspectorPlacement = "side",
   inspectorOpen = true,
   clipboardWriter,
@@ -43,27 +43,27 @@ export function OverviewDashboard({
 }: OverviewDashboardProps) {
   const selectedId = resolveOverviewSelection(
     bundle.opportunities,
-    selectedPublicPackId ?? bundle.selectedPack?.publicPackId,
+    selectedPublicRepackId ?? bundle.selectedRepack?.publicRepackId,
   );
-  const selectedPack =
-    bundle.selectedPack?.publicPackId === selectedId
-      ? bundle.selectedPack
+  const selectedRepack =
+    bundle.selectedRepack?.publicRepackId === selectedId
+      ? bundle.selectedRepack
       : null;
 
   return (
-    <section aria-label="PackScout catalog overview" className={styles.workspace}>
+    <section aria-label="PackScout repack overview" className={styles.workspace}>
       <div className={styles.resultsColumn}>
         <OverviewKpis kpis={bundle.kpis} />
         {controls ? <div className={styles.controls}>{controls}</div> : null}
         <OpportunityTable
           onSelectOpportunity={onSelectOpportunity}
           opportunities={bundle.opportunities}
-          selectedPublicPackId={selectedId}
+          selectedPublicRepackId={selectedId}
         />
         <div className={styles.summaryGrid}>
           <CatalogSummaries
-            summaries={bundle.platformSummaries}
-            title="By platform"
+            summaries={bundle.vendorSummaries}
+            title="By vendor"
           />
           <CatalogSummaries
             summaries={bundle.categorySummaries}
@@ -73,22 +73,22 @@ export function OverviewDashboard({
       </div>
 
       <div className={styles.inspectorColumn}>
-        {!inspectorOpen ? null : selectedPack ? (
-          <PackInspector
+        {!inspectorOpen ? null : selectedRepack ? (
+          <RepackInspector
             clipboardWriter={clipboardWriter}
-            key={selectedPack.publicPackId}
+            key={selectedRepack.publicRepackId}
             metadata={bundle.metadata}
             onActionOutcome={onInspectorAction}
             onClose={onCloseInspector}
-            pack={selectedPack}
+            repack={selectedRepack}
             placement={inspectorPlacement}
             returnFocusRef={inspectorReturnFocusRef}
           />
         ) : (
-          <aside aria-label="Pack details" className={styles.pendingInspector}>
+          <aside aria-label="Repack details" className={styles.pendingInspector}>
             <p>
               {selectedId
-                ? "Updating selected pack details…"
+                ? "Updating selected repack details…"
                 : "Select an opportunity to inspect its current evidence."}
             </p>
           </aside>

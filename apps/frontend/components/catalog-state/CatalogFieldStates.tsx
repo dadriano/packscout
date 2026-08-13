@@ -1,13 +1,15 @@
-import type { PublicAvailabilityReason } from "@packscout/contracts";
 import { CatalogImage } from "@/components/catalog/CatalogImage.client";
-import { getPublicReasonCopy } from "@/lib/metric-vocabulary";
+import {
+  getPublicReasonCopy,
+  type PublicMetricReason,
+} from "@/lib/metric-vocabulary";
 import styles from "./CatalogState.module.css";
 
 export function UnavailableValue({
   reason,
   compact = false,
 }: {
-  reason: PublicAvailabilityReason;
+  reason: PublicMetricReason;
   compact?: boolean;
 }) {
   return (
@@ -31,16 +33,16 @@ export function UncategorizedValue() {
   );
 }
 
-export function MissingPackImage({
-  packName,
+export function MissingRepackImage({
+  repackName,
   variant = "thumbnail",
 }: {
-  packName: string;
+  repackName: string;
   variant?: "thumbnail" | "pack";
 }) {
   return (
     <CatalogImage
-      fallbackAlt={packName}
+      fallbackAlt={repackName}
       image={null}
       variant={variant}
     />

@@ -3,7 +3,7 @@ import Link from "next/link";
 export function DashboardPageHeader({
   activeView,
 }: {
-  activeView: "overview" | "all-packs";
+  activeView: "overview" | "all-repacks";
 }) {
   return (
     <div className="page-heading-row">
@@ -22,17 +22,17 @@ export function DashboardPageHeader({
             Overview
           </Link>
           <Link
-            aria-current={activeView === "all-packs" ? "page" : undefined}
-            aria-selected={activeView === "all-packs"}
+            aria-current={activeView === "all-repacks" ? "page" : undefined}
+            aria-selected={activeView === "all-repacks"}
             className="dashboard-tabs__tab"
             href="/packs"
             role="tab"
           >
-            All Packs
+            All Repacks
           </Link>
         </nav>
       </div>
-      <p className="dashboard-disclaimer">Estimated EV · Not financial advice.</p>
+      <p className="dashboard-disclaimer">PackScout EV · Estimated · Not financial advice.</p>
     </div>
   );
 }

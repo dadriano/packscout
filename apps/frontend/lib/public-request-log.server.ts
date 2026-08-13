@@ -15,8 +15,9 @@ export type PublicRequestLogEntry = Readonly<{
   code:
     | "INVALID_QUERY"
     | "CURSOR_EXPIRED"
-    | "SNAPSHOT_UNAVAILABLE"
-    | "PACK_NOT_FOUND"
+    | "RELEASE_UNAVAILABLE"
+    | "REPACK_NOT_FOUND"
+    | "COLLECTIBLE_NOT_FOUND"
     | "TRANSPORT_UNAVAILABLE"
     | "ORIGIN_REJECTED"
     | "UNSUPPORTED_MEDIA"
@@ -26,15 +27,15 @@ export type PublicRequestLogEntry = Readonly<{
     | "RATE_LIMITED"
     | "EVENT_UNAVAILABLE"
     | null;
-  snapshotVersion: string | null;
+  publicReleaseId: string | null;
   retainedPreviousResult: boolean;
 }>;
 
 type PublicRequestLogInput = PublicRequestLogEntry;
 
 const PATHNAME_PATTERN = /^\/(?:[A-Za-z0-9._~-]+\/?)*$/;
-const SNAPSHOT_VERSION_PATTERN =
-  /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
+const PUBLIC_RELEASE_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SOURCES = [
   "server-preload",
   "reactive-client",
@@ -52,8 +53,9 @@ const OUTCOMES = [
 const CODES = [
   "INVALID_QUERY",
   "CURSOR_EXPIRED",
-  "SNAPSHOT_UNAVAILABLE",
-  "PACK_NOT_FOUND",
+  "RELEASE_UNAVAILABLE",
+  "REPACK_NOT_FOUND",
+  "COLLECTIBLE_NOT_FOUND",
   "TRANSPORT_UNAVAILABLE",
   "ORIGIN_REJECTED",
   "UNSUPPORTED_MEDIA",
@@ -76,13 +78,13 @@ export function createPublicRequestLogEntry(
   if (
     keys.length !== 6 ||
     keys.join("|") !==
-      "code|outcome|pathname|retainedPreviousResult|snapshotVersion|source"
+      "code|outcome|pathname|publicReleaseId|retainedPreviousResult|source"
   ) {
     return null;
   }
 
   const pathname = input.pathname;
-  const snapshotVersion = input.snapshotVersion;
+  const publicReleaseId = input.publicReleaseId;
   if (
     typeof pathname !== "string" ||
     pathname.length > 160 ||
@@ -91,9 +93,9 @@ export function createPublicRequestLogEntry(
     !OUTCOMES.includes(input.outcome as (typeof OUTCOMES)[number]) ||
     (input.code !== null &&
       !CODES.includes(input.code as (typeof CODES)[number])) ||
-    (snapshotVersion !== null &&
-      (typeof snapshotVersion !== "string" ||
-        !SNAPSHOT_VERSION_PATTERN.test(snapshotVersion))) ||
+    (publicReleaseId !== null &&
+      (typeof publicReleaseId !== "string" ||
+        !PUBLIC_RELEASE_ID_PATTERN.test(publicReleaseId))) ||
     typeof input.retainedPreviousResult !== "boolean"
   ) {
     return null;
@@ -104,7 +106,7 @@ export function createPublicRequestLogEntry(
     source: input.source,
     outcome: input.outcome,
     code: input.code,
-    snapshotVersion,
+    publicReleaseId,
     retainedPreviousResult: input.retainedPreviousResult,
   } as PublicRequestLogInput);
 }

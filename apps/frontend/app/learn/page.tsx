@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { LearnIndex } from "@/components/learn/LearnIndex";
-import { ShellStatusReporter } from "@/components/shell/SnapshotStatus.client";
+import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
 import { LEARN_GUIDES } from "@/lib/learn-content";
-import { readPublicShellStatus } from "@/lib/public-catalog.server";
-import { snapshotStatusFromPublicResult } from "@/lib/public-shell-status";
+import { readPublicShellStatus } from "@/lib/public-repacks.server";
+import { dataReleaseStatusFromPublicResult } from "@/lib/public-release-status";
 
 export const metadata: Metadata = {
   title: "Learn",
@@ -14,10 +14,10 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function LearnPage() {
-  const status = snapshotStatusFromPublicResult(await readPublicShellStatus());
+  const status = dataReleaseStatusFromPublicResult(await readPublicShellStatus());
   return (
     <>
-      <ShellStatusReporter status={status} />
+      <DataReleaseStatusReporter status={status} />
       <LearnIndex guides={LEARN_GUIDES} />
     </>
   );

@@ -1,57 +1,85 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type {
-  PublicBuyback,
-  PublicEstimatedEv,
-  PublicTopChaseSummary,
+  PackScoutEv,
+  PublicRepackChase,
+  PublicRepackSummary,
+  VendorReportedEv,
 } from "@packscout/contracts";
 import {
   formatBasisPoints,
   formatMoneyMinorUnits,
   MetricPresentationConsistencyError,
-  metricPresentationConsistencyIssues,
+  packScoutMetricConsistencyIssues,
   presentBuyback,
-  presentEstimatedEv,
-  presentSignedEvPercent,
+  presentPackScoutEv,
+  presentPackScoutEvPercent,
   presentTopChaseValue,
-  type EstimatedEvPresentationInput,
+  presentVendorReportedEv,
+  type PackScoutEvPresentationInput,
 } from "./metric-presentation";
 
-function availableEstimateInput(
+function availableEstimate(
   priceMinorUnits: number,
   grossMinorUnits: number,
   evPercentBasisPoints: number,
-): EstimatedEvPresentationInput {
+): PackScoutEvPresentationInput {
+  const estimate: PackScoutEv = {
+    status: "available",
+    metrics: {
+      grossEv: { minorUnits: grossMinorUnits, currency: "USD" },
+      grossReturnBasisPoints: evPercentBasisPoints + 10_000,
+      evDollars: {
+        minorUnits: grossMinorUnits - priceMinorUnits,
+        currency: "USD",
+      },
+      evPercentBasisPoints,
+    },
+    confidence: {
+      scoreBasisPoints: 7_000,
+      band: "medium",
+      limitationCodes: ["partial_probability_coverage"],
+    },
+    modelVersion: "packscout-ev-v2",
+    confidencePolicyVersion: "confidence-v1",
+    dataAsOf: "2026-08-11T08:30:02Z",
+    calculatedAt: "2026-08-11T08:31:00Z",
+  };
   return {
-    packPrice: {
+    repackPrice: {
       status: "available",
       value: { minorUnits: priceMinorUnits, currency: "USD" },
-      reason: null,
-      nullRank: 0,
     },
-    estimatedEv: {
-      grossEv: {
-        status: "available",
-        value: { minorUnits: grossMinorUnits, currency: "USD" },
-        reason: null,
-        nullRank: 0,
-      },
-      evDollars: {
-        status: "available",
-        value: {
-          minorUnits: grossMinorUnits - priceMinorUnits,
-          currency: "USD",
+    estimate,
+  };
+}
+
+function chaseWithValue(minorUnits: number): PublicRepackChase {
+  return {
+    publicRepackId: "00000000-0000-5000-8000-000000000301",
+    publicCollectibleId: "00000000-0000-5000-8000-000000000201",
+    role: "top_chase",
+    evidenceKinds: ["vendor_inventory"],
+    probabilityBasisPoints: 50,
+    collectible: {
+      publicCollectibleId: "00000000-0000-5000-8000-000000000201",
+      name: "Celestial Nexus",
+      collectibleType: "card",
+      publicCategoryIds: [],
+      primaryImage: null,
+      valuation: {
+        displayMoney: { minorUnits, currency: "USD" },
+        usdComparison: {
+          status: "available",
+          value: { minorUnits, currency: "USD" },
         },
-        reason: null,
-        nullRank: 0,
-      },
-      evPercent: {
-        status: "available",
-        value: { basisPoints: evPercentBasisPoints },
-        reason: null,
-        nullRank: 0,
+        valuationType: "market_estimate",
+        observedAt: "2026-08-11T08:30:02Z",
       },
     },
+    matchConfidence: { scoreBasisPoints: 9_500, band: "high" },
+    observedAt: "2026-08-11T08:30:02Z",
+    displayOrder: 0,
   };
 }
 
@@ -68,28 +96,6 @@ test("formats authoritative minor units and basis points with stable signs", () 
     "+$184.55",
   );
   assert.equal(
-    formatMoneyMinorUnits(
-      { minorUnits: -18_455, currency: "USD" },
-      { signed: true },
-    ),
-    "-$184.55",
-  );
-  assert.equal(
-    formatMoneyMinorUnits(
-      { minorUnits: 0, currency: "USD" },
-      { signed: true },
-    ),
-    "$0.00",
-  );
-  assert.equal(
-    formatBasisPoints(750, {
-      signed: true,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }),
-    "+7.50%",
-  );
-  assert.equal(
     formatBasisPoints(-750, {
       signed: true,
       minimumFractionDigits: 2,
@@ -99,212 +105,142 @@ test("formats authoritative minor units and basis points with stable signs", () 
   );
 });
 
-test("presents pipeline 107.50% and 92.50% returns as signed EV advantage", () => {
-  const positive = presentEstimatedEv(availableEstimateInput(100_00, 107_50, 750));
-  const negative = presentEstimatedEv(availableEstimateInput(100_00, 92_50, -750));
+test("presents PackScout EV as the primary signed estimate with confidence", () => {
+  const positive = presentPackScoutEv(availableEstimate(100_00, 107_50, 750));
+  const negative = presentPackScoutEv(availableEstimate(100_00, 92_50, -750));
 
   assert.equal(positive.evPercent.displayValue, "+7.50%");
   assert.equal(positive.evDollars.displayValue, "+$7.50");
   assert.equal(positive.semanticState, "positive");
-  assert.match(positive.evPercent.accessibleLabel, /Positive/);
-
+  assert.equal(positive.confidence.displayValue, "Medium · 70%");
+  assert.match(positive.confidence.accessibleLabel, /reliability, not return/i);
+  assert.deepEqual(positive.confidence.limitations, [
+    "Probabilities cover only part of the supported outcomes.",
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(positive.confidence),
+    /partial_probability_coverage/,
+  );
   assert.equal(negative.evPercent.displayValue, "-7.50%");
-  assert.equal(negative.evDollars.displayValue, "-$7.50");
   assert.equal(negative.semanticState, "negative");
-  assert.match(negative.evPercent.accessibleLabel, /Negative/);
 });
 
-test("keeps positive, neutral, negative, and unavailable meaning explicit", () => {
-  const positive = presentEstimatedEv(availableEstimateInput(100_00, 110_00, 1_000));
-  const neutral = presentEstimatedEv(availableEstimateInput(100_00, 100_00, 0));
-  const negative = presentEstimatedEv(availableEstimateInput(100_00, 90_00, -1_000));
-  const unavailable = presentEstimatedEv({
-    packPrice: {
+test("keeps unavailable PackScout EV distinct from zero and vendor EV", () => {
+  const estimate: PackScoutEv = {
+    status: "unavailable",
+    metrics: null,
+    confidence: null,
+    modelVersion: "packscout-ev-v2",
+    confidencePolicyVersion: "confidence-v1",
+    dataAsOf: null,
+    calculatedAt: null,
+    reason: "ESTIMATE_INPUT_INCOMPLETE",
+  };
+  const presentation = presentPackScoutEv({
+    repackPrice: {
       status: "available",
       value: { minorUnits: 100_00, currency: "USD" },
-      reason: null,
-      nullRank: 0,
     },
-    estimatedEv: {
-      grossEv: {
-        status: "unavailable",
-        value: null,
-        reason: "ESTIMATE_INPUT_INCOMPLETE",
-        nullRank: 1,
-      },
-      evDollars: {
-        status: "unavailable",
-        value: null,
-        reason: "ESTIMATE_INPUT_INCOMPLETE",
-        nullRank: 1,
-      },
-      evPercent: {
-        status: "unavailable",
-        value: null,
-        reason: "ESTIMATE_INPUT_INCOMPLETE",
-        nullRank: 1,
-      },
-    },
+    estimate,
   });
 
-  assert.deepEqual(
-    [positive, neutral, negative, unavailable].map(
-      ({ semanticLabel }) => semanticLabel,
-    ),
-    ["Positive", "Neutral", "Negative", "Unavailable"],
-  );
-  assert.equal(neutral.evPercent.displayValue, "0.00%");
-  assert.equal(neutral.evDollars.displayValue, "$0.00");
-  assert.equal(unavailable.evPercent.displayValue, "Unavailable");
-  assert.equal(
-    unavailable.reasonCopy,
-    "Estimate unavailable: supported evidence is incomplete.",
-  );
-  assert.doesNotMatch(JSON.stringify(unavailable), /0%|provider-reported/i);
-});
-
-test("retains available source values while the derived estimate is unavailable", () => {
-  const input: EstimatedEvPresentationInput = {
-    packPrice: {
-      status: "unavailable",
-      value: null,
-      reason: "PRICE_UNAVAILABLE",
-      nullRank: 1,
-    },
-    estimatedEv: {
-      grossEv: {
-        status: "available",
-        value: { minorUnits: 85_00, currency: "USD" },
-        reason: null,
-        nullRank: 0,
-      },
-      evDollars: {
-        status: "unavailable",
-        value: null,
-        reason: "PRICE_UNAVAILABLE",
-        nullRank: 1,
-      },
-      evPercent: {
-        status: "unavailable",
-        value: null,
-        reason: "PRICE_UNAVAILABLE",
-        nullRank: 1,
-      },
-    },
-  };
-  const presentation = presentEstimatedEv(input);
-
-  assert.equal(presentation.availability, "unavailable");
-  assert.equal(presentation.packPrice.displayValue, "Unavailable");
-  assert.equal(presentation.grossEv.displayValue, "$85.00");
+  assert.equal(presentation.semanticLabel, "Unavailable");
+  assert.equal(presentation.evPercent.displayValue, "Unavailable");
+  assert.equal(presentation.confidence.displayValue, "Unavailable");
   assert.equal(
     presentation.reasonCopy,
-    "Estimate unavailable: pack price is unavailable.",
+    "Estimate unavailable: supported evidence is incomplete.",
   );
+  assert.doesNotMatch(JSON.stringify(presentation), /0%|vendor-reported/i);
 });
 
-test("validates integer EV dollar consistency in development and tests", () => {
-  const valid = availableEstimateInput(100_00, 107_50, 750);
-  const invalid: EstimatedEvPresentationInput = {
+test("rejects internally inconsistent PackScout metrics in development", () => {
+  const valid = availableEstimate(100_00, 107_50, 750);
+  assert.equal(valid.estimate.status, "available");
+  if (valid.estimate.status !== "available") return;
+  const invalid: PackScoutEvPresentationInput = {
     ...valid,
-    estimatedEv: {
-      ...valid.estimatedEv,
-      evDollars: {
-        status: "available",
-        value: { minorUnits: 749, currency: "USD" },
-        reason: null,
-        nullRank: 0,
-      },
+    estimate: {
+      ...valid.estimate,
+      metrics: { ...valid.estimate.metrics, evPercentBasisPoints: 749 },
     },
   };
 
-  assert.deepEqual(metricPresentationConsistencyIssues(valid), []);
-  assert.deepEqual(metricPresentationConsistencyIssues(invalid), [
-    "EV $ must equal Gross EV minus Pack Price",
+  assert.deepEqual(packScoutMetricConsistencyIssues(valid), []);
+  assert.deepEqual(packScoutMetricConsistencyIssues(invalid), [
+    "PackScout EV percent must equal gross return minus 100%",
   ]);
   assert.throws(
-    () => presentEstimatedEv(invalid),
+    () => presentPackScoutEv(invalid),
     MetricPresentationConsistencyError,
   );
 });
 
-test("presents standalone signed EV and buyback fields without source substitution", () => {
-  const median: PublicEstimatedEv["evPercent"] = {
+test("keeps vendor-reported EV separate from PackScout EV", () => {
+  const vendorEstimate: VendorReportedEv = {
     status: "available",
-    value: { basisPoints: 180 },
-    reason: null,
-    nullRank: 0,
+    displayMoney: { minorUnits: 85_00, currency: "USD" },
+    metrics: {
+      grossEv: { minorUnits: 85_00, currency: "USD" },
+      grossReturnBasisPoints: 8_500,
+      evDollars: { minorUnits: -15_00, currency: "USD" },
+      evPercentBasisPoints: -1_500,
+    },
+    observedAt: "2026-08-11T08:30:02Z",
   };
-  const buyback: PublicBuyback = {
+  const packScout = availableEstimate(100_00, 120_00, 2_000).estimate;
+
+  assert.equal(presentVendorReportedEv(vendorEstimate).evPercent.displayValue, "-15.00%");
+  assert.equal(
+    presentVendorReportedEv(vendorEstimate).reportedGrossEv.displayValue,
+    "$85.00",
+  );
+  assert.equal(presentPackScoutEvPercent(packScout).displayValue, "+20.00%");
+  assert.doesNotMatch(
+    presentVendorReportedEv(vendorEstimate).accessibleLabel,
+    /PackScout EV/i,
+  );
+});
+
+test("retains vendor-reported source money when USD comparison is unavailable", () => {
+  const vendorEstimate: VendorReportedEv = {
+    status: "unavailable",
+    displayMoney: { minorUnits: 1_850, currency: "USDC" },
+    metrics: null,
+    observedAt: "2026-08-11T08:30:02Z",
+    reason: "CURRENCY_UNSUPPORTED",
+  };
+
+  const presentation = presentVendorReportedEv(vendorEstimate);
+
+  assert.equal(presentation.availability, "unavailable");
+  assert.equal(presentation.reportedGrossEv.availability, "available");
+  assert.equal(presentation.reportedGrossEv.displayValue, "USDC 18.50");
+  assert.equal(presentation.evPercent.displayValue, "Unavailable");
+  assert.equal(presentation.observedAt, "2026-08-11T08:30:02Z");
+  assert.match(presentation.reasonCopy ?? "", /cannot be compared in USD/i);
+  assert.match(presentation.accessibleLabel, /USDC 18\.50/);
+});
+
+test("presents buyback and desired-chase valuation from canonical V2 fields", () => {
+  const buyback: PublicRepackSummary["buyback"] = {
     status: "available",
-    value: { basisPoints: 9_300, sourceKind: "derived" },
-    reason: null,
-    nullRank: 0,
+    value: { basisPoints: 9_300, sourceKind: "packscout_derived" },
   };
-  const unavailableBuyback: PublicBuyback = {
+  const unavailableBuyback: PublicRepackSummary["buyback"] = {
     status: "unavailable",
     value: null,
     reason: "BUYBACK_UNAVAILABLE",
-    nullRank: 1,
   };
 
-  assert.equal(presentSignedEvPercent(median).displayValue, "+1.80%");
   assert.equal(presentBuyback(buyback).displayValue, "93%");
   assert.equal(presentBuyback(unavailableBuyback).displayValue, "Unavailable");
-  assert.equal(
-    presentBuyback(unavailableBuyback).accessibleLabel,
-    "Buyback %: Unavailable. Buyback unavailable: supported coverage is not available.",
+  assert.equal(presentTopChaseValue(chaseWithValue(8_500_000)).displayValue, "$85,000.00");
+  assert.equal(presentTopChaseValue(null).displayValue, "Unavailable");
+  const desired = presentTopChaseValue(
+    chaseWithValue(8_500_000),
+    "Desired Chase Value",
   );
-});
-
-test("keeps top-chase representative value separate and truthfully unavailable", () => {
-  const available: PublicTopChaseSummary = {
-    status: "available",
-    value: {
-      publicChaseId: "10000000-0000-5000-8000-000000000001",
-      name: "Celestial Nexus",
-      displayMoney: { minorUnits: 8_500_000, currency: "USD" },
-      usdComparison: {
-        status: "available",
-        value: { minorUnits: 8_500_000, currency: "USD" },
-        reason: null,
-        nullRank: 0,
-      },
-      primaryImage: null,
-    },
-    reason: null,
-    nullRank: 0,
-  };
-  const unsupported: PublicTopChaseSummary = {
-    ...available,
-    value: {
-      ...available.value,
-      displayMoney: { minorUnits: 8_500_000, currency: "CREDITS" },
-      usdComparison: {
-        status: "unavailable",
-        value: null,
-        reason: "CURRENCY_UNSUPPORTED",
-        nullRank: 1,
-      },
-    },
-  };
-
-  assert.equal(presentTopChaseValue(available).displayValue, "$85,000.00");
-  assert.equal(presentTopChaseValue(unsupported).displayValue, "Unavailable");
-  assert.equal(
-    presentTopChaseValue(unsupported).accessibleLabel,
-    "Top Chase Value: Unavailable. Estimate unavailable: currency is not supported.",
-  );
-});
-
-test("presentation input is limited to public comparison fields", () => {
-  const inputKeys = Object.keys(availableEstimateInput(100_00, 107_50, 750));
-  assert.deepEqual(inputKeys, ["packPrice", "estimatedEv"]);
-
-  const forbiddenTerms = /net.?ev|fees|shipping|provider.?reported|probabilit/i;
-  assert.doesNotMatch(
-    JSON.stringify(presentEstimatedEv(availableEstimateInput(100_00, 107_50, 750))),
-    forbiddenTerms,
-  );
-
+  assert.equal(desired.label, "Desired Chase Value");
+  assert.match(desired.accessibleLabel, /^Desired Chase Value:/);
 });

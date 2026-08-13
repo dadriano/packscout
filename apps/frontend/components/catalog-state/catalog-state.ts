@@ -1,15 +1,15 @@
 export const CATALOG_STATE_COPY = Object.freeze({
-  loading: "Loading pack data.",
+  loading: "Loading repack data.",
   updating: "Updating results…",
-  unavailable: "Pack data is temporarily unavailable.",
-  empty: "Pack data is not available yet.",
-  noMatches: "No packs match these filters.",
+  unavailable: "Repack data is temporarily unavailable.",
+  empty: "Repack data is not available yet.",
+  noMatches: "No repacks match these filters.",
   retry: "Retry",
   clearFilters: "Clear filters",
   retainedFailure: "Could not refresh. Showing your previous results.",
-  retryPending: "Retrying pack data…",
-  retrySucceeded: "Pack data refreshed.",
-  retryFailed: "Pack data is still unavailable.",
+  retryPending: "Retrying repack data…",
+  retrySucceeded: "Repack data refreshed.",
+  retryFailed: "Repack data is still unavailable.",
   clearPending: "Clearing filters…",
   clearSucceeded: "Filters cleared.",
   clearFailed: "Could not clear filters. Your current filters are unchanged.",
@@ -43,7 +43,7 @@ export function catalogUpdateMessage(update: CatalogUpdateState): string {
     case "failed":
       return CATALOG_STATE_COPY.retainedFailure;
     case "updated":
-      return `${update.visibleCount} ${update.visibleCount === 1 ? "pack" : "packs"} shown.`;
+      return `${update.visibleCount} ${update.visibleCount === 1 ? "repack" : "repacks"} shown.`;
   }
 }
 

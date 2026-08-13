@@ -1,11 +1,11 @@
 import type { CSSProperties } from "react";
-import type { CatalogSummary } from "@packscout/contracts";
+import type { DashboardBundle } from "@packscout/contracts";
 import { presentCatalogSummaries } from "./overview-presentation";
 import styles from "./CatalogSummaries.module.css";
 
 type CatalogSummariesProps = Readonly<{
-  title: "By platform" | "By category";
-  summaries: readonly CatalogSummary[];
+  title: "By vendor" | "By category";
+  summaries: DashboardBundle["vendorSummaries"] | DashboardBundle["categorySummaries"];
 }>;
 
 type SummaryBarStyle = CSSProperties & { "--bar-ratio": number };
@@ -16,7 +16,7 @@ export function CatalogSummaries({
 }: CatalogSummariesProps) {
   const rows = presentCatalogSummaries(summaries);
   const headingId =
-    title === "By platform" ? "catalog-by-platform" : "catalog-by-category";
+    title === "By vendor" ? "catalog-by-vendor" : "catalog-by-category";
 
   return (
     <section aria-labelledby={headingId} className={styles.section}>
@@ -28,8 +28,8 @@ export function CatalogSummaries({
           <p className={styles.context}>Current catalog</p>
         </div>
         <div aria-hidden="true" className={styles.columns}>
-          <span>Packs</span>
-          <span>Median EV</span>
+          <span>Repacks</span>
+          <span>Median PackScout EV</span>
         </div>
       </div>
 
@@ -45,7 +45,7 @@ export function CatalogSummaries({
               <span className={styles.bar} />
             </span>
             <span aria-hidden="true" className={styles.count}>
-              {row.packCountLabel}
+              {row.repackCountLabel}
             </span>
             <span
               aria-hidden="true"

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  createCatalogSearchEvent,
+  createRepackSearchEvent,
   createDashboardViewEvent,
   createFiltersAppliedEvent,
   createPublicReadFailureBeacon,
@@ -12,8 +12,8 @@ import {
 } from "./telemetry.client";
 
 test("creates bounded product outcomes without raw search or browser identity", () => {
-  const event = createCatalogSearchEvent({
-    snapshotVersion: "snapshot:v1",
+  const event = createRepackSearchEvent({
+    publicReleaseId: "20000000-0000-4000-8000-000000000002",
     queryLength: 34,
     resultCount: 0,
     outcome: "no_matches",
@@ -22,7 +22,7 @@ test("creates bounded product outcomes without raw search or browser identity", 
   assert.deepEqual(
     {
       schemaVersion: event.schemaVersion,
-      snapshotVersion: event.snapshotVersion,
+      publicReleaseId: event.publicReleaseId,
       name: event.name,
       surface: event.surface,
       outcome: event.outcome,
@@ -30,10 +30,10 @@ test("creates bounded product outcomes without raw search or browser identity", 
       resultCountBucket: event.resultCountBucket,
     },
     {
-      schemaVersion: "anonymous-product-event-v1",
-      snapshotVersion: "snapshot:v1",
-      name: "catalog_search",
-      surface: "all_packs",
+      schemaVersion: "anonymous-product-event-v2",
+      publicReleaseId: "20000000-0000-4000-8000-000000000002",
+      name: "repack_search",
+      surface: "all_repacks",
       outcome: "no_matches",
       queryLengthBucket: "21-60",
       resultCountBucket: "0",
@@ -53,17 +53,17 @@ test("fails closed instead of constructing unbounded bucket events", () => {
   assert.equal(resultCountBucket(-1), null);
   assert.equal(
     createFiltersAppliedEvent({
-      snapshotVersion: "snapshot:v1",
+      publicReleaseId: "20000000-0000-4000-8000-000000000002",
       surface: "overview",
       outcome: "results",
-      activeFilterCount: 4,
+      activeFilterCount: 5,
       resultCount: 10,
     }),
     null,
   );
   assert.ok(
     createDashboardViewEvent({
-      snapshotVersion: "snapshot:v1",
+      publicReleaseId: "20000000-0000-4000-8000-000000000002",
       surface: "overview",
     }),
   );
@@ -72,7 +72,7 @@ test("fails closed instead of constructing unbounded bucket events", () => {
 test("uses sendBeacon first and sends only the strict JSON blob", async () => {
   const calls: Array<{ url: string; body: Blob }> = [];
   const event = createDashboardViewEvent({
-    snapshotVersion: "snapshot:v1",
+    publicReleaseId: "20000000-0000-4000-8000-000000000002",
     surface: "overview",
   });
   queueProductTelemetry(event, {
@@ -94,10 +94,10 @@ test("uses sendBeacon first and sends only the strict JSON blob", async () => {
 test("falls back to nonblocking credential-free keepalive fetch", async () => {
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   const event = createPublicReadFailureBeacon({
-    queryName: "listPublicPacks",
-    routeSurface: "all_packs",
+    queryName: "listPublicRepacks",
+    routeSurface: "all_repacks",
     errorCode: "TRANSPORT_UNAVAILABLE",
-    snapshotVersion: "snapshot:v1",
+    publicReleaseId: "20000000-0000-4000-8000-000000000002",
     retainedPreviousResult: true,
   });
 
@@ -120,8 +120,8 @@ test("falls back to nonblocking credential-free keepalive fetch", async () => {
 
 test("swallows transport failures without changing the caller outcome", () => {
   const event = createDashboardViewEvent({
-    snapshotVersion: "snapshot:v1",
-    surface: "all_packs",
+    publicReleaseId: "20000000-0000-4000-8000-000000000002",
+    surface: "all_repacks",
   });
   assert.doesNotThrow(() =>
     queueProductTelemetry(event, {

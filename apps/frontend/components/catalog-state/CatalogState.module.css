@@ -109,11 +109,11 @@
   gap: 1rem;
 }
 
-.loadingRoot[data-surface="all-packs"] .loadingContent {
+.loadingRoot[data-surface="all-repacks"] .loadingContent {
   grid-template-columns: 1fr;
 }
 
-.loadingRoot[data-surface="all-packs"] .inspectorPlaceholder {
+.loadingRoot[data-surface="all-repacks"] .inspectorPlaceholder {
   min-height: 215px;
 }
 
@@ -269,7 +269,7 @@
   box-shadow: var(--shadow-control);
 }
 
-.pageState[data-state="snapshot-unavailable"] {
+.pageState[data-state="data-release-unavailable"] {
   border-left: 3px solid var(--color-status-neutral);
 }
 

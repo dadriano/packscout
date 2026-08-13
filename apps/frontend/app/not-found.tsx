@@ -1,13 +1,13 @@
 import Link from "next/link";
-import { ShellStatusReporter } from "@/components/shell/SnapshotStatus.client";
-import { readPublicShellStatus } from "@/lib/public-catalog.server";
-import { snapshotStatusFromPublicResult } from "@/lib/public-shell-status";
+import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
+import { readPublicShellStatus } from "@/lib/public-repacks.server";
+import { dataReleaseStatusFromPublicResult } from "@/lib/public-release-status";
 
 export default async function NotFoundPage() {
-  const status = snapshotStatusFromPublicResult(await readPublicShellStatus());
+  const status = dataReleaseStatusFromPublicResult(await readPublicShellStatus());
   return (
     <>
-      <ShellStatusReporter status={status} />
+      <DataReleaseStatusReporter status={status} />
       <section className="route-placeholder" aria-labelledby="not-found-title">
         <div className="route-placeholder__inner">
           <p className="route-kicker">404 · Off route</p>

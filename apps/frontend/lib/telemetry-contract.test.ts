@@ -8,20 +8,20 @@ import {
 
 const NOW = Date.parse("2026-08-11T20:00:00.000Z");
 const BASE = {
-  schemaVersion: "anonymous-product-event-v1",
+    schemaVersion: "anonymous-product-event-v2",
   eventId: "5e1b8a78-1577-4abc-8e26-495e2e5fdabc",
-  snapshotVersion: "snapshot:v1",
+  publicReleaseId: "20000000-0000-4000-8000-000000000002",
   occurredAt: "2026-08-11T19:59:00.000Z",
 } as const;
-const PACK_ID = "beab33e4-20cf-5c41-9d31-2e616a34c113";
+const REPACK_ID = "beab33e4-20cf-5c41-9d31-2e616a34c113";
 
 test("accepts only the five strict anonymous product event shapes", () => {
   const events = [
     { ...BASE, name: "dashboard_view", surface: "overview", outcome: "rendered" },
     {
       ...BASE,
-      name: "catalog_search",
-      surface: "all_packs",
+      name: "repack_search",
+      surface: "all_repacks",
       outcome: "results",
       queryLengthBucket: "1-20",
       resultCountBucket: "1-25",
@@ -37,15 +37,15 @@ test("accepts only the five strict anonymous product event shapes", () => {
     {
       ...BASE,
       name: "promo_copied",
-      publicPackId: PACK_ID,
-      platformKey: "collector_crypt",
+      publicRepackId: REPACK_ID,
+      vendorKey: "collector_crypt",
       outcome: "clipboard",
     },
     {
       ...BASE,
-      name: "pack_link_opened",
-      publicPackId: PACK_ID,
-      platformKey: "collector_crypt",
+      name: "repack_link_opened",
+      publicRepackId: REPACK_ID,
+      vendorKey: "collector_crypt",
       outcome: "opened",
     },
   ];
@@ -57,8 +57,8 @@ test("accepts only the five strict anonymous product event shapes", () => {
 test("rejects browser identity, raw catalog state, and subject fields on aggregate events", () => {
   const event = {
     ...BASE,
-    name: "catalog_search",
-    surface: "all_packs",
+    name: "repack_search",
+    surface: "all_repacks",
     outcome: "results",
     queryLengthBucket: "1-20",
     resultCountBucket: "1-25",
@@ -67,7 +67,8 @@ test("rejects browser identity, raw catalog state, and subject fields on aggrega
     { q: "secret-query" },
     { cursor: "secret-cursor" },
     { fingerprint: "secret-fingerprint" },
-    { publicPackId: PACK_ID },
+    { publicRepackId: REPACK_ID },
+    { publicCollectibleId: REPACK_ID },
     { userAgent: "browser" },
     { tenantId: "tenant" },
   ]) {
@@ -126,10 +127,10 @@ test("enforces public-read query/error combinations and excludes raw query conte
   const beacon = {
     schemaVersion: "public-read-failure-v1",
     eventId: BASE.eventId,
-    queryName: "listPublicPacks",
-    routeSurface: "all_packs",
+    queryName: "listPublicRepacks",
+    routeSurface: "all_repacks",
     errorCode: "CURSOR_EXPIRED",
-    snapshotVersion: "snapshot:v1",
+    publicReleaseId: "20000000-0000-4000-8000-000000000002",
     retainedPreviousResult: true,
     occurredAt: BASE.occurredAt,
   } as const;
@@ -147,7 +148,7 @@ test("enforces public-read query/error combinations and excludes raw query conte
   );
   assert.equal(
     parsePublicReadFailureBeacon(
-      { ...beacon, snapshotVersion: null, retainedPreviousResult: true },
+      { ...beacon, publicReleaseId: null, retainedPreviousResult: true },
       NOW,
     ).ok,
     false,

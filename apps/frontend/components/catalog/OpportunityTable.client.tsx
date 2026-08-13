@@ -1,6 +1,6 @@
 "use client";
 
-import type { PublicPackSummary } from "@packscout/contracts";
+import type { PublicRepackViewSummary } from "@packscout/contracts";
 import type { MetricValuePresentation } from "@/lib/metric-presentation";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { CatalogImage } from "./CatalogImage.client";
@@ -8,16 +8,17 @@ import {
   presentOpportunities,
   type DisplayField,
 } from "./overview-presentation";
+import { RepackHeatBadge } from "./RepackHeatBadge";
 import styles from "./OpportunityTable.module.css";
 
 export type OpportunitySelectionHandler = (
-  publicPackId: string,
+  publicRepackId: string,
   trigger: HTMLButtonElement,
 ) => void;
 
 type OpportunityTableProps = Readonly<{
-  opportunities: readonly PublicPackSummary[];
-  selectedPublicPackId: string | null;
+  opportunities: readonly PublicRepackViewSummary[];
+  selectedPublicRepackId: string | null;
   onSelectOpportunity: OpportunitySelectionHandler;
 }>;
 
@@ -65,10 +66,11 @@ function ColumnLabel({
 }: Readonly<{
   children: string;
   field:
-    | "pack"
-    | "platform"
+    | "repack"
+    | "heat"
+    | "vendor"
     | "category"
-    | "packPrice"
+    | "repackPrice"
     | "evPercent"
     | "buybackPercent"
     | "topChaseValue";
@@ -84,7 +86,7 @@ function ColumnLabel({
 
 export function OpportunityTable({
   opportunities,
-  selectedPublicPackId,
+  selectedPublicRepackId,
   onSelectOpportunity,
 }: OpportunityTableProps) {
   const rows = presentOpportunities(opportunities);
@@ -93,13 +95,13 @@ export function OpportunityTable({
     <section aria-labelledby="top-opportunities-heading" className={styles.section}>
       <div className={styles.sectionHeader}>
         <div>
-          <p className={styles.eyebrow}>Ranked by EV $</p>
+          <p className={styles.eyebrow}>Ranked by PackScout EV $</p>
           <h2 className={styles.heading} id="top-opportunities-heading">
             Top opportunities
           </h2>
         </div>
         <span className={styles.resultCount}>
-          {rows.length} {rows.length === 1 ? "pack" : "packs"}
+          {rows.length} {rows.length === 1 ? "repack" : "repacks"}
         </span>
       </div>
 
@@ -114,19 +116,22 @@ export function OpportunityTable({
             <tr>
               <th scope="col">#</th>
               <th scope="col">
-                <ColumnLabel field="pack">Pack</ColumnLabel>
+                <ColumnLabel field="repack">Repack</ColumnLabel>
               </th>
               <th scope="col">
-                <ColumnLabel field="platform">Platform</ColumnLabel>
+                <ColumnLabel field="heat">Heat</ColumnLabel>
+              </th>
+              <th scope="col">
+                <ColumnLabel field="vendor">Vendor</ColumnLabel>
               </th>
               <th scope="col">
                 <ColumnLabel field="category">Category</ColumnLabel>
               </th>
               <th scope="col">
-                <ColumnLabel field="packPrice">Pack price</ColumnLabel>
+                <ColumnLabel field="repackPrice">Repack price</ColumnLabel>
               </th>
               <th scope="col">
-                <ColumnLabel field="evPercent">EV %</ColumnLabel>
+                <ColumnLabel field="evPercent">PackScout EV %</ColumnLabel>
               </th>
               <th scope="col">
                 <ColumnLabel field="buybackPercent">Buyback %</ColumnLabel>
@@ -140,9 +145,9 @@ export function OpportunityTable({
           </thead>
           <tbody>
             {rows.map((row) => {
-              const selected = row.publicPackId === selectedPublicPackId;
+              const selected = row.publicRepackId === selectedPublicRepackId;
               return (
-                <tr data-selected={selected ? "true" : "false"} key={row.publicPackId}>
+                <tr data-selected={selected ? "true" : "false"} key={row.publicRepackId}>
                   <td className={styles.rank}>{row.rank}</td>
                   <td className={styles.packCell}>
                     <button
@@ -150,7 +155,7 @@ export function OpportunityTable({
                       aria-pressed={selected}
                       className={styles.selectPack}
                       onClick={(event) =>
-                        onSelectOpportunity(row.publicPackId, event.currentTarget)
+                        onSelectOpportunity(row.publicRepackId, event.currentTarget)
                       }
                       type="button"
                     >
@@ -168,28 +173,34 @@ export function OpportunityTable({
                     </button>
                   </td>
                   <td>
-                    <span className={styles.platform}>
-                      {row.platformLogoUrl ? (
+                    <RepackHeatBadge heat={row.heat} />
+                  </td>
+                  <td>
+                    <span className={styles.vendor}>
+                      {row.vendorLogoUrl ? (
                         <CatalogImage
                           decorative
                           fallback="none"
-                          fallbackAlt={`${row.platformDisplayName} logo`}
+                          fallbackAlt={`${row.vendorDisplayName} logo`}
                           image={{
-                            url: row.platformLogoUrl,
-                            alt: `${row.platformDisplayName} logo`,
+                            url: row.vendorLogoUrl,
+                            alt: `${row.vendorDisplayName} logo`,
                           }}
-                          variant="platform"
+                          variant="vendor"
                         />
                       ) : null}
-                      <span>{row.platformDisplayName}</span>
+                      <span>{row.vendorDisplayName}</span>
                     </span>
                   </td>
                   <td>{row.category}</td>
                   <td>
-                    <PriceCell price={row.packPrice} />
+                    <PriceCell price={row.repackPrice} />
                   </td>
                   <td>
-                    <MetricCell metric={row.evPercent} />
+                    <MetricCell metric={row.packScoutEvPercent} />
+                    <span className={styles.unavailableReason}>
+                      Confidence: {row.packScoutConfidence.displayValue}
+                    </span>
                   </td>
                   <td>
                     <MetricCell metric={row.buyback} />

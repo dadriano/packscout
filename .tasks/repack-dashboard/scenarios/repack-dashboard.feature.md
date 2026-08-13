@@ -3,6 +3,17 @@
 Status: active build handoff — local and cloud-development Convex-backed mock frontend/read-model slices implemented; canonical publication and launch evidence blocked
 Owner: product build
 
+## Scenario: A buyer understands recent repack heat without confusing it with EV
+
+Given a complete data release and a current release-bound heat aggregate
+When the buyer compares repacks or inspects one result
+Then PackScout shows Hot, Warm, Normal, Cold, or Insufficient data using text in addition to color
+And the inspector explains recent activity relative to that repack's own baseline, the observation windows, confidence, public drivers, limitations, and expiry
+And simulated development frames are visibly labeled Simulated
+And no heat state is described as EV, profit, certainty, or a recommendation
+
+Coverage: Automated plus local browser coverage under blocked task `repack-dashboard/013` — 50 contract, 148 service, 18 Convex, 125 frontend, and 19 local-script tests prove strict aggregates, release-bound storage, deterministic one-shot/idempotent replay, loop playback through frame 98, and fail-closed shutdown. Light/dark checks at 1536×1024, 1440×1000, and 390×844 prove compact states, the full inspector explanation, internal table scrolling, modal-sheet focus return, frame replacement, and a fresh console with zero warnings or errors. The complete `npm run verify:framework` gate also passes. Real observed heat remains blocked on normalized live observations, aggregate publication ownership, and preproduction evidence.
+
 ## Scenario: A buyer opens a coherent market overview
 
 Given a complete public catalog snapshot

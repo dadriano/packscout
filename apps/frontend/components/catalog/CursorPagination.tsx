@@ -1,8 +1,8 @@
-import type { CatalogPageRange } from "@packscout/contracts";
+import type { RepackPageRange } from "@packscout/contracts";
 import styles from "./CursorPagination.module.css";
 
 type CursorPaginationProps = Readonly<{
-  range: CatalogPageRange;
+  range: RepackPageRange;
   hasPrevious: boolean;
   hasNext: boolean;
   pending?: boolean;

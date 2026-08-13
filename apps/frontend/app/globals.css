@@ -18,6 +18,7 @@
   --color-positive: #00a96e;
   --color-negative: #e53d42;
   --color-warning: #bd7413;
+  --color-warning-strong: #8a4d00;
   --color-status-neutral: #7d8499;
   --color-header: rgba(255, 255, 255, 0.9);
   --shadow-control: 0 1px 2px rgba(22, 26, 45, 0.05);
@@ -44,6 +45,7 @@
     --color-positive: #21d68a;
     --color-negative: #ff5c61;
     --color-warning: #efa23e;
+    --color-warning-strong: #efa23e;
     --color-status-neutral: #929cab;
     --color-header: rgba(3, 11, 19, 0.9);
     --shadow-control: 0 1px 2px rgba(0, 0, 0, 0.28);
@@ -67,6 +69,7 @@
   --color-positive: #21d68a;
   --color-negative: #ff5c61;
   --color-warning: #efa23e;
+  --color-warning-strong: #efa23e;
   --color-status-neutral: #929cab;
   --color-header: rgba(3, 11, 19, 0.9);
   --shadow-control: 0 1px 2px rgba(0, 0, 0, 0.28);
@@ -83,6 +86,7 @@
 
 html {
   min-width: 320px;
+  overflow-x: hidden;
   background: var(--color-canvas);
   scroll-behavior: smooth;
 }
@@ -341,7 +345,7 @@ a {
   animation: search-progress 900ms ease-in-out infinite;
 }
 
-.snapshot-status {
+.data-release-status {
   grid-area: status;
   display: grid;
   grid-template-columns: 9px minmax(0, 1fr);
@@ -355,22 +359,22 @@ a {
   white-space: nowrap;
 }
 
-.snapshot-status__dot {
+.data-release-status__dot {
   width: 8px;
   height: 8px;
   border-radius: 999px;
   background: var(--color-status-neutral);
 }
 
-.snapshot-status[data-state="fresh"] .snapshot-status__dot {
+.data-release-status[data-state="fresh"] .data-release-status__dot {
   background: var(--color-positive);
 }
 
-.snapshot-status[data-state="delayed"] .snapshot-status__dot {
+.data-release-status[data-state="delayed"] .data-release-status__dot {
   background: var(--color-warning);
 }
 
-.snapshot-status[data-state="loading"] .snapshot-status__dot {
+.data-release-status[data-state="loading"] .data-release-status__dot {
   animation: status-breathe 1.6s ease-in-out infinite;
 }
 
@@ -767,7 +771,7 @@ a {
     bottom: -0.36rem;
   }
 
-  .snapshot-status {
+  .data-release-status {
     justify-self: end;
   }
 }
@@ -820,7 +824,7 @@ a {
     grid-template-columns: 20px minmax(0, 1fr);
   }
 
-  .snapshot-status {
+  .data-release-status {
     justify-self: start;
     width: 100%;
     min-height: 1.5rem;

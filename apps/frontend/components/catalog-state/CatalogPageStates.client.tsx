@@ -44,7 +44,7 @@ function StateMark({ kind }: { kind: "unavailable" | "empty" | "no-matches" }) {
   );
 }
 
-export function SnapshotUnavailable({
+export function DataReleaseUnavailable({
   onRetry,
 }: {
   onRetry: RecoverableAction;
@@ -58,14 +58,14 @@ export function SnapshotUnavailable({
 
   return (
     <section
-      aria-labelledby="snapshot-unavailable-title"
+      aria-labelledby="data-release-unavailable-title"
       className={styles.pageState}
-      data-state="snapshot-unavailable"
+      data-state="data-release-unavailable"
     >
       <StateMark kind="unavailable" />
       <div className={styles.pageStateCopy}>
         <p className={styles.stateEyebrow}>Catalog unavailable</p>
-        <h2 id="snapshot-unavailable-title">
+        <h2 id="data-release-unavailable-title">
           {CATALOG_STATE_COPY.unavailable}
         </h2>
         <p>
@@ -151,7 +151,7 @@ export function NoMatches({
             </ul>
           </div>
         ) : (
-          <p>Your current search or filters returned no packs.</p>
+          <p>Your current search or filters returned no repacks.</p>
         )}
         <button
           aria-disabled={clear.state === "pending"}

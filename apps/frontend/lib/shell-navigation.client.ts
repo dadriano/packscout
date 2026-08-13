@@ -1,5 +1,5 @@
 export type GlobalDestination = "dashboard" | "learn" | null;
-export type DashboardView = "overview" | "all-packs" | null;
+export type DashboardView = "overview" | "all-repacks" | null;
 
 type ShortcutEvent = Readonly<{
   altKey: boolean;
@@ -17,7 +17,7 @@ export function resolveGlobalDestination(pathname: string): GlobalDestination {
 
 export function resolveDashboardView(pathname: string): DashboardView {
   if (pathname === "/") return "overview";
-  if (pathname === "/packs") return "all-packs";
+  if (pathname === "/packs") return "all-repacks";
   return null;
 }
 

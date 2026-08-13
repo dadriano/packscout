@@ -20,7 +20,7 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
         </h1>
         <p className={styles.indexIntro}>
           Three practical guides to repacks, long-run value estimates, and the
-          evidence worth checking before you follow a provider listing.
+          evidence worth checking before you follow a vendor listing.
         </p>
       </header>
 
@@ -49,7 +49,7 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
       </ol>
 
       <p className={styles.indexNote}>
-        PackScout education is provider-neutral and stays available while
+        PackScout education is vendor-neutral and stays available while
         catalog data is loading or unavailable.
       </p>
     </section>

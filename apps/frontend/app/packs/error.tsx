@@ -2,13 +2,13 @@
 
 import { CatalogRouteRecovery } from "@/components/catalog-state";
 import { DashboardPageHeader } from "@/components/shell/DashboardPageHeader";
-import { ShellStatusReporter } from "@/components/shell/SnapshotStatus.client";
+import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
 
-export default function AllPacksError() {
+export default function AllRepacksError() {
   return (
     <>
-      <ShellStatusReporter status={{ state: "unavailable" }} />
-      <DashboardPageHeader activeView="all-packs" />
+      <DataReleaseStatusReporter status={{ state: "unavailable" }} />
+      <DashboardPageHeader activeView="all-repacks" />
       <CatalogRouteRecovery />
     </>
   );

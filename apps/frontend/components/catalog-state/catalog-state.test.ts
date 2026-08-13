@@ -20,10 +20,10 @@ test("uses the approved public catalog-state vocabulary without operational deta
       retainedFailure: CATALOG_STATE_COPY.retainedFailure,
     },
     {
-      loading: "Loading pack data.",
-      unavailable: "Pack data is temporarily unavailable.",
-      empty: "Pack data is not available yet.",
-      noMatches: "No packs match these filters.",
+      loading: "Loading repack data.",
+      unavailable: "Repack data is temporarily unavailable.",
+      empty: "Repack data is not available yet.",
+      noMatches: "No repacks match these filters.",
       retry: "Retry",
       clearFilters: "Clear filters",
       retainedFailure: "Could not refresh. Showing your previous results.",
@@ -63,11 +63,11 @@ test("announces updating, retained failure, and bounded result counts", () => {
   );
   assert.equal(
     catalogUpdateMessage({ state: "updated", visibleCount: 1 }),
-    "1 pack shown.",
+    "1 repack shown.",
   );
   assert.equal(
     catalogUpdateMessage({ state: "updated", visibleCount: 25 }),
-    "25 packs shown.",
+    "25 repacks shown.",
   );
 });
 

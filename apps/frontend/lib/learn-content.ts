@@ -70,28 +70,28 @@ export const LEARN_GUIDES = Object.freeze([
       {
         heading: "A known price, with randomized contents",
         paragraphs: [
-          "A repack is a collectible product with a listed pack price and contents selected from a provider’s stated inventory. You know the price before opening, but not which eligible item you will receive.",
-          "Providers can use different inventory rules, odds, categories, and opening methods. Read the listing terms for the specific pack instead of assuming that one provider’s process applies to another.",
+          "A repack is a collectible product with a listed repack price and contents selected from a vendor’s stated inventory. You know the price before opening, but not which eligible item you will receive.",
+          "Vendors can use different inventory rules, odds, categories, and opening methods. Read the listing terms for the specific repack instead of assuming that one vendor’s process applies to another.",
         ],
       },
       {
         heading: "Chase items and the rest of the inventory",
         paragraphs: [
-          "A chase item is one of the most desirable or highly valued eligible items in a pack. PackScout calls the highest-valued eligible related collectible it can currently identify the Top Chase.",
+          "A chase item is one of the most desirable or highly valued eligible items in a repack. PackScout calls the highest-valued eligible related collectible it can currently identify the Top Chase.",
           "A prominent chase does not describe the most likely result. Look for supported odds and a clear inventory list so you can understand both the headline item and the range of other possible outcomes.",
         ],
       },
       {
         heading: "What a buyback offer means",
         paragraphs: [
-          "Some providers offer to buy an opened item back under documented terms. Buyback % is provider-supported buyback coverage relative to Pack Price, supplied directly or derived from documented provider terms.",
-          "A buyback is not the same as the market value of the item, and its availability, timing, and conditions can vary. Confirm the current provider terms before relying on it.",
+          "Some vendors offer to buy an opened item back under documented terms. Buyback % is vendor-supported buyback coverage relative to Repack Price, reported directly or derived by PackScout from documented terms.",
+          "A buyback is not the same as the market value of the item, and its availability, timing, and conditions can vary. Confirm the current vendor terms before relying on it.",
         ],
       },
       {
-        heading: "Provider facts and PackScout estimates",
+        heading: "Vendor facts and PackScout estimates",
         paragraphs: [
-          "Providers report listing details such as price, eligible inventory, stated odds, and buyback terms. PackScout uses supported catalog evidence to calculate comparison estimates; it does not control the opening or the item you receive.",
+          "Vendors report listing details such as price, eligible inventory, stated odds, and buyback terms. PackScout uses supported post-processed evidence to calculate comparison estimates; it does not control the opening or the item you receive.",
         ],
         callout: {
           label: "Keep the sources separate",
@@ -101,22 +101,22 @@ export const LEARN_GUIDES = Object.freeze([
     ],
     relatedLink: {
       href: "/packs",
-      label: "Compare repacks in All Packs",
+      label: "Compare repacks in All Repacks",
       description:
-        "Review pack prices, supported estimates, inventory signals, and provider listings side by side.",
+        "Review repack prices, supported estimates, inventory signals, and vendor listings side by side.",
     },
   },
   {
     slug: "expected-value",
     title: "What is Expected Value (EV)?",
     description:
-      "How PackScout estimates long-run value and why one result can differ.",
-    readingTimeMinutes: 5,
+      "How vendor-reported EV, PackScout EV, and confidence support informed comparisons.",
+    readingTimeMinutes: 6,
     sections: [
       {
         heading: "Expected Value is a long-run estimate",
         paragraphs: [
-          "Expected Value (EV) is a probability-weighted estimate of value across many hypothetical openings under the supported inventory and odds. It is useful for comparing pack structures; it is not a forecast for the next pack.",
+          "Expected Value (EV) is a probability-weighted estimate of value across many hypothetical openings under the supported inventory and odds. It is useful for comparing repack structures; it is not a forecast for the next repack.",
         ],
         callout: {
           label: "Important limitation",
@@ -129,31 +129,40 @@ export const LEARN_GUIDES = Object.freeze([
       {
         heading: "The metrics PackScout shows",
         paragraphs: [
-          "PackScout uses the same metric definitions on Dashboard, All Packs, and Learn so a label keeps one meaning wherever you see it.",
+          "PackScout uses the same metric definitions on Dashboard, All Repacks, and Learn so a label keeps one meaning wherever you see it.",
         ],
         metricKeys: EXPECTED_VALUE_METRIC_KEYS,
       },
       {
+        heading: "Vendor-reported EV and PackScout EV stay separate",
+        paragraphs: [
+          "A vendor may publish its own EV using its inventory, odds, and valuation approach. PackScout independently calculates PackScout EV from supported post-processed evidence.",
+          METRIC_TRUST_COPY.sourceExplanation,
+          "A missing estimate is not replaced with the other source, and disagreement does not mean either value was silently changed.",
+        ],
+      },
+      {
         heading: "A worked example",
         paragraphs: [
-          "This independent example is for explanation only and does not represent a current pack or provider listing.",
+          "This independent example is for explanation only and does not represent a current repack or vendor listing.",
         ],
         example: {
-          heading: "A hypothetical $100 pack",
+          heading: "A hypothetical $100 repack",
           rows: [
-            { label: "Pack Price", value: "$100.00" },
+            { label: "Repack Price", value: "$100.00" },
             { label: "Gross EV", value: "$108.00" },
             { label: "EV $", value: "+$8.00" },
             { label: "EV %", value: "+8.00% · Positive" },
           ],
           explanation:
-            "Gross EV minus Pack Price is +$8.00. Dividing that difference by the $100.00 Pack Price produces a signed EV % of +8.00%.",
+            "Gross EV minus Repack Price is +$8.00. Dividing that difference by the $100.00 Repack Price produces a signed EV % of +8.00%.",
         },
       },
       {
-        heading: "Coverage, evidence, and unavailable estimates",
+        heading: "Confidence, coverage, and unavailable estimates",
         paragraphs: [
           "An estimate is only as useful as its supported odds, inventory, prices, and relationships. Coverage describes how much of that required evidence PackScout can support; it is not a promise that every source is complete or current.",
+          METRIC_TRUST_COPY.confidenceExplanation,
           METRIC_TRUST_COPY.unavailableExplanation,
           "An unavailable value is not zero. It means the comparison should wait for better evidence rather than filling a gap with an invented number.",
         ],
@@ -161,13 +170,13 @@ export const LEARN_GUIDES = Object.freeze([
       {
         heading: "Use EV as one comparison input",
         paragraphs: [
-          "Two packs with similar EV can still have very different odds, inventory depth, buyback terms, and ranges of possible outcomes. Review the underlying listing and evidence alongside the estimate.",
+          "Two repacks with similar EV can still have very different odds, inventory depth, buyback terms, and ranges of possible outcomes. Review the underlying listing and evidence alongside the estimate.",
         ],
       },
     ],
     relatedLink: {
       href: "/",
-      label: "Explore PackScout Estimated EV on Dashboard",
+      label: "Explore PackScout EV on Dashboard",
       description:
         "Return to Overview to compare supported long-run estimates and catalog context.",
     },
@@ -181,7 +190,7 @@ export const LEARN_GUIDES = Object.freeze([
       {
         heading: "Look for evidence, not just a headline",
         paragraphs: [
-          "A strong listing makes the pack price, eligible inventory, odds, valuation basis, availability, and provider terms understandable. A missing detail is a reason to pause and verify, not proof that a provider acted improperly.",
+          "A strong listing makes the repack price, eligible inventory, odds, valuation basis, availability, and vendor terms understandable. A missing detail is a reason to pause and verify, not proof that a vendor acted improperly.",
         ],
       },
       {
@@ -197,7 +206,7 @@ export const LEARN_GUIDES = Object.freeze([
           },
           {
             title: "Unsupported values",
-            body: "A stated item value should have a credible basis. Treat a headline value differently from a PackScout estimate or a provider buyback offer.",
+            body: "A stated item value should have a credible basis. Treat a headline value differently from a PackScout estimate or a vendor buyback offer.",
           },
           {
             title: "Stale listings",
@@ -225,15 +234,15 @@ export const LEARN_GUIDES = Object.freeze([
       {
         heading: "A simple pre-open review",
         paragraphs: [
-          "Confirm the pack price, inventory, odds, valuation support, buyback conditions, listing freshness, and outbound destination. If a material term is unclear, wait for evidence or choose a listing you can evaluate.",
+          "Confirm the repack price, inventory, odds, valuation support, buyback conditions, listing freshness, and outbound destination. If a material term is unclear, wait for evidence or choose a listing you can evaluate.",
         ],
       },
     ],
     relatedLink: {
       href: "/packs",
-      label: "Review evidence across All Packs",
+      label: "Review evidence across All Repacks",
       description:
-        "Compare supported fields and open a provider listing only when its public action is available.",
+        "Compare supported fields and open a vendor listing only when its public action is available.",
     },
   },
 ] as const satisfies readonly LearnGuide[]);

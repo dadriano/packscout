@@ -1,7 +1,7 @@
 # Task: Validate and Observe the V1 Launch
 
 **ID:** repack-dashboard/012
-**Depends on:** repack-dashboard/001, repack-dashboard/002, repack-dashboard/003, repack-dashboard/004, repack-dashboard/005, repack-dashboard/006, repack-dashboard/007, repack-dashboard/008, repack-dashboard/009, repack-dashboard/010, repack-dashboard/011
+**Depends on:** repack-dashboard/001, repack-dashboard/002, repack-dashboard/003, repack-dashboard/004, repack-dashboard/005, repack-dashboard/006, repack-dashboard/007, repack-dashboard/008, repack-dashboard/009, repack-dashboard/010, repack-dashboard/011, repack-dashboard/013
 **Blocks:** none
 **Estimated scope:** large
 **Estimated effort:** 7–10 days for one builder, including instrumentation, preproduction evidence, recovery drills, and full verification
@@ -64,6 +64,7 @@ Every event also requires schema version `anonymous-product-event-v1`, UUID even
 - Accept client reactive failures only through strict same-origin `POST /api/public-read-failure`: allow the four public query names, five route surfaces, five stable failure codes, nullable retained snapshot version, and retained-result flag defined in `repack-dashboard/tech-004`; reject raw query, cursor, pack, and platform fields.
 - Alert when no complete snapshot/observation exists, successful-observation age reaches 30 minutes, or reconciliation fails; report reactive failure volume separately.
 - Keep public copy sanitized, prove failed publication retains the prior complete snapshot, and prove changed activation or unchanged metadata-only reconciliation clears age-based delay after recovery.
+- Prove observed Repack Heat aggregates are release-bound, expire fail-closed, remain independent of immutable catalog freshness, and never ingest raw pull or provider-event payloads into Convex.
 
 ### Freshness Policy
 
@@ -162,6 +163,7 @@ The launch evidence bundle contains:
 - [ ] Event-level and daily aggregate retention complete at 30 days and 13 months with role-restricted access.
 - [ ] Every approved rollback trigger activates only a reconciled safe snapshot or explicitly clears availability, while the outgoing manifest fingerprint remains blocked across a new publication ID.
 - [ ] Joint launch and post-rollback approvals are recorded against one immutable evidence manifest.
+- [ ] Simulated heat is replaced by observed aggregate publication before live labeling, with sample gates, expiry, release binding, and public limitation evidence.
 
 ### Telemetry, Observability, and Automation Evidence
 

@@ -1,7 +1,7 @@
 import {
   dashboardQueryInputSchema,
   type DashboardQueryInput,
-  type ListPublicPacksInput,
+  type ListPublicRepacksInput,
 } from "@packscout/contracts";
 import { parseCatalogQueryState } from "./catalog-query-state.client";
 
@@ -25,9 +25,9 @@ export function toUrlSearchParams(input: NextSearchParams): URLSearchParams {
   return result;
 }
 
-export function parseAllPacksRouteQuery(
+export function parseAllRepacksRouteQuery(
   input: NextSearchParams,
-): RouteQueryResult<ListPublicPacksInput> {
+): RouteQueryResult<ListPublicRepacksInput> {
   const parsed = parseCatalogQueryState(toUrlSearchParams(input));
   return parsed.ok
     ? { ok: true, query: parsed.query }
@@ -37,7 +37,13 @@ export function parseAllPacksRouteQuery(
 export function parseDashboardRouteQuery(
   input: NextSearchParams,
 ): RouteQueryResult<DashboardQueryInput> {
-  const allowed = new Set(["platform", "category", "minPrice", "maxPrice"]);
+  const allowed = new Set([
+    "vendor",
+    "category",
+    "collectibleType",
+    "minPrice",
+    "maxPrice",
+  ]);
   if (Object.keys(input).some((key) => !allowed.has(key))) {
     return { ok: false, message: "This Dashboard link contains unsupported query state." };
   }
@@ -45,7 +51,7 @@ export function parseDashboardRouteQuery(
   if (!parsed.ok) return parsed;
   const dashboard = dashboardQueryInputSchema.safeParse({
     filters: parsed.query.filters,
-    selectedPublicPackId: null,
+    selectedPublicRepackId: null,
   });
   return dashboard.success
     ? { ok: true, query: dashboard.data }

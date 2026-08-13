@@ -1,18 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
 import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type {
   DashboardBundle,
-  PublicCatalogFilters,
-  PublicPackDetail,
+  PublicRepackFilters,
+  PublicRepackViewDetail,
 } from "@packscout/contracts";
 import { CatalogFilters } from "@/components/catalog/CatalogFilters.client";
 import { OverviewDashboard } from "@/components/catalog/OverviewDashboard.client";
@@ -26,28 +20,33 @@ import { useNarrowCatalogInspector } from "@/lib/catalog-viewport.client";
 import {
   createDashboardViewEvent,
   createFiltersAppliedEvent,
-  createPackLinkOpenedEvent,
   createPromoCopiedEvent,
+  createRepackLinkOpenedEvent,
   queueProductTelemetry,
 } from "@/lib/telemetry.client";
 import styles from "./DashboardOverviewClient.module.css";
 
 type DashboardOverviewClientProps = Readonly<{
   bundle: DashboardBundle;
-  details: readonly PublicPackDetail[];
+  details: readonly PublicRepackViewDetail[];
 }>;
 
 function actionMessage(outcome: InspectorActionOutcome): string {
-  if (outcome.name === "pack_link_opened") return "Provider listing opened in a new tab.";
+  if (outcome.name === "repack_link_opened") {
+    return "Vendor listing opened in a new tab.";
+  }
   return outcome.outcome === "clipboard"
     ? "Promo code copied."
     : "Clipboard access is unavailable. Copy the visible code manually.";
 }
 
-function activeFilterCount(filters: PublicCatalogFilters): 0 | 1 | 2 | 3 {
-  return (Number(filters.platforms.length > 0) +
+function activeFilterCount(
+  filters: PublicRepackFilters,
+): 0 | 1 | 2 | 3 | 4 {
+  return (Number(filters.vendors.length > 0) +
     Number(filters.categories.length > 0) +
-    Number(filters.price.mode === "narrowed")) as 0 | 1 | 2 | 3;
+    Number(filters.collectibleTypes.length > 0) +
+    Number(filters.price.mode === "narrowed")) as 0 | 1 | 2 | 3 | 4;
 }
 
 export function DashboardOverviewClient({
@@ -56,31 +55,33 @@ export function DashboardOverviewClient({
 }: DashboardOverviewClientProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [selectedPublicPackId, setSelectedPublicPackId] = useState<string | null>(
-    bundle.selectedPack?.publicPackId ?? null,
+  const [selectedPublicRepackId, setSelectedPublicRepackId] = useState<string | null>(
+    bundle.selectedRepack?.publicRepackId ?? null,
   );
   const [feedback, setFeedback] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const narrowInspector = useNarrowCatalogInspector();
   const selectionTriggerRef = useRef<HTMLElement | null>(null);
   const detailById = useMemo(
-    () => new Map(details.map((detail) => [detail.publicPackId, detail])),
+    () => new Map(details.map((detail) => [detail.publicRepackId, detail])),
     [details],
   );
-  const selectedPack = selectedPublicPackId
-    ? detailById.get(selectedPublicPackId) ??
-      (bundle.selectedPack?.publicPackId === selectedPublicPackId ? bundle.selectedPack : null)
-    : bundle.selectedPack;
+  const selectedRepack = selectedPublicRepackId
+    ? detailById.get(selectedPublicRepackId) ??
+      (bundle.selectedRepack?.publicRepackId === selectedPublicRepackId
+        ? bundle.selectedRepack
+        : null)
+    : bundle.selectedRepack;
   const selectedBundle = useMemo(
-    () => ({ ...bundle, selectedPack: selectedPack ?? null }),
-    [bundle, selectedPack],
+    () => ({ ...bundle, selectedRepack: selectedRepack ?? null }),
+    [bundle, selectedRepack],
   );
 
-  function navigate(filters: PublicCatalogFilters) {
+  function navigate(filters: PublicRepackFilters) {
     startTransition(() => router.push(serializeDashboardFilters(filters)));
   }
 
-  const allPacksHref = serializeCatalogQueryState({
+  const allRepacksHref = serializeCatalogQueryState({
     ...DEFAULT_CATALOG_QUERY,
     filters: bundle.activeFilters,
   });
@@ -88,28 +89,28 @@ export function DashboardOverviewClient({
   useEffect(() => {
     queueProductTelemetry(
       createDashboardViewEvent({
-        snapshotVersion: bundle.metadata.publicationId,
+        publicReleaseId: bundle.metadata.publicReleaseId,
         surface: "overview",
       }),
     );
-  }, [bundle.metadata.publicationId]);
+  }, [bundle.metadata.publicReleaseId]);
 
   useEffect(() => {
     const count = activeFilterCount(bundle.activeFilters);
     if (count === 0) return;
     queueProductTelemetry(
       createFiltersAppliedEvent({
-        snapshotVersion: bundle.metadata.publicationId,
+        publicReleaseId: bundle.metadata.publicReleaseId,
         surface: "overview",
-        outcome: bundle.kpis.totalPacks === 0 ? "no_matches" : "results",
+        outcome: bundle.kpis.totalRepacks === 0 ? "no_matches" : "results",
         activeFilterCount: count,
-        resultCount: bundle.kpis.totalPacks,
+        resultCount: bundle.kpis.totalRepacks,
       }),
     );
   }, [
     bundle.activeFilters,
-    bundle.kpis.totalPacks,
-    bundle.metadata.publicationId,
+    bundle.kpis.totalRepacks,
+    bundle.metadata.publicReleaseId,
   ]);
 
   function reportInspectorAction(outcome: InspectorActionOutcome) {
@@ -117,15 +118,15 @@ export function DashboardOverviewClient({
     queueProductTelemetry(
       outcome.name === "promo_copied"
         ? createPromoCopiedEvent({
-            snapshotVersion: bundle.metadata.publicationId,
-            publicPackId: outcome.publicPackId,
-            platformKey: outcome.platformKey,
+            publicReleaseId: bundle.metadata.publicReleaseId,
+            publicRepackId: outcome.publicRepackId,
+            vendorKey: outcome.vendorKey,
             outcome: outcome.outcome,
           })
-        : createPackLinkOpenedEvent({
-            snapshotVersion: bundle.metadata.publicationId,
-            publicPackId: outcome.publicPackId,
-            platformKey: outcome.platformKey,
+        : createRepackLinkOpenedEvent({
+            publicReleaseId: bundle.metadata.publicReleaseId,
+            publicRepackId: outcome.publicRepackId,
+            vendorKey: outcome.vendorKey,
             outcome: outcome.outcome,
           }),
     );
@@ -144,8 +145,8 @@ export function DashboardOverviewClient({
               onReset={() => startTransition(() => router.push("/"))}
               pending={pending}
             />
-            <Link className={styles.viewAll} href={allPacksHref}>
-              View all packs <span aria-hidden="true">→</span>
+            <Link className={styles.viewAll} href={allRepacksHref}>
+              View all repacks <span aria-hidden="true">→</span>
             </Link>
           </div>
         }
@@ -154,14 +155,16 @@ export function DashboardOverviewClient({
         inspectorReturnFocusRef={selectionTriggerRef}
         onCloseInspector={() => setSheetOpen(false)}
         onInspectorAction={reportInspectorAction}
-        onSelectOpportunity={(publicPackId, trigger) => {
+        onSelectOpportunity={(publicRepackId, trigger) => {
           selectionTriggerRef.current = trigger;
-          setSelectedPublicPackId(publicPackId);
+          setSelectedPublicRepackId(publicRepackId);
           if (narrowInspector) setSheetOpen(true);
         }}
-        selectedPublicPackId={selectedPublicPackId}
+        selectedPublicRepackId={selectedPublicRepackId}
       />
-      <p aria-live="polite" className={styles.feedback} role="status">{feedback}</p>
+      <p aria-live="polite" className={styles.feedback} role="status">
+        {feedback}
+      </p>
     </div>
   );
 }

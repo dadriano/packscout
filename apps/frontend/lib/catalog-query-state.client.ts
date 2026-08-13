@@ -1,46 +1,50 @@
 import {
-  PUBLIC_CATALOG_DEFAULT_PAGE_SIZE,
-  PUBLIC_CATALOG_PRICE_MAX_MINOR,
-  PUBLIC_CATALOG_PRICE_MIN_MINOR,
+  PUBLIC_REPACK_DEFAULT_PAGE_SIZE,
+  PUBLIC_REPACK_PRICE_MAX_MINOR,
+  PUBLIC_REPACK_PRICE_MIN_MINOR,
   decodePublicCursorStack,
   encodePublicCursorStack,
-  listPublicPacksInputSchema,
-  type ListPublicPacksInput,
-  type PublicCatalogSort,
+  listPublicRepacksInputSchema,
+  type ListPublicRepacksInput,
+  type PublicRepackSort,
 } from "@packscout/contracts";
 
-const SORT_KEYS = new Set<PublicCatalogSort>([
-  "pack",
-  "pack_price",
-  "ev_dollars",
-  "ev_percent",
+const SORT_KEYS = new Set<PublicRepackSort>([
+  "repack",
+  "repack_price",
+  "packscout_ev_dollars",
+  "packscout_ev_percent",
+  "vendor_reported_ev_percent",
   "buyback_percent",
-  "gross_ev",
+  "packscout_gross_ev",
   "top_chase_value",
+  "packscout_confidence",
 ]);
 
-export const DEFAULT_CATALOG_QUERY: ListPublicPacksInput = Object.freeze({
+export const DEFAULT_CATALOG_QUERY: ListPublicRepacksInput = Object.freeze({
   search: "",
   filters: Object.freeze({
-    platforms: Object.freeze([]),
+    vendors: Object.freeze([]),
     categories: Object.freeze([]),
+    collectibleTypes: Object.freeze([]),
     price: Object.freeze({
       mode: "full",
-      minMinor: PUBLIC_CATALOG_PRICE_MIN_MINOR,
-      maxMinor: PUBLIC_CATALOG_PRICE_MAX_MINOR,
+      minMinor: PUBLIC_REPACK_PRICE_MIN_MINOR,
+      maxMinor: PUBLIC_REPACK_PRICE_MAX_MINOR,
     }),
   }),
-  sort: "ev_dollars",
+  sort: "packscout_ev_dollars",
   direction: "desc",
   cursor: null,
   cursorStack: null,
   queryFingerprint: null,
-  pageSize: PUBLIC_CATALOG_DEFAULT_PAGE_SIZE,
-  selectedPublicPackId: null,
+  pageSize: PUBLIC_REPACK_DEFAULT_PAGE_SIZE,
+  desiredPublicCollectibleId: null,
+  selectedPublicRepackId: null,
 });
 
 export type CatalogQueryParseResult =
-  | { readonly ok: true; readonly query: ListPublicPacksInput }
+  | { readonly ok: true; readonly query: ListPublicRepacksInput }
   | { readonly ok: false; readonly message: string };
 
 function parseDollarAmount(value: string | null): number | null {
@@ -65,8 +69,10 @@ function canonicalValues(values: readonly string[]): readonly string[] {
 function onlyKnownKeys(parameters: URLSearchParams): boolean {
   const knownKeys = new Set([
     "q",
-    "platform",
+    "chase",
+    "vendor",
     "category",
+    "collectibleType",
     "minPrice",
     "maxPrice",
     "sort",
@@ -81,6 +87,7 @@ function onlyKnownKeys(parameters: URLSearchParams): boolean {
 function hasDuplicateSingleton(parameters: URLSearchParams): boolean {
   return [
     "q",
+    "chase",
     "minPrice",
     "maxPrice",
     "sort",
@@ -104,26 +111,27 @@ export function parseCatalogQueryState(
     return { ok: false, message: "Both price limits are required." };
   }
 
-  const minMinor = minRaw === null ? PUBLIC_CATALOG_PRICE_MIN_MINOR : parseDollarAmount(minRaw);
-  const maxMinor = maxRaw === null ? PUBLIC_CATALOG_PRICE_MAX_MINOR : parseDollarAmount(maxRaw);
+  const minMinor = minRaw === null ? PUBLIC_REPACK_PRICE_MIN_MINOR : parseDollarAmount(minRaw);
+  const maxMinor = maxRaw === null ? PUBLIC_REPACK_PRICE_MAX_MINOR : parseDollarAmount(maxRaw);
   if (minMinor === null || maxMinor === null) {
     return { ok: false, message: "The catalog price range is invalid." };
   }
 
   const sortRaw = parameters.get("sort") ?? DEFAULT_CATALOG_QUERY.sort;
   const directionRaw = parameters.get("direction") ?? DEFAULT_CATALOG_QUERY.direction;
-  if (!SORT_KEYS.has(sortRaw as PublicCatalogSort) || !["asc", "desc"].includes(directionRaw)) {
+  if (!SORT_KEYS.has(sortRaw as PublicRepackSort) || !["asc", "desc"].includes(directionRaw)) {
     return { ok: false, message: "The catalog sort is invalid." };
   }
 
   const cursor = parameters.get("cursor");
   const cursorStack = parameters.get("cursorStack");
   const queryFingerprint = parameters.get("queryFingerprint");
-  const parsed = listPublicPacksInputSchema.safeParse({
+  const parsed = listPublicRepacksInputSchema.safeParse({
     search: parameters.get("q") ?? "",
     filters: {
-      platforms: canonicalValues(parameters.getAll("platform")),
+      vendors: canonicalValues(parameters.getAll("vendor")),
       categories: canonicalValues(parameters.getAll("category")),
+      collectibleTypes: canonicalValues(parameters.getAll("collectibleType")),
       price:
         minRaw === null && maxRaw === null
           ? DEFAULT_CATALOG_QUERY.filters.price
@@ -134,8 +142,9 @@ export function parseCatalogQueryState(
     cursor,
     cursorStack,
     queryFingerprint,
-    pageSize: PUBLIC_CATALOG_DEFAULT_PAGE_SIZE,
-    selectedPublicPackId: null,
+    pageSize: PUBLIC_REPACK_DEFAULT_PAGE_SIZE,
+    desiredPublicCollectibleId: parameters.get("chase"),
+    selectedPublicRepackId: null,
   });
 
   return parsed.success
@@ -143,12 +152,18 @@ export function parseCatalogQueryState(
     : { ok: false, message: "This catalog link cannot be applied." };
 }
 
-export function serializeCatalogQueryState(query: ListPublicPacksInput): string {
-  const parsed = listPublicPacksInputSchema.parse(query);
+export function serializeCatalogQueryState(query: ListPublicRepacksInput): string {
+  const parsed = listPublicRepacksInputSchema.parse(query);
   const parameters = new URLSearchParams();
   if (parsed.search) parameters.set("q", parsed.search);
-  for (const platform of parsed.filters.platforms) parameters.append("platform", platform);
+  if (parsed.desiredPublicCollectibleId) {
+    parameters.set("chase", parsed.desiredPublicCollectibleId);
+  }
+  for (const vendor of parsed.filters.vendors) parameters.append("vendor", vendor);
   for (const category of parsed.filters.categories) parameters.append("category", category);
+  for (const collectibleType of parsed.filters.collectibleTypes) {
+    parameters.append("collectibleType", collectibleType);
+  }
   if (parsed.filters.price.mode === "narrowed") {
     parameters.set("minPrice", formatDollarAmount(parsed.filters.price.minMinor));
     parameters.set("maxPrice", formatDollarAmount(parsed.filters.price.maxMinor));
@@ -165,9 +180,9 @@ export function serializeCatalogQueryState(query: ListPublicPacksInput): string 
 }
 
 export function serializeDashboardFilters(
-  filters: ListPublicPacksInput["filters"],
+  filters: ListPublicRepacksInput["filters"],
 ): string {
-  const query = listPublicPacksInputSchema.parse({ filters });
+  const query = listPublicRepacksInputSchema.parse({ filters });
   const allPacksHref = serializeCatalogQueryState(query);
   return allPacksHref === "/packs"
     ? "/"
@@ -175,24 +190,29 @@ export function serializeDashboardFilters(
 }
 
 export function resetCatalogPagination(
-  query: ListPublicPacksInput,
-  changes: Partial<Pick<ListPublicPacksInput, "search" | "filters" | "sort" | "direction">>,
-): ListPublicPacksInput {
-  return listPublicPacksInputSchema.parse({
+  query: ListPublicRepacksInput,
+  changes: Partial<
+    Pick<
+      ListPublicRepacksInput,
+      "search" | "filters" | "sort" | "direction" | "desiredPublicCollectibleId"
+    >
+  >,
+): ListPublicRepacksInput {
+  return listPublicRepacksInputSchema.parse({
     ...query,
     ...changes,
     cursor: null,
     cursorStack: null,
     queryFingerprint: null,
-    selectedPublicPackId: null,
+    selectedPublicRepackId: null,
   });
 }
 
 export function nextCatalogPage(
-  query: ListPublicPacksInput,
+  query: ListPublicRepacksInput,
   nextCursor: string | null,
   queryFingerprint: string,
-): ListPublicPacksInput {
+): ListPublicRepacksInput {
   if (nextCursor === null) return query;
   const previousStarts = query.cursorStack
     ? decodePublicCursorStack(query.cursorStack)
@@ -201,7 +221,7 @@ export function nextCatalogPage(
   const stack = query.cursor
     ? [...previousStarts, query.cursor]
     : [...previousStarts];
-  return listPublicPacksInputSchema.parse({
+  return listPublicRepacksInputSchema.parse({
     ...query,
     cursor: nextCursor,
     cursorStack: stack.length > 0 ? encodePublicCursorStack(stack) : null,
@@ -210,16 +230,16 @@ export function nextCatalogPage(
 }
 
 export function previousCatalogPage(
-  query: ListPublicPacksInput,
+  query: ListPublicRepacksInput,
   queryFingerprint: string,
-): ListPublicPacksInput {
+): ListPublicRepacksInput {
   const previousStarts = query.cursorStack
     ? decodePublicCursorStack(query.cursorStack)
     : [];
   if (previousStarts === null) return query;
   const stack = [...previousStarts];
   const cursor = stack.pop() ?? null;
-  return listPublicPacksInputSchema.parse({
+  return listPublicRepacksInputSchema.parse({
     ...query,
     cursor,
     cursorStack: stack.length > 0 ? encodePublicCursorStack(stack) : null,

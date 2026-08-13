@@ -1,112 +1,280 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { catalogQueryRowValidator } from "./publicCatalogValidation";
+import { repackSearchRowValidator } from "./publicRepackValidation";
 
 const sha256Validator = v.string();
 const timestampValidator = v.string();
-const usdMoneyValidator = v.object({
-  minorUnits: v.number(),
-  currency: v.literal("USD"),
-});
+const nullableTimestampValidator = v.union(timestampValidator, v.null());
+const nullableTextValidator = v.union(v.string(), v.null());
+
 const moneyValidator = v.object({
   minorUnits: v.number(),
   currency: v.string(),
 });
-const signedUsdMoneyValidator = v.object({
+
+const reportedMoneyValidator = v.object({
+  minorUnits: v.number(),
+  currency: v.string(),
+});
+
+const usdMoneyValidator = v.object({
   minorUnits: v.number(),
   currency: v.literal("USD"),
 });
-const basisPointsValidator = v.object({ basisPoints: v.number() });
 
-const priceComparisonValidator = v.union(
+const imageValidator = v.object({
+  url: v.string(),
+  alt: v.string(),
+});
+
+const nullableImageValidator = v.union(imageValidator, v.null());
+
+const referralParameterValidator = v.object({
+  name: v.string(),
+  value: v.string(),
+});
+
+const promoValidator = v.object({
+  code: v.string(),
+  label: v.string(),
+});
+
+const packLinkValidator = v.object({
+  listingUrl: v.string(),
+  listingHost: v.string(),
+  referralParameters: v.array(referralParameterValidator),
+});
+
+const priceValidator = v.object({
+  displayMoney: v.union(moneyValidator, v.null()),
+  usdComparison: v.union(
+    v.object({
+      status: v.literal("available"),
+      value: usdMoneyValidator,
+    }),
+    v.object({
+      status: v.literal("unavailable"),
+      value: v.null(),
+      reason: v.union(
+        v.literal("PRICE_UNAVAILABLE"),
+        v.literal("CURRENCY_UNSUPPORTED"),
+      ),
+    }),
+  ),
+});
+
+const estimateMetricsValidator = v.object({
+  grossEv: usdMoneyValidator,
+  grossReturnBasisPoints: v.number(),
+  evDollars: v.object({
+    minorUnits: v.number(),
+    currency: v.literal("USD"),
+  }),
+  evPercentBasisPoints: v.number(),
+});
+
+const confidenceBandValidator = v.union(
+  v.literal("low"),
+  v.literal("medium"),
+  v.literal("high"),
+);
+
+const repackHeatComponentUnavailableValidator = v.object({
+  status: v.literal("unavailable"),
+  reason: v.union(
+    v.literal("CURRENT_SAMPLE_INSUFFICIENT"),
+    v.literal("BASELINE_SAMPLE_INSUFFICIENT"),
+    v.literal("BASELINE_UNAVAILABLE"),
+    v.literal("EVIDENCE_INCOMPLETE"),
+    v.literal("METRIC_UNSUPPORTED"),
+  ),
+});
+
+const repackHeatProvenanceValidator = v.union(
+  v.object({ kind: v.literal("observed"), aggregationVersion: v.string() }),
+  v.object({
+    kind: v.literal("simulated"),
+    aggregationVersion: v.string(),
+    scenarioVersion: v.string(),
+  }),
+);
+
+const repackHeatWindowValidator = v.object({
+  startedAt: timestampValidator,
+  endedAt: timestampValidator,
+  pullCount: v.number(),
+});
+
+export const publicRepackHeatSignalValidator = v.object({
+  publicRepackId: v.string(),
+  state: v.union(
+    v.literal("hot"),
+    v.literal("warm"),
+    v.literal("normal"),
+    v.literal("cold"),
+    v.literal("insufficient_data"),
+  ),
+  scoreBasisPoints: v.union(v.number(), v.null()),
+  signalConfidence: v.union(
+    v.object({
+      scoreBasisPoints: v.number(),
+      band: confidenceBandValidator,
+    }),
+    v.null(),
+  ),
+  provenance: repackHeatProvenanceValidator,
+  sourceCoverage: v.union(v.literal("complete"), v.literal("partial")),
+  currentWindow: repackHeatWindowValidator,
+  baselineWindow: repackHeatWindowValidator,
+  sampleRequirements: v.object({
+    minimumCurrentPullCount: v.number(),
+    minimumBaselinePullCount: v.number(),
+  }),
+  components: v.object({
+    activity: v.union(
+      v.object({
+        status: v.literal("available"),
+        currentPullCount: v.number(),
+        baselinePullCount: v.number(),
+        relativeRateDeltaBasisPoints: v.number(),
+      }),
+      repackHeatComponentUnavailableValidator,
+    ),
+    observedReturn: v.union(
+      v.object({
+        status: v.literal("available"),
+        currentReturnBasisPoints: v.number(),
+        baselineReturnBasisPoints: v.number(),
+        rateDeltaBasisPoints: v.number(),
+      }),
+      repackHeatComponentUnavailableValidator,
+    ),
+    largeHitFrequency: v.union(
+      v.object({
+        status: v.literal("available"),
+        currentHitCount: v.number(),
+        baselineHitCount: v.number(),
+        currentRateBasisPoints: v.number(),
+        baselineRateBasisPoints: v.number(),
+        rateDeltaBasisPoints: v.number(),
+        thresholdMultipleBasisPoints: v.number(),
+      }),
+      repackHeatComponentUnavailableValidator,
+    ),
+    chaseAvailability: v.union(
+      v.object({
+        status: v.literal("available"),
+        currentAvailableChaseCount: v.number(),
+        baselineAvailableChaseCount: v.number(),
+        change: v.union(
+          v.literal("restocked"),
+          v.literal("depleted"),
+          v.literal("unchanged"),
+        ),
+      }),
+      repackHeatComponentUnavailableValidator,
+    ),
+    poolComposition: v.union(
+      v.object({
+        status: v.literal("available"),
+        addedOutcomeCount: v.number(),
+        removedOutcomeCount: v.number(),
+        changeMagnitudeBasisPoints: v.number(),
+        changed: v.boolean(),
+      }),
+      repackHeatComponentUnavailableValidator,
+    ),
+  }),
+  drivers: v.array(
+    v.object({
+      code: v.union(
+        v.literal("activity"),
+        v.literal("chase_availability"),
+        v.literal("large_hit_frequency"),
+        v.literal("observed_return"),
+        v.literal("pool_composition"),
+      ),
+      contributionBasisPoints: v.number(),
+    }),
+  ),
+  limitationCodes: v.array(
+    v.union(
+      v.literal("current_sample_below_minimum"),
+      v.literal("baseline_sample_below_minimum"),
+      v.literal("partial_source_coverage"),
+      v.literal("return_data_incomplete"),
+      v.literal("large_hit_data_incomplete"),
+      v.literal("chase_inventory_incomplete"),
+      v.literal("pool_composition_incomplete"),
+      v.literal("simulated_data"),
+    ),
+  ),
+  heatPolicyVersion: v.string(),
+  calculatedAt: timestampValidator,
+  expiresAt: timestampValidator,
+});
+
+const confidenceValidator = v.object({
+  scoreBasisPoints: v.number(),
+  band: confidenceBandValidator,
+  limitationCodes: v.array(
+    v.union(
+      v.literal("incomplete_outcome_pool"),
+      v.literal("estimated_value_ranges"),
+      v.literal("partial_probability_coverage"),
+      v.literal("sparse_valuation_data"),
+      v.literal("stale_valuation_data"),
+      v.literal("unresolved_collectibles"),
+      v.literal("currency_normalization_applied"),
+      v.literal("vendor_odds_unverified"),
+      v.literal("vendor_probability_inputs"),
+    ),
+  ),
+});
+
+const vendorReportedEvEstimateValidator = v.union(
   v.object({
     status: v.literal("available"),
-    value: usdMoneyValidator,
-    reason: v.null(),
-    nullRank: v.literal(0),
+    displayMoney: reportedMoneyValidator,
+    metrics: estimateMetricsValidator,
+    observedAt: timestampValidator,
   }),
   v.object({
     status: v.literal("unavailable"),
-    value: v.null(),
+    displayMoney: v.union(reportedMoneyValidator, v.null()),
+    metrics: v.null(),
+    observedAt: nullableTimestampValidator,
     reason: v.union(
+      v.literal("NOT_REPORTED"),
       v.literal("PRICE_UNAVAILABLE"),
       v.literal("CURRENCY_UNSUPPORTED"),
     ),
-    nullRank: v.literal(1),
   }),
 );
 
-const grossEvValidator = v.union(
+const packScoutEvEstimateValidator = v.union(
   v.object({
     status: v.literal("available"),
-    value: usdMoneyValidator,
-    reason: v.null(),
-    nullRank: v.literal(0),
+    metrics: estimateMetricsValidator,
+    confidence: confidenceValidator,
+    modelVersion: v.string(),
+    confidencePolicyVersion: v.string(),
+    dataAsOf: timestampValidator,
+    calculatedAt: timestampValidator,
   }),
   v.object({
     status: v.literal("unavailable"),
-    value: v.null(),
-    reason: v.union(
-      v.literal("CURRENCY_UNSUPPORTED"),
-      v.literal("ESTIMATE_INPUT_INCOMPLETE"),
-    ),
-    nullRank: v.literal(1),
-  }),
-);
-
-const grossReturnValidator = v.union(
-  v.object({
-    status: v.literal("available"),
-    value: basisPointsValidator,
-    reason: v.null(),
-    nullRank: v.literal(0),
-  }),
-  v.object({
-    status: v.literal("unavailable"),
-    value: v.null(),
-    reason: v.union(
-      v.literal("CURRENCY_UNSUPPORTED"),
-      v.literal("ESTIMATE_INPUT_INCOMPLETE"),
-    ),
-    nullRank: v.literal(1),
-  }),
-);
-
-const derivedEvDollarsValidator = v.union(
-  v.object({
-    status: v.literal("available"),
-    value: signedUsdMoneyValidator,
-    reason: v.null(),
-    nullRank: v.literal(0),
-  }),
-  v.object({
-    status: v.literal("unavailable"),
-    value: v.null(),
+    metrics: v.null(),
+    confidence: v.null(),
+    modelVersion: v.string(),
+    confidencePolicyVersion: v.string(),
+    dataAsOf: nullableTimestampValidator,
+    calculatedAt: nullableTimestampValidator,
     reason: v.union(
       v.literal("PRICE_UNAVAILABLE"),
       v.literal("CURRENCY_UNSUPPORTED"),
       v.literal("ESTIMATE_INPUT_INCOMPLETE"),
     ),
-    nullRank: v.literal(1),
-  }),
-);
-
-const derivedEvPercentValidator = v.union(
-  v.object({
-    status: v.literal("available"),
-    value: basisPointsValidator,
-    reason: v.null(),
-    nullRank: v.literal(0),
-  }),
-  v.object({
-    status: v.literal("unavailable"),
-    value: v.null(),
-    reason: v.union(
-      v.literal("PRICE_UNAVAILABLE"),
-      v.literal("CURRENCY_UNSUPPORTED"),
-      v.literal("ESTIMATE_INPUT_INCOMPLETE"),
-    ),
-    nullRank: v.literal(1),
   }),
 );
 
@@ -115,243 +283,447 @@ const buybackValidator = v.union(
     status: v.literal("available"),
     value: v.object({
       basisPoints: v.number(),
-      sourceKind: v.union(v.literal("direct"), v.literal("derived")),
+      sourceKind: v.union(
+        v.literal("vendor_reported"),
+        v.literal("packscout_derived"),
+      ),
     }),
-    reason: v.null(),
-    nullRank: v.literal(0),
   }),
   v.object({
     status: v.literal("unavailable"),
     value: v.null(),
     reason: v.literal("BUYBACK_UNAVAILABLE"),
-    nullRank: v.literal(1),
   }),
 );
 
-const publicImageValidator = v.object({ url: v.string(), alt: v.string() });
-const chaseComparisonValidator = v.union(
-  v.object({
-    status: v.literal("available"),
-    value: usdMoneyValidator,
-    reason: v.null(),
-    nullRank: v.literal(0),
-  }),
-  v.object({
-    status: v.literal("unavailable"),
-    value: v.null(),
-    reason: v.union(
-      v.literal("CHASE_UNAVAILABLE"),
-      v.literal("CURRENCY_UNSUPPORTED"),
-    ),
-    nullRank: v.literal(1),
-  }),
-);
-const topChaseDetailValidator = v.union(
-  v.object({
-    status: v.literal("available"),
-    value: v.object({
-      publicChaseId: v.string(),
-      name: v.string(),
-      displayMoney: v.union(moneyValidator, v.null()),
-      usdComparison: chaseComparisonValidator,
-      primaryImage: v.union(publicImageValidator, v.null()),
-      evidenceKind: v.union(
-        v.literal("canonical_asset_value"),
-        v.literal("canonical_asset_identity"),
-      ),
-      observedAt: timestampValidator,
-    }),
-    reason: v.null(),
-    nullRank: v.literal(0),
-  }),
-  v.object({
-    status: v.literal("unavailable"),
-    value: v.null(),
-    reason: v.literal("CHASE_UNAVAILABLE"),
-    nullRank: v.literal(1),
-  }),
+const collectibleTypeValidator = v.union(
+  v.literal("card"),
+  v.literal("watch"),
+  v.literal("coin"),
+  v.literal("sealed_product"),
+  v.literal("memorabilia"),
+  v.literal("other"),
 );
 
-const referralParameterValidator = v.object({
-  name: v.string(),
-  value: v.string(),
-});
-const promoValidator = v.object({ code: v.string(), label: v.string() });
-const packLinkValidator = v.object({
-  listingUrl: v.string(),
-  listingHost: v.string(),
-  referralParameters: v.array(referralParameterValidator),
-});
-
-export const publicPackDetailValidator = v.object({
-  publicPackId: v.string(),
-  platformKey: v.string(),
-  platformDisplayName: v.string(),
-  platformLogoUrl: v.union(v.string(), v.null()),
-  category: v.string(),
-  name: v.string(),
-  availability: v.union(v.literal("active"), v.literal("sold_out")),
-  price: v.object({
-    displayMoney: v.union(moneyValidator, v.null()),
-    usdComparison: priceComparisonValidator,
-  }),
-  estimatedEv: v.object({
-    grossEv: grossEvValidator,
-    grossReturn: grossReturnValidator,
-    evDollars: derivedEvDollarsValidator,
-    evPercent: derivedEvPercentValidator,
-    calculatedAt: v.union(timestampValidator, v.null()),
-    coverage: v.object({
-      evidenceCompleteness: v.union(
-        v.literal("complete"),
-        v.literal("partial"),
-        v.literal("unknown"),
-      ),
-      probabilityCoverageBasisPoints: v.union(v.number(), v.null()),
-    }),
-    limitations: v.array(v.string()),
-  }),
-  buyback: buybackValidator,
-  primaryImage: v.union(publicImageValidator, v.null()),
-  topChase: topChaseDetailValidator,
-  actionAvailability: v.object({ promo: v.boolean(), packLink: v.boolean() }),
-  sourceFirstSeenAt: timestampValidator,
-  sourceCollectedAt: timestampValidator,
-  description: v.union(v.string(), v.null()),
-  actions: v.object({
-    promo: v.optional(promoValidator),
-    packLink: v.optional(packLinkValidator),
-  }),
-});
-
-export const snapshotMetadataValidator = v.object({
-  schemaVersion: v.literal("catalog_snapshot_v1"),
-  dataSource: v.union(v.literal("canonical"), v.literal("mock")),
-  publicationId: v.string(),
-  sourceWatermark: sha256Validator,
-  manifestFingerprint: sha256Validator,
-  contentHash: sha256Validator,
-  publicConfigRevision: v.number(),
-  publicConfigHash: sha256Validator,
-  originSetHash: sha256Validator,
-  createdAt: timestampValidator,
-  completedAt: timestampValidator,
-  dataAsOf: timestampValidator,
-  lastSuccessfulObservationAt: timestampValidator,
-  staleAt: timestampValidator,
-  freshness: v.union(v.literal("fresh"), v.literal("delayed")),
-  delayedSourceCount: v.number(),
-  platformConfigCount: v.number(),
-  packCount: v.number(),
-  searchAlgorithmVersion: v.literal("packscout_relevance_v1"),
-});
-
-const platformConfigValidator = v.object({
-  platformKey: v.string(),
-  revision: v.number(),
-  contentHash: sha256Validator,
+const publicVendorValidator = v.object({
+  publicVendorId: v.string(),
+  vendorKey: v.string(),
   displayName: v.string(),
-  logoUrl: v.union(v.string(), v.null()),
+  logoUrl: nullableTextValidator,
+  websiteUrl: nullableTextValidator,
   listingHosts: v.array(v.string()),
   imageOrigins: v.array(v.string()),
   referralParameters: v.array(referralParameterValidator),
   publicPromo: v.union(promoValidator, v.null()),
 });
 
-const catalogFacetValidator = v.object({
-  key: v.string(),
+const categoryKindValidator = v.union(
+  v.literal("vertical"),
+  v.literal("sport"),
+  v.literal("league"),
+  v.literal("franchise"),
+  v.literal("brand"),
+  v.literal("set"),
+  v.literal("other"),
+);
+
+const publicCategoryValidator = v.object({
+  publicCategoryId: v.string(),
+  parentPublicCategoryId: nullableTextValidator,
+  categoryKey: v.string(),
+  name: v.string(),
+  kind: categoryKindValidator,
+  depth: v.number(),
+  pathPublicCategoryIds: v.array(v.string()),
+  displayOrder: v.number(),
+});
+
+const collectibleValuationValidator = v.object({
+  displayMoney: v.union(moneyValidator, v.null()),
+  usdComparison: v.union(
+    v.object({
+      status: v.literal("available"),
+      value: usdMoneyValidator,
+    }),
+    v.object({
+      status: v.literal("unavailable"),
+      value: v.null(),
+      reason: v.union(
+        v.literal("VALUATION_UNAVAILABLE"),
+        v.literal("CURRENCY_UNSUPPORTED"),
+      ),
+    }),
+  ),
+  valuationType: v.union(
+    v.literal("market_estimate"),
+    v.literal("vendor_reported"),
+    v.literal("last_sale"),
+    v.literal("appraisal"),
+  ),
+  observedAt: timestampValidator,
+});
+
+const publicCollectibleValidator = v.object({
+  publicCollectibleId: v.string(),
+  name: v.string(),
+  normalizedName: v.string(),
+  aliases: v.array(v.string()),
+  normalizedAliases: v.array(v.string()),
+  collectibleType: collectibleTypeValidator,
+  publicCategoryIds: v.array(v.string()),
+  year: v.union(v.number(), v.null()),
+  brand: nullableTextValidator,
+  setOrSeries: nullableTextValidator,
+  cardNumber: nullableTextValidator,
+  referenceNumber: nullableTextValidator,
+  subject: nullableTextValidator,
+  grade: nullableTextValidator,
+  grader: nullableTextValidator,
+  primaryImage: nullableImageValidator,
+  valuation: v.union(collectibleValuationValidator, v.null()),
+  searchText: v.string(),
+  dataAsOf: timestampValidator,
+});
+
+const chaseRoleValidator = v.union(
+  v.literal("top_chase"),
+  v.literal("featured_chase"),
+  v.literal("possible_outcome"),
+);
+
+const chaseEvidenceKindValidator = v.union(
+  v.literal("vendor_inventory"),
+  v.literal("vendor_odds"),
+  v.literal("vendor_featured_chase"),
+  v.literal("packscout_resolved"),
+  v.literal("historical_pull_inference"),
+  v.literal("name_only"),
+);
+
+const collectibleDisplayValidator = v.object({
+  publicCollectibleId: v.string(),
+  name: v.string(),
+  collectibleType: collectibleTypeValidator,
+  publicCategoryIds: v.array(v.string()),
+  primaryImage: nullableImageValidator,
+  valuation: v.union(collectibleValuationValidator, v.null()),
+});
+
+const publicRepackChaseValidator = v.object({
+  publicRepackId: v.string(),
+  publicCollectibleId: v.string(),
+  role: chaseRoleValidator,
+  evidenceKinds: v.array(chaseEvidenceKindValidator),
+  probabilityBasisPoints: v.union(v.number(), v.null()),
+  collectible: collectibleDisplayValidator,
+  matchConfidence: v.object({
+    scoreBasisPoints: v.number(),
+    band: confidenceBandValidator,
+  }),
+  observedAt: timestampValidator,
+  displayOrder: v.number(),
+});
+
+const publicRepackCategoryValidator = v.object({
+  publicCategoryId: v.string(),
   label: v.string(),
-  packCount: v.number(),
+});
+
+const publicRepackDetailValidator = v.object({
+  publicRepackId: v.string(),
+  publicVendorId: v.string(),
+  vendorKey: v.string(),
+  vendorDisplayName: v.string(),
+  vendorLogoUrl: nullableTextValidator,
+  name: v.string(),
+  format: v.union(v.literal("repack"), v.literal("gacha")),
+  contentMode: v.union(
+    v.literal("focused"),
+    v.literal("mixed"),
+    v.literal("unknown"),
+  ),
+  categories: v.array(publicRepackCategoryValidator),
+  collectibleTypes: v.array(collectibleTypeValidator),
+  availability: v.union(v.literal("active"), v.literal("sold_out")),
+  price: priceValidator,
+  evEstimates: v.object({
+    vendorReported: vendorReportedEvEstimateValidator,
+    packScout: packScoutEvEstimateValidator,
+  }),
+  buyback: buybackValidator,
+  primaryImage: nullableImageValidator,
+  topChase: v.union(publicRepackChaseValidator, v.null()),
+  contentSummary: v.object({
+    knownCollectibleCount: v.number(),
+    chaseCount: v.number(),
+    categoryCount: v.number(),
+    collectibleTypeCount: v.number(),
+    evidenceCompleteness: v.union(
+      v.literal("complete"),
+      v.literal("partial"),
+      v.literal("unknown"),
+    ),
+    probabilityCoverageBasisPoints: v.union(v.number(), v.null()),
+  }),
+  actionAvailability: v.object({
+    promo: v.boolean(),
+    repackLink: v.boolean(),
+  }),
+  sourceUpdatedAt: timestampValidator,
+  description: nullableTextValidator,
+  actions: v.object({
+    promo: v.optional(promoValidator),
+    repackLink: v.optional(packLinkValidator),
+  }),
+});
+
+export const dataReleaseMetadataValidator = v.object({
+  schemaVersion: v.literal("data_release_v2"),
+  dataSource: v.union(v.literal("canonical"), v.literal("mock")),
+  publicReleaseId: v.string(),
+  sourceWatermark: v.string(),
+  manifestFingerprint: sha256Validator,
+  contentHash: sha256Validator,
+  publicConfigRevision: v.number(),
+  publicConfigHash: sha256Validator,
+  originSetHash: sha256Validator,
+  searchAlgorithmVersion: v.literal("repack_search_v2"),
+  repackSearchIndexHash: sha256Validator,
+  confidencePolicyVersion: v.string(),
+  createdAt: timestampValidator,
+  completedAt: timestampValidator,
+  dataAsOf: timestampValidator,
+  lastSuccessfulObservationAt: timestampValidator,
+  staleAt: timestampValidator,
+  freshness: v.union(v.literal("fresh"), v.literal("delayed")),
+  delayedVendorCount: v.number(),
+  vendorCount: v.number(),
+  categoryCount: v.number(),
+  repackCount: v.number(),
+  collectibleCount: v.number(),
+  repackChaseCount: v.number(),
 });
 
 export default defineSchema({
-  catalogState: defineTable({
+  dataReleaseState: defineTable({
     key: v.literal("singleton"),
-    activeSnapshotId: v.union(v.id("catalogSnapshots"), v.null()),
-    previousSnapshotId: v.union(v.id("catalogSnapshots"), v.null()),
+    activeReleaseId: v.union(v.id("dataReleases"), v.null()),
+    previousReleaseId: v.union(v.id("dataReleases"), v.null()),
     latestObservationSequence: v.number(),
     dataAsOf: timestampValidator,
     lastSuccessfulObservationAt: timestampValidator,
     staleAt: timestampValidator,
     freshness: v.union(v.literal("fresh"), v.literal("delayed")),
-    delayedSourceCount: v.number(),
+    delayedVendorCount: v.number(),
     updatedAt: timestampValidator,
   }).index("by_key", ["key"]),
 
-  catalogSnapshots: defineTable({
-    publicationId: v.string(),
+  dataReleases: defineTable({
+    publicReleaseId: v.string(),
     lifecycle: v.union(
       v.literal("staging"),
       v.literal("complete"),
       v.literal("failed"),
       v.literal("retired"),
-      v.literal("blocked"),
     ),
-    metadata: snapshotMetadataValidator,
-    platformConfigs: v.array(platformConfigValidator),
-    facets: v.object({
-      platforms: v.array(catalogFacetValidator),
-      categories: v.array(catalogFacetValidator),
+    metadata: dataReleaseMetadataValidator,
+    searchShardCount: v.number(),
+  }).index("by_public_release_id", ["publicReleaseId"]),
+
+  repackHeatState: defineTable({
+    key: v.literal("singleton"),
+    activeHeatSnapshotId: v.union(v.id("repackHeatSnapshots"), v.null()),
+    previousHeatSnapshotId: v.union(v.id("repackHeatSnapshots"), v.null()),
+    freshness: v.union(
+      v.literal("current"),
+      v.literal("expired"),
+      v.literal("unavailable"),
+    ),
+    expiresAt: nullableTimestampValidator,
+    latestSequence: v.number(),
+    updatedAt: timestampValidator,
+  }).index("by_key", ["key"]),
+
+  repackHeatSnapshots: defineTable({
+    releaseId: v.id("dataReleases"),
+    publicHeatSnapshotId: v.string(),
+    simulationRunId: v.union(v.string(), v.null()),
+    sequence: v.number(),
+    lifecycle: v.union(
+      v.literal("staging"),
+      v.literal("complete"),
+      v.literal("retired"),
+      v.literal("failed"),
+    ),
+    sourceKind: v.union(v.literal("observed"), v.literal("simulated")),
+    scenarioVersion: v.union(v.string(), v.null()),
+    aggregationVersion: v.string(),
+    heatPolicyVersion: v.string(),
+    contentHash: sha256Validator,
+    signalCount: v.number(),
+    baselineWindowStartedAt: timestampValidator,
+    baselineWindowEndedAt: timestampValidator,
+    currentWindowStartedAt: timestampValidator,
+    currentWindowEndedAt: timestampValidator,
+    calculatedAt: timestampValidator,
+    expiresAt: timestampValidator,
+  })
+    .index("by_public_heat_snapshot_id", ["publicHeatSnapshotId"])
+    .index("by_release_id_and_sequence", ["releaseId", "sequence"])
+    .index("by_simulation_run_id_and_sequence", [
+      "simulationRunId",
+      "sequence",
+    ]),
+
+  repackHeatSignals: defineTable({
+    heatSnapshotId: v.id("repackHeatSnapshots"),
+    releaseId: v.id("dataReleases"),
+    repackId: v.id("repacks"),
+    publicRepackId: v.string(),
+    detail: publicRepackHeatSignalValidator,
+  })
+    .index("by_heat_snapshot_id_and_public_repack_id", [
+      "heatSnapshotId",
+      "publicRepackId",
+    ])
+    .index("by_heat_snapshot_id_and_repack_id", [
+      "heatSnapshotId",
+      "repackId",
+    ]),
+
+  vendors: defineTable({
+    releaseId: v.id("dataReleases"),
+    publicVendorId: v.string(),
+    vendorKey: v.string(),
+    detail: publicVendorValidator,
+  })
+    .index("by_release_id_and_public_vendor_id", [
+      "releaseId",
+      "publicVendorId",
+    ])
+    .index("by_release_id_and_vendor_key", ["releaseId", "vendorKey"]),
+
+  categories: defineTable({
+    releaseId: v.id("dataReleases"),
+    publicCategoryId: v.string(),
+    categoryKey: v.string(),
+    parentCategoryId: v.union(v.id("categories"), v.null()),
+    detail: publicCategoryValidator,
+  })
+    .index("by_release_id_and_public_category_id", [
+      "releaseId",
+      "publicCategoryId",
+    ])
+    .index("by_release_id_and_category_key", ["releaseId", "categoryKey"])
+    .index("by_release_id_and_parent_category_id", [
+      "releaseId",
+      "parentCategoryId",
+    ]),
+
+  repacks: defineTable({
+    releaseId: v.id("dataReleases"),
+    publicRepackId: v.string(),
+    vendorId: v.id("vendors"),
+    detail: publicRepackDetailValidator,
+  })
+    .index("by_release_id_and_public_repack_id", [
+      "releaseId",
+      "publicRepackId",
+    ])
+    .index("by_release_id_and_vendor_id", ["releaseId", "vendorId"]),
+
+  collectibles: defineTable({
+    releaseId: v.id("dataReleases"),
+    publicCollectibleId: v.string(),
+    collectibleType: collectibleTypeValidator,
+    normalizedName: v.string(),
+    searchText: v.string(),
+    detail: publicCollectibleValidator,
+  })
+    .index("by_release_id_and_public_collectible_id", [
+      "releaseId",
+      "publicCollectibleId",
+    ])
+    .index("by_release_id_and_normalized_name", [
+      "releaseId",
+      "normalizedName",
+    ])
+    .searchIndex("search_search_text", {
+      searchField: "searchText",
+      filterFields: ["releaseId", "collectibleType"],
     }),
-    shardCount: v.number(),
-  }).index("by_publication_id", ["publicationId"]),
 
-  publicPacks: defineTable({
-    snapshotId: v.id("catalogSnapshots"),
-    publicPackId: v.string(),
-    detail: publicPackDetailValidator,
-  }).index("by_snapshot_id_and_public_pack_id", [
-    "snapshotId",
-    "publicPackId",
-  ]),
+  repackChases: defineTable({
+    releaseId: v.id("dataReleases"),
+    repackId: v.id("repacks"),
+    collectibleId: v.id("collectibles"),
+    detail: publicRepackChaseValidator,
+  })
+    .index("by_release_id_and_repack_id", ["releaseId", "repackId"])
+    .index("by_release_id_and_collectible_id", [
+      "releaseId",
+      "collectibleId",
+    ])
+    .index("by_release_id_and_repack_id_and_collectible_id", [
+      "releaseId",
+      "repackId",
+      "collectibleId",
+    ]),
 
-  catalogQueryShards: defineTable({
-    snapshotId: v.id("catalogSnapshots"),
+  repackSearchShards: defineTable({
+    releaseId: v.id("dataReleases"),
     shardNumber: v.number(),
     rowCount: v.number(),
     byteCount: v.number(),
     contentHash: sha256Validator,
-    rows: v.array(catalogQueryRowValidator),
-  }).index("by_snapshot_id_and_shard_number", ["snapshotId", "shardNumber"]),
+    rows: v.array(repackSearchRowValidator),
+  }).index("by_release_id_and_shard_number", ["releaseId", "shardNumber"]),
 
-  publicationBatches: defineTable({
-    snapshotId: v.id("catalogSnapshots"),
+  dataReleaseBatches: defineTable({
+    releaseId: v.id("dataReleases"),
     batchIndex: v.number(),
-    kind: v.union(v.literal("packs"), v.literal("query_shards")),
+    kind: v.union(
+      v.literal("vendors"),
+      v.literal("categories"),
+      v.literal("repacks"),
+      v.literal("collectibles"),
+      v.literal("repack_chases"),
+      v.literal("search_shards"),
+    ),
     idempotencyKey: v.string(),
     bodyHash: sha256Validator,
     recordCount: v.number(),
     byteCount: v.number(),
     acceptedAt: timestampValidator,
   })
-    .index("by_snapshot_id_and_batch_index", ["snapshotId", "batchIndex"])
+    .index("by_release_id_and_batch_index", ["releaseId", "batchIndex"])
     .index("by_idempotency_key", ["idempotencyKey"]),
 
-  publicationOperations: defineTable({
+  dataReleaseOperations: defineTable({
     operationId: v.string(),
     kind: v.string(),
     idempotencyKey: v.string(),
     bodyHash: sha256Validator,
-    publicationId: v.union(v.string(), v.null()),
+    publicReleaseId: nullableTextValidator,
     observationSequence: v.union(v.number(), v.null()),
     status: v.string(),
     result: v.string(),
-    convexSnapshotVersion: v.union(v.string(), v.null()),
+    convexReleaseVersion: nullableTextValidator,
     confirmationReceiptHash: v.union(sha256Validator, v.null()),
     acceptedAt: timestampValidator,
-    completedAt: v.union(timestampValidator, v.null()),
+    completedAt: nullableTimestampValidator,
   })
     .index("by_kind_and_idempotency_key", ["kind", "idempotencyKey"])
-    .index("by_publication_id_and_kind", ["publicationId", "kind"]),
+    .index("by_public_release_id_and_kind", ["publicReleaseId", "kind"]),
 
-  blockedCatalogManifests: defineTable({
+  blockedDataReleaseManifests: defineTable({
     fingerprint: sha256Validator,
     active: v.boolean(),
     blockSequence: v.number(),
     originatingOperationId: v.string(),
     sanitizedReason: v.string(),
     blockedAt: timestampValidator,
-    releasedAt: v.union(timestampValidator, v.null()),
+    releasedAt: nullableTimestampValidator,
     releaseReceiptHash: v.union(sha256Validator, v.null()),
   }).index("by_fingerprint_and_active", ["fingerprint", "active"]),
 });

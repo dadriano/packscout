@@ -8,7 +8,7 @@ import styles from "./CatalogImage.module.css";
 type CatalogImageProps = Readonly<{
   image: PublicImage | null;
   fallbackAlt: string;
-  variant: "thumbnail" | "pack" | "chase" | "platform";
+  variant: "thumbnail" | "pack" | "chase" | "vendor";
   fallback?: "pack" | "none";
   decorative?: boolean;
 }>;
@@ -17,7 +17,7 @@ const IMAGE_DIMENSIONS = Object.freeze({
   thumbnail: { width: 48, height: 64 },
   pack: { width: 160, height: 220 },
   chase: { width: 92, height: 124 },
-  platform: { width: 24, height: 24 },
+  vendor: { width: 24, height: 24 },
 });
 
 export function CatalogImage({

@@ -111,7 +111,7 @@
   overflow-wrap: anywhere;
 }
 
-.platform {
+.vendor {
   display: inline-flex;
   align-items: center;
   gap: 0.42rem;
@@ -152,6 +152,34 @@
   margin-top: 0.95rem;
   border-top: 1px solid var(--color-border);
   padding-top: 0.85rem;
+}
+
+.vendorEstimate {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.95rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.85rem;
+}
+
+.vendorEstimateMetrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.vendorEstimateReason {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.66rem;
+  line-height: 1.45;
+}
+
+.vendorEstimateContext {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.64rem;
+  line-height: 1.45;
 }
 
 .estimateContext {
@@ -236,6 +264,21 @@
   font-variant-numeric: tabular-nums;
   font-weight: 720;
   letter-spacing: -0.025em;
+}
+
+.chaseValueReason {
+  margin: 0.2rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.61rem;
+  line-height: 1.4;
+}
+
+.chaseEvidence {
+  margin: 0.35rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  line-height: 1.4;
+  text-transform: capitalize;
 }
 
 .chaseUnavailable {

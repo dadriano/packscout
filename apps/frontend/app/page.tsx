@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { DashboardPageHeader } from "@/components/shell/DashboardPageHeader";
-import { ShellStatusReporter } from "@/components/shell/SnapshotStatus.client";
+import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
 import { CatalogRouteRecovery, EmptyCatalog } from "@/components/catalog-state";
 import { parseDashboardRouteQuery, type NextSearchParams } from "@/lib/catalog-route-state.server";
-import { readDashboardBundle } from "@/lib/public-catalog.server";
-import { snapshotStatusFromMetadata } from "@/lib/public-shell-status";
+import { readDashboardBundle } from "@/lib/public-repacks.server";
+import { dataReleaseStatusFromMetadata } from "@/lib/public-release-status";
 import { DashboardOverviewClient } from "./DashboardOverviewClient.client";
 
 export default async function DashboardOverviewPage({
@@ -14,7 +14,7 @@ export default async function DashboardOverviewPage({
   if (!parsed.ok) {
     return (
       <>
-        <ShellStatusReporter status={{ state: "unavailable" }} />
+        <DataReleaseStatusReporter status={{ state: "unavailable" }} />
         <DashboardPageHeader activeView="overview" />
         <section className="route-placeholder" aria-labelledby="invalid-overview-title">
           <div className="route-placeholder__inner">
@@ -32,26 +32,26 @@ export default async function DashboardOverviewPage({
   if (!result.ok) {
     return (
       <>
-        <ShellStatusReporter status={{ state: "unavailable" }} />
+        <DataReleaseStatusReporter status={{ state: "unavailable" }} />
         <DashboardPageHeader activeView="overview" />
         <CatalogRouteRecovery />
       </>
     );
   }
 
-  const status = snapshotStatusFromMetadata(result.data.metadata);
+  const status = dataReleaseStatusFromMetadata(result.data.metadata);
 
   return (
     <>
-      <ShellStatusReporter status={status} />
+      <DataReleaseStatusReporter status={status} />
       <DashboardPageHeader activeView="overview" />
-      {result.data.metadata.packCount === 0 ? (
+      {result.data.metadata.repackCount === 0 ? (
         <EmptyCatalog />
       ) : (
         <DashboardOverviewClient
           bundle={result.data}
           details={result.data.details}
-          key={`${result.data.metadata.publicationId}:${JSON.stringify(result.data.activeFilters)}`}
+          key={`${result.data.metadata.publicReleaseId}:${JSON.stringify(result.data.activeFilters)}`}
         />
       )}
     </>

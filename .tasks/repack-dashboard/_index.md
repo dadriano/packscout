@@ -4,7 +4,7 @@
 
 Open `repack-dashboard/001`, collect one sanitized page example for each provider stream, and finish with an approved live data contract that the catalog snapshot can consume.
 
-**Progress:** 1/12 tasks complete; 11 tasks blocked on live-data, publication, or launch evidence
+**Progress:** 1/13 tasks complete; 12 tasks blocked on live-data, publication, or launch evidence
 
 ## Context
 
@@ -42,6 +42,7 @@ Merged data-pipeline PR #1 establishes durable canonical history, quarantine, pr
 - Missing, incomplete, or unsupported values display as unavailable with a stable public reason, never as zero or blank; observation age is communicated through freshness status instead of changing pack values.
 - V1 comparison values use canonical USD minor units. The public publisher never performs currency conversion; it marks values without approved canonical USD evidence unavailable.
 - Overview opportunities include active packs with estimates. All Packs also shows sold-out public listings with a status label and disabled outbound action; disabled listings are excluded.
+- Repack Heat is a separate recent-versus-baseline activity signal. It is never EV, profitability, certainty, or a recommendation; simulated development heat is always visibly labeled.
 
 ## Query Interaction Decisions
 
@@ -118,13 +119,14 @@ Merged data-pipeline PR #1 establishes durable canonical history, quarantine, pr
 | 008 | Deliver the pack inspector and actions | large | 4–6 days | blocked | 005, 006, 007 |
 | 009 | Publish the Learn guides | medium | 2–4 days | blocked | 004, 005 |
 | 010 | Handle data and interface states | medium | 3–5 days | blocked | 006, 007, 008, 009 |
+| 013 | Deliver repack heat signals | large | 4–6 days | blocked | 003, 006, 007, 008 |
 
 ## Tasks: Completion
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
 | 011 | Complete responsive and accessible behavior | medium | 3–5 days | blocked | 004, 006, 007, 008, 009, 010 |
-| 012 | Validate and observe the V1 launch | large | 7–10 days | blocked | 001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011 |
+| 012 | Validate and observe the V1 launch | large | 7–10 days | blocked | 001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 013 |
 
 ## Build Order
 
@@ -140,6 +142,7 @@ Merged data-pipeline PR #1 establishes durable canonical history, quarantine, pr
 2. Complete `008` after both catalog views exist.
 3. Complete `010`, then `011`.
 4. Complete `012` only after every earlier acceptance contract is satisfied.
+5. Build `013` against the development aggregate simulator while real observation feeds remain blocked, then include its live evidence in `012`.
 
 ## Parallel Groups
 
@@ -157,6 +160,7 @@ Merged data-pipeline PR #1 establishes durable canonical history, quarantine, pr
 | E | 005 complete | 006, 007, 009 |
 | F | 006 and 007 complete | 008 |
 | G | 008 and 009 complete | 010, then 011, then 012 |
+| H | Development read model and catalog UI available | 013 mock aggregate lane; live completion joins 012 |
 
 ## Next Action
 
@@ -165,7 +169,8 @@ Open `001-lock-live-data-handoff.md`, capture one sanitized real response page f
 ## Current Build Handoff
 
 - Done: `004` establishes the complete `apps/frontend` PackScout shell, routes, theme, search, freshness region, and not-found behavior.
-- Implemented and verified in local and cloud development but dependency-blocked: the public DTO/read-query foundation, metric presentation, Overview, All Packs, inspector/actions, Learn content, public states, responsive layouts, and strict frontend telemetry/security boundaries. The frontend always reads Convex; a deterministic internal development seed writes one mock snapshot with 9 packs (8 active and 6 Overview opportunities), one bounded query shard, matching bounded detail arrays, and an operation receipt. `dataSource` is required as `mock` or `canonical`, and the shell visibly labels the seeded source as mock data.
+- Implemented and verified in local and cloud development but dependency-blocked: the public DTO/read-query foundation, metric presentation, Overview, All Repacks, inspector/actions, Learn content, public states, responsive layouts, and strict frontend telemetry/security boundaries. The frontend always reads Convex; the current deterministic internal V2 development seed writes one aggregate release with 6 repacks spanning focused, mixed, sold-out, dual-EV, hierarchical-category, and desired-chase states, one bounded search shard, aligned details, and an operation receipt. `dataSource` is required as `mock` or `canonical`, and the shell visibly labels the seeded source as mock data.
+- Implemented and locally verified but dependency-blocked: `013` adds a separate high-churn Repack Heat aggregate, deterministic local stream playback, fail-closed expiry, and text-first Dashboard/table/inspector presentation without placing raw synthetic events in Convex or changing immutable release hashes. Focused suites pass with 50 contract, 148 service, 18 Convex, 125 frontend, and 19 local-script tests; one-shot `created`/`unchanged` replay, loop playback through frame 98, clean shutdown, both-theme desktop/mobile browser checks, and the complete repository-wide `npm run verify:framework` gate are green. Real-observation and preproduction evidence remain open.
 - Development workflow evidence: the catalog functions are deployed to `abundant-puffin-373`; the guarded seed returned `created` on its first cloud-development run and `unchanged` on replay without duplicate rows. The frontend server read the deployment over its HTTPS Convex URL, and browser smoke verified visible mock provenance, catalog search, row selection, and inspector replacement. Existing desktop/mobile browser QA also covers mock labeling, search, row selection, and inspector updates against the local Convex backend.
 - Live blockers: the provider transport/page/cursor evidence for `001`; the adopted V2 cutover, dual-approved PostgreSQL public configuration, and authenticated Convex publication/HMAC path for `002`; activated canonical snapshots and reactive `preloadQuery`/`usePreloadedQuery` integration for `003`; and durable telemetry/observability, edge enforcement, real 1,500/10,000-pack scale, preproduction/performance evidence, and owner approvals for `012`.
 - Status rule: locally implemented UI slices remain `blocked` when an upstream task or launch-evidence acceptance contract is unmet; no task below claims real-provider or live-launch readiness.

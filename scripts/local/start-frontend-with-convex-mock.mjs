@@ -5,8 +5,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   readLocalConvexConfiguration,
-  seedLocalMockCatalog,
-} from "./seed-convex-mock-catalog.mjs";
+  seedLocalMockDataRelease,
+} from "./seed-convex-mock-data-release.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -129,7 +129,7 @@ export function unexpectedConvexExitError(outcome) {
 }
 
 export async function startFrontendWithConvexMock() {
-  await seedLocalMockCatalog();
+  await seedLocalMockDataRelease();
   const { childEnvironment, publicUrl } = await readLocalConvexConfiguration();
   const sessionEnvironment = {
     ...childEnvironment,

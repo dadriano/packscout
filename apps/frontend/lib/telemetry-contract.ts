@@ -1,4 +1,4 @@
-export const TELEMETRY_SCHEMA_VERSION = "anonymous-product-event-v1" as const;
+export const TELEMETRY_SCHEMA_VERSION = "anonymous-product-event-v2" as const;
 export const PUBLIC_READ_FAILURE_SCHEMA_VERSION =
   "public-read-failure-v1" as const;
 
@@ -19,19 +19,19 @@ export type AnonymousProductEvent =
   | Readonly<{
       schemaVersion: typeof TELEMETRY_SCHEMA_VERSION;
       eventId: string;
-      snapshotVersion: string;
+      publicReleaseId: string;
       occurredAt: string;
       name: "dashboard_view";
-      surface: "overview" | "all_packs";
+      surface: "overview" | "all_repacks";
       outcome: "rendered";
     }>
   | Readonly<{
       schemaVersion: typeof TELEMETRY_SCHEMA_VERSION;
       eventId: string;
-      snapshotVersion: string;
+      publicReleaseId: string;
       occurredAt: string;
-      name: "catalog_search";
-      surface: "all_packs";
+      name: "repack_search";
+      surface: "all_repacks";
       outcome: "results" | "no_matches" | "failed";
       queryLengthBucket: "1-20" | "21-60" | "61-120";
       resultCountBucket: "0" | "1-25" | "26-100" | "101+";
@@ -39,44 +39,46 @@ export type AnonymousProductEvent =
   | Readonly<{
       schemaVersion: typeof TELEMETRY_SCHEMA_VERSION;
       eventId: string;
-      snapshotVersion: string;
+      publicReleaseId: string;
       occurredAt: string;
       name: "filters_applied";
-      surface: "overview" | "all_packs";
+      surface: "overview" | "all_repacks";
       outcome: "results" | "no_matches" | "failed";
-      activeFilterCount: 0 | 1 | 2 | 3;
+      activeFilterCount: 0 | 1 | 2 | 3 | 4;
       resultCountBucket: "0" | "1-25" | "26-100" | "101+";
     }>
   | Readonly<{
       schemaVersion: typeof TELEMETRY_SCHEMA_VERSION;
       eventId: string;
-      snapshotVersion: string;
+      publicReleaseId: string;
       occurredAt: string;
       name: "promo_copied";
-      publicPackId: string;
-      platformKey: string;
+      publicRepackId: string;
+      vendorKey: string;
       outcome: "clipboard" | "manual_fallback" | "failed";
     }>
   | Readonly<{
       schemaVersion: typeof TELEMETRY_SCHEMA_VERSION;
       eventId: string;
-      snapshotVersion: string;
+      publicReleaseId: string;
       occurredAt: string;
-      name: "pack_link_opened";
-      publicPackId: string;
-      platformKey: string;
+      name: "repack_link_opened";
+      publicRepackId: string;
+      vendorKey: string;
       outcome: "opened" | "blocked";
     }>;
 
 export type PublicReadQueryName =
   | "getPublicShellStatus"
   | "getDashboardBundle"
-  | "listPublicPacks"
-  | "getPublicPack";
+  | "listPublicRepacks"
+  | "getPublicRepack"
+  | "searchPublicCollectibles"
+  | "findRepacksByDesiredCollectible";
 
 export type PublicReadRouteSurface =
   | "overview"
-  | "all_packs"
+  | "all_repacks"
   | "learn"
   | "article"
   | "not_found";
@@ -84,8 +86,9 @@ export type PublicReadRouteSurface =
 export type PublicReadFailureCode =
   | "INVALID_QUERY"
   | "CURSOR_EXPIRED"
-  | "SNAPSHOT_UNAVAILABLE"
-  | "PACK_NOT_FOUND"
+  | "RELEASE_UNAVAILABLE"
+  | "REPACK_NOT_FOUND"
+  | "COLLECTIBLE_NOT_FOUND"
   | "TRANSPORT_UNAVAILABLE";
 
 export type PublicReadFailureBeacon = Readonly<{
@@ -94,7 +97,7 @@ export type PublicReadFailureBeacon = Readonly<{
   queryName: PublicReadQueryName;
   routeSurface: PublicReadRouteSurface;
   errorCode: PublicReadFailureCode;
-  snapshotVersion: string | null;
+  publicReleaseId: string | null;
   retainedPreviousResult: boolean;
   occurredAt: string;
 }>;
@@ -118,11 +121,9 @@ export type ParseTelemetryResult<T> =
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const PUBLIC_PACK_ID_PATTERN =
+const PUBLIC_REPACK_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const PLATFORM_KEY_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/;
-const SNAPSHOT_VERSION_PATTERN =
-  /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
+const VENDOR_KEY_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/;
 const UTC_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
@@ -157,8 +158,8 @@ function validBase(
     record.schemaVersion === TELEMETRY_SCHEMA_VERSION &&
     typeof record.eventId === "string" &&
     UUID_PATTERN.test(record.eventId) &&
-    typeof record.snapshotVersion === "string" &&
-    SNAPSHOT_VERSION_PATTERN.test(record.snapshotVersion) &&
+    typeof record.publicReleaseId === "string" &&
+    UUID_PATTERN.test(record.publicReleaseId) &&
     validOccurredAt(record.occurredAt, now)
   );
 }
@@ -193,7 +194,7 @@ export function parseAnonymousProductEvent(
   const common = [
     "schemaVersion",
     "eventId",
-    "snapshotVersion",
+    "publicReleaseId",
     "occurredAt",
     "name",
     "outcome",
@@ -202,12 +203,12 @@ export function parseAnonymousProductEvent(
   if (input.name === "dashboard_view") {
     if (
       !hasExactKeys(input, [...common, "surface"]) ||
-      !isOneOf(input.surface, ["overview", "all_packs"]) ||
+      !isOneOf(input.surface, ["overview", "all_repacks"]) ||
       input.outcome !== "rendered"
     ) {
       return { ok: false };
     }
-  } else if (input.name === "catalog_search") {
+  } else if (input.name === "repack_search") {
     if (
       !hasExactKeys(input, [
         ...common,
@@ -215,7 +216,7 @@ export function parseAnonymousProductEvent(
         "queryLengthBucket",
         "resultCountBucket",
       ]) ||
-      input.surface !== "all_packs" ||
+      input.surface !== "all_repacks" ||
       !isOneOf(input.outcome, ["results", "no_matches", "failed"]) ||
       !isOneOf(input.queryLengthBucket, ["1-20", "21-60", "61-120"]) ||
       !isOneOf(input.resultCountBucket, ["0", "1-25", "26-100", "101+"])
@@ -230,31 +231,31 @@ export function parseAnonymousProductEvent(
         "activeFilterCount",
         "resultCountBucket",
       ]) ||
-      !isOneOf(input.surface, ["overview", "all_packs"]) ||
+      !isOneOf(input.surface, ["overview", "all_repacks"]) ||
       !isOneOf(input.outcome, ["results", "no_matches", "failed"]) ||
       !isOneOf(input.resultCountBucket, ["0", "1-25", "26-100", "101+"]) ||
-      ![0, 1, 2, 3].includes(input.activeFilterCount as number)
+      ![0, 1, 2, 3, 4].includes(input.activeFilterCount as number)
     ) {
       return { ok: false };
     }
   } else if (input.name === "promo_copied") {
     if (
-      !hasExactKeys(input, [...common, "publicPackId", "platformKey"]) ||
-      typeof input.publicPackId !== "string" ||
-      !PUBLIC_PACK_ID_PATTERN.test(input.publicPackId) ||
-      typeof input.platformKey !== "string" ||
-      !PLATFORM_KEY_PATTERN.test(input.platformKey) ||
+      !hasExactKeys(input, [...common, "publicRepackId", "vendorKey"]) ||
+      typeof input.publicRepackId !== "string" ||
+      !PUBLIC_REPACK_ID_PATTERN.test(input.publicRepackId) ||
+      typeof input.vendorKey !== "string" ||
+      !VENDOR_KEY_PATTERN.test(input.vendorKey) ||
       !isOneOf(input.outcome, ["clipboard", "manual_fallback", "failed"])
     ) {
       return { ok: false };
     }
-  } else if (input.name === "pack_link_opened") {
+  } else if (input.name === "repack_link_opened") {
     if (
-      !hasExactKeys(input, [...common, "publicPackId", "platformKey"]) ||
-      typeof input.publicPackId !== "string" ||
-      !PUBLIC_PACK_ID_PATTERN.test(input.publicPackId) ||
-      typeof input.platformKey !== "string" ||
-      !PLATFORM_KEY_PATTERN.test(input.platformKey) ||
+      !hasExactKeys(input, [...common, "publicRepackId", "vendorKey"]) ||
+      typeof input.publicRepackId !== "string" ||
+      !PUBLIC_REPACK_ID_PATTERN.test(input.publicRepackId) ||
+      typeof input.vendorKey !== "string" ||
+      !VENDOR_KEY_PATTERN.test(input.vendorKey) ||
       !isOneOf(input.outcome, ["opened", "blocked"])
     ) {
       return { ok: false };
@@ -269,22 +270,33 @@ export function parseAnonymousProductEvent(
 const ALLOWED_FAILURES: Readonly<
   Record<PublicReadQueryName, readonly PublicReadFailureCode[]>
 > = Object.freeze({
-  getPublicShellStatus: ["SNAPSHOT_UNAVAILABLE", "TRANSPORT_UNAVAILABLE"],
+  getPublicShellStatus: ["RELEASE_UNAVAILABLE", "TRANSPORT_UNAVAILABLE"],
   getDashboardBundle: [
     "INVALID_QUERY",
-    "SNAPSHOT_UNAVAILABLE",
+    "RELEASE_UNAVAILABLE",
     "TRANSPORT_UNAVAILABLE",
   ],
-  listPublicPacks: [
+  listPublicRepacks: [
     "INVALID_QUERY",
     "CURSOR_EXPIRED",
-    "SNAPSHOT_UNAVAILABLE",
+    "RELEASE_UNAVAILABLE",
     "TRANSPORT_UNAVAILABLE",
   ],
-  getPublicPack: [
+  getPublicRepack: [
     "INVALID_QUERY",
-    "SNAPSHOT_UNAVAILABLE",
-    "PACK_NOT_FOUND",
+    "RELEASE_UNAVAILABLE",
+    "REPACK_NOT_FOUND",
+    "TRANSPORT_UNAVAILABLE",
+  ],
+  searchPublicCollectibles: [
+    "INVALID_QUERY",
+    "RELEASE_UNAVAILABLE",
+    "TRANSPORT_UNAVAILABLE",
+  ],
+  findRepacksByDesiredCollectible: [
+    "INVALID_QUERY",
+    "RELEASE_UNAVAILABLE",
+    "COLLECTIBLE_NOT_FOUND",
     "TRANSPORT_UNAVAILABLE",
   ],
 });
@@ -301,7 +313,7 @@ export function parsePublicReadFailureBeacon(
       "queryName",
       "routeSurface",
       "errorCode",
-      "snapshotVersion",
+      "publicReleaseId",
       "retainedPreviousResult",
       "occurredAt",
     ]) ||
@@ -311,12 +323,14 @@ export function parsePublicReadFailureBeacon(
     !isOneOf(input.queryName, [
       "getPublicShellStatus",
       "getDashboardBundle",
-      "listPublicPacks",
-      "getPublicPack",
+      "listPublicRepacks",
+      "getPublicRepack",
+      "searchPublicCollectibles",
+      "findRepacksByDesiredCollectible",
     ]) ||
     !isOneOf(input.routeSurface, [
       "overview",
-      "all_packs",
+      "all_repacks",
       "learn",
       "article",
       "not_found",
@@ -324,15 +338,16 @@ export function parsePublicReadFailureBeacon(
     !isOneOf(input.errorCode, [
       "INVALID_QUERY",
       "CURSOR_EXPIRED",
-      "SNAPSHOT_UNAVAILABLE",
-      "PACK_NOT_FOUND",
+      "RELEASE_UNAVAILABLE",
+      "REPACK_NOT_FOUND",
+      "COLLECTIBLE_NOT_FOUND",
       "TRANSPORT_UNAVAILABLE",
     ]) ||
-    (input.snapshotVersion !== null &&
-      (typeof input.snapshotVersion !== "string" ||
-        !SNAPSHOT_VERSION_PATTERN.test(input.snapshotVersion))) ||
+    (input.publicReleaseId !== null &&
+      (typeof input.publicReleaseId !== "string" ||
+        !UUID_PATTERN.test(input.publicReleaseId))) ||
     typeof input.retainedPreviousResult !== "boolean" ||
-    (input.retainedPreviousResult === true && input.snapshotVersion === null) ||
+    (input.retainedPreviousResult === true && input.publicReleaseId === null) ||
     !validOccurredAt(input.occurredAt, now) ||
     !ALLOWED_FAILURES[input.queryName].includes(input.errorCode)
   ) {
@@ -345,13 +360,13 @@ export function parsePublicReadFailureBeacon(
 export function telemetryContext(
   event: AnonymousProductEvent | PublicReadFailureBeacon,
 ): Readonly<{
-  snapshotVersion: string | null;
-  publicPackId: string | null;
-  platformKey: string | null;
+  publicReleaseId: string | null;
+  publicRepackId: string | null;
+  vendorKey: string | null;
 }> {
   return {
-    snapshotVersion: event.snapshotVersion,
-    publicPackId: "publicPackId" in event ? event.publicPackId : null,
-    platformKey: "platformKey" in event ? event.platformKey : null,
+    publicReleaseId: event.publicReleaseId,
+    publicRepackId: "publicRepackId" in event ? event.publicRepackId : null,
+    vendorKey: "vendorKey" in event ? event.vendorKey : null,
   };
 }

@@ -9,7 +9,7 @@ test("creates a bounded pathname-only public request outcome", () => {
       source: "public-read-failure-route",
       outcome: "failed",
       code: "TRANSPORT_UNAVAILABLE",
-      snapshotVersion: null,
+      publicReleaseId: null,
       retainedPreviousResult: true,
     }),
     {
@@ -17,7 +17,7 @@ test("creates a bounded pathname-only public request outcome", () => {
       source: "public-read-failure-route",
       outcome: "failed",
       code: "TRANSPORT_UNAVAILABLE",
-      snapshotVersion: null,
+      publicReleaseId: null,
       retainedPreviousResult: true,
     },
   );
@@ -28,8 +28,8 @@ test("rejects full URLs, query strings, fragments, and unknown logging fields", 
     pathname: "/packs",
     source: "server-preload",
     outcome: "failed",
-    code: "SNAPSHOT_UNAVAILABLE",
-    snapshotVersion: null,
+    code: "RELEASE_UNAVAILABLE",
+    publicReleaseId: null,
     retainedPreviousResult: false,
   } as const;
   for (const pathname of [
@@ -51,13 +51,13 @@ test("rejects full URLs, query strings, fragments, and unknown logging fields", 
   );
 });
 
-test("rejects unbounded codes and unsafe snapshot identifiers", () => {
+test("rejects unbounded codes and unsafe release identifiers", () => {
   const base = {
     pathname: "/packs",
     source: "reactive-client",
     outcome: "rejected",
     code: "INVALID_QUERY",
-    snapshotVersion: "snapshot:v1",
+    publicReleaseId: "20000000-0000-4000-8000-000000000002",
     retainedPreviousResult: true,
   } as const;
   assert.ok(createPublicRequestLogEntry(base));
@@ -66,7 +66,7 @@ test("rejects unbounded codes and unsafe snapshot identifiers", () => {
     null,
   );
   assert.equal(
-    createPublicRequestLogEntry({ ...base, snapshotVersion: "../secret" }),
+    createPublicRequestLogEntry({ ...base, publicReleaseId: "../secret" }),
     null,
   );
 });

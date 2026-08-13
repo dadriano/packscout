@@ -2,11 +2,11 @@ export { CatalogLoading, StablePlaceholder } from "./CatalogLoading";
 export {
   EmptyCatalog,
   NoMatches,
-  SnapshotUnavailable,
+  DataReleaseUnavailable,
 } from "./CatalogPageStates.client";
 export {
   MissingChaseMedia,
-  MissingPackImage,
+  MissingRepackImage,
   UncategorizedValue,
   UnavailableValue,
 } from "./CatalogFieldStates";

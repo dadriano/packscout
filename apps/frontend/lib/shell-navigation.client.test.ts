@@ -16,11 +16,11 @@ test("shell navigation marks only the approved route families", () => {
   assert.equal(resolveGlobalDestination("/unknown"), null);
 
   assert.equal(resolveDashboardView("/"), "overview");
-  assert.equal(resolveDashboardView("/packs"), "all-packs");
+  assert.equal(resolveDashboardView("/packs"), "all-repacks");
   assert.equal(resolveDashboardView("/learn"), null);
 });
 
-test("global catalog search trims and normalizes a single All Packs query", () => {
+test("global repack search trims and normalizes a single All Repacks query", () => {
   assert.equal(normalizeCatalogQuery("  mythic   pokemon\n gacha "), "mythic pokemon gacha");
   assert.equal(catalogSearchHref("   "), "/packs");
   assert.equal(catalogSearchHref("One Piece & Magic"), "/packs?q=One+Piece+%26+Magic");

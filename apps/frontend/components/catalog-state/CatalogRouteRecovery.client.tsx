@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { SnapshotUnavailable } from "./CatalogPageStates.client";
+import { DataReleaseUnavailable } from "./CatalogPageStates.client";
 
 export function CatalogRouteRecovery() {
   const router = useRouter();
-  return <SnapshotUnavailable onRetry={() => router.refresh()} />;
+  return <DataReleaseUnavailable onRetry={() => router.refresh()} />;
 }

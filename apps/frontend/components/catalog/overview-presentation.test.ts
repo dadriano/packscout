@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type {
-  CatalogSummary,
+  DashboardBundle,
   DashboardKpis,
-  PublicPackSummary,
+  PublicRepackViewSummary,
 } from "@packscout/contracts";
 import {
   presentCatalogSummaries,
@@ -12,84 +12,125 @@ import {
   resolveOverviewSelection,
 } from "./overview-presentation";
 
-function available<T>(value: T) {
-  return {
-    status: "available" as const,
-    value,
-    reason: null,
-    nullRank: 0 as const,
-  };
-}
-
 function opportunity(
-  publicPackId: string,
+  publicRepackId: string,
   name: string,
   priceMinorUnits: number,
   evBasisPoints: number,
-): PublicPackSummary {
+): PublicRepackViewSummary {
   return {
-    publicPackId,
+    publicRepackId,
+    publicVendorId: "00000000-0000-5000-8000-000000000001",
+    vendorKey: "collector_crypt",
+    vendorDisplayName: "Collector Crypt",
+    vendorLogoUrl: null,
     name,
-    category: "Pokemon",
-    platformDisplayName: "Collector Crypt",
-    platformLogoUrl: null,
-    primaryImage: null,
+    format: "repack",
+    contentMode: "focused",
+    categories: [
+      {
+        publicCategoryId: "00000000-0000-5000-8000-000000000101",
+        label: "Pokémon",
+      },
+    ],
+    collectibleTypes: ["card"],
+    availability: "active",
     price: {
       displayMoney: { minorUnits: priceMinorUnits, currency: "USD" },
-      usdComparison: available({ minorUnits: priceMinorUnits, currency: "USD" }),
+      usdComparison: {
+        status: "available",
+        value: { minorUnits: priceMinorUnits, currency: "USD" },
+      },
     },
-    estimatedEv: {
-      evPercent: available({ basisPoints: evBasisPoints }),
+    buyback: {
+      status: "available",
+      value: { basisPoints: 9_300, sourceKind: "vendor_reported" },
     },
-    buyback: available({ basisPoints: 9_300, sourceKind: "direct" }),
-    topChase: available({
-      displayMoney: { minorUnits: 8_500_000, currency: "USD" },
-      usdComparison: available({ minorUnits: 8_500_000, currency: "USD" }),
-    }),
-  } as PublicPackSummary;
+    primaryImage: null,
+    evEstimates: {
+      vendorReported: {
+        status: "unavailable",
+        displayMoney: null,
+        metrics: null,
+        observedAt: null,
+        reason: "NOT_REPORTED",
+      },
+      packScout: {
+        status: "available",
+        metrics: {
+          grossEv: {
+            minorUnits: Math.round(priceMinorUnits * (10_000 + evBasisPoints) / 10_000),
+            currency: "USD",
+          },
+          grossReturnBasisPoints: 10_000 + evBasisPoints,
+          evDollars: {
+            minorUnits: Math.round(priceMinorUnits * evBasisPoints / 10_000),
+            currency: "USD",
+          },
+          evPercentBasisPoints: evBasisPoints,
+        },
+        confidence: {
+          scoreBasisPoints: 8_500,
+          band: "high",
+          limitationCodes: [],
+        },
+        modelVersion: "packscout-ev-v2",
+        confidencePolicyVersion: "confidence-v1",
+        dataAsOf: "2026-08-11T08:30:02Z",
+        calculatedAt: "2026-08-11T08:31:00Z",
+      },
+    },
+    topChase: null,
+    contentSummary: {
+      knownCollectibleCount: 1,
+      chaseCount: 0,
+      categoryCount: 1,
+      collectibleTypeCount: 1,
+      evidenceCompleteness: "partial",
+      probabilityCoverageBasisPoints: 7_500,
+    },
+    actionAvailability: { promo: true, repackLink: true },
+    sourceUpdatedAt: "2026-08-11T08:30:02Z",
+    heat: {
+      status: "unavailable",
+      signal: null,
+      reason: "NOT_PUBLISHED",
+    },
+  };
 }
 
-test("always presents the four overview KPIs with explicit metric meaning", () => {
+test("always presents four overview KPIs with PackScout EV meaning", () => {
   const kpis: DashboardKpis = {
-    totalPacks: 1_248,
-    positiveEvPacks: 612,
-    medianEvPercent: available({ basisPoints: 180 }),
-    highestChaseValue: {
-      status: "unavailable",
-      value: null,
-      reason: "CHASE_UNAVAILABLE",
-      nullRank: 1,
-    },
+    totalRepacks: 1_248,
+    positiveEvRepacks: 612,
+    medianPackScoutEvPercent: { status: "available", basisPoints: 180 },
+    highestChaseValueUsdMinor: null,
+    highConfidenceRepacks: 500,
   };
 
   const presentation = presentDashboardKpis(kpis);
 
   assert.deepEqual(
     presentation.map(({ id }) => id),
-    ["packs", "positiveEv", "medianEv", "highestChase"],
+    ["repacks", "positiveEv", "medianEv", "highestChase"],
   );
   assert.deepEqual(
     presentation.map(({ value }) => value),
     ["1,248", "612", "+1.80%", "Unavailable"],
   );
-  assert.equal(presentation[2]?.stateLabel, "Positive");
-  assert.equal(presentation[3]?.stateLabel, "Unavailable");
-  assert.equal(
-    presentation[3]?.reasonCopy,
-    "Top chase value unavailable.",
-  );
-  assert.match(presentation[0]?.helper ?? "", /applied filters/i);
+  assert.match(presentation[2]?.helper ?? "", /high confidence/i);
+  assert.equal(presentation[3]?.reasonCopy, "Collectible value unavailable.");
 });
 
-test("preserves the provider-ranked opportunity order and authoritative values", () => {
+test("preserves PackScout-ranked opportunity order and exposes confidence", () => {
   const first = opportunity(
-    "00000000-0000-5000-8000-000000000001",
+    "00000000-0000-5000-8000-000000000301",
     "Mythic Pokemon Gacha",
     250_000,
     750,
   );
   const second = opportunity(
-    "00000000-0000-5000-8000-000000000002",
+    "00000000-0000-5000-8000-000000000302",
     "Legends Booster Box",
     29_900,
     210,
@@ -99,22 +140,20 @@ test("preserves the provider-ranked opportunity order and authoritative values",
 
   assert.deepEqual(
     presentation.map(({ rank, name }) => [rank, name]),
-    [
-      [1, "Legends Booster Box"],
-      [2, "Mythic Pokemon Gacha"],
-    ],
+    [[1, "Legends Booster Box"], [2, "Mythic Pokemon Gacha"]],
   );
-  assert.equal(presentation[0]?.packPrice.displayValue, "$299.00");
-  assert.equal(presentation[0]?.evPercent.displayValue, "+2.10%");
+  assert.equal(presentation[0]?.repackPrice.displayValue, "$299.00");
+  assert.equal(presentation[0]?.packScoutEvPercent.displayValue, "+2.10%");
+  assert.equal(presentation[0]?.packScoutConfidence.displayValue, "High · 85%");
   assert.equal(presentation[0]?.buyback.displayValue, "93%");
-  assert.equal(presentation[0]?.topChaseValue.displayValue, "$85,000.00");
+  assert.equal(presentation[0]?.heat.status, "unavailable");
 });
 
 test("keeps valid overview selection and otherwise falls back deterministically", () => {
   const opportunities = [
-    { publicPackId: "first" },
-    { publicPackId: "second" },
-  ] as Pick<PublicPackSummary, "publicPackId">[];
+    { publicRepackId: "first" },
+    { publicRepackId: "second" },
+  ] as Pick<PublicRepackViewSummary, "publicRepackId">[];
 
   assert.equal(resolveOverviewSelection(opportunities, "second"), "second");
   assert.equal(resolveOverviewSelection(opportunities, "missing"), "first");
@@ -122,23 +161,22 @@ test("keeps valid overview selection and otherwise falls back deterministically"
   assert.equal(resolveOverviewSelection([], "missing"), null);
 });
 
-test("scales catalog summaries by the current result set and retains unavailable reasons", () => {
-  const summaries: CatalogSummary[] = [
+test("scales repack groups and retains unavailable reasons", () => {
+  const summaries: DashboardBundle["vendorSummaries"] = [
     {
       key: "collector_crypt",
       label: "Collector Crypt",
-      packCount: 732,
-      medianEvPercent: available({ basisPoints: 230 }),
+      repackCount: 732,
+      medianPackScoutEvPercent: { status: "available", basisPoints: 230 },
     },
     {
       key: "courtyard",
       label: "Courtyard",
-      packCount: 366,
-      medianEvPercent: {
+      repackCount: 366,
+      medianPackScoutEvPercent: {
         status: "unavailable",
-        value: null,
-        reason: "ESTIMATE_INPUT_INCOMPLETE",
-        nullRank: 1,
+        basisPoints: null,
+        reason: "ESTIMATE_UNAVAILABLE",
       },
     },
   ];
@@ -148,11 +186,4 @@ test("scales catalog summaries by the current result set and retains unavailable
   assert.deepEqual(presentation.map(({ barRatio }) => barRatio), [1, 0.5]);
   assert.equal(presentation[0]?.medianEvPercent.displayValue, "+2.30%");
   assert.equal(presentation[1]?.medianEvPercent.displayValue, "Unavailable");
-  const unavailableMedian = presentation[1]?.medianEvPercent;
-  assert.equal(unavailableMedian?.availability, "unavailable");
-  if (unavailableMedian?.availability !== "unavailable") return;
-  assert.match(
-    unavailableMedian.reasonCopy,
-    /supported evidence is incomplete/i,
-  );
 });

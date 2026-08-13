@@ -2,12 +2,12 @@
 
 import { CatalogRouteRecovery } from "@/components/catalog-state";
 import { DashboardPageHeader } from "@/components/shell/DashboardPageHeader";
-import { ShellStatusReporter } from "@/components/shell/SnapshotStatus.client";
+import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
 
 export default function DashboardError() {
   return (
     <>
-      <ShellStatusReporter status={{ state: "unavailable" }} />
+      <DataReleaseStatusReporter status={{ state: "unavailable" }} />
       <DashboardPageHeader activeView="overview" />
       <CatalogRouteRecovery />
     </>

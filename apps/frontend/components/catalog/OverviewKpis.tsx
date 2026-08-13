@@ -3,7 +3,7 @@ import { presentDashboardKpis } from "./overview-presentation";
 import styles from "./OverviewKpis.module.css";
 
 const KPI_MARKS = Object.freeze({
-  packs: "#",
+  repacks: "#",
   positiveEv: "+",
   medianEv: "%",
   highestChase: "◇",

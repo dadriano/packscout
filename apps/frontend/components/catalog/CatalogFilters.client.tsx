@@ -2,18 +2,18 @@
 
 import { useMemo, useState } from "react";
 import {
-  PUBLIC_CATALOG_PRICE_MAX_MINOR,
-  PUBLIC_CATALOG_PRICE_MIN_MINOR,
-  type ContextualCatalogFacets,
-  type PublicCatalogFilters,
+  PUBLIC_REPACK_PRICE_MAX_MINOR,
+  PUBLIC_REPACK_PRICE_MIN_MINOR,
+  type ContextualRepackFacets,
+  type PublicRepackFilters,
 } from "@packscout/contracts";
 import styles from "./CatalogFilters.module.css";
 
 type CatalogFiltersProps = Readonly<{
-  accepted: PublicCatalogFilters;
-  facets: ContextualCatalogFacets;
+  accepted: PublicRepackFilters;
+  facets: ContextualRepackFacets;
   pending?: boolean;
-  onApply: (filters: PublicCatalogFilters) => void;
+  onApply: (filters: PublicRepackFilters) => void;
   onReset: () => void;
 }>;
 
@@ -34,31 +34,35 @@ function CatalogFiltersDraft({
   onApply,
   onReset,
 }: CatalogFiltersProps) {
-  const [platforms, setPlatforms] = useState<readonly string[]>(accepted.platforms);
+  const [vendors, setVendors] = useState<readonly string[]>(accepted.vendors);
   const [categories, setCategories] = useState<readonly string[]>(accepted.categories);
+  const [collectibleTypes, setCollectibleTypes] = useState<readonly string[]>(
+    accepted.collectibleTypes,
+  );
   const [minimum, setMinimum] = useState(dollars(accepted.price.minMinor));
   const [maximum, setMaximum] = useState(dollars(accepted.price.maxMinor));
 
-  const draft = useMemo<PublicCatalogFilters>(() => {
+  const draft = useMemo<PublicRepackFilters>(() => {
     const minMinor = Math.round(minimum * 100);
     const maxMinor = Math.round(maximum * 100);
     const full =
-      minMinor === PUBLIC_CATALOG_PRICE_MIN_MINOR &&
-      maxMinor === PUBLIC_CATALOG_PRICE_MAX_MINOR;
+      minMinor === PUBLIC_REPACK_PRICE_MIN_MINOR &&
+      maxMinor === PUBLIC_REPACK_PRICE_MAX_MINOR;
     return {
-      platforms: [...platforms].sort(),
+      vendors: [...vendors].sort(),
       categories: [...categories].sort(),
+      collectibleTypes: [...collectibleTypes].sort() as PublicRepackFilters["collectibleTypes"],
       price: full
         ? { mode: "full", minMinor, maxMinor }
         : { mode: "narrowed", minMinor, maxMinor },
     };
-  }, [categories, maximum, minimum, platforms]);
+  }, [categories, collectibleTypes, maximum, minimum, vendors]);
 
   const valid =
     Number.isFinite(minimum) &&
     Number.isFinite(maximum) &&
-    minimum >= PUBLIC_CATALOG_PRICE_MIN_MINOR / 100 &&
-    maximum <= PUBLIC_CATALOG_PRICE_MAX_MINOR / 100 &&
+    minimum >= PUBLIC_REPACK_PRICE_MIN_MINOR / 100 &&
+    maximum <= PUBLIC_REPACK_PRICE_MAX_MINOR / 100 &&
     minimum <= maximum;
   const changed = JSON.stringify(draft) !== JSON.stringify(accepted);
 
@@ -79,20 +83,20 @@ function CatalogFiltersDraft({
       <div className={styles.filterGrid}>
         <details className={styles.disclosure}>
           <summary>
-            <span><span className={styles.label}>Platform</span>{selectionSummary(platforms, "All platforms")}</span>
+            <span><span className={styles.label}>Vendor</span>{selectionSummary(vendors, "All vendors")}</span>
             <span aria-hidden="true">⌄</span>
           </summary>
           <fieldset className={styles.options}>
-            <legend className="sr-only">Select platforms</legend>
-            {facets.platforms.map((facet) => (
+            <legend className="sr-only">Select vendors</legend>
+            {facets.vendors.map((facet) => (
               <label key={facet.key}>
                 <input
-                  checked={platforms.includes(facet.key)}
-                  onChange={() => toggle(facet.key, platforms, setPlatforms)}
+                  checked={vendors.includes(facet.key)}
+                  onChange={() => toggle(facet.key, vendors, setVendors)}
                   type="checkbox"
                 />
                 <span>{facet.label}</span>
-                <span className={styles.count}>{facet.packCount}</span>
+                <span className={styles.count}>{facet.repackCount}</span>
               </label>
             ))}
           </fieldset>
@@ -113,21 +117,42 @@ function CatalogFiltersDraft({
                   type="checkbox"
                 />
                 <span>{facet.label}</span>
-                <span className={styles.count}>{facet.packCount}</span>
+                <span className={styles.count}>{facet.repackCount}</span>
+              </label>
+            ))}
+          </fieldset>
+        </details>
+
+        <details className={styles.disclosure}>
+          <summary>
+            <span><span className={styles.label}>Collectible type</span>{selectionSummary(collectibleTypes, "All types")}</span>
+            <span aria-hidden="true">⌄</span>
+          </summary>
+          <fieldset className={styles.options}>
+            <legend className="sr-only">Select collectible types</legend>
+            {facets.collectibleTypes.map((facet) => (
+              <label key={facet.key}>
+                <input
+                  checked={collectibleTypes.includes(facet.key)}
+                  onChange={() => toggle(facet.key, collectibleTypes, setCollectibleTypes)}
+                  type="checkbox"
+                />
+                <span>{facet.label}</span>
+                <span className={styles.count}>{facet.repackCount}</span>
               </label>
             ))}
           </fieldset>
         </details>
 
         <fieldset aria-describedby="catalog-price-help" className={styles.priceGroup}>
-          <legend className={styles.label}>Pack Price</legend>
+          <legend className={styles.label}>Repack Price</legend>
           <label>
-            <span className="sr-only">Minimum pack price in dollars</span>
+            <span className="sr-only">Minimum repack price in dollars</span>
             <span aria-hidden="true">$</span>
             <input
               inputMode="decimal"
-              max={PUBLIC_CATALOG_PRICE_MAX_MINOR / 100}
-              min={PUBLIC_CATALOG_PRICE_MIN_MINOR / 100}
+              max={PUBLIC_REPACK_PRICE_MAX_MINOR / 100}
+              min={PUBLIC_REPACK_PRICE_MIN_MINOR / 100}
               onChange={(event) => setMinimum(event.currentTarget.valueAsNumber)}
               step="0.01"
               type="number"
@@ -136,13 +161,13 @@ function CatalogFiltersDraft({
           </label>
           <span aria-hidden="true">–</span>
           <label>
-            <span className="sr-only">Maximum pack price in dollars</span>
+            <span className="sr-only">Maximum repack price in dollars</span>
             <span aria-hidden="true">$</span>
             <input
               aria-invalid={!valid}
               inputMode="decimal"
-              max={PUBLIC_CATALOG_PRICE_MAX_MINOR / 100}
-              min={PUBLIC_CATALOG_PRICE_MIN_MINOR / 100}
+              max={PUBLIC_REPACK_PRICE_MAX_MINOR / 100}
+              min={PUBLIC_REPACK_PRICE_MIN_MINOR / 100}
               onChange={(event) => setMaximum(event.currentTarget.valueAsNumber)}
               step="0.01"
               type="number"
@@ -159,8 +184,8 @@ function CatalogFiltersDraft({
             : changed
               ? "Filters have unapplied changes."
               : accepted.price.mode === "full"
-                ? "Full price range includes packs without a USD comparison price."
-                : "Narrowed price range excludes packs without a USD comparison price."}
+                ? "Full price range includes repacks without a USD comparison price."
+                : "Narrowed price range excludes repacks without a USD comparison price."}
         </p>
         <button
           className={styles.apply}

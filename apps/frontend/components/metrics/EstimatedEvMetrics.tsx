@@ -1,10 +1,10 @@
-import type { EstimatedEvPresentation } from "@/lib/metric-presentation";
+import type { PackScoutEvPresentation } from "@/lib/metric-presentation";
 import { METRIC_TRUST_COPY } from "@/lib/metric-vocabulary";
 import { MetricValue } from "./MetricValue";
 import styles from "./EstimatedEvMetrics.module.css";
 
 type EstimatedEvMetricsProps = Readonly<{
-  presentation: EstimatedEvPresentation;
+  presentation: PackScoutEvPresentation;
   compact?: boolean;
   showLongRunExplanation?: boolean;
 }>;
@@ -27,6 +27,15 @@ export function EstimatedEvMetrics({
         </span>
       </div>
 
+      <div
+        aria-label={presentation.confidence.accessibleLabel}
+        className={styles.confidence}
+        data-band={presentation.confidence.band ?? "unavailable"}
+      >
+        <span>EV confidence</span>
+        <strong>{presentation.confidence.displayValue}</strong>
+      </div>
+
       <div className={styles.metrics}>
         <MetricValue
           compact={compact}
@@ -47,7 +56,7 @@ export function EstimatedEvMetrics({
         />
         <MetricValue
           compact={compact}
-          metric={presentation.packPrice}
+          metric={presentation.repackPrice}
           showReason={false}
           showSemanticState={false}
         />
@@ -57,9 +66,10 @@ export function EstimatedEvMetrics({
         <p className={styles.reason}>{presentation.reasonCopy}</p>
       ) : null}
       {showLongRunExplanation ? (
-        <p className={styles.explanation}>
-          {METRIC_TRUST_COPY.longRunExplanation}
-        </p>
+        <div className={styles.explanation}>
+          <p>{METRIC_TRUST_COPY.confidenceExplanation}</p>
+          <p>{METRIC_TRUST_COPY.longRunExplanation}</p>
+        </div>
       ) : null}
     </section>
   );

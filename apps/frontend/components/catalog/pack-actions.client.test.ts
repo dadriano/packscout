@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { PublicPackActions } from "@packscout/contracts";
+import type { PublicRepackActions } from "@packscout/contracts";
 import {
-  buildPublishedPackHref,
+  buildPublishedRepackHref,
   copyPublicPromoCode,
 } from "./pack-actions.client";
 
-type PublicPackLink = NonNullable<PublicPackActions["packLink"]>;
+type PublicRepackLink = NonNullable<PublicRepackActions["repackLink"]>;
 
-const publishedLink: PublicPackLink = {
+const publishedLink: PublicRepackLink = {
   listingUrl:
     "https://packs.example/listing/alpha?keep=1&ref=old&ref=older#details",
   listingHost: "packs.example",
@@ -19,7 +19,7 @@ const publishedLink: PublicPackLink = {
 };
 
 test("builds the approved outbound URL with each referral parameter exactly once", () => {
-  const result = buildPublishedPackHref(publishedLink, "active");
+  const result = buildPublishedRepackHref(publishedLink, "active");
 
   assert.equal(result.ok, true);
   if (!result.ok) return;
@@ -34,23 +34,23 @@ test("builds the approved outbound URL with each referral parameter exactly once
 });
 
 test("blocks missing, sold-out, unapproved, and malformed outbound actions", () => {
-  assert.deepEqual(buildPublishedPackHref(undefined, "active"), {
+  assert.deepEqual(buildPublishedRepackHref(undefined, "active"), {
     ok: false,
     code: "MISSING_LINK",
   });
-  assert.deepEqual(buildPublishedPackHref(publishedLink, "sold_out"), {
+  assert.deepEqual(buildPublishedRepackHref(publishedLink, "sold_out"), {
     ok: false,
     code: "SOLD_OUT",
   });
   assert.deepEqual(
-    buildPublishedPackHref(
+    buildPublishedRepackHref(
       { ...publishedLink, listingUrl: "http://packs.example/listing/alpha" },
       "active",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
   assert.deepEqual(
-    buildPublishedPackHref(
+    buildPublishedRepackHref(
       {
         ...publishedLink,
         listingUrl: "https://person:secret@packs.example/listing/alpha",
@@ -60,14 +60,14 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
   assert.deepEqual(
-    buildPublishedPackHref(
+    buildPublishedRepackHref(
       { ...publishedLink, listingHost: "other.example" },
       "active",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
   assert.deepEqual(
-    buildPublishedPackHref(
+    buildPublishedRepackHref(
       {
         ...publishedLink,
         listingUrl: "https://packs.example.attacker.test/listing/alpha",
@@ -77,7 +77,7 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
   assert.deepEqual(
-    buildPublishedPackHref(
+    buildPublishedRepackHref(
       {
         ...publishedLink,
         listingUrl: "https://packs.example:8443/listing/alpha",
@@ -87,55 +87,55 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
   assert.deepEqual(
-    buildPublishedPackHref(
-      { ...publishedLink, listingHost: "PACKS.EXAMPLE" } as PublicPackLink,
+    buildPublishedRepackHref(
+      { ...publishedLink, listingHost: "PACKS.EXAMPLE" } as PublicRepackLink,
       "active",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
   assert.deepEqual(
-    buildPublishedPackHref(
+    buildPublishedRepackHref(
       {
         ...publishedLink,
         listingUrl: "https://sub.packs.example/listing/alpha",
         listingHost: "*.packs.example",
-      } as PublicPackLink,
+      } as PublicRepackLink,
       "active",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
   assert.deepEqual(
-    buildPublishedPackHref(
+    buildPublishedRepackHref(
       {
         ...publishedLink,
         referralParameters: [
           { name: "ref", value: "one" },
           { name: "ref", value: "two" },
         ],
-      } as PublicPackLink,
+      } as PublicRepackLink,
       "active",
     ),
     { ok: false, code: "INVALID_REFERRAL_CONFIG" },
   );
   assert.deepEqual(
-    buildPublishedPackHref(
+    buildPublishedRepackHref(
       {
         ...publishedLink,
         referralParameters: [{ name: "ref", value: "  " }],
-      } as PublicPackLink,
+      } as PublicRepackLink,
       "active",
     ),
     { ok: false, code: "INVALID_REFERRAL_CONFIG" },
   );
   assert.deepEqual(
-    buildPublishedPackHref(
+    buildPublishedRepackHref(
       {
         ...publishedLink,
         referralParameters: Array.from({ length: 9 }, (_, index) => ({
           name: `ref${index}`,
           value: "packscout",
         })),
-      } as PublicPackLink,
+      } as PublicRepackLink,
       "active",
     ),
     { ok: false, code: "INVALID_REFERRAL_CONFIG" },

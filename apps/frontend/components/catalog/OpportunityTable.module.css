@@ -50,7 +50,7 @@
 
 .table {
   width: 100%;
-  min-width: 990px;
+  min-width: 1110px;
   border-spacing: 0;
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums lining-nums;
@@ -161,7 +161,7 @@
   text-transform: uppercase;
 }
 
-.platform {
+.vendor {
   display: inline-flex;
   max-width: 10rem;
   align-items: center;

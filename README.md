@@ -42,19 +42,27 @@ PACKSCOUT_FRONTEND_PORT=5150 npm run dev
 PACKSCOUT_ADMIN_PORT=5151 PACKSCOUT_ADMIN_HMR_PORT=5152 npm run dev:admin
 ```
 
-### Local Convex mock catalog
+### Local Convex mock data release
 
-The dashboard can use the deterministic nine-pack catalog in a local Convex
+The dashboard can use the deterministic six-repack data release in a local Convex
 deployment. Start or configure Convex locally first so the ignored root
 `.env.local` contains a loopback `CONVEX_URL` (or
 `NEXT_PUBLIC_CONVEX_URL`). Then run:
 
 ```bash
 # Push the current Convex functions and seed once. Replays refresh freshness.
-npm run seed:mock-catalog:local
+npm run seed:mock-data-release:local
 
 # Seed, supervise local Convex, then start the frontend after it is ready.
 npm run dev:frontend:mock:local
+
+# Publish one deterministic aggregate heat frame, then exit.
+npm run simulate:mock-heat:local -- \
+  --seed packscout-demo \
+  --frame 0
+
+# Run the complete frontend session with advancing mock heat.
+npm run dev:frontend:mock-heat:local
 ```
 
 The standalone seed command is one-shot and does not keep the local backend
@@ -63,16 +71,36 @@ the full frontend session, watches Convex functions, waits for backend
 readiness before starting Next.js, and stops the supervised session on Ctrl+C
 or a termination signal.
 
-Both commands refuse cloud/self-hosted URLs and deploy keys. The seed is an
+The heat simulator turns deterministic, ephemeral pull activity into bounded
+repack heat aggregates in the local Node process. Convex receives only those
+aggregate frames; it never receives or stores the synthetic pull activity.
+One-shot mode is the default and resolves `startAt` to the current time. Add
+`--loop` explicitly to publish every five wall-clock seconds while advancing
+the deterministic scenario profile by one five-minute step. Public observation
+and calculation timestamps advance by the publication cadence, so accelerated
+scenario playback never future-dates evidence. The simulator prints the
+canonical seed, `startAt`, run identifier, scenario step, and publication
+cadence. Copy those printed controls into `--seed`, `--start-at`, `--frame`,
+`--frame-step-ms`, and `--tick-ms` to replay a selected frame byte-for-byte.
+
+The combined heat command publishes frame 0 before starting the frontend, then
+advances the same run while Convex and Next.js are supervised. Ctrl+C, a
+termination signal, or a simulator failure marks the last published frame
+expired, stops the complete npm/npx process groups, and removes the temporary
+simulation enable flag. A one-shot frame instead expires through its ID-bound scheduled
+expiry. Simulated signals are visibly identified in the product and must not be
+treated as live provider evidence or as EV.
+
+All local mock commands refuse cloud/self-hosted URLs and deploy keys. The seed is an
 internal Convex mutation, runs only when its temporary local enable flag is
-present, refuses an active canonical catalog or partial/conflicting mock state,
+present, refuses an active canonical release or partial/conflicting mock state,
 and removes the enable flag before exiting. An unchanged replay advances only
-the catalog observation timestamps; the snapshot, packs, shard, pointer, and
+the release observation timestamps; the release, repacks, shard, pointer, and
 recorded seed operation stay immutable. No credential or public URL is
 written to a tracked file or browser bundle beyond the required public Convex
 origin.
 
-### Cloud development catalog
+### Cloud development data release
 
 The PackScout frontend can also read the project development deployment at
 `https://abundant-puffin-373.convex.cloud`. Keep that public browser URL in the

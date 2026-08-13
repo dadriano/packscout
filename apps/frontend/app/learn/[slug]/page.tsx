@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ArticleLayout } from "@/components/learn/ArticleLayout";
-import { ShellStatusReporter } from "@/components/shell/SnapshotStatus.client";
+import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
 import { findLearnGuide, LEARN_GUIDES } from "@/lib/learn-content";
-import { readPublicShellStatus } from "@/lib/public-catalog.server";
-import { snapshotStatusFromPublicResult } from "@/lib/public-shell-status";
+import { readPublicShellStatus } from "@/lib/public-repacks.server";
+import { dataReleaseStatusFromPublicResult } from "@/lib/public-release-status";
 
 type LearnArticleProps = Readonly<{
   params: Promise<{ slug: string }>;
@@ -24,11 +24,11 @@ export async function generateMetadata({ params }: LearnArticleProps): Promise<M
 export default async function LearnArticlePage({ params }: LearnArticleProps) {
   const guide = findLearnGuide((await params).slug);
   if (!guide) notFound();
-  const status = snapshotStatusFromPublicResult(await readPublicShellStatus());
+  const status = dataReleaseStatusFromPublicResult(await readPublicShellStatus());
 
   return (
     <>
-      <ShellStatusReporter status={status} />
+      <DataReleaseStatusReporter status={status} />
       <ArticleLayout guide={guide} />
     </>
   );

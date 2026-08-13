@@ -1,13 +1,13 @@
 import { CatalogLoading } from "@/components/catalog-state";
 import { DashboardPageHeader } from "@/components/shell/DashboardPageHeader";
-import { ShellStatusReporter } from "@/components/shell/SnapshotStatus.client";
+import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
 
-export default function AllPacksLoading() {
+export default function AllRepacksLoading() {
   return (
     <>
-      <ShellStatusReporter status={{ state: "loading" }} />
-      <DashboardPageHeader activeView="all-packs" />
-      <CatalogLoading surface="all-packs" />
+      <DataReleaseStatusReporter status={{ state: "loading" }} />
+      <DashboardPageHeader activeView="all-repacks" />
+      <CatalogLoading surface="all-repacks" />
     </>
   );
 }

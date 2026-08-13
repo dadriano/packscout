@@ -10,20 +10,35 @@ import {
 } from "./metric-vocabulary";
 
 const expectedGlossary = [
-  ["platform", "Platform", "The marketplace or provider offering the pack"],
-  ["category", "Category", "The collectible family represented by the pack"],
-  ["pack", "Pack", "The provider’s public listing name"],
-  ["packPrice", "Pack Price", "The amount charged to open or buy the pack"],
-  ["evDollars", "EV $", "PackScout Gross EV minus Pack Price"],
+  ["vendor", "Vendor", "The vendor offering the repack"],
+  ["category", "Category", "A subject branch represented by the repack"],
+  ["repack", "Repack", "The vendor’s public repack or gacha listing name"],
+  [
+    "heat",
+    "Heat",
+    "A timing signal comparing recent activity with this repack’s own baseline. Heat does not mean profit, positive EV, or a predicted outcome.",
+  ],
+  ["repackPrice", "Repack Price", "The amount charged to open or buy the repack"],
+  ["evDollars", "EV $", "PackScout Gross EV minus Repack Price"],
   [
     "evPercent",
     "EV %",
-    "The percentage PackScout Gross EV is above or below Pack Price",
+    "The percentage PackScout Gross EV is above or below Repack Price",
+  ],
+  [
+    "evConfidence",
+    "EV Confidence",
+    "How reliable PackScout considers its EV estimate based on supported evidence; it does not indicate whether EV is positive",
+  ],
+  [
+    "vendorReportedEv",
+    "Vendor-reported EV",
+    "An EV estimate reported by the vendor and kept separate from PackScout EV",
   ],
   [
     "buybackPercent",
     "Buyback %",
-    "Provider-supported buyback coverage relative to Pack Price, supplied directly or derived from documented provider terms",
+    "Vendor-supported buyback coverage relative to Repack Price, reported directly or derived by PackScout from documented terms",
   ],
   [
     "grossEv",
@@ -40,12 +55,12 @@ const expectedGlossary = [
     "Top Chase Value",
     "The supported canonical representative value attached to that collectible",
   ],
-  ["promoCode", "Promo Code", "A public platform-approved code available to copy"],
-  ["packLink", "Pack Link", "The tracked outbound link to the provider listing"],
+  ["promoCode", "Promo Code", "A public vendor-approved code available to copy"],
+  ["repackLink", "Repack Link", "The tracked outbound link to the vendor listing"],
 ] as const;
 
-test("defines all twelve All Packs fields with the approved shared wording", () => {
-  assert.equal(COMPARISON_GLOSSARY.length, 12);
+test("defines all repack comparison fields with canonical shared wording", () => {
+  assert.equal(COMPARISON_GLOSSARY.length, 15);
   assert.deepEqual(
     COMPARISON_GLOSSARY.map(({ key, label, definition }) => [
       key,
@@ -57,30 +72,34 @@ test("defines all twelve All Packs fields with the approved shared wording", () 
   assert.ok(COMPARISON_GLOSSARY.every(({ enabledByDefault }) => enabledByDefault));
 });
 
-test("links EV glossary education to the one approved Learn article", () => {
+test("links both EV sources and confidence to the approved Learn article", () => {
   assert.equal(EXPECTED_VALUE_ARTICLE_HREF, "/learn/expected-value");
   assert.deepEqual(
     COMPARISON_GLOSSARY.filter(
       (entry) => "learnHref" in entry,
-    ).map((entry) => [entry.key, entry.learnHref]),
+    ).map((entry) => entry.key),
     [
-      ["evDollars", EXPECTED_VALUE_ARTICLE_HREF],
-      ["evPercent", EXPECTED_VALUE_ARTICLE_HREF],
-      ["grossEv", EXPECTED_VALUE_ARTICLE_HREF],
+      "evDollars",
+      "evPercent",
+      "evConfidence",
+      "vendorReportedEv",
+      "grossEv",
     ],
   );
-  assert.equal(getGlossaryDefinition("evPercent").label, "EV %");
+  assert.equal(getGlossaryDefinition("evConfidence").label, "EV Confidence");
 });
 
-test("maps internal reason codes to bounded public copy", () => {
+test("maps V2 reason codes to bounded public copy", () => {
   assert.deepEqual(PUBLIC_REASON_COPY, {
     ESTIMATE_INPUT_INCOMPLETE:
       "Estimate unavailable: supported evidence is incomplete.",
-    PRICE_UNAVAILABLE: "Estimate unavailable: pack price is unavailable.",
+    PRICE_UNAVAILABLE: "Estimate unavailable: repack price is unavailable.",
     CURRENCY_UNSUPPORTED: "Estimate unavailable: currency is not supported.",
+    ESTIMATE_UNAVAILABLE: "Estimate unavailable.",
     BUYBACK_UNAVAILABLE:
       "Buyback unavailable: supported coverage is not available.",
-    CHASE_UNAVAILABLE: "Top chase value unavailable.",
+    VALUATION_UNAVAILABLE: "Collectible value unavailable.",
+    NOT_REPORTED: "The vendor has not reported an EV estimate.",
   });
   assert.equal(
     getPublicReasonCopy("CURRENCY_UNSUPPORTED"),
@@ -93,13 +112,15 @@ test("maps internal reason codes to bounded public copy", () => {
 
 test("keeps the metric trust language canonical for Dashboard and Learn", () => {
   assert.deepEqual(METRIC_TRUST_COPY, {
-    dashboardDisclaimer: "Estimated EV · Not financial advice.",
-    estimateLabel: "PackScout Estimated EV",
+    dashboardDisclaimer: "PackScout EV · Estimated · Not financial advice.",
+    estimateLabel: "PackScout EV",
     financialDisclaimer: "Not financial advice.",
     longRunExplanation:
-      "EV is a long-run estimate. It does not predict the contents or outcome of one pack.",
+      "EV is a long-run estimate. It does not predict the contents or outcome of one repack.",
     sourceExplanation:
-      "Provider-reported values and PackScout estimates are different sources.",
+      "Vendor-reported EV and PackScout EV are separate estimates and are never averaged.",
+    confidenceExplanation:
+      "Confidence describes the reliability of PackScout's estimate, not whether its EV is positive or negative.",
     unavailableExplanation:
       "Unavailable means PackScout does not have enough supported evidence to show the value.",
   });
