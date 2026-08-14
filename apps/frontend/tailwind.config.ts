@@ -9,21 +9,24 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        canvas: "var(--canvas)",
-        ink: "var(--ink)",
-        pine: "var(--pine)",
-        moss: "var(--moss)",
-        trail: "var(--trail)",
-        paper: "var(--paper)",
-        line: "var(--line)",
+        canvas: "var(--color-canvas)",
+        surface: "var(--color-surface)",
+        raised: "var(--color-surface-raised)",
+        text: "var(--color-text)",
+        muted: "var(--color-text-muted)",
+        border: "var(--color-border)",
+        action: "var(--color-action)",
+        focus: "var(--color-focus)",
+        positive: "var(--color-positive)",
+        negative: "var(--color-negative)",
+        warning: "var(--color-warning)",
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
-        display: ["var(--font-display)"],
         mono: ["var(--font-mono)"],
       },
       boxShadow: {
-        field: "0 22px 70px rgba(31, 48, 39, 0.14)",
+        control: "var(--shadow-control)",
       },
     },
   },

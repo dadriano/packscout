@@ -18,16 +18,12 @@ import type {
   ProviderProjectionOutcome,
   ProviderProjectionPort,
 } from "./provider-import-types.ts";
+import {
+  normalizeTradeLifecycleEvidence,
+  type CanonicalTradeLifecycleCategory,
+} from "./provider-stream-normalization.ts";
 
-export type CanonicalSaleCategory =
-  | "buyback"
-  | "listing"
-  | "mint"
-  | "other"
-  | "sale"
-  | "shipment"
-  | "transfer"
-  | "unlisting";
+export type CanonicalSaleCategory = CanonicalTradeLifecycleCategory;
 
 export interface ProviderActorPseudonymizer {
   pseudonymize(input: {
@@ -85,23 +81,6 @@ export class HmacProviderActorPseudonymizer
       )
       .digest("hex")}`;
   }
-}
-
-function categoryForProviderEvent(value: string): CanonicalSaleCategory {
-  const normalized = value.trim().toLowerCase().replaceAll(/[-\s]/g, "_");
-  const categories: Readonly<Record<string, CanonicalSaleCategory>> = {
-    buy: "buyback",
-    buyback: "buyback",
-    listing: "listing",
-    mint: "mint",
-    minted: "mint",
-    sale: "sale",
-    shipped: "shipment",
-    shipment: "shipment",
-    transfer: "transfer",
-    unlisting: "unlisting",
-  };
-  return categories[normalized] ?? "other";
 }
 
 function invalid(
@@ -320,7 +299,9 @@ export class EventProjectionService implements ProviderProjectionPort {
                   "eventType",
                   128,
                 ),
-                eventCategory: categoryForProviderEvent(candidate.eventType),
+                eventCategory: normalizeTradeLifecycleEvidence(
+                  candidate.eventType,
+                ).canonicalCategory,
                 transactionKey: normalizeCanonicalIdentity(
                   candidate.transactionKey,
                   "transactionKey",

@@ -12,6 +12,7 @@ export * from "./persistence-error.ts";
 export * from "./pipeline-types.ts";
 export * from "./provider-configuration-repository.ts";
 export * from "./provider-scheduling-repository.ts";
+export * from "./provider-stream-write-policy.ts";
 export * from "./protected-payload-retention-repository.ts";
 export * from "./quarantine-repository.ts";
 export * from "./security.ts";

@@ -145,7 +145,7 @@ test("sale projection keeps provider type separate from constrained category and
   assert.equal(known.status, "accepted");
   if (known.status === "accepted") {
     assert.equal(known.projections[0]?.content.providerEventType, "buyback");
-    assert.equal(known.projections[0]?.content.eventCategory, "buyback");
+    assert.equal(known.projections[0]?.content.eventCategory, "sale");
     assert.equal(
       JSON.stringify(known).includes("0xraw-wallet-address"),
       false,
