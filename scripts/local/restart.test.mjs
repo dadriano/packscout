@@ -222,6 +222,70 @@ function commandLog(fixture) {
 }
 
 describe("scripts/local/restart.sh", () => {
+  test("prints a complete side-effect-free help guide", () => {
+    const fixture = createFixture();
+    rmSync(path.join(fixture.root, ".env"));
+    rmSync(path.join(fixture.root, ".env.local"));
+
+    const invalidReadinessEnvironment = {
+      PACKSCOUT_RESTART_MAX_ATTEMPTS: "invalid",
+      PACKSCOUT_RESTART_POLL_SECONDS: "invalid",
+      PACKSCOUT_RESTART_WORKER_STABILITY_POLLS: "invalid",
+    };
+    const longHelp = runFixture(
+      fixture,
+      ["--help"],
+      invalidReadinessEnvironment,
+    );
+    const shortHelp = runFixture(
+      fixture,
+      ["-h"],
+      invalidReadinessEnvironment,
+    );
+
+    assert.equal(longHelp.status, 0, longHelp.stderr);
+    assert.equal(longHelp.stderr, "");
+    assert.equal(shortHelp.status, 0, shortHelp.stderr);
+    assert.equal(shortHelp.stdout, longHelp.stdout);
+    for (const section of [
+      "Usage:",
+      "Services:",
+      "Options:",
+      "Frontend modes:",
+      "Prerequisites:",
+      "Safety and diagnostics:",
+      "Readiness tuning:",
+      "Examples:",
+      "Exit status:",
+    ]) {
+      assert.match(longHelp.stdout, new RegExp(section));
+    }
+    assert.match(longHelp.stdout, /services:restart:local/);
+    assert.match(longHelp.stdout, /standard[\s\S]*mock[\s\S]*mock-heat/);
+    assert.match(longHelp.stdout, /5100[\s\S]*5101[\s\S]*5102/);
+    assert.match(longHelp.stdout, /Library\/Logs\/PackScout/);
+    assert.match(longHelp.stdout, /no service names[\s\S]*frontend,[\s\S]*admin,[\s\S]*worker/i);
+    assert.match(
+      longHelp.stdout,
+      /If stopping a later service[\s\S]*attempts to restore services stopped earlier/,
+    );
+    assert.match(
+      longHelp.stdout,
+      /startup\/readiness failure[\s\S]*without promising full\s+rollback/i,
+    );
+    assert.equal(commandLog(fixture), "");
+    assert.equal(existsSync(path.join(fixture.home, "Library", "LaunchAgents")), false);
+    assert.equal(
+      existsSync(
+        path.join(
+          fixture.temporaryDirectory,
+          `dev.packscout.maintenance.${process.getuid()}.lock`,
+        ),
+      ),
+      false,
+    );
+  });
+
   test("generates secret-free launchd jobs and verifies every default service", () => {
     const fixture = createFixture();
     const outcome = runFixture(fixture);

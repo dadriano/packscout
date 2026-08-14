@@ -15,31 +15,64 @@ UPDATE_LOCK_HELD=false
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/local/update-main.sh [options] [services]
+  ./scripts/local/update-main.sh [options] [service ...]
+  npm run workspace:update:main:local -- [options] [service ...]
 
-Fast-forward the clean primary PackScout checkout from origin/main, install the
-locked dependencies, and restart the selected local services.
+Safely fast-forward PackScout's clean primary checkout, run npm ci, and restart
+the selected launchd-managed local services. The update target defaults to
+origin/main. With no service names, the frontend, admin, and worker restart.
 
-Options forwarded to restart.sh:
-  --clean                         Clear generated caches for selected services
-  --frontend-mode MODE            standard, mock, or mock-heat
+Update options:
+  --dry-run                       Validate local preconditions and print the
+                                  planned commands without fetching or changing
+                                  Git refs, workspace files, dependencies, or
+                                  services
+  --help, -h                      Show this help
 
 Services:
   frontend                        Restart the frontend service
   admin                           Restart the admin service
   worker                          Restart the worker service
 
-Update options:
-  --dry-run                       Validate local preconditions and print actions
-  --help, -h                      Show this help
+Options forwarded to restart.sh:
+  --clean                         Clear only selected frontend build caches
+  --frontend-mode <mode>          standard | mock | mock-heat
+  --frontend-mode=<mode>          Equivalent assignment form
+
+Update sequence:
+  1. Require the primary checkout and configured target branch.
+  2. Acquire the shared PackScout maintenance lock and require a clean tree.
+  3. Fetch the configured remote branch and require a fast-forward-only update.
+  4. Refuse incoming paths that would replace ignored or untracked local data.
+  5. Merge with --ff-only, run npm ci, then invoke restart.sh.
 
 Safety:
-  --force is intentionally unsupported. Commit, stash, or remove every tracked
-  and untracked workspace change before updating.
+  - --force is intentionally unsupported; the script never checks out, resets,
+    cleans, or discards local work.
+  - Commit, stash, or remove every tracked and untracked workspace change first,
+    including changes under .tasks or output.
+  - Linked worktrees, detached/wrong branches, local-ahead history, divergence,
+    and ignored-path collisions are refused.
+  - Ignored environment files are preserved. If an incoming tracked path would
+    collide with one, the update stops before merging.
+  - If npm ci or restart fails after a successful merge, the new commit remains
+    checked out; fix the reported problem and rerun rather than resetting.
 
 Explicit environment overrides:
-  PACKSCOUT_UPDATE_REMOTE=origin
-  PACKSCOUT_UPDATE_BRANCH=main
+  PACKSCOUT_UPDATE_REMOTE          Git remote (default: origin)
+  PACKSCOUT_UPDATE_BRANCH          Local and remote branch (default: main)
+
+Examples:
+  ./scripts/local/update-main.sh --dry-run
+  ./scripts/local/update-main.sh
+  ./scripts/local/update-main.sh frontend
+  ./scripts/local/update-main.sh --clean frontend admin
+  ./scripts/local/update-main.sh --frontend-mode mock-heat frontend worker
+  PACKSCOUT_UPDATE_REMOTE=upstream ./scripts/local/update-main.sh --dry-run
+
+Exit status:
+  0  Help/dry-run completed, or update, install, and restart all succeeded.
+  1+ Invalid input, unsafe repository state, Git/npm failure, or restart failure.
 EOF
 }
 

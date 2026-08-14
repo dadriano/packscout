@@ -21,18 +21,68 @@ WORKER_STABILITY_POLLS="${PACKSCOUT_RESTART_WORKER_STABILITY_POLLS:-5}"
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/local/restart.sh [options] [frontend|admin|worker ...]
+  ./scripts/local/restart.sh [options] [service ...]
+  npm run services:restart:local -- [options] [service ...]
 
-Restart PackScout's macOS launchd-managed local development services. With no
-service names, all three services restart.
+Create or update PackScout's per-user launchd jobs, then restart and verify the
+selected local development services. With no service names, the frontend,
+admin, and worker all restart.
+
+Services:
+  frontend                        Next.js app on 127.0.0.1:5100
+  admin                           Admin HTTP on 127.0.0.1:5101; HMR on 5102
+  worker                          Background worker; verifies process liveness
 
 Options:
-  --clean                         Remove selected frontend build caches first
-  --frontend-mode <mode>          standard | mock | mock-heat (default: standard)
+  --clean                         Remove only the frontend .next-dev and
+                                  .next-build caches when frontend is selected
+  --frontend-mode <mode>          Select the frontend runtime; affects only the
+                                  frontend service (default: standard)
   --help, -h                      Show this help
 
-The script must run from PackScout's primary checkout. It never copies secrets
-into launchd plists; admin and worker continue loading the ignored root .env.
+Frontend modes:
+  standard                        Run dev:frontend with its configured Convex URL
+  mock                            Run a deterministic local Convex mock release
+  mock-heat                       Run the local mock release and Heat simulation
+
+Prerequisites:
+  - macOS with launchd, Node.js, npm, and the repository dependencies installed
+  - PackScout's primary checkout; linked worktrees are intentionally refused
+  - ignored root .env for admin or worker
+  - ignored root .env.local for mock or mock-heat frontend mode
+  - ports used by selected services free or owned by their matching PackScout
+    jobs: frontend 5100; admin 5101 and 5102
+
+Safety and diagnostics:
+  - A per-user maintenance lock prevents overlapping restart/update operations.
+  - Existing jobs and port listeners must belong to this exact checkout.
+  - Frontend/admin require exact health responses; worker reports only stable
+    process liveness.
+  - If stopping a later service or releasing a selected port fails, the script
+    attempts to restore services stopped earlier. A startup/readiness failure
+    attempts to stop the failed job and exits nonzero without promising full
+    rollback.
+  - Generated plists contain no application secrets. Admin and worker load the
+    ignored root .env themselves.
+  - Logs are written under ~/Library/Logs/PackScout. No cloud deployment runs.
+
+Readiness tuning:
+  PACKSCOUT_RESTART_MAX_ATTEMPTS       Poll attempts (default: 120)
+  PACKSCOUT_RESTART_POLL_SECONDS       Seconds between polls (default: 1)
+  PACKSCOUT_RESTART_WORKER_STABILITY_POLLS
+                                        Stable worker polls (default: 5)
+
+Examples:
+  ./scripts/local/restart.sh
+  ./scripts/local/restart.sh frontend
+  ./scripts/local/restart.sh --clean frontend
+  ./scripts/local/restart.sh --frontend-mode mock frontend
+  ./scripts/local/restart.sh --frontend-mode mock-heat frontend
+  ./scripts/local/restart.sh admin worker
+
+Exit status:
+  0  Help printed, or every selected service reached its verification boundary.
+  1+ Invalid input, unmet prerequisites, unsafe ownership, or restart failure.
 EOF
 }
 

@@ -478,11 +478,66 @@ exit 23
     assert.equal(existsSync(fixture.restartLog), false, "restart must not run after npm fails");
   });
 
-  it("shows help and explicitly rejects force or unsafe restart arguments", () => {
+  it("prints a complete side-effect-free help guide", () => {
     const fixture = createFixture();
-    const help = runUpdater(fixture, ["--help"]);
-    assert.equal(help.status, 0, combinedOutput(help));
-    assert.match(help.stdout, /Usage:/);
+    publishRemoteChange(fixture);
+    const localHead = git(fixture.checkout, "rev-parse", "HEAD");
+    const trackingHead = git(fixture.checkout, "rev-parse", "origin/main");
+
+    const invalidTargetEnvironment = {
+      PACKSCOUT_UPDATE_REMOTE: "-invalid",
+      PACKSCOUT_UPDATE_BRANCH: "-invalid",
+    };
+    const longHelp = runUpdater(
+      fixture,
+      ["--help"],
+      invalidTargetEnvironment,
+    );
+    const shortHelp = runUpdater(
+      fixture,
+      ["-h"],
+      invalidTargetEnvironment,
+    );
+
+    assert.equal(longHelp.status, 0, combinedOutput(longHelp));
+    assert.equal(longHelp.stderr, "");
+    assert.equal(shortHelp.status, 0, combinedOutput(shortHelp));
+    assert.equal(shortHelp.stdout, longHelp.stdout);
+    for (const section of [
+      "Usage:",
+      "Update options:",
+      "Services:",
+      "Options forwarded to restart.sh:",
+      "Update sequence:",
+      "Safety:",
+      "Explicit environment overrides:",
+      "Examples:",
+      "Exit status:",
+    ]) {
+      assert.match(longHelp.stdout, new RegExp(section.replace(".", "\\.")));
+    }
+    assert.match(longHelp.stdout, /workspace:update:main:local/);
+    assert.match(longHelp.stdout, /fast-forward-only/);
+    assert.match(longHelp.stdout, /npm ci/);
+    assert.match(longHelp.stdout, /--frontend-mode=<mode>/);
+    assert.match(longHelp.stdout, /without fetching or changing[\s\S]*workspace files/);
+    assert.match(longHelp.stdout, /no service names[\s\S]*frontend,[\s\S]*admin,[\s\S]*worker/i);
+    assert.equal(git(fixture.checkout, "rev-parse", "HEAD"), localHead);
+    assert.equal(git(fixture.checkout, "rev-parse", "origin/main"), trackingHead);
+    assertNoDeployCommands(fixture);
+    assert.equal(
+      existsSync(
+        join(
+          fixture.maintenanceTmp,
+          `dev.packscout.maintenance.${process.getuid()}.lock`,
+        ),
+      ),
+      false,
+    );
+  });
+
+  it("explicitly rejects force or unsafe restart arguments", () => {
+    const fixture = createFixture();
 
     for (const args of [["--force"], ["--frontend-mode", "production"], ["database"]]) {
       const result = runUpdater(fixture, args);
