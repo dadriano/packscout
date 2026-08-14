@@ -1,0 +1,72 @@
+.badge {
+  --heat-color: var(--color-status-neutral);
+  --heat-soft: color-mix(in srgb, var(--heat-color) 9%, transparent);
+  display: inline-grid;
+  width: fit-content;
+  max-width: 9.5rem;
+  grid-template-columns: 0.42rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--heat-color) 30%, var(--color-border));
+  border-radius: 999px;
+  background: var(--heat-soft);
+  color: var(--color-text);
+  padding: 0.3rem 0.48rem;
+  line-height: 1.1;
+}
+
+.badge[data-state="hot"] {
+  --heat-color: #db5b3f;
+}
+
+.badge[data-state="warm"] {
+  --heat-color: var(--color-warning);
+}
+
+.badge[data-state="normal"] {
+  --heat-color: var(--color-action);
+}
+
+.badge[data-state="cold"] {
+  --heat-color: #3f7edb;
+}
+
+.badge[data-state="insufficient_data"],
+.badge[data-state="unavailable"] {
+  --heat-color: var(--color-status-neutral);
+}
+
+.marker {
+  width: 0.42rem;
+  height: 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--heat-color) 72%, var(--color-text));
+  border-radius: 999px;
+  background: var(--heat-color);
+}
+
+.badge[data-state="insufficient_data"] .marker,
+.badge[data-state="unavailable"] .marker {
+  background: transparent;
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.copy strong {
+  overflow: hidden;
+  font-size: 0.66rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy small {
+  color: var(--color-text-muted);
+  font-size: 0.54rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}

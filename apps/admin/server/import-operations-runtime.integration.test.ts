@@ -400,6 +400,7 @@ test("admin entrypoint starts Prisma before listening and closes cleanly on SIGT
           ...process.env,
           NODE_ENV: "production",
           PACKSCOUT_DATABASE_URL: databaseUrl,
+          PACKSCOUT_ADMIN_HOST: "127.0.0.1",
           PACKSCOUT_ADMIN_PORT: String(port),
           PACKSCOUT_ADMIN_ALLOWED_ORIGINS: origin,
           PACKSCOUT_SESSION_HASHING_SECRET: sessionSecret,
@@ -415,7 +416,7 @@ test("admin entrypoint starts Prisma before listening and closes cleanly on SIGT
     );
     const startup = await waitForChildOutput(
       child,
-      `Packscout Admin is available at http://localhost:${port}`,
+      `Packscout Admin is available at http://127.0.0.1:${port}`,
     );
     assert.equal(startup.readOutput().includes(databaseUrl), false);
     const exitPromise = new Promise<{

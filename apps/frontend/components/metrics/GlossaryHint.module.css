@@ -1,0 +1,95 @@
+.root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: 0.3rem;
+  vertical-align: middle;
+}
+
+.trigger {
+  display: inline-grid;
+  width: 1.05rem;
+  height: 1.05rem;
+  place-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: help;
+  font-family: ui-serif, Georgia, serif;
+  font-size: 0.67rem;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  border-color: var(--color-action);
+  background: var(--color-action-soft);
+  color: var(--color-action-strong);
+}
+
+.panel {
+  position: fixed;
+  z-index: 60;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  display: flex;
+  width: min(19rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  flex-direction: column;
+  gap: 0.42rem;
+  border: 1px solid var(--color-border-strong);
+  border-block-start: 2px solid var(--color-action);
+  border-radius: 0.45rem;
+  background: var(--color-surface-raised);
+  box-shadow:
+    0 18px 45px color-mix(in srgb, var(--color-text) 12%, transparent),
+    var(--shadow-control);
+  color: var(--color-text);
+  padding: 0.85rem 0.9rem 0.9rem;
+  overflow-y: auto;
+  text-align: start;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.heading {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.definition {
+  color: var(--color-text-muted);
+  font-size: 0.79rem;
+  font-weight: 500;
+  line-height: 1.48;
+}
+
+.learnLink {
+  width: fit-content;
+  margin-block-start: 0.18rem;
+  color: var(--color-action-strong);
+  font-size: 0.77rem;
+  font-weight: 750;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-action) 35%, transparent);
+  text-underline-offset: 0.2em;
+}
+
+.learnLink:hover {
+  text-decoration-color: currentColor;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trigger {
+    transition: none;
+  }
+}

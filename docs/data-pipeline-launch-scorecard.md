@@ -1,12 +1,44 @@
 # Data Pipeline Launch Scorecard
 
-**Evidence date:** 2026-08-06
+**Evidence date:** 2026-08-11
 
-**Fixture and controllable-mock gate:** PASS
+**ProviderStreamContractV2 record gate:** PARTIAL PASS — real record envelopes only
 
-**Repository `npm run verify:framework` gate:** PASS
+**Aggregate V1 fixture and controllable-mock gate:** HISTORICAL ONLY — not a launch input
 
-**Real-provider deployment gate:** NOT RUN — this document is not production launch approval
+**Repository `npm run verify:framework` gate:** NOT RUN FOR V2
+
+**Real-provider deployment gate:** BLOCKED — transport/page evidence is not supplied
+
+## Current launch boundary
+
+`ProviderStreamContractV2` replaces the unlaunched aggregate
+`ProviderFeedPageV1` boundary for the dashboard launch source. The provider draft
+supplies real record-level examples for `catalog`, `pulls`, and `trades`; those
+examples support the V2 discriminated record contract, required outer
+relationships, nullable event time and money, catalog mutability, event
+immutability, lifecycle vocabulary, and currency-reference evidence.
+
+The draft does **not** supply request paths, authentication, stream selector,
+raw page wrappers, page-size behavior, cursor fields, termination, ordering,
+expiry, error envelopes, or rate-limit signals. No provider-local decoder,
+runtime registration, durable checkpoint migration, backfill, or incremental
+launch claim may be approved until sanitized real evidence locks those facts.
+
+| V2 launch evidence | Current state | Verdict |
+| --- | --- | --- |
+| Real sanitized record envelope: catalog pack/card | Committed record-level fixture and contract test | PARTIAL PASS |
+| Real sanitized record envelope: pull | Committed record-level fixture and contract test | PARTIAL PASS |
+| Real sanitized record envelope: trade | Committed record-level fixture and contract test | PARTIAL PASS |
+| Request path/auth/selector and raw page wrapper | Not supplied | BLOCKED |
+| Independent cursor scope, termination, ordering, expiry, and full-history start | Not supplied | BLOCKED |
+| Provider error and rate-limit behavior | Not supplied | BLOCKED |
+| Per-stream durable checkpoint/restart and real reconciliation | Cannot run before transport evidence | BLOCKED |
+
+Everything below under the aggregate V1 fixture scorecard is retained as
+historical PR #1 evidence for canonical history, quarantine, projections, and EV
+behavior only. It is not permission to register `http-cursor-v1` for the launch
+source, infer a V2 page wrapper, or run V1 and V2 against the same source.
 
 ## Evidence boundary
 
@@ -16,7 +48,7 @@ The evidence is fixture/mock evidence only. It does not prove provider connectiv
 
 Fixture configuration and run IDs are `N/A`: the launch harness intentionally does not create database-backed configuration or run records. Its stable fixture labels are not deployment identities.
 
-## Fixture and mock scorecard
+## Historical aggregate V1 fixture and mock scorecard
 
 `C/P/S` means catalog/pull/sale source records. `Backfill C/R/U` means canonical projection commands that created, revised, or left unchanged a canonical identity during the initial page. Multiple projection commands may target one identity, so command count is reconciled to outcomes rather than assumed to equal the final unique-identity count. `Replay/correction/new` is source-version accounting for the incremental page.
 
@@ -88,7 +120,7 @@ The platform rows use the same shared runtime boundaries, so the following gates
 
 The durable EV row is valid only after the repository-wide gate recorded below passes with the final queue composition.
 
-## Real-provider deployment gate
+## Historical aggregate V1 real-provider deployment gate
 
 | Platform | Endpoint/configuration | Connection test | No-cursor full history | Durable-head incremental | Real reconciliation | Launch state |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -101,16 +133,16 @@ The durable EV row is valid only after the repository-wide gate recorded below p
 | Stadium Vault | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
 | Trove | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
 
-## Exact remaining environment and launch setup
+## Exact remaining V2 environment and launch setup
 
 1. Provision a PostgreSQL 16 deployment with current migrations and an organization containing the approved administrator and data-operator accounts.
 2. Supply the admin and worker runtimes with `PACKSCOUT_DATABASE_URL`, distinct 32-byte base64 `PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64` and `PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64` values, the worker's `PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION`, and the admin's `PACKSCOUT_SESSION_HASHING_SECRET`. Set `PACKSCOUT_ADMIN_TRUSTED_PROXIES` to the exact comma-separated proxy IP addresses or CIDR ranges when the admin runs behind a reverse proxy; leave it unset for a direct connection so forwarded client-address headers remain untrusted. Set `PACKSCOUT_ESTIMATED_EV_VERIFIED_USD_STABLECOINS` only after financial/data approval, using a comma-separated allowlist of uppercase 2–12 character currency identifiers (maximum 32; no `USD`, duplicates, spaces, or lowercase); unset or empty trusts no stablecoins. Supply normal runtime origin, session, worker identity, pool, and polling settings for the target environment. Secrets must stay in deployment secret storage and out of commands, logs, screenshots, and this scorecard.
-3. Confirm an approved endpoint for each of the eight platform keys. Each endpoint must support the `platform` query parameter, the optional opaque `cursor` query parameter, and the v1 response envelope with catalog, pull, and sale arrays, `next_cursor`, and `has_more`. Confirm endpoint host allowlisting, DNS behavior, maximum response size, timeout, rate limits, pagination order, cursor expiry, and full-history start semantics with the provider.
-4. Create one server-side provider configuration per platform using transport adapter `http-cursor-v1`, the approved endpoint, authentication mode `none` or `bearer`, a deployment-supplied bearer secret when required, a 300-second schedule, and a 900-second stale threshold. Do not activate a configuration until its non-importing connection test succeeds.
-5. In preproduction, run each provider from a null cursor until `has_more` is false. Record the persisted configuration revision ID, sanitized run ID, bounded cursor references, per-kind source totals, canonical created/revised/unchanged totals, quarantine totals, unresolved relationships, EV estimated/unavailable totals, provider-head time, freshness, quality, and notification state.
-6. Run a real incremental import from each persisted head. Obtain upstream-approved examples of an exact replay, a correction, and a new record; verify idempotency, immutable historical run evidence, canonical revision/creation, relationship reconciliation, independent quarantine retry, and safe cursor advancement.
-7. Exercise real-environment timeout, rate-limit, authentication failure, malformed/poison record, stale/recovery, retention, notification deduplication, credential masking, permission, login-throttling, session-revocation, manual-run conflict, and operator browser flows. Record only sanitized stable codes, counts, and bounded identifiers.
-8. Resolve every real count difference and define numeric release thresholds for quarantine rate and unresolved relationships. Run focused environment checks and `npm run verify:framework`; an authorized administrator must review the persisted evidence before enabling the five-minute incremental schedules.
+3. Obtain and sanitize one real raw page for each of `catalog`, `pulls`, and `trades`. Record the exact request path, authentication method, stream selector, page-size behavior, raw wrapper, cursor field, end signal, error envelope, and rate-limit signals without recording a credential.
+4. Confirm from provider evidence whether each stream has an independent cursor. Record ordering, cursor expiry, null-cursor full-history behavior, incremental continuation, and catalog correction delivery. If cursor scope differs from the V2 design, stop and revise the contract rather than silently reinterpreting it.
+5. Implement and register one provider-local V2 transport decoder using the observed wrapper. Remove the launch source's aggregate V1 runtime registration, fixtures, and adapter selection in the same cutover; do not introduce aliases, dual reads, or a provider-name branch in generic orchestration.
+6. Migrate unlaunched persistence to one durable checkpoint and run per `(configuration revision, stream)`. In preproduction, backfill each stream to its evidenced terminal state, restart from every stream checkpoint, and verify that only the stream whose validated page commits advances.
+7. Run real incrementals with an exact event replay, a conflicting pull/trade repeat, a catalog correction, a malformed record, timeout, rate limit, authentication failure, stale/recovery, and lost-worker recovery. Reconcile accepted, duplicate, quarantined, canonical-revision, Estimated EV, unavailable, and exported counts using only sanitized stable evidence.
+8. Resolve every real count difference and define numeric release thresholds for quarantine rate and unresolved relationships. Run the focused V2 checks and `npm run verify:framework`; Product and Engineering owners must review the persisted evidence before enabling incremental schedules or labeling the public catalog live.
 
 ## Reproducing the fixture evidence
 
@@ -132,4 +164,6 @@ PACKSCOUT_PROVIDER_SAMPLES=/absolute/path/to/approved/provider-samples \
   packages/services/src/providers/provider-launch-harness.test.ts
 ```
 
-The final integrated `npm run verify:framework` run passed on 2026-08-06: framework ownership/dependency/document/script checks, zero new standards findings, lint, typecheck, 282 tests, and production builds all completed successfully.
+The integrated `npm run verify:framework` run recorded on 2026-08-06 applies to
+the historical aggregate V1 fixture implementation only. It does not satisfy
+the V2 gate above. A fresh repository-wide run is required after the V2 cutover.
