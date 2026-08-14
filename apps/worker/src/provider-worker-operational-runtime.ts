@@ -1,5 +1,5 @@
 import {
-  DrizzleAdminNotificationPublisher,
+  PrismaAdminNotificationPublisher,
 } from "@packscout/database";
 import {
   createOperationalRuntime,
@@ -9,7 +9,7 @@ import {
 } from "@packscout/services";
 
 type OperationalDatabase = ConstructorParameters<
-  typeof DrizzleAdminNotificationPublisher
+  typeof PrismaAdminNotificationPublisher
 >[0];
 
 export interface ProviderWorkerOperationalRuntimeInput {
@@ -23,7 +23,7 @@ export function createProviderWorkerOperationalRuntime(
   input: ProviderWorkerOperationalRuntimeInput,
 ) {
   return createOperationalRuntime({
-    durableAdminPublisher: new DrizzleAdminNotificationPublisher(input.database),
+    durableAdminPublisher: new PrismaAdminNotificationPublisher(input.database),
     ids: input.ids,
     clock: input.clock,
     observability: input.observability,

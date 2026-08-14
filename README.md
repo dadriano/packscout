@@ -21,6 +21,10 @@ browser API client, and explicit unconfigured states for auth and persistence.
 npm install
 ```
 
+Database setup uses an empty PostgreSQL 16+ target and the checked-in Prisma
+migrations. Follow the [database provisioning workflow](docs/database-provisioning.md)
+before starting a database-backed runtime.
+
 ## Development
 
 ```bash

@@ -6,30 +6,32 @@
   "exports": {
     ".": "./src/index.ts",
     "./protected-evidence": "./src/protected-evidence.ts",
-    "./schema": "./src/schema/index.ts",
     "./test-support": "./src/test-support.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
+    "lint": "eslint src prisma",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
-    "migration:generate:local": "drizzle-kit generate",
-    "migration:check:local": "drizzle-kit check"
+    "prisma:validate": "PACKSCOUT_DATABASE_URL=postgresql://packscout:packscout@127.0.0.1:1/packscout_schema_tooling prisma validate --schema prisma/schema.prisma",
+    "prisma:generate": "PACKSCOUT_DATABASE_URL=postgresql://packscout:packscout@127.0.0.1:1/packscout_schema_tooling prisma generate --schema prisma/schema.prisma",
+    "prisma:migrate:deploy": "node -e \"if (!process.env.PACKSCOUT_DATABASE_URL) { console.error('PACKSCOUT_DATABASE_URL is required for Prisma migration deploy.'); process.exit(1); }\" && prisma migrate deploy --schema prisma/schema.prisma",
+    "test:prisma-schema": "node --import tsx --test 'prisma/**/*.test.ts'",
+    "test:prisma-lifecycle": "node --import tsx --test 'src/database.lifecycle.test.ts'",
+    "test:prisma-setup": "node --import tsx --test 'src/setup-repository.test.ts'"
   },
   "dependencies": {
     "@packscout/contracts": "0.0.0",
-    "drizzle-orm": "^0.45.2",
+    "@prisma/client": "^6.19.3",
     "pg": "^8.16.3"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.4",
     "@eslint/js": "^9.17.0",
     "@types/node": "^20",
     "@types/pg": "^8.15.6",
-    "drizzle-kit": "^0.31.10",
     "eslint": "^9.17.0",
     "globals": "^15.14.0",
+    "prisma": "^6.19.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.19.1"

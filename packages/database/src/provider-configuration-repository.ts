@@ -3,17 +3,13 @@ import type {
   ProviderConnectionTestSummary,
   ProviderLifecycleState,
 } from "@packscout/contracts";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import type { PackscoutDatabase } from "./database.ts";
-import {
-  auditEvents,
-  providerConfigRevisions,
-  providerConnectionTests,
-  providerCursorCheckpoints,
-  providerSecretVersions,
-  providerSources,
-} from "./schema/index.ts";
+import { Prisma } from "@prisma/client";
+import { PACKSCOUT_TRANSACTION_OPTIONS } from "./database.ts";
+import type {
+  PackscoutPrismaClient,
+  PackscoutQueryClient,
+} from "./database.ts";
+import { isPrismaUniqueConstraintError } from "./prisma-error.ts";
 
 export interface StoredProviderCredential {
   readonly ciphertext: Uint8Array;
@@ -68,6 +64,7 @@ export type ProviderRevisionPersistenceLookup =
 
 interface ProviderAggregateRow {
   id: string;
+  organizationId: string;
   platformKey: string;
   displayName: string;
   state: ProviderLifecycleState;
@@ -97,10 +94,8 @@ function endpointHost(endpoint: string): string {
   }
 }
 
-export class DrizzleProviderConfigurationRepository<
-  TQueryResult extends PgQueryResultHKT,
-> {
-  constructor(private readonly database: PackscoutDatabase<TQueryResult>) {}
+export class PrismaProviderConfigurationRepository {
+  constructor(private readonly database: PackscoutPrismaClient) {}
 
   async createProvider(
     input: PersistedProviderRevisionInput & {
@@ -109,56 +104,65 @@ export class DrizzleProviderConfigurationRepository<
     },
   ): Promise<ProviderCreatePersistenceResult> {
     this.assertCredentialMatchesAuth(input);
-    return this.database.transaction(async (transaction) => {
-      const [provider] = await transaction
-        .insert(providerSources)
-        .values({
-          id: input.providerId,
+    try {
+      return await this.database.$transaction(async (transaction) => {
+        await transaction.provider_sources.create({
+          data: {
+            id: input.providerId,
+            organization_id: input.organizationId,
+            platform_key: input.platformKey,
+            display_name: input.displayName,
+            state: "draft",
+            created_at: input.now,
+            updated_at: input.now,
+          },
+        });
+        await transaction.provider_config_revisions.create({
+          data: {
+            id: input.revisionId,
+            organization_id: input.organizationId,
+            provider_id: input.providerId,
+            version: 1,
+            adapter_key: input.adapterKey,
+            endpoint_url: input.endpoint,
+            auth_mode: input.authMode,
+            schedule_seconds: input.scheduleSeconds,
+            stale_after_seconds: input.staleAfterSeconds,
+            created_by_actor_key: input.actorKey,
+            created_at: input.now,
+          },
+        });
+        await this.storeCredential(transaction, input, null);
+        await this.appendAudit(transaction, {
           organizationId: input.organizationId,
-          platformKey: input.platformKey,
-          displayName: input.displayName,
-          state: "draft",
-          createdAt: input.now,
-          updatedAt: input.now,
+          providerId: input.providerId,
+          revisionId: input.revisionId,
+          actorKey: input.actorKey,
+          action: "provider.create",
+          outcome: "success",
+          occurredAt: input.now,
+          metadata: { adapterKey: input.adapterKey },
+        });
+        return {
+          kind: "created" as const,
+          provider: await this.requireSummary(
+            transaction,
+            input.organizationId,
+            input.providerId,
+          ),
+        };
+      }, PACKSCOUT_TRANSACTION_OPTIONS);
+    } catch (error) {
+      if (
+        isPrismaUniqueConstraintError(error, {
+          fields: ["organization_id", "platform_key"],
+          constraintNames: ["provider_sources_organization_platform_unique"],
         })
-        .onConflictDoNothing({
-          target: [providerSources.organizationId, providerSources.platformKey],
-        })
-        .returning({ id: providerSources.id });
-      if (!provider) return { kind: "platform_conflict" };
-      await transaction.insert(providerConfigRevisions).values({
-        id: input.revisionId,
-        organizationId: input.organizationId,
-        providerId: input.providerId,
-        version: 1,
-        adapterKey: input.adapterKey,
-        endpointUrl: input.endpoint,
-        authMode: input.authMode,
-        scheduleSeconds: input.scheduleSeconds,
-        staleAfterSeconds: input.staleAfterSeconds,
-        createdByActorKey: input.actorKey,
-        createdAt: input.now,
-      });
-      await this.storeCredential(transaction, input, null);
-      await this.appendAudit(transaction, {
-        organizationId: input.organizationId,
-        providerId: input.providerId,
-        revisionId: input.revisionId,
-        actorKey: input.actorKey,
-        action: "provider.create",
-        outcome: "success",
-        occurredAt: input.now,
-        metadata: { adapterKey: input.adapterKey },
-      });
-      return {
-        kind: "created",
-        provider: await this.requireSummary(
-          transaction,
-          input.organizationId,
-          input.providerId,
-        ),
-      };
-    });
+      ) {
+        return { kind: "platform_conflict" };
+      }
+      throw error;
+    }
   }
 
   async replaceRevision(
@@ -167,7 +171,7 @@ export class DrizzleProviderConfigurationRepository<
     },
   ): Promise<ProviderMutationPersistenceResult> {
     this.assertCredentialMatchesAuth(input);
-    return this.database.transaction(async (transaction) => {
+    return this.database.$transaction(async (transaction) => {
       const current = await this.lockAndLoadCurrent(
         transaction,
         input.organizationId,
@@ -183,34 +187,31 @@ export class DrizzleProviderConfigurationRepository<
           current: await this.toSummary(transaction, current.provider, current.revision),
         };
       }
-      await transaction.insert(providerConfigRevisions).values({
-        id: input.revisionId,
-        organizationId: input.organizationId,
-        providerId: input.providerId,
-        version: current.revision.version + 1,
-        adapterKey: input.adapterKey,
-        endpointUrl: input.endpoint,
-        authMode: input.authMode,
-        scheduleSeconds: input.scheduleSeconds,
-        staleAfterSeconds: input.staleAfterSeconds,
-        createdByActorKey: input.actorKey,
-        createdAt: input.now,
+      await transaction.provider_config_revisions.create({
+        data: {
+          id: input.revisionId,
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          version: current.revision.version + 1,
+          adapter_key: input.adapterKey,
+          endpoint_url: input.endpoint,
+          auth_mode: input.authMode,
+          schedule_seconds: input.scheduleSeconds,
+          stale_after_seconds: input.staleAfterSeconds,
+          created_by_actor_key: input.actorKey,
+          created_at: input.now,
+        },
       });
       await this.storeCredential(transaction, input, input.now);
-      await transaction
-        .update(providerSources)
-        .set({
+      await transaction.provider_sources.updateMany({
+        where: { id: input.providerId, organization_id: input.organizationId },
+        data: {
           ...(input.displayName === undefined
             ? {}
-            : { displayName: input.displayName }),
-          updatedAt: input.now,
-        })
-        .where(
-          and(
-            eq(providerSources.id, input.providerId),
-            eq(providerSources.organizationId, input.organizationId),
-          ),
-        );
+            : { display_name: input.displayName }),
+          updated_at: input.now,
+        },
+      });
       await this.appendAudit(transaction, {
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -229,7 +230,7 @@ export class DrizzleProviderConfigurationRepository<
           input.providerId,
         ),
       };
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async getProvider(
@@ -242,13 +243,15 @@ export class DrizzleProviderConfigurationRepository<
   async listProviders(
     organizationId: string,
   ): Promise<readonly ProviderConfigurationSummary[]> {
-    const providers = await this.database
-      .select({ id: providerSources.id })
-      .from(providerSources)
-      .where(eq(providerSources.organizationId, organizationId))
-      .orderBy(asc(providerSources.platformKey), asc(providerSources.id));
+    const providers = await this.database.provider_sources.findMany({
+      where: { organization_id: organizationId },
+      orderBy: [{ platform_key: "asc" }, { id: "asc" }],
+      select: { id: true },
+    });
     const summaries = await Promise.all(
-      providers.map(({ id }) => this.loadSummary(this.database, organizationId, id)),
+      providers.map(({ id }) =>
+        this.loadSummary(this.database, organizationId, id),
+      ),
     );
     return summaries.filter(
       (summary): summary is ProviderConfigurationSummary => summary !== null,
@@ -273,22 +276,19 @@ export class DrizzleProviderConfigurationRepository<
         current: await this.toSummary(this.database, current.provider, current.revision),
       };
     }
-    const [credential] = await this.database
-      .select({
-        ciphertext: providerSecretVersions.ciphertext,
-        nonce: providerSecretVersions.nonce,
-        authTag: providerSecretVersions.authTag,
-        keyVersion: providerSecretVersions.keyVersion,
-      })
-      .from(providerSecretVersions)
-      .where(
-        and(
-          eq(providerSecretVersions.organizationId, input.organizationId),
-          eq(providerSecretVersions.providerId, input.providerId),
-          eq(providerSecretVersions.revisionId, current.revision.id),
-        ),
-      )
-      .limit(1);
+    const credential = await this.database.provider_secret_versions.findFirst({
+      where: {
+        organization_id: input.organizationId,
+        provider_id: input.providerId,
+        revision_id: current.revision.id,
+      },
+      select: {
+        ciphertext: true,
+        nonce: true,
+        auth_tag: true,
+        key_version: true,
+      },
+    });
     return {
       kind: "found",
       revision: {
@@ -300,7 +300,14 @@ export class DrizzleProviderConfigurationRepository<
         endpoint: current.revision.endpointUrl,
         authMode: current.revision.authMode,
         scheduleSeconds: current.revision.scheduleSeconds,
-        encryptedCredential: credential ?? null,
+        encryptedCredential: credential
+          ? {
+              ciphertext: credential.ciphertext,
+              nonce: credential.nonce,
+              authTag: credential.auth_tag,
+              keyVersion: credential.key_version,
+            }
+          : null,
       },
     };
   }
@@ -314,54 +321,57 @@ export class DrizzleProviderConfigurationRepository<
     providerId: string;
     revisionId: string;
   }): Promise<StoredProviderRevision | null> {
-    const [revision] = await this.database
-      .select({
-        organizationId: providerConfigRevisions.organizationId,
-        providerId: providerConfigRevisions.providerId,
-        revisionId: providerConfigRevisions.id,
-        platformKey: providerSources.platformKey,
-        adapterKey: providerConfigRevisions.adapterKey,
-        endpoint: providerConfigRevisions.endpointUrl,
-        authMode: providerConfigRevisions.authMode,
-        scheduleSeconds: providerConfigRevisions.scheduleSeconds,
-      })
-      .from(providerConfigRevisions)
-      .innerJoin(
-        providerSources,
-        and(
-          eq(providerSources.id, providerConfigRevisions.providerId),
-          eq(
-            providerSources.organizationId,
-            providerConfigRevisions.organizationId,
-          ),
-        ),
-      )
-      .where(
-        and(
-          eq(providerConfigRevisions.organizationId, input.organizationId),
-          eq(providerConfigRevisions.providerId, input.providerId),
-          eq(providerConfigRevisions.id, input.revisionId),
-        ),
-      )
-      .limit(1);
+    const revision = await this.database.provider_config_revisions.findFirst({
+      where: {
+        organization_id: input.organizationId,
+        provider_id: input.providerId,
+        id: input.revisionId,
+      },
+      select: {
+        id: true,
+        adapter_key: true,
+        endpoint_url: true,
+        auth_mode: true,
+        schedule_seconds: true,
+      },
+    });
     if (!revision) return null;
-    const [credential] = await this.database
-      .select({
-        ciphertext: providerSecretVersions.ciphertext,
-        nonce: providerSecretVersions.nonce,
-        authTag: providerSecretVersions.authTag,
-        keyVersion: providerSecretVersions.keyVersion,
-      })
-      .from(providerSecretVersions)
-      .where(
-        and(
-          eq(providerSecretVersions.organizationId, input.organizationId),
-          eq(providerSecretVersions.providerId, input.providerId),
-          eq(providerSecretVersions.revisionId, input.revisionId),
-        ),
-      )
-      .limit(1);
-    return { ...revision, encryptedCredential: credential ?? null };
+    const provider = await this.database.provider_sources.findFirst({
+      where: { id: input.providerId, organization_id: input.organizationId },
+      select: { platform_key: true },
+    });
+    if (!provider) return null;
+    const credential = await this.database.provider_secret_versions.findFirst({
+      where: {
+        organization_id: input.organizationId,
+        provider_id: input.providerId,
+        revision_id: input.revisionId,
+      },
+      select: {
+        ciphertext: true,
+        nonce: true,
+        auth_tag: true,
+        key_version: true,
+      },
+    });
+    return {
+      organizationId: input.organizationId,
+      providerId: input.providerId,
+      revisionId: revision.id,
+      platformKey: provider.platform_key,
+      adapterKey: revision.adapter_key,
+      endpoint: revision.endpoint_url,
+      authMode: revision.auth_mode,
+      scheduleSeconds: revision.schedule_seconds,
+      encryptedCredential: credential
+        ? {
+            ciphertext: credential.ciphertext,
+            nonce: credential.nonce,
+            authTag: credential.auth_tag,
+            keyVersion: credential.key_version,
+          }
+        : null,
+    };
   }
 
   async recordConnectionTest(input: {
@@ -372,41 +382,43 @@ export class DrizzleProviderConfigurationRepository<
     test: ProviderConnectionTestSummary;
     testedAt: Date;
   }): Promise<ProviderConnectionTestSummary> {
-    await this.database.transaction(async (transaction) => {
-      const [revision] = await transaction
-        .select({ id: providerConfigRevisions.id })
-        .from(providerConfigRevisions)
-        .where(
-          and(
-            eq(providerConfigRevisions.organizationId, input.organizationId),
-            eq(providerConfigRevisions.providerId, input.providerId),
-            eq(providerConfigRevisions.id, input.revisionId),
-          ),
-        )
-        .limit(1);
-      if (!revision) throw new Error("Provider revision is outside tenant scope.");
-      await transaction.insert(providerConnectionTests).values({
-        organizationId: input.organizationId,
-        providerId: input.providerId,
-        revisionId: input.revisionId,
-        outcome: input.test.verdict,
-        latencyMs: input.test.latencyMs,
-        responseStatus: input.test.responseStatus,
-        recordCountsJson: input.test.recordCounts,
-        hasMore: input.test.hasMore,
-        nextCursorPresent: input.test.nextCursorPresent,
-        sanitizedCode: input.test.sanitizedCode,
-        testedByActorKey: input.actorKey,
-        testedAt: input.testedAt,
+    await this.database.$transaction(async (transaction) => {
+      const revision = await transaction.provider_config_revisions.findFirst({
+        where: {
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          id: input.revisionId,
+        },
+        select: { id: true },
       });
-      await transaction
-        .update(providerConfigRevisions)
-        .set({
-          testedAt: input.test.verdict === "success" ? input.testedAt : null,
-          testedByActorKey:
+      if (!revision) throw new Error("Provider revision is outside tenant scope.");
+      await transaction.provider_connection_tests.create({
+        data: {
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          revision_id: input.revisionId,
+          outcome: input.test.verdict,
+          latency_ms: input.test.latencyMs,
+          response_status: input.test.responseStatus,
+          record_counts_json:
+            input.test.recordCounts === null
+              ? Prisma.DbNull
+              : (input.test.recordCounts as unknown as Prisma.InputJsonValue),
+          has_more: input.test.hasMore,
+          next_cursor_present: input.test.nextCursorPresent,
+          sanitized_code: input.test.sanitizedCode,
+          tested_by_actor_key: input.actorKey,
+          tested_at: input.testedAt,
+        },
+      });
+      await transaction.provider_config_revisions.update({
+        where: { id: input.revisionId },
+        data: {
+          tested_at: input.test.verdict === "success" ? input.testedAt : null,
+          tested_by_actor_key:
             input.test.verdict === "success" ? input.actorKey : null,
-        })
-        .where(eq(providerConfigRevisions.id, input.revisionId));
+        },
+      });
       await this.appendAudit(transaction, {
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -422,7 +434,7 @@ export class DrizzleProviderConfigurationRepository<
             : {}),
         },
       });
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
     return input.test;
   }
 
@@ -434,7 +446,7 @@ export class DrizzleProviderConfigurationRepository<
     activatedAt: Date;
     nextRunAt: Date;
   }): Promise<ProviderMutationPersistenceResult> {
-    return this.database.transaction(async (transaction) => {
+    return this.database.$transaction(async (transaction) => {
       const current = await this.lockAndLoadCurrent(
         transaction,
         input.organizationId,
@@ -449,25 +461,26 @@ export class DrizzleProviderConfigurationRepository<
         };
       }
       if (!current.revision.testedAt) return { kind: "connection_required" };
-      await transaction
-        .update(providerSources)
-        .set({
+      await transaction.provider_sources.updateMany({
+        where: { id: input.providerId, organization_id: input.organizationId },
+        data: {
           state: "active",
-          activeRevisionId: current.revision.id,
-          nextRunAt: input.nextRunAt,
-          updatedAt: input.activatedAt,
-        })
-        .where(eq(providerSources.id, input.providerId));
-      await transaction
-        .insert(providerCursorCheckpoints)
-        .values({
-          configRevisionId: current.revision.id,
-          organizationId: input.organizationId,
-          providerId: input.providerId,
+          active_revision_id: current.revision.id,
+          next_run_at: input.nextRunAt,
+          updated_at: input.activatedAt,
+        },
+      });
+      await transaction.provider_cursor_checkpoints.upsert({
+        where: { config_revision_id: current.revision.id },
+        create: {
+          config_revision_id: current.revision.id,
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
           cursor: null,
-          updatedAt: input.activatedAt,
-        })
-        .onConflictDoNothing();
+          updated_at: input.activatedAt,
+        },
+        update: {},
+      });
       await this.appendAudit(transaction, {
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -486,7 +499,7 @@ export class DrizzleProviderConfigurationRepository<
           input.providerId,
         ),
       };
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async transitionState(input: {
@@ -497,7 +510,7 @@ export class DrizzleProviderConfigurationRepository<
     actorKey: string;
     changedAt: Date;
   }): Promise<ProviderMutationPersistenceResult> {
-    return this.database.transaction(async (transaction) => {
+    return this.database.$transaction(async (transaction) => {
       const current = await this.lockAndLoadCurrent(
         transaction,
         input.organizationId,
@@ -519,19 +532,14 @@ export class DrizzleProviderConfigurationRepository<
       if (current.provider.state === "archived") {
         return { kind: "lifecycle_conflict" };
       }
-      await transaction
-        .update(providerSources)
-        .set({
+      await transaction.provider_sources.updateMany({
+        where: { id: input.providerId, organization_id: input.organizationId },
+        data: {
           state: input.targetState,
-          nextRunAt: null,
-          updatedAt: input.changedAt,
-        })
-        .where(
-          and(
-            eq(providerSources.id, input.providerId),
-            eq(providerSources.organizationId, input.organizationId),
-          ),
-        );
+          next_run_at: null,
+          updated_at: input.changedAt,
+        },
+      });
       await this.appendAudit(transaction, {
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -553,7 +561,7 @@ export class DrizzleProviderConfigurationRepository<
           input.providerId,
         ),
       };
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   private assertCredentialMatchesAuth(input: PersistedProviderRevisionInput): void {
@@ -566,37 +574,37 @@ export class DrizzleProviderConfigurationRepository<
   }
 
   private async storeCredential(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     input: PersistedProviderRevisionInput,
     retirePriorAt: Date | null,
   ): Promise<void> {
     if (retirePriorAt) {
-      await database
-        .update(providerSecretVersions)
-        .set({ retiredAt: retirePriorAt })
-        .where(
-          and(
-            eq(providerSecretVersions.organizationId, input.organizationId),
-            eq(providerSecretVersions.providerId, input.providerId),
-            sql`${providerSecretVersions.retiredAt} is null`,
-          ),
-        );
+      await database.provider_secret_versions.updateMany({
+        where: {
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          retired_at: null,
+        },
+        data: { retired_at: retirePriorAt },
+      });
     }
     if (!input.encryptedCredential) return;
-    await database.insert(providerSecretVersions).values({
-      organizationId: input.organizationId,
-      providerId: input.providerId,
-      revisionId: input.revisionId,
-      ciphertext: input.encryptedCredential.ciphertext,
-      nonce: input.encryptedCredential.nonce,
-      authTag: input.encryptedCredential.authTag,
-      keyVersion: input.encryptedCredential.keyVersion,
-      createdAt: input.now,
+    await database.provider_secret_versions.create({
+      data: {
+        organization_id: input.organizationId,
+        provider_id: input.providerId,
+        revision_id: input.revisionId,
+        ciphertext: new Uint8Array(input.encryptedCredential.ciphertext),
+        nonce: new Uint8Array(input.encryptedCredential.nonce),
+        auth_tag: new Uint8Array(input.encryptedCredential.authTag),
+        key_version: input.encryptedCredential.keyVersion,
+        created_at: input.now,
+      },
     });
   }
 
   private async appendAudit(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     input: {
       organizationId: string;
       providerId: string;
@@ -608,20 +616,25 @@ export class DrizzleProviderConfigurationRepository<
       metadata: Record<string, string>;
     },
   ): Promise<void> {
-    await database.insert(auditEvents).values({
-      organizationId: input.organizationId,
-      actorKey: input.actorKey,
-      action: input.action,
-      subjectType: "provider",
-      subjectId: input.providerId,
-      outcome: input.outcome,
-      metadataJson: { revisionId: input.revisionId, ...input.metadata },
-      occurredAt: input.occurredAt,
+    await database.audit_events.create({
+      data: {
+        organization_id: input.organizationId,
+        actor_key: input.actorKey,
+        action: input.action,
+        subject_type: "provider",
+        subject_id: input.providerId,
+        outcome: input.outcome,
+        metadata_json: {
+          revisionId: input.revisionId,
+          ...input.metadata,
+        },
+        occurred_at: input.occurredAt,
+      },
     });
   }
 
   private async requireSummary(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     organizationId: string,
     providerId: string,
   ): Promise<ProviderConfigurationSummary> {
@@ -631,7 +644,7 @@ export class DrizzleProviderConfigurationRepository<
   }
 
   private async loadSummary(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     organizationId: string,
     providerId: string,
   ): Promise<ProviderConfigurationSummary | null> {
@@ -642,94 +655,118 @@ export class DrizzleProviderConfigurationRepository<
   }
 
   private async loadCurrent(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     organizationId: string,
     providerId: string,
   ): Promise<{
     provider: ProviderAggregateRow;
     revision: ProviderRevisionRow;
   } | null> {
-    const [provider] = await database
-      .select({
-        id: providerSources.id,
-        platformKey: providerSources.platformKey,
-        displayName: providerSources.displayName,
-        state: providerSources.state,
-        activeRevisionId: providerSources.activeRevisionId,
-        nextRunAt: providerSources.nextRunAt,
-        createdAt: providerSources.createdAt,
-        updatedAt: providerSources.updatedAt,
-      })
-      .from(providerSources)
-      .where(
-        and(
-          eq(providerSources.organizationId, organizationId),
-          eq(providerSources.id, providerId),
-        ),
-      )
-      .limit(1);
-    if (!provider) return null;
-    const [revision] = await database
-      .select({
-        id: providerConfigRevisions.id,
-        version: providerConfigRevisions.version,
-        adapterKey: providerConfigRevisions.adapterKey,
-        endpointUrl: providerConfigRevisions.endpointUrl,
-        authMode: providerConfigRevisions.authMode,
-        scheduleSeconds: providerConfigRevisions.scheduleSeconds,
-        staleAfterSeconds: providerConfigRevisions.staleAfterSeconds,
-        testedAt: providerConfigRevisions.testedAt,
-        createdAt: providerConfigRevisions.createdAt,
-      })
-      .from(providerConfigRevisions)
-      .where(
-        and(
-          eq(providerConfigRevisions.organizationId, organizationId),
-          eq(providerConfigRevisions.providerId, providerId),
-        ),
-      )
-      .orderBy(desc(providerConfigRevisions.version))
-      .limit(1);
-    if (!revision) return null;
-    return { provider, revision };
+    const providerRecord = await database.provider_sources.findFirst({
+      where: { organization_id: organizationId, id: providerId },
+      select: {
+        id: true,
+        organization_id: true,
+        platform_key: true,
+        display_name: true,
+        state: true,
+        active_revision_id: true,
+        next_run_at: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
+    if (!providerRecord) return null;
+    const revisionRecord = await database.provider_config_revisions.findFirst({
+      where: { organization_id: organizationId, provider_id: providerId },
+      orderBy: { version: "desc" },
+      select: {
+        id: true,
+        version: true,
+        adapter_key: true,
+        endpoint_url: true,
+        auth_mode: true,
+        schedule_seconds: true,
+        stale_after_seconds: true,
+        tested_at: true,
+        created_at: true,
+      },
+    });
+    if (!revisionRecord) return null;
+    return {
+      provider: {
+        id: providerRecord.id,
+        organizationId: providerRecord.organization_id,
+        platformKey: providerRecord.platform_key,
+        displayName: providerRecord.display_name,
+        state: providerRecord.state,
+        activeRevisionId: providerRecord.active_revision_id,
+        nextRunAt: providerRecord.next_run_at,
+        createdAt: providerRecord.created_at,
+        updatedAt: providerRecord.updated_at,
+      },
+      revision: {
+        id: revisionRecord.id,
+        version: revisionRecord.version,
+        adapterKey: revisionRecord.adapter_key,
+        endpointUrl: revisionRecord.endpoint_url,
+        authMode: revisionRecord.auth_mode,
+        scheduleSeconds: revisionRecord.schedule_seconds,
+        staleAfterSeconds: revisionRecord.stale_after_seconds,
+        testedAt: revisionRecord.tested_at,
+        createdAt: revisionRecord.created_at,
+      },
+    };
   }
 
   private async lockAndLoadCurrent(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     organizationId: string,
     providerId: string,
   ) {
-    await database.execute(
-      sql`select id from ${providerSources} where ${providerSources.id} = ${providerId} and ${providerSources.organizationId} = ${organizationId} for update`,
+    await database.$queryRaw(
+      Prisma.sql`
+        select id
+        from provider_sources
+        where id = ${providerId}::uuid
+          and organization_id = ${organizationId}::uuid
+        for update
+      `,
     );
     return this.loadCurrent(database, organizationId, providerId);
   }
 
   private async toSummary(
-    database: PackscoutDatabase<TQueryResult>,
+    database: PackscoutQueryClient,
     provider: ProviderAggregateRow,
     revision: ProviderRevisionRow,
   ): Promise<ProviderConfigurationSummary> {
-    const [secret] = await database
-      .select({ revisionId: providerSecretVersions.revisionId })
-      .from(providerSecretVersions)
-      .where(eq(providerSecretVersions.revisionId, revision.id))
-      .limit(1);
-    const [lastTest] = await database
-      .select({
-        verdict: providerConnectionTests.outcome,
-        testedAt: providerConnectionTests.testedAt,
-        latencyMs: providerConnectionTests.latencyMs,
-        responseStatus: providerConnectionTests.responseStatus,
-        recordCounts: providerConnectionTests.recordCountsJson,
-        hasMore: providerConnectionTests.hasMore,
-        nextCursorPresent: providerConnectionTests.nextCursorPresent,
-        sanitizedCode: providerConnectionTests.sanitizedCode,
-      })
-      .from(providerConnectionTests)
-      .where(eq(providerConnectionTests.revisionId, revision.id))
-      .orderBy(desc(providerConnectionTests.testedAt), desc(providerConnectionTests.id))
-      .limit(1);
+    const secret = await database.provider_secret_versions.findFirst({
+      where: {
+        organization_id: provider.organizationId,
+        provider_id: provider.id,
+        revision_id: revision.id,
+      },
+      select: { revision_id: true },
+    });
+    const lastTest = await database.provider_connection_tests.findFirst({
+      where: {
+        organization_id: provider.organizationId,
+        provider_id: provider.id,
+        revision_id: revision.id,
+      },
+      orderBy: [{ tested_at: "desc" }, { id: "desc" }],
+      select: {
+        outcome: true,
+        tested_at: true,
+        latency_ms: true,
+        response_status: true,
+        record_counts_json: true,
+        has_more: true,
+        next_cursor_present: true,
+        sanitized_code: true,
+      },
+    });
     return {
       id: provider.id,
       platformKey: provider.platformKey,
@@ -749,14 +786,15 @@ export class DrizzleProviderConfigurationRepository<
         createdAt: revision.createdAt.toISOString(),
         lastConnectionTest: lastTest
           ? {
-              verdict: lastTest.verdict as ProviderConnectionTestSummary["verdict"],
-              checkedAt: lastTest.testedAt.toISOString(),
-              latencyMs: lastTest.latencyMs ?? 0,
-              responseStatus: lastTest.responseStatus,
-              recordCounts: lastTest.recordCounts,
-              hasMore: lastTest.hasMore,
-              nextCursorPresent: lastTest.nextCursorPresent,
-              sanitizedCode: lastTest.sanitizedCode,
+              verdict: lastTest.outcome as ProviderConnectionTestSummary["verdict"],
+              checkedAt: lastTest.tested_at.toISOString(),
+              latencyMs: lastTest.latency_ms ?? 0,
+              responseStatus: lastTest.response_status,
+              recordCounts:
+                lastTest.record_counts_json as ProviderConnectionTestSummary["recordCounts"],
+              hasMore: lastTest.has_more,
+              nextCursorPresent: lastTest.next_cursor_present,
+              sanitizedCode: lastTest.sanitized_code,
             }
           : null,
       },

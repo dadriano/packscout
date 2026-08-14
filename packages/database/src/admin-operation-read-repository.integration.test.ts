@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { eq } from "drizzle-orm";
-import { DrizzleAdminImportRunRepository } from "./admin-import-run-repository.ts";
-import { DrizzleAdminProviderOperationRepository } from "./admin-provider-operation-repository.ts";
-import { DrizzleImportRunRepository } from "./import-run-repository.ts";
+import { PrismaAdminImportRunRepository } from "./admin-import-run-repository.ts";
+import { PrismaAdminProviderOperationRepository } from "./admin-provider-operation-repository.ts";
+import { PrismaImportRunRepository } from "./import-run-repository.ts";
 import { IngestionPersistenceRepository } from "./ingestion-repository.ts";
-import { DrizzleQuarantineRepository } from "./quarantine-repository.ts";
-import { importRuns, quarantineAttempts, quarantineRecords } from "./schema/index.ts";
+import { PrismaQuarantineRepository } from "./quarantine-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
@@ -192,15 +190,15 @@ async function seed() {
         : {}),
       committedAt: new Date(startedAt.getTime() + index * 60_000 + 10_000),
     });
-    await harness.database
-      .update(importRuns)
-      .set({
+    await harness.database.import_runs.update({
+      where: { id: runId },
+      data: {
         state: "succeeded",
-        startedAt: new Date(startedAt.getTime() + index * 60_000 + 1_000),
-        finishedAt: new Date(startedAt.getTime() + index * 60_000 + 20_000),
-        reachedProviderHead: true,
-      })
-      .where(eq(importRuns.id, runId));
+        started_at: new Date(startedAt.getTime() + index * 60_000 + 1_000),
+        finished_at: new Date(startedAt.getTime() + index * 60_000 + 20_000),
+        reached_provider_head: true,
+      },
+    });
   }
   return { ...harness, setup };
 }
@@ -208,7 +206,7 @@ async function seed() {
 test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile run outcomes", async () => {
   const harness = await seed();
   try {
-    const providers = new DrizzleAdminProviderOperationRepository(harness.database);
+    const providers = new PrismaAdminProviderOperationRepository(harness.database);
     const firstProviders = await providers.listPage({
       organizationId: ids.organization,
       limit: 1,
@@ -226,8 +224,27 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
     assert.deepEqual(secondProviders.items.map(({ providerId }) => providerId), [
       ids.secondProvider,
     ]);
+    assert.deepEqual(
+      await providers.listPage({
+        organizationId: ids.otherOrganization,
+        limit: 50,
+      }),
+      {
+        items: [{
+          providerId: ids.otherProvider,
+          platformKey: "other-platform",
+          configurationRevisionId: ids.otherRevision,
+          configurationVersion: 1,
+        }],
+        hasMore: false,
+      },
+    );
+    await assert.rejects(
+      providers.listPage({ organizationId: ids.organization, limit: 51 }),
+      RangeError,
+    );
 
-    const runs = new DrizzleAdminImportRunRepository(harness.database);
+    const runs = new PrismaAdminImportRunRepository(harness.database);
     const firstRuns = await runs.listPage({
       organizationId: ids.organization,
       providerId: ids.provider,
@@ -262,6 +279,13 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
     assert.equal(nextRuns.items[1]?.counters.accepted, 1);
     assert.equal(nextRuns.items[1]?.counters.quarantined, 1);
     assert.equal(nextRuns.items[1]?.counters.sales, 1);
+    const scheduledRuns = await runs.listPage({
+      organizationId: ids.organization,
+      state: "succeeded",
+      trigger: "scheduled",
+      limit: 50,
+    });
+    assert.deepEqual(scheduledRuns.items.map(({ id }) => id), [ids.unchangedRun]);
     const detail = await runs.get({
       organizationId: ids.organization,
       runId: ids.revisedRun,
@@ -273,6 +297,14 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
       organizationId: ids.otherOrganization,
       runId: ids.acceptedRun,
     }), null);
+    assert.equal(await runs.get({
+      organizationId: ids.organization,
+      runId: "71000000-0000-4000-8000-000000000099",
+    }), null);
+    await assert.rejects(
+      runs.listPage({ organizationId: ids.organization, limit: 0 }),
+      RangeError,
+    );
     assert.doesNotMatch(JSON.stringify([...firstRuns.items, ...nextRuns.items]), /raw-secret|private-user|wallet/);
   } finally {
     await harness.close();
@@ -282,19 +314,21 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
 test("quarantine keysets apply run, kind, reason, and effective-state filters before bounding", async () => {
   const harness = await seed();
   try {
-    const repository = new DrizzleQuarantineRepository(harness.database);
-    const [entry] = await harness.database
-      .select({ id: quarantineRecords.id })
-      .from(quarantineRecords)
-      .where(eq(quarantineRecords.organizationId, ids.organization));
+    const repository = new PrismaQuarantineRepository(harness.database);
+    const entry = await harness.database.quarantine_records.findFirst({
+      where: { organization_id: ids.organization },
+      select: { id: true },
+    });
     assert.ok(entry);
-    await harness.database.insert(quarantineAttempts).values({
-      id: ids.retryAttempt,
-      organizationId: ids.organization,
-      quarantineId: entry.id,
-      state: "running",
-      requestedByActorKey: "actor:admin",
-      startedAt: new Date(startedAt.getTime() + 30_000),
+    await harness.database.quarantine_attempts.create({
+      data: {
+        id: ids.retryAttempt,
+        organization_id: ids.organization,
+        quarantine_id: entry.id,
+        state: "running",
+        requested_by_actor_key: "actor:admin",
+        started_at: new Date(startedAt.getTime() + 30_000),
+      },
     });
     const page = await repository.listEntriesPage(
       ids.organization,
@@ -323,7 +357,7 @@ test("quarantine keysets apply run, kind, reason, and effective-state filters be
 test("manual run persistence validates the expected active revision under the provider lock", async () => {
   const harness = await seed();
   try {
-    const repository = new DrizzleImportRunRepository(harness.database);
+    const repository = new PrismaImportRunRepository(harness.database);
     const stale = await repository.requestRun({
       organizationId: ids.organization,
       providerId: ids.secondProvider,

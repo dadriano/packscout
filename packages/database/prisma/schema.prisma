@@ -1,0 +1,862 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PACKSCOUT_DATABASE_URL")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model admin_alerts {
+  id                                                                                  String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                     String                 @db.Uuid
+  latest_event_id                                                                     String                 @db.Uuid
+  kind                                                                                operational_event_kind
+  severity                                                                            operational_severity
+  state                                                                               admin_alert_state      @default(active)
+  dedupe_key                                                                          String
+  recovery_key                                                                        String
+  title                                                                               String
+  summary                                                                             String
+  provider_id                                                                         String?                @db.Uuid
+  run_id                                                                              String?                @db.Uuid
+  quarantine_id                                                                       String?                @db.Uuid
+  first_seen_at                                                                       DateTime               @db.Timestamptz(6)
+  last_seen_at                                                                        DateTime               @db.Timestamptz(6)
+  occurrence_count                                                                    Int                    @default(1)
+  reopened_count                                                                      Int                    @default(0)
+  acknowledged_by_actor_key                                                           String?
+  acknowledged_at                                                                     DateTime?              @db.Timestamptz(6)
+  resolved_by_actor_key                                                               String?
+  resolved_at                                                                         DateTime?              @db.Timestamptz(6)
+  operational_events_admin_alerts_latest_event_idTooperational_events                 operational_events     @relation("admin_alerts_latest_event_idTooperational_events", fields: [latest_event_id], references: [id], onUpdate: NoAction, map: "admin_alerts_latest_event_id_operational_events_id_fk")
+  operational_events_admin_alerts_latest_event_id_organization_idTooperational_events operational_events     @relation("admin_alerts_latest_event_id_organization_idTooperational_events", fields: [latest_event_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "admin_alerts_latest_event_tenant_fk")
+  organizations                                                                       organizations          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "admin_alerts_organization_id_organizations_id_fk")
+  provider_sources_admin_alerts_provider_idToprovider_sources                         provider_sources?      @relation("admin_alerts_provider_idToprovider_sources", fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_provider_id_provider_sources_id_fk")
+  provider_sources_admin_alerts_provider_id_organization_idToprovider_sources         provider_sources?      @relation("admin_alerts_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "admin_alerts_provider_tenant_fk")
+  quarantine_records_admin_alerts_quarantine_idToquarantine_records                   quarantine_records?    @relation("admin_alerts_quarantine_idToquarantine_records", fields: [quarantine_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_quarantine_id_quarantine_records_id_fk")
+  quarantine_records_admin_alerts_quarantine_id_organization_idToquarantine_records   quarantine_records?    @relation("admin_alerts_quarantine_id_organization_idToquarantine_records", fields: [quarantine_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "admin_alerts_quarantine_tenant_fk")
+  import_runs_admin_alerts_run_idToimport_runs                                        import_runs?           @relation("admin_alerts_run_idToimport_runs", fields: [run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_run_id_import_runs_id_fk")
+  import_runs_admin_alerts_run_id_organization_id_provider_idToimport_runs            import_runs?           @relation("admin_alerts_run_id_organization_id_provider_idToimport_runs", fields: [run_id, organization_id, provider_id], references: [id, organization_id, provider_id], onUpdate: NoAction, map: "admin_alerts_run_tenant_fk")
+
+  @@unique([organization_id, dedupe_key], map: "admin_alerts_organization_dedupe_unique")
+  @@index([organization_id, state, last_seen_at], map: "admin_alerts_organization_state_seen_idx")
+}
+
+model audit_events {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String?        @db.Uuid
+  actor_key       String
+  action          String
+  subject_type    String
+  subject_id      String?        @db.Uuid
+  outcome         audit_outcome
+  metadata_json   Json           @default("{}")
+  occurred_at     DateTime       @default(now()) @db.Timestamptz(6)
+  organizations   organizations? @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "audit_events_organization_id_organizations_id_fk")
+
+  @@index([organization_id, occurred_at], map: "audit_events_organization_occurred_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model auth_rate_limits {
+  bucket_key        String    @id
+  window_started_at DateTime  @db.Timestamptz(6)
+  attempt_count     Int       @default(0)
+  blocked_until     DateTime? @db.Timestamptz(6)
+  updated_at        DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model canonical_entities {
+  id                                                                                                   String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                      String                    @db.Uuid
+  platform_key                                                                                         String
+  record_kind                                                                                          canonical_record_kind
+  external_id                                                                                          String
+  current_revision_id                                                                                  String?                   @db.Uuid
+  created_at                                                                                           DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at                                                                                           DateTime                  @default(now()) @db.Timestamptz(6)
+  canonical_revisions_canonical_entities_current_revision_idTocanonical_revisions                      canonical_revisions?      @relation("canonical_entities_current_revision_idTocanonical_revisions", fields: [current_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "canonical_entities_current_revision_id_canonical_revisions_id_f")
+  organizations                                                                                        organizations             @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_entities_organization_id_organizations_id_fk")
+  canonical_relationships_canonical_relationships_source_entity_idTocanonical_entities                 canonical_relationships[] @relation("canonical_relationships_source_entity_idTocanonical_entities")
+  canonical_relationships_canonical_relationships_source_entity_id_organization_idTocanonical_entities canonical_relationships[] @relation("canonical_relationships_source_entity_id_organization_idTocanonical_entities")
+  canonical_relationships_canonical_relationships_target_entity_idTocanonical_entities                 canonical_relationships[] @relation("canonical_relationships_target_entity_idTocanonical_entities")
+  canonical_relationships_canonical_relationships_target_entity_id_organization_idTocanonical_entities canonical_relationships[] @relation("canonical_relationships_target_entity_id_organization_idTocanonical_entities")
+  canonical_revisions_canonical_revisions_entity_idTocanonical_entities                                canonical_revisions[]     @relation("canonical_revisions_entity_idTocanonical_entities")
+  canonical_revisions_canonical_revisions_entity_id_organization_idTocanonical_entities                canonical_revisions[]     @relation("canonical_revisions_entity_id_organization_idTocanonical_entities")
+
+  @@unique([id, organization_id], map: "canonical_entities_id_organization_unique")
+  @@unique([organization_id, platform_key, record_kind, external_id], map: "canonical_entities_stable_identity_unique")
+  @@index([current_revision_id], map: "canonical_entities_current_revision_idx")
+}
+
+model canonical_relationships {
+  id                                                                                              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                 String                @db.Uuid
+  source_entity_id                                                                                String                @db.Uuid
+  relationship_kind                                                                               String
+  target_platform_key                                                                             String
+  target_record_kind                                                                              canonical_record_kind
+  target_external_id                                                                              String?
+  target_entity_id                                                                                String?               @db.Uuid
+  created_at                                                                                      DateTime              @default(now()) @db.Timestamptz(6)
+  resolved_at                                                                                     DateTime?             @db.Timestamptz(6)
+  organizations                                                                                   organizations         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_relationships_organization_id_organizations_id_fk")
+  canonical_entities_canonical_relationships_source_entity_idTocanonical_entities                 canonical_entities    @relation("canonical_relationships_source_entity_idTocanonical_entities", fields: [source_entity_id], references: [id], onUpdate: NoAction, map: "canonical_relationships_source_entity_id_canonical_entities_id_")
+  canonical_entities_canonical_relationships_source_entity_id_organization_idTocanonical_entities canonical_entities    @relation("canonical_relationships_source_entity_id_organization_idTocanonical_entities", fields: [source_entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_relationships_source_tenant_fk")
+  canonical_entities_canonical_relationships_target_entity_idTocanonical_entities                 canonical_entities?   @relation("canonical_relationships_target_entity_idTocanonical_entities", fields: [target_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "canonical_relationships_target_entity_id_canonical_entities_id_")
+  canonical_entities_canonical_relationships_target_entity_id_organization_idTocanonical_entities canonical_entities?   @relation("canonical_relationships_target_entity_id_organization_idTocanonical_entities", fields: [target_entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_relationships_target_tenant_fk")
+
+  @@unique([source_entity_id, relationship_kind, target_platform_key, target_record_kind, target_external_id], map: "canonical_relationships_source_kind_target_unique")
+  @@index([organization_id, target_platform_key, target_record_kind, target_external_id, resolved_at], map: "canonical_relationships_unresolved_lookup_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model canonical_revisions {
+  id                                                                                                                                   String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                                                      String                                @db.Uuid
+  entity_id                                                                                                                            String                                @db.Uuid
+  revision_number                                                                                                                      Int
+  source_record_id                                                                                                                     String                                @db.Uuid
+  content_json                                                                                                                         Json
+  content_hash                                                                                                                         String
+  provenance_json                                                                                                                      Json
+  provenance_hash                                                                                                                      String
+  actor_key                                                                                                                            String?
+  source_updated_at                                                                                                                    DateTime                              @db.Timestamptz(6)
+  source_collected_at                                                                                                                  DateTime                              @db.Timestamptz(6)
+  accepted_at                                                                                                                          DateTime                              @default(now()) @db.Timestamptz(6)
+  canonical_entities_canonical_entities_current_revision_idTocanonical_revisions                                                       canonical_entities[]                  @relation("canonical_entities_current_revision_idTocanonical_revisions")
+  canonical_entities_canonical_revisions_entity_idTocanonical_entities                                                                 canonical_entities                    @relation("canonical_revisions_entity_idTocanonical_entities", fields: [entity_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_entity_id_canonical_entities_id_fk")
+  canonical_entities_canonical_revisions_entity_id_organization_idTocanonical_entities                                                 canonical_entities                    @relation("canonical_revisions_entity_id_organization_idTocanonical_entities", fields: [entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_entity_tenant_fk")
+  organizations                                                                                                                        organizations                         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_organization_id_organizations_id_fk")
+  source_records_canonical_revisions_source_record_idTosource_records                                                                  source_records                        @relation("canonical_revisions_source_record_idTosource_records", fields: [source_record_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_source_record_id_source_records_id_fk")
+  source_records_canonical_revisions_source_record_id_organization_idTosource_records                                                  source_records                        @relation("canonical_revisions_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_source_tenant_fk")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions    estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions        estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions                 estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions                    estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                        estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions")
+  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_idTocanonical_revisions                     source_record_projection_revisions[]  @relation("source_record_projection_revisions_canonical_revision_idTocanonical_revisions")
+  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions     source_record_projection_revisions[]  @relation("source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions")
+
+  @@unique([entity_id, content_hash, provenance_hash], map: "canonical_revisions_content_provenance_unique")
+  @@unique([entity_id, revision_number], map: "canonical_revisions_entity_number_unique")
+  @@unique([id, entity_id, organization_id], map: "canonical_revisions_id_entity_organization_unique")
+  @@unique([id, organization_id], map: "canonical_revisions_id_organization_unique")
+  @@index([organization_id, accepted_at], map: "canonical_revisions_organization_accepted_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model estimated_ev_recomputation_requests {
+  id                                                                                                                                             String                             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  request_key                                                                                                                                    String                             @unique(map: "estimated_ev_recomputation_request_key_unique")
+  organization_id                                                                                                                                String                             @db.Uuid
+  provider_id                                                                                                                                    String                             @db.Uuid
+  configuration_revision_id                                                                                                                      String                             @db.Uuid
+  platform_key                                                                                                                                   String
+  pack_external_id                                                                                                                               String
+  ev_input_external_id                                                                                                                           String
+  pack_revision_id                                                                                                                               String?                            @db.Uuid
+  ev_input_revision_id                                                                                                                           String?                            @db.Uuid
+  state                                                                                                                                          estimated_ev_recomputation_state   @default(queued)
+  result_status                                                                                                                                  estimated_ev_recomputation_result?
+  calculation_revision_id                                                                                                                        String?                            @db.Uuid
+  attempt_count                                                                                                                                  Int                                @default(0)
+  available_at                                                                                                                                   DateTime                           @default(now()) @db.Timestamptz(6)
+  claimed_by                                                                                                                                     String?
+  claim_token                                                                                                                                    String?                            @db.Uuid
+  claim_expires_at                                                                                                                               DateTime?                          @db.Timestamptz(6)
+  failure_code                                                                                                                                   String?
+  created_at                                                                                                                                     DateTime                           @default(now()) @db.Timestamptz(6)
+  updated_at                                                                                                                                     DateTime                           @default(now()) @db.Timestamptz(6)
+  completed_at                                                                                                                                   DateTime?                          @db.Timestamptz(6)
+  canonical_revisions_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions                           canonical_revisions?               @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions", fields: [calculation_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_calculation_revision_tenant_fk")
+  provider_config_revisions_estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions provider_config_revisions          @relation("estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions", fields: [configuration_revision_id, provider_id, organization_id], references: [id, provider_id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_config_tenant_fk")
+  canonical_revisions_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions                              canonical_revisions?               @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions", fields: [ev_input_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_input_revision_tenant_fk")
+  canonical_revisions_estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions                                  canonical_revisions?               @relation("estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions", fields: [pack_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_pack_revision_tenant_fk")
+  provider_sources_estimated_ev_recomputation_requests_provider_id_organization_idToprovider_sources                                             provider_sources                   @relation("estimated_ev_recomputation_requests_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_provider_tenant_fk")
+  canonical_revisions_estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions                                           canonical_revisions?               @relation("estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions", fields: [calculation_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "estimated_ev_recomputation_requests_calculation_revision_id_can")
+  provider_config_revisions_estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions                             provider_config_revisions          @relation("estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions", fields: [configuration_revision_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_configuration_revision_id_p")
+  canonical_revisions_estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions                                              canonical_revisions?               @relation("estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions", fields: [ev_input_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "estimated_ev_recomputation_requests_ev_input_revision_id_canoni")
+  organizations                                                                                                                                  organizations                      @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_organization_id_organizatio")
+  canonical_revisions_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                                                  canonical_revisions?               @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions", fields: [pack_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "estimated_ev_recomputation_requests_pack_revision_id_canonical_")
+  provider_sources_estimated_ev_recomputation_requests_provider_idToprovider_sources                                                             provider_sources                   @relation("estimated_ev_recomputation_requests_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_provider_id_provider_source")
+
+  @@index([state, available_at, created_at, id], map: "estimated_ev_recomputation_claim_idx")
+  @@index([organization_id, platform_key, pack_external_id, created_at], map: "estimated_ev_recomputation_tenant_pack_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model import_pages {
+  id                                                                                                 String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                    String                       @db.Uuid
+  provider_id                                                                                        String                       @db.Uuid
+  run_id                                                                                             String                       @db.Uuid
+  page_number                                                                                        Int
+  requested_cursor                                                                                   String?
+  next_cursor                                                                                        String?
+  has_more                                                                                           Boolean
+  payload_json                                                                                       Json?
+  payload_hash                                                                                       String
+  record_counts_json                                                                                 Json
+  committed_at                                                                                       DateTime                     @default(now()) @db.Timestamptz(6)
+  expires_at                                                                                         DateTime                     @db.Timestamptz(6)
+  payload_expired_at                                                                                 DateTime?                    @db.Timestamptz(6)
+  organizations                                                                                      organizations                @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "import_pages_organization_id_organizations_id_fk")
+  provider_sources                                                                                   provider_sources             @relation(fields: [provider_id], references: [id], onUpdate: NoAction, map: "import_pages_provider_id_provider_sources_id_fk")
+  import_runs_import_pages_run_idToimport_runs                                                       import_runs                  @relation("import_pages_run_idToimport_runs", fields: [run_id], references: [id], onUpdate: NoAction, map: "import_pages_run_id_import_runs_id_fk")
+  import_runs_import_pages_run_id_organization_id_provider_idToimport_runs                           import_runs                  @relation("import_pages_run_id_organization_id_provider_idToimport_runs", fields: [run_id, organization_id, provider_id], references: [id, organization_id, provider_id], onUpdate: NoAction, map: "import_pages_run_tenant_fk")
+  quarantine_records_quarantine_records_page_idToimport_pages                                        quarantine_records[]         @relation("quarantine_records_page_idToimport_pages")
+  quarantine_records_quarantine_records_page_id_organization_id_run_idToimport_pages                 quarantine_records[]         @relation("quarantine_records_page_id_organization_id_run_idToimport_pages")
+  source_record_observations_source_record_observations_page_idToimport_pages                        source_record_observations[] @relation("source_record_observations_page_idToimport_pages")
+  source_record_observations_source_record_observations_page_id_organization_id_run_idToimport_pages source_record_observations[] @relation("source_record_observations_page_id_organization_id_run_idToimport_pages")
+  source_record_outcomes_source_record_outcomes_page_idToimport_pages                                source_record_outcomes[]     @relation("source_record_outcomes_page_idToimport_pages")
+  source_record_outcomes_source_record_outcomes_page_id_organization_id_run_idToimport_pages         source_record_outcomes[]     @relation("source_record_outcomes_page_id_organization_id_run_idToimport_pages")
+  source_records_source_records_first_page_idToimport_pages                                          source_records[]             @relation("source_records_first_page_idToimport_pages")
+  source_records_source_records_first_page_id_organization_id_provider_id_first_run_idToimport_pages source_records[]             @relation("source_records_first_page_id_organization_id_provider_id_first_run_idToimport_pages")
+
+  @@unique([id, organization_id, provider_id, run_id], map: "import_pages_id_organization_provider_run_unique")
+  @@unique([id, organization_id, run_id], map: "import_pages_id_organization_run_unique")
+  @@unique([run_id, requested_cursor], map: "import_pages_run_cursor_unique")
+  @@unique([run_id, page_number], map: "import_pages_run_number_unique")
+  @@index([organization_id, expires_at], map: "import_pages_expiry_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model import_runs {
+  id                                                                                                                  String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                                     String                        @db.Uuid
+  provider_id                                                                                                         String                        @db.Uuid
+  config_revision_id                                                                                                  String                        @db.Uuid
+  trigger                                                                                                             import_trigger
+  state                                                                                                               import_run_state              @default(queued)
+  requested_cursor                                                                                                    String?
+  final_cursor                                                                                                        String?
+  started_at                                                                                                          DateTime?                     @db.Timestamptz(6)
+  finished_at                                                                                                         DateTime?                     @db.Timestamptz(6)
+  heartbeat_at                                                                                                        DateTime?                     @db.Timestamptz(6)
+  counters_json                                                                                                       Json                          @default("{\"pages\": 0, \"records\": 0, \"accepted\": 0, \"duplicate\": 0, \"quarantined\": 0, \"requestAttempts\": 0, \"transientRetries\": 0}")
+  failure_code                                                                                                        String?
+  failure_summary                                                                                                     String?
+  created_at                                                                                                          DateTime                      @default(now()) @db.Timestamptz(6)
+  requested_by_actor_key                                                                                              String?
+  lease_owner                                                                                                         String?
+  lease_expires_at                                                                                                    DateTime?                     @db.Timestamptz(6)
+  attempt                                                                                                             Int                           @default(0)
+  reached_provider_head                                                                                               Boolean                       @default(false)
+  admin_alerts_admin_alerts_run_idToimport_runs                                                                       admin_alerts[]                @relation("admin_alerts_run_idToimport_runs")
+  admin_alerts_admin_alerts_run_id_organization_id_provider_idToimport_runs                                           admin_alerts[]                @relation("admin_alerts_run_id_organization_id_provider_idToimport_runs")
+  import_pages_import_pages_run_idToimport_runs                                                                       import_pages[]                @relation("import_pages_run_idToimport_runs")
+  import_pages_import_pages_run_id_organization_id_provider_idToimport_runs                                           import_pages[]                @relation("import_pages_run_id_organization_id_provider_idToimport_runs")
+  provider_config_revisions_import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions     provider_config_revisions     @relation("import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions", fields: [config_revision_id, provider_id, organization_id], references: [id, provider_id, organization_id], onUpdate: NoAction, map: "import_runs_config_provider_tenant_fk")
+  provider_config_revisions_import_runs_config_revision_idToprovider_config_revisions                                 provider_config_revisions     @relation("import_runs_config_revision_idToprovider_config_revisions", fields: [config_revision_id], references: [id], onUpdate: NoAction, map: "import_runs_config_revision_id_provider_config_revisions_id_fk")
+  organizations                                                                                                       organizations                 @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "import_runs_organization_id_organizations_id_fk")
+  provider_sources_import_runs_provider_idToprovider_sources                                                          provider_sources              @relation("import_runs_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "import_runs_provider_id_provider_sources_id_fk")
+  provider_sources_import_runs_provider_id_organization_idToprovider_sources                                          provider_sources              @relation("import_runs_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "import_runs_provider_tenant_fk")
+  operational_events_operational_events_run_idToimport_runs                                                           operational_events[]          @relation("operational_events_run_idToimport_runs")
+  operational_events_operational_events_run_id_organization_id_provider_idToimport_runs                               operational_events[]          @relation("operational_events_run_id_organization_id_provider_idToimport_runs")
+  provider_cursor_checkpoints_provider_cursor_checkpoints_advanced_by_run_idToimport_runs                             provider_cursor_checkpoints[] @relation("provider_cursor_checkpoints_advanced_by_run_idToimport_runs")
+  provider_cursor_checkpoints_provider_cursor_checkpoints_advanced_by_run_id_organization_id_provider_idToimport_runs provider_cursor_checkpoints[] @relation("provider_cursor_checkpoints_advanced_by_run_id_organization_id_provider_idToimport_runs")
+  provider_schedules_provider_schedules_last_run_idToimport_runs                                                      provider_schedules[]          @relation("provider_schedules_last_run_idToimport_runs")
+  quarantine_records                                                                                                  quarantine_records[]
+  source_record_observations                                                                                          source_record_observations[]
+  source_record_outcomes                                                                                              source_record_outcomes[]
+  source_records                                                                                                      source_records[]
+
+  @@unique([id, organization_id, provider_id, config_revision_id], map: "import_runs_id_organization_provider_config_unique")
+  @@unique([id, organization_id, provider_id], map: "import_runs_id_organization_provider_unique")
+  @@index([organization_id, provider_id, created_at], map: "import_runs_organization_provider_created_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model operational_events {
+  id                                                                                      String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                         String                 @db.Uuid
+  kind                                                                                    operational_event_kind
+  severity                                                                                operational_severity
+  provider_id                                                                             String?                @db.Uuid
+  run_id                                                                                  String?                @db.Uuid
+  quarantine_id                                                                           String?                @db.Uuid
+  dedupe_key                                                                              String
+  recovery_key                                                                            String
+  title                                                                                   String
+  summary                                                                                 String
+  evidence_json                                                                           Json                   @default("{}")
+  occurred_at                                                                             DateTime               @db.Timestamptz(6)
+  admin_alerts_admin_alerts_latest_event_idTooperational_events                           admin_alerts[]         @relation("admin_alerts_latest_event_idTooperational_events")
+  admin_alerts_admin_alerts_latest_event_id_organization_idTooperational_events           admin_alerts[]         @relation("admin_alerts_latest_event_id_organization_idTooperational_events")
+  organizations                                                                           organizations          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "operational_events_organization_id_organizations_id_fk")
+  provider_sources_operational_events_provider_idToprovider_sources                       provider_sources?      @relation("operational_events_provider_idToprovider_sources", fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operational_events_provider_id_provider_sources_id_fk")
+  provider_sources_operational_events_provider_id_organization_idToprovider_sources       provider_sources?      @relation("operational_events_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "operational_events_provider_tenant_fk")
+  quarantine_records_operational_events_quarantine_idToquarantine_records                 quarantine_records?    @relation("operational_events_quarantine_idToquarantine_records", fields: [quarantine_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operational_events_quarantine_id_quarantine_records_id_fk")
+  quarantine_records_operational_events_quarantine_id_organization_idToquarantine_records quarantine_records?    @relation("operational_events_quarantine_id_organization_idToquarantine_records", fields: [quarantine_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "operational_events_quarantine_tenant_fk")
+  import_runs_operational_events_run_idToimport_runs                                      import_runs?           @relation("operational_events_run_idToimport_runs", fields: [run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operational_events_run_id_import_runs_id_fk")
+  import_runs_operational_events_run_id_organization_id_provider_idToimport_runs          import_runs?           @relation("operational_events_run_id_organization_id_provider_idToimport_runs", fields: [run_id, organization_id, provider_id], references: [id, organization_id, provider_id], onUpdate: NoAction, map: "operational_events_run_tenant_fk")
+
+  @@unique([id, organization_id], map: "operational_events_id_organization_unique")
+  @@index([organization_id, dedupe_key, occurred_at], map: "operational_events_organization_dedupe_idx")
+  @@index([organization_id, occurred_at], map: "operational_events_organization_occurred_idx")
+}
+
+model operator_memberships {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id   String              @db.Uuid
+  operator_id       String              @db.Uuid
+  role              operator_role
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime            @default(now()) @db.Timestamptz(6)
+  operators         operators           @relation(fields: [operator_id], references: [id], onUpdate: NoAction, map: "operator_memberships_operator_id_operators_id_fk")
+  organizations     organizations       @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "operator_memberships_organization_id_organizations_id_fk")
+  operator_sessions operator_sessions[]
+
+  @@unique([organization_id, operator_id], map: "operator_memberships_organization_operator_unique")
+  @@index([operator_id], map: "operator_memberships_operator_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model operator_sessions {
+  id                   String               @id @db.Uuid
+  organization_id      String               @db.Uuid
+  operator_id          String               @db.Uuid
+  token_hash           String               @unique(map: "operator_sessions_token_hash_unique")
+  csrf_hash            String
+  idle_expires_at      DateTime             @db.Timestamptz(6)
+  absolute_expires_at  DateTime             @db.Timestamptz(6)
+  last_seen_at         DateTime             @db.Timestamptz(6)
+  revoked_at           DateTime?            @db.Timestamptz(6)
+  created_at           DateTime             @db.Timestamptz(6)
+  operator_memberships operator_memberships @relation(fields: [organization_id, operator_id], references: [organization_id, operator_id], onUpdate: NoAction, map: "operator_sessions_membership_fk")
+  operators            operators            @relation(fields: [operator_id], references: [id], onUpdate: NoAction, map: "operator_sessions_operator_id_operators_id_fk")
+  organizations        organizations        @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "operator_sessions_organization_id_organizations_id_fk")
+
+  @@index([operator_id, created_at], map: "operator_sessions_operator_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model operators {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email_normalized     String                 @unique(map: "operators_email_normalized_unique")
+  display_name         String
+  password_hash        String
+  state                operator_state         @default(active)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  operator_memberships operator_memberships[]
+  operator_sessions    operator_sessions[]
+}
+
+model organizations {
+  id                                  String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug                                String                                @unique(map: "organizations_slug_unique")
+  name                                String
+  created_at                          DateTime                              @default(now()) @db.Timestamptz(6)
+  admin_alerts                        admin_alerts[]
+  audit_events                        audit_events[]
+  canonical_entities                  canonical_entities[]
+  canonical_relationships             canonical_relationships[]
+  canonical_revisions                 canonical_revisions[]
+  estimated_ev_recomputation_requests estimated_ev_recomputation_requests[]
+  import_pages                        import_pages[]
+  import_runs                         import_runs[]
+  operational_events                  operational_events[]
+  operator_memberships                operator_memberships[]
+  operator_sessions                   operator_sessions[]
+  provider_config_revisions           provider_config_revisions[]
+  provider_connection_tests           provider_connection_tests[]
+  provider_cursor_checkpoints         provider_cursor_checkpoints[]
+  provider_health_states              provider_health_states[]
+  provider_schedules                  provider_schedules[]
+  provider_secret_versions            provider_secret_versions[]
+  provider_sources                    provider_sources[]
+  quarantine_attempts                 quarantine_attempts[]
+  quarantine_records                  quarantine_records[]
+  retention_executions                retention_executions[]
+  source_record_observations          source_record_observations[]
+  source_record_outcomes              source_record_outcomes[]
+  source_record_projection_revisions  source_record_projection_revisions[]
+  source_records                      source_records[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model provider_config_revisions {
+  id                                                                                                                                                       String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                                                                          String                                @db.Uuid
+  provider_id                                                                                                                                              String                                @db.Uuid
+  version                                                                                                                                                  Int
+  adapter_key                                                                                                                                              String
+  endpoint_url                                                                                                                                             String
+  auth_mode                                                                                                                                                provider_auth_mode
+  schedule_seconds                                                                                                                                         Int                                   @default(300)
+  stale_after_seconds                                                                                                                                      Int                                   @default(900)
+  tested_at                                                                                                                                                DateTime?                             @db.Timestamptz(6)
+  tested_by_actor_key                                                                                                                                      String?
+  created_by_actor_key                                                                                                                                     String
+  created_at                                                                                                                                               DateTime                              @default(now()) @db.Timestamptz(6)
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions                             estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions")
+  import_runs_import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions                                                        import_runs[]                         @relation("import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions")
+  import_runs_import_runs_config_revision_idToprovider_config_revisions                                                                                    import_runs[]                         @relation("import_runs_config_revision_idToprovider_config_revisions")
+  organizations                                                                                                                                            organizations                         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "provider_config_revisions_organization_id_organizations_id_fk")
+  provider_sources_provider_config_revisions_provider_idToprovider_sources                                                                                 provider_sources                      @relation("provider_config_revisions_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "provider_config_revisions_provider_id_provider_sources_id_fk")
+  provider_sources_provider_config_revisions_provider_id_organization_idToprovider_sources                                                                 provider_sources                      @relation("provider_config_revisions_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "provider_config_revisions_provider_tenant_fk")
+  provider_connection_tests_provider_connection_tests_revision_idToprovider_config_revisions                                                               provider_connection_tests[]           @relation("provider_connection_tests_revision_idToprovider_config_revisions")
+  provider_connection_tests_provider_connection_tests_revision_id_provider_id_organization_idToprovider_config_revisions                                   provider_connection_tests[]           @relation("provider_connection_tests_revision_id_provider_id_organization_idToprovider_config_revisions")
+  provider_cursor_checkpoints_provider_cursor_checkpoints_config_revision_idToprovider_config_revisions                                                    provider_cursor_checkpoints?          @relation("provider_cursor_checkpoints_config_revision_idToprovider_config_revisions")
+  provider_schedules_provider_schedules_config_revision_idToprovider_config_revisions                                                                      provider_schedules[]                  @relation("provider_schedules_config_revision_idToprovider_config_revisions")
+  provider_secret_versions_provider_secret_versions_revision_idToprovider_config_revisions                                                                 provider_secret_versions?             @relation("provider_secret_versions_revision_idToprovider_config_revisions")
+  provider_sources_provider_sources_active_revision_idToprovider_config_revisions                                                                          provider_sources[]                    @relation("provider_sources_active_revision_idToprovider_config_revisions")
+
+  @@unique([id, provider_id, organization_id], map: "provider_config_revisions_id_provider_organization_unique")
+  @@unique([provider_id, version], map: "provider_config_revisions_provider_version_unique")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model provider_connection_tests {
+  id                                                                                                                     String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                                        String                    @db.Uuid
+  provider_id                                                                                                            String                    @db.Uuid
+  revision_id                                                                                                            String                    @db.Uuid
+  outcome                                                                                                                String
+  latency_ms                                                                                                             Int?
+  sanitized_code                                                                                                         String?
+  tested_by_actor_key                                                                                                    String
+  tested_at                                                                                                              DateTime                  @default(now()) @db.Timestamptz(6)
+  response_status                                                                                                        Int?
+  record_counts_json                                                                                                     Json?
+  has_more                                                                                                               Boolean?
+  next_cursor_present                                                                                                    Boolean?
+  organizations                                                                                                          organizations             @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "provider_connection_tests_organization_id_organizations_id_fk")
+  provider_sources                                                                                                       provider_sources          @relation(fields: [provider_id], references: [id], onUpdate: NoAction, map: "provider_connection_tests_provider_id_provider_sources_id_fk")
+  provider_config_revisions_provider_connection_tests_revision_idToprovider_config_revisions                             provider_config_revisions @relation("provider_connection_tests_revision_idToprovider_config_revisions", fields: [revision_id], references: [id], onUpdate: NoAction, map: "provider_connection_tests_revision_id_provider_config_revisions")
+  provider_config_revisions_provider_connection_tests_revision_id_provider_id_organization_idToprovider_config_revisions provider_config_revisions @relation("provider_connection_tests_revision_id_provider_id_organization_idToprovider_config_revisions", fields: [revision_id, provider_id, organization_id], references: [id, provider_id, organization_id], onUpdate: NoAction, map: "provider_connection_tests_revision_tenant_fk")
+
+  @@index([provider_id, tested_at], map: "provider_connection_tests_provider_tested_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model provider_cursor_checkpoints {
+  config_revision_id                                                                                  String                    @id @db.Uuid
+  organization_id                                                                                     String                    @db.Uuid
+  provider_id                                                                                         String                    @db.Uuid
+  cursor                                                                                              String?
+  advanced_by_run_id                                                                                  String?                   @db.Uuid
+  updated_at                                                                                          DateTime                  @default(now()) @db.Timestamptz(6)
+  import_runs_provider_cursor_checkpoints_advanced_by_run_idToimport_runs                             import_runs?              @relation("provider_cursor_checkpoints_advanced_by_run_idToimport_runs", fields: [advanced_by_run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_cursor_checkpoints_advanced_by_run_id_import_runs_id_f")
+  provider_config_revisions_provider_cursor_checkpoints_config_revision_idToprovider_config_revisions provider_config_revisions @relation("provider_cursor_checkpoints_config_revision_idToprovider_config_revisions", fields: [config_revision_id], references: [id], onUpdate: NoAction, map: "provider_cursor_checkpoints_config_revision_id_provider_config_")
+  organizations                                                                                       organizations             @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "provider_cursor_checkpoints_organization_id_organizations_id_fk")
+  provider_sources                                                                                    provider_sources          @relation(fields: [provider_id], references: [id], onUpdate: NoAction, map: "provider_cursor_checkpoints_provider_id_provider_sources_id_fk")
+  import_runs_provider_cursor_checkpoints_advanced_by_run_id_organization_id_provider_idToimport_runs import_runs?              @relation("provider_cursor_checkpoints_advanced_by_run_id_organization_id_provider_idToimport_runs", fields: [advanced_by_run_id, organization_id, provider_id], references: [id, organization_id, provider_id], onUpdate: NoAction, map: "provider_cursor_checkpoints_run_tenant_fk")
+
+  @@index([organization_id, provider_id], map: "provider_cursor_checkpoints_organization_provider_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model provider_health_states {
+  provider_id                                                                           String           @id @db.Uuid
+  organization_id                                                                       String           @db.Uuid
+  last_attempted_at                                                                     DateTime?        @db.Timestamptz(6)
+  last_head_reached_at                                                                  DateTime?        @db.Timestamptz(6)
+  consecutive_failures                                                                  Int              @default(0)
+  latest_failure_code                                                                   String?
+  recovered_at                                                                          DateTime?        @db.Timestamptz(6)
+  latest_mapping_warning_at                                                             DateTime?        @db.Timestamptz(6)
+  mapping_warning_severity                                                              String?
+  mapping_warning_active                                                                Boolean          @default(false)
+  latest_calculation_warning_at                                                         DateTime?        @db.Timestamptz(6)
+  calculation_warning_severity                                                          String?
+  calculation_warning_active                                                            Boolean          @default(false)
+  updated_at                                                                            DateTime         @db.Timestamptz(6)
+  organizations                                                                         organizations    @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "provider_health_states_organization_id_organizations_id_fk")
+  provider_sources_provider_health_states_provider_idToprovider_sources                 provider_sources @relation("provider_health_states_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "provider_health_states_provider_id_provider_sources_id_fk")
+  provider_sources_provider_health_states_provider_id_organization_idToprovider_sources provider_sources @relation("provider_health_states_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "provider_health_states_provider_tenant_fk")
+
+  @@unique([provider_id, organization_id], map: "provider_health_states_provider_tenant_unique")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model provider_schedules {
+  provider_id                                                                                String                    @id @db.Uuid
+  organization_id                                                                            String                    @db.Uuid
+  config_revision_id                                                                         String                    @db.Uuid
+  next_due_at                                                                                DateTime                  @db.Timestamptz(6)
+  claim_owner                                                                                String?
+  claim_expires_at                                                                           DateTime?                 @db.Timestamptz(6)
+  last_claimed_at                                                                            DateTime?                 @db.Timestamptz(6)
+  last_outcome                                                                               String?
+  last_run_id                                                                                String?                   @db.Uuid
+  updated_at                                                                                 DateTime                  @db.Timestamptz(6)
+  provider_config_revisions_provider_schedules_config_revision_idToprovider_config_revisions provider_config_revisions @relation("provider_schedules_config_revision_idToprovider_config_revisions", fields: [config_revision_id], references: [id], onUpdate: NoAction, map: "provider_schedules_config_revision_id_provider_config_revisions")
+  import_runs_provider_schedules_last_run_idToimport_runs                                    import_runs?              @relation("provider_schedules_last_run_idToimport_runs", fields: [last_run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_schedules_last_run_id_import_runs_id_fk")
+  organizations                                                                              organizations             @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "provider_schedules_organization_id_organizations_id_fk")
+  provider_sources_provider_schedules_provider_idToprovider_sources                          provider_sources          @relation("provider_schedules_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "provider_schedules_provider_id_provider_sources_id_fk")
+
+  @@unique([provider_id, organization_id, config_revision_id], map: "provider_schedules_provider_tenant_revision_unique")
+  @@index([organization_id, next_due_at], map: "provider_schedules_due_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model provider_secret_versions {
+  id                                                                                        String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                           String                    @db.Uuid
+  provider_id                                                                               String                    @db.Uuid
+  revision_id                                                                               String                    @unique(map: "provider_secret_versions_revision_unique") @db.Uuid
+  ciphertext                                                                                Bytes
+  nonce                                                                                     Bytes
+  auth_tag                                                                                  Bytes
+  key_version                                                                               Int
+  created_at                                                                                DateTime                  @default(now()) @db.Timestamptz(6)
+  retired_at                                                                                DateTime?                 @db.Timestamptz(6)
+  organizations                                                                             organizations             @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "provider_secret_versions_organization_id_organizations_id_fk")
+  provider_sources                                                                          provider_sources          @relation(fields: [provider_id], references: [id], onUpdate: NoAction, map: "provider_secret_versions_provider_id_provider_sources_id_fk")
+  provider_config_revisions_provider_secret_versions_revision_idToprovider_config_revisions provider_config_revisions @relation("provider_secret_versions_revision_idToprovider_config_revisions", fields: [revision_id], references: [id], onUpdate: NoAction, map: "provider_secret_versions_revision_id_provider_config_revisions_")
+
+  @@index([organization_id, provider_id, created_at], map: "provider_secret_versions_provider_created_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model provider_sources {
+  id                                                                                                                    String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                                       String                                @db.Uuid
+  platform_key                                                                                                          String
+  display_name                                                                                                          String
+  state                                                                                                                 provider_state                        @default(draft)
+  active_revision_id                                                                                                    String?                               @db.Uuid
+  next_run_at                                                                                                           DateTime?                             @db.Timestamptz(6)
+  created_at                                                                                                            DateTime                              @default(now()) @db.Timestamptz(6)
+  updated_at                                                                                                            DateTime                              @default(now()) @db.Timestamptz(6)
+  admin_alerts_admin_alerts_provider_idToprovider_sources                                                               admin_alerts[]                        @relation("admin_alerts_provider_idToprovider_sources")
+  admin_alerts_admin_alerts_provider_id_organization_idToprovider_sources                                               admin_alerts[]                        @relation("admin_alerts_provider_id_organization_idToprovider_sources")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_provider_id_organization_idToprovider_sources estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_provider_id_organization_idToprovider_sources")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_provider_idToprovider_sources                 estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_provider_idToprovider_sources")
+  import_pages                                                                                                          import_pages[]
+  import_runs_import_runs_provider_idToprovider_sources                                                                 import_runs[]                         @relation("import_runs_provider_idToprovider_sources")
+  import_runs_import_runs_provider_id_organization_idToprovider_sources                                                 import_runs[]                         @relation("import_runs_provider_id_organization_idToprovider_sources")
+  operational_events_operational_events_provider_idToprovider_sources                                                   operational_events[]                  @relation("operational_events_provider_idToprovider_sources")
+  operational_events_operational_events_provider_id_organization_idToprovider_sources                                   operational_events[]                  @relation("operational_events_provider_id_organization_idToprovider_sources")
+  provider_config_revisions_provider_config_revisions_provider_idToprovider_sources                                     provider_config_revisions[]           @relation("provider_config_revisions_provider_idToprovider_sources")
+  provider_config_revisions_provider_config_revisions_provider_id_organization_idToprovider_sources                     provider_config_revisions[]           @relation("provider_config_revisions_provider_id_organization_idToprovider_sources")
+  provider_connection_tests                                                                                             provider_connection_tests[]
+  provider_cursor_checkpoints                                                                                           provider_cursor_checkpoints[]
+  provider_health_states_provider_health_states_provider_idToprovider_sources                                           provider_health_states?               @relation("provider_health_states_provider_idToprovider_sources")
+  provider_health_states_provider_health_states_provider_id_organization_idToprovider_sources                           provider_health_states?               @relation("provider_health_states_provider_id_organization_idToprovider_sources")
+  provider_schedules_provider_schedules_provider_idToprovider_sources                                                   provider_schedules?                   @relation("provider_schedules_provider_idToprovider_sources")
+  provider_secret_versions                                                                                              provider_secret_versions[]
+  provider_config_revisions_provider_sources_active_revision_idToprovider_config_revisions                              provider_config_revisions?            @relation("provider_sources_active_revision_idToprovider_config_revisions", fields: [active_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_sources_active_revision_id_provider_config_revisions_i")
+  organizations                                                                                                         organizations                         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "provider_sources_organization_id_organizations_id_fk")
+  quarantine_records_quarantine_records_provider_idToprovider_sources                                                   quarantine_records[]                  @relation("quarantine_records_provider_idToprovider_sources")
+  quarantine_records_quarantine_records_provider_id_organization_idToprovider_sources                                   quarantine_records[]                  @relation("quarantine_records_provider_id_organization_idToprovider_sources")
+  source_records                                                                                                        source_records[]
+
+  @@unique([id, organization_id], map: "provider_sources_id_organization_unique")
+  @@unique([organization_id, platform_key], map: "provider_sources_organization_platform_unique")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model quarantine_attempts {
+  id                                                                                       String                   @id @db.Uuid
+  organization_id                                                                          String                   @db.Uuid
+  quarantine_id                                                                            String                   @db.Uuid
+  source_record_id                                                                         String?                  @db.Uuid
+  state                                                                                    quarantine_attempt_state @default(running)
+  requested_by_actor_key                                                                   String
+  failure_code                                                                             String?
+  field_path                                                                               String?
+  sanitized_summary                                                                        String?
+  canonical_revision_count                                                                 Int?
+  started_at                                                                               DateTime                 @db.Timestamptz(6)
+  finished_at                                                                              DateTime?                @db.Timestamptz(6)
+  organizations                                                                            organizations            @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "quarantine_attempts_organization_id_organizations_id_fk")
+  quarantine_records_quarantine_attempts_quarantine_idToquarantine_records                 quarantine_records       @relation("quarantine_attempts_quarantine_idToquarantine_records", fields: [quarantine_id], references: [id], onUpdate: NoAction, map: "quarantine_attempts_quarantine_id_quarantine_records_id_fk")
+  quarantine_records_quarantine_attempts_quarantine_id_organization_idToquarantine_records quarantine_records       @relation("quarantine_attempts_quarantine_id_organization_idToquarantine_records", fields: [quarantine_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "quarantine_attempts_quarantine_tenant_fk")
+  source_records_quarantine_attempts_source_record_idTosource_records                      source_records?          @relation("quarantine_attempts_source_record_idTosource_records", fields: [source_record_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "quarantine_attempts_source_record_id_source_records_id_fk")
+  source_records_quarantine_attempts_source_record_id_organization_idTosource_records      source_records?          @relation("quarantine_attempts_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "quarantine_attempts_source_tenant_fk")
+
+  @@index([organization_id, quarantine_id, started_at], map: "quarantine_attempts_organization_quarantine_started_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model quarantine_records {
+  id                                                                                        String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                           String                @db.Uuid
+  provider_id                                                                               String                @db.Uuid
+  source_record_id                                                                          String?               @db.Uuid
+  record_kind                                                                               source_record_kind
+  external_id                                                                               String?
+  state                                                                                     quarantine_state      @default(open)
+  reason_code                                                                               String
+  field_path                                                                                String?
+  sanitized_summary                                                                         String
+  payload_json                                                                              Json?
+  retry_count                                                                               Int                   @default(0)
+  last_retry_at                                                                             DateTime?             @db.Timestamptz(6)
+  resolved_at                                                                               DateTime?             @db.Timestamptz(6)
+  expires_at                                                                                DateTime              @db.Timestamptz(6)
+  payload_expired_at                                                                        DateTime?             @db.Timestamptz(6)
+  created_at                                                                                DateTime              @default(now()) @db.Timestamptz(6)
+  run_id                                                                                    String                @db.Uuid
+  page_id                                                                                   String                @db.Uuid
+  record_index                                                                              Int
+  admin_alerts_admin_alerts_quarantine_idToquarantine_records                               admin_alerts[]        @relation("admin_alerts_quarantine_idToquarantine_records")
+  admin_alerts_admin_alerts_quarantine_id_organization_idToquarantine_records               admin_alerts[]        @relation("admin_alerts_quarantine_id_organization_idToquarantine_records")
+  operational_events_operational_events_quarantine_idToquarantine_records                   operational_events[]  @relation("operational_events_quarantine_idToquarantine_records")
+  operational_events_operational_events_quarantine_id_organization_idToquarantine_records   operational_events[]  @relation("operational_events_quarantine_id_organization_idToquarantine_records")
+  quarantine_attempts_quarantine_attempts_quarantine_idToquarantine_records                 quarantine_attempts[] @relation("quarantine_attempts_quarantine_idToquarantine_records")
+  quarantine_attempts_quarantine_attempts_quarantine_id_organization_idToquarantine_records quarantine_attempts[] @relation("quarantine_attempts_quarantine_id_organization_idToquarantine_records")
+  organizations                                                                             organizations         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "quarantine_records_organization_id_organizations_id_fk")
+  import_pages_quarantine_records_page_idToimport_pages                                     import_pages          @relation("quarantine_records_page_idToimport_pages", fields: [page_id], references: [id], onUpdate: NoAction, map: "quarantine_records_page_id_import_pages_id_fk")
+  import_pages_quarantine_records_page_id_organization_id_run_idToimport_pages              import_pages          @relation("quarantine_records_page_id_organization_id_run_idToimport_pages", fields: [page_id, organization_id, run_id], references: [id, organization_id, run_id], onUpdate: NoAction, map: "quarantine_records_page_run_tenant_fk")
+  provider_sources_quarantine_records_provider_idToprovider_sources                         provider_sources      @relation("quarantine_records_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "quarantine_records_provider_id_provider_sources_id_fk")
+  provider_sources_quarantine_records_provider_id_organization_idToprovider_sources         provider_sources      @relation("quarantine_records_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "quarantine_records_provider_tenant_fk")
+  import_runs                                                                               import_runs           @relation(fields: [run_id], references: [id], onUpdate: NoAction, map: "quarantine_records_run_id_import_runs_id_fk")
+  source_records_quarantine_records_source_record_idTosource_records                        source_records?       @relation("quarantine_records_source_record_idTosource_records", fields: [source_record_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "quarantine_records_source_record_id_source_records_id_fk")
+  source_records_quarantine_records_source_record_id_organization_idTosource_records        source_records?       @relation("quarantine_records_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "quarantine_records_source_tenant_fk")
+
+  @@unique([id, organization_id], map: "quarantine_records_id_organization_unique")
+  @@unique([page_id, record_kind, record_index], map: "quarantine_records_page_kind_index_unique")
+  @@index([organization_id, expires_at], map: "quarantine_records_expiry_idx")
+  @@index([organization_id, state, created_at], map: "quarantine_records_organization_state_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model retention_executions {
+  id                           String                    @id @db.Uuid
+  organization_id              String                    @db.Uuid
+  state                        retention_execution_state @default(running)
+  cutoff_at                    DateTime                  @db.Timestamptz(6)
+  batch_size                   Int
+  selected_count               Int                       @default(0)
+  expired_count                Int                       @default(0)
+  already_expired_count        Int                       @default(0)
+  failed_count                 Int                       @default(0)
+  remaining_count              Int                       @default(0)
+  pages_expired_count          Int                       @default(0)
+  source_records_expired_count Int                       @default(0)
+  quarantines_expired_count    Int                       @default(0)
+  failure_code                 String?
+  sanitized_summary            String?
+  started_at                   DateTime                  @db.Timestamptz(6)
+  finished_at                  DateTime?                 @db.Timestamptz(6)
+  organizations                organizations             @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "retention_executions_organization_id_organizations_id_fk")
+
+  @@unique([id, organization_id], map: "retention_executions_id_organization_unique")
+  @@index([organization_id, started_at], map: "retention_executions_organization_started_idx")
+}
+
+model source_record_observations {
+  id                                                                                         BigInt         @id @default(autoincrement())
+  source_record_id                                                                           String         @db.Uuid
+  organization_id                                                                            String         @db.Uuid
+  run_id                                                                                     String         @db.Uuid
+  page_id                                                                                    String         @db.Uuid
+  observed_at                                                                                DateTime       @default(now()) @db.Timestamptz(6)
+  organizations                                                                              organizations  @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "source_record_observations_organization_id_organizations_id_fk")
+  import_pages_source_record_observations_page_idToimport_pages                              import_pages   @relation("source_record_observations_page_idToimport_pages", fields: [page_id], references: [id], onUpdate: NoAction, map: "source_record_observations_page_id_import_pages_id_fk")
+  import_pages_source_record_observations_page_id_organization_id_run_idToimport_pages       import_pages   @relation("source_record_observations_page_id_organization_id_run_idToimport_pages", fields: [page_id, organization_id, run_id], references: [id, organization_id, run_id], onUpdate: NoAction, map: "source_record_observations_page_run_tenant_fk")
+  import_runs                                                                                import_runs    @relation(fields: [run_id], references: [id], onUpdate: NoAction, map: "source_record_observations_run_id_import_runs_id_fk")
+  source_records_source_record_observations_source_record_idTosource_records                 source_records @relation("source_record_observations_source_record_idTosource_records", fields: [source_record_id], references: [id], onUpdate: NoAction, map: "source_record_observations_source_record_id_source_records_id_f")
+  source_records_source_record_observations_source_record_id_organization_idTosource_records source_records @relation("source_record_observations_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "source_record_observations_source_tenant_fk")
+
+  @@unique([source_record_id, run_id, page_id], map: "source_record_observations_record_run_page_unique")
+  @@index([organization_id, run_id], map: "source_record_observations_organization_run_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model source_record_outcomes {
+  id                                                                                     BigInt                @id @default(autoincrement())
+  organization_id                                                                        String                @db.Uuid
+  run_id                                                                                 String                @db.Uuid
+  page_id                                                                                String                @db.Uuid
+  source_record_id                                                                       String?               @db.Uuid
+  record_kind                                                                            source_record_kind
+  external_id                                                                            String?
+  outcome                                                                                source_record_outcome
+  reason_code                                                                            String?
+  created_at                                                                             DateTime              @default(now()) @db.Timestamptz(6)
+  record_index                                                                           Int
+  organizations                                                                          organizations         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "source_record_outcomes_organization_id_organizations_id_fk")
+  import_pages_source_record_outcomes_page_idToimport_pages                              import_pages          @relation("source_record_outcomes_page_idToimport_pages", fields: [page_id], references: [id], onUpdate: NoAction, map: "source_record_outcomes_page_id_import_pages_id_fk")
+  import_pages_source_record_outcomes_page_id_organization_id_run_idToimport_pages       import_pages          @relation("source_record_outcomes_page_id_organization_id_run_idToimport_pages", fields: [page_id, organization_id, run_id], references: [id, organization_id, run_id], onUpdate: NoAction, map: "source_record_outcomes_page_run_tenant_fk")
+  import_runs                                                                            import_runs           @relation(fields: [run_id], references: [id], onUpdate: NoAction, map: "source_record_outcomes_run_id_import_runs_id_fk")
+  source_records_source_record_outcomes_source_record_idTosource_records                 source_records?       @relation("source_record_outcomes_source_record_idTosource_records", fields: [source_record_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "source_record_outcomes_source_record_id_source_records_id_fk")
+  source_records_source_record_outcomes_source_record_id_organization_idTosource_records source_records?       @relation("source_record_outcomes_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "source_record_outcomes_source_tenant_fk")
+
+  @@unique([page_id, record_kind, record_index], map: "source_record_outcomes_page_kind_index_unique")
+  @@index([organization_id, run_id], map: "source_record_outcomes_organization_run_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model source_record_projection_revisions {
+  source_record_id                                                                                                  String              @db.Uuid
+  canonical_revision_id                                                                                             String              @db.Uuid
+  organization_id                                                                                                   String              @db.Uuid
+  projection_index                                                                                                  Int
+  created_at                                                                                                        DateTime            @default(now()) @db.Timestamptz(6)
+  canonical_revisions_source_record_projection_revisions_canonical_revision_idTocanonical_revisions                 canonical_revisions @relation("source_record_projection_revisions_canonical_revision_idTocanonical_revisions", fields: [canonical_revision_id], references: [id], onUpdate: NoAction, map: "source_record_projection_revisions_canonical_revision_id_canoni")
+  organizations                                                                                                     organizations       @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "source_record_projection_revisions_organization_id_organization")
+  canonical_revisions_source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions canonical_revisions @relation("source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions", fields: [canonical_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "source_record_projection_revisions_revision_tenant_fk")
+  source_records_source_record_projection_revisions_source_record_idTosource_records                                source_records      @relation("source_record_projection_revisions_source_record_idTosource_records", fields: [source_record_id], references: [id], onUpdate: NoAction, map: "source_record_projection_revisions_source_record_id_source_reco")
+  source_records_source_record_projection_revisions_source_record_id_organization_idTosource_records                source_records      @relation("source_record_projection_revisions_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "source_record_projection_revisions_source_tenant_fk")
+
+  @@unique([source_record_id, canonical_revision_id], map: "source_record_projection_revisions_pair_unique")
+  @@unique([source_record_id, projection_index], map: "source_record_projection_revisions_source_projection_unique")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model source_records {
+  id                                                                                                                     String                               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                                        String                               @db.Uuid
+  provider_id                                                                                                            String                               @db.Uuid
+  first_run_id                                                                                                           String                               @db.Uuid
+  first_page_id                                                                                                          String                               @db.Uuid
+  record_kind                                                                                                            source_record_kind
+  external_id                                                                                                            String
+  source_time                                                                                                            DateTime                             @db.Timestamptz(6)
+  collected_at                                                                                                           DateTime                             @db.Timestamptz(6)
+  payload_json                                                                                                           Json?
+  content_hash                                                                                                           String
+  expires_at                                                                                                             DateTime                             @db.Timestamptz(6)
+  payload_expired_at                                                                                                     DateTime?                            @db.Timestamptz(6)
+  created_at                                                                                                             DateTime                             @default(now()) @db.Timestamptz(6)
+  canonical_revisions_canonical_revisions_source_record_idTosource_records                                               canonical_revisions[]                @relation("canonical_revisions_source_record_idTosource_records")
+  canonical_revisions_canonical_revisions_source_record_id_organization_idTosource_records                               canonical_revisions[]                @relation("canonical_revisions_source_record_id_organization_idTosource_records")
+  quarantine_attempts_quarantine_attempts_source_record_idTosource_records                                               quarantine_attempts[]                @relation("quarantine_attempts_source_record_idTosource_records")
+  quarantine_attempts_quarantine_attempts_source_record_id_organization_idTosource_records                               quarantine_attempts[]                @relation("quarantine_attempts_source_record_id_organization_idTosource_records")
+  quarantine_records_quarantine_records_source_record_idTosource_records                                                 quarantine_records[]                 @relation("quarantine_records_source_record_idTosource_records")
+  quarantine_records_quarantine_records_source_record_id_organization_idTosource_records                                 quarantine_records[]                 @relation("quarantine_records_source_record_id_organization_idTosource_records")
+  source_record_observations_source_record_observations_source_record_idTosource_records                                 source_record_observations[]         @relation("source_record_observations_source_record_idTosource_records")
+  source_record_observations_source_record_observations_source_record_id_organization_idTosource_records                 source_record_observations[]         @relation("source_record_observations_source_record_id_organization_idTosource_records")
+  source_record_outcomes_source_record_outcomes_source_record_idTosource_records                                         source_record_outcomes[]             @relation("source_record_outcomes_source_record_idTosource_records")
+  source_record_outcomes_source_record_outcomes_source_record_id_organization_idTosource_records                         source_record_outcomes[]             @relation("source_record_outcomes_source_record_id_organization_idTosource_records")
+  source_record_projection_revisions_source_record_projection_revisions_source_record_idTosource_records                 source_record_projection_revisions[] @relation("source_record_projection_revisions_source_record_idTosource_records")
+  source_record_projection_revisions_source_record_projection_revisions_source_record_id_organization_idTosource_records source_record_projection_revisions[] @relation("source_record_projection_revisions_source_record_id_organization_idTosource_records")
+  import_pages_source_records_first_page_idToimport_pages                                                                import_pages                         @relation("source_records_first_page_idToimport_pages", fields: [first_page_id], references: [id], onUpdate: NoAction, map: "source_records_first_page_id_import_pages_id_fk")
+  import_pages_source_records_first_page_id_organization_id_provider_id_first_run_idToimport_pages                       import_pages                         @relation("source_records_first_page_id_organization_id_provider_id_first_run_idToimport_pages", fields: [first_page_id, organization_id, provider_id, first_run_id], references: [id, organization_id, provider_id, run_id], onUpdate: NoAction, map: "source_records_first_page_tenant_fk")
+  import_runs                                                                                                            import_runs                          @relation(fields: [first_run_id], references: [id], onUpdate: NoAction, map: "source_records_first_run_id_import_runs_id_fk")
+  organizations                                                                                                          organizations                        @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "source_records_organization_id_organizations_id_fk")
+  provider_sources                                                                                                       provider_sources                     @relation(fields: [provider_id], references: [id], onUpdate: NoAction, map: "source_records_provider_id_provider_sources_id_fk")
+
+  @@unique([id, organization_id], map: "source_records_id_organization_unique")
+  @@unique([organization_id, provider_id, record_kind, external_id, source_time, content_hash], map: "source_records_immutable_identity_unique")
+  @@index([organization_id, expires_at], map: "source_records_expiry_idx")
+}
+
+enum admin_alert_state {
+  active
+  acknowledged
+  resolved
+}
+
+enum audit_outcome {
+  success
+  failure
+  blocked
+}
+
+enum canonical_record_kind {
+  platform
+  pack
+  catalog_asset
+  ev_input
+  pull
+  sale
+  estimated_ev
+}
+
+enum estimated_ev_recomputation_result {
+  estimated
+  unavailable
+}
+
+enum estimated_ev_recomputation_state {
+  queued
+  running
+  completed
+  failed
+}
+
+enum import_run_state {
+  queued
+  running
+  succeeded
+  incomplete
+  failed
+}
+
+enum import_trigger {
+  scheduled
+  manual
+  recovery
+}
+
+enum operational_event_kind {
+  run_failed
+  run_incomplete
+  provider_stale
+  provider_recovered
+  quarantine_resolved
+  quarantine_expired
+  retention_failed
+  retention_recovered
+}
+
+enum operational_severity {
+  info
+  warning
+  critical
+}
+
+enum operator_role {
+  admin
+  data_operator
+}
+
+enum operator_state {
+  active
+  disabled
+}
+
+enum provider_auth_mode {
+  none
+  bearer
+}
+
+enum provider_state {
+  draft
+  active
+  disabled
+  archived
+}
+
+enum quarantine_attempt_state {
+  running
+  succeeded
+  failed
+}
+
+enum quarantine_state {
+  open
+  resolved
+  expired
+}
+
+enum retention_execution_state {
+  running
+  succeeded
+  failed
+}
+
+enum source_record_kind {
+  catalog
+  pull
+  sale
+}
+
+enum source_record_outcome {
+  accepted
+  duplicate
+  quarantined
+}

@@ -1,19 +1,12 @@
-import { and, eq, sql } from "drizzle-orm";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import type { PackscoutDatabase } from "./database.ts";
-import { PersistenceError } from "./persistence-error.ts";
+import { Prisma } from "@prisma/client";
 import {
-  auditEvents,
-  importRuns,
-  organizations,
-  providerConfigRevisions,
-  providerConnectionTests,
-  providerCursorCheckpoints,
-  providerSources,
-} from "./schema/index.ts";
+  PACKSCOUT_TRANSACTION_OPTIONS,
+  type PackscoutPrismaClient,
+} from "./database.ts";
+import { PersistenceError } from "./persistence-error.ts";
 
-export class PipelineSetupRepository<TQueryResult extends PgQueryResultHKT> {
-  constructor(private readonly database: PackscoutDatabase<TQueryResult>) {}
+export class PipelineSetupRepository {
+  constructor(private readonly database: PackscoutPrismaClient) {}
 
   async createOrganization(input: {
     id?: string;
@@ -21,11 +14,15 @@ export class PipelineSetupRepository<TQueryResult extends PgQueryResultHKT> {
     name: string;
     createdAt?: Date;
   }): Promise<string> {
-    const [created] = await this.database
-      .insert(organizations)
-      .values(input)
-      .returning({ id: organizations.id });
-    if (!created) throw new Error("Organization insert returned no identity.");
+    const created = await this.database.organizations.create({
+      data: {
+        id: input.id,
+        slug: input.slug,
+        name: input.name,
+        created_at: input.createdAt,
+      },
+      select: { id: true },
+    });
     return created.id;
   }
 
@@ -36,11 +33,17 @@ export class PipelineSetupRepository<TQueryResult extends PgQueryResultHKT> {
     displayName: string;
     createdAt?: Date;
   }): Promise<string> {
-    const [created] = await this.database
-      .insert(providerSources)
-      .values({ ...input, updatedAt: input.createdAt })
-      .returning({ id: providerSources.id });
-    if (!created) throw new Error("Provider insert returned no identity.");
+    const created = await this.database.provider_sources.create({
+      data: {
+        id: input.id,
+        organization_id: input.organizationId,
+        platform_key: input.platformKey,
+        display_name: input.displayName,
+        created_at: input.createdAt,
+        updated_at: input.createdAt,
+      },
+      select: { id: true },
+    });
     return created.id;
   }
 
@@ -57,22 +60,36 @@ export class PipelineSetupRepository<TQueryResult extends PgQueryResultHKT> {
     createdByActorKey: string;
     createdAt?: Date;
   }): Promise<string> {
-    const [provider] = await this.database
-      .select({ id: providerSources.id })
-      .from(providerSources)
-      .where(
-        and(
-          eq(providerSources.id, input.providerId),
-          eq(providerSources.organizationId, input.organizationId),
-        ),
-      )
-      .limit(1);
-    if (!provider) throw new PersistenceError("TENANT_SCOPE_VIOLATION", "Provider is outside the organization scope.");
-    const [created] = await this.database
-      .insert(providerConfigRevisions)
-      .values(input)
-      .returning({ id: providerConfigRevisions.id });
-    if (!created) throw new Error("Configuration revision insert returned no identity.");
+    const provider = await this.database.provider_sources.findFirst({
+      where: {
+        id: input.providerId,
+        organization_id: input.organizationId,
+      },
+      select: { id: true },
+    });
+    if (!provider) {
+      throw new PersistenceError(
+        "TENANT_SCOPE_VIOLATION",
+        "Provider is outside the organization scope.",
+      );
+    }
+
+    const created = await this.database.provider_config_revisions.create({
+      data: {
+        id: input.id,
+        organization_id: input.organizationId,
+        provider_id: input.providerId,
+        version: input.version,
+        adapter_key: input.adapterKey,
+        endpoint_url: input.endpointUrl,
+        auth_mode: input.authMode,
+        schedule_seconds: input.scheduleSeconds,
+        stale_after_seconds: input.staleAfterSeconds,
+        created_by_actor_key: input.createdByActorKey,
+        created_at: input.createdAt,
+      },
+      select: { id: true },
+    });
     return created.id;
   }
 
@@ -84,38 +101,41 @@ export class PipelineSetupRepository<TQueryResult extends PgQueryResultHKT> {
     testedAt: Date;
     latencyMs: number;
   }): Promise<void> {
-    await this.database.transaction(async (transaction) => {
-      const [revision] = await transaction
-        .select({ id: providerConfigRevisions.id })
-        .from(providerConfigRevisions)
-        .where(
-          and(
-            eq(providerConfigRevisions.id, input.revisionId),
-            eq(providerConfigRevisions.providerId, input.providerId),
-            eq(providerConfigRevisions.organizationId, input.organizationId),
-          ),
-        )
-        .limit(1);
+    await this.database.$transaction(async (transaction) => {
+      const revision = await transaction.provider_config_revisions.findFirst({
+        where: {
+          id: input.revisionId,
+          provider_id: input.providerId,
+          organization_id: input.organizationId,
+        },
+        select: { id: true },
+      });
       if (!revision) {
         throw new PersistenceError(
           "TENANT_SCOPE_VIOLATION",
           "Configuration revision is outside the organization and provider scope.",
         );
       }
-      await transaction.insert(providerConnectionTests).values({
-        organizationId: input.organizationId,
-        providerId: input.providerId,
-        revisionId: input.revisionId,
-        outcome: "success",
-        latencyMs: input.latencyMs,
-        testedByActorKey: input.actorKey,
-        testedAt: input.testedAt,
+
+      await transaction.provider_connection_tests.create({
+        data: {
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          revision_id: input.revisionId,
+          outcome: "success",
+          latency_ms: input.latencyMs,
+          tested_by_actor_key: input.actorKey,
+          tested_at: input.testedAt,
+        },
       });
-      await transaction
-        .update(providerConfigRevisions)
-        .set({ testedAt: input.testedAt, testedByActorKey: input.actorKey })
-        .where(eq(providerConfigRevisions.id, input.revisionId));
-    });
+      await transaction.provider_config_revisions.update({
+        where: { id: input.revisionId },
+        data: {
+          tested_at: input.testedAt,
+          tested_by_actor_key: input.actorKey,
+        },
+      });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async activateConfiguration(input: {
@@ -126,71 +146,71 @@ export class PipelineSetupRepository<TQueryResult extends PgQueryResultHKT> {
     activatedAt: Date;
     nextRunAt: Date;
   }): Promise<void> {
-    await this.database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select id from ${providerSources} where ${providerSources.id} = ${input.providerId} and ${providerSources.organizationId} = ${input.organizationId} for update`,
-      );
-      const [revision] = await transaction
-        .select({
-          id: providerConfigRevisions.id,
-          testedAt: providerConfigRevisions.testedAt,
-        })
-        .from(providerConfigRevisions)
-        .where(
-          and(
-            eq(providerConfigRevisions.id, input.revisionId),
-            eq(providerConfigRevisions.providerId, input.providerId),
-            eq(providerConfigRevisions.organizationId, input.organizationId),
-          ),
-        )
-        .limit(1);
+    await this.database.$transaction(async (transaction) => {
+      await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`
+        select id
+        from public.provider_sources
+        where id = cast(${input.providerId} as uuid)
+          and organization_id = cast(${input.organizationId} as uuid)
+        for update
+      `);
+
+      const revision = await transaction.provider_config_revisions.findFirst({
+        where: {
+          id: input.revisionId,
+          provider_id: input.providerId,
+          organization_id: input.organizationId,
+        },
+        select: { id: true, tested_at: true },
+      });
       if (!revision) {
         throw new PersistenceError(
           "TENANT_SCOPE_VIOLATION",
           "Configuration revision is outside the organization and provider scope.",
         );
       }
-      if (!revision.testedAt) {
+      if (!revision.tested_at) {
         throw new PersistenceError(
           "CONFIG_REVISION_UNTESTED",
           "A successful connection test is required before activation.",
         );
       }
-      await transaction
-        .update(providerSources)
-        .set({
-          activeRevisionId: input.revisionId,
+
+      await transaction.provider_sources.updateMany({
+        where: {
+          id: input.providerId,
+          organization_id: input.organizationId,
+        },
+        data: {
+          active_revision_id: input.revisionId,
           state: "active",
-          nextRunAt: input.nextRunAt,
-          updatedAt: input.activatedAt,
-        })
-        .where(
-          and(
-            eq(providerSources.id, input.providerId),
-            eq(providerSources.organizationId, input.organizationId),
-          ),
-        );
-      await transaction
-        .insert(providerCursorCheckpoints)
-        .values({
-          configRevisionId: input.revisionId,
-          organizationId: input.organizationId,
-          providerId: input.providerId,
-          cursor: null,
-          updatedAt: input.activatedAt,
-        })
-        .onConflictDoNothing();
-      await transaction.insert(auditEvents).values({
-        organizationId: input.organizationId,
-        actorKey: input.actorKey,
-        action: "provider.activate",
-        subjectType: "provider",
-        subjectId: input.providerId,
-        outcome: "success",
-        metadataJson: {},
-        occurredAt: input.activatedAt,
+          next_run_at: input.nextRunAt,
+          updated_at: input.activatedAt,
+        },
       });
-    });
+      await transaction.provider_cursor_checkpoints.createMany({
+        data: [{
+          config_revision_id: input.revisionId,
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          cursor: null,
+          updated_at: input.activatedAt,
+        }],
+        skipDuplicates: true,
+      });
+      await transaction.audit_events.create({
+        data: {
+          organization_id: input.organizationId,
+          actor_key: input.actorKey,
+          action: "provider.activate",
+          subject_type: "provider",
+          subject_id: input.providerId,
+          outcome: "success",
+          metadata_json: {},
+          occurred_at: input.activatedAt,
+        },
+      });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async createImportRun(input: {
@@ -207,28 +227,36 @@ export class PipelineSetupRepository<TQueryResult extends PgQueryResultHKT> {
     if (input.trigger === "manual" && !input.requestedByActorKey) {
       throw new TypeError("Manual import runs require a requested actor key.");
     }
-    const [configuration] = await this.database
-      .select({ id: providerConfigRevisions.id })
-      .from(providerConfigRevisions)
-      .where(
-        and(
-          eq(providerConfigRevisions.id, input.configRevisionId),
-          eq(providerConfigRevisions.providerId, input.providerId),
-          eq(providerConfigRevisions.organizationId, input.organizationId),
-        ),
-      )
-      .limit(1);
+
+    const configuration = await this.database.provider_config_revisions.findFirst({
+      where: {
+        id: input.configRevisionId,
+        provider_id: input.providerId,
+        organization_id: input.organizationId,
+      },
+      select: { id: true },
+    });
     if (!configuration) {
       throw new PersistenceError(
         "TENANT_SCOPE_VIOLATION",
         "Run configuration is outside the organization and provider scope.",
       );
     }
-    const [created] = await this.database
-      .insert(importRuns)
-      .values(input)
-      .returning({ id: importRuns.id });
-    if (!created) throw new Error("Import run insert returned no identity.");
+
+    const created = await this.database.import_runs.create({
+      data: {
+        id: input.id,
+        organization_id: input.organizationId,
+        provider_id: input.providerId,
+        config_revision_id: input.configRevisionId,
+        trigger: input.trigger,
+        requested_by_actor_key: input.requestedByActorKey,
+        state: input.state,
+        requested_cursor: input.requestedCursor,
+        created_at: input.createdAt,
+      },
+      select: { id: true },
+    });
     return created.id;
   }
 
@@ -237,17 +265,14 @@ export class PipelineSetupRepository<TQueryResult extends PgQueryResultHKT> {
     providerId: string;
     configRevisionId: string;
   }): Promise<string | null | undefined> {
-    const [record] = await this.database
-      .select({ cursor: providerCursorCheckpoints.cursor })
-      .from(providerCursorCheckpoints)
-      .where(
-        and(
-          eq(providerCursorCheckpoints.organizationId, input.organizationId),
-          eq(providerCursorCheckpoints.providerId, input.providerId),
-          eq(providerCursorCheckpoints.configRevisionId, input.configRevisionId),
-        ),
-      )
-      .limit(1);
+    const record = await this.database.provider_cursor_checkpoints.findFirst({
+      where: {
+        organization_id: input.organizationId,
+        provider_id: input.providerId,
+        config_revision_id: input.configRevisionId,
+      },
+      select: { cursor: true },
+    });
     return record?.cursor;
   }
 }

@@ -3,13 +3,11 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { Pool } from "pg";
-import { createNodePostgresDatabase } from "@packscout/database";
+import { createPrismaClientLifecycle } from "@packscout/database";
 import { createProviderWorkerRuntime } from "./provider-worker-composition.ts";
 import { JsonConsoleProviderWorkerObservability } from "./provider-worker-observability.ts";
 import {
   JsonConsoleProviderWorkerLogger,
-  type ProviderWorkerLogEvent,
 } from "./provider-worker-runtime.ts";
 import {
   ProviderWorkerConfigurationError,
@@ -36,40 +34,31 @@ async function runProviderWorker(): Promise<void> {
     fallbackWorkerId(),
   );
   const logger = new JsonConsoleProviderWorkerLogger();
-  const pool = new Pool({
-    connectionString: configuration.databaseUrl,
-    max: configuration.databasePoolMaximum,
+  const databaseLifecycle = createPrismaClientLifecycle({
+    databaseUrl: configuration.databaseUrl,
   });
-  const database = createNodePostgresDatabase(pool);
-  const observability = new JsonConsoleProviderWorkerObservability(
-    configuration.workerId,
-  );
-  const runtime = createProviderWorkerRuntime({
-    configuration,
-    database,
-    logger,
-    observability,
-  });
-  const stop = () => runtime.stop();
-  const poolFailure = () => {
-    const event: ProviderWorkerLogEvent = {
-      level: "error",
-      event: "provider_database_pool_failed",
-      workerId: configuration.workerId,
-      failureCode: "DATABASE_POOL_ERROR",
-    };
-    logger.write(event);
-  };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
-  pool.on("error", poolFailure);
   try {
-    await runtime.start();
+    await databaseLifecycle.start();
+    const observability = new JsonConsoleProviderWorkerObservability(
+      configuration.workerId,
+    );
+    const runtime = createProviderWorkerRuntime({
+      configuration,
+      database: databaseLifecycle.client,
+      logger,
+      observability,
+    });
+    const stop = () => runtime.stop();
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    try {
+      await runtime.start();
+    } finally {
+      process.removeListener("SIGINT", stop);
+      process.removeListener("SIGTERM", stop);
+    }
   } finally {
-    process.removeListener("SIGINT", stop);
-    process.removeListener("SIGTERM", stop);
-    pool.removeListener("error", poolFailure);
-    await pool.end();
+    await databaseLifecycle.close();
   }
 }
 

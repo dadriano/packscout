@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
-  DrizzleAdminNotificationPublisher,
-  DrizzleOperationalHealthRepository,
+  PrismaAdminNotificationPublisher,
+  PrismaOperationalHealthRepository,
 } from "@packscout/database";
 import {
   OperationalAlertService,
@@ -12,7 +12,7 @@ import {
 } from "@packscout/services";
 
 type OperationalDatabase = ConstructorParameters<
-  typeof DrizzleAdminNotificationPublisher
+  typeof PrismaAdminNotificationPublisher
 >[0];
 
 export interface AdminOperationalRuntimeInput {
@@ -68,7 +68,7 @@ export function createAdminOperationalRuntime(
   input: AdminOperationalRuntimeInput,
 ) {
   const clock = { now: () => new Date() };
-  const publisher = new DrizzleAdminNotificationPublisher(input.database);
+  const publisher = new PrismaAdminNotificationPublisher(input.database);
   const pipeline = createOperationalRuntime({
     durableAdminPublisher: publisher,
     ids: { id: randomUUID },
@@ -82,7 +82,7 @@ export function createAdminOperationalRuntime(
       clock,
     ),
     health: new OperationalHealthService(
-      new DrizzleOperationalHealthRepository(input.database),
+      new PrismaOperationalHealthRepository(input.database),
       clock,
     ),
     ...pipeline,

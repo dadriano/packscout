@@ -2,22 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { CreateProviderRequest } from "@packscout/contracts";
 import {
-  DrizzleProviderConfigurationRepository,
+  PrismaProviderConfigurationRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
-import {
-  auditEvents,
-  canonicalRevisions,
-  importPages,
-  importRuns,
-  providerConfigRevisions,
-  providerConnectionTests,
-  providerCursorCheckpoints,
-  providerSecretVersions,
-  sourceRecords,
-} from "@packscout/database/schema";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
-import { eq, sql } from "drizzle-orm";
 import type {
   ProviderConnectionTestResult,
   ProviderTransportAdapter,
@@ -186,7 +174,7 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       name: "Other",
     });
     const adapter = new TrackingTransportAdapter();
-    const repository = new DrizzleProviderConfigurationRepository(
+    const repository = new PrismaProviderConfigurationRepository(
       harness.database,
     );
     const credentialCipher = new AesGcmProviderCredentialCipher({
@@ -284,22 +272,33 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       token: "fixture-initial-secret",
     });
 
-    for (const table of [importPages, sourceRecords, canonicalRevisions, importRuns]) {
-      const [record] = await harness.database
-        .select({ count: sql<number>`count(*)::integer` })
-        .from(table);
-      assert.equal(record?.count, 0);
-    }
-    const [cursorBeforeActivation] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(providerCursorCheckpoints);
-    assert.equal(cursorBeforeActivation?.count, 0);
-
-    const active = await service.activateRevision(
-      admin,
-      providerId,
-      firstRevisionId,
+    assert.deepEqual(
+      await Promise.all([
+        harness.database.import_pages.count(),
+        harness.database.source_records.count(),
+        harness.database.canonical_revisions.count(),
+        harness.database.import_runs.count(),
+      ]),
+      [0, 0, 0, 0],
     );
+    assert.equal(await harness.database.provider_cursor_checkpoints.count(), 0);
+
+    const concurrentActivations = await Promise.all([
+      service.activateRevision(admin, providerId, firstRevisionId),
+      service.activateRevision(admin, providerId, firstRevisionId),
+    ]);
+    assert.ok(
+      concurrentActivations.every(
+        (result) => result.activeRevisionId === firstRevisionId,
+      ),
+    );
+    assert.equal(
+      await harness.database.provider_cursor_checkpoints.count({
+        where: { provider_id: providerId, organization_id: organizationId },
+      }),
+      1,
+    );
+    const active = concurrentActivations[0]!;
     assert.equal(active.state, "active");
     assert.equal(active.activeRevisionId, firstRevisionId);
     assert.equal(active.nextRunAt, new Date(now.getTime() + 300_000).toISOString());
@@ -331,10 +330,10 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       state: "succeeded",
       createdAt: now,
     });
-    await harness.database
-      .update(importRuns)
-      .set({ state: "running", startedAt: now })
-      .where(eq(importRuns.id, runId));
+    await harness.database.import_runs.update({
+      where: { id: runId },
+      data: { state: "running", started_at: now },
+    });
 
     const replacements = await Promise.allSettled([
       service.replaceRevision(admin, providerId, {
@@ -390,10 +389,13 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
     );
     assert.equal(disabled.state, "disabled");
     assert.equal(disabled.nextRunAt, null);
-    const [running] = await harness.database
-      .select({ state: importRuns.state, revisionId: importRuns.configRevisionId })
-      .from(importRuns)
-      .where(eq(importRuns.id, runId));
+    const runningRecord = await harness.database.import_runs.findUnique({
+      where: { id: runId },
+      select: { state: true, config_revision_id: true },
+    });
+    const running = runningRecord
+      ? { state: runningRecord.state, revisionId: runningRecord.config_revision_id }
+      : null;
     assert.deepEqual(running, {
       state: "running",
       revisionId: firstRevisionId,
@@ -431,32 +433,36 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       }),
       "fixture-initial-secret",
     );
-    const [retiredPriorSecret] = await harness.database
-      .select({ retiredAt: providerSecretVersions.retiredAt })
-      .from(providerSecretVersions)
-      .where(eq(providerSecretVersions.revisionId, firstRevisionId));
-    assert.ok(retiredPriorSecret?.retiredAt);
+    const retiredPriorSecret =
+      await harness.database.provider_secret_versions.findUnique({
+        where: { revision_id: firstRevisionId },
+        select: { retired_at: true },
+      });
+    assert.ok(retiredPriorSecret?.retired_at);
 
-    const [revisionCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(providerConfigRevisions)
-      .where(eq(providerConfigRevisions.providerId, providerId));
-    const [secretCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(providerSecretVersions)
-      .where(eq(providerSecretVersions.providerId, providerId));
-    const [testCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(providerConnectionTests)
-      .where(eq(providerConnectionTests.providerId, providerId));
+    const [revisionCount, secretCount, testCount] = await Promise.all([
+      harness.database.provider_config_revisions.count({
+        where: { provider_id: providerId },
+      }),
+      harness.database.provider_secret_versions.count({
+        where: { provider_id: providerId },
+      }),
+      harness.database.provider_connection_tests.count({
+        where: { provider_id: providerId },
+      }),
+    ]);
     assert.deepEqual(
-      { revisions: revisionCount?.count, secrets: secretCount?.count, tests: testCount?.count },
+      { revisions: revisionCount, secrets: secretCount, tests: testCount },
       { revisions: 2, secrets: 2, tests: 4 },
     );
-    const audits = await harness.database
-      .select({ actorKey: auditEvents.actorKey, metadata: auditEvents.metadataJson })
-      .from(auditEvents)
-      .where(eq(auditEvents.subjectId, providerId));
+    const auditRecords = await harness.database.audit_events.findMany({
+      where: { subject_id: providerId },
+      select: { actor_key: true, metadata_json: true },
+    });
+    const audits = auditRecords.map((audit) => ({
+      actorKey: audit.actor_key,
+      metadata: audit.metadata_json,
+    }));
     const serializedEvidence = JSON.stringify({ archived, audits });
     assert.doesNotMatch(
       serializedEvidence,
@@ -478,7 +484,7 @@ test("failed connection tests stay sanitized and cannot enable a revision", asyn
       name: "PackScout",
     });
     const service = new ProviderConfigurationService({
-      repository: new DrizzleProviderConfigurationRepository(harness.database),
+      repository: new PrismaProviderConfigurationRepository(harness.database),
       adapters: new ProviderTransportAdapterRegistry([
         new AuthenticationFailureAdapter(),
       ]),
@@ -522,14 +528,12 @@ test("failed connection tests stay sanitized and cannot enable a revision", asyn
       JSON.stringify({ result, activation: activation.message }),
       /must-never-leak/,
     );
-    const [rawCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(importPages);
-    const [cursorCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(providerCursorCheckpoints);
+    const [rawCount, cursorCount] = await Promise.all([
+      harness.database.import_pages.count(),
+      harness.database.provider_cursor_checkpoints.count(),
+    ]);
     assert.deepEqual(
-      { raw: rawCount?.count, cursors: cursorCount?.count },
+      { raw: rawCount, cursors: cursorCount },
       { raw: 0, cursors: 0 },
     );
   } finally {

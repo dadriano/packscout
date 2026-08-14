@@ -1,7 +1,5 @@
-import { and, eq } from "drizzle-orm";
-import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
-import type { PackscoutDatabase } from "./database.ts";
-import { auditEvents, importPages } from "./schema/index.ts";
+import { PACKSCOUT_TRANSACTION_OPTIONS } from "./database.ts";
+import type { PackscoutPrismaClient } from "./database.ts";
 
 export interface RawEvidenceAccessContext {
   organizationId: string;
@@ -18,44 +16,47 @@ export interface ProtectedRawPage {
   payloadExpiredAt: Date | null;
 }
 
-export class ProtectedEvidenceRepository<TQueryResult extends PgQueryResultHKT> {
-  constructor(private readonly database: PackscoutDatabase<TQueryResult>) {}
+export class ProtectedEvidenceRepository {
+  constructor(private readonly database: PackscoutPrismaClient) {}
 
   async getRawPage(
     access: RawEvidenceAccessContext,
     pageId: string,
     accessedAt: Date,
   ): Promise<ProtectedRawPage | null> {
-    return this.database.transaction(async (transaction) => {
-      const [page] = await transaction
-        .select({
-          pageId: importPages.id,
-          runId: importPages.runId,
-          payload: importPages.payloadJson,
-          payloadHash: importPages.payloadHash,
-          expiresAt: importPages.expiresAt,
-          payloadExpiredAt: importPages.payloadExpiredAt,
-        })
-        .from(importPages)
-        .where(
-          and(
-            eq(importPages.id, pageId),
-            eq(importPages.organizationId, access.organizationId),
-          ),
-        )
-        .limit(1);
-      if (!page) return null;
-      await transaction.insert(auditEvents).values({
-        organizationId: access.organizationId,
-        actorKey: access.actorKey,
-        action: "raw_evidence.read",
-        subjectType: "import_page",
-        subjectId: page.pageId,
-        outcome: "success",
-        metadataJson: { purpose: access.purpose },
-        occurredAt: accessedAt,
+    return this.database.$transaction(async (transaction) => {
+      const page = await transaction.import_pages.findFirst({
+        where: { id: pageId, organization_id: access.organizationId },
+        select: {
+          id: true,
+          run_id: true,
+          payload_json: true,
+          payload_hash: true,
+          expires_at: true,
+          payload_expired_at: true,
+        },
       });
-      return page;
-    });
+      if (!page) return null;
+      await transaction.audit_events.create({
+        data: {
+          organization_id: access.organizationId,
+          actor_key: access.actorKey,
+          action: "raw_evidence.read",
+          subject_type: "import_page",
+          subject_id: page.id,
+          outcome: "success",
+          metadata_json: { purpose: access.purpose },
+          occurred_at: accessedAt,
+        },
+      });
+      return {
+        pageId: page.id,
+        runId: page.run_id,
+        payload: page.payload_json,
+        payloadHash: page.payload_hash,
+        expiresAt: page.expires_at,
+        payloadExpiredAt: page.payload_expired_at,
+      };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 }

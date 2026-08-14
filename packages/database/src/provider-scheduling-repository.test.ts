@@ -1,15 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { eq } from "drizzle-orm";
 import {
-  DrizzleProviderScheduleRepository,
+  PrismaProviderHealthRepository,
+  PrismaProviderScheduleRepository,
   projectProviderRunHealth,
 } from "./provider-scheduling-repository.ts";
-import {
-  organizations,
-  providerConfigRevisions,
-  providerSources,
-} from "./schema/core.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
 test("database claims serialize workers, preserve cadence, and recover expired leases", async () => {
@@ -19,66 +14,132 @@ test("database claims serialize workers, preserve cadence, and recover expired l
     const providerId = "20000000-0000-4000-8000-000000000001";
     const revisionId = "30000000-0000-4000-8000-000000000001";
     const dueAt = new Date("2026-08-06T12:00:00.000Z");
-    await context.database.insert(organizations).values({
-      id: organizationId,
-      slug: "scheduler-test",
-      name: "Scheduler test",
+    await context.client.organizations.create({
+      data: {
+        id: organizationId,
+        slug: "scheduler-test",
+        name: "Scheduler test",
+      },
     });
-    await context.database.insert(providerSources).values({
-      id: providerId,
-      organizationId,
-      platformKey: "scheduler-platform",
-      displayName: "Scheduler provider",
+    await context.client.provider_sources.create({
+      data: {
+        id: providerId,
+        organization_id: organizationId,
+        platform_key: "scheduler-platform",
+        display_name: "Scheduler provider",
+      },
     });
-    await context.database.insert(providerConfigRevisions).values({
-      id: revisionId,
-      organizationId,
-      providerId,
-      version: 1,
-      adapterKey: "http-cursor-v1",
-      endpointUrl: "https://provider.example/feed",
-      authMode: "none",
-      scheduleSeconds: 300,
-      staleAfterSeconds: 900,
-      testedAt: new Date("2026-08-06T11:55:00.000Z"),
-      testedByActorKey: "actor:test",
-      createdByActorKey: "actor:test",
+    await context.client.provider_config_revisions.create({
+      data: {
+        id: revisionId,
+        organization_id: organizationId,
+        provider_id: providerId,
+        version: 1,
+        adapter_key: "http-cursor-v1",
+        endpoint_url: "https://provider.example/feed",
+        auth_mode: "none",
+        schedule_seconds: 300,
+        stale_after_seconds: 900,
+        tested_at: new Date("2026-08-06T11:55:00.000Z"),
+        tested_by_actor_key: "actor:test",
+        created_by_actor_key: "actor:test",
+      },
     });
-    await context.database
-      .update(providerSources)
-      .set({
+    await context.client.provider_sources.update({
+      where: { id: providerId },
+      data: {
         state: "active",
-        activeRevisionId: revisionId,
-        nextRunAt: dueAt,
-      })
-      .where(eq(providerSources.id, providerId));
-
-    const repository = new DrizzleProviderScheduleRepository(context.database);
-    const firstClaim = await repository.claimDueProvider({
-      workerId: "worker-a",
-      now: dueAt,
-      leaseExpiresAt: new Date("2026-08-06T12:00:30.000Z"),
+        active_revision_id: revisionId,
+        next_run_at: dueAt,
+      },
     });
-    assert.equal(firstClaim?.providerId, providerId);
 
-    const contendingClaim = await repository.claimDueProvider({
-      workerId: "worker-b",
+    const independentClient = await context.createIndependentClient();
+    const repository = new PrismaProviderScheduleRepository(context.client);
+    const contenderRepository = new PrismaProviderScheduleRepository(
+      independentClient,
+    );
+    const [firstClaim, secondClaim] = await Promise.all([
+      repository.claimDueProvider({
+        workerId: "worker-a",
+        now: dueAt,
+        leaseExpiresAt: new Date("2026-08-06T12:00:30.000Z"),
+      }),
+      contenderRepository.claimDueProvider({
+        workerId: "worker-b",
+        now: dueAt,
+        leaseExpiresAt: new Date("2026-08-06T12:00:30.000Z"),
+      }),
+    ]);
+    assert.equal([firstClaim, secondClaim].filter(Boolean).length, 1);
+    const winnerWorker = firstClaim ? "worker-a" : "worker-b";
+    assert.equal((firstClaim ?? secondClaim)?.providerId, providerId);
+
+    const contendingClaim = await contenderRepository.claimDueProvider({
+      workerId: "worker-contender",
       now: new Date("2026-08-06T12:00:10.000Z"),
       leaseExpiresAt: new Date("2026-08-06T12:00:40.000Z"),
     });
     assert.equal(contendingClaim, null);
 
-    const recoveredClaim = await repository.claimDueProvider({
-      workerId: "worker-b",
+    const recoveredClaim = await contenderRepository.claimDueProvider({
+      workerId: "worker-recovery",
       now: new Date("2026-08-06T12:00:31.000Z"),
       leaseExpiresAt: new Date("2026-08-06T12:01:01.000Z"),
     });
     assert.equal(recoveredClaim?.providerId, providerId);
 
-    const nextDueAt = new Date("2026-08-06T12:05:31.000Z");
     assert.equal(
       await repository.completeClaim({
-        workerId: "worker-b",
+        workerId: "worker-foreign",
+        organizationId,
+        providerId,
+        configRevisionId: revisionId,
+        outcome: "coalesced",
+        runId: null,
+        completedAt: new Date("2026-08-06T12:00:31.500Z"),
+        nextDueAt: new Date("2026-08-06T14:00:00.000Z"),
+      }),
+      false,
+    );
+    assert.equal(
+      (
+        await context.client.provider_sources.findUniqueOrThrow({
+          where: { id: providerId },
+          select: { next_run_at: true },
+        })
+      ).next_run_at?.getTime(),
+      dueAt.getTime(),
+    );
+
+    const staleRetryAt = new Date("2026-08-06T13:00:00.000Z");
+    await repository.releaseClaim({
+      workerId: winnerWorker,
+      organizationId,
+      providerId,
+      configRevisionId: revisionId,
+      releasedAt: new Date("2026-08-06T12:00:32.000Z"),
+      retryAt: staleRetryAt,
+    });
+    const stillRecovered = await context.client.provider_schedules.findUniqueOrThrow({
+      where: { provider_id: providerId },
+    });
+    assert.equal(stillRecovered.claim_owner, "worker-recovery");
+    assert.equal(stillRecovered.next_due_at.getTime(), dueAt.getTime());
+    assert.equal(
+      (
+        await context.client.provider_sources.findUniqueOrThrow({
+          where: { id: providerId },
+          select: { next_run_at: true },
+        })
+      ).next_run_at?.getTime(),
+      dueAt.getTime(),
+    );
+
+    const nextDueAt = new Date("2026-08-06T12:05:31.000Z");
+    assert.equal(
+      await contenderRepository.completeClaim({
+        workerId: "worker-recovery",
         organizationId,
         providerId,
         configRevisionId: revisionId,
@@ -106,6 +167,111 @@ test("database claims serialize workers, preserve cadence, and recover expired l
         })
       )?.providerId,
       providerId,
+    );
+  } finally {
+    await context.close();
+  }
+});
+
+test("provider health mutations serialize and remain tenant scoped", async () => {
+  const context = await createMigratedTestDatabase();
+  const organizationId = "11000000-0000-4000-8000-000000000001";
+  const providerId = "21000000-0000-4000-8000-000000000001";
+  try {
+    await context.client.organizations.create({
+      data: {
+        id: organizationId,
+        slug: "health-test",
+        name: "Health test",
+      },
+    });
+    await context.client.provider_sources.create({
+      data: {
+        id: providerId,
+        organization_id: organizationId,
+        platform_key: "health-platform",
+        display_name: "Health provider",
+      },
+    });
+    const independentClient = await context.createIndependentClient();
+    const first = new PrismaProviderHealthRepository(context.client);
+    const second = new PrismaProviderHealthRepository(independentClient);
+    await Promise.all([
+      first.recordRunOutcome({
+        organizationId,
+        providerId,
+        reachedProviderHead: false,
+        failureCode: "IMPORT_TIMEOUT",
+        finishedAt: new Date("2026-08-06T11:00:00.000Z"),
+      }),
+      second.recordRunOutcome({
+        organizationId,
+        providerId,
+        reachedProviderHead: false,
+        failureCode: "IMPORT_UNREACHABLE",
+        finishedAt: new Date("2026-08-06T11:01:00.000Z"),
+      }),
+    ]);
+    assert.equal(
+      (
+        await context.client.provider_health_states.findUniqueOrThrow({
+          where: { provider_id: providerId },
+        })
+      ).consecutive_failures,
+      2,
+    );
+
+    const recoveredAt = new Date("2026-08-06T12:00:00.000Z");
+    await first.recordRunOutcome({
+      organizationId,
+      providerId,
+      reachedProviderHead: true,
+      failureCode: null,
+      finishedAt: recoveredAt,
+    });
+    await first.recordQualitySignal({
+      organizationId,
+      providerId,
+      kind: "mapping",
+      severity: "warning",
+      occurredAt: new Date("2026-08-06T12:01:00.000Z"),
+    });
+    await second.recordQualitySignal({
+      organizationId,
+      providerId,
+      kind: "calculation",
+      severity: "degraded",
+      occurredAt: new Date("2026-08-06T12:02:00.000Z"),
+    });
+    await first.resolveQualitySignal({
+      organizationId,
+      providerId,
+      kind: "mapping",
+      resolvedAt: new Date("2026-08-06T12:03:00.000Z"),
+    });
+    const health = await context.client.provider_health_states.findUniqueOrThrow({
+      where: { provider_id: providerId },
+    });
+    assert.equal(health.consecutive_failures, 0);
+    assert.equal(health.latest_failure_code, null);
+    assert.equal(health.last_head_reached_at?.getTime(), recoveredAt.getTime());
+    assert.equal(health.recovered_at?.getTime(), recoveredAt.getTime());
+    assert.equal(health.mapping_warning_active, false);
+    assert.equal(health.calculation_warning_active, true);
+    assert.equal(health.calculation_warning_severity, "degraded");
+
+    await assert.rejects(
+      second.recordRunOutcome({
+        organizationId: "11000000-0000-4000-8000-000000000099",
+        providerId,
+        reachedProviderHead: false,
+        failureCode: "IMPORT_TIMEOUT",
+        finishedAt: new Date("2026-08-06T12:04:00.000Z"),
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "TENANT_SCOPE_VIOLATION",
     );
   } finally {
     await context.close();

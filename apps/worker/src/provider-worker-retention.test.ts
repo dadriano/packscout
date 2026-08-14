@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DrizzleProtectedPayloadRetentionRepository,
+  PrismaProtectedPayloadRetentionRepository,
   IngestionPersistenceRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
@@ -121,7 +121,7 @@ test("worker retention composition expires a bounded durable batch", async () =>
       true,
     );
 
-    const discovery = new DrizzleProtectedPayloadRetentionRepository(
+    const discovery = new PrismaProtectedPayloadRetentionRepository(
       harness.database,
       clock,
     );

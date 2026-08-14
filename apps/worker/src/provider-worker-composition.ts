@@ -1,11 +1,11 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
-  DrizzleImportRunRepository,
-  DrizzleProviderConfigurationRepository,
-  DrizzleProviderHealthRepository,
-  DrizzleProviderScheduleRepository,
+  PrismaImportRunRepository,
+  PrismaProviderConfigurationRepository,
+  PrismaProviderHealthRepository,
+  PrismaProviderScheduleRepository,
   IngestionPersistenceRepository,
-  type createNodePostgresDatabase,
+  type PackscoutPrismaClient,
 } from "@packscout/database";
 import {
   AesGcmProviderCredentialCipher,
@@ -32,7 +32,6 @@ import {
   type ProviderWorkerLogger,
 } from "./provider-worker-runtime.ts";
 
-type NodePostgresDatabase = ReturnType<typeof createNodePostgresDatabase>;
 type RuntimeConfiguration = Pick<
   ProviderWorkerConfiguration,
   | "actorPseudonymKey"
@@ -50,7 +49,7 @@ type RuntimeConfiguration = Pick<
 
 export interface ProviderWorkerCompositionInput {
   readonly configuration: RuntimeConfiguration;
-  readonly database: NodePostgresDatabase;
+  readonly database: PackscoutPrismaClient;
   readonly logger: ProviderWorkerLogger;
   readonly observability: OperationalObservability;
 }
@@ -96,14 +95,14 @@ export function createProviderWorkerRuntime(
         input.configuration.retentionOrganizationDiscoveryLimit,
     },
   });
-  const runs = new DrizzleImportRunRepository(input.database);
+  const runs = new PrismaImportRunRepository(input.database);
   const pages = new IngestionPersistenceRepository(input.database, {
     retentionDays: 90,
     actorPseudonymKey: input.configuration.actorPseudonymKey,
   });
   const imports = new ProviderImportService({
     runs,
-    revisions: new DrizzleProviderConfigurationRepository(input.database),
+    revisions: new PrismaProviderConfigurationRepository(input.database),
     pages,
     transportAdapters: new ProviderTransportAdapterRegistry([
       new HttpCursorAdapter(),
@@ -135,13 +134,13 @@ export function createProviderWorkerRuntime(
   });
   return new ProviderWorkerRuntime({
     scheduler: new ProviderSchedulerService({
-      schedules: new DrizzleProviderScheduleRepository(input.database),
+      schedules: new PrismaProviderScheduleRepository(input.database),
       imports,
       clock,
     }),
     imports: new ProviderImportWorkerService(
       imports,
-      new DrizzleProviderHealthRepository(input.database),
+      new PrismaProviderHealthRepository(input.database),
       {
         events: operational.events,
         reporter: operational.reporter,

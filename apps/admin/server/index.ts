@@ -1,15 +1,16 @@
 import path from "node:path";
+import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
-import { Pool } from "pg";
+import type { ViteDevServer } from "vite";
 import {
-  createNodePostgresDatabase,
+  createPrismaClientLifecycle,
   DatabaseLoginAttemptLimiter,
-  DrizzleAuthAuditSink,
-  DrizzleAuthRepository,
-  DrizzleProviderConfigurationRepository,
-  DrizzleProviderHealthRepository,
+  PrismaAuthAuditSink,
+  PrismaAuthRepository,
+  PrismaProviderConfigurationRepository,
+  PrismaProviderHealthRepository,
 } from "@packscout/database";
 import { createAdminApp } from "./app.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
@@ -80,82 +81,142 @@ const trustedProxies = readTrustedProxies(
   process.env.PACKSCOUT_ADMIN_TRUSTED_PROXIES,
   "PACKSCOUT_ADMIN_TRUSTED_PROXIES",
 );
-const pool = new Pool({ connectionString: databaseUrl, max: 10 });
-const database = createNodePostgresDatabase(pool);
-const providerRepository = new DrizzleProviderConfigurationRepository(database);
-const operational = createAdminOperationalRuntime({
-  database,
-  actorPseudonymKey: providerActorKey,
-});
-const auth = await createAdminAuthRuntime({
-  repository: new DrizzleAuthRepository(database),
-  loginLimiter: new DatabaseLoginAttemptLimiter(database, {
-    windowMs: 15 * 60 * 1_000,
-    blockMs: 15 * 60 * 1_000,
-    maximumFailures: 8,
-  }),
-  audit: new DrizzleAuthAuditSink(database),
-  sessionSecret,
-  sessionIdleMs,
-  sessionAbsoluteMs,
-  production: !isDevelopment,
-  allowedOrigins,
-});
-const app = createAdminApp({
-  trustedProxies,
-  auth,
-  providers: createProviderAdminRuntime({
-    repository: providerRepository,
-    healthRepository: new DrizzleProviderHealthRepository(database),
-    credentialKey: providerCredentialKey,
-    actorPseudonymKey: providerActorKey,
-    environment: isDevelopment ? "local" : "production",
-    operational,
-  }),
-  importOperations: createAdminImportOperationsRuntime({
+
+function waitForListening(server: Server): Promise<void> {
+  if (server.listening) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    const onError = () => {
+      server.off("listening", onListening);
+      reject(new Error("PackScout Admin failed to start listening."));
+    };
+    server.once("listening", onListening);
+    server.once("error", onError);
+  });
+}
+
+function closeHttpServer(server: Server | undefined): Promise<void> {
+  if (!server?.listening) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
+const databaseLifecycle = createPrismaClientLifecycle({ databaseUrl });
+let server: Server | undefined;
+let developmentServer: ViteDevServer | undefined;
+let shutdownPromise: Promise<void> | undefined;
+
+try {
+  await databaseLifecycle.start();
+  const database = databaseLifecycle.client;
+  const providerRepository = new PrismaProviderConfigurationRepository(database);
+  const operational = createAdminOperationalRuntime({
     database,
     actorPseudonymKey: providerActorKey,
-    credentialKey: providerCredentialKey,
-    environment: isDevelopment ? "local" : "production",
-    operational,
-  }),
-  operationalAlerts: { alerts: operational.alerts },
-  operationalHealth: { health: operational.health },
-});
-
-if (isDevelopment) {
-  const { createServer: createViteServer } = await import("vite");
-  const hmrPort = readPort(
-    process.env.PACKSCOUT_ADMIN_HMR_PORT,
-    port + 1,
-    "PACKSCOUT_ADMIN_HMR_PORT",
-  );
-  const vite = await createViteServer({
-    root: adminRoot,
-    server: {
-      middlewareMode: true,
-      hmr: { port: hmrPort },
-    },
-    appType: "spa",
+  });
+  const auth = await createAdminAuthRuntime({
+    repository: new PrismaAuthRepository(database),
+    loginLimiter: new DatabaseLoginAttemptLimiter(database, {
+      windowMs: 15 * 60 * 1_000,
+      blockMs: 15 * 60 * 1_000,
+      maximumFailures: 8,
+    }),
+    audit: new PrismaAuthAuditSink(database),
+    sessionSecret,
+    sessionIdleMs,
+    sessionAbsoluteMs,
+    production: !isDevelopment,
+    allowedOrigins,
+  });
+  const app = createAdminApp({
+    trustedProxies,
+    auth,
+    providers: createProviderAdminRuntime({
+      repository: providerRepository,
+      healthRepository: new PrismaProviderHealthRepository(database),
+      credentialKey: providerCredentialKey,
+      actorPseudonymKey: providerActorKey,
+      environment: isDevelopment ? "local" : "production",
+      operational,
+    }),
+    importOperations: createAdminImportOperationsRuntime({
+      database,
+      actorPseudonymKey: providerActorKey,
+      credentialKey: providerCredentialKey,
+      environment: isDevelopment ? "local" : "production",
+      operational,
+    }),
+    operationalAlerts: { alerts: operational.alerts },
+    operationalHealth: { health: operational.health },
   });
 
-  app.use(vite.middlewares);
-} else {
-  const outputDirectory = path.join(adminRoot, "dist");
-  app.use(express.static(outputDirectory));
-  app.get("*", (_request, response) => {
-    response.sendFile(path.join(outputDirectory, "index.html"));
-  });
-}
+  if (isDevelopment) {
+    const { createServer: createViteServer } = await import("vite");
+    const hmrPort = readPort(
+      process.env.PACKSCOUT_ADMIN_HMR_PORT,
+      port + 1,
+      "PACKSCOUT_ADMIN_HMR_PORT",
+    );
+    developmentServer = await createViteServer({
+      root: adminRoot,
+      server: {
+        middlewareMode: true,
+        hmr: { port: hmrPort },
+      },
+      appType: "spa",
+    });
 
-const server = app.listen(port, () => {
+    app.use(developmentServer.middlewares);
+  } else {
+    const outputDirectory = path.join(adminRoot, "dist");
+    app.use(express.static(outputDirectory));
+    app.get("*", (_request, response) => {
+      response.sendFile(path.join(outputDirectory, "index.html"));
+    });
+  }
+
+  server = app.listen(port);
+  await waitForListening(server);
+  process.once("SIGINT", handleShutdownSignal);
+  process.once("SIGTERM", handleShutdownSignal);
   console.log(`Packscout Admin is available at http://localhost:${port}`);
-});
-
-async function shutDown(): Promise<void> {
-  server.close();
-  await pool.end();
+} catch (error) {
+  await closeHttpServer(server).catch(() => undefined);
+  await developmentServer?.close().catch(() => undefined);
+  await databaseLifecycle.close().catch(() => undefined);
+  throw error;
 }
 
-process.once("SIGINT", () => void shutDown());
-process.once("SIGTERM", () => void shutDown());
+function shutDown(): Promise<void> {
+  shutdownPromise ??= (async () => {
+    let shutdownError: unknown;
+    try {
+      await closeHttpServer(server);
+    } catch (error) {
+      shutdownError = error;
+    }
+    try {
+      await developmentServer?.close();
+    } catch (error) {
+      shutdownError ??= error;
+    }
+    try {
+      await databaseLifecycle.close();
+    } catch (error) {
+      shutdownError ??= error;
+    }
+    if (shutdownError) throw new Error("PackScout Admin shutdown failed.");
+  })();
+  return shutdownPromise;
+}
+
+function handleShutdownSignal(): void {
+  void shutDown().catch(() => {
+    console.error("PackScout Admin shutdown failed.");
+    process.exitCode = 1;
+  });
+}

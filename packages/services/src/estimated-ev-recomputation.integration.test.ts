@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DrizzleEstimatedEvRecomputationRepository,
+  PrismaEstimatedEvRecomputationRepository,
   IngestionPersistenceRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
-import { estimatedEvRecomputationRequests } from "@packscout/database/schema";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
-import { asc } from "drizzle-orm";
 import { CatalogProjectionService } from "./catalog-projection-service.ts";
 import { CanonicalEstimatedEvProjectionRepository } from "./estimated-ev-projection-repository.ts";
 import { EstimatedEvRecomputationProcessor } from "./estimated-ev-recomputation-processor.ts";
@@ -160,7 +158,7 @@ async function setup() {
     retentionDays: 90,
     actorPseudonymKey: new Uint8Array(32).fill(4),
   });
-  const queue = new DrizzleEstimatedEvRecomputationRepository(harness.database);
+  const queue = new PrismaEstimatedEvRecomputationRepository(harness.database);
   const availability: string[] = [];
   const service = new PackScoutEstimatedEvService(
     new CanonicalEstimatedEvProjectionRepository(persistence),
@@ -235,10 +233,9 @@ function processor(
 }
 
 async function requests(harness: Awaited<ReturnType<typeof setup>>) {
-  return harness.database
-    .select()
-    .from(estimatedEvRecomputationRequests)
-    .orderBy(asc(estimatedEvRecomputationRequests.createdAt));
+  return harness.database.estimated_ev_recomputation_requests.findMany({
+    orderBy: { created_at: "asc" },
+  });
 }
 
 test("page commits durably coalesce same-page EV work and queue later pack and input revisions", async () => {
@@ -339,7 +336,7 @@ test("expired claims are recovered without duplicate calculation history or stal
     );
     const [request] = await requests(harness);
     assert.equal(request?.state, "completed");
-    assert.equal(request?.attemptCount, 2);
+    assert.equal(request?.attempt_count, 2);
     assert.equal(
       (
         await harness.persistence.listCanonicalRevisions(ids.organization, {
@@ -376,7 +373,7 @@ test("transient processor failures retry durably and incomplete unsupported inpu
     assert.equal((await worker.runCycle()).retrying, 1);
     let [request] = await requests(harness);
     assert.deepEqual(
-      { state: request?.state, attempts: request?.attemptCount, code: request?.failureCode },
+      { state: request?.state, attempts: request?.attempt_count, code: request?.failure_code },
       { state: "queued", attempts: 1, code: "TRANSIENT_CALCULATION_FAILURE" },
     );
     time.set("2026-08-06T14:01:02.000Z");
@@ -387,7 +384,7 @@ test("transient processor failures retry durably and incomplete unsupported inpu
     );
     [request] = await requests(harness);
     assert.deepEqual(
-      { state: request?.state, attempts: request?.attemptCount, result: request?.resultStatus },
+      { state: request?.state, attempts: request?.attempt_count, result: request?.result_status },
       { state: "completed", attempts: 2, result: "unavailable" },
     );
     const explanation = await harness.service.explain({

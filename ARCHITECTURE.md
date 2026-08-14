@@ -8,7 +8,12 @@ Status: current architecture
 packscout/
 ├── apps/
 │   ├── frontend/   Next.js user-facing application
-│   └── admin/      Vite/React admin SPA and Express adapter
+│   ├── admin/      Vite/React admin SPA and Express adapter
+│   └── worker/     Provider import and operational worker runtime
+├── packages/
+│   ├── contracts/  Browser-safe schemas and shared contracts
+│   ├── database/   Prisma persistence and PostgreSQL repositories
+│   └── services/   Server-side domain workflows
 ├── scripts/    Repository checks and environment-scoped utilities
 ├── docs/       Canonical engineering standards
 └── .tasks/     Feature plans and BDD scenarios
@@ -24,18 +29,20 @@ Browser
   └── admin:5101    -> Express -> admin API routes
                                -> Vite middleware in development
                                -> built SPA files in production
+
+Worker -> provider adapters -> services -> Prisma repositories -> PostgreSQL 16+
 ```
 
 Packscout reserves local ports `5100–5199`. The default admin Vite HMR socket
 uses `5102`; future local services should remain in this range unless an
 external protocol requires a conventional port.
 
-The current apps expose independent `/api/health` endpoints. The admin also owns a
-typed browser API client and a structured API fallback: malformed JSON and unknown
+The apps expose independent `/api/health` endpoints. The admin also owns a typed
+browser API client and a structured API fallback: malformed JSON and unknown
 `/api/*` routes return stable JSON errors before browser routes reach the SPA.
-Authentication, persistence, and shared domain services have not been selected yet;
-the standards and admin UI describe those boundaries without pretending the systems
-already exist.
+Admin authentication and organization-scoped operations run through shared server
+services. PostgreSQL 16+ is the canonical database; Prisma ORM, Prisma Client, and
+Prisma Migrate are the only application persistence and migration path.
 
 ## Admin foundation
 
@@ -45,26 +52,27 @@ The admin starts with an operational shell rather than feature-specific routes:
 - light and dark themes using shared CSS tokens,
 - shared dialog, confirmation, toast, button, status, and empty-state patterns,
 - client requests isolated under `apps/admin/src/api`, and
-- visible unconfigured states for authentication and persistence.
+- protected provider, import, quarantine, alert, health, and operator workflows.
 
-These are presentation and transport foundations only. They do not authorize users,
-establish tenant scope, or persist data. The first protected or mutating admin feature
-must introduce its real boundary design and direct route coverage with the feature.
+The Express boundary authenticates, authorizes, validates, delegates to shared
+services, and maps stable errors. Organization scope and mutation permissions are
+enforced again at the persistence boundary and covered directly by integration tests.
 
 ## Dependency direction
 
 ```text
-frontend UI -> frontend server components/API adapters -> future shared services -> persistence/external APIs
-admin UI    -> admin client API helpers -> Express adapters -> future shared services -> persistence/external APIs
+frontend UI -> frontend server components/API adapters -> shared services -> persistence/external APIs
+admin UI    -> admin client API helpers -> Express adapters -> shared services -> Prisma repositories -> PostgreSQL
+worker      -> provider adapters -> shared services -> Prisma repositories -> PostgreSQL
 ```
 
 Rules:
 
 - `apps/frontend` and `apps/admin` do not import one another.
 - `apps/admin/src` never imports `apps/admin/server`, Express, dotenv, or Node-only modules.
-- frontend client components never import `next/server`, Node-only modules, or future server-only packages.
+- frontend client components never import `next/server`, Node-only modules, or server-only packages.
 - Express and Next route handlers adapt transport concerns; shared workflows should move behind a transport-neutral service API when a second caller needs them.
-- Future cross-app packages expose public entry points. Consumers never deep-import another package's `src` directory.
+- Cross-app packages expose public entry points. Consumers never deep-import another package's `src` directory.
 
 ## Ownership
 

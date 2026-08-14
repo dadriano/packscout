@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { and, eq, isNull, sql, type Logger } from "drizzle-orm";
-import type { PgliteQueryResultHKT } from "drizzle-orm/pglite";
 import {
-  DrizzleAuthAuditSink,
-  DrizzleAuthRepository,
+  PrismaAuthAuditSink,
+  PrismaAuthRepository,
 } from "./auth-repository.ts";
 import {
   IngestionPersistenceRepository,
@@ -13,22 +11,6 @@ import {
 import { PersistenceError } from "./persistence-error.ts";
 import type { CommitPageInput } from "./pipeline-types.ts";
 import { ProtectedEvidenceRepository } from "./protected-evidence.ts";
-import {
-  auditEvents,
-  canonicalEntities,
-  canonicalRelationships,
-  canonicalRevisions,
-  importPages,
-  importRuns,
-  operatorSessions,
-  providerCursorCheckpoints,
-  providerSources,
-  quarantineRecords,
-  sourceRecordObservations,
-  sourceRecordOutcomes,
-  sourceRecordProjectionRevisions,
-  sourceRecords,
-} from "./schema/index.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
@@ -50,20 +32,8 @@ const committedAt = new Date("2026-01-01T00:00:00.000Z");
 const collectedAt = new Date("2025-12-31T23:59:00.000Z");
 const sourceTime = new Date("2025-12-31T23:58:00.000Z");
 
-class QueryCounter implements Logger {
-  queryCount = 0;
-
-  logQuery(): void {
-    this.queryCount += 1;
-  }
-
-  reset(): void {
-    this.queryCount = 0;
-  }
-}
-
-async function createPipelineHarness(options: { logger?: Logger } = {}) {
-  const harness = await createMigratedTestDatabase(options);
+async function createPipelineHarness() {
+  const harness = await createMigratedTestDatabase();
   const setup = new PipelineSetupRepository(harness.database);
   await setup.createOrganization({
     id: ids.organization,
@@ -219,7 +189,7 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
 }
 
 async function addRun(
-  setup: PipelineSetupRepository<PgliteQueryResultHKT>,
+  setup: PipelineSetupRepository,
   runId: string,
 ): Promise<void> {
   await setup.createImportRun({
@@ -248,11 +218,10 @@ test("empty migration builds PostgreSQL constraints including NULL cursor idempo
       (error: unknown) =>
         error instanceof PersistenceError && error.code === "IDEMPOTENCY_CONFLICT",
     );
-    const [count] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(importPages)
-      .where(eq(importPages.runId, ids.run));
-    assert.equal(count?.count, 1);
+    assert.equal(
+      await harness.database.import_pages.count({ where: { run_id: ids.run } }),
+      1,
+    );
   } finally {
     await harness.close();
   }
@@ -266,7 +235,7 @@ test("production page commits reject a worker without the active run lease", asy
       (error: unknown) =>
         error instanceof PersistenceError && error.code === "RUN_OWNERSHIP_LOST",
     );
-    assert.equal((await harness.database.select().from(importPages)).length, 0);
+    assert.equal(await harness.database.import_pages.count(), 0);
   } finally {
     await harness.close();
   }
@@ -320,18 +289,83 @@ test("unchanged replay is a no-op while changed content advances one current rev
     });
     assert.equal(current?.content.priceCents, 3000);
 
-    const [projectionLinks] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(sourceRecordProjectionRevisions);
-    assert.ok((projectionLinks?.count ?? 0) >= 4);
+    assert.ok(await harness.database.source_record_projection_revisions.count() >= 4);
   } finally {
     await harness.close();
   }
 });
 
-test("large page commits batch writes while preserving evidence, projections, and record counts", async () => {
-  const queryCounter = new QueryCounter();
-  const harness = await createPipelineHarness({ logger: queryCounter });
+test("independent clients serialize competing revisions for one canonical identity", async () => {
+  const harness = await createPipelineHarness();
+  const independentClient = await harness.createIndependentClient();
+  try {
+    await addRun(harness.setup, ids.secondRun);
+    const independentIngestion = new IngestionPersistenceRepository(independentClient, {
+      retentionDays: 90,
+      actorPseudonymKey: "test-pseudonym-key",
+    });
+    const pageFor = (
+      runId: string,
+      pageNumber: number,
+      priceCents: number,
+      sourceOffset: number,
+    ): CommitPageInput => ({
+      ...initialPage({
+        runId,
+        pageNumber,
+        payload: { competing: priceCents },
+        records: [],
+        quarantines: [],
+        committedAt: new Date(committedAt.getTime() + sourceOffset),
+      }),
+      records: [
+        {
+          recordKind: "catalog",
+          recordIndex: 0,
+          externalId: `competing-source-${priceCents}`,
+          sourceTime: new Date(sourceTime.getTime() + sourceOffset),
+          collectedAt: new Date(collectedAt.getTime() + sourceOffset),
+          payload: { priceCents },
+          projections: [
+            {
+              platformKey: "beezie",
+              recordKind: "pack",
+              externalId: "competing-pack",
+              content: { name: "Competing Pack", priceCents },
+              sourceUpdatedAt: new Date(sourceTime.getTime() + sourceOffset),
+              sourceCollectedAt: new Date(collectedAt.getTime() + sourceOffset),
+            },
+          ],
+        },
+      ],
+    });
+
+    await Promise.all([
+      harness.ingestion.commitPage(pageFor(ids.run, 1, 2500, 1_000)),
+      independentIngestion.commitPage(pageFor(ids.secondRun, 1, 3000, 2_000)),
+    ]);
+
+    const revisions = await harness.ingestion.listCanonicalRevisions(ids.organization, {
+      platformKey: "beezie",
+      recordKind: "pack",
+      externalId: "competing-pack",
+    });
+    assert.equal(revisions.length, 2);
+    assert.deepEqual(
+      revisions.map(({ revisionNumber }) => revisionNumber),
+      [1, 2],
+    );
+    assert.equal(
+      new Set(revisions.map(({ content }) => content.priceCents)).size,
+      2,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("large page commits batch writes while preserving evidence, projections, and record counts", async (context) => {
+  const harness = await createPipelineHarness();
   try {
     const recordCount = 550;
     const records: CommitPageInput["records"] = Array.from(
@@ -394,7 +428,7 @@ test("large page commits batch writes while preserving evidence, projections, an
       ],
     });
 
-    queryCounter.reset();
+    harness.statementCounter.reset();
     const committed = await harness.ingestion.commitPage(page);
     assert.equal(committed.newCanonicalRevisions, recordCount - 1);
     assert.deepEqual(committed.counters, {
@@ -407,53 +441,44 @@ test("large page commits batch writes while preserving evidence, projections, an
       transientRetries: 0,
     });
     assert.ok(
-      queryCounter.queryCount < 80,
-      `large page commit issued ${queryCounter.queryCount} SQL statements`,
+      harness.statementCounter.count < 80,
+      `large page commit issued ${harness.statementCounter.count} SQL statements`,
+    );
+    context.diagnostic(
+      `550-record page commit issued ${harness.statementCounter.count} SQL statements`,
     );
 
-    const [storedPage] = await harness.database
-      .select({ recordCounts: importPages.recordCountsJson })
-      .from(importPages)
-      .where(eq(importPages.id, committed.pageId));
-    assert.deepEqual(storedPage?.recordCounts, {
+    const storedPage = await harness.database.import_pages.findUnique({
+      where: { id: committed.pageId },
+      select: { record_counts_json: true },
+    });
+    assert.deepEqual(storedPage?.record_counts_json, {
       catalog: recordCount,
       pulls: 1,
       sales: 1,
     });
-    const [sourceCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(sourceRecords);
-    const [observationCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(sourceRecordObservations);
-    const [outcomeCount] = await harness.database
-      .select({
-        count: sql<number>`count(*)::integer`,
-        linked: sql<number>`count(*) filter (where ${sourceRecordOutcomes.sourceRecordId} is not null)::integer`,
-        standalone: sql<number>`count(*) filter (where ${sourceRecordOutcomes.sourceRecordId} is null)::integer`,
-      })
-      .from(sourceRecordOutcomes);
-    const [quarantineCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(quarantineRecords);
-    const [revisionCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(canonicalRevisions);
-    const [projectionLinkCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(sourceRecordProjectionRevisions);
-    const [relationshipCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(canonicalRelationships);
-    assert.equal(sourceCount?.count, recordCount);
-    assert.equal(observationCount?.count, recordCount);
-    assert.equal(outcomeCount?.count, recordCount + 2);
-    assert.equal(outcomeCount?.linked, recordCount);
-    assert.equal(outcomeCount?.standalone, 2);
-    assert.equal(quarantineCount?.count, 3);
-    assert.equal(revisionCount?.count, recordCount - 1);
-    assert.equal(projectionLinkCount?.count, recordCount - 1);
-    assert.equal(relationshipCount?.count, recordCount - 1);
+    assert.equal(await harness.database.source_records.count(), recordCount);
+    assert.equal(await harness.database.source_record_observations.count(), recordCount);
+    assert.equal(await harness.database.source_record_outcomes.count(), recordCount + 2);
+    assert.equal(
+      await harness.database.source_record_outcomes.count({
+        where: { source_record_id: { not: null } },
+      }),
+      recordCount,
+    );
+    assert.equal(
+      await harness.database.source_record_outcomes.count({
+        where: { source_record_id: null },
+      }),
+      2,
+    );
+    assert.equal(await harness.database.quarantine_records.count(), 3);
+    assert.equal(await harness.database.canonical_revisions.count(), recordCount - 1);
+    assert.equal(
+      await harness.database.source_record_projection_revisions.count(),
+      recordCount - 1,
+    );
+    assert.equal(await harness.database.canonical_relationships.count(), recordCount - 1);
 
     await addRun(harness.setup, ids.secondRun);
     const replay = await harness.ingestion.commitPage({
@@ -472,18 +497,12 @@ test("large page commits batch writes while preserving evidence, projections, an
       requestAttempts: 0,
       transientRetries: 0,
     });
-    const [sourcesAfterReplay] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(sourceRecords);
-    const [revisionsAfterReplay] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(canonicalRevisions);
-    const [observationsAfterReplay] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(sourceRecordObservations);
-    assert.equal(sourcesAfterReplay?.count, recordCount);
-    assert.equal(revisionsAfterReplay?.count, recordCount - 1);
-    assert.equal(observationsAfterReplay?.count, recordCount * 2);
+    assert.equal(await harness.database.source_records.count(), recordCount);
+    assert.equal(await harness.database.canonical_revisions.count(), recordCount - 1);
+    assert.equal(
+      await harness.database.source_record_observations.count(),
+      recordCount * 2,
+    );
   } finally {
     await harness.close();
   }
@@ -493,12 +512,12 @@ test("unresolved pull relationships persist and reconcile when a pack arrives", 
   const harness = await createPipelineHarness();
   try {
     await harness.ingestion.commitPage(initialPage());
-    const [unresolved] = await harness.database
-      .select({ id: canonicalRelationships.id, targetId: canonicalRelationships.targetEntityId })
-      .from(canonicalRelationships)
-      .where(eq(canonicalRelationships.targetExternalId, "pack-arrives-later"));
+    const unresolved = await harness.database.canonical_relationships.findFirst({
+      where: { target_external_id: "pack-arrives-later" },
+      select: { id: true, target_entity_id: true },
+    });
     assert.ok(unresolved);
-    assert.equal(unresolved.targetId, null);
+    assert.equal(unresolved.target_entity_id, null);
 
     await addRun(harness.setup, ids.secondRun);
     const packPage = initialPage({
@@ -527,11 +546,11 @@ test("unresolved pull relationships persist and reconcile when a pack arrives", 
       quarantines: [],
     });
     await harness.ingestion.commitPage(packPage);
-    const [linked] = await harness.database
-      .select({ targetId: canonicalRelationships.targetEntityId })
-      .from(canonicalRelationships)
-      .where(eq(canonicalRelationships.id, unresolved.id));
-    assert.ok(linked?.targetId);
+    const linked = await harness.database.canonical_relationships.findUnique({
+      where: { id: unresolved.id },
+      select: { target_entity_id: true },
+    });
+    assert.ok(linked?.target_entity_id);
     const reconciled = await harness.ingestion.reconcileRelationships({
       organizationId: ids.organization,
       target: {
@@ -617,21 +636,21 @@ test("actor PII stays in protected evidence and unsafe canonical writes roll bac
       (error: unknown) =>
         error instanceof PersistenceError && error.code === "UNSAFE_CANONICAL_ACTOR_DATA",
     );
-    const [failedPage] = await harness.database
-      .select({ id: importPages.id })
-      .from(importPages)
-      .where(and(eq(importPages.runId, ids.run), eq(importPages.pageNumber, 2)));
-    assert.equal(failedPage, undefined);
-    const [checkpoint] = await harness.database
-      .select({ cursor: providerCursorCheckpoints.cursor })
-      .from(providerCursorCheckpoints)
-      .where(eq(providerCursorCheckpoints.configRevisionId, ids.configuration));
+    const failedPage = await harness.database.import_pages.findFirst({
+      where: { run_id: ids.run, page_number: 2 },
+      select: { id: true },
+    });
+    assert.equal(failedPage, null);
+    const checkpoint = await harness.database.provider_cursor_checkpoints.findUnique({
+      where: { config_revision_id: ids.configuration },
+      select: { cursor: true },
+    });
     assert.equal(checkpoint?.cursor, "cursor-1");
-    const [run] = await harness.database
-      .select({ counters: importRuns.countersJson })
-      .from(importRuns)
-      .where(eq(importRuns.id, ids.run));
-    assert.deepEqual(run?.counters, committed.counters);
+    const run = await harness.database.import_runs.findUnique({
+      where: { id: ids.run },
+      select: { counters_json: true },
+    });
+    assert.deepEqual(run?.counters_json, committed.counters);
   } finally {
     await harness.close();
   }
@@ -649,30 +668,18 @@ test("90-day retention clears payloads but preserves canonical, outcomes, runs, 
       batchSize: 100,
     });
     assert.deepEqual(expired, { pages: 1, sourceRecords: 2, quarantines: 1 });
-    const [page] = await harness.database.select().from(importPages);
-    const [source] = await harness.database.select().from(sourceRecords);
-    const [quarantine] = await harness.database.select().from(quarantineRecords);
-    assert.equal(page?.payloadJson, null);
-    assert.equal(source?.payloadJson, null);
-    assert.equal(quarantine?.payloadJson, null);
-    assert.equal(quarantine?.reasonCode, "MISSING_EXTERNAL_ID");
+    const page = await harness.database.import_pages.findFirst();
+    const source = await harness.database.source_records.findFirst();
+    const quarantine = await harness.database.quarantine_records.findFirst();
+    assert.equal(page?.payload_json, null);
+    assert.equal(source?.payload_json, null);
+    assert.equal(quarantine?.payload_json, null);
+    assert.equal(quarantine?.reason_code, "MISSING_EXTERNAL_ID");
 
-    const [revisionCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(canonicalRevisions);
-    const [outcomeCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(sourceRecordOutcomes);
-    const [runCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(importRuns);
-    const [auditCount] = await harness.database
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(auditEvents);
-    assert.equal(revisionCount?.count, 3);
-    assert.equal(outcomeCount?.count, 3);
-    assert.equal(runCount?.count, 1);
-    assert.ok((auditCount?.count ?? 0) >= 1);
+    assert.equal(await harness.database.canonical_revisions.count(), 3);
+    assert.equal(await harness.database.source_record_outcomes.count(), 3);
+    assert.equal(await harness.database.import_runs.count(), 1);
+    assert.ok(await harness.database.audit_events.count() >= 1);
   } finally {
     await harness.close();
   }
@@ -684,7 +691,7 @@ test("auth repository keeps last-admin checks tenant-scoped and revokes sessions
     const setup = new PipelineSetupRepository(harness.database);
     await setup.createOrganization({ id: ids.organization, slug: "packscout", name: "PackScout" });
     await setup.createOrganization({ id: ids.otherOrganization, slug: "other", name: "Other" });
-    const repository = new DrizzleAuthRepository(harness.database);
+    const repository = new PrismaAuthRepository(harness.database);
     const now = new Date("2026-08-06T12:00:00.000Z");
     assert.equal(
       (await repository.provisionOperator({
@@ -749,13 +756,13 @@ test("auth repository keeps last-admin checks tenant-scoped and revokes sessions
       })).kind,
       "updated",
     );
-    const [session] = await harness.database
-      .select({ revokedAt: operatorSessions.revokedAt })
-      .from(operatorSessions)
-      .where(eq(operatorSessions.id, ids.session));
-    assert.ok(session?.revokedAt);
+    const session = await harness.database.operator_sessions.findUnique({
+      where: { id: ids.session },
+      select: { revoked_at: true },
+    });
+    assert.ok(session?.revoked_at);
 
-    const audit = new DrizzleAuthAuditSink(harness.database);
+    const audit = new PrismaAuthAuditSink(harness.database);
     await audit.append({
       organizationId: null,
       actorId: null,
@@ -765,52 +772,53 @@ test("auth repository keeps last-admin checks tenant-scoped and revokes sessions
       occurredAt: now,
       metadata: {},
     });
-    const [unscoped] = await harness.database
-      .select({ organizationId: auditEvents.organizationId, actorKey: auditEvents.actorKey })
-      .from(auditEvents)
-      .where(isNull(auditEvents.organizationId));
-    assert.deepEqual(unscoped, { organizationId: null, actorKey: "anonymous" });
+    const unscoped = await harness.database.audit_events.findFirst({
+      where: { organization_id: null },
+      select: { organization_id: true, actor_key: true },
+    });
+    assert.deepEqual(unscoped, { organization_id: null, actor_key: "anonymous" });
   } finally {
     await harness.close();
   }
 });
 
 test("database constraints reject cross-tenant run and current-revision references", async () => {
-  const harness = await createPipelineHarness();
+    const harness = await createPipelineHarness();
   try {
     await assert.rejects(
-      harness.database.insert(importRuns).values({
-        organizationId: ids.otherOrganization,
-        providerId: ids.provider,
-        configRevisionId: ids.configuration,
+      harness.database.import_runs.create({ data: {
+        organization_id: ids.otherOrganization,
+        provider_id: ids.provider,
+        config_revision_id: ids.configuration,
         trigger: "manual",
-      }),
+        requested_by_actor_key: "operator:other",
+      } }),
     );
     await harness.ingestion.commitPage(initialPage());
-    const [entity] = await harness.database
-      .select({ id: canonicalEntities.id })
-      .from(canonicalEntities)
-      .where(eq(canonicalEntities.externalId, "pack-standard"));
-    const [otherRevision] = await harness.database
-      .select({ id: canonicalRevisions.id })
-      .from(canonicalRevisions)
-      .where(eq(canonicalRevisions.entityId, entity!.id));
-    const [differentEntity] = await harness.database
-      .select({ id: canonicalEntities.id })
-      .from(canonicalEntities)
-      .where(eq(canonicalEntities.externalId, "pack-premium"));
+    const entity = await harness.database.canonical_entities.findFirstOrThrow({
+      where: { external_id: "pack-standard" },
+      select: { id: true },
+    });
+    const otherRevision = await harness.database.canonical_revisions.findFirstOrThrow({
+      where: { entity_id: entity.id },
+      select: { id: true },
+    });
+    const differentEntity = await harness.database.canonical_entities.findFirstOrThrow({
+      where: { external_id: "pack-premium" },
+      select: { id: true },
+    });
     await assert.rejects(
-      harness.database
-        .update(canonicalEntities)
-        .set({ currentRevisionId: otherRevision!.id })
-        .where(eq(canonicalEntities.id, differentEntity!.id)),
+      harness.database.canonical_entities.update({
+        where: { id: differentEntity.id },
+        data: { current_revision_id: otherRevision.id },
+      }),
     );
 
-    const [provider] = await harness.database
-      .select({ activeRevisionId: providerSources.activeRevisionId })
-      .from(providerSources)
-      .where(eq(providerSources.id, ids.provider));
-    assert.equal(provider?.activeRevisionId, ids.configuration);
+    const provider = await harness.database.provider_sources.findUnique({
+      where: { id: ids.provider },
+      select: { active_revision_id: true },
+    });
+    assert.equal(provider?.active_revision_id, ids.configuration);
   } finally {
     await harness.close();
   }
