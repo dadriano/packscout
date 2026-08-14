@@ -1,0 +1,227 @@
+.section {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+}
+
+.sectionHeader {
+  display: flex;
+  min-height: 4rem;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem 0.72rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.18rem;
+  color: var(--color-action);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 760;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.heading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 770;
+  letter-spacing: -0.02em;
+}
+
+.resultCount {
+  color: var(--color-text-muted);
+  font-size: 0.71rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scrollRegion {
+  max-width: 100%;
+  overflow-x: auto;
+  border-top: 1px solid var(--color-border);
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.scrollRegion:focus-visible {
+  outline-offset: -3px;
+}
+
+.table {
+  width: 100%;
+  min-width: 1110px;
+  border-spacing: 0;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums lining-nums;
+  text-align: left;
+}
+
+.table th {
+  height: 2.35rem;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.63rem;
+  font-weight: 680;
+  letter-spacing: 0.01em;
+  padding: 0.45rem 0.6rem;
+  white-space: nowrap;
+}
+
+.table th:first-child,
+.table td:first-child {
+  padding-left: 1rem;
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: 1rem;
+}
+
+.columnLabel {
+  display: inline-flex;
+  align-items: center;
+}
+
+.table td {
+  min-width: 0;
+  height: 4rem;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  padding: 0.4rem 0.6rem;
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr {
+  position: relative;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.table tbody tr:hover {
+  background: color-mix(in srgb, var(--color-action-soft) 38%, transparent);
+}
+
+.table tbody tr[data-selected="true"] {
+  background: color-mix(in srgb, var(--color-action-soft) 60%, transparent);
+  box-shadow:
+    inset 3px 0 0 var(--color-action),
+    inset 0 1px 0 color-mix(in srgb, var(--color-action) 40%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--color-action) 40%, transparent);
+}
+
+.rank {
+  width: 2.7rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.packCell {
+  width: 15.5rem;
+}
+
+.selectPack {
+  display: grid;
+  width: 100%;
+  min-width: 13.5rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.65rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.18rem;
+  text-align: left;
+}
+
+.packName {
+  overflow: hidden;
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selectedLabel {
+  grid-column: 2;
+  margin-top: -0.38rem;
+  color: var(--color-action-strong);
+  font-size: 0.58rem;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.vendor {
+  display: inline-flex;
+  max-width: 10rem;
+  align-items: center;
+  gap: 0.45rem;
+  line-height: 1.35;
+}
+
+.metric {
+  display: grid;
+  max-width: 12rem;
+  gap: 0.16rem;
+  line-height: 1.25;
+}
+
+.metricValue {
+  font-weight: 660;
+  white-space: nowrap;
+}
+
+.metric[data-state="positive"] .metricValue,
+.metric[data-state="positive"] .metricState {
+  color: var(--color-positive);
+}
+
+.metric[data-state="negative"] .metricValue,
+.metric[data-state="negative"] .metricState {
+  color: var(--color-negative);
+}
+
+.metric[data-state="unavailable"] .metricValue,
+.metric[data-state="unavailable"] .metricState {
+  color: var(--color-status-neutral);
+}
+
+.metricState,
+.unavailableReason {
+  color: var(--color-text-muted);
+  font-size: 0.58rem;
+  line-height: 1.35;
+}
+
+.metricState {
+  font-weight: 720;
+}
+
+.unavailableReason {
+  max-width: 10rem;
+}
+
+.emptyState {
+  margin: 0;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  padding: 2.4rem 1rem;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table tbody tr {
+    transition: none;
+  }
+}

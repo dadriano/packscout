@@ -17,12 +17,16 @@ import { createAdminImportOperationsRuntime } from "./import-operations-runtime.
 import { createAdminOperationalRuntime } from "./operational-runtime.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
 import {
+  adminDevelopmentAllowedOrigins,
+  adminDevelopmentServerNetwork,
   readAllowedOrigins,
   readBase64Key,
+  readServiceHost,
   readPort,
   readPositiveDuration,
   readRequiredSecret,
   readTrustedProxies,
+  serviceHttpOrigin,
 } from "./runtime-config.ts";
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -31,12 +35,18 @@ const workspaceRoot = path.resolve(adminRoot, "..", "..");
 
 dotenv.config({ path: path.join(workspaceRoot, ".env") });
 
+const isDevelopment = process.env.NODE_ENV !== "production";
 const port = readPort(
   process.env.PACKSCOUT_ADMIN_PORT,
   5101,
   "PACKSCOUT_ADMIN_PORT",
 );
-const isDevelopment = process.env.NODE_ENV !== "production";
+const host = readServiceHost(
+  process.env.PACKSCOUT_ADMIN_HOST,
+  isDevelopment ? "127.0.0.1" : "0.0.0.0",
+  "PACKSCOUT_ADMIN_HOST",
+  isDevelopment,
+);
 const sessionIdleMs = readPositiveDuration(
   process.env.PACKSCOUT_SESSION_IDLE_MS,
   60 * 60 * 1_000,
@@ -71,9 +81,7 @@ const providerActorKey = readBase64Key(
 );
 const allowedOrigins = readAllowedOrigins(
   process.env.PACKSCOUT_ADMIN_ALLOWED_ORIGINS,
-  isDevelopment
-    ? [`http://localhost:${port}`, `http://127.0.0.1:${port}`]
-    : [],
+  isDevelopment ? adminDevelopmentAllowedOrigins(host, port) : [],
   "PACKSCOUT_ADMIN_ALLOWED_ORIGINS",
 );
 const trustedProxies = readTrustedProxies(
@@ -132,10 +140,7 @@ if (isDevelopment) {
   );
   const vite = await createViteServer({
     root: adminRoot,
-    server: {
-      middlewareMode: true,
-      hmr: { port: hmrPort },
-    },
+    server: adminDevelopmentServerNetwork(host, hmrPort),
     appType: "spa",
   });
 
@@ -148,8 +153,8 @@ if (isDevelopment) {
   });
 }
 
-const server = app.listen(port, () => {
-  console.log(`Packscout Admin is available at http://localhost:${port}`);
+const server = app.listen(port, host, () => {
+  console.log(`Packscout Admin is available at ${serviceHttpOrigin(host, port)}`);
 });
 
 async function shutDown(): Promise<void> {

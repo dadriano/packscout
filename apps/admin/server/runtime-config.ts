@@ -2,6 +2,54 @@ import { isIP } from "node:net";
 
 const MIN_PORT = 1;
 const MAX_PORT = 65_535;
+const loopbackHosts = new Set(["127.0.0.1", "::1", "localhost"]);
+
+export function readServiceHost(
+  value: string | undefined,
+  fallback: string,
+  variableName: string,
+  loopbackOnly = true,
+): string {
+  const candidate = value ?? fallback;
+  if (
+    (loopbackOnly && !loopbackHosts.has(candidate)) ||
+    (!loopbackOnly && candidate !== "localhost" && isIP(candidate) === 0)
+  ) {
+    throw new Error(
+      loopbackOnly
+        ? `${variableName} must be 127.0.0.1, ::1, or localhost for local service binding.`
+        : `${variableName} must be a valid IP address or localhost.`,
+    );
+  }
+  return candidate;
+}
+
+export function adminDevelopmentServerNetwork(
+  host: string,
+  hmrPort: number,
+) {
+  return {
+    middlewareMode: true as const,
+    hmr: { host, port: hmrPort },
+  };
+}
+
+export function serviceHttpOrigin(host: string, port: number): string {
+  return `http://${isIP(host) === 6 ? `[${host}]` : host}:${port}`;
+}
+
+export function adminDevelopmentAllowedOrigins(
+  host: string,
+  port: number,
+): string[] {
+  return [
+    ...new Set([
+      `http://localhost:${port}`,
+      `http://127.0.0.1:${port}`,
+      serviceHttpOrigin(host, port),
+    ]),
+  ];
+}
 
 export function readPort(
   value: string | undefined,

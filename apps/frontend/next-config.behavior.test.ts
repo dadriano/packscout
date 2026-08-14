@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import nextConfig from "./next.config";
 
-test("frontend responses carry the production security header baseline", async () => {
+test("frontend responses carry the static security header baseline", async () => {
   const resolveHeaders = nextConfig.headers;
   assert.ok(resolveHeaders, "Next config must apply global response headers");
 
@@ -21,13 +21,9 @@ test("frontend responses carry the production security header baseline", async (
     "max-age=63072000; includeSubDomains; preload",
   );
 
-  const policy = headers.get("content-security-policy") ?? "";
-  for (const directive of [
-    "default-src 'self'",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-  ]) {
-    assert.match(policy, new RegExp(directive.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  }
+  assert.equal(
+    headers.has("content-security-policy"),
+    false,
+    "request-specific CSP belongs to proxy.ts so one nonce reaches Next rendering",
+  );
 });

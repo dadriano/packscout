@@ -1,0 +1,134 @@
+.section {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  padding: 0.85rem 1rem 0.6rem;
+}
+
+.header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.7rem;
+}
+
+.heading {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 760;
+  letter-spacing: -0.018em;
+}
+
+.context {
+  margin: 0.15rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 3rem 4.7rem;
+  gap: 0.75rem;
+  color: var(--color-text-muted);
+  font-size: 0.6rem;
+  text-align: right;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  min-height: 2.55rem;
+  grid-template-columns: minmax(6.5rem, 0.7fr) minmax(5rem, 1.3fr) 3rem 4.7rem;
+  align-items: center;
+  gap: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track {
+  position: relative;
+  height: 0.32rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border) 62%, transparent);
+}
+
+.bar {
+  position: absolute;
+  inset: 0;
+  width: calc(var(--bar-ratio) * 100%);
+  min-width: calc(var(--bar-ratio) * 0.25rem);
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-action), var(--color-action-strong));
+}
+
+.count,
+.median {
+  text-align: right;
+}
+
+.median {
+  display: grid;
+  justify-items: end;
+  gap: 0.05rem;
+  font-weight: 670;
+}
+
+.median small {
+  color: var(--color-text-muted);
+  font-size: 0.53rem;
+  font-weight: 650;
+}
+
+.median[data-state="positive"] {
+  color: var(--color-positive);
+}
+
+.median[data-state="negative"] {
+  color: var(--color-negative);
+}
+
+.median[data-state="unavailable"] {
+  color: var(--color-status-neutral);
+}
+
+.empty {
+  margin: 0;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  padding-block: 1.5rem;
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .columns {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: minmax(6rem, 1fr) 3.25rem 4.5rem;
+  }
+
+  .track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    margin-bottom: 0.45rem;
+  }
+}

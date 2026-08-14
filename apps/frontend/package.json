@@ -3,14 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "rm -rf .next-dev && NEXT_DIST_DIR=.next-dev next dev --webpack -p ${PACKSCOUT_FRONTEND_PORT:-5100}",
+    "dev": "rm -rf .next-dev && NEXT_DIST_DIR=.next-dev next dev --webpack -H ${PACKSCOUT_FRONTEND_HOST:-127.0.0.1} -p ${PACKSCOUT_FRONTEND_PORT:-5100}",
     "build": "rm -rf .next-build && NEXT_DIST_DIR=.next-build next build --webpack",
-    "start": "NEXT_DIST_DIR=.next-build next start -p ${PACKSCOUT_FRONTEND_PORT:-5100}",
+    "start": "NEXT_DIST_DIR=.next-build next start -H ${PACKSCOUT_FRONTEND_HOST:-0.0.0.0} -p ${PACKSCOUT_FRONTEND_PORT:-5100}",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit --incremental false",
     "test": "node ../../scripts/run-tests.mjs frontend"
   },
   "dependencies": {
+    "@packscout/contracts": "0.0.0",
+    "convex": "1.43.0",
     "next": "^16.2.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

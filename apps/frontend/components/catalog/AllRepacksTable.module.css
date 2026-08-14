@@ -1,0 +1,243 @@
+.region {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+}
+
+.headingRow {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.15rem 0.8rem;
+}
+
+.eyebrow,
+.orderStatus {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.eyebrow {
+  margin-bottom: 0.2rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.scroller {
+  contain: layout paint inline-size;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.scroller:focus-visible {
+  outline-offset: -3px;
+}
+
+.table {
+  width: 100%;
+  min-width: 1840px;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.table th,
+.table td {
+  border-top: 1px solid var(--color-border);
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.table th {
+  position: relative;
+  z-index: 1;
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.table th:nth-child(3),
+.table td:nth-child(3) {
+  min-width: 248px;
+}
+
+.table th:nth-child(12),
+.table td:nth-child(12) {
+  min-width: 250px;
+}
+
+.headerLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sortButton,
+.inlineAction,
+.packSelect {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0;
+  font-weight: inherit;
+}
+
+.sortIcon {
+  color: var(--color-action);
+  font-size: 0.78rem;
+}
+
+.row {
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--color-action-soft) 35%, transparent);
+}
+
+.row[data-selected="true"] {
+  background: color-mix(in srgb, var(--color-action-soft) 62%, transparent);
+  box-shadow: inset 3px 0 var(--color-action);
+}
+
+.packCell {
+  padding-block: 0.42rem !important;
+}
+
+.packSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.15rem;
+  text-align: left;
+}
+
+.packImage,
+.imagePlaceholder {
+  width: 36px;
+  height: 46px;
+  flex: 0 0 auto;
+  border-radius: 0.28rem;
+  object-fit: cover;
+}
+
+.imagePlaceholder {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  background: linear-gradient(145deg, var(--color-action-soft), var(--color-surface-subtle));
+  color: var(--color-action);
+  font-weight: 800;
+}
+
+.packIdentity {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.packName {
+  max-width: 178px;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.soldOut {
+  width: fit-content;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  padding: 0.05rem 0.35rem;
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.chaseName {
+  display: block;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chaseMatch {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.chaseEvidence {
+  color: var(--color-text-muted);
+  font-size: 0.66rem;
+  white-space: normal;
+}
+
+.unavailable,
+.notAvailable {
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+
+.unavailable {
+  border-bottom: 1px dotted var(--color-border-strong);
+}
+
+.inlineAction {
+  border: 1px solid var(--color-border);
+  border-radius: 0.45rem;
+  padding: 0.42rem 0.58rem;
+  color: var(--color-action-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.inlineAction:hover {
+  border-color: var(--color-action);
+  background: var(--color-action-soft);
+}
+
+@media (max-width: 720px) {
+  .headingRow {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .table {
+    min-width: 1760px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row {
+    transition: none;
+  }
+}

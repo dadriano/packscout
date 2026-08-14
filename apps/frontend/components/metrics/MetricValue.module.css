@@ -1,0 +1,92 @@
+.root {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 0.38rem;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.root[data-density="compact"] {
+  gap: 0.22rem;
+}
+
+.labelRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.label {
+  color: var(--color-text-muted);
+  font-size: 0.69rem;
+  font-weight: 720;
+  letter-spacing: 0.038em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.valueRow {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.38rem;
+}
+
+.value {
+  color: var(--color-text);
+  font-size: 1.03rem;
+  font-weight: 720;
+  letter-spacing: -0.018em;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.root[data-density="compact"] .value {
+  font-size: 0.91rem;
+}
+
+.stateLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  font-size: 0.67rem;
+  font-weight: 760;
+  letter-spacing: 0.025em;
+  line-height: 1.25;
+}
+
+.stateLabel::before {
+  width: 0.38rem;
+  height: 0.38rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+}
+
+.root[data-state="positive"] .value,
+.root[data-state="positive"] .stateLabel {
+  color: var(--color-positive);
+}
+
+.root[data-state="negative"] .value,
+.root[data-state="negative"] .stateLabel {
+  color: var(--color-negative);
+}
+
+.root[data-state="neutral"] .stateLabel {
+  color: var(--color-status-neutral);
+}
+
+.root[data-state="unavailable"] .value {
+  color: var(--color-status-neutral);
+  font-weight: 650;
+}
+
+.reason {
+  max-width: 28rem;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.42;
+}

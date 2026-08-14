@@ -411,7 +411,7 @@ test("Clutchpacks maps formatted values, bucket evidence, supporting cards, null
     null,
   );
 
-  const expectedCategories = ["sale", "shipment", "mint"];
+  const expectedCategories = ["sale", "transfer", "mint"];
   output.outcomes.slice(3).forEach((rawOutcome, index) => {
     const outcome = mapped(rawOutcome);
     const projection = canonicalProjection(

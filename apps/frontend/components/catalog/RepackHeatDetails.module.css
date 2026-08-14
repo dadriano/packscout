@@ -1,0 +1,259 @@
+.root {
+  display: grid;
+  gap: 0.8rem;
+  border-top: 1px solid var(--color-border);
+  padding: 1rem;
+}
+
+.headingRow,
+.headingGroup {
+  display: flex;
+  align-items: center;
+}
+
+.headingRow {
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.headingGroup {
+  min-width: 0;
+}
+
+.headingGroup h3 {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 750;
+  letter-spacing: -0.018em;
+}
+
+.interpretation,
+.unavailable,
+.sampleRequirement,
+.timing,
+.provenance {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.64rem;
+  line-height: 1.48;
+}
+
+.interpretation {
+  border-inline-start: 2px solid color-mix(in srgb, var(--color-warning) 55%, transparent);
+  padding-inline-start: 0.65rem;
+}
+
+.unavailable {
+  display: grid;
+  min-height: 3.5rem;
+  align-content: center;
+  gap: 0.35rem;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.unavailable p {
+  margin: 0;
+}
+
+.summary,
+.windows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.summary > div,
+.windows > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.22rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-subtle) 65%, transparent);
+  padding: 0.62rem;
+}
+
+.summary span,
+.windows span,
+.components dt,
+.limitations > span {
+  color: var(--color-text-muted);
+  font-size: 0.57rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.summary strong,
+.windows strong {
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeRange {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.12rem;
+}
+
+.windows time,
+.timeRange {
+  color: var(--color-text-muted);
+  font-size: 0.56rem;
+  line-height: 1.4;
+}
+
+.provenance {
+  width: fit-content;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.18rem 0.42rem;
+  font-weight: 720;
+}
+
+.provenance[data-simulated="true"] {
+  border-color: color-mix(in srgb, var(--color-warning) 38%, var(--color-border));
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  color: var(--color-warning-strong);
+}
+
+.componentGroup,
+.driverGroup,
+.drivers,
+.components {
+  display: grid;
+}
+
+.componentGroup,
+.driverGroup {
+  gap: 0.3rem;
+}
+
+.componentGroup > span,
+.driverGroup > span {
+  color: var(--color-text-muted);
+  font-size: 0.57rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.driverGroup > p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.6rem;
+  line-height: 1.45;
+}
+
+.drivers,
+.components {
+  margin: 0;
+}
+
+.drivers {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.drivers > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.16rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.42rem;
+  background: color-mix(in srgb, var(--color-surface-subtle) 55%, transparent);
+  padding: 0.48rem 0.52rem;
+}
+
+.drivers dt {
+  color: var(--color-text-muted);
+  font-size: 0.55rem;
+  font-weight: 700;
+}
+
+.drivers dd {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+  margin: 0;
+}
+
+.drivers dd strong {
+  font-size: 0.67rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.drivers dd span {
+  color: var(--color-text-muted);
+  font-size: 0.53rem;
+  line-height: 1.35;
+}
+
+.components > div {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 0.72fr) minmax(0, 1.28fr);
+  gap: 0.7rem;
+  border-top: 1px solid var(--color-border);
+  padding: 0.58rem 0;
+}
+
+.components > div:last-child {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.components dt {
+  align-self: start;
+  line-height: 1.4;
+}
+
+.components dd {
+  display: grid;
+  min-width: 0;
+  gap: 0.16rem;
+  margin: 0;
+  text-align: right;
+}
+
+.components dd strong {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.components dd span {
+  color: var(--color-text-muted);
+  font-size: 0.57rem;
+  line-height: 1.4;
+}
+
+.components [data-availability="unavailable"] dd strong {
+  color: var(--color-status-neutral);
+}
+
+.limitations {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.limitations ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.6rem;
+  line-height: 1.45;
+  padding-inline-start: 1rem;
+}
+
+@media (max-width: 430px) {
+  .root {
+    padding: 0.85rem;
+  }
+
+  .summary,
+  .windows,
+  .drivers {
+    grid-template-columns: 1fr;
+  }
+}
