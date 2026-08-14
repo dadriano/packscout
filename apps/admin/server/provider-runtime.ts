@@ -2,21 +2,21 @@ import { createHmac, randomUUID } from "node:crypto";
 import type { ProviderConfigurationSummary } from "@packscout/contracts";
 import {
   AesGcmProviderCredentialCipher,
-  HttpCursorAdapter,
   ProviderConfigurationService,
   ProviderHealthService,
-  ProviderTransportAdapterRegistry,
   type ProviderConfigurationRepository,
   type ProviderHealthDto,
   type ProviderHealthRepository,
   type ProviderFreshnessOperationalHooks,
   type ProviderRuntimeEnvironment,
+  type ProviderTransportAdapterRegistry,
 } from "@packscout/services";
 import type {
   ProviderAdminListItem,
   ProviderHealthView,
   ProvidersRouterDependencies,
 } from "./routes/providers.ts";
+import { createProviderConfigurationTransportRegistry } from "./provider-transport-runtime.ts";
 
 interface ProviderCatalogRepository extends ProviderConfigurationRepository {
   listProviders(
@@ -31,6 +31,8 @@ export interface ProviderAdminRuntimeInput {
   readonly actorPseudonymKey: Uint8Array;
   readonly environment: ProviderRuntimeEnvironment;
   readonly operational?: ProviderFreshnessOperationalHooks;
+  /** A real decoder-backed registry may replace the fail-closed declaration. */
+  readonly transportAdapters?: ProviderTransportAdapterRegistry;
 }
 
 function healthView(health: ProviderHealthDto): ProviderHealthView {
@@ -58,9 +60,11 @@ export function createProviderAdminRuntime(
     clock,
     input.operational,
   );
+  const transportAdapters =
+    input.transportAdapters ?? createProviderConfigurationTransportRegistry();
   const configuration = new ProviderConfigurationService({
     repository: input.repository,
-    adapters: new ProviderTransportAdapterRegistry([new HttpCursorAdapter()]),
+    adapters: transportAdapters,
     credentialCipher: new AesGcmProviderCredentialCipher({
       primaryVersion: 1,
       keys: new Map([[1, input.credentialKey]]),

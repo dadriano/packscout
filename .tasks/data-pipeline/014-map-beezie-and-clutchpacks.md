@@ -1,11 +1,13 @@
 # Task: Map Beezie and ClutchPacks
 
+> **Superseded implementation artifact (2026-08-14).** Historical aggregate V1/eight-provider evidence only; do not build it. Only Collector Crypt and Courtyard are validated by the current [record-stream V2 contract](../../docs/provider-data-contract-v2.md).
+
 **ID:** data-pipeline/014  
 **Feature PRD:** [Data Pipeline](./_index.md)  
 **Depends on:** [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/009](009-calculate-estimated-ev.md)  
 **Blocks:** [data-pipeline/018](018-validate-backfill-and-incremental-launch.md)  
 **Estimated scope:** large  
-**Status:** done
+**Status:** done (historical artifact; superseded by V2)
 
 ## Objective
 

@@ -2,6 +2,20 @@ import { z } from "zod";
 
 const stableCodeSchema = z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/);
 
+export const nonRetryableQuarantineReasonCodes = [
+  "IDENTITY_CONFLICT",
+  "CATALOG_IDENTITY_CONFLICT",
+  "IMMUTABLE_EVENT_CONFLICT",
+] as const;
+
+const nonRetryableQuarantineReasonCodeSet = new Set<string>(
+  nonRetryableQuarantineReasonCodes,
+);
+
+export function isQuarantineReasonRetryable(reasonCode: string): boolean {
+  return !nonRetryableQuarantineReasonCodeSet.has(reasonCode);
+}
+
 export const quarantineIdSchema = z.uuid();
 
 export const quarantineListQuerySchema = z.object({
@@ -34,7 +48,7 @@ export interface QuarantineEntrySummary {
   readonly platformKey: string;
   readonly runId: string;
   readonly pageId: string;
-  readonly recordKind: "catalog" | "pull" | "sale";
+  readonly recordKind: "catalog" | "pull" | "trade";
   readonly recordIndex: number;
   readonly externalId: string | null;
   readonly reasonCode: string;
@@ -74,6 +88,7 @@ export interface QuarantineCounts {
 export type QuarantineRetryOutcomeCode =
   | "resolved"
   | "failed"
+  | "non_retryable"
   | "already_retrying"
   | "already_resolved"
   | "expired"

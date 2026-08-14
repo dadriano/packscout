@@ -4,7 +4,7 @@ import type {
   ProviderConfigurationIdentity,
   ProviderSourceIdentity,
   PullCandidate,
-  SaleCandidate,
+  TradeCandidate,
 } from "./provider-adapter.ts";
 import {
   EventProjectionService,
@@ -15,7 +15,7 @@ const configuration: ProviderConfigurationIdentity = {
   providerId: "provider-a",
   configurationRevisionId: "revision-a",
   platform: "fixture",
-  adapterKey: "fixture-mapper-v1",
+  adapterKey: "fixture-mapper-v2",
 };
 const pullSource: ProviderSourceIdentity = {
   platform: "fixture",
@@ -25,11 +25,11 @@ const pullSource: ProviderSourceIdentity = {
   sourceTimestamp: "2026-08-06T10:00:00.000Z",
   collectedAt: "2026-08-06T10:01:00.000Z",
 };
-const saleSource: ProviderSourceIdentity = {
+const tradeSource: ProviderSourceIdentity = {
   ...pullSource,
-  recordKind: "sale",
+  recordKind: "trade",
   recordIndex: 4,
-  externalId: "sale-1",
+  externalId: "trade-1",
 };
 
 function pull(overrides: Partial<PullCandidate> = {}): PullCandidate {
@@ -43,6 +43,8 @@ function pull(overrides: Partial<PullCandidate> = {}): PullCandidate {
     occurredAt: pullSource.sourceTimestamp,
     value: { amount: 12.345, currency: "USD" },
     valueSource: "provider_event",
+    buybackStatus: null,
+    buybackRefund: null,
     pseudonymizationInputs: [
       {
         role: "owner",
@@ -54,18 +56,19 @@ function pull(overrides: Partial<PullCandidate> = {}): PullCandidate {
   };
 }
 
-function sale(overrides: Partial<SaleCandidate> = {}): SaleCandidate {
+function trade(overrides: Partial<TradeCandidate> = {}): TradeCandidate {
   return {
-    candidateKind: "sale",
-    source: saleSource,
+    candidateKind: "trade",
+    source: tradeSource,
     relationships: [],
     dataQualityEvidence: [],
     eventType: "sale",
     transactionKey: "tx-1",
     packExternalId: "pack-1",
     assetExternalId: "asset-1",
-    occurredAt: saleSource.sourceTimestamp,
+    occurredAt: tradeSource.sourceTimestamp,
     amount: { amount: 40, currency: "USD" },
+    paymentMethod: null,
     pseudonymizationInputs: [
       {
         role: "from",
@@ -88,11 +91,16 @@ function service(providerKey = new Uint8Array(32).fill(9)) {
   );
 }
 
-test("pull projection preserves nullable links, value provenance, and resolvable relationships", () => {
+test("pull projection preserves nullable links, value and buyback evidence, and resolvable relationships", () => {
   const result = service().project({
     configuration,
     source: pullSource,
-    candidates: [pull()],
+    candidates: [
+      pull({
+        buybackStatus: "confirmed",
+        buybackRefund: { amount: 10.5, currency: "USDC" },
+      }),
+    ],
   });
   assert.equal(result.status, "accepted");
   if (result.status !== "accepted") return;
@@ -115,8 +123,15 @@ test("pull projection preserves nullable links, value provenance, and resolvable
   assert.deepEqual(projection.content.value, {
     amountMinor: 1235,
     currency: "USD",
+    minorUnitExponent: 2,
   });
   assert.equal(projection.content.valueSource, "provider_event");
+  assert.equal(projection.content.buybackStatus, "confirmed");
+  assert.deepEqual(projection.content.buybackRefund, {
+    amountMinor: 10_500_000,
+    currency: "USDC",
+    minorUnitExponent: 6,
+  });
   assert.equal(
     JSON.stringify(projection).includes("public-user-name"),
     false,
@@ -136,16 +151,29 @@ test("pull projection preserves nullable links, value provenance, and resolvable
   }
 });
 
-test("sale projection keeps provider type separate from constrained category and accepts nullable money", () => {
+test("trade projection keeps provider type separate from exact category and accepts nullable money", () => {
   const known = service().project({
     configuration,
-    source: saleSource,
-    candidates: [sale({ eventType: "buyback" })],
+    source: tradeSource,
+    candidates: [
+      trade({
+        eventType: "buyback",
+        amount: { amount: 12.345678, currency: "USDC" },
+        paymentMethod: "partial_payment",
+      }),
+    ],
   });
   assert.equal(known.status, "accepted");
   if (known.status === "accepted") {
     assert.equal(known.projections[0]?.content.providerEventType, "buyback");
-    assert.equal(known.projections[0]?.content.eventCategory, "sale");
+    assert.equal(known.projections[0]?.content.eventCategory, "buyback");
+    assert.equal(known.projections[0]?.content.paymentMethod, "partial_payment");
+    assert.deepEqual(known.projections[0]?.content.amount, {
+      amountMinor: 12_345_678,
+      currency: "USDC",
+      minorUnitExponent: 6,
+    });
+    assert.equal(known.projections[0]?.recordKind, "trade");
     assert.equal(
       JSON.stringify(known).includes("0xraw-wallet-address"),
       false,
@@ -153,8 +181,8 @@ test("sale projection keeps provider type separate from constrained category and
   }
   const unknown = service().project({
     configuration,
-    source: saleSource,
-    candidates: [sale({ eventType: "raffle_settlement", amount: null })],
+    source: tradeSource,
+    candidates: [trade({ eventType: "raffle_settlement", amount: null })],
   });
   assert.equal(unknown.status, "accepted");
   if (unknown.status === "accepted") {

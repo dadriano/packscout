@@ -69,6 +69,32 @@ export function normalizeCanonicalTimestamp(
 export interface CanonicalMoney {
   readonly amountMinor: number;
   readonly currency: string;
+  readonly minorUnitExponent: number;
+}
+
+function decimalAmountToMinorUnits(
+  amount: number,
+  minorUnitExponent: number,
+): number | null {
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  const match = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/.exec(amount.toString());
+  if (!match) return null;
+  const fractionalDigits = match[2] ?? "";
+  const scientificExponent = Number(match[3] ?? "0");
+  if (!Number.isSafeInteger(scientificExponent)) return null;
+
+  const digits = BigInt(`${match[1]}${fractionalDigits}`);
+  const scale = scientificExponent - fractionalDigits.length + minorUnitExponent;
+  let rounded: bigint;
+  if (scale >= 0) {
+    rounded = digits * 10n ** BigInt(scale);
+  } else {
+    const divisor = 10n ** BigInt(-scale);
+    const quotient = digits / divisor;
+    const remainder = digits % divisor;
+    rounded = quotient + (remainder * 2n >= divisor ? 1n : 0n);
+  }
+  return rounded <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(rounded) : null;
 }
 
 export function normalizeCanonicalMoney(
@@ -81,25 +107,28 @@ export function normalizeCanonicalMoney(
     `${fieldPath}.currency`,
     128,
   );
-  const isTokenAddress = /^0x[0-9a-fA-F]{40}$/.test(currency);
-  const normalizedCurrency = isTokenAddress ? currency : currency.toUpperCase();
+  const normalizedCurrency = currency.toUpperCase();
+  const minorUnitExponent = normalizedCurrency === "USDC"
+    ? 6
+    : normalizedCurrency === "USD"
+      ? 2
+      : null;
   if (
-    (!isTokenAddress && !/^[A-Z0-9]{2,12}$/.test(normalizedCurrency)) ||
+    minorUnitExponent === null ||
     !Number.isFinite(value.amount) ||
-    value.amount < 0 ||
-    Math.abs(value.amount * 100) > Number.MAX_SAFE_INTEGER
+    value.amount < 0
   ) {
     throw new CanonicalProjectionValidationError(
       "INVALID_MONEY",
       `${fieldPath}.amount`,
     );
   }
-  const amountMinor = Math.floor(value.amount * 100 + 0.5);
-  if (!Number.isSafeInteger(amountMinor)) {
+  const amountMinor = decimalAmountToMinorUnits(value.amount, minorUnitExponent);
+  if (amountMinor === null) {
     throw new CanonicalProjectionValidationError(
       "INVALID_MONEY",
       `${fieldPath}.amount`,
     );
   }
-  return { amountMinor, currency: normalizedCurrency };
+  return { amountMinor, currency: normalizedCurrency, minorUnitExponent };
 }

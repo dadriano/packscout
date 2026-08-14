@@ -117,8 +117,8 @@ async function createHarness() {
   await setup.createProviderSource({
     id: ids.provider,
     organizationId: ids.organization,
-    platformKey: "beezie",
-    displayName: "Beezie",
+    platformKey: "courtyard",
+    displayName: "Courtyard",
     createdAt: now,
   });
   await setup.createConfigRevision({
@@ -126,7 +126,7 @@ async function createHarness() {
     organizationId: ids.organization,
     providerId: ids.provider,
     version: 1,
-    adapterKey: "http-cursor-v1",
+    adapterKey: "http-cursor-v2",
     endpointUrl: "https://provider.example/feed",
     authMode: "none",
     createdByActorKey: "actor:admin",
@@ -159,15 +159,17 @@ async function createHarness() {
     createdAt: now,
   });
   const pull = {
-    platform: "beezie",
-    external_id: "pull-1",
-    pack_external_id: null,
+    stream: "pulls",
+    platform: "courtyard",
+    record_id: "courtyard-pull-1",
+    pack_id: "courtyard-pack-1",
+    card_id: "courtyard-card-1",
     occurred_at: "2026-08-06T11:55:00.000Z",
     collected_at: now.toISOString(),
     data: {
-      tokenId: 15_006,
-      swapValue: 31_000_000,
-      from: "fixture-wallet-a",
+      pulled_by: { user_id: "private-user" },
+      fmv_estimate_usd: 31,
+      proof_of_integrity: "courtyard-card-1",
       rawSecret,
     },
   };
@@ -184,14 +186,15 @@ async function createHarness() {
     requestedCursor: "raw-cursor-in-private-user",
     nextCursor: "raw-cursor-out-0xprivate-wallet",
     hasMore: false,
-    payload: { catalog: [], pulls: [pull], sales: [], rawSecret },
+    payload: { records: [pull], rawSecret },
+    checkpointMode: "provider",
     records: [],
     quarantines: [{
       recordKind: "pull",
       recordIndex: 0,
       externalId: "private-user",
       reasonCode: "MAPPING_REJECTED",
-      fieldPath: "data.tokenId",
+      fieldPath: "data.fmv_estimate_usd",
       sanitizedSummary: "Pull mapping requires review.",
       payload: pull,
     }],

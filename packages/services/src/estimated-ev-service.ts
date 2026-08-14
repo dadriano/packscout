@@ -98,6 +98,10 @@ function nullableFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function isNullableFiniteNumber(value: unknown): boolean {
+  return value === null || nullableFiniteNumber(value) !== null;
+}
+
 function unitBasis(value: unknown): PackScoutEstimatedEvUnitBasis | null {
   return value === "per_draw" || value === "per_pack" ? value : null;
 }
@@ -161,7 +165,13 @@ function inputManifest(input: {
     evInputRevisionId: input.evInput?.revisionId ?? null,
     packPriceValueMinor: nullableSafeInteger(packContent?.priceValueMinor),
     packPriceCurrency: nullableString(packContent?.priceCurrency),
+    packPriceMinorUnitExponent: nullableFiniteNumber(
+      packContent?.priceMinorUnitExponent,
+    ),
     distributionCurrency: nullableString(evContent?.currency),
+    distributionMinorUnitExponent: nullableFiniteNumber(
+      evContent?.minorUnitExponent,
+    ),
     unitBasis: unitBasis(evContent?.unitBasis),
     drawCount: nullableSafeInteger(evContent?.drawCount),
     declaredCoverage: nullableFiniteNumber(record(evContent?.coverage)?.declaredCoverage),
@@ -184,10 +194,12 @@ function calculatorInput(
       ? {
           valueMinor: manifest.packPriceValueMinor,
           currency: manifest.packPriceCurrency,
+          minorUnitExponent: manifest.packPriceMinorUnitExponent,
           sourceRevisionId: manifest.packRevisionId,
         }
       : null,
     distributionCurrency: manifest.distributionCurrency,
+    distributionMinorUnitExponent: manifest.distributionMinorUnitExponent,
     unitBasis: manifest.unitBasis,
     drawCount: manifest.drawCount,
     declaredCoverage: manifest.declaredCoverage,
@@ -242,6 +254,7 @@ function projectionContent(
     calculationFingerprint: fingerprint,
     status: result.status,
     grossValueMinor: result.grossValueMinor,
+    minorUnitExponent: result.minorUnitExponent,
     evPercent: result.evPercent,
     currency: result.currency,
     method: result.method,
@@ -262,11 +275,23 @@ function providerReportedEv(
   const content = record(pack?.content);
   const valueMinor = nullableSafeInteger(content?.providerReportedEvValueMinor);
   const currency = boundedToken(content?.providerReportedEvCurrency, 12);
-  if (!pack || valueMinor === null || valueMinor < 0 || currency === null) return null;
+  const minorUnitExponent = nullableSafeInteger(
+    content?.providerReportedEvMinorUnitExponent,
+  );
+  if (
+    !pack ||
+    valueMinor === null ||
+    valueMinor < 0 ||
+    currency === null ||
+    minorUnitExponent === null ||
+    minorUnitExponent < 0 ||
+    minorUnitExponent > 18
+  ) return null;
   return {
     status: "reported",
     valueMinor,
     currency,
+    minorUnitExponent,
     sourceAt: pack.sourceUpdatedAt.toISOString(),
     sourceRevisionId: pack.revisionId,
   };
@@ -287,12 +312,14 @@ function persistedContent(
   const estimatedValuesAreValid =
     content?.status !== "estimated" ||
     (nullableSafeInteger(content.grossValueMinor) !== null &&
+      content.minorUnitExponent === 2 &&
       nullableFiniteNumber(content.evPercent) !== null &&
       content.currency === "USD" &&
       Array.isArray(reasonCodes) && reasonCodes.length === 0);
   const unavailableValuesAreValid =
     content?.status !== "unavailable" ||
     (content.grossValueMinor === null &&
+      content.minorUnitExponent === null &&
       content.evPercent === null &&
       content.currency === null);
   if (
@@ -316,8 +343,13 @@ function persistedContent(
     !sourceRevisionIds.every((revisionId) => boundedToken(revisionId) !== null) ||
     !currencyTreatmentValues.has(String(priceTreatment)) ||
     !currencyTreatmentValues.has(String(distributionTreatment)) ||
+    !isNullableFiniteNumber(evidence.priceMinorUnitExponent) ||
+    !isNullableFiniteNumber(evidence.distributionMinorUnitExponent) ||
+    evidence.outputMinorUnitExponent !== 2 ||
     evidence.currencyPolicy !== "usd_and_explicit_verified_usd_stablecoins_v1" ||
     !inputManifest ||
+    !isNullableFiniteNumber(inputManifest.packPriceMinorUnitExponent) ||
+    !isNullableFiniteNumber(inputManifest.distributionMinorUnitExponent) ||
     !estimatedValuesAreValid ||
     !unavailableValuesAreValid
   ) {
@@ -335,6 +367,7 @@ function explanation(
     label: content.label,
     status: content.status,
     grossValueMinor: content.grossValueMinor,
+    minorUnitExponent: content.minorUnitExponent,
     evPercent: content.evPercent,
     currency: content.currency,
     unitBasis: basis,

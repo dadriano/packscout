@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -15,6 +16,15 @@ import {
 const execFileAsync = promisify(execFile);
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const schemaPath = fileURLToPath(new URL("./schema.prisma", import.meta.url));
+const baselineMigrationPath = fileURLToPath(
+  new URL("./migrations/20260812000000_clean_baseline/migration.sql", import.meta.url),
+);
+const archiveTriggerMigrationPath = fileURLToPath(
+  new URL("./migrations/20260813590000_add_archive_import_trigger/migration.sql", import.meta.url),
+);
+const providerV2MigrationPath = fileURLToPath(
+  new URL("./migrations/20260814000000_provider_stream_v2_cutover/migration.sql", import.meta.url),
+);
 const prismaExecutable = fileURLToPath(new URL("../../../node_modules/prisma/build/index.js", import.meta.url));
 const adminDatabaseUrl = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL
   ?? `postgresql://${encodeURIComponent(userInfo().username)}@127.0.0.1:5432/postgres`;
@@ -139,7 +149,7 @@ async function seedScopedProvider(prisma: PrismaClient): Promise<void> {
       auth_mode, created_by_actor_key
     ) values (
       '${ids.configuration}', '${ids.organization}', '${ids.provider}', 1,
-      'http-cursor-v1', 'https://provider.example/feed', 'bearer', 'operator:admin'
+      'http-cursor-v2', 'https://provider.example/feed', 'bearer', 'operator:admin'
     )
   `);
 }
@@ -202,6 +212,64 @@ test("migration application fails visibly instead of reporting an incomplete sch
     const catalog = await inspectSchema(disposable.db);
     const manifest = await loadSchemaParityManifest();
     assert.throws(() => assertSchemaParity(catalog, manifest), /schema object counts drifted/);
+  } finally {
+    await disposable.stop();
+  }
+});
+
+test("provider stream V2 cutover rejects legacy source evidence instead of inventing hashes", { concurrency: false }, async () => {
+  const disposable = await createDisposableDatabase();
+  try {
+    await disposable.db.query(await readFile(baselineMigrationPath, "utf8"));
+    await disposable.db.query(await readFile(archiveTriggerMigrationPath, "utf8"));
+    await disposable.db.query(`
+      insert into public.organizations (id, slug, name)
+      values ('${ids.organization}', 'legacy-cutover', 'Legacy Cutover');
+      insert into public.provider_sources (
+        id, organization_id, platform_key, display_name
+      ) values (
+        '${ids.provider}', '${ids.organization}', 'legacy', 'Legacy'
+      );
+      insert into public.provider_config_revisions (
+        id, organization_id, provider_id, version, adapter_key, endpoint_url,
+        auth_mode, created_by_actor_key
+      ) values (
+        '${ids.configuration}', '${ids.organization}', '${ids.provider}', 1,
+        'legacy-v1', 'https://provider.example/feed', 'none', 'operator:test'
+      );
+      insert into public.import_runs (
+        id, organization_id, provider_id, config_revision_id, trigger, state
+      ) values (
+        '${ids.activeRun}', '${ids.organization}', '${ids.provider}',
+        '${ids.configuration}', 'scheduled', 'succeeded'
+      );
+      insert into public.import_pages (
+        id, organization_id, provider_id, run_id, page_number, next_cursor,
+        has_more, payload_hash, record_counts_json, committed_at, expires_at
+      ) values (
+        '${ids.duplicateActiveRun}', '${ids.organization}', '${ids.provider}',
+        '${ids.activeRun}', 1, 'legacy-cursor', false, '${"a".repeat(64)}',
+        '{"catalog":1,"pulls":0,"sales":0}'::jsonb,
+        now(), now() + interval '90 days'
+      );
+      insert into public.source_records (
+        organization_id, provider_id, first_run_id, first_page_id, record_kind,
+        external_id, source_time, collected_at, content_hash, expires_at
+      ) values (
+        '${ids.organization}', '${ids.provider}', '${ids.activeRun}',
+        '${ids.duplicateActiveRun}', 'catalog', 'legacy-record', now(), now(),
+        '${"b".repeat(64)}', now() + interval '90 days'
+      );
+    `);
+    await assert.rejects(
+      disposable.db.query(await readFile(providerV2MigrationPath, "utf8")),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal((error as Error & { code?: string }).code, "P0001");
+        assert.match(error.message, /provider_stream_v2_cutover_requires_empty_source_records/);
+        return true;
+      },
+    );
   } finally {
     await disposable.stop();
   }

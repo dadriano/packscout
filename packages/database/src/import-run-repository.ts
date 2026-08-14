@@ -20,7 +20,8 @@ export interface PersistedImportRun {
   readonly organizationId: string;
   readonly providerId: string;
   readonly configRevisionId: string;
-  readonly trigger: PersistedImportTrigger | "recovery";
+  readonly trigger: PersistedImportTrigger | "recovery" | "archive";
+  readonly archiveSha256: string | null;
   readonly state: PersistedImportRunState;
   readonly requestedCursor: string | null;
   readonly finalCursor: string | null;
@@ -39,6 +40,9 @@ export interface ClaimedImportRun extends PersistedImportRun {
   readonly leaseExpiresAt: Date;
   readonly currentCursor: string | null;
   readonly nextPageNumber: number;
+  readonly committedCursors: readonly string[];
+  readonly committedArchiveUncompressedBytes: number;
+  readonly archiveMaximumElapsedMs: number;
 }
 
 export type RequestImportPersistenceResult =
@@ -50,6 +54,12 @@ export type RequestImportPersistenceResult =
       readonly kind: "revision_conflict";
       readonly activeConfigurationRevisionId: string;
     };
+
+export type RequestArchiveImportPersistenceResult =
+  | { readonly kind: "created"; readonly run: PersistedImportRun }
+  | { readonly kind: "existing"; readonly run: PersistedImportRun }
+  | { readonly kind: "active"; readonly run: PersistedImportRun }
+  | { readonly kind: "not_found" | "provider_unavailable" | "revision_conflict" };
 
 export type ClaimImportPersistenceResult =
   | { readonly kind: "claimed"; readonly run: ClaimedImportRun }
@@ -71,7 +81,8 @@ interface ImportRunRow {
   readonly organization_id: string;
   readonly provider_id: string;
   readonly config_revision_id: string;
-  readonly trigger: PersistedImportTrigger | "recovery";
+  readonly trigger: PersistedImportTrigger | "recovery" | "archive";
+  readonly archive_sha256: string | null;
   readonly state: PersistedImportRunState;
   readonly requested_cursor: string | null;
   readonly final_cursor: string | null;
@@ -114,8 +125,33 @@ function normalizeCounters(counters: Prisma.JsonValue): RunCounters {
   };
 }
 
+const maximumArchiveOperationElapsedMs = 4 * 60 * 60 * 1_000;
+
+function archiveResourceCounters(counters: Prisma.JsonValue): {
+  uncompressedBytes: number;
+  maximumElapsedMs: number;
+} {
+  if (typeof counters !== "object" || counters === null || Array.isArray(counters)) {
+    throw new Error("Archive run resource counters are invalid.");
+  }
+  const uncompressedBytes = counters.archiveUncompressedBytes;
+  const maximumElapsedMs = counters.archiveMaximumElapsedMs;
+  if (
+    typeof uncompressedBytes !== "number" ||
+    !Number.isSafeInteger(uncompressedBytes) ||
+    uncompressedBytes < 0 ||
+    typeof maximumElapsedMs !== "number" ||
+    !Number.isSafeInteger(maximumElapsedMs) ||
+    maximumElapsedMs < 1 ||
+    maximumElapsedMs > maximumArchiveOperationElapsedMs
+  ) {
+    throw new Error("Archive run resource counters are invalid.");
+  }
+  return { uncompressedBytes, maximumElapsedMs };
+}
+
 export class PrismaImportRunRepository {
-  constructor(private readonly database: PackscoutPrismaClient) {}
+  constructor(protected readonly database: PackscoutPrismaClient) {}
 
   async requestRun(input: {
     organizationId: string;
@@ -164,9 +200,11 @@ export class PrismaImportRunRepository {
           provider_id: input.providerId,
           id: provider.active_revision_id,
         },
-        select: { tested_at: true },
+        select: { tested_at: true, source_mode: true },
       });
-      if (!activeRevision?.tested_at) return { kind: "provider_unavailable" };
+      if (!activeRevision?.tested_at || activeRevision.source_mode !== "http") {
+        return { kind: "provider_unavailable" };
+      }
 
       const activeRun = await this.loadActiveRun(
         transaction,
@@ -226,6 +264,218 @@ export class PrismaImportRunRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
+  async requestArchiveRun(input: {
+    organizationId: string;
+    providerId: string;
+    configurationRevisionId: string;
+    runId: string;
+    archiveSha256: string;
+    requestedByActorKey: string;
+    requestedAt: Date;
+    initialCursor: string;
+    maximumElapsedMs: number;
+  }): Promise<RequestArchiveImportPersistenceResult> {
+    if (!/^[0-9a-f]{64}$/.test(input.archiveSha256)) {
+      throw new RangeError("Archive SHA-256 must be a lowercase hexadecimal value.");
+    }
+    if (
+      input.requestedByActorKey.length < 1 ||
+      input.initialCursor.length < 1 ||
+      !Number.isSafeInteger(input.maximumElapsedMs) ||
+      input.maximumElapsedMs < 1 ||
+      input.maximumElapsedMs > maximumArchiveOperationElapsedMs
+    ) {
+      throw new RangeError(
+        "Archive imports require a valid actor, initial cursor, and elapsed-time limit.",
+      );
+    }
+    return this.database.$transaction(async (transaction) => {
+      await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`
+        select id
+        from provider_sources
+        where id = cast(${input.providerId} as uuid)
+          and organization_id = cast(${input.organizationId} as uuid)
+        for update
+      `);
+      const existingRow = await transaction.import_runs.findFirst({
+        where: {
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          archive_sha256: input.archiveSha256,
+        },
+      });
+      if (existingRow) {
+        return existingRow.config_revision_id === input.configurationRevisionId
+          ? { kind: "existing", run: this.toRun(existingRow) }
+          : { kind: "revision_conflict" };
+      }
+
+      const provider = await transaction.provider_sources.findFirst({
+        where: { organization_id: input.organizationId, id: input.providerId },
+        select: { state: true, active_revision_id: true },
+      });
+      if (!provider) return { kind: "not_found" };
+      if (provider.state === "archived") {
+        return { kind: "provider_unavailable" };
+      }
+      const revision = await transaction.provider_config_revisions.findFirst({
+        where: {
+          id: input.configurationRevisionId,
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+        },
+        select: { source_mode: true, endpoint_url: true },
+      });
+      if (
+        !revision ||
+        revision.source_mode !== "archive" ||
+        revision.endpoint_url !== `archive://sha256/${input.archiveSha256}`
+      ) {
+        return { kind: "revision_conflict" };
+      }
+      const activeRun = await this.loadActiveRun(
+        transaction,
+        input.organizationId,
+        input.providerId,
+      );
+      if (activeRun) return { kind: "active", run: activeRun };
+
+      await transaction.import_runs.create({
+        data: {
+          id: input.runId,
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          config_revision_id: input.configurationRevisionId,
+          trigger: "archive",
+          archive_sha256: input.archiveSha256,
+          requested_by_actor_key: input.requestedByActorKey,
+          state: "queued",
+          requested_cursor: input.initialCursor,
+          counters_json: {
+            accepted: 0,
+            duplicate: 0,
+            quarantined: 0,
+            pages: 0,
+            records: 0,
+            requestAttempts: 0,
+            transientRetries: 0,
+            archiveUncompressedBytes: 0,
+            archiveMaximumElapsedMs: input.maximumElapsedMs,
+          },
+          created_at: input.requestedAt,
+        },
+      });
+      await transaction.audit_events.create({
+        data: {
+          organization_id: input.organizationId,
+          actor_key: input.requestedByActorKey,
+          action: "provider.archive_import.request",
+          subject_type: "import_run",
+          subject_id: input.runId,
+          outcome: "success",
+          metadata_json: {
+            providerId: input.providerId,
+            configRevisionId: input.configurationRevisionId,
+            archiveSha256: input.archiveSha256,
+          },
+          occurred_at: input.requestedAt,
+        },
+      });
+      const run = await this.loadRun(transaction, input.organizationId, input.runId);
+      if (!run) throw new Error("Created archive import run could not be loaded.");
+      return { kind: "created", run };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
+  async claimArchiveRun(input: {
+    organizationId: string;
+    runId: string;
+    workerId: string;
+    claimedAt: Date;
+    leaseExpiresAt: Date;
+  }): Promise<ClaimImportPersistenceResult> {
+    this.assertLease(input.workerId, input.claimedAt, input.leaseExpiresAt);
+    return this.database.$transaction(async (transaction) => {
+      const locked = await this.lockRun(transaction, input.organizationId, input.runId);
+      if (!locked) return { kind: "not_found" };
+      const { run } = locked;
+      const canClaim =
+        run.trigger === "archive" &&
+        (run.state === "queued" ||
+          (run.state === "running" &&
+            locked.leaseExpiresAt !== null &&
+            locked.leaseExpiresAt <= input.claimedAt));
+      if (!canClaim) return { kind: "not_claimable", run };
+      return {
+        kind: "claimed",
+        run: await this.persistClaim(transaction, run, input),
+      };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
+  async getArchiveRevision(input: {
+    organizationId: string;
+    providerId: string;
+    configurationRevisionId: string;
+  }): Promise<{ platformKey: string; mappingAdapterKey: string } | null> {
+    const revision = await this.database.provider_config_revisions.findFirst({
+      where: {
+        id: input.configurationRevisionId,
+        organization_id: input.organizationId,
+        provider_id: input.providerId,
+        source_mode: "archive",
+      },
+      select: {
+        mapping_adapter_key: true,
+        provider_sources_provider_config_revisions_provider_idToprovider_sources: {
+          select: { platform_key: true },
+        },
+      },
+    });
+    if (!revision?.mapping_adapter_key) return null;
+    return {
+      platformKey:
+        revision.provider_sources_provider_config_revisions_provider_idToprovider_sources.platform_key,
+      mappingAdapterKey: revision.mapping_adapter_key,
+    };
+  }
+
+  async hasCommittedTerminalPage(input: {
+    organizationId: string;
+    runId: string;
+    pageNumber: number;
+    finalCursor: string;
+  }): Promise<boolean> {
+    if (!Number.isSafeInteger(input.pageNumber) || input.pageNumber < 1) return false;
+    const rows = await this.database.$queryRaw<Array<{ present: boolean }>>(Prisma.sql`
+      select exists (
+        select 1
+        from public.import_pages as page
+        join public.import_runs as run
+          on run.id = page.run_id
+         and run.organization_id = page.organization_id
+        where run.id = cast(${input.runId} as uuid)
+          and run.organization_id = cast(${input.organizationId} as uuid)
+          and page.page_number = ${input.pageNumber}
+          and page.next_cursor = ${input.finalCursor}
+          and page.has_more = false
+          and (
+            run.trigger <> 'archive'::public.import_trigger
+            or (
+              run.started_at is not null
+              and jsonb_typeof(run.counters_json -> 'archiveMaximumElapsedMs') = 'number'
+              and (run.counters_json ->> 'archiveMaximumElapsedMs')::bigint
+                between 1 and ${maximumArchiveOperationElapsedMs}
+              and page.committed_at <= run.started_at +
+                ((run.counters_json ->> 'archiveMaximumElapsedMs')::bigint *
+                  interval '1 millisecond')
+            )
+          )
+      ) as present
+    `);
+    return rows[0]?.present ?? false;
+  }
+
   async claimRun(input: {
     organizationId: string;
     runId: string;
@@ -243,10 +493,10 @@ export class PrismaImportRunRepository {
       if (!locked) return { kind: "not_found" };
       const { run } = locked;
       const canClaim =
-        run.state === "queued" ||
+        run.trigger !== "archive" && (run.state === "queued" ||
         (run.state === "running" &&
           locked.leaseExpiresAt !== null &&
-          locked.leaseExpiresAt <= input.claimedAt);
+          locked.leaseExpiresAt <= input.claimedAt));
       if (!canClaim) return { kind: "not_claimable", run };
       return {
         kind: "claimed",
@@ -265,12 +515,15 @@ export class PrismaImportRunRepository {
       const [candidate] = await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`
         select id
         from import_runs
-        where state = 'queued'::import_run_state
-           or (
+        where trigger <> 'archive'::import_trigger
+          and (
+            state = 'queued'::import_run_state
+            or (
              state = 'running'::import_run_state
              and lease_expires_at is not null
              and lease_expires_at <= ${input.claimedAt}
-           )
+            )
+          )
         order by created_at asc, id asc
         for update skip locked
         limit 1
@@ -423,37 +676,86 @@ export class PrismaImportRunRepository {
       leaseExpiresAt: Date;
     },
   ): Promise<ClaimedImportRun> {
-    await database.import_runs.updateMany({
-      where: {
-        organization_id: run.organizationId,
-        id: run.id,
-      },
-      data: {
-        state: "running",
-        started_at: run.startedAt ?? input.claimedAt,
-        heartbeat_at: input.claimedAt,
-        lease_owner: input.workerId,
-        lease_expires_at: input.leaseExpiresAt,
-        attempt: { increment: 1 },
-      },
-    });
-    const checkpoint = await database.provider_cursor_checkpoints.findFirst({
-      where: {
-        organization_id: run.organizationId,
-        provider_id: run.providerId,
-        config_revision_id: run.configRevisionId,
-      },
-      select: { cursor: true },
-    });
+    if (run.trigger === "archive") {
+      await database.$executeRaw(Prisma.sql`
+        update public.import_runs
+        set state = 'running'::public.import_run_state,
+            started_at = coalesce(started_at, clock_timestamp()),
+            heartbeat_at = ${input.claimedAt},
+            lease_owner = ${input.workerId},
+            lease_expires_at = ${input.leaseExpiresAt},
+            attempt = attempt + 1
+        where organization_id = cast(${run.organizationId} as uuid)
+          and id = cast(${run.id} as uuid)
+      `);
+    } else {
+      await database.import_runs.updateMany({
+        where: {
+          organization_id: run.organizationId,
+          id: run.id,
+        },
+        data: {
+          state: "running",
+          started_at: run.startedAt ?? input.claimedAt,
+          heartbeat_at: input.claimedAt,
+          lease_owner: input.workerId,
+          lease_expires_at: input.leaseExpiresAt,
+          attempt: { increment: 1 },
+        },
+      });
+    }
+    const checkpoint = run.trigger === "archive"
+      ? null
+      : await database.provider_cursor_checkpoints.findFirst({
+          where: {
+            organization_id: run.organizationId,
+            provider_id: run.providerId,
+            config_revision_id: run.configRevisionId,
+          },
+          select: { cursor: true },
+        });
     const claimed = await this.loadRun(database, run.organizationId, run.id);
     if (!claimed) throw new Error("Claimed import run could not be loaded.");
+    const claimedResourceCounters = run.trigger === "archive"
+      ? await database.import_runs.findFirst({
+          where: { id: run.id, organization_id: run.organizationId },
+          select: { counters_json: true },
+        })
+      : null;
+    const committedPages = await database.import_pages.findMany({
+      where: {
+        organization_id: run.organizationId,
+        run_id: run.id,
+      },
+      select: { requested_cursor: true, next_cursor: true },
+      orderBy: [{ page_number: "asc" }, { id: "asc" }],
+      take: 100_001,
+    });
+    const committedCursors = [...new Set(
+      committedPages.flatMap(({ requested_cursor, next_cursor }) =>
+        [requested_cursor, next_cursor].filter(
+          (cursor): cursor is string => cursor !== null,
+        ),
+      ),
+    )];
+    const archiveResources = run.trigger === "archive"
+      ? archiveResourceCounters(claimedResourceCounters?.counters_json ?? null)
+      : null;
     return {
       ...claimed,
       state: "running",
       workerId: input.workerId,
       leaseExpiresAt: input.leaseExpiresAt,
-      currentCursor: checkpoint?.cursor ?? null,
+      currentCursor:
+        run.trigger === "archive"
+          ? claimed.finalCursor ?? claimed.requestedCursor
+          : checkpoint?.cursor ?? null,
       nextPageNumber: claimed.counters.pages + 1,
+      committedCursors,
+      committedArchiveUncompressedBytes:
+        archiveResources?.uncompressedBytes ?? 0,
+      archiveMaximumElapsedMs:
+        archiveResources?.maximumElapsedMs ?? maximumArchiveOperationElapsedMs,
     };
   }
 
@@ -517,6 +819,7 @@ export class PrismaImportRunRepository {
       providerId: row.provider_id,
       configRevisionId: row.config_revision_id,
       trigger: row.trigger,
+      archiveSha256: row.archive_sha256,
       state: row.state,
       requestedCursor: row.requested_cursor,
       finalCursor: row.final_cursor,

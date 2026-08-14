@@ -28,13 +28,13 @@ const pageQuerySchema = z.object({
 const runListQuerySchema = pageQuerySchema.extend({
   providerId: providerIdSchema.optional(),
   state: z.enum(["queued", "running", "succeeded", "incomplete", "failed"]).optional(),
-  trigger: z.enum(["scheduled", "manual", "recovery"]).optional(),
+  trigger: z.enum(["scheduled", "manual", "recovery", "archive"]).optional(),
 }).strict();
 const quarantineListQuerySchema = pageQuerySchema.extend({
   providerId: providerIdSchema.optional(),
   runId: runIdSchema.optional(),
   state: z.enum(["open", "retrying", "resolved", "expired"]).optional(),
-  recordKind: z.enum(["catalog", "pull", "sale"]).optional(),
+  recordKind: z.enum(["catalog", "pull", "trade"]).optional(),
   reasonCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/).optional(),
 }).strict();
 const manualImportRequestSchema = z.object({
@@ -69,7 +69,7 @@ export interface ImportRunCountersView {
   readonly pages: number;
   readonly catalog: number;
   readonly pulls: number;
-  readonly sales: number;
+  readonly trades: number;
   readonly accepted: number;
   readonly unchanged: number;
   readonly revised: number;
@@ -84,7 +84,7 @@ export interface ImportRunSummaryView {
   readonly platformKey: string;
   readonly configurationRevisionId: string;
   readonly configurationVersion: number;
-  readonly trigger: "scheduled" | "manual" | "recovery";
+  readonly trigger: "scheduled" | "manual" | "recovery" | "archive";
   readonly state: RunState;
   readonly requestedAt: string;
   readonly startedAt: string | null;
@@ -112,7 +112,7 @@ export interface ImportRunDetailView extends ImportRunSummaryView {
     readonly committedAt: string;
     readonly catalog: number;
     readonly pulls: number;
-    readonly sales: number;
+    readonly trades: number;
     readonly accepted: number;
     readonly unchanged: number;
     readonly revised: number;
@@ -145,7 +145,7 @@ export interface ImportOperationsRouterDependencies {
       limit: number;
       providerId?: string;
       state?: RunState;
-      trigger?: "scheduled" | "manual" | "recovery";
+      trigger?: "scheduled" | "manual" | "recovery" | "archive";
     }): Promise<Paginated<ImportRunSummaryView>>;
     getRun(input: {
       organizationId: string;
@@ -170,8 +170,8 @@ export interface ImportOperationsRouterDependencies {
     }): Promise<{
       run: Pick<
         ImportRunSummaryView,
-        "id" | "providerId" | "configurationRevisionId" | "trigger" | "state"
-      >;
+        "id" | "providerId" | "configurationRevisionId" | "state"
+      > & { readonly trigger: "manual" };
       deduplicated: boolean;
     }>;
   };
@@ -225,7 +225,7 @@ function sanitizeCounters(counters: ImportRunCountersView): ImportRunCountersVie
     pages: counters.pages,
     catalog: counters.catalog,
     pulls: counters.pulls,
-    sales: counters.sales,
+    trades: counters.trades,
     accepted: counters.accepted,
     unchanged: counters.unchanged,
     revised: counters.revised,
@@ -301,7 +301,7 @@ function sanitizeRunDetail(run: ImportRunDetailView): ImportRunDetailView {
       committedAt: page.committedAt,
       catalog: page.catalog,
       pulls: page.pulls,
-      sales: page.sales,
+      trades: page.trades,
       accepted: page.accepted,
       unchanged: page.unchanged,
       revised: page.revised,

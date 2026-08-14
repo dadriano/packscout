@@ -91,6 +91,7 @@ export class PrismaProviderScheduleRepository {
           and sources.next_run_at is not null
           and sources.next_run_at <= ${input.now}
           and revisions.tested_at is not null
+          and revisions.source_mode = 'http'::provider_source_mode
           and (
             schedules.provider_id is null
             or schedules.config_revision_id <> sources.active_revision_id
@@ -340,6 +341,7 @@ export class PrismaProviderHealthRepository {
       where: {
         organization_id: input.organizationId,
         provider_id: input.providerId,
+        source_mode: "http",
         ...(provider.active_revision_id ? { id: provider.active_revision_id } : {}),
       },
       orderBy: [{ version: "desc" }, { id: "desc" }],
@@ -360,6 +362,7 @@ export class PrismaProviderHealthRepository {
           where: {
             organization_id: input.organizationId,
             provider_id: input.providerId,
+            trigger: { not: "archive" },
           },
           orderBy: [{ created_at: "desc" }, { id: "desc" }],
         }),
@@ -367,6 +370,7 @@ export class PrismaProviderHealthRepository {
           where: {
             organization_id: input.organizationId,
             provider_id: input.providerId,
+            trigger: { not: "archive" },
             state: "incomplete",
           },
           orderBy: [{ finished_at: "desc" }, { id: "desc" }],
@@ -376,6 +380,7 @@ export class PrismaProviderHealthRepository {
           where: {
             organization_id: input.organizationId,
             provider_id: input.providerId,
+            trigger: { not: "archive" },
             reached_provider_head: true,
             finished_at: { not: null },
           },

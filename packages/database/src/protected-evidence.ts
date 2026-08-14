@@ -1,5 +1,6 @@
 import { PACKSCOUT_TRANSACTION_OPTIONS } from "./database.ts";
 import type { PackscoutPrismaClient } from "./database.ts";
+import { decodeDatabaseSafeProtectedJsonEvidence } from "./protected-json-evidence.ts";
 
 export interface RawEvidenceAccessContext {
   organizationId: string;
@@ -52,7 +53,7 @@ export class ProtectedEvidenceRepository {
       return {
         pageId: page.id,
         runId: page.run_id,
-        payload: page.payload_json,
+        payload: decodeDatabaseSafeProtectedJsonEvidence(page.payload_json),
         payloadHash: page.payload_hash,
         expiresAt: page.expires_at,
         payloadExpiredAt: page.payload_expired_at,

@@ -9,7 +9,7 @@ test("provider create defaults to five-minute imports and fifteen-minute stalene
   const parsed = createProviderRequestSchema.parse({
     platformKey: "beezie",
     displayName: "Beezie",
-    adapterKey: "http-cursor-v1",
+    adapterKey: "http-cursor-v2",
     endpoint: "https://provider.example/feed",
     auth: { mode: "none" },
   });
@@ -22,7 +22,7 @@ test("provider create rejects executable identities, invalid timing, and missing
     {
       platformKey: "../beezie",
       displayName: "Beezie",
-      adapterKey: "http-cursor-v1",
+      adapterKey: "http-cursor-v2",
       endpoint: "https://provider.example/feed",
       auth: { mode: "none" },
     },
@@ -36,7 +36,7 @@ test("provider create rejects executable identities, invalid timing, and missing
     {
       platformKey: "beezie",
       displayName: "Beezie",
-      adapterKey: "http-cursor-v1",
+      adapterKey: "http-cursor-v2",
       endpoint: "https://provider.example/feed",
       scheduleSeconds: 0,
       staleAfterSeconds: 0,
@@ -45,7 +45,7 @@ test("provider create rejects executable identities, invalid timing, and missing
     {
       platformKey: "beezie",
       displayName: "Beezie",
-      adapterKey: "http-cursor-v1",
+      adapterKey: "http-cursor-v2",
       endpoint: "https://provider.example/feed",
       auth: { mode: "bearer" },
     },
@@ -57,7 +57,7 @@ test("provider create rejects executable identities, invalid timing, and missing
 test("bearer replacement requires exactly one explicit secret decision", () => {
   const base = {
     expectedRevisionId: "00000000-0000-4000-8000-000000000001",
-    adapterKey: "http-cursor-v1",
+    adapterKey: "http-cursor-v2",
     endpoint: "https://provider.example/feed",
     scheduleSeconds: 300,
     staleAfterSeconds: 900,

@@ -6,7 +6,7 @@ import type {
 import { requestJson } from "./client";
 
 export type ImportRunState = "queued" | "running" | "succeeded" | "incomplete" | "failed";
-export type ImportRunTrigger = "scheduled" | "manual" | "recovery";
+export type ImportRunTrigger = "scheduled" | "manual" | "recovery" | "archive";
 
 export interface ProviderOperationSummary {
   providerId: string;
@@ -34,7 +34,7 @@ export interface ImportRunCounters {
   pages: number;
   catalog: number;
   pulls: number;
-  sales: number;
+  trades: number;
   accepted: number;
   unchanged: number;
   revised: number;
@@ -70,7 +70,7 @@ export interface ImportRunDetail extends ImportRunSummary {
     committedAt: string;
     catalog: number;
     pulls: number;
-    sales: number;
+    trades: number;
     accepted: number;
     unchanged: number;
     revised: number;
@@ -119,7 +119,9 @@ export function requestManualImport(
   providerId: string,
   expectedConfigurationRevisionId: string,
 ): Promise<{
-  run: Pick<ImportRunSummary, "id" | "providerId" | "configurationRevisionId" | "trigger" | "state">;
+  run: Pick<ImportRunSummary, "id" | "providerId" | "configurationRevisionId" | "state"> & {
+    trigger: "manual";
+  };
   deduplicated: boolean;
 }> {
   return requestJson(`/data-providers/${encodeURIComponent(providerId)}/import-runs`, {

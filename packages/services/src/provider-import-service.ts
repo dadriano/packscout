@@ -219,6 +219,15 @@ function isOwnershipError(error: unknown): boolean {
   );
 }
 
+function isCursorSafetyError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "CURSOR_SAFETY_VIOLATION"
+  );
+}
+
 export class ProviderImportService {
   readonly #sleeper: ProviderImportSleeper;
   readonly #random: ProviderImportRandom;
@@ -321,6 +330,14 @@ export class ProviderImportService {
       return { run: result.run, coalesced: false };
     }
     if (result.kind === "active") {
+      if (result.run.trigger !== input.trigger) {
+        throw new ProviderImportServiceError(
+          "IMPORT_TRIGGER_CONFLICT",
+          "Another provider import is already active.",
+          409,
+          result.run,
+        );
+      }
       return { run: result.run, coalesced: true };
     }
     if (result.kind === "revision_conflict") {
@@ -432,14 +449,31 @@ export class ProviderImportService {
       return this.finishFailure(run, failure);
     }
 
+    if (run.currentCursor !== null && run.nextPageNumber > 1) {
+      const terminalPageCommitted = await this.dependencies.runs
+        .hasCommittedTerminalPage({
+          organizationId: run.organizationId,
+          runId: run.id,
+          pageNumber: run.nextPageNumber - 1,
+          finalCursor: run.currentCursor,
+        });
+      if (terminalPageCommitted) {
+        return this.finishSuccess(
+          run,
+          run.counters.quarantined > 0 ? "incomplete" : "succeeded",
+        );
+      }
+    }
+
     let cursor = run.currentCursor;
     let pageNumber = run.nextPageNumber;
-    const seenCursors = new Set<string>();
+    const seenCursors = new Set<string>(run.committedCursors);
     if (cursor !== null) seenCursors.add(cursor);
+    const runStartedAt = run.startedAt ?? claimedAt;
     while (true) {
       if (
         pageNumber > this.#maximumPages ||
-        this.dependencies.clock.now().getTime() - claimedAt.getTime() >
+        this.dependencies.clock.now().getTime() - runStartedAt.getTime() >
           this.#maximumRunDurationMs
       ) {
         return this.finishFailure(run, {
@@ -492,23 +526,30 @@ export class ProviderImportService {
           workerId: run.workerId,
           pageNumber,
           requestedCursor: cursor,
-          nextCursor: fetched.page.rawPage.next_cursor,
-          hasMore: fetched.page.rawPage.has_more,
+          nextCursor: fetched.page.page.nextCursor,
+          hasMore: fetched.page.page.hasMore,
           payload: fetched.page.rawPage,
+          checkpointMode: "provider",
           records: planned.records,
           quarantines: planned.quarantines,
           committedAt: this.dependencies.clock.now(),
         });
       } catch (error) {
         if (isOwnershipError(error)) this.throwOwnershipLost();
+        if (isCursorSafetyError(error)) {
+          return this.finishFailure(run, {
+            code: "IMPORT_CURSOR_SAFETY_FAILED",
+            summary: "Provider pagination failed a cursor safety check.",
+          });
+        }
         return this.finishFailure(run, {
           code: "IMPORT_PERSISTENCE_FAILED",
           summary: "Provider page could not be durably committed.",
         });
       }
-      const nextCursor = fetched.page.rawPage.next_cursor;
+      const nextCursor = fetched.page.page.nextCursor;
       cursor = nextCursor;
-      if (!fetched.page.rawPage.has_more) {
+      if (!fetched.page.page.hasMore) {
         return this.finishSuccess(
           run,
           committed.counters.quarantined > 0 ? "incomplete" : "succeeded",

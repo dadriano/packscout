@@ -10,14 +10,17 @@ import {
 
 test("provider lifecycle synonyms retain raw evidence and map to one category", () => {
   const cases = [
-    [" List ", "listed"],
-    ["listing", "listed"],
-    ["unlist", "unlisted"],
-    ["UNLISTING", "unlisted"],
-    ["buyback", "sale"],
+    [" List ", "list"],
+    ["listing", "list"],
+    ["unlist", "unlist"],
+    ["UNLISTING", "unlist"],
+    ["buyback", "buyback"],
     ["Sold", "sale"],
     ["minted", "mint"],
-    ["Shipped", "transfer"],
+    ["burned", "burn"],
+    ["transferred", "transfer"],
+    ["swapped", "swap"],
+    ["Shipped", "ship"],
     ["provider-new-vocabulary", "other"],
   ] as const;
 

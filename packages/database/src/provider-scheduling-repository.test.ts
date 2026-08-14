@@ -35,7 +35,7 @@ test("database claims serialize workers, preserve cadence, and recover expired l
         organization_id: organizationId,
         provider_id: providerId,
         version: 1,
-        adapter_key: "http-cursor-v1",
+        adapter_key: "http-cursor-v2",
         endpoint_url: "https://provider.example/feed",
         auth_mode: "none",
         schedule_seconds: 300,
@@ -273,6 +273,125 @@ test("provider health mutations serialize and remain tenant scoped", async () =>
         "code" in error &&
         error.code === "TENANT_SCOPE_VIOLATION",
     );
+  } finally {
+    await context.close();
+  }
+});
+
+test("archive history does not affect live health while an active archive remains visible", async () => {
+  const context = await createMigratedTestDatabase();
+  const organizationId = "12000000-0000-4000-8000-000000000001";
+  const providerId = "22000000-0000-4000-8000-000000000001";
+  const httpRevisionId = "32000000-0000-4000-8000-000000000001";
+  const archiveRevisionId = "32000000-0000-4000-8000-000000000002";
+  const liveRunId = "42000000-0000-4000-8000-000000000001";
+  try {
+    await context.client.organizations.create({
+      data: { id: organizationId, slug: "archive-health", name: "Archive Health" },
+    });
+    await context.client.provider_sources.create({
+      data: {
+        id: providerId,
+        organization_id: organizationId,
+        platform_key: "collector_crypt",
+        display_name: "Collector Crypt",
+      },
+    });
+    await context.client.provider_config_revisions.createMany({
+      data: [
+        {
+          id: httpRevisionId,
+          organization_id: organizationId,
+          provider_id: providerId,
+          version: 1,
+          adapter_key: "http-cursor-v2",
+          endpoint_url: "https://provider.example/feed",
+          auth_mode: "none",
+          created_by_actor_key: "actor:test",
+        },
+        {
+          id: archiveRevisionId,
+          organization_id: organizationId,
+          provider_id: providerId,
+          version: 2,
+          adapter_key: "provider-archive-v2",
+          mapping_adapter_key: "collector-crypt-v2",
+          actor_pseudonym_key_fingerprint: "a".repeat(64),
+          archive_importer_build_sha: "b".repeat(40),
+          endpoint_url: `archive://sha256/${"c".repeat(64)}`,
+          auth_mode: "none",
+          schedule_seconds: 60,
+          stale_after_seconds: 1,
+          source_mode: "archive",
+          created_by_actor_key: "actor:test",
+        },
+      ],
+    });
+    const liveFinishedAt = new Date("2026-08-06T10:00:00.000Z");
+    await context.client.import_runs.createMany({
+      data: [
+        {
+          id: liveRunId,
+          organization_id: organizationId,
+          provider_id: providerId,
+          config_revision_id: httpRevisionId,
+          trigger: "scheduled",
+          state: "succeeded",
+          reached_provider_head: true,
+          started_at: new Date("2026-08-06T09:59:00.000Z"),
+          finished_at: liveFinishedAt,
+          created_at: new Date("2026-08-06T09:58:00.000Z"),
+        },
+        {
+          id: "42000000-0000-4000-8000-000000000002",
+          organization_id: organizationId,
+          provider_id: providerId,
+          config_revision_id: archiveRevisionId,
+          trigger: "archive",
+          archive_sha256: "c".repeat(64),
+          requested_by_actor_key: "actor:archive",
+          state: "succeeded",
+          reached_provider_head: true,
+          started_at: new Date("2026-08-06T11:59:00.000Z"),
+          finished_at: new Date("2026-08-06T12:00:00.000Z"),
+          created_at: new Date("2026-08-06T11:58:00.000Z"),
+        },
+        {
+          id: "42000000-0000-4000-8000-000000000003",
+          organization_id: organizationId,
+          provider_id: providerId,
+          config_revision_id: archiveRevisionId,
+          trigger: "archive",
+          archive_sha256: "d".repeat(64),
+          requested_by_actor_key: "actor:archive",
+          state: "incomplete",
+          finished_at: new Date("2026-08-06T12:01:00.000Z"),
+          created_at: new Date("2026-08-06T12:00:30.000Z"),
+        },
+        {
+          id: "42000000-0000-4000-8000-000000000004",
+          organization_id: organizationId,
+          provider_id: providerId,
+          config_revision_id: archiveRevisionId,
+          trigger: "archive",
+          archive_sha256: "e".repeat(64),
+          requested_by_actor_key: "actor:archive",
+          state: "queued",
+          created_at: new Date("2026-08-06T12:02:00.000Z"),
+        },
+      ],
+    });
+
+    const health = await new PrismaProviderHealthRepository(
+      context.client,
+    ).loadHealthEvidence({ organizationId, providerId });
+    assert.equal(health?.configRevisionId, httpRevisionId);
+    assert.equal(health?.activeRun?.id, "42000000-0000-4000-8000-000000000004");
+    assert.equal(health?.activeRun?.state, "queued");
+    assert.equal(health?.latestRun?.id, liveRunId);
+    assert.equal(health?.latestIncompleteRunId, null);
+    assert.equal(health?.lastAttemptedAt?.toISOString(), "2026-08-06T09:59:00.000Z");
+    assert.equal(health?.lastHeadReachedAt?.getTime(), liveFinishedAt.getTime());
   } finally {
     await context.close();
   }

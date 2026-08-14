@@ -24,7 +24,7 @@ const provider: ProviderConfigurationSummary = {
   latestRevision: {
     id: "00000000-0000-4000-8000-000000000021",
     version: 1,
-    adapterKey: "cursor-http",
+    adapterKey: "http-cursor-v2",
     endpoint: "https://feed.packscout.test/cards",
     endpointHost: "feed.packscout.test",
     authMode: "none",
@@ -96,7 +96,7 @@ test("provider form creates a draft from normalized form values and navigates to
   await act(async () => {
     changeControl(renderer, "provider-name", "Fanatics cards");
     changeControl(renderer, "provider-platform", "fanatics");
-    changeControl(renderer, "provider-adapter", "cursor-http");
+    changeControl(renderer, "provider-adapter", "http-cursor-v2");
     changeControl(renderer, "provider-endpoint", "https://feed.packscout.test/cards");
   });
   assert.match(pageText(renderer), /Unsaved changes/);
@@ -115,7 +115,7 @@ test("provider form creates a draft from normalized form values and navigates to
   assert.deepEqual(JSON.parse(String(requests[0]?.init?.body)), {
     displayName: "Fanatics cards",
     platformKey: "fanatics",
-    adapterKey: "cursor-http",
+    adapterKey: "http-cursor-v2",
     endpoint: "https://feed.packscout.test/cards",
     auth: { mode: "none" },
     scheduleSeconds: 300,

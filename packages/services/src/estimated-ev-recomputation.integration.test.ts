@@ -123,6 +123,19 @@ function projections(
   return result.projections;
 }
 
+function catalogEvidence(candidateSource: ProviderSourceIdentity, page: number) {
+  return {
+    stream: "catalog" as const,
+    platform: candidateSource.platform,
+    entity: "pack" as const,
+    record_id: candidateSource.externalId,
+    first_seen_at: candidateSource.sourceTimestamp,
+    occurred_at: candidateSource.sourceTimestamp,
+    collected_at: candidateSource.collectedAt,
+    data: { page },
+  };
+}
+
 async function setup() {
   const harness = await createMigratedTestDatabase();
   const setupRepository = new PipelineSetupRepository(harness.database);
@@ -186,6 +199,7 @@ async function commit(
     requestedCursor: page === 1 ? null : `cursor-${page - 1}`,
     nextCursor: `cursor-${page}`,
     hasMore: true,
+    checkpointMode: "provider",
     payload: { page },
     records: [
       {
@@ -193,7 +207,7 @@ async function commit(
         externalId: candidateSource.externalId,
         sourceTime: new Date(candidateSource.sourceTimestamp),
         collectedAt: new Date(candidateSource.collectedAt),
-        payload: { page },
+        payload: catalogEvidence(candidateSource, page),
         projections: projections(candidateSource, candidates),
       },
     ],

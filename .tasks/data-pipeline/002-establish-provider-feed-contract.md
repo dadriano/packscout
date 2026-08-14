@@ -1,11 +1,13 @@
 # Task: Establish the Provider Feed Contract
 
+> **Superseded implementation artifact (2026-08-14).** Historical aggregate V1/eight-provider evidence only; do not build it. Use the record-stream V2 contract in [`docs/provider-data-contract-v2.md`](../../docs/provider-data-contract-v2.md).
+
 **ID:** data-pipeline/002  
 **Feature PRD:** [Data Pipeline](./_index.md)  
 **Depends on:** none  
 **Blocks:** [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Estimated scope:** medium  
-**Status:** done
+**Status:** done (historical artifact; superseded by V2)
 
 ## Objective
 

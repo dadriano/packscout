@@ -10,7 +10,7 @@ import type {
   ProviderRelationshipKey,
   PseudonymousActorInput,
   PullCandidate,
-  SaleCandidate,
+  TradeCandidate,
 } from "./provider-adapter.ts";
 import type {
   ProviderCanonicalProjectionCommand,
@@ -23,7 +23,7 @@ import {
   type CanonicalTradeLifecycleCategory,
 } from "./provider-stream-normalization.ts";
 
-export type CanonicalSaleCategory = CanonicalTradeLifecycleCategory;
+export type CanonicalTradeCategory = CanonicalTradeLifecycleCategory;
 
 export interface ProviderActorPseudonymizer {
   pseudonymize(input: {
@@ -95,7 +95,7 @@ function invalid(
 }
 
 function actorKeys(
-  candidate: PullCandidate | SaleCandidate,
+  candidate: PullCandidate | TradeCandidate,
   providerId: string,
   pseudonymizer: ProviderActorPseudonymizer,
 ): Readonly<Record<PseudonymousActorInput["role"], string>> {
@@ -143,7 +143,7 @@ function relationshipCommand(
 }
 
 function relationshipsForEvent(
-  candidate: PullCandidate | SaleCandidate,
+  candidate: PullCandidate | TradeCandidate,
 ): readonly ProviderCanonicalRelationshipCommand[] {
   const relationships = candidate.relationships
     .map(relationshipCommand)
@@ -187,7 +187,7 @@ function relationshipsForEvent(
   return Object.freeze([...unique.values()]);
 }
 
-function qualityEvidence(candidate: PullCandidate | SaleCandidate) {
+function qualityEvidence(candidate: PullCandidate | TradeCandidate) {
   return candidate.dataQualityEvidence.map((evidence) => ({
     code: normalizeCanonicalIdentity(evidence.code, "quality.code", 128),
     severity: evidence.severity,
@@ -196,7 +196,7 @@ function qualityEvidence(candidate: PullCandidate | SaleCandidate) {
 }
 
 function commonProjection(
-  candidate: PullCandidate | SaleCandidate,
+  candidate: PullCandidate | TradeCandidate,
   providerId: string,
   adapterKey: string,
   pseudonymizer: ProviderActorPseudonymizer,
@@ -240,7 +240,10 @@ export class EventProjectionService implements ProviderProjectionPort {
       return invalid("EVENT_CANDIDATE_SET_INVALID", "candidates");
     }
     const [candidate] = input.candidates;
-    if (!candidate || (candidate.candidateKind !== "pull" && candidate.candidateKind !== "sale")) {
+    if (
+      !candidate ||
+      (candidate.candidateKind !== "pull" && candidate.candidateKind !== "trade")
+    ) {
       return invalid("EVENT_CANDIDATE_KIND_INVALID", "candidates[0].candidateKind");
     }
     if (
@@ -281,19 +284,28 @@ export class EventProjectionService implements ProviderProjectionPort {
                   "valueSource",
                   128,
                 ),
+                buybackStatus: normalizeOptionalText(
+                  candidate.buybackStatus,
+                  "buybackStatus",
+                  128,
+                ),
+                buybackRefund: normalizeCanonicalMoney(
+                  candidate.buybackRefund,
+                  "buybackRefund",
+                ),
                 actorKeys: common.actors,
               },
             }
           : {
               platformKey: input.source.platform,
-              recordKind: "sale",
+              recordKind: "trade",
               externalId: common.externalId,
               sourceUpdatedAt: common.occurredAt,
               sourceCollectedAt: common.collectedAt,
               relationships: common.relationships,
               provenance: common.provenance,
               content: {
-                eventKind: "sale",
+                eventKind: "trade",
                 providerEventType: normalizeCanonicalIdentity(
                   candidate.eventType,
                   "eventType",
@@ -312,6 +324,11 @@ export class EventProjectionService implements ProviderProjectionPort {
                 packExternalId: candidate.packExternalId ?? null,
                 assetExternalId: candidate.assetExternalId,
                 amount: normalizeCanonicalMoney(candidate.amount, "amount"),
+                paymentMethod: normalizeOptionalText(
+                  candidate.paymentMethod,
+                  "paymentMethod",
+                  128,
+                ),
                 actorKeys: common.actors,
               },
             };

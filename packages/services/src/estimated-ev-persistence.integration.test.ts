@@ -120,6 +120,22 @@ function projectCatalog(
   return result.projections;
 }
 
+function catalogEvidence(
+  candidateSource: ProviderSourceIdentity,
+  data: Record<string, string | number>,
+) {
+  return {
+    stream: "catalog" as const,
+    platform: candidateSource.platform,
+    entity: "pack" as const,
+    record_id: candidateSource.externalId,
+    first_seen_at: candidateSource.sourceTimestamp,
+    occurred_at: candidateSource.sourceTimestamp,
+    collected_at: candidateSource.collectedAt,
+    data,
+  };
+}
+
 async function setupHarness(
   operational?: ConstructorParameters<typeof PackScoutEstimatedEvService>[1],
 ) {
@@ -181,6 +197,7 @@ async function commitCatalog(input: {
     requestedCursor: input.pageNumber === 1 ? null : `cursor-${input.pageNumber - 1}`,
     nextCursor: `cursor-${input.pageNumber}`,
     hasMore: true,
+    checkpointMode: "provider",
     payload: {
       page: input.pageNumber,
       raw_provider_blob: "expires-with-source-evidence",
@@ -192,7 +209,9 @@ async function commitCatalog(input: {
         externalId: input.candidateSource.externalId,
         sourceTime: new Date(input.candidateSource.sourceTimestamp),
         collectedAt: new Date(input.candidateSource.collectedAt),
-        payload: { raw_provider_blob: "expires-with-source-evidence" },
+        payload: catalogEvidence(input.candidateSource, {
+          raw_provider_blob: "expires-with-source-evidence",
+        }),
         projections: projectCatalog(input.candidateSource, input.candidates),
       },
     ],
@@ -240,6 +259,7 @@ test("estimated EV revisions are source-linked, explainable, idempotent, and res
       {
         status: first.explanation.status,
         grossValueMinor: first.explanation.grossValueMinor,
+        minorUnitExponent: first.explanation.minorUnitExponent,
         evPercent: first.explanation.evPercent,
         unitLabel: first.explanation.unitLabel,
         methodVersion: first.explanation.methodVersion,
@@ -248,6 +268,7 @@ test("estimated EV revisions are source-linked, explainable, idempotent, and res
       {
         status: "estimated",
         grossValueMinor: 300,
+        minorUnitExponent: 2,
         evPercent: 30,
         unitLabel: "per pack",
         methodVersion: PACKSCOUT_ESTIMATED_EV_METHOD_VERSION,
@@ -258,6 +279,7 @@ test("estimated EV revisions are source-linked, explainable, idempotent, and res
       status: "reported",
       valueMinor: 400,
       currency: "USD",
+      minorUnitExponent: 2,
       sourceAt: initialSource.sourceTimestamp,
       sourceRevisionId: first.explanation.sourceRevisionIds[0],
     });
@@ -335,6 +357,8 @@ test("estimated EV revisions are source-linked, explainable, idempotent, and res
     const manifest = current.content.inputManifest as Record<string, unknown>;
     assert.equal(typeof manifest.packRevisionId, "string");
     assert.equal(typeof manifest.evInputRevisionId, "string");
+    assert.equal(manifest.packPriceMinorUnitExponent, 2);
+    assert.equal(manifest.distributionMinorUnitExponent, 2);
 
     const relationship = await harness.database.canonical_relationships.findFirst({
       where: { relationship_kind: "estimates_pack" },

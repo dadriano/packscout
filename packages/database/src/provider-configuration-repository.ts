@@ -187,12 +187,20 @@ export class PrismaProviderConfigurationRepository {
           current: await this.toSummary(transaction, current.provider, current.revision),
         };
       }
+      const latestRevision = await transaction.provider_config_revisions.findFirst({
+        where: {
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+        },
+        orderBy: { version: "desc" },
+        select: { version: true },
+      });
       await transaction.provider_config_revisions.create({
         data: {
           id: input.revisionId,
           organization_id: input.organizationId,
           provider_id: input.providerId,
-          version: current.revision.version + 1,
+          version: (latestRevision?.version ?? current.revision.version) + 1,
           adapter_key: input.adapterKey,
           endpoint_url: input.endpoint,
           auth_mode: input.authMode,
@@ -326,6 +334,7 @@ export class PrismaProviderConfigurationRepository {
         organization_id: input.organizationId,
         provider_id: input.providerId,
         id: input.revisionId,
+        source_mode: "http",
       },
       select: {
         id: true,
@@ -388,6 +397,7 @@ export class PrismaProviderConfigurationRepository {
           organization_id: input.organizationId,
           provider_id: input.providerId,
           id: input.revisionId,
+          source_mode: "http",
         },
         select: { id: true },
       });
@@ -678,7 +688,11 @@ export class PrismaProviderConfigurationRepository {
     });
     if (!providerRecord) return null;
     const revisionRecord = await database.provider_config_revisions.findFirst({
-      where: { organization_id: organizationId, provider_id: providerId },
+      where: {
+        organization_id: organizationId,
+        provider_id: providerId,
+        source_mode: "http",
+      },
       orderBy: { version: "desc" },
       select: {
         id: true,

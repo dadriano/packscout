@@ -6,7 +6,6 @@ import type {
   TradeRecordV2,
 } from "@packscout/contracts";
 import {
-  assertStreamLocalPageCommitV2,
   decideProviderStreamWriteV2,
 } from "./provider-stream-write-policy.ts";
 
@@ -117,30 +116,11 @@ test("pulls and trades are immutable, idempotent events", () => {
   );
 });
 
-test("page commits cannot mix catalog, pulls, and trades checkpoints", () => {
-  assert.doesNotThrow(() =>
-    assertStreamLocalPageCommitV2({
-      runStream: "catalog",
-      pageStream: "catalog",
-      records: [catalog],
-    }),
-  );
-  assert.throws(
-    () =>
-      assertStreamLocalPageCommitV2({
-        runStream: "catalog",
-        pageStream: "catalog",
-        records: [catalog, pull],
-      }),
-    /cannot cross stream checkpoints/,
-  );
-  assert.throws(
-    () =>
-      assertStreamLocalPageCommitV2({
-        runStream: "pulls",
-        pageStream: "trades",
-        records: [trade],
-      }),
-    /cannot cross stream checkpoints/,
-  );
+test("mixed provider pages may contain catalog, pull, and trade records", () => {
+  for (const record of [catalog, pull, trade]) {
+    assert.equal(
+      decideProviderStreamWriteV2({ existing: null, incoming: record }).kind,
+      "accept_initial",
+    );
+  }
 });

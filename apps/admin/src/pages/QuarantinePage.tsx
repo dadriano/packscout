@@ -99,8 +99,14 @@ export function QuarantinePage() {
         const result = await retryQuarantines(ids);
         mergeOutcomes(result.outcomes);
         const resolved = result.outcomes.filter((outcome) => outcome.outcome === "resolved").length;
-        const failed = result.outcomes.filter((outcome) => outcome.outcome === "failed").length;
-        showToast(`${resolved} resolved${failed ? `; ${failed} still need review` : ""}.`, failed ? "error" : "success");
+        const needsReview = result.outcomes.filter(
+          (outcome) =>
+            outcome.outcome === "failed" || outcome.outcome === "non_retryable",
+        ).length;
+        showToast(
+          `${resolved} resolved${needsReview ? `; ${needsReview} still need review` : ""}.`,
+          needsReview ? "error" : "success",
+        );
       },
     });
   }
@@ -114,7 +120,7 @@ export function QuarantinePage() {
         <div className="admin-field"><label htmlFor="quarantine-provider">Provider</label><select id="quarantine-provider" value={providerId} onChange={(event) => setProviderId(event.target.value)}><option value="">All providers</option>{providers.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></div>
         <div className="admin-field"><label htmlFor="quarantine-run">Run ID</label><input id="quarantine-run" value={runId} onChange={(event) => setRunId(event.target.value)} placeholder="UUID" /></div>
         <div className="admin-field"><label htmlFor="quarantine-state">State</label><select id="quarantine-state" value={state} onChange={(event) => setState(event.target.value)}><option value="">All states</option><option value="open">Open</option><option value="retrying">Retrying</option><option value="resolved">Resolved</option><option value="expired">Expired</option></select></div>
-        <div className="admin-field"><label htmlFor="quarantine-kind">Record kind</label><select id="quarantine-kind" value={recordKind} onChange={(event) => setRecordKind(event.target.value)}><option value="">All kinds</option><option value="catalog">Catalog</option><option value="pull">Pull</option><option value="sale">Sale</option></select></div>
+        <div className="admin-field"><label htmlFor="quarantine-kind">Record kind</label><select id="quarantine-kind" value={recordKind} onChange={(event) => setRecordKind(event.target.value)}><option value="">All kinds</option><option value="catalog">Catalog</option><option value="pull">Pull</option><option value="trade">Trade</option></select></div>
         <div className="admin-field"><label htmlFor="quarantine-reason">Reason code</label><input id="quarantine-reason" pattern="[A-Za-z][A-Za-z0-9_]*" maxLength={128} value={reasonCode} onChange={(event) => setReasonCode(event.target.value)} /></div>
         <button type="submit" className="admin-button admin-button--secondary">Apply filters</button>
         {filterCount > 0 ? <button type="button" className="admin-button admin-button--secondary" onClick={() => { setProviderId(""); setRunId(""); setState(""); setRecordKind(""); setReasonCode(""); setCursorStack([]); setLoading(true); setSearchParams({}); }}>Clear</button> : null}

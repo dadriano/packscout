@@ -20,6 +20,7 @@ const providerId = "00000000-0000-4000-8000-000000000020";
 const revisionId = "00000000-0000-4000-8000-000000000021";
 const runId = "00000000-0000-4000-8000-000000000030";
 const quarantineId = "00000000-0000-4000-8000-000000000040";
+const conflictQuarantineId = "00000000-0000-4000-8000-000000000042";
 const admin: AuthenticatedActor = {
   sessionId: "admin-session",
   operatorId: "00000000-0000-4000-8000-000000000001",
@@ -48,7 +49,7 @@ const counters = {
   pages: 2,
   catalog: 3,
   pulls: 4,
-  sales: 5,
+  trades: 5,
   accepted: 9,
   unchanged: 2,
   revised: 1,
@@ -115,7 +116,7 @@ const unsafePage = {
   committedAt: "2026-08-06T12:00:30.000Z",
   catalog: 3,
   pulls: 4,
-  sales: 5,
+  trades: 5,
   accepted: 9,
   unchanged: 2,
   revised: 1,
@@ -230,8 +231,19 @@ function createHarness(
   };
   const quarantineService: ImportOperationsRouterDependencies["quarantine"] = {
     async detail() { return quarantineDetail; },
-    async retryOne() {
+    async retryOne(_actor, id) {
       calls.retryOne += 1;
+      if (id === conflictQuarantineId) {
+        return {
+          quarantineId: id,
+          outcome: "non_retryable",
+          entry: {
+            ...quarantine,
+            id,
+            reasonCode: "CATALOG_IDENTITY_CONFLICT",
+          },
+        };
+      }
       return { quarantineId, outcome: "failed", entry: quarantine };
     },
     async retryMany(_actor, input) {
@@ -344,6 +356,38 @@ test("admin and data operators can request imports while active work deduplicate
   assert.equal(calls.manual, 2);
 });
 
+test("archive runs are readable but cannot be requested through the manual import endpoint", async () => {
+  const archiveRun = { ...run, trigger: "archive" as const } satisfies ImportRunSummaryView;
+  const { app, calls, cookiePolicy } = createHarness({
+    async listRuns(input) {
+      assert.equal(input.trigger, "archive");
+      return { items: [archiveRun], nextCursor: null };
+    },
+  });
+  await withServer(app, async (baseUrl) => {
+    const history = await fetch(`${baseUrl}/api/import-runs?trigger=archive`, {
+      headers: { Cookie: `${cookiePolicy.name}=data-session` },
+    });
+    assert.equal(history.status, 200);
+    assert.equal(
+      ((await history.json()) as { items: ImportRunSummaryView[] }).items[0]?.trigger,
+      "archive",
+    );
+
+    const manualPath = `${baseUrl}/api/data-providers/${providerId}/import-runs`;
+    const disguisedArchive = await fetch(manualPath, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy.name),
+      body: JSON.stringify({
+        expectedConfigurationRevisionId: revisionId,
+        trigger: "archive",
+      }),
+    });
+    assert.equal(disguisedArchive.status, 422);
+  });
+  assert.equal(calls.manual, 0);
+});
+
 test("single and bounded bulk retries enforce permissions and return independent safe outcomes", async () => {
   const { app, calls, cookiePolicy } = createHarness();
   await withServer(app, async (baseUrl) => {
@@ -355,6 +399,19 @@ test("single and bounded bulk retries enforce permissions and return independent
     const singleBody = await single.text();
     assert.match(singleBody, /"outcome":"failed"/);
     assertBrowserSafe(singleBody);
+
+    const craftedConflictRetry = await fetch(
+      `${baseUrl}/api/quarantine/${conflictQuarantineId}/retries`,
+      {
+        method: "POST",
+        headers: mutationHeaders(cookiePolicy.name, "data-session"),
+      },
+    );
+    assert.equal(craftedConflictRetry.status, 200);
+    const conflictBody = await craftedConflictRetry.text();
+    assert.match(conflictBody, /"outcome":"non_retryable"/);
+    assert.match(conflictBody, /"reasonCode":"CATALOG_IDENTITY_CONFLICT"/);
+    assertBrowserSafe(conflictBody);
 
     const tooMany = Array.from({ length: 51 }, (_, index) =>
       `00000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
@@ -376,7 +433,7 @@ test("single and bounded bulk retries enforce permissions and return independent
     assert.match(bulkBody, /"outcome":"resolved"/);
     assertBrowserSafe(bulkBody);
   });
-  assert.deepEqual(calls, { manual: 0, retryOne: 1, retryMany: 1 });
+  assert.deepEqual(calls, { manual: 0, retryOne: 2, retryMany: 1 });
 });
 
 test("reader rate limits map to a stable bounded response", async () => {

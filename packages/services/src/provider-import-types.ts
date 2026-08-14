@@ -1,6 +1,7 @@
 import type {
-  ProviderFeedValidatedPageV1,
-  ProviderFeedRecordKind,
+  ProviderRecordKindV2,
+  ProviderStreamRecordV2,
+  ProviderStreamValidatedPageV2,
 } from "@packscout/contracts";
 import type {
   ProviderAdapterCandidate,
@@ -32,7 +33,8 @@ export interface ProviderImportRunSummary {
   readonly organizationId: string;
   readonly providerId: string;
   readonly configRevisionId: string;
-  readonly trigger: ProviderImportTrigger | "recovery";
+  readonly trigger: ProviderImportTrigger | "recovery" | "archive";
+  readonly archiveSha256: string | null;
   readonly state: ProviderImportRunState;
   readonly requestedCursor: string | null;
   readonly finalCursor: string | null;
@@ -51,6 +53,12 @@ export interface ClaimedProviderImportRun extends ProviderImportRunSummary {
   readonly leaseExpiresAt: Date;
   readonly currentCursor: string | null;
   readonly nextPageNumber: number;
+  /** Requested and returned cursors already committed for this run. */
+  readonly committedCursors: readonly string[];
+  /** Durable archive bytes committed by every prior attempt of this run. */
+  readonly committedArchiveUncompressedBytes: number;
+  /** Durable elapsed-time ceiling used to derive this archive run's deadline. */
+  readonly archiveMaximumElapsedMs: number;
 }
 
 export type ProviderImportRequestPersistenceResult =
@@ -104,6 +112,12 @@ export interface ProviderImportRunRepository {
     claimedAt: Date;
     leaseExpiresAt: Date;
   }): Promise<ProviderImportQueueClaimPersistenceResult>;
+  hasCommittedTerminalPage(input: {
+    organizationId: string;
+    runId: string;
+    pageNumber: number;
+    finalCursor: string;
+  }): Promise<boolean>;
   renewLease(input: {
     organizationId: string;
     runId: string;
@@ -155,7 +169,7 @@ export type ProviderCanonicalRecordKind =
   | "catalog_asset"
   | "ev_input"
   | "pull"
-  | "sale"
+  | "trade"
   | "estimated_ev";
 
 export interface ProviderCanonicalRelationshipCommand {
@@ -197,12 +211,12 @@ export interface ProviderProjectionPort {
 }
 
 export interface ProviderImportSourceRecordInput {
-  readonly recordKind: ProviderFeedRecordKind;
+  readonly recordKind: ProviderRecordKindV2;
   readonly recordIndex: number;
   readonly externalId: string;
   readonly sourceTime: Date;
   readonly collectedAt: Date;
-  readonly payload: Record<string, unknown>;
+  readonly payload: ProviderStreamRecordV2;
   readonly projections: readonly ProviderCanonicalProjectionCommand[];
   readonly quarantine?: {
     readonly reasonCode: string;
@@ -212,7 +226,7 @@ export interface ProviderImportSourceRecordInput {
 }
 
 export interface ProviderImportQuarantineInput {
-  readonly recordKind: ProviderFeedRecordKind;
+  readonly recordKind: ProviderRecordKindV2;
   readonly recordIndex: number;
   readonly externalId: string | null;
   readonly reasonCode: string;
@@ -232,6 +246,10 @@ export interface ProviderImportCommitPageInput {
   readonly nextCursor: string | null;
   readonly hasMore: boolean;
   readonly payload: unknown;
+  readonly payloadHash?: string;
+  /** Exact uncompressed NDJSON bytes represented by an archive page. */
+  readonly archiveUncompressedBytes?: number;
+  readonly checkpointMode: "provider" | "archive";
   readonly records: readonly ProviderImportSourceRecordInput[];
   readonly quarantines: readonly ProviderImportQuarantineInput[];
   readonly committedAt: Date;
@@ -259,8 +277,80 @@ export interface ProviderImportMappedPage {
 export interface ProviderImportPagePlanner {
   plan(input: {
     configuration: ProviderConfigurationIdentity;
-    page: ProviderFeedValidatedPageV1;
+    page: ProviderStreamValidatedPageV2;
   }): Promise<ProviderImportMappedPage>;
+}
+
+export interface ProviderArchiveImportPagePlanner {
+  /** Resolves the immutable mapper key stored with the archive revision. */
+  planArchive(input: {
+    configuration: ProviderConfigurationIdentity;
+    page: ProviderStreamValidatedPageV2;
+  }): Promise<ProviderImportMappedPage>;
+}
+
+export type ProviderArchiveImportRequestPersistenceResult =
+  | { readonly kind: "created"; readonly run: ProviderImportRunSummary }
+  | { readonly kind: "existing"; readonly run: ProviderImportRunSummary }
+  | { readonly kind: "active"; readonly run: ProviderImportRunSummary }
+  | { readonly kind: "not_found" | "provider_unavailable" | "revision_conflict" };
+
+export interface ProviderArchiveImportRepository {
+  ensureArchiveRevision(input: {
+    organizationId: string;
+    providerId: string;
+    configurationRevisionId: string;
+    platformKey: string;
+    mappingAdapterKey: string;
+    actorPseudonymKeyFingerprint: string;
+    archiveImporterBuildSha: string;
+    archiveSha256: string;
+    actorKey: string;
+    createdAt: Date;
+  }): Promise<{ readonly created: boolean }>;
+  requestArchiveRun(input: {
+    organizationId: string;
+    providerId: string;
+    configurationRevisionId: string;
+    runId: string;
+    archiveSha256: string;
+    requestedByActorKey: string;
+    requestedAt: Date;
+    initialCursor: string;
+    maximumElapsedMs: number;
+  }): Promise<ProviderArchiveImportRequestPersistenceResult>;
+  claimArchiveRun(input: {
+    organizationId: string;
+    runId: string;
+    workerId: string;
+    claimedAt: Date;
+    leaseExpiresAt: Date;
+  }): Promise<ProviderImportClaimPersistenceResult>;
+  getArchiveRevision(input: {
+    organizationId: string;
+    providerId: string;
+    configurationRevisionId: string;
+  }): Promise<{
+    readonly platformKey: string;
+    readonly mappingAdapterKey: string;
+  } | null>;
+  hasCommittedTerminalPage(input: {
+    organizationId: string;
+    runId: string;
+    pageNumber: number;
+    finalCursor: string;
+  }): Promise<boolean>;
+  requeueFailedArchiveRun(input: {
+    organizationId: string;
+    providerId: string;
+    runId: string;
+    archiveSha256: string;
+    actorKey: string;
+    requeuedAt: Date;
+  }): Promise<
+    | { readonly kind: "requeued" }
+    | { readonly kind: "not_found" | "state_conflict" }
+  >;
 }
 
 export type ProviderImportTerminalFailureCode =
@@ -282,6 +372,7 @@ export type ProviderImportTerminalFailureCode =
 
 export type ProviderImportServiceErrorCode =
   | "CONFIG_REVISION_CONFLICT"
+  | "IMPORT_TRIGGER_CONFLICT"
   | "IMPORT_RUN_NOT_CLAIMABLE"
   | "IMPORT_RUN_NOT_FOUND"
   | "PROVIDER_NOT_FOUND"

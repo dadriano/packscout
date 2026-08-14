@@ -22,6 +22,7 @@ function terminalRun(
     providerId: "provider-1",
     configRevisionId: "revision-1",
     trigger: "scheduled",
+    archiveSha256: null,
     state: "succeeded",
     requestedCursor: null,
     finalCursor: "provider-head",

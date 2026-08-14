@@ -143,8 +143,10 @@ function packContent(candidate: CanonicalPackCandidate): CanonicalPackProjection
     sourceStatus: normalizeOptionalText(candidate.sourceStatus, "candidates.pack.sourceStatus", 256),
     priceValueMinor: price?.amountMinor ?? null,
     priceCurrency: price?.currency ?? null,
+    priceMinorUnitExponent: price?.minorUnitExponent ?? null,
     providerReportedEvValueMinor: providerEv?.amountMinor ?? null,
     providerReportedEvCurrency: providerEv?.currency ?? null,
+    providerReportedEvMinorUnitExponent: providerEv?.minorUnitExponent ?? null,
     buybackPercent: normalizedNullablePercentage(candidate.buybackPercent, "candidates.pack.buybackPercent"),
     drawCount: normalizedNullableCount(candidate.drawCount, "candidates.pack.drawCount"),
     imageUrls: normalizedImages(candidate.imageUrls, "candidates.pack.imageUrls"),
@@ -178,6 +180,7 @@ function assetContent(candidate: CatalogAssetCandidate): CanonicalCatalogAssetPr
     sourceStatus: normalizeOptionalText(candidate.sourceStatus, "candidates.catalogAsset.sourceStatus", 256),
     providerValueMinor: value?.amountMinor ?? null,
     providerValueCurrency: value?.currency ?? null,
+    providerValueMinorUnitExponent: value?.minorUnitExponent ?? null,
     valueSource: normalizeOptionalText(candidate.valueSource, "candidates.catalogAsset.valueSource", 500),
     imageUrls: normalizedImages(candidate.imageUrls, "candidates.catalogAsset.imageUrls"),
     dataQualityEvidence: normalizedQualityEvidence(

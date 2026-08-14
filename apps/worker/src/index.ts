@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { createPrismaClientLifecycle } from "@packscout/database";
+import { ProviderTransportAdapterRegistry } from "@packscout/services";
 import { createProviderWorkerRuntime } from "./provider-worker-composition.ts";
 import { JsonConsoleProviderWorkerObservability } from "./provider-worker-observability.ts";
 import {
@@ -47,6 +48,9 @@ async function runProviderWorker(): Promise<void> {
       database: databaseLifecycle.client,
       logger,
       observability,
+      // No live API page decoder has been supplied yet. Keep live imports
+      // fail-closed until the real response wrapper and cursor semantics exist.
+      transportAdapters: new ProviderTransportAdapterRegistry(),
     });
     const stop = () => runtime.stop();
     process.once("SIGINT", stop);

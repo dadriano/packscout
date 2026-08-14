@@ -46,7 +46,7 @@ test("EV workers claim disjoint work, recover leases, and reject stale acknowled
         organization_id: organizationId,
         provider_id: providerId,
         version: 1,
-        adapter_key: "http-cursor-v1",
+        adapter_key: "http-cursor-v2",
         endpoint_url: "https://provider.example/feed",
         auth_mode: "none",
         created_by_actor_key: "actor:test",

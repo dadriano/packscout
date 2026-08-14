@@ -33,7 +33,7 @@ const configuration: ProviderConfigurationIdentity = {
   providerId: ids.provider,
   configurationRevisionId: ids.revision,
   platform: "fixture",
-  adapterKey: "fixture-mapper-v1",
+  adapterKey: "fixture-mapper-v2",
 };
 
 function candidate(amount: number): PullCandidate {
@@ -57,7 +57,20 @@ function candidate(amount: number): PullCandidate {
   };
 }
 
-test("event projections remain idempotent, preserve corrections, protect actors, and reconcile late packs", async () => {
+function pullEvidence(value: number) {
+  return {
+    stream: "pulls" as const,
+    platform: source.platform,
+    record_id: source.externalId,
+    pack_id: "pack-late",
+    card_id: null,
+    occurred_at: source.sourceTimestamp,
+    collected_at: source.collectedAt,
+    data: { value, actor: "raw-user-must-not-persist-canonically" },
+  };
+}
+
+test("event projections stay immutable, protect actors, and reconcile late packs", async () => {
   const harness = await createMigratedTestDatabase();
   try {
     const setup = new PipelineSetupRepository(harness.database);
@@ -77,7 +90,7 @@ test("event projections remain idempotent, preserve corrections, protect actors,
       organizationId: ids.organization,
       providerId: ids.provider,
       version: 1,
-      adapterKey: "fixture-mapper-v1",
+      adapterKey: "fixture-mapper-v2",
       endpointUrl: "https://provider.example/feed",
       authMode: "none",
       createdByActorKey: "actor:test",
@@ -121,11 +134,12 @@ test("event projections remain idempotent, preserve corrections, protect actors,
       requestedCursor: null,
       nextCursor: "event-1",
       hasMore: true,
+      checkpointMode: "provider",
       payload: { page: 1 },
       records: [
         {
           ...baseRecord,
-          payload: { value: 10, actor: "raw-user-must-not-persist-canonically" },
+          payload: pullEvidence(10),
           projections: [firstProjection],
         },
       ],
@@ -155,11 +169,12 @@ test("event projections remain idempotent, preserve corrections, protect actors,
       requestedCursor: "event-1",
       nextCursor: "event-2",
       hasMore: true,
+      checkpointMode: "provider",
       payload: { page: 2 },
       records: [
         {
           ...baseRecord,
-          payload: { value: 10, actor: "raw-user-must-not-persist-canonically" },
+          payload: pullEvidence(10),
           projections: [firstProjection],
         },
       ],
@@ -183,6 +198,7 @@ test("event projections remain idempotent, preserve corrections, protect actors,
       requestedCursor: "event-2",
       nextCursor: "event-3",
       hasMore: true,
+      checkpointMode: "provider",
       payload: { page: 3 },
       records: [
         {
@@ -191,7 +207,16 @@ test("event projections remain idempotent, preserve corrections, protect actors,
           externalId: "pack-late",
           sourceTime: new Date("2026-08-06T10:04:00.000Z"),
           collectedAt: new Date("2026-08-06T10:04:30.000Z"),
-          payload: { name: "Late Pack" },
+          payload: {
+            stream: "catalog",
+            platform: source.platform,
+            entity: "pack",
+            record_id: "pack-late",
+            first_seen_at: "2026-08-06T10:04:00.000Z",
+            occurred_at: "2026-08-06T10:04:00.000Z",
+            collected_at: "2026-08-06T10:04:30.000Z",
+            data: { name: "Late Pack" },
+          },
           projections: [
             {
               platformKey: "fixture",
@@ -231,7 +256,7 @@ test("event projections remain idempotent, preserve corrections, protect actors,
     });
     assert.equal(changed.status, "accepted");
     if (changed.status !== "accepted") return;
-    await persistence.commitPage({
+    const conflict = await persistence.commitPage({
       organizationId: ids.organization,
       providerId: ids.provider,
       configRevisionId: ids.revision,
@@ -240,25 +265,37 @@ test("event projections remain idempotent, preserve corrections, protect actors,
       requestedCursor: "event-3",
       nextCursor: "event-head",
       hasMore: false,
+      checkpointMode: "provider",
       payload: { page: 4 },
       records: [
         {
           ...baseRecord,
-          payload: { value: 11, actor: "raw-user-must-not-persist-canonically" },
+          payload: pullEvidence(11),
           projections: changed.projections,
         },
       ],
       committedAt: new Date("2026-08-06T10:07:00.000Z"),
     });
-    assert.equal(await harness.database.canonical_revisions.count(), 3);
+    assert.equal(conflict.counters.quarantined, 1);
+    assert.equal(await harness.database.canonical_revisions.count(), 2);
     assert.equal(
       (await persistence.listCanonicalRevisions(ids.organization, {
         platformKey: "fixture",
         recordKind: "pull",
         externalId: source.externalId,
       })).length,
-      2,
+      1,
     );
+    assert.equal(await harness.database.quarantine_records.count({
+      where: { reason_code: "IMMUTABLE_EVENT_CONFLICT" },
+    }), 1);
+    assert.equal(await harness.database.source_record_outcomes.count({
+      where: {
+        page_id: conflict.pageId,
+        outcome: "quarantined",
+        reason_code: "IMMUTABLE_EVENT_CONFLICT",
+      },
+    }), 1);
   } finally {
     await harness.close();
   }

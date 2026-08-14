@@ -1,13 +1,15 @@
 import { Prisma } from "@prisma/client";
+import { isQuarantineReasonRetryable } from "@packscout/contracts";
 import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   type PackscoutPrismaClient,
   type PackscoutQueryClient,
 } from "./database.ts";
+import { decodeDatabaseSafeProtectedJsonEvidence } from "./protected-json-evidence.ts";
 
 type QuarantineState = "open" | "retrying" | "resolved" | "expired";
 type StoredQuarantineState = "open" | "resolved" | "expired";
-type RecordKind = "catalog" | "pull" | "sale";
+type RecordKind = "catalog" | "pull" | "trade";
 
 export interface PersistedQuarantineEntry {
   readonly id: string;
@@ -95,7 +97,11 @@ export type PersistedQuarantineClaimResult =
       readonly evidence: PersistedProtectedQuarantineEvidence;
     }
   | {
-      readonly kind: "already_retrying" | "already_resolved" | "expired";
+      readonly kind:
+        | "already_retrying"
+        | "already_resolved"
+        | "expired"
+        | "non_retryable";
       readonly entry: PersistedQuarantineEntry;
     }
   | { readonly kind: "not_found" };
@@ -363,6 +369,9 @@ export class PrismaQuarantineRepository {
       }
       if (current.state === "retrying") {
         return { kind: "already_retrying", entry: current };
+      }
+      if (!isQuarantineReasonRetryable(current.reasonCode)) {
+        return { kind: "non_retryable", entry: current };
       }
       const evidence = await this.loadEvidence(
         transaction,
@@ -684,7 +693,7 @@ export class PrismaQuarantineRepository {
       });
       if (!source?.payload_json || source.expires_at <= now) return null;
       return {
-        rawRecord: source.payload_json,
+        rawRecord: decodeDatabaseSafeProtectedJsonEvidence(source.payload_json),
         organizationId,
         sourceRecordId: row.sourceRecordId,
         runId: row.runId,
@@ -708,6 +717,29 @@ export class PrismaQuarantineRepository {
         },
       };
     }
+    const standalone = await database.quarantine_records.findFirst({
+      where: { organization_id: organizationId, id: row.id },
+      select: { payload_json: true, expires_at: true },
+    });
+    if (standalone?.payload_json && standalone.expires_at > now) {
+      return {
+        rawRecord: decodeDatabaseSafeProtectedJsonEvidence(standalone.payload_json),
+        organizationId,
+        sourceRecordId: null,
+        runId: row.runId,
+        pageId: row.pageId,
+        recordKind: row.recordKind,
+        recordIndex: row.recordIndex,
+        expiresAt: row.expiresAt,
+        source: null,
+        configuration: {
+          providerId: row.providerId,
+          configurationRevisionId: row.configurationRevisionId,
+          platform: row.platformKey,
+          adapterKey: row.adapterKey,
+        },
+      };
+    }
     const page = await database.import_pages.findFirst({
       where: {
         organization_id: organizationId,
@@ -717,7 +749,7 @@ export class PrismaQuarantineRepository {
     });
     if (!page?.payload_json || page.expires_at <= now) return null;
     const rawRecord = this.recordFromPage(
-      page.payload_json,
+      decodeDatabaseSafeProtectedJsonEvidence(page.payload_json),
       row.recordKind,
       row.recordIndex,
     );
@@ -743,7 +775,9 @@ export class PrismaQuarantineRepository {
 
   private recordFromPage(payload: unknown, kind: RecordKind, index: number): unknown {
     if (typeof payload !== "object" || payload === null) return undefined;
-    const key = kind === "catalog" ? "catalog" : kind === "pull" ? "pulls" : "sales";
+    const records = "records" in payload ? payload.records : undefined;
+    if (Array.isArray(records)) return records[index];
+    const key = kind === "catalog" ? "catalog" : kind === "pull" ? "pulls" : "trades";
     const group = key in payload ? payload[key as keyof typeof payload] : undefined;
     return Array.isArray(group) ? group[index] : undefined;
   }

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type {
+  CatalogRecordV2,
+  PullRecordV2,
+  TradeRecordV2,
+} from "@packscout/contracts";
+import type { Prisma } from "@prisma/client";
 import { IngestionPersistenceRepository } from "./ingestion-repository.ts";
 import { PersistenceError } from "./persistence-error.ts";
+import { decodeDatabaseSafeProtectedJsonEvidence } from "./protected-json-evidence.ts";
 import { PrismaQuarantineRepository } from "./quarantine-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
@@ -29,17 +36,61 @@ const expiresAt = new Date("2026-11-04T12:00:00.000Z");
 const platform = "fixture-platform";
 const rawSecret = "Bearer database-raw-secret";
 
-function rawCatalog(externalId: string) {
+function protectedData() {
   return {
+    username: "private-database-user",
+    wallet: "0xprivate-database-wallet",
+    secret: rawSecret,
+  };
+}
+
+function prismaJson(value: unknown): Prisma.InputJsonValue {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new Error("Test fixture must be JSON serializable.");
+  }
+  return JSON.parse(serialized) as Prisma.InputJsonValue;
+}
+
+function rawCatalog(externalId: string): CatalogRecordV2 {
+  return {
+    stream: "catalog",
     platform,
-    external_id: externalId,
-    updated_at: sourceTime.toISOString(),
+    entity: "card",
+    record_id: externalId,
+    first_seen_at: sourceTime.toISOString(),
+    occurred_at: sourceTime.toISOString(),
     collected_at: collectedAt.toISOString(),
-    data: {
-      username: "private-database-user",
-      wallet: "0xprivate-database-wallet",
-      secret: rawSecret,
-    },
+    data: protectedData(),
+  };
+}
+
+function rawPull(externalId: string): PullRecordV2 {
+  return {
+    stream: "pulls",
+    platform,
+    record_id: externalId,
+    pack_id: "fixture-pack",
+    card_id: "fixture-card",
+    occurred_at: sourceTime.toISOString(),
+    collected_at: collectedAt.toISOString(),
+    data: protectedData(),
+  };
+}
+
+function rawTrade(externalId: string): TradeRecordV2 {
+  return {
+    stream: "trades",
+    platform,
+    record_id: externalId,
+    card_id: "fixture-card",
+    event_type: "sale",
+    amount: 125,
+    currency: "USD",
+    tx_hash: `fixture-tx-${externalId}`,
+    occurred_at: sourceTime.toISOString(),
+    collected_at: collectedAt.toISOString(),
+    data: protectedData(),
   };
 }
 
@@ -70,7 +121,7 @@ async function createHarness() {
     organizationId: ids.organization,
     providerId: ids.provider,
     version: 1,
-    adapterKey: "fixture-mapper-v1",
+    adapterKey: "http-cursor-v2",
     endpointUrl: "https://provider.example/feed",
     authMode: "none",
     createdByActorKey: "actor:admin",
@@ -101,19 +152,19 @@ async function createHarness() {
     nextCursor: "opaque-cursor-after-quarantine",
     hasMore: true,
     payload: {
-      catalog: [catalog],
-      pulls: [],
-      sales: [],
-      next_cursor: "opaque-cursor-after-quarantine",
-      has_more: true,
+      requestedCursor: null,
+      nextCursor: "opaque-cursor-after-quarantine",
+      hasMore: true,
+      records: [catalog],
     },
+    checkpointMode: "provider",
     records: [],
     quarantines: [{
       recordKind: "catalog",
       recordIndex: 0,
       externalId: null,
       reasonCode: "ENVELOPE_VALIDATION_FAILED",
-      fieldPath: "catalog[0].external_id",
+      fieldPath: "records[0].record_id",
       sanitizedSummary: "Catalog envelope failed validation.",
       payload: catalog,
     }],
@@ -229,7 +280,7 @@ test("quarantine retry claims atomically, materializes repaired evidence, and pr
       actorKey: "actor:admin",
       failedAt: retryAt,
       failureCode: "ENVELOPE_VALIDATION_FAILED",
-      fieldPath: "external_id",
+      fieldPath: "record_id",
       sanitizedSummary: "Retained evidence still fails envelope validation.",
     });
     const second = await harness.repository.claimRetry({
@@ -402,9 +453,9 @@ test("quarantine listing is tenant-scoped, filtered, and stable across keyset pa
           record_index: 1,
           external_id: "pull-two",
           reason_code: "PULL_MAPPING_FAILED",
-          field_path: "pulls[1]",
+          field_path: "records[1]",
           sanitized_summary: "Pull mapping failed.",
-          payload_json: rawCatalog("pull-two"),
+          payload_json: prismaJson(rawPull("pull-two")),
           expires_at: expiresAt,
           created_at: new Date(committedAt.getTime() + 1_000),
         },
@@ -414,13 +465,13 @@ test("quarantine listing is tenant-scoped, filtered, and stable across keyset pa
           provider_id: ids.provider,
           run_id: ids.run,
           page_id: harness.quarantine.pageId,
-          record_kind: "sale",
+          record_kind: "trade",
           record_index: 2,
-          external_id: "sale-three",
-          reason_code: "SALE_MAPPING_FAILED",
-          field_path: "sales[2]",
-          sanitized_summary: "Sale mapping failed.",
-          payload_json: rawCatalog("sale-three"),
+          external_id: "trade-three",
+          reason_code: "TRADE_MAPPING_FAILED",
+          field_path: "records[2]",
+          sanitized_summary: "Trade mapping failed.",
+          payload_json: prismaJson(rawTrade("trade-three")),
           expires_at: expiresAt,
           created_at: new Date(committedAt.getTime() + 2_000),
         },
@@ -455,7 +506,7 @@ test("quarantine listing is tenant-scoped, filtered, and stable across keyset pa
       (
         await harness.repository.listEntriesPage(
           ids.organization,
-          { limit: 10, recordKind: "sale", reasonCode: "SALE_MAPPING_FAILED" },
+          { limit: 10, recordKind: "trade", reasonCode: "TRADE_MAPPING_FAILED" },
           retryAt,
         )
       ).items.map(({ id }) => id),
@@ -500,12 +551,12 @@ test("linked-source retries project through the shared ingestion semantics and r
       nextCursor: "opaque-cursor-after-linked-quarantine",
       hasMore: false,
       payload: {
-        catalog: [linkedRecord],
-        pulls: [],
-        sales: [],
-        next_cursor: "opaque-cursor-after-linked-quarantine",
-        has_more: false,
+        requestedCursor: "opaque-cursor-after-quarantine",
+        nextCursor: "opaque-cursor-after-linked-quarantine",
+        hasMore: false,
+        records: [linkedRecord],
       },
+      checkpointMode: "provider",
       records: [
         {
           recordKind: "catalog",
@@ -671,9 +722,14 @@ test("independent expiry workers claim disjoint evidence while a running retry s
           page_number: 2,
           requested_cursor: "expiry-two",
           has_more: false,
-          payload_json: { catalog: [rawCatalog("expiry-two")], pulls: [], sales: [] },
+          payload_json: prismaJson({
+            requestedCursor: "expiry-two",
+            nextCursor: "expiry-two-complete",
+            hasMore: false,
+            records: [rawCatalog("expiry-two")],
+          }),
           payload_hash: "expiry-two-hash",
-          record_counts_json: { catalog: 1, pulls: 0, sales: 0 },
+          record_counts_json: { catalog: 1, pulls: 0, trades: 0 },
           committed_at: committedAt,
           expires_at: expiresAt,
         },
@@ -685,13 +741,14 @@ test("independent expiry workers claim disjoint evidence while a running retry s
           page_number: 3,
           requested_cursor: "expiry-three",
           has_more: false,
-          payload_json: {
-            catalog: [rawCatalog("expiry-three")],
-            pulls: [],
-            sales: [],
-          },
+          payload_json: prismaJson({
+            requestedCursor: "expiry-three",
+            nextCursor: "expiry-three-complete",
+            hasMore: false,
+            records: [rawCatalog("expiry-three")],
+          }),
           payload_hash: "expiry-three-hash",
-          record_counts_json: { catalog: 1, pulls: 0, sales: 0 },
+          record_counts_json: { catalog: 1, pulls: 0, trades: 0 },
           committed_at: committedAt,
           expires_at: expiresAt,
         },
@@ -710,7 +767,7 @@ test("independent expiry workers claim disjoint evidence while a running retry s
           external_id: "expiry-two",
           reason_code: "MAPPING_FAILED",
           sanitized_summary: "Mapping failed.",
-          payload_json: rawCatalog("expiry-two"),
+          payload_json: prismaJson(rawCatalog("expiry-two")),
           expires_at: expiresAt,
           created_at: committedAt,
         },
@@ -725,7 +782,7 @@ test("independent expiry workers claim disjoint evidence while a running retry s
           external_id: "expiry-three",
           reason_code: "MAPPING_FAILED",
           sanitized_summary: "Mapping failed.",
-          payload_json: rawCatalog("expiry-three"),
+          payload_json: prismaJson(rawCatalog("expiry-three")),
           expires_at: expiresAt,
           created_at: new Date(committedAt.getTime() + 1_000),
         },
@@ -755,12 +812,20 @@ test("independent expiry workers claim disjoint evidence while a running retry s
       }),
       2,
     );
+    const protectedEntry = await harness.database.quarantine_records.findUnique({
+      where: { id: harness.quarantine.id },
+      select: { state: true, payload_json: true },
+    });
     assert.deepEqual(
-      await harness.database.quarantine_records.findUnique({
-        where: { id: harness.quarantine.id },
-        select: { state: true, payload_json: true },
-      }),
-      { state: "open", payload_json: harness.catalog },
+      protectedEntry
+        ? {
+            state: protectedEntry.state,
+            payload: decodeDatabaseSafeProtectedJsonEvidence(
+              protectedEntry.payload_json,
+            ),
+          }
+        : null,
+      { state: "open", payload: harness.catalog },
     );
     assert.notEqual(
       (

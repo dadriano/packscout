@@ -47,7 +47,7 @@ function summary(state: "draft" | "active" | "disabled" | "archived" = "draft") 
     latestRevision: {
       id: revisionId,
       version: 1,
-      adapterKey: "cursor-http",
+      adapterKey: "http-cursor-v2",
       endpoint: "https://feed.packscout.test/cards",
       endpointHost: "feed.packscout.test",
       authMode: "bearer" as const,
@@ -126,7 +126,7 @@ function createHarness(
         checkedAt: "2026-08-06T12:01:00.000Z",
         latencyMs: 42,
         responseStatus: 200,
-        recordCounts: { catalog: 2, pulls: 1, sales: 1 },
+        recordCounts: { catalog: 2, pulls: 1, trades: 1 },
         hasMore: false,
         nextCursorPresent: false,
         sanitizedCode: null,
@@ -188,7 +188,7 @@ test("provider mutations enforce permission, origin, CSRF, validation, and maske
   const input = {
     platformKey: "fanatics",
     displayName: "Fanatics cards",
-    adapterKey: "cursor-http",
+    adapterKey: "http-cursor-v2",
     endpoint: "https://feed.packscout.test/cards",
     scheduleSeconds: 300,
     staleAfterSeconds: 900,
@@ -280,7 +280,7 @@ test("revision conflicts return masked current state without overwriting", async
       body: JSON.stringify({
         expectedRevisionId: revisionId,
         displayName: "Unsaved name",
-        adapterKey: "cursor-http",
+        adapterKey: "http-cursor-v2",
         endpoint: "https://feed.packscout.test/cards",
         scheduleSeconds: 300,
         staleAfterSeconds: 900,

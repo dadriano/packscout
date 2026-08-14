@@ -2,7 +2,7 @@ import type { ProviderCanonicalProjectionCommand } from "./provider-import-types
 
 export interface EstimatedEvCanonicalIdentity {
   readonly platformKey: string;
-  readonly recordKind: "catalog_asset" | "estimated_ev" | "ev_input" | "pack" | "platform" | "pull" | "sale";
+  readonly recordKind: "catalog_asset" | "estimated_ev" | "ev_input" | "pack" | "platform" | "pull" | "trade";
   readonly externalId: string;
 }
 

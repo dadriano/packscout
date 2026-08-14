@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ProviderTransportPageInput } from "./provider-adapter.ts";
+import type {
+  ProviderHttpResponseDecoderV2,
+  ProviderTransportPageInput,
+} from "./provider-adapter.ts";
 import { ProviderTransportRequestError } from "./provider-adapter.ts";
 import {
   HttpCursorAdapter,
@@ -14,33 +17,79 @@ const providerHost = "provider.invalid";
 const publicAddress = "93.184.216.34";
 const resolvePublicHost: ProviderDnsResolver = async () => [publicAddress];
 
-function validPage(overrides: Record<string, unknown> = {}) {
+const fixtureRecords = [
+  {
+    stream: "catalog",
+    platform,
+    entity: "pack",
+    record_id: "fixture-pack-001",
+    first_seen_at: "2026-08-12T03:04:05.000Z",
+    occurred_at: "2026-08-13T03:04:05.000Z",
+    collected_at: "2026-08-13T03:05:00.000Z",
+    data: { nested: { values: [1, null, "opaque"] } },
+  },
+  {
+    stream: "pulls",
+    platform,
+    record_id: "fixture-pull-001",
+    pack_id: "fixture-pack-001",
+    card_id: null,
+    occurred_at: "2026-08-13T03:04:05.000Z",
+    collected_at: "2026-08-13T03:05:00.000Z",
+    data: { outcome: "pending" },
+  },
+  {
+    stream: "trades",
+    platform,
+    record_id: "fixture-trade-001",
+    card_id: "fixture-card-001",
+    event_type: "list",
+    amount: 50,
+    currency: "USDC",
+    tx_hash: "fixture-transaction-001",
+    occurred_at: "2026-08-13T03:04:05.000Z",
+    collected_at: "2026-08-13T03:05:00.000Z",
+    data: { actor: "sanitized" },
+  },
+] as const;
+
+function validWrapper(overrides: Record<string, unknown> = {}) {
   return {
-    catalog: [
-      {
-        platform,
-        external_id: "fixture:catalog:1",
-        updated_at: "2026-01-02T03:04:05.000Z",
-        collected_at: "2026-01-02T03:05:00.000Z",
-        data: { nested: { values: [1, null, "opaque"] } },
-      },
-    ],
-    pulls: [
-      {
-        platform,
-        external_id: "fixture:pull:1",
-        pack_external_id: null,
-        occurred_at: "2026-01-02T03:04:05.000Z",
-        collected_at: "2026-01-02T03:05:00.000Z",
-        data: { actor: "sanitized" },
-      },
-    ],
-    sales: [],
-    next_cursor: "fixture:cursor:complete",
-    has_more: false,
+    fixture_records: fixtureRecords,
+    fixture_next_cursor: "fixture:cursor:complete",
+    fixture_has_more: false,
     ...overrides,
   };
 }
+
+const fixtureJsonDecoder: ProviderHttpResponseDecoderV2 = {
+  decode(input) {
+    let rawPage: unknown;
+    try {
+      rawPage = JSON.parse(input.bodyText) as unknown;
+    } catch {
+      return { ok: false, code: "invalid_json" };
+    }
+    if (typeof rawPage !== "object" || rawPage === null) {
+      return {
+        ok: false,
+        code: "invalid_response",
+        fieldPaths: ["$"],
+        issueCodes: ["invalid_type"],
+      };
+    }
+    const wrapper = rawPage as Record<string, unknown>;
+    return {
+      ok: true,
+      page: {
+        rawPage,
+        records: wrapper.fixture_records,
+        nextCursor: wrapper.fixture_next_cursor,
+        hasMore: wrapper.fixture_has_more,
+      },
+    };
+  },
+};
 
 function jsonResponse(value: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(value), {
@@ -64,9 +113,10 @@ function pageInput(
 }
 
 function createAdapter(
-  dependencies: HttpCursorAdapterDependencies = {},
+  dependencies: Partial<HttpCursorAdapterDependencies> = {},
 ): HttpCursorAdapter {
   return new HttpCursorAdapter({
+    decoder: fixtureJsonDecoder,
     resolveHost: resolvePublicHost,
     ...dependencies,
   });
@@ -84,11 +134,11 @@ async function captureRequestError(
   assert.fail("Expected provider transport request to fail.");
 }
 
-test("initial requests omit cursor and subsequent requests preserve opaque cursor bytes", async () => {
+test("requests send only platform and an optional opaque cursor", async () => {
   const requests: { url: URL; init: RequestInit | undefined }[] = [];
   const httpClient: ProviderHttpClient = async (input, init) => {
     requests.push({ url: new URL(String(input)), init });
-    return jsonResponse(validPage());
+    return jsonResponse(validWrapper());
   };
   const adapter = createAdapter({ httpClient });
 
@@ -102,10 +152,13 @@ test("initial requests omit cursor and subsequent requests preserve opaque curso
   await adapter.fetchPage(pageInput({ cursor: opaqueCursor }));
 
   assert.equal(requests[0]?.url.searchParams.get("platform"), platform);
-  assert.equal(requests[0]?.url.searchParams.get("existing"), "kept");
+  assert.equal(requests[0]?.url.searchParams.has("existing"), false);
   assert.equal(requests[0]?.url.searchParams.has("cursor"), false);
+  assert.equal(requests[0]?.url.searchParams.has("stream"), false);
+  assert.deepEqual([...requests[0]!.url.searchParams.keys()], ["platform"]);
   assert.equal(requests[0]?.url.hash, "");
   assert.equal(requests[1]?.url.searchParams.get("cursor"), opaqueCursor);
+  assert.deepEqual([...requests[1]!.url.searchParams.keys()], ["platform", "cursor"]);
   assert.equal(requests[1]?.init?.method, "GET");
   assert.equal(requests[1]?.init?.redirect, "manual");
 });
@@ -114,7 +167,7 @@ test("none and bearer authentication produce only the configured authorization b
   const authorizationValues: (string | null)[] = [];
   const httpClient: ProviderHttpClient = async (_input, init) => {
     authorizationValues.push(new Headers(init?.headers).get("authorization"));
-    return jsonResponse(validPage());
+    return jsonResponse(validWrapper());
   };
   const adapter = createAdapter({ httpClient });
 
@@ -129,13 +182,14 @@ test("the exact-host allowlist rejects lookalikes before DNS or bearer request",
   let resolutionCount = 0;
   let requestCount = 0;
   const adapter = new HttpCursorAdapter({
+    decoder: fixtureJsonDecoder,
     resolveHost: async () => {
       resolutionCount += 1;
       return [publicAddress];
     },
     httpClient: async () => {
       requestCount += 1;
-      return jsonResponse(validPage());
+      return jsonResponse(validWrapper());
     },
   });
   const error = await captureRequestError(
@@ -178,10 +232,11 @@ test("private, loopback, link-local, documentation, and reserved destinations fa
   for (const address of rejectedAddresses) {
     let requested = false;
     const adapter = new HttpCursorAdapter({
+      decoder: fixtureJsonDecoder,
       resolveHost: async () => [address],
       httpClient: async () => {
         requested = true;
-        return jsonResponse(validPage());
+        return jsonResponse(validWrapper());
       },
     });
     const error = await captureRequestError(
@@ -198,10 +253,11 @@ test("public IPv4 and IPv6 DNS answers can reach the allowlisted host", async ()
   for (const address of [publicAddress, "2606:4700:4700::1111"] as const) {
     let requested = false;
     const adapter = new HttpCursorAdapter({
+      decoder: fixtureJsonDecoder,
       resolveHost: async () => [address],
       httpClient: async () => {
         requested = true;
-        return jsonResponse(validPage());
+        return jsonResponse(validWrapper());
       },
     });
     await adapter.fetchPage(pageInput());
@@ -217,9 +273,10 @@ test("the validated DNS result is passed to the request client as a connection p
       hostname: providerHost,
       addresses: [publicAddress],
     });
-    return jsonResponse(validPage());
+    return jsonResponse(validWrapper());
   };
   const adapter = new HttpCursorAdapter({
+    decoder: fixtureJsonDecoder,
     resolveHost: async () => {
       resolutionCount += 1;
       return [publicAddress];
@@ -236,13 +293,14 @@ test("a private IP endpoint is rejected directly even if a resolver claims it is
   let resolved = false;
   let requested = false;
   const adapter = new HttpCursorAdapter({
+    decoder: fixtureJsonDecoder,
     resolveHost: async () => {
       resolved = true;
       return [publicAddress];
     },
     httpClient: async () => {
       requested = true;
-      return jsonResponse(validPage());
+      return jsonResponse(validWrapper());
     },
   });
   const error = await captureRequestError(
@@ -270,10 +328,11 @@ test("DNS errors, empty answers, invalid answers, and mixed public/private answe
   for (const resolveHost of resolutions) {
     let requested = false;
     const adapter = new HttpCursorAdapter({
+      decoder: fixtureJsonDecoder,
       resolveHost,
       httpClient: async () => {
         requested = true;
-        return jsonResponse(validPage());
+        return jsonResponse(validWrapper());
       },
     });
     const error = await captureRequestError(adapter.fetchPage(pageInput()));
@@ -378,7 +437,11 @@ test("response size, JSON, and page-structure failures use bounded safe errors",
   const rawValue = "fixture-private-nested-value";
   const invalidStructureAdapter = createAdapter({
     httpClient: async () =>
-      jsonResponse({ catalog: [{ rawValue }], pulls: [], next_cursor: "next", has_more: false }),
+      jsonResponse({
+        rawValue,
+        fixture_next_cursor: "next",
+        fixture_has_more: false,
+      }),
   });
   const invalidStructure = await captureRequestError(
     invalidStructureAdapter.fetchPage(pageInput()),
@@ -386,7 +449,7 @@ test("response size, JSON, and page-structure failures use bounded safe errors",
   assert.deepEqual(invalidStructure.failure, {
     code: "invalid_response",
     retryable: false,
-    fieldPaths: ["sales"],
+    fieldPaths: ["records"],
     issueCodes: ["invalid_type"],
   });
   assert.doesNotMatch(
@@ -395,31 +458,126 @@ test("response size, JSON, and page-structure failures use bounded safe errors",
   );
 });
 
-test("mixed envelope failures return raw evidence, valid records, and stable invalid outcomes", async () => {
+test("mixed V2 failures return raw evidence, valid records, and stable invalid outcomes", async () => {
   const rawValue = "fixture-protected-value";
-  const page = validPage({
-    catalog: [
-      validPage().catalog[0],
-      {
-        ...validPage().catalog[0],
-        platform: "unexpected-platform",
-        data: { rawValue },
-      },
-    ],
-  });
-  const adapter = createAdapter({ httpClient: async () => jsonResponse(page) });
+  const records = [
+    fixtureRecords[0],
+    {
+      ...fixtureRecords[1],
+      platform: "unexpected-platform",
+      data: { rawValue },
+    },
+  ];
+  const wrapper = validWrapper({ fixture_records: records });
+  const adapter = createAdapter({ httpClient: async () => jsonResponse(wrapper) });
   const result = await adapter.fetchPage(pageInput());
-  assert.equal(result.rawPage.catalog.length, 2);
-  assert.equal(result.validPage.catalog.length, 1);
+  assert.equal(result.page.records.length, 1);
   assert.deepEqual(result.invalidRecords.map(({ issues }) => issues), [
-    [{ code: "platform_mismatch", path: "catalog[1].platform" }],
+    [{ code: "platform_mismatch", path: "records[1].platform" }],
   ]);
-  assert.deepEqual(result.rawPage.catalog[1], page.catalog[1]);
+  assert.deepEqual(
+    (result.rawPage as { fixture_records: unknown[] }).fixture_records[1],
+    records[1],
+  );
+});
+
+test("the injected decoder receives bounded body and response metadata without a wrapper assumption", async () => {
+  const wrapper = validWrapper();
+  const bodyText = JSON.stringify(wrapper);
+  let captured:
+    | Parameters<ProviderHttpResponseDecoderV2["decode"]>[0]
+    | undefined;
+  const decoder: ProviderHttpResponseDecoderV2 = {
+    decode(input) {
+      captured = input;
+      return fixtureJsonDecoder.decode(input);
+    },
+  };
+  const adapter = createAdapter({
+    decoder,
+    httpClient: async () =>
+      new Response(bodyText, {
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+          "x-fixture-page": "page-7",
+        },
+      }),
+  });
+
+  await adapter.fetchPage(pageInput({ cursor: "cursor-6" }));
+
+  assert.equal(captured?.bodyText, bodyText);
+  assert.equal(captured?.contentType, "application/x-ndjson; charset=utf-8");
+  assert.equal(captured?.headers["x-fixture-page"], "page-7");
+  assert.equal(captured?.requestedPlatform, platform);
+  assert.equal(captured?.requestedCursor, "cursor-6");
+});
+
+test("decoder failures stay bounded and unexpected decoder exceptions fail closed", async () => {
+  const protectedValue = "provider-private-value";
+  const boundedAdapter = createAdapter({
+    decoder: {
+      decode: () => ({
+        ok: false,
+        code: "invalid_response",
+        fieldPaths: ["records[0].card_id", protectedValue],
+        issueCodes: ["invalid_type", protectedValue],
+      }),
+    },
+    httpClient: async () => jsonResponse(validWrapper()),
+  });
+  const bounded = await captureRequestError(boundedAdapter.fetchPage(pageInput()));
+  assert.deepEqual(bounded.failure, {
+    code: "invalid_response",
+    retryable: false,
+    fieldPaths: ["records[0].card_id"],
+    issueCodes: ["invalid_type"],
+  });
+  assert.doesNotMatch(JSON.stringify(bounded.failure), new RegExp(protectedValue));
+
+  const throwingAdapter = createAdapter({
+    decoder: {
+      decode() {
+        throw new Error(protectedValue);
+      },
+    },
+    httpClient: async () => jsonResponse(validWrapper()),
+  });
+  const throwing = await captureRequestError(
+    throwingAdapter.fetchPage(pageInput()),
+  );
+  assert.deepEqual(throwing.failure, {
+    code: "invalid_response",
+    retryable: false,
+  });
+  assert.doesNotMatch(JSON.stringify(throwing.failure), new RegExp(protectedValue));
+});
+
+test("a decoder is required and oversized cursors fail before network access", async () => {
+  assert.throws(
+    () => new HttpCursorAdapter({ decoder: undefined as never }),
+    /decoder is required/,
+  );
+  let requested = false;
+  const adapter = createAdapter({
+    httpClient: async () => {
+      requested = true;
+      return jsonResponse(validWrapper());
+    },
+  });
+  const error = await captureRequestError(
+    adapter.fetchPage(pageInput({ cursor: "x".repeat(2_049) })),
+  );
+  assert.equal(error.failure.code, "invalid_configuration");
+  assert.equal(requested, false);
 });
 
 test("timeouts cover DNS verification and the HTTP request", async () => {
   const never = () => new Promise<readonly string[]>(() => undefined);
-  const dnsAdapter = new HttpCursorAdapter({ resolveHost: never });
+  const dnsAdapter = new HttpCursorAdapter({
+    decoder: fixtureJsonDecoder,
+    resolveHost: never,
+  });
   const dnsTimeout = await captureRequestError(
     dnsAdapter.fetchPage(pageInput({ timeoutMs: 1 })),
   );
@@ -446,7 +604,7 @@ test("connection tests use the initial raw page and return bounded metadata", as
   const adapter = createAdapter({
     httpClient: async (input) => {
       requestedCursor = new URL(String(input)).searchParams.get("cursor");
-      return jsonResponse(validPage());
+      return jsonResponse(validWrapper());
     },
     now: () => timestamps.shift() ?? 107,
   });
@@ -461,7 +619,7 @@ test("connection tests use the initial raw page and return bounded metadata", as
     ok: true,
     latencyMs: 7,
     responseStatus: 200,
-    recordCounts: { catalog: 1, pulls: 1, sales: 0 },
+    recordCounts: { catalog: 1, pulls: 1, trades: 1 },
     hasMore: false,
     nextCursorPresent: true,
   });

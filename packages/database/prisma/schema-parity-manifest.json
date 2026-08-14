@@ -1,53 +1,17 @@
 {
-  "source": "approved pre-cutover catalog contract",
+  "source": "approved provider stream V2 catalog contract",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260812000000_clean_baseline/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260814000000_provider_stream_v2_cutover/migration.sql"
   },
   "expectedCounts": {
     "tables": 28,
-    "enums": 18,
-    "columns": 322,
-    "indexes": 44,
+    "enums": 19,
+    "columns": 330,
+    "indexes": 49,
     "uniqueConstraints": 19,
     "foreignKeys": 119,
-    "checkConstraints": 55
-  },
-  "nativeExtensions": {
-    "foreignKeys": {
-      "canonical_entities_current_revision_scope_fk": {
-        "table": "canonical_entities",
-        "columns": [
-          "current_revision_id",
-          "id",
-          "organization_id"
-        ],
-        "referencedTable": "canonical_revisions",
-        "referencedColumns": [
-          "id",
-          "entity_id",
-          "organization_id"
-        ],
-        "onDelete": "restrict",
-        "onUpdate": "no action"
-      },
-      "provider_sources_active_revision_scope_fk": {
-        "table": "provider_sources",
-        "columns": [
-          "active_revision_id",
-          "id",
-          "organization_id"
-        ],
-        "referencedTable": "provider_config_revisions",
-        "referencedColumns": [
-          "id",
-          "provider_id",
-          "organization_id"
-        ],
-        "onDelete": "restrict",
-        "onUpdate": "no action"
-      }
-    }
+    "checkConstraints": 58
   },
   "enums": {
     "admin_alert_state": [
@@ -66,7 +30,7 @@
       "catalog_asset",
       "ev_input",
       "pull",
-      "sale",
+      "trade",
       "estimated_ev"
     ],
     "estimated_ev_recomputation_result": [
@@ -89,7 +53,8 @@
     "import_trigger": [
       "scheduled",
       "manual",
-      "recovery"
+      "recovery",
+      "archive"
     ],
     "operational_event_kind": [
       "run_failed",
@@ -118,6 +83,10 @@
       "none",
       "bearer"
     ],
+    "provider_source_mode": [
+      "http",
+      "archive"
+    ],
     "provider_state": [
       "draft",
       "active",
@@ -142,7 +111,7 @@
     "source_record_kind": [
       "catalog",
       "pull",
-      "sale"
+      "trade"
     ],
     "source_record_outcome": [
       "accepted",
@@ -214,7 +183,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 1
+          "default": "1"
         },
         "organization_id": {
           "type": "uuid",
@@ -249,7 +218,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "resolved_at": {
           "type": "timestamp with time zone",
@@ -284,7 +253,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'active'"
+          "default": "'active'::admin_alert_state"
         },
         "summary": {
           "type": "text",
@@ -549,7 +518,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "blocked_until": {
           "type": "timestamp with time zone",
@@ -1082,7 +1051,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "available_at": {
           "type": "timestamp with time zone",
@@ -1222,7 +1191,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'queued'"
+          "default": "'queued'::estimated_ev_recomputation_state"
         },
         "updated_at": {
           "type": "timestamp with time zone",
@@ -1627,12 +1596,19 @@
     },
     "import_runs": {
       "columns": {
+        "archive_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "attempt": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "config_revision_id": {
           "type": "uuid",
@@ -1646,7 +1622,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'{\"accepted\":0,\"duplicate\":0,\"quarantined\":0,\"pages\":0,\"records\":0,\"requestAttempts\":0,\"transientRetries\":0}'::jsonb"
+          "default": "'{\"pages\": 0, \"records\": 0, \"accepted\": 0, \"duplicate\": 0, \"quarantined\": 0, \"requestAttempts\": 0, \"transientRetries\": 0}'::jsonb"
         },
         "created_at": {
           "type": "timestamp with time zone",
@@ -1730,7 +1706,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": false
+          "default": "false"
         },
         "requested_by_actor_key": {
           "type": "text",
@@ -1758,7 +1734,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'queued'"
+          "default": "'queued'::import_run_state"
         },
         "trigger": {
           "type": "import_trigger",
@@ -1769,6 +1745,24 @@
         }
       },
       "indexes": {
+        "import_runs_archive_identity_unique": {
+          "columns": [
+            "organization_id",
+            "provider_id",
+            "archive_sha256"
+          ],
+          "unique": true,
+          "where": "(archive_sha256 IS NOT NULL)"
+        },
+        "import_runs_archive_lookup_idx": {
+          "columns": [
+            "organization_id",
+            "provider_id",
+            "archive_sha256"
+          ],
+          "unique": false,
+          "where": null
+        },
         "import_runs_organization_provider_created_idx": {
           "columns": [
             "organization_id",
@@ -1870,6 +1864,12 @@
         }
       },
       "checkConstraints": {
+        "import_runs_archive_sha256_format": {
+          "value": "((archive_sha256 IS NULL) OR (archive_sha256 ~ '^[0-9a-f]{64}$'::text))"
+        },
+        "import_runs_archive_trigger_consistent": {
+          "value": "((trigger = 'archive'::import_trigger) = (archive_sha256 IS NOT NULL))"
+        },
         "import_runs_attempt_nonnegative": {
           "value": "(attempt >= 0)"
         },
@@ -1882,8 +1882,8 @@
         "import_runs_lease_owner_bounded": {
           "value": "((lease_owner IS NULL) OR (length(lease_owner) <= 256))"
         },
-        "import_runs_manual_actor_required": {
-          "value": "((trigger <> 'manual'::import_trigger) OR (requested_by_actor_key IS NOT NULL))"
+        "import_runs_operator_actor_required": {
+          "value": "((trigger <> ALL (ARRAY['manual'::import_trigger, 'archive'::import_trigger])) OR (requested_by_actor_key IS NOT NULL))"
         },
         "import_runs_requested_cursor_bounded": {
           "value": "((requested_cursor IS NULL) OR (length(requested_cursor) <= 2048))"
@@ -2380,7 +2380,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'active'"
+          "default": "'active'::operator_state"
         },
         "updated_at": {
           "type": "timestamp with time zone",
@@ -2455,10 +2455,24 @@
     },
     "provider_config_revisions": {
       "columns": {
+        "actor_pseudonym_key_fingerprint": {
+          "type": "character(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "adapter_key": {
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "archive_importer_build_sha": {
+          "type": "character(40)",
+          "primaryKey": false,
+          "notNull": false,
           "identity": null,
           "default": null
         },
@@ -2497,6 +2511,13 @@
           "identity": null,
           "default": "gen_random_uuid()"
         },
+        "mapping_adapter_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "organization_id": {
           "type": "uuid",
           "primaryKey": false,
@@ -2516,14 +2537,21 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 300
+          "default": "300"
+        },
+        "source_mode": {
+          "type": "provider_source_mode",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'http'::provider_source_mode"
         },
         "stale_after_seconds": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 900
+          "default": "900"
         },
         "tested_at": {
           "type": "timestamp with time zone",
@@ -2548,6 +2576,15 @@
         }
       },
       "indexes": {
+        "provider_config_revisions_archive_locator_unique": {
+          "columns": [
+            "organization_id",
+            "provider_id",
+            "endpoint_url"
+          ],
+          "unique": true,
+          "where": "(source_mode = 'archive'::provider_source_mode)"
+        },
         "provider_config_revisions_provider_version_unique": {
           "columns": [
             "provider_id",
@@ -2605,6 +2642,9 @@
         }
       },
       "checkConstraints": {
+        "provider_config_revisions_archive_mode_honest": {
+          "value": "(((source_mode = 'http'::provider_source_mode) AND (mapping_adapter_key IS NULL) AND (actor_pseudonym_key_fingerprint IS NULL) AND (archive_importer_build_sha IS NULL)) OR ((source_mode = 'archive'::provider_source_mode) AND (endpoint_url ~ '^archive://sha256/[0-9a-f]{64}$'::text) AND (mapping_adapter_key ~ '^[a-z0-9](?:[a-z0-9_-]{0,126}[a-z0-9])?$'::text) AND (actor_pseudonym_key_fingerprint ~ '^[0-9a-f]{64}$'::text) AND (archive_importer_build_sha ~ '^[0-9a-f]{40}$'::text) AND (auth_mode = 'none'::provider_auth_mode) AND (tested_at IS NULL) AND (tested_by_actor_key IS NULL)))"
+        },
         "provider_config_revisions_schedule_safe": {
           "value": "(schedule_seconds >= 60)"
         },
@@ -2922,7 +2962,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": false
+          "default": "false"
         },
         "calculation_warning_severity": {
           "type": "text",
@@ -2936,7 +2976,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "last_attempted_at": {
           "type": "timestamp with time zone",
@@ -2978,7 +3018,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": false
+          "default": "false"
         },
         "mapping_warning_severity": {
           "type": "text",
@@ -3482,7 +3522,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'draft'"
+          "default": "'draft'::provider_state"
         },
         "updated_at": {
           "type": "timestamp with time zone",
@@ -3625,7 +3665,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'running'"
+          "default": "'running'::quarantine_attempt_state"
         }
       },
       "indexes": {
@@ -3832,7 +3872,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "run_id": {
           "type": "uuid",
@@ -3860,7 +3900,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'open'"
+          "default": "'open'::quarantine_state"
         }
       },
       "indexes": {
@@ -4011,7 +4051,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "batch_size": {
           "type": "integer",
@@ -4032,14 +4072,14 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "failed_count": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "failure_code": {
           "type": "text",
@@ -4074,21 +4114,21 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "quarantines_expired_count": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "remaining_count": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "sanitized_summary": {
           "type": "text",
@@ -4102,14 +4142,14 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "source_records_expired_count": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "started_at": {
           "type": "timestamp with time zone",
@@ -4123,7 +4163,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'running'"
+          "default": "'running'::retention_execution_state"
         }
       },
       "indexes": {
@@ -4202,6 +4242,13 @@
         },
         "run_id": {
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_collected_at": {
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
@@ -4701,8 +4748,22 @@
           "identity": null,
           "default": null
         },
+        "record_identity_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "record_kind": {
           "type": "source_record_kind",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_facts_hash": {
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
@@ -4725,16 +4786,36 @@
           "unique": false,
           "where": null
         },
-        "source_records_immutable_identity_unique": {
+        "source_records_immutable_event_identity_unique": {
+          "columns": [
+            "organization_id",
+            "provider_id",
+            "record_kind",
+            "external_id"
+          ],
+          "unique": true,
+          "where": "(record_kind = ANY (ARRAY['pull'::source_record_kind, 'trade'::source_record_kind]))"
+        },
+        "source_records_source_facts_unique": {
           "columns": [
             "organization_id",
             "provider_id",
             "record_kind",
             "external_id",
-            "source_time",
-            "content_hash"
+            "source_facts_hash"
           ],
           "unique": true,
+          "where": null
+        },
+        "source_records_stable_identity_idx": {
+          "columns": [
+            "organization_id",
+            "provider_id",
+            "record_kind",
+            "external_id",
+            "record_identity_hash"
+          ],
+          "unique": false,
           "where": null
         }
       },
@@ -4814,6 +4895,42 @@
         "source_records_external_id_not_blank": {
           "value": "(length(TRIM(BOTH FROM external_id)) > 0)"
         }
+      }
+    }
+  },
+  "nativeExtensions": {
+    "foreignKeys": {
+      "canonical_entities_current_revision_scope_fk": {
+        "table": "canonical_entities",
+        "columns": [
+          "current_revision_id",
+          "id",
+          "organization_id"
+        ],
+        "referencedTable": "canonical_revisions",
+        "referencedColumns": [
+          "id",
+          "entity_id",
+          "organization_id"
+        ],
+        "onDelete": "restrict",
+        "onUpdate": "no action"
+      },
+      "provider_sources_active_revision_scope_fk": {
+        "table": "provider_sources",
+        "columns": [
+          "active_revision_id",
+          "id",
+          "organization_id"
+        ],
+        "referencedTable": "provider_config_revisions",
+        "referencedColumns": [
+          "id",
+          "provider_id",
+          "organization_id"
+        ],
+        "onDelete": "restrict",
+        "onUpdate": "no action"
       }
     }
   }

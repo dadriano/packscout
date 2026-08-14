@@ -35,9 +35,11 @@ function validInput(
     packPrice: {
       valueMinor: 1_000,
       currency: "USD",
+      minorUnitExponent: 2,
       sourceRevisionId: "price-revision-1",
     },
     distributionCurrency: "USD",
+    distributionMinorUnitExponent: 2,
     unitBasis: "per_pack",
     drawCount: 1,
     declaredCoverage: 1,
@@ -76,6 +78,7 @@ test("per-pack midpoint EV is deterministic and ignores draw count multiplicatio
   assert.deepEqual(
     {
       grossValueMinor: first.grossValueMinor,
+      minorUnitExponent: first.minorUnitExponent,
       evPercent: first.evPercent,
       currency: first.currency,
       method: first.method,
@@ -88,6 +91,7 @@ test("per-pack midpoint EV is deterministic and ignores draw count multiplicatio
     },
     {
       grossValueMinor: 1_050,
+      minorUnitExponent: 2,
       evPercent: 105,
       currency: "USD",
       method: PACKSCOUT_ESTIMATED_EV_METHOD,
@@ -114,6 +118,7 @@ test("per-draw EV applies the positive draw count before comparing with pack pri
       packPrice: {
         valueMinor: 600,
         currency: "USD",
+        minorUnitExponent: 2,
         sourceRevisionId: "price-revision-1",
       },
       unitBasis: "per_draw",
@@ -141,12 +146,13 @@ test("per-draw EV applies the positive draw count before comparing with pack pri
   assert.equal(result.evidence.appliedDrawMultiplier, 3);
 });
 
-test("rounding is aggregate half-up for money and half-up to two percent decimals", () => {
+test("money rounds half-up while EV percentage uses the exact pre-rounding value", () => {
   const result = calculatePackScoutEstimatedEv(
     validInput({
       packPrice: {
         valueMinor: 300,
         currency: "USD",
+        minorUnitExponent: 2,
         sourceRevisionId: "price-revision-1",
       },
       buckets: [bucket({ lowerValueMinor: 100, upperValueMinor: 101 })],
@@ -155,7 +161,7 @@ test("rounding is aggregate half-up for money and half-up to two percent decimal
   assert.equal(result.status, "estimated");
   if (result.status !== "estimated") assert.fail("Expected an estimate.");
   assert.equal(result.grossValueMinor, 101);
-  assert.equal(result.evPercent, 33.67);
+  assert.equal(result.evPercent, 33.5);
 });
 
 test("large midpoint evidence is projected from the exact rational value", () => {
@@ -169,6 +175,7 @@ test("large midpoint evidence is projected from the exact rational value", () =>
       packPrice: {
         valueMinor: expectedMidpointValueMinor,
         currency: "USD",
+        minorUnitExponent: 2,
         sourceRevisionId: "price-revision-1",
       },
       buckets: [bucket({ lowerValueMinor, upperValueMinor })],
@@ -230,15 +237,17 @@ test("coverage tolerance is explicit and accepted distributions are not renormal
 });
 
 test("USD-stablecoin parity requires exact membership in the verified policy", () => {
-  const verifiedCurrency = "stablecoin:verified-usd";
+  const verifiedCurrency = "USDC";
   const verified = calculatePackScoutEstimatedEv(
     validInput({
       packPrice: {
-        valueMinor: 1_000,
+        valueMinor: 10_000_000,
         currency: verifiedCurrency,
+        minorUnitExponent: 6,
         sourceRevisionId: "price-revision-1",
       },
       distributionCurrency: verifiedCurrency,
+      distributionMinorUnitExponent: 6,
       currencyPolicy: { verifiedUsdStablecoins: [verifiedCurrency] },
     }),
   );
@@ -266,6 +275,104 @@ test("USD-stablecoin parity requires exact membership in the verified policy", (
   }
 });
 
+test("mixed USD and verified USDC inputs compare exact scaled values before USD-cent rounding", () => {
+  const usdPriceUsdcDistribution = calculatePackScoutEstimatedEv(
+    validInput({
+      packPrice: {
+        valueMinor: 1_000,
+        currency: "USD",
+        minorUnitExponent: 2,
+        sourceRevisionId: "price-revision-1",
+      },
+      distributionCurrency: "USDC",
+      distributionMinorUnitExponent: 6,
+      buckets: [
+        bucket({
+          lowerValueMinor: 12_345_678,
+          upperValueMinor: 12_345_678,
+        }),
+      ],
+      currencyPolicy: { verifiedUsdStablecoins: ["USDC"] },
+    }),
+  );
+  assert.equal(usdPriceUsdcDistribution.status, "estimated");
+  if (usdPriceUsdcDistribution.status !== "estimated") {
+    assert.fail("Expected an estimate.");
+  }
+  assert.equal(usdPriceUsdcDistribution.grossValueMinor, 1_235);
+  assert.equal(usdPriceUsdcDistribution.minorUnitExponent, 2);
+  assert.equal(usdPriceUsdcDistribution.evPercent, 123.46);
+  assert.equal(usdPriceUsdcDistribution.evidence.priceMinorUnitExponent, 2);
+  assert.equal(
+    usdPriceUsdcDistribution.evidence.distributionMinorUnitExponent,
+    6,
+  );
+  assert.equal(usdPriceUsdcDistribution.evidence.outputMinorUnitExponent, 2);
+  assert.equal(
+    usdPriceUsdcDistribution.evidence.includedBuckets[0]?.minorUnitExponent,
+    6,
+  );
+
+  const usdcPriceUsdDistribution = calculatePackScoutEstimatedEv(
+    validInput({
+      packPrice: {
+        valueMinor: 1_500_000,
+        currency: "USDC",
+        minorUnitExponent: 6,
+        sourceRevisionId: "price-revision-1",
+      },
+      distributionCurrency: "USD",
+      distributionMinorUnitExponent: 2,
+      buckets: [bucket({ lowerValueMinor: 200, upperValueMinor: 200 })],
+      currencyPolicy: { verifiedUsdStablecoins: ["USDC"] },
+    }),
+  );
+  assert.equal(usdcPriceUsdDistribution.status, "estimated");
+  if (usdcPriceUsdDistribution.status !== "estimated") {
+    assert.fail("Expected an estimate.");
+  }
+  assert.equal(usdcPriceUsdDistribution.grossValueMinor, 200);
+  assert.equal(usdcPriceUsdDistribution.evPercent, 133.33);
+});
+
+test("verified USDC pack and distribution preserve micro-unit evidence while output rounds explicitly", () => {
+  const result = calculatePackScoutEstimatedEv(
+    validInput({
+      packPrice: {
+        valueMinor: 1_234_567,
+        currency: "USDC",
+        minorUnitExponent: 6,
+        sourceRevisionId: "price-revision-1",
+      },
+      distributionCurrency: "USDC",
+      distributionMinorUnitExponent: 6,
+      buckets: [
+        bucket({
+          lowerValueMinor: 1_234_567,
+          upperValueMinor: 1_234_567,
+        }),
+      ],
+      currencyPolicy: { verifiedUsdStablecoins: ["USDC"] },
+    }),
+  );
+  assert.equal(result.status, "estimated");
+  if (result.status !== "estimated") assert.fail("Expected an estimate.");
+  assert.equal(result.grossValueMinor, 123);
+  assert.equal(result.minorUnitExponent, 2);
+  assert.equal(result.evPercent, 100);
+  assert.equal(
+    result.evidence.rounding.grossValue,
+    "aggregate_half_up_to_usd_minor_unit",
+  );
+  assert.deepEqual(
+    result.evidence.includedBuckets.map((value) => ({
+      midpointValueMinor: value.midpointValueMinor,
+      minorUnitExponent: value.minorUnitExponent,
+    })),
+    [{ midpointValueMinor: 1_234_567, minorUnitExponent: 6 }],
+  );
+});
+
 interface ReasonCase {
   readonly name: string;
   readonly reason: PackScoutEstimatedEvUnavailableReason;
@@ -279,13 +386,30 @@ test("every insufficient-input condition returns one constrained unavailable rea
       name: "invalid price",
       reason: "invalid_pack_price",
       input: validInput({
-        packPrice: { valueMinor: 0, currency: "USD", sourceRevisionId: "price-revision-1" },
+        packPrice: { valueMinor: 0, currency: "USD", minorUnitExponent: 2, sourceRevisionId: "price-revision-1" },
       }),
     },
     {
       name: "unsupported currency",
       reason: "unsupported_currency",
       input: validInput({ distributionCurrency: "token:unknown" }),
+    },
+    {
+      name: "missing money scale",
+      reason: "missing_money_scale",
+      input: validInput({ distributionMinorUnitExponent: null }),
+    },
+    {
+      name: "invalid money scale",
+      reason: "invalid_money_scale",
+      input: validInput({
+        packPrice: {
+          valueMinor: 1_000,
+          currency: "USD",
+          minorUnitExponent: 6,
+          sourceRevisionId: "price-revision-1",
+        },
+      }),
     },
     {
       name: "missing buckets",
@@ -363,7 +487,7 @@ test("every insufficient-input condition returns one constrained unavailable rea
       name: "overflow",
       reason: "calculation_overflow",
       input: validInput({
-        packPrice: { valueMinor: 1, currency: "USD", sourceRevisionId: "price-revision-1" },
+        packPrice: { valueMinor: 1, currency: "USD", minorUnitExponent: 2, sourceRevisionId: "price-revision-1" },
         unitBasis: "per_draw",
         drawCount: 2,
         buckets: [

@@ -8,8 +8,8 @@ import {
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import {
-  safeValidateProviderFeedPageV1,
-  type ProviderFeedPageStructureV1,
+  safeValidateProviderStreamPageV2,
+  type ProviderStreamPageStructureV2,
 } from "@packscout/contracts";
 import {
   ProviderMappingAdapterRegistry,
@@ -17,13 +17,15 @@ import {
 } from "./provider-adapter-registry.ts";
 import type {
   ProviderMappingAdapter,
-  ProviderMappingOutput,
   NormalizedProviderTransportFailure,
-  ProviderSourceIdentity,
+  ProviderRecordMappingOutcome,
   ProviderTransportAdapter,
   ProviderTransportPageInput,
 } from "./provider-adapter.ts";
-import { ProviderTransportRequestError } from "./provider-adapter.ts";
+import {
+  ProviderTransportRequestError,
+  sourceIdentityForRecord,
+} from "./provider-adapter.ts";
 import { AesGcmProviderCredentialCipher } from "./provider-credential-cipher.ts";
 import { DefaultProviderImportPagePlanner } from "./provider-import-page-planner.ts";
 import {
@@ -59,13 +61,16 @@ class MutableClock {
 }
 
 class FixtureTransportAdapter implements ProviderTransportAdapter {
-  readonly key = "http-cursor-v1";
+  readonly key = "http-cursor-v2";
   readonly requests: Array<string | null> = [];
   failure: NormalizedProviderTransportFailure | null = null;
   onFetch?: () => Promise<void>;
 
   constructor(
-    private readonly pages: ReadonlyMap<string | null, ProviderFeedPageStructureV1>,
+    private readonly pages: ReadonlyMap<
+      string | null,
+      Omit<ProviderStreamPageStructureV2, "requestedCursor">
+    >,
     onFetch?: () => Promise<void>,
   ) {
     this.onFetch = onFetch;
@@ -80,7 +85,7 @@ class FixtureTransportAdapter implements ProviderTransportAdapter {
       ok: true as const,
       latencyMs: 1,
       responseStatus: 200,
-      recordCounts: { catalog: 0, pulls: 0, sales: 0 },
+      recordCounts: { catalog: 0, pulls: 0, trades: 0 },
       hasMore: false,
       nextCursorPresent: true,
     };
@@ -92,97 +97,110 @@ class FixtureTransportAdapter implements ProviderTransportAdapter {
     await this.onFetch?.();
     const raw = this.pages.get(input.cursor);
     if (!raw) throw new Error("Missing fixture page.");
-    const parsed = safeValidateProviderFeedPageV1(raw, {
-      requestedPlatform: input.platform,
-      requestedCursor: input.cursor,
-      seenCursors: input.seenCursors,
+    const normalizedPage = { ...raw, requestedCursor: input.cursor };
+    const parsed = safeValidateProviderStreamPageV2({
+      rawPage: raw,
+      normalizedPage,
+      context: {
+        requestedPlatform: input.platform,
+        requestedCursor: input.cursor,
+        seenCursors: input.seenCursors,
+      },
     });
-    if (!parsed.success) throw parsed.error;
+    if (!parsed.success) {
+      throw new ProviderTransportRequestError({
+        code: "invalid_response",
+        retryable: false,
+        issueCodes: parsed.error.issues.map(({ code }) => code),
+      });
+    }
     return parsed.data;
   }
 }
 
-function source(
-  recordKind: "catalog" | "pull" | "sale",
-  recordIndex: number,
-  envelope: { external_id: string; collected_at: string; updated_at?: string; occurred_at?: string },
-): ProviderSourceIdentity {
-  return {
-    platform,
-    recordKind,
-    recordIndex,
-    externalId: envelope.external_id,
-    collectedAt: envelope.collected_at,
-    sourceTimestamp: envelope.updated_at ?? envelope.occurred_at!,
-  };
-}
-
 class FixtureMappingAdapter implements ProviderMappingAdapter {
-  readonly key = "fixture-mapper-v1";
+  readonly key = "fixture-mapper-v2";
   readonly platformKey = platform;
 
-  mapPage(input: Parameters<ProviderMappingAdapter["mapPage"]>[0]): ProviderMappingOutput {
+  mapRecord(
+    input: Parameters<ProviderMappingAdapter["mapRecord"]>[0],
+  ): ProviderRecordMappingOutcome {
     assert.equal(input.configuration.adapterKey, this.key);
-    const outcomes: ProviderMappingOutput["outcomes"][number][] = [];
-    input.page.catalog.forEach((envelope, index) => {
-      const recordSource = source(
-        "catalog",
-        input.recordIndexes.catalog[index]!,
-        envelope,
-      );
-      outcomes.push(
-        envelope.external_id === "bad-map"
-          ? {
-              status: "invalid",
-              source: recordSource,
-              failure: { reasonCode: "UNCLASSIFIABLE_CATALOG", fieldPath: "data" },
-            }
-          : {
-              status: "mapped",
-              source: recordSource,
-              candidates: [
-                {
-                  candidateKind: "catalog_asset",
-                  source: recordSource,
-                  externalId: envelope.external_id,
-                  name: envelope.external_id,
-                  relationships: [],
-                  dataQualityEvidence: [],
-                },
-              ],
+    const recordSource = sourceIdentityForRecord(input);
+    if (input.record.stream === "catalog") {
+      return input.record.record_id === "bad-map"
+        ? {
+            status: "invalid",
+            source: recordSource,
+            failure: {
+              reasonCode: "UNCLASSIFIABLE_CATALOG",
+              fieldPath: "data",
             },
-      );
-    });
-    input.page.pulls.forEach((envelope, index) => {
-      const recordSource = source(
-        "pull",
-        input.recordIndexes.pulls[index]!,
-        envelope,
-      );
-      outcomes.push({
+          }
+        : {
+            status: "mapped",
+            source: recordSource,
+            candidates: [
+              {
+                candidateKind: "catalog_asset",
+                source: recordSource,
+                externalId: input.record.record_id,
+                name: input.record.record_id,
+                relationships: [],
+                dataQualityEvidence: [],
+              },
+            ],
+          };
+    }
+    if (input.record.stream === "pulls") {
+      return {
         status: "mapped",
         source: recordSource,
         candidates: [
           {
             candidateKind: "pull",
             source: recordSource,
-            packExternalId: envelope.pack_external_id,
-            assetExternalId: null,
-            occurredAt: envelope.occurred_at,
+            packExternalId: input.record.pack_id,
+            assetExternalId: input.record.card_id,
+            occurredAt: input.record.occurred_at!,
             pseudonymizationInputs: [],
             relationships: [],
             dataQualityEvidence: [],
           },
         ],
-      });
-    });
-    return { outcomes };
+      };
+    }
+    return {
+      status: "mapped",
+      source: recordSource,
+      candidates: [
+        {
+          candidateKind: "trade",
+          source: recordSource,
+          eventType: input.record.event_type,
+          transactionKey: input.record.tx_hash,
+          assetExternalId: input.record.card_id,
+          occurredAt: input.record.occurred_at!,
+          amount:
+            input.record.amount === null || input.record.currency === null
+              ? null
+              : {
+                  amount: input.record.amount,
+                  currency: input.record.currency,
+                },
+          paymentMethod: input.record.payment_method ?? null,
+          pseudonymizationInputs: [],
+          relationships: [],
+          dataQualityEvidence: [],
+        },
+      ],
+    };
   }
 }
 
 const projectionPort: ProviderProjectionPort = {
   project: ({ configuration, source: recordSource }) => {
-    assert.equal(configuration.adapterKey, "fixture-mapper-v1");
+    assert.equal(configuration.adapterKey, "fixture-mapper-v2");
     return recordSource.externalId === "projection-bad"
       ? { status: "invalid", reasonCode: "PROJECTION_SCHEMA_INVALID" }
       : {
@@ -191,7 +209,9 @@ const projectionPort: ProviderProjectionPort = {
             {
               platformKey: platform,
               recordKind:
-                recordSource.recordKind === "catalog" ? "catalog_asset" : "pull",
+                recordSource.recordKind === "catalog"
+                  ? "catalog_asset"
+                  : recordSource.recordKind,
               externalId: recordSource.externalId,
               content: { sourceExternalId: recordSource.externalId },
               sourceUpdatedAt: new Date(recordSource.sourceTimestamp),
@@ -204,9 +224,12 @@ const projectionPort: ProviderProjectionPort = {
 
 function catalog(externalId: string) {
   return {
+    stream: "catalog",
     platform,
-    external_id: externalId,
-    updated_at: sourceTime,
+    entity: "card",
+    record_id: externalId,
+    first_seen_at: sourceTime,
+    occurred_at: sourceTime,
     collected_at: collectedAt,
     data: { display: externalId },
   };
@@ -214,9 +237,28 @@ function catalog(externalId: string) {
 
 function pull(externalId: string) {
   return {
+    stream: "pulls",
     platform,
-    external_id: externalId,
-    pack_external_id: null,
+    record_id: externalId,
+    pack_id: "fixture-pack",
+    card_id: null,
+    occurred_at: sourceTime,
+    collected_at: collectedAt,
+    data: { display: externalId },
+  };
+}
+
+function trade(externalId: string) {
+  return {
+    stream: "trades",
+    platform,
+    record_id: externalId,
+    card_id: "fixture-card",
+    event_type: "sale",
+    amount: 25,
+    currency: "USD",
+    payment_method: "card",
+    tx_hash: `${externalId}:tx`,
     occurred_at: sourceTime,
     collected_at: collectedAt,
     data: { display: externalId },
@@ -224,7 +266,10 @@ function pull(externalId: string) {
 }
 
 async function createHarness(
-  pages: ReadonlyMap<string | null, ProviderFeedPageStructureV1>,
+  pages: ReadonlyMap<
+    string | null,
+    Omit<ProviderStreamPageStructureV2, "requestedCursor">
+  >,
   options: {
     onFetch?: () => Promise<void>;
     pageRepository?: (
@@ -259,7 +304,7 @@ async function createHarness(
     organizationId: ids.organization,
     providerId: ids.provider,
     version: 1,
-    adapterKey: "http-cursor-v1",
+    adapterKey: "http-cursor-v2",
     endpointUrl: "https://provider.example/feed",
     authMode: "none",
     createdByActorKey: "operator:admin",
@@ -312,32 +357,37 @@ async function createHarness(
     sleeper: { sleep: async () => undefined },
     random: { value: () => 0 },
     leaseDurationMs: 20_000,
-    maximumRunDurationMs: 20_000,
+    maximumRunDurationMs: 60_000,
   });
   return { ...harness, clock, service, transport };
 }
 
-test("manual and scheduled requests share one run while a disabled-after-start import reaches head with linked quarantine", async () => {
+test("same-trigger requests coalesce while a different trigger conflicts and the claimed import reaches head", async () => {
   let disabled = false;
-  const pages = new Map<string | null, ProviderFeedPageStructureV1>([
+  const pages = new Map<
+    string | null,
+    Omit<ProviderStreamPageStructureV2, "requestedCursor">
+  >([
     [
       null,
       {
-        catalog: [catalog("good-1"), catalog("bad-map"), { platform, data: {} }],
-        pulls: [pull("projection-bad")],
-        sales: [],
-        next_cursor: "opaque-page-2",
-        has_more: true,
+        records: [
+          catalog("good-1"),
+          catalog("bad-map"),
+          { platform, data: {} },
+          pull("projection-bad"),
+          trade("good-trade"),
+        ],
+        nextCursor: "opaque-page-2",
+        hasMore: true,
       },
     ],
     [
       "opaque-page-2",
       {
-        catalog: [catalog("good-2")],
-        pulls: [],
-        sales: [],
-        next_cursor: "opaque-head",
-        has_more: false,
+        records: [catalog("good-2")],
+        nextCursor: "opaque-head",
+        hasMore: false,
       },
     ],
   ]);
@@ -368,18 +418,23 @@ test("manual and scheduled requests share one run while a disabled-after-start i
     assert.ok(requested);
     assert.ok(coalesced);
     assert.equal(coalesced.run.id, requested.run.id);
-    const manualDuplicate = await harness.service.requestImport({
-      trigger: "manual",
-      providerId: ids.provider,
-      expectedConfigurationRevisionId: ids.revision,
-      actor: {
-        organizationId: ids.organization,
-        operatorId: "admin",
-        role: "admin",
-      },
-    });
-    assert.equal(manualDuplicate.coalesced, true);
-    assert.equal(manualDuplicate.run.id, requested.run.id);
+    await assert.rejects(
+      harness.service.requestImport({
+        trigger: "manual",
+        providerId: ids.provider,
+        expectedConfigurationRevisionId: ids.revision,
+        actor: {
+          organizationId: ids.organization,
+          operatorId: "admin",
+          role: "admin",
+        },
+      }),
+      (error: unknown) =>
+        error instanceof ProviderImportServiceError &&
+        error.code === "IMPORT_TRIGGER_CONFLICT" &&
+        error.status === 409 &&
+        error.activeRun?.id === requested.run.id,
+    );
     await assert.rejects(
       harness.service.executeImport({
         organizationId: ids.otherOrganization,
@@ -398,11 +453,11 @@ test("manual and scheduled requests share one run while a disabled-after-start i
     assert.equal(finished.state, "incomplete");
     assert.equal(finished.reachedProviderHead, true);
     assert.deepEqual(finished.counters, {
-      accepted: 2,
+      accepted: 3,
       duplicate: 0,
       quarantined: 3,
       pages: 2,
-      records: 5,
+      records: 6,
       requestAttempts: 2,
       transientRetries: 0,
     });
@@ -413,9 +468,21 @@ test("manual and scheduled requests share one run while a disabled-after-start i
     });
     assert.equal(checkpoint?.cursor, "opaque-head");
     assert.equal(await harness.database.import_pages.count(), 2);
-    assert.equal(await harness.database.source_records.count(), 4);
-    assert.equal(await harness.database.canonical_revisions.count(), 2);
-    assert.equal(await harness.database.source_record_outcomes.count(), 5);
+    assert.equal(await harness.database.source_records.count(), 5);
+    assert.equal(await harness.database.canonical_revisions.count(), 3);
+    assert.equal(await harness.database.source_record_outcomes.count(), 6);
+    assert.deepEqual(
+      await harness.database.source_records.groupBy({
+        by: ["record_kind"],
+        _count: { _all: true },
+        orderBy: { record_kind: "asc" },
+      }),
+      [
+        { _count: { _all: 3 }, record_kind: "catalog" },
+        { _count: { _all: 1 }, record_kind: "pull" },
+        { _count: { _all: 1 }, record_kind: "trade" },
+      ],
+    );
     const linkedQuarantines = await harness.database.quarantine_records.findMany({
       where: { source_record_id: { not: null } },
     });
@@ -450,11 +517,9 @@ test("the shared import workflow claims and executes a queued manual run", async
       [
         null,
         {
-          catalog: [catalog("manual-queue-record")],
-          pulls: [],
-          sales: [],
-          next_cursor: "manual-queue-head",
-          has_more: false,
+          records: [catalog("manual-queue-record")],
+          nextCursor: "manual-queue-head",
+          hasMore: false,
         },
       ],
     ]),
@@ -493,25 +558,24 @@ test("the shared import workflow claims and executes a queued manual run", async
 
 test("a crash after atomic page commit resumes from the durable opaque cursor without replaying source history", async () => {
   let simulateCrash = true;
-  const pages = new Map<string | null, ProviderFeedPageStructureV1>([
+  const pages = new Map<
+    string | null,
+    Omit<ProviderStreamPageStructureV2, "requestedCursor">
+  >([
     [
       null,
       {
-        catalog: [catalog("crash-page-1")],
-        pulls: [],
-        sales: [],
-        next_cursor: "opaque-resume",
-        has_more: true,
+        records: [catalog("crash-page-1")],
+        nextCursor: "opaque-resume",
+        hasMore: true,
       },
     ],
     [
       "opaque-resume",
       {
-        catalog: [catalog("crash-page-2")],
-        pulls: [],
-        sales: [],
-        next_cursor: "opaque-final",
-        has_more: false,
+        records: [catalog("crash-page-2")],
+        nextCursor: "opaque-final",
+        hasMore: false,
       },
     ],
   ]);
@@ -570,6 +634,146 @@ test("a crash after atomic page commit resumes from the durable opaque cursor wi
       providerId: ids.provider,
     });
     assert.equal(next.run.requestedCursor, "opaque-final");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a reclaimed run finishes an already-committed terminal page without another provider request", async () => {
+  let simulateCrash = true;
+  const harness = await createHarness(new Map([
+    [
+      null,
+      {
+        records: [catalog("terminal-before-crash")],
+        nextCursor: "opaque-terminal-head",
+        hasMore: false,
+      },
+    ],
+  ]), {
+    pageRepository: (repository) => ({
+      commitPage: async (input) => {
+        const result = await repository.commitPage(input);
+        if (simulateCrash) {
+          simulateCrash = false;
+          throw { code: "RUN_OWNERSHIP_LOST" };
+        }
+        return result;
+      },
+    }),
+  });
+  try {
+    const requested = await harness.service.requestImport({
+      trigger: "scheduled",
+      organizationId: ids.organization,
+      providerId: ids.provider,
+    });
+    await assert.rejects(
+      harness.service.executeImport({
+        organizationId: ids.organization,
+        runId: requested.run.id,
+        workerId: "worker-terminal-before-crash",
+      }),
+      (error: unknown) =>
+        error instanceof ProviderImportServiceError &&
+        error.code === "RUN_OWNERSHIP_LOST",
+    );
+    harness.clock.advance(20_001);
+    harness.transport.failure = {
+      code: "network_error",
+      retryable: false,
+    };
+    const finished = await harness.service.executeImport({
+      organizationId: ids.organization,
+      runId: requested.run.id,
+      workerId: "worker-terminal-after-crash",
+    });
+    assert.equal(finished.state, "succeeded");
+    assert.equal(finished.reachedProviderHead, true);
+    assert.equal(finished.finalCursor, "opaque-terminal-head");
+    assert.deepEqual(harness.transport.requests, [null]);
+    assert.equal(await harness.database.import_pages.count(), 1);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a reclaimed run rejects a terminal response that returns to an earlier committed cursor", async () => {
+  let commitCount = 0;
+  const harness = await createHarness(new Map([
+    [
+      null,
+      {
+        records: [catalog("cycle-page-1")],
+        nextCursor: "opaque-cycle-1",
+        hasMore: true,
+      },
+    ],
+    [
+      "opaque-cycle-1",
+      {
+        records: [catalog("cycle-page-2")],
+        nextCursor: "opaque-cycle-2",
+        hasMore: true,
+      },
+    ],
+    [
+      "opaque-cycle-2",
+      {
+        records: [],
+        nextCursor: "opaque-cycle-1",
+        hasMore: false,
+      },
+    ],
+  ]), {
+    pageRepository: (repository) => ({
+      commitPage: async (input) => {
+        const result = await repository.commitPage(input);
+        commitCount += 1;
+        if (commitCount === 2) throw { code: "RUN_OWNERSHIP_LOST" };
+        return result;
+      },
+    }),
+  });
+  try {
+    const requested = await harness.service.requestImport({
+      trigger: "scheduled",
+      organizationId: ids.organization,
+      providerId: ids.provider,
+    });
+    await assert.rejects(
+      harness.service.executeImport({
+        organizationId: ids.organization,
+        runId: requested.run.id,
+        workerId: "worker-cycle-before-crash",
+      }),
+      (error: unknown) =>
+        error instanceof ProviderImportServiceError &&
+        error.code === "RUN_OWNERSHIP_LOST",
+    );
+    harness.clock.advance(20_001);
+    const failed = await harness.service.executeImport({
+      organizationId: ids.organization,
+      runId: requested.run.id,
+      workerId: "worker-cycle-after-crash",
+    });
+    assert.equal(failed.state, "failed");
+    assert.equal(failed.failureCode, "IMPORT_CURSOR_SAFETY_FAILED");
+    assert.equal(failed.reachedProviderHead, false);
+    assert.equal(failed.finalCursor, "opaque-cycle-2");
+    assert.deepEqual(harness.transport.requests, [
+      null,
+      "opaque-cycle-1",
+      "opaque-cycle-2",
+    ]);
+    assert.equal(await harness.database.import_pages.count(), 2);
+    assert.equal(
+      (await harness.database.provider_cursor_checkpoints.findUnique({
+        where: { config_revision_id: ids.revision },
+        select: { cursor: true },
+      }))?.cursor,
+      "opaque-cycle-2",
+    );
   } finally {
     await harness.close();
   }
@@ -658,15 +862,16 @@ test("transport failures retain distinct sanitized terminal codes and retry only
 });
 
 test("a page persistence failure leaves the checkpoint untouched and records only a sanitized terminal result", async () => {
-  const pages = new Map<string | null, ProviderFeedPageStructureV1>([
+  const pages = new Map<
+    string | null,
+    Omit<ProviderStreamPageStructureV2, "requestedCursor">
+  >([
     [
       null,
       {
-        catalog: [catalog("persistence-failure")],
-        pulls: [],
-        sales: [],
-        next_cursor: "must-not-advance",
-        has_more: false,
+        records: [catalog("persistence-failure")],
+        nextCursor: "must-not-advance",
+        hasMore: false,
       },
     ],
   ]);

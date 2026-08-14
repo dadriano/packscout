@@ -113,3 +113,24 @@ test("quarantine detail explains when the operator loses permission", async (con
   assert.match(pageText(renderer), /Return to quarantine/);
   assert.doesNotMatch(pageText(renderer), /Retry record/);
 });
+
+test("quarantine detail keeps source identity and facts conflicts out of the retry workflow", async (context) => {
+  const requests = stubFetch(context, () =>
+    jsonResponse({
+      entry: {
+        ...entry,
+        reasonCode: "CATALOG_IDENTITY_CONFLICT",
+        sanitizedSummary: "A catalog record reused a stable source key.",
+      },
+    }),
+  );
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.match(pageText(renderer), /Retry is disabled/);
+  assert.match(pageText(renderer), /review the provider data manually/i);
+  assert.match(pageText(renderer), /Disabled for source conflicts/);
+  assert.doesNotMatch(pageText(renderer), /Retry record/);
+  assert.equal(requests.length, 1);
+});

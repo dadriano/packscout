@@ -1,11 +1,13 @@
 # Task: Validate Backfill and Incremental Launch
 
+> **Superseded implementation artifact (2026-08-14).** Historical aggregate V1/eight-provider evidence only; do not use it as a launch gate. The current [record-stream V2 contract](../../docs/provider-data-contract-v2.md) validates Collector Crypt and Courtyard; live HTTP remains blocked on real wrapper/cursor evidence.
+
 **ID:** data-pipeline/018  
 **Feature PRD:** [Data Pipeline](./_index.md)  
 **Depends on:** [data-pipeline/010](010-schedule-imports-and-track-freshness.md), [data-pipeline/011](011-manage-providers-in-admin.md), [data-pipeline/012](012-operate-imports-in-admin.md), [data-pipeline/013](013-enforce-retention-and-operational-notifications.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Blocks:** none  
 **Estimated scope:** large  
-**Status:** done
+**Status:** done (historical artifact; superseded by V2)
 
 ## Objective
 

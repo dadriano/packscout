@@ -1,11 +1,13 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {
-  safeValidateProviderFeedPageV1,
-  ProviderFeedValidationError,
+  safeValidateProviderStreamPageV2,
+  ProviderStreamValidationError,
 } from "@packscout/contracts";
 import {
   ProviderTransportRequestError,
+  type ProviderHttpResponseDecoderV2,
+  type ProviderHttpResponseDecodeResultV2,
   type NormalizedProviderTransportFailure,
   type ProviderConnectionTestResult,
   type ProviderTransportAdapter,
@@ -32,6 +34,7 @@ export type ProviderDnsResolver = (
 ) => Promise<readonly string[]>;
 
 export interface HttpCursorAdapterDependencies {
+  readonly decoder: ProviderHttpResponseDecoderV2;
   readonly httpClient?: ProviderHttpClient;
   readonly resolveHost?: ProviderDnsResolver;
   readonly now?: () => number;
@@ -81,6 +84,7 @@ function validateRequestInput(input: ProviderTransportPageInput): void {
   if (
     input.platform.trim().length === 0 ||
     input.cursor === "" ||
+    (input.cursor !== null && input.cursor.length > 2_048) ||
     input.allowedHosts.length === 0
   ) {
     throw requestError("invalid_configuration", false);
@@ -150,14 +154,16 @@ function buildRequestUrl(input: ProviderTransportPageInput): URL {
     throw requestError("destination_not_allowed", false);
   }
   url.hash = "";
+  url.search = "";
   url.searchParams.set("platform", input.platform);
-  url.searchParams.delete("cursor");
   if (input.cursor !== null) url.searchParams.set("cursor", input.cursor);
   return url;
 }
 
 function buildRequestHeaders(input: ProviderTransportPageInput): Headers {
-  const headers = new Headers({ Accept: "application/json" });
+  const headers = new Headers({
+    Accept: "application/json, application/x-ndjson",
+  });
   if (input.auth.mode === "bearer") {
     headers.set("Authorization", `Bearer ${input.auth.token}`);
   }
@@ -381,13 +387,43 @@ function normalizedLatency(startedAt: number, finishedAt: number): number {
   return Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0;
 }
 
+function responseHeaders(response: Response): Readonly<Record<string, string>> {
+  const headers = Object.create(null) as Record<string, string>;
+  response.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
+  return Object.freeze(headers);
+}
+
+function decoderFailure(
+  result: Extract<ProviderHttpResponseDecodeResultV2, { readonly ok: false }>,
+): ProviderTransportRequestError {
+  const safeFieldPath = /^(?:\$|records(?:\[[0-9]+\])?(?:\.[A-Za-z0-9_$-]+)*|nextCursor|hasMore)$/;
+  const safeIssueCode = /^[a-z0-9_]{1,128}$/;
+  const fieldPaths = result.fieldPaths
+    ?.filter((value) => safeFieldPath.test(value))
+    .slice(0, 100);
+  const issueCodes = result.issueCodes
+    ?.filter((value) => safeIssueCode.test(value))
+    .slice(0, 100);
+  return requestError(result.code, false, {
+    ...(fieldPaths && fieldPaths.length > 0 ? { fieldPaths } : {}),
+    ...(issueCodes && issueCodes.length > 0 ? { issueCodes } : {}),
+  });
+}
+
 export class HttpCursorAdapter implements ProviderTransportAdapter {
-  readonly key = "http-cursor-v1";
+  readonly key = "http-cursor-v2";
+  readonly #decoder: ProviderHttpResponseDecoderV2;
   readonly #httpClient: ProviderHttpClient;
   readonly #resolveHost: ProviderDnsResolver;
   readonly #now: () => number;
 
-  constructor(dependencies: HttpCursorAdapterDependencies = {}) {
+  constructor(dependencies: HttpCursorAdapterDependencies) {
+    if (typeof dependencies.decoder?.decode !== "function") {
+      throw new TypeError("A provider response decoder is required.");
+    }
+    this.#decoder = dependencies.decoder;
     this.#httpClient =
       dependencies.httpClient ?? requestPinnedProviderHttp;
     this.#resolveHost = dependencies.resolveHost ?? defaultDnsResolver;
@@ -423,12 +459,15 @@ export class HttpCursorAdapter implements ProviderTransportAdapter {
         latencyMs: normalizedLatency(startedAt, this.#now()),
         responseStatus,
         recordCounts: {
-          catalog: page.rawPage.catalog.length,
-          pulls: page.rawPage.pulls.length,
-          sales: page.rawPage.sales.length,
+          catalog: page.page.records.filter(({ stream }) => stream === "catalog")
+            .length,
+          pulls: page.page.records.filter(({ stream }) => stream === "pulls")
+            .length,
+          trades: page.page.records.filter(({ stream }) => stream === "trades")
+            .length,
         },
-        hasMore: page.rawPage.has_more,
-        nextCursorPresent: page.rawPage.next_cursor.length > 0,
+        hasMore: page.page.hasMore,
+        nextCursorPresent: page.page.nextCursor.length > 0,
       };
     } catch (error) {
       const normalized =
@@ -487,25 +526,41 @@ export class HttpCursorAdapter implements ProviderTransportAdapter {
         );
       }
       const responseText = await readBoundedResponse(response, maximumBytes);
-      let responseValue: unknown;
+      let decoded: ProviderHttpResponseDecodeResultV2;
       try {
-        responseValue = JSON.parse(responseText) as unknown;
+        decoded = await this.#decoder.decode({
+          bodyText: responseText,
+          contentType: response.headers.get("content-type"),
+          headers: responseHeaders(response),
+          requestedPlatform: input.platform,
+          requestedCursor: input.cursor,
+        });
       } catch {
-        throw requestError("invalid_json", false);
+        throw requestError("invalid_response", false);
       }
-      const validated = safeValidateProviderFeedPageV1(responseValue, {
-        requestedPlatform: input.platform,
-        requestedCursor: input.cursor,
-        seenCursors: input.seenCursors,
+      if (!decoded.ok) throw decoderFailure(decoded);
+      const validated = safeValidateProviderStreamPageV2({
+        rawPage: decoded.page.rawPage,
+        normalizedPage: {
+          requestedCursor: input.cursor,
+          nextCursor: decoded.page.nextCursor,
+          hasMore: decoded.page.hasMore,
+          records: decoded.page.records,
+        },
+        context: {
+          requestedPlatform: input.platform,
+          requestedCursor: input.cursor,
+          seenCursors: input.seenCursors,
+        },
       });
       if (!validated.success) {
-        throw new ProviderFeedValidationError(validated.error.issues);
+        throw new ProviderStreamValidationError(validated.error.issues);
       }
       return { page: validated.data, responseStatus: response.status };
     } catch (error) {
       if (requestLifetime.didTimeOut()) throw requestError("timeout", true);
       if (error instanceof ProviderTransportRequestError) throw error;
-      if (error instanceof ProviderFeedValidationError) {
+      if (error instanceof ProviderStreamValidationError) {
         throw requestError("invalid_response", false, {
           fieldPaths: error.issues.map((issue) => issue.path),
           issueCodes: error.issues.map((issue) => issue.code),

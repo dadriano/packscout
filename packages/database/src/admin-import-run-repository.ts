@@ -41,7 +41,7 @@ interface PageRow {
 interface OutcomeAggregate {
   readonly runId: string;
   readonly pageId: string;
-  readonly recordKind: "catalog" | "pull" | "sale";
+  readonly recordKind: "catalog" | "pull" | "trade";
   readonly outcome: "accepted" | "duplicate" | "quarantined";
   readonly total: number;
 }
@@ -258,7 +258,7 @@ export class PrismaAdminImportRunRepository {
           pages: pageTotal?._count._all ?? 0,
           catalog: aggregateTotal(outcomes, { runId: run.id, recordKind: "catalog" }),
           pulls: aggregateTotal(outcomes, { runId: run.id, recordKind: "pull" }),
-          sales: aggregateTotal(outcomes, { runId: run.id, recordKind: "sale" }),
+          trades: aggregateTotal(outcomes, { runId: run.id, recordKind: "trade" }),
           accepted: Math.max(0, acceptedTotal - revisedTotal),
           unchanged: aggregateTotal(outcomes, { runId: run.id, outcome: "duplicate" }),
           revised: revisedTotal,
@@ -287,7 +287,6 @@ export class PrismaAdminImportRunRepository {
         committed_at: true,
       },
       orderBy: { page_number: "asc" },
-      take: 100,
     });
     const pages: PageRow[] = pageRows.map((page) => ({
       id: page.id,
@@ -351,7 +350,7 @@ export class PrismaAdminImportRunRepository {
         committedAt: page.committedAt,
         catalog: aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "catalog" }),
         pulls: aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "pull" }),
-        sales: aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "sale" }),
+        trades: aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "trade" }),
         accepted: Math.max(0, acceptedTotal - revisedTotal),
         unchanged: aggregateTotal(outcomes, { runId, pageId: page.id, outcome: "duplicate" }),
         revised: revisedTotal,

@@ -50,6 +50,7 @@ export class PrismaAdminProviderOperationRepository {
           where: {
             organization_id: input.organizationId,
             provider_id: provider.id,
+            source_mode: "http",
             ...(provider.active_revision_id
               ? { id: provider.active_revision_id }
               : {}),

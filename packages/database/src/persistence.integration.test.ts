@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { CatalogRecordV2, PullRecordV2 } from "@packscout/contracts";
 import {
   PrismaAuthAuditSink,
   PrismaAuthRepository,
@@ -59,7 +60,7 @@ async function createPipelineHarness() {
     organizationId: ids.organization,
     providerId: ids.provider,
     version: 1,
-    adapterKey: "http-cursor-v1",
+    adapterKey: "http-cursor-v2",
     endpointUrl: "https://provider.example/feed",
     authMode: "none",
     createdByActorKey: "operator:admin",
@@ -101,13 +102,48 @@ async function createPipelineHarness() {
   };
 }
 
+function catalogRecord(
+  recordId: string,
+  data: CatalogRecordV2["data"],
+): CatalogRecordV2 {
+  return {
+    stream: "catalog",
+    platform: "beezie",
+    entity: "pack",
+    record_id: recordId,
+    first_seen_at: sourceTime.toISOString(),
+    occurred_at: sourceTime.toISOString(),
+    collected_at: collectedAt.toISOString(),
+    data,
+  };
+}
+
+function pullRecord(recordId: string): PullRecordV2 {
+  return {
+    stream: "pulls",
+    platform: "beezie",
+    record_id: recordId,
+    pack_id: "pack-arrives-later",
+    card_id: "card-1",
+    occurred_at: sourceTime.toISOString(),
+    collected_at: collectedAt.toISOString(),
+    data: { wallet_address: "0xraw-wallet" },
+  };
+}
+
 function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput {
+  const catalog = catalogRecord("catalog-envelope", { username: "public-user" });
+  const pull = pullRecord("pull-1");
+  const invalidTrade = {
+    stream: "trades",
+    platform: "beezie",
+    data: { wallet_address: "0xquarantine-only" },
+  };
   const payload = {
-    catalog: [{ external_id: "catalog-envelope", data: { username: "public-user" } }],
-    pulls: [{ external_id: "pull-1", data: { wallet_address: "0xraw-wallet" } }],
-    sales: [],
-    next_cursor: "cursor-1",
-    has_more: true,
+    requestedCursor: null,
+    nextCursor: "cursor-1",
+    hasMore: true,
+    records: [catalog, pull, invalidTrade],
   };
   return {
     organizationId: ids.organization,
@@ -119,6 +155,7 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
     nextCursor: "cursor-1",
     hasMore: true,
     payload,
+    checkpointMode: "provider",
     committedAt,
     records: [
       {
@@ -126,7 +163,7 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
         externalId: "catalog-envelope",
         sourceTime,
         collectedAt,
-        payload: payload.catalog[0]!,
+        payload: catalog,
         projections: [
           {
             platformKey: "beezie",
@@ -151,7 +188,7 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
         externalId: "pull-1",
         sourceTime,
         collectedAt,
-        payload: payload.pulls[0]!,
+        payload: pull,
         projections: [
           {
             platformKey: "beezie",
@@ -175,13 +212,13 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
     ],
     quarantines: [
       {
-        recordKind: "sale",
-        recordIndex: 0,
+        recordKind: "trade",
+        recordIndex: 2,
         externalId: null,
         reasonCode: "MISSING_EXTERNAL_ID",
-        fieldPath: "sales[0].external_id",
-        sanitizedSummary: "A sale record is missing its identity.",
-        payload: { wallet_address: "0xquarantine-only" },
+        fieldPath: "records[2].record_id",
+        sanitizedSummary: "A trade record is missing its identity.",
+        payload: invalidTrade,
       },
     ],
     ...overrides,
@@ -227,6 +264,64 @@ test("empty migration builds PostgreSQL constraints including NULL cursor idempo
   }
 });
 
+test("page commit rejects a prior run cursor but permits an empty stationary terminal page", async () => {
+  const harness = await createPipelineHarness();
+  try {
+    await harness.ingestion.commitPage(initialPage());
+    await harness.ingestion.commitPage(initialPage({
+      pageNumber: 2,
+      requestedCursor: "cursor-1",
+      nextCursor: "cursor-2",
+      hasMore: true,
+      payload: { requestedCursor: "cursor-1", nextCursor: "cursor-2", records: [] },
+      records: [],
+      quarantines: [],
+    }));
+
+    await assert.rejects(
+      harness.ingestion.commitPage(initialPage({
+        pageNumber: 3,
+        requestedCursor: "cursor-2",
+        nextCursor: "cursor-1",
+        hasMore: false,
+        payload: { requestedCursor: "cursor-2", nextCursor: "cursor-1", records: [] },
+        records: [],
+        quarantines: [],
+      })),
+      (error: unknown) =>
+        error instanceof PersistenceError &&
+        error.code === "CURSOR_SAFETY_VIOLATION",
+    );
+    assert.equal(
+      await harness.database.import_pages.count({ where: { run_id: ids.run } }),
+      2,
+    );
+    assert.equal(
+      (await harness.database.provider_cursor_checkpoints.findUnique({
+        where: { config_revision_id: ids.configuration },
+        select: { cursor: true },
+      }))?.cursor,
+      "cursor-2",
+    );
+
+    await harness.ingestion.commitPage(initialPage({
+      pageNumber: 3,
+      requestedCursor: "cursor-2",
+      nextCursor: "cursor-2",
+      hasMore: false,
+      payload: { requestedCursor: "cursor-2", nextCursor: "cursor-2", records: [] },
+      records: [],
+      quarantines: [],
+    }));
+    assert.equal(
+      await harness.database.import_pages.count({ where: { run_id: ids.run } }),
+      3,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 test("production page commits reject a worker without the active run lease", async () => {
   const harness = await createPipelineHarness();
   try {
@@ -262,7 +357,7 @@ test("unchanged replay is a no-op while changed content advances one current rev
     changed.records = [
       {
         ...firstRecord,
-        payload: { ...firstRecord.payload, data: { release: 2 } },
+        payload: catalogRecord(firstRecord.externalId, { release: 2 }),
         projections: [
           {
             ...firstRecord.projections[0]!,
@@ -325,7 +420,7 @@ test("independent clients serialize competing revisions for one canonical identi
           externalId: `competing-source-${priceCents}`,
           sourceTime: new Date(sourceTime.getTime() + sourceOffset),
           collectedAt: new Date(collectedAt.getTime() + sourceOffset),
-          payload: { priceCents },
+          payload: catalogRecord(`competing-source-${priceCents}`, { priceCents }),
           projections: [
             {
               platformKey: "beezie",
@@ -375,7 +470,7 @@ test("large page commits batch writes while preserving evidence, projections, an
         externalId: `large-source-${index}`,
         sourceTime,
         collectedAt,
-        payload: { id: `large-source-${index}`, value: index },
+        payload: catalogRecord(`large-source-${index}`, { value: index }),
         projections: [
           {
             platformKey: "beezie",
@@ -398,7 +493,7 @@ test("large page commits batch writes while preserving evidence, projections, an
           ? {
               quarantine: {
                 reasonCode: "INVALID_CATALOG_RECORD",
-                fieldPath: `catalog[${index}]`,
+                fieldPath: `records[${index}]`,
                 sanitizedSummary: "The catalog record failed validation.",
               },
             }
@@ -418,12 +513,12 @@ test("large page commits batch writes while preserving evidence, projections, an
           payload: { invalid: "pull" },
         },
         {
-          recordKind: "sale",
+          recordKind: "trade",
           recordIndex: recordCount + 1,
           externalId: null,
-          reasonCode: "INVALID_SALE_RECORD",
-          sanitizedSummary: "The sale record failed envelope validation.",
-          payload: { invalid: "sale" },
+          reasonCode: "INVALID_TRADE_RECORD",
+          sanitizedSummary: "The trade record failed envelope validation.",
+          payload: { invalid: "trade" },
         },
       ],
     });
@@ -455,7 +550,7 @@ test("large page commits batch writes while preserving evidence, projections, an
     assert.deepEqual(storedPage?.record_counts_json, {
       catalog: recordCount,
       pulls: 1,
-      sales: 1,
+      trades: 1,
     });
     assert.equal(await harness.database.source_records.count(), recordCount);
     assert.equal(await harness.database.source_record_observations.count(), recordCount);
@@ -523,14 +618,19 @@ test("unresolved pull relationships persist and reconcile when a pack arrives", 
     const packPage = initialPage({
       runId: ids.secondRun,
       committedAt: new Date(committedAt.getTime() + 1_000),
-      payload: { catalog: [{ id: "pack-arrives-later" }] },
+      payload: {
+        requestedCursor: null,
+        nextCursor: "cursor-1",
+        hasMore: true,
+        records: [catalogRecord("late-pack-source", { id: "pack-arrives-later" })],
+      },
       records: [
         {
           recordKind: "catalog",
           externalId: "late-pack-source",
           sourceTime,
           collectedAt,
-          payload: { id: "pack-arrives-later" },
+          payload: catalogRecord("late-pack-source", { id: "pack-arrives-later" }),
           projections: [
             {
               platformKey: "beezie",
@@ -619,7 +719,7 @@ test("actor PII stays in protected evidence and unsafe canonical writes roll bac
         {
           ...initialPage().records[0]!,
           externalId: "unsafe-source",
-          payload: { id: "unsafe-source" },
+          payload: catalogRecord("unsafe-source", { id: "unsafe-source" }),
           projections: [
             {
               ...initialPage().records[0]!.projections[0]!,

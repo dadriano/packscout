@@ -7,7 +7,7 @@ import type {
 } from "./estimated-ev-calculator.ts";
 
 export const ESTIMATED_EV_PROJECTION_SCHEMA_VERSION =
-  "packscout-estimated-ev-projection-v1" as const;
+  "packscout-estimated-ev-projection-v2" as const;
 
 export interface EstimatedEvInputManifestBucket {
   readonly bucketId: string;
@@ -22,7 +22,9 @@ export interface EstimatedEvInputManifest {
   readonly evInputRevisionId: string | null;
   readonly packPriceValueMinor: number | null;
   readonly packPriceCurrency: string | null;
+  readonly packPriceMinorUnitExponent: number | null;
   readonly distributionCurrency: string | null;
+  readonly distributionMinorUnitExponent: number | null;
   readonly unitBasis: PackScoutEstimatedEvUnitBasis | null;
   readonly drawCount: number | null;
   readonly declaredCoverage: number | null;
@@ -38,6 +40,7 @@ export interface CanonicalEstimatedEvProjectionContent {
   readonly calculationFingerprint: string;
   readonly status: "estimated" | "unavailable";
   readonly grossValueMinor: number | null;
+  readonly minorUnitExponent: 2 | null;
   readonly evPercent: number | null;
   readonly currency: "USD" | null;
   readonly method: string;
@@ -55,6 +58,7 @@ export interface PackScoutProviderReportedEvExplanation {
   readonly status: "reported";
   readonly valueMinor: number;
   readonly currency: string;
+  readonly minorUnitExponent: number;
   readonly sourceAt: string;
   readonly sourceRevisionId: string;
 }
@@ -63,6 +67,7 @@ export interface PackScoutEstimatedEvExplanation {
   readonly label: "PackScout Estimated EV";
   readonly status: "estimated" | "unavailable";
   readonly grossValueMinor: number | null;
+  readonly minorUnitExponent: 2 | null;
   readonly evPercent: number | null;
   readonly currency: "USD" | null;
   readonly unitBasis: PackScoutEstimatedEvUnitBasis | null;

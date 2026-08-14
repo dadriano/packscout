@@ -55,7 +55,7 @@ A catalog asset projection exposes stable source identity, asset type, related p
 
 ## Spec Compliance
 
-- Added provider-neutral pack, supporting-asset, and EV-input projection contracts with explicit nullable fields, minor-unit money, normalized currencies, provenance, and separate provider EV.
+- Added provider-neutral pack, supporting-asset, and EV-input projection contracts with explicit nullable fields, integer money plus its minor-unit exponent, normalized currencies, provenance, and separate provider EV.
 - Preserved nested purchasable variants and late-resolvable parent/pack relationships as stable canonical identities.
 - Represented probability evidence, top chases, declared coverage, and inventory completeness independently so insufficient evidence never hides an otherwise valid pack.
 - Routed all outputs through the existing idempotent canonical history and relationship persistence boundary without raw-field leakage or platform branches.

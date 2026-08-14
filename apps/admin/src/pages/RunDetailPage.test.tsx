@@ -31,7 +31,7 @@ const run: ImportRunDetail = {
     pages: 1,
     catalog: 3,
     pulls: 4,
-    sales: 5,
+    trades: 5,
     accepted: 9,
     unchanged: 2,
     revised: 1,
@@ -52,7 +52,7 @@ const run: ImportRunDetail = {
     committedAt: "2026-08-06T12:00:55.000Z",
     catalog: 3,
     pulls: 4,
-    sales: 5,
+    trades: 5,
     accepted: 9,
     unchanged: 2,
     revised: 1,
@@ -66,9 +66,9 @@ const run: ImportRunDetail = {
   relatedQuarantines: [],
 };
 
-function route() {
+function route(targetRun: ImportRunDetail = run) {
   return (
-    <MemoryRouter initialEntries={[`/runs/${run.id}`]}>
+    <MemoryRouter initialEntries={[`/runs/${targetRun.id}`]}>
       <Routes>
         <Route path="/runs/:runId" element={<RunDetailPage />} />
       </Routes>
@@ -108,4 +108,29 @@ test("run detail replaces loading with a permission-specific failure", async (co
   assert.match(pageText(renderer), /Your role no longer permits access to this run/);
   assert.match(pageText(renderer), /Return to runs/);
   assert.doesNotMatch(pageText(renderer), /Fanatics cards/);
+});
+
+test("archive detail never presents archive offsets as the live provider checkpoint", async (context) => {
+  const archiveRun: ImportRunDetail = {
+    ...run,
+    trigger: "archive",
+    cursor: { requestedPreview: null, finalPreview: null },
+    pages: [{
+      ...run.pages[0]!,
+      requestedCursorPreview: null,
+      nextCursorPreview: null,
+    }],
+  };
+  stubFetch(context, () => jsonResponse({ run: archiveRun }));
+  const renderer = await renderPage(route(archiveRun));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  const text = pageText(renderer);
+  assert.match(text, /Archive source/);
+  assert.match(text, /Starting archive offset/);
+  assert.match(text, /Final archive offset/);
+  assert.match(text, /Archive offset in/);
+  assert.match(text, /Archive offset out/);
+  assert.doesNotMatch(text, /Provider head/);
 });

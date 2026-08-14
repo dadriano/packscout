@@ -248,6 +248,7 @@ model import_runs {
   lease_expires_at                                                                                                    DateTime?                     @db.Timestamptz(6)
   attempt                                                                                                             Int                           @default(0)
   reached_provider_head                                                                                               Boolean                       @default(false)
+  archive_sha256                                                                                                      String?
   admin_alerts_admin_alerts_run_idToimport_runs                                                                       admin_alerts[]                @relation("admin_alerts_run_idToimport_runs")
   admin_alerts_admin_alerts_run_id_organization_id_provider_idToimport_runs                                           admin_alerts[]                @relation("admin_alerts_run_id_organization_id_provider_idToimport_runs")
   import_pages_import_pages_run_idToimport_runs                                                                       import_pages[]                @relation("import_pages_run_idToimport_runs")
@@ -270,6 +271,7 @@ model import_runs {
   @@unique([id, organization_id, provider_id, config_revision_id], map: "import_runs_id_organization_provider_config_unique")
   @@unique([id, organization_id, provider_id], map: "import_runs_id_organization_provider_unique")
   @@index([organization_id, provider_id, created_at], map: "import_runs_organization_provider_created_idx")
+  @@index([organization_id, provider_id, archive_sha256], map: "import_runs_archive_lookup_idx")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -396,6 +398,10 @@ model provider_config_revisions {
   tested_by_actor_key                                                                                                                                      String?
   created_by_actor_key                                                                                                                                     String
   created_at                                                                                                                                               DateTime                              @default(now()) @db.Timestamptz(6)
+  source_mode                                                                                                                                              provider_source_mode                  @default(http)
+  mapping_adapter_key                                                                                                                                      String?
+  actor_pseudonym_key_fingerprint                                                                                                                          String?                               @db.Char(64)
+  archive_importer_build_sha                                                                                                                               String?                               @db.Char(40)
   estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions")
   estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions                             estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions")
   import_runs_import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions                                                        import_runs[]                         @relation("import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions")
@@ -653,6 +659,7 @@ model source_record_observations {
   run_id                                                                                     String         @db.Uuid
   page_id                                                                                    String         @db.Uuid
   observed_at                                                                                DateTime       @default(now()) @db.Timestamptz(6)
+  source_collected_at                                                                        DateTime       @db.Timestamptz(6)
   organizations                                                                              organizations  @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "source_record_observations_organization_id_organizations_id_fk")
   import_pages_source_record_observations_page_idToimport_pages                              import_pages   @relation("source_record_observations_page_idToimport_pages", fields: [page_id], references: [id], onUpdate: NoAction, map: "source_record_observations_page_id_import_pages_id_fk")
   import_pages_source_record_observations_page_id_organization_id_run_idToimport_pages       import_pages   @relation("source_record_observations_page_id_organization_id_run_idToimport_pages", fields: [page_id, organization_id, run_id], references: [id, organization_id, run_id], onUpdate: NoAction, map: "source_record_observations_page_run_tenant_fk")
@@ -718,6 +725,8 @@ model source_records {
   collected_at                                                                                                           DateTime                             @db.Timestamptz(6)
   payload_json                                                                                                           Json?
   content_hash                                                                                                           String
+  record_identity_hash                                                                                                   String
+  source_facts_hash                                                                                                      String
   expires_at                                                                                                             DateTime                             @db.Timestamptz(6)
   payload_expired_at                                                                                                     DateTime?                            @db.Timestamptz(6)
   created_at                                                                                                             DateTime                             @default(now()) @db.Timestamptz(6)
@@ -740,7 +749,8 @@ model source_records {
   provider_sources                                                                                                       provider_sources                     @relation(fields: [provider_id], references: [id], onUpdate: NoAction, map: "source_records_provider_id_provider_sources_id_fk")
 
   @@unique([id, organization_id], map: "source_records_id_organization_unique")
-  @@unique([organization_id, provider_id, record_kind, external_id, source_time, content_hash], map: "source_records_immutable_identity_unique")
+  @@unique([organization_id, provider_id, record_kind, external_id, source_facts_hash], map: "source_records_source_facts_unique")
+  @@index([organization_id, provider_id, record_kind, external_id, record_identity_hash], map: "source_records_stable_identity_idx")
   @@index([organization_id, expires_at], map: "source_records_expiry_idx")
 }
 
@@ -762,7 +772,7 @@ enum canonical_record_kind {
   catalog_asset
   ev_input
   pull
-  sale
+  trade
   estimated_ev
 }
 
@@ -790,6 +800,7 @@ enum import_trigger {
   scheduled
   manual
   recovery
+  archive
 }
 
 enum operational_event_kind {
@@ -831,6 +842,11 @@ enum provider_state {
   archived
 }
 
+enum provider_source_mode {
+  http
+  archive
+}
+
 enum quarantine_attempt_state {
   running
   succeeded
@@ -852,7 +868,7 @@ enum retention_execution_state {
 enum source_record_kind {
   catalog
   pull
-  sale
+  trade
 }
 
 enum source_record_outcome {

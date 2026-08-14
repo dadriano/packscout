@@ -130,7 +130,7 @@ test("pack projection normalizes money and keeps provider EV separate with expli
       category: " Sports ",
       sourceStatus: "published",
       price: { amount: 24.995, currency: "usd" },
-      providerReportedEv: { amount: 18.5, currency: "usdc" },
+      providerReportedEv: { amount: 18.500001, currency: "usdc" },
       buybackPercent: 70,
       drawCount: 3,
       imageUrls: ["https://images.example/b.png", "https://images.example/a.png"],
@@ -141,7 +141,7 @@ test("pack projection normalizes money and keeps provider EV separate with expli
   ]);
 
   assert.deepEqual(projection?.content, {
-    schemaVersion: "catalog-projection-v1",
+    schemaVersion: "catalog-projection-v2",
     entityType: "pack",
     parentExternalId: null,
     name: "Standard Pack",
@@ -151,8 +151,10 @@ test("pack projection normalizes money and keeps provider EV separate with expli
     sourceStatus: "published",
     priceValueMinor: 2500,
     priceCurrency: "USD",
-    providerReportedEvValueMinor: 1850,
+    priceMinorUnitExponent: 2,
+    providerReportedEvValueMinor: 18_500_001,
     providerReportedEvCurrency: "USDC",
+    providerReportedEvMinorUnitExponent: 6,
     buybackPercent: 70,
     drawCount: 3,
     imageUrls: ["https://images.example/a.png", "https://images.example/b.png"],
@@ -161,7 +163,7 @@ test("pack projection normalizes money and keeps provider EV separate with expli
     ],
   });
   assert.deepEqual(projection?.provenance, {
-    projectionVersion: "catalog-projection-v1",
+    projectionVersion: "catalog-projection-v2",
     providerId: configuration.providerId,
     configurationRevisionId: configuration.configurationRevisionId,
     adapterKey: configuration.adapterKey,
@@ -218,7 +220,7 @@ test("supporting assets retain explicit unknown availability and late-resolvable
     },
   ]);
   assert.deepEqual(projection?.content, {
-    schemaVersion: "catalog-projection-v1",
+    schemaVersion: "catalog-projection-v2",
     entityType: "catalog_asset",
     assetType: "card",
     relatedPackExternalId: "pack-arrives-later",
@@ -229,6 +231,7 @@ test("supporting assets retain explicit unknown availability and late-resolvable
     sourceStatus: null,
     providerValueMinor: 1235,
     providerValueCurrency: "USD",
+    providerValueMinorUnitExponent: 2,
     valueSource: "provider_floor",
     imageUrls: [],
     dataQualityEvidence: [
@@ -255,6 +258,7 @@ test("EV input keeps probability evidence and top chases separate with readiness
     },
   ]);
   assert.equal(content.currency, "USD");
+  assert.equal(content.minorUnitExponent, 2);
   assert.deepEqual(content.coverage, {
     declaredCoverage: 1,
     calculatedCoverage: 1,

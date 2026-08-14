@@ -14,7 +14,6 @@ import {
   DefaultProviderImportPagePlanner,
   EventProjectionService,
   HmacProviderActorPseudonymizer,
-  HttpCursorAdapter,
   ProviderImportService,
   ProviderImportWorkerService,
   ProviderProjectionService,
@@ -52,6 +51,12 @@ export interface ProviderWorkerCompositionInput {
   readonly database: PackscoutPrismaClient;
   readonly logger: ProviderWorkerLogger;
   readonly observability: OperationalObservability;
+  /**
+   * Live transports are registered only after their provider response decoder
+   * is known. The default is intentionally empty so production cannot pretend
+   * the archive-derived V2 record contract proves the live API page wrapper.
+   */
+  readonly transportAdapters?: ProviderTransportAdapterRegistry;
 }
 
 function createActorKeyer(key: Uint8Array): ProviderActorKeyer {
@@ -104,9 +109,8 @@ export function createProviderWorkerRuntime(
     runs,
     revisions: new PrismaProviderConfigurationRepository(input.database),
     pages,
-    transportAdapters: new ProviderTransportAdapterRegistry([
-      new HttpCursorAdapter(),
-    ]),
+    transportAdapters:
+      input.transportAdapters ?? new ProviderTransportAdapterRegistry(),
     pagePlanner: new DefaultProviderImportPagePlanner(
       createProviderMappingAdapterRegistryFromManifest(),
       new ProviderProjectionService(

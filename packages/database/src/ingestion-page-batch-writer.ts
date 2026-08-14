@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PackscoutQueryClient } from "./database.ts";
 import type {
@@ -8,10 +8,19 @@ import type {
   SourceRecordKind,
 } from "./pipeline-types.ts";
 import {
+  providerStreamContentHashV2,
+  providerStreamRecordIdentityHashV2,
+  providerStreamSourceFactsHashV2,
+} from "./provider-stream-write-policy.ts";
+import {
   assertCanonicalActorDataSafe,
   hashJson,
   pseudonymizeProviderActor,
 } from "./security.ts";
+import {
+  databaseSafeProtectedJsonEvidence,
+  databaseSafeQuarantineExternalId,
+} from "./protected-json-evidence.ts";
 
 const maximumRowsPerWrite = 500;
 
@@ -35,12 +44,15 @@ interface PreparedSourceRecord {
   readonly recordIndex: number;
   readonly input: CommitPageInput["records"][number];
   readonly contentHash: string;
+  readonly recordIdentityHash: string;
+  readonly sourceFactsHash: string;
   readonly identityKey: string;
 }
 
 interface ResolvedSourceRecord extends PreparedSourceRecord {
-  readonly sourceRecordId: string;
+  readonly sourceRecordId: string | null;
   readonly created: boolean;
+  readonly conflictReasonCode: "CATALOG_IDENTITY_CONFLICT" | "IMMUTABLE_EVENT_CONFLICT" | null;
 }
 
 interface CanonicalEntityIdentity {
@@ -162,18 +174,45 @@ function uuid(value: string): Prisma.Sql {
   return Prisma.sql`cast(${value} as uuid)`;
 }
 
-function sourceIdentityKey(input: {
+function sourceFactsKey(input: {
   recordKind: SourceRecordKind;
   externalId: string;
-  sourceTime: Date;
-  contentHash: string;
+  sourceFactsHash: string;
 }): string {
   return [
     input.recordKind,
     input.externalId,
-    input.sourceTime.toISOString(),
-    input.contentHash,
+    input.sourceFactsHash,
   ].join("\u0000");
+}
+
+function stableSourceKey(input: {
+  recordKind: SourceRecordKind;
+  externalId: string;
+}): string {
+  return [input.recordKind, input.externalId].join("\u0000");
+}
+
+function stableSourceLockKey(
+  input: Pick<CommitPageInput, "organizationId" | "providerId">,
+  record: Pick<PreparedSourceRecord["input"], "recordKind" | "externalId">,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify([
+      input.organizationId,
+      input.providerId,
+      record.recordKind,
+      record.externalId,
+    ]))
+    .digest()
+    .readBigInt64BE(0)
+    .toString();
+}
+
+function compareAdvisoryKeys(left: string, right: string): number {
+  const leftValue = BigInt(left);
+  const rightValue = BigInt(right);
+  return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
 }
 
 function canonicalIdentityKey(identity: CanonicalEntityIdentity): string {
@@ -198,16 +237,128 @@ async function resolveSourceRecords(
   expiresAt: Date,
 ): Promise<ResolvedSourceRecord[]> {
   if (prepared.length === 0) return [];
-  const uniqueByIdentity = new Map<string, PreparedSourceRecord>();
+  interface ExistingSource {
+    readonly id: string;
+    readonly recordKind: SourceRecordKind;
+    readonly externalId: string;
+    readonly recordIdentityHash: string;
+    readonly sourceFactsHash: string;
+  }
+  const stableIdentities = new Map<string, Pick<PreparedSourceRecord["input"], "recordKind" | "externalId">>();
   for (const record of prepared) {
-    if (!uniqueByIdentity.has(record.identityKey)) {
-      uniqueByIdentity.set(record.identityKey, record);
+    stableIdentities.set(stableSourceKey(record.input), record.input);
+  }
+  const stableLockKeys = [...stableIdentities.values()]
+    .map((record) => stableSourceLockKey(input, record))
+    .sort(compareAdvisoryKeys);
+  for (const batch of batches(stableLockKeys)) {
+    await database.$queryRaw(Prisma.sql`
+      select pg_advisory_xact_lock(lock_key)::text as lock_result
+      from (
+        select distinct lock_key
+        from unnest(array[${Prisma.join(batch)}]::bigint[]) as requested(lock_key)
+        order by lock_key
+      ) as stable_locks
+    `);
+  }
+  const existingByStableIdentity = new Map<string, ExistingSource[]>();
+  for (const batch of batches([...stableIdentities.values()])) {
+    const identities = batch.map((record) => Prisma.sql`(
+      cast(${record.recordKind} as public.source_record_kind),
+      ${record.externalId}
+    )`);
+    const existing = await database.$queryRaw<ExistingSource[]>(Prisma.sql`
+      select
+        id,
+        record_kind::text as "recordKind",
+        external_id as "externalId",
+        record_identity_hash as "recordIdentityHash",
+        source_facts_hash as "sourceFactsHash"
+      from public.source_records
+      where organization_id = ${uuid(input.organizationId)}
+        and provider_id = ${uuid(input.providerId)}
+        and (record_kind, external_id) in (values ${Prisma.join(identities)})
+      order by created_at, id
+    `);
+    for (const row of existing) {
+      const key = stableSourceKey(row);
+      const values = existingByStableIdentity.get(key) ?? [];
+      values.push(row);
+      existingByStableIdentity.set(key, values);
     }
   }
-  const uniqueRecords = [...uniqueByIdentity.values()].sort((left, right) =>
+
+  const decisions: ResolvedSourceRecord[] = [];
+  const recordsToCreate = new Map<string, PreparedSourceRecord>();
+  for (const record of prepared) {
+    const stableKey = stableSourceKey(record.input);
+    const existing = existingByStableIdentity.get(stableKey) ?? [];
+    const duplicate = existing.find(
+      (candidate) => candidate.sourceFactsHash === record.sourceFactsHash,
+    );
+    if (duplicate) {
+      decisions.push({
+        ...record,
+        sourceRecordId: duplicate.id,
+        created: false,
+        conflictReasonCode: null,
+      });
+      continue;
+    }
+    if (existing.length > 0) {
+      if (record.input.recordKind !== "catalog") {
+        decisions.push({
+          ...record,
+          sourceRecordId: null,
+          created: false,
+          conflictReasonCode: "IMMUTABLE_EVENT_CONFLICT",
+        });
+        continue;
+      }
+      if (
+        existing.every(
+          (candidate) => candidate.recordIdentityHash !== record.recordIdentityHash,
+        )
+      ) {
+        decisions.push({
+          ...record,
+          sourceRecordId: null,
+          created: false,
+          conflictReasonCode: "CATALOG_IDENTITY_CONFLICT",
+        });
+        continue;
+      }
+    }
+    const pending = recordsToCreate.get(record.identityKey);
+    if (pending) {
+      decisions.push({
+        ...record,
+        sourceRecordId: null,
+        created: false,
+        conflictReasonCode: null,
+      });
+      continue;
+    }
+    recordsToCreate.set(record.identityKey, record);
+    existing.push({
+      id: "",
+      recordKind: record.input.recordKind,
+      externalId: record.input.externalId,
+      recordIdentityHash: record.recordIdentityHash,
+      sourceFactsHash: record.sourceFactsHash,
+    });
+    existingByStableIdentity.set(stableKey, existing);
+    decisions.push({
+      ...record,
+      sourceRecordId: null,
+      created: true,
+      conflictReasonCode: null,
+    });
+  }
+
+  const uniqueRecords = [...recordsToCreate.values()].sort((left, right) =>
     compareKeys(left.identityKey, right.identityKey),
   );
-  const createdIdentityKeys = new Set<string>();
   for (const batch of batches(uniqueRecords)) {
     const rows = batch.map((record) => Prisma.sql`(
       ${uuid(input.organizationId)},
@@ -218,33 +369,22 @@ async function resolveSourceRecords(
       ${record.input.externalId},
       ${record.input.sourceTime},
       ${record.input.collectedAt},
-      ${jsonValue(record.input.payload)},
+      ${jsonValue(databaseSafeProtectedJsonEvidence(record.input.payload))},
       ${record.contentHash},
+      ${record.recordIdentityHash},
+      ${record.sourceFactsHash},
       ${expiresAt},
       ${input.committedAt}
     )`);
-    const inserted = await database.$queryRaw<Array<{
-      recordKind: SourceRecordKind;
-      externalId: string;
-      sourceTime: Date;
-      contentHash: string;
-    }>>(Prisma.sql`
+    await database.$executeRaw(Prisma.sql`
       insert into public.source_records (
         organization_id, provider_id, first_run_id, first_page_id,
         record_kind, external_id, source_time, collected_at, payload_json,
-        content_hash, expires_at, created_at
+        content_hash, record_identity_hash, source_facts_hash, expires_at, created_at
       )
       values ${Prisma.join(rows)}
       on conflict do nothing
-      returning
-        record_kind::text as "recordKind",
-        external_id as "externalId",
-        source_time as "sourceTime",
-        content_hash as "contentHash"
     `);
-    for (const record of inserted) {
-      createdIdentityKeys.add(sourceIdentityKey(record));
-    }
   }
 
   const resolvedByIdentity = new Map<string, string>();
@@ -252,42 +392,86 @@ async function resolveSourceRecords(
     const identities = batch.map((record) => Prisma.sql`(
       cast(${record.input.recordKind} as public.source_record_kind),
       ${record.input.externalId},
-      ${record.input.sourceTime},
-      ${record.contentHash}
+      ${record.sourceFactsHash}
     )`);
     const resolved = await database.$queryRaw<Array<{
       id: string;
       recordKind: SourceRecordKind;
       externalId: string;
-      sourceTime: Date;
-      contentHash: string;
+      sourceFactsHash: string;
     }>>(Prisma.sql`
       select
-        id,
-        record_kind::text as "recordKind",
-        external_id as "externalId",
-        source_time as "sourceTime",
-        content_hash as "contentHash"
+      id,
+      record_kind::text as "recordKind",
+      external_id as "externalId",
+      source_facts_hash as "sourceFactsHash"
       from public.source_records
       where organization_id = ${uuid(input.organizationId)}
         and provider_id = ${uuid(input.providerId)}
-        and (record_kind, external_id, source_time, content_hash) in (
+        and (record_kind, external_id, source_facts_hash) in (
           values ${Prisma.join(identities)}
         )
     `);
     for (const record of resolved) {
-      resolvedByIdentity.set(sourceIdentityKey(record), record.id);
+      resolvedByIdentity.set(sourceFactsKey(record), record.id);
     }
   }
-
-  const unclaimedCreatedIdentities = new Set(createdIdentityKeys);
-  return prepared.map((record) => {
-    const sourceRecordId = resolvedByIdentity.get(record.identityKey);
-    if (!sourceRecordId) {
-      throw new Error("Source record conflict could not be resolved.");
+  const unresolved = decisions.filter(
+    (record) =>
+      !record.conflictReasonCode && !resolvedByIdentity.has(record.identityKey),
+  );
+  const reconciledByStableIdentity = new Map<string, ExistingSource[]>();
+  for (const batch of batches(unresolved)) {
+    const identities = batch.map((record) => Prisma.sql`(
+      cast(${record.input.recordKind} as public.source_record_kind),
+      ${record.input.externalId}
+    )`);
+    const reconciled = await database.$queryRaw<ExistingSource[]>(Prisma.sql`
+      select
+        id,
+        record_kind::text as "recordKind",
+        external_id as "externalId",
+        record_identity_hash as "recordIdentityHash",
+        source_facts_hash as "sourceFactsHash"
+      from public.source_records
+      where organization_id = ${uuid(input.organizationId)}
+        and provider_id = ${uuid(input.providerId)}
+        and (record_kind, external_id) in (values ${Prisma.join(identities)})
+    `);
+    for (const row of reconciled) {
+      const key = stableSourceKey(row);
+      const values = reconciledByStableIdentity.get(key) ?? [];
+      values.push(row);
+      reconciledByStableIdentity.set(key, values);
     }
-    const created = unclaimedCreatedIdentities.delete(record.identityKey);
-    return { ...record, sourceRecordId, created };
+  }
+  return decisions.map((record) => {
+    if (record.conflictReasonCode) return record;
+    const sourceRecordId = resolvedByIdentity.get(record.identityKey);
+    if (sourceRecordId) return { ...record, sourceRecordId };
+    const stable = reconciledByStableIdentity.get(stableSourceKey(record.input)) ?? [];
+    const concurrentDuplicate = stable.find(
+      (candidate) => candidate.sourceFactsHash === record.sourceFactsHash,
+    );
+    if (concurrentDuplicate) {
+      return {
+        ...record,
+        sourceRecordId: concurrentDuplicate.id,
+        created: false,
+      };
+    }
+    if (stable.length > 0) {
+      return {
+        ...record,
+        sourceRecordId: null,
+        created: false,
+        conflictReasonCode:
+          record.input.recordKind === "catalog"
+            ? "CATALOG_IDENTITY_CONFLICT"
+            : "IMMUTABLE_EVENT_CONFLICT",
+      };
+    }
+    throw new Error("Source record conflict could not be resolved.");
   });
 }
 
@@ -671,13 +855,17 @@ export async function persistPageRecordsInBatches(
   expiresAt: Date,
 ): Promise<PageRecordBatchResult> {
   const prepared = input.records.map((record, sourcePosition) => {
-    const contentHash = hashJson(record.payload);
+    const contentHash = providerStreamContentHashV2(record.payload);
+    const recordIdentityHash = providerStreamRecordIdentityHashV2(record.payload);
+    const sourceFactsHash = providerStreamSourceFactsHashV2(record.payload);
     return {
       sourcePosition,
       recordIndex: record.recordIndex ?? sourcePosition,
       input: record,
       contentHash,
-      identityKey: sourceIdentityKey({ ...record, contentHash }),
+      recordIdentityHash,
+      sourceFactsHash,
+      identityKey: sourceFactsKey({ ...record, sourceFactsHash }),
     };
   });
   const resolved = await resolveSourceRecords(
@@ -694,8 +882,10 @@ export async function persistPageRecordsInBatches(
     runId: string;
     pageId: string;
     observedAt: Date;
+    sourceCollectedAt: Date;
   }>();
   for (const record of resolved) {
+    if (!record.sourceRecordId) continue;
     const key = [record.sourceRecordId, input.runId, pageId].join("\u0000");
     observationByIdentity.set(key, {
       sourceRecordId: record.sourceRecordId,
@@ -703,6 +893,7 @@ export async function persistPageRecordsInBatches(
       runId: input.runId,
       pageId,
       observedAt: input.committedAt,
+      sourceCollectedAt: record.input.collectedAt,
     });
   }
   for (const batch of batches([...observationByIdentity.values()])) {
@@ -711,31 +902,39 @@ export async function persistPageRecordsInBatches(
       ${uuid(observation.organizationId)},
       ${uuid(observation.runId)},
       ${uuid(observation.pageId)},
-      ${observation.observedAt}
+      ${observation.observedAt},
+      ${observation.sourceCollectedAt}
     )`);
     await database.$executeRaw(Prisma.sql`
       insert into public.source_record_observations (
-        source_record_id, organization_id, run_id, page_id, observed_at
+        source_record_id, organization_id, run_id, page_id, observed_at,
+        source_collected_at
       )
       values ${Prisma.join(rows)}
       on conflict do nothing
     `);
   }
 
-  const projectionWrites = resolved.flatMap((record) =>
-    record.input.quarantine
-      ? []
-      : record.input.projections.map((projection, projectionIndex) => ({
-          organizationId: input.organizationId,
-          providerId: input.providerId,
-          configRevisionId: input.configRevisionId,
-          sourceRecordId: record.sourceRecordId,
-          projection,
-          projectionIndex,
-          acceptedAt: input.committedAt,
-          sourcePosition: record.sourcePosition,
-        })),
-  );
+  const projectionWrites: Array<CanonicalProjectionWriteInput & {
+    readonly sourcePosition: number;
+  }> = [];
+  for (const record of resolved) {
+    if (record.input.quarantine || record.conflictReasonCode) continue;
+    const sourceRecordId = record.sourceRecordId;
+    if (!sourceRecordId) continue;
+    for (const [projectionIndex, projection] of record.input.projections.entries()) {
+      projectionWrites.push({
+        organizationId: input.organizationId,
+        providerId: input.providerId,
+        configRevisionId: input.configRevisionId,
+        sourceRecordId,
+        projection,
+        projectionIndex,
+        acceptedAt: input.committedAt,
+        sourcePosition: record.sourcePosition,
+      });
+    }
+  }
   const canonicalResults = await writeCanonicalProjectionBatch(
     database,
     policy,
@@ -755,7 +954,8 @@ export async function persistPageRecordsInBatches(
   const outcomeRows: SourceOutcomeInsert[] = [];
   const quarantineRows: QuarantineInsert[] = [];
   for (const record of resolved) {
-    const outcome = record.input.quarantine
+    const reasonCode = record.conflictReasonCode ?? record.input.quarantine?.reasonCode ?? null;
+    const outcome = reasonCode
       ? "quarantined"
       : sourcePositionsWithNewRevisions.has(record.sourcePosition) || record.created
         ? "accepted"
@@ -772,10 +972,11 @@ export async function persistPageRecordsInBatches(
       recordIndex: record.recordIndex,
       externalId: record.input.externalId,
       outcome,
-      reasonCode: record.input.quarantine?.reasonCode ?? null,
+      reasonCode,
       createdAt: input.committedAt,
     });
-    if (record.input.quarantine) {
+    if (reasonCode) {
+      const conflict = record.conflictReasonCode !== null;
       quarantineRows.push({
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -785,17 +986,22 @@ export async function persistPageRecordsInBatches(
         recordKind: record.input.recordKind,
         recordIndex: record.recordIndex,
         externalId: record.input.externalId,
-        reasonCode: record.input.quarantine.reasonCode,
-        fieldPath: record.input.quarantine.fieldPath ?? null,
-        sanitizedSummary: record.input.quarantine.sanitizedSummary,
-        payload: null,
-        hasStandalonePayload: false,
+        reasonCode,
+        fieldPath: conflict ? null : record.input.quarantine?.fieldPath ?? null,
+        sanitizedSummary: conflict
+          ? record.conflictReasonCode === "IMMUTABLE_EVENT_CONFLICT"
+            ? "A pull or trade reused a stable source identity with different facts."
+            : "A catalog record reused a stable source key with a different identity."
+          : record.input.quarantine!.sanitizedSummary,
+        payload: conflict ? record.input.payload : null,
+        hasStandalonePayload: conflict,
         expiresAt,
         createdAt: input.committedAt,
       });
     }
   }
   for (const quarantine of input.quarantines ?? []) {
+    quarantined += 1;
     quarantineRows.push({
       organizationId: input.organizationId,
       providerId: input.providerId,
@@ -804,7 +1010,7 @@ export async function persistPageRecordsInBatches(
       sourceRecordId: null,
       recordKind: quarantine.recordKind,
       recordIndex: quarantine.recordIndex,
-      externalId: quarantine.externalId,
+      externalId: databaseSafeQuarantineExternalId(quarantine.externalId),
       reasonCode: quarantine.reasonCode,
       fieldPath: quarantine.fieldPath ?? null,
       sanitizedSummary: quarantine.sanitizedSummary,
@@ -820,7 +1026,7 @@ export async function persistPageRecordsInBatches(
       sourceRecordId: null,
       recordKind: quarantine.recordKind,
       recordIndex: quarantine.recordIndex,
-      externalId: quarantine.externalId,
+      externalId: databaseSafeQuarantineExternalId(quarantine.externalId),
       outcome: "quarantined",
       reasonCode: quarantine.reasonCode,
       createdAt: input.committedAt,
@@ -860,7 +1066,9 @@ export async function persistPageRecordsInBatches(
       ${quarantine.reasonCode},
       ${quarantine.fieldPath},
       ${quarantine.sanitizedSummary},
-      ${quarantine.hasStandalonePayload ? jsonValue(quarantine.payload) : Prisma.sql`null::jsonb`},
+      ${quarantine.hasStandalonePayload
+        ? jsonValue(databaseSafeProtectedJsonEvidence(quarantine.payload))
+        : Prisma.sql`null::jsonb`},
       ${quarantine.expiresAt},
       ${quarantine.createdAt}
     )`);

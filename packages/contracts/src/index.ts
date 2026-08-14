@@ -1,6 +1,5 @@
 export * from "./auth.ts";
 export * from "./data-release-v2.ts";
-export * from "./provider-feed.ts";
 export * from "./provider-stream-contract-v2.ts";
 export * from "./public-repacks.ts";
 export * from "./repack-heat.ts";

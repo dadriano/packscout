@@ -1,6 +1,6 @@
 import type { ProviderDataQualityEvidence } from "./provider-adapter.ts";
 
-export const CATALOG_PROJECTION_VERSION = "catalog-projection-v1" as const;
+export const CATALOG_PROJECTION_VERSION = "catalog-projection-v2" as const;
 export const EV_INPUT_COVERAGE_TOLERANCE = 0.000_001;
 
 export type CanonicalAvailability =
@@ -26,8 +26,10 @@ export interface CanonicalPackProjectionContent {
   readonly sourceStatus: string | null;
   readonly priceValueMinor: number | null;
   readonly priceCurrency: string | null;
+  readonly priceMinorUnitExponent: number | null;
   readonly providerReportedEvValueMinor: number | null;
   readonly providerReportedEvCurrency: string | null;
+  readonly providerReportedEvMinorUnitExponent: number | null;
   readonly buybackPercent: number | null;
   readonly drawCount: number | null;
   readonly imageUrls: readonly string[];
@@ -46,6 +48,7 @@ export interface CanonicalCatalogAssetProjectionContent {
   readonly sourceStatus: string | null;
   readonly providerValueMinor: number | null;
   readonly providerValueCurrency: string | null;
+  readonly providerValueMinorUnitExponent: number | null;
   readonly valueSource: string | null;
   readonly imageUrls: readonly string[];
   readonly dataQualityEvidence: readonly CanonicalDataQualityEvidence[];
@@ -99,6 +102,7 @@ export interface CanonicalEvInputProjectionContent {
   readonly entityType: "ev_input";
   readonly packExternalId: string;
   readonly currency: string | null;
+  readonly minorUnitExponent: number | null;
   readonly unitBasis: "per_draw" | "per_pack" | null;
   readonly drawCount: number | null;
   readonly evidenceCompleteness: "complete" | "partial" | "unknown";
@@ -114,7 +118,7 @@ export interface CanonicalCatalogProjectionProvenance {
   readonly providerId: string;
   readonly configurationRevisionId: string;
   readonly adapterKey: string;
-  readonly sourceRecordKind: "catalog" | "pull" | "sale";
+  readonly sourceRecordKind: "catalog" | "pull" | "trade";
   readonly sourceRecordIndex: number;
   readonly sourceExternalId: string;
 }

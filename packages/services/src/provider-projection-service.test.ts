@@ -78,7 +78,31 @@ test("projection composition routes provider-neutral candidate families without 
     ).status,
     "accepted",
   );
-  assert.deepEqual(calls, ["catalog", "event"]);
+  const tradeSource = { ...source, recordKind: "trade" as const };
+  assert.equal(
+    (
+      await service.project({
+        configuration,
+        source: tradeSource,
+        candidates: [
+          {
+            ...base,
+            source: tradeSource,
+            candidateKind: "trade",
+            eventType: "sale",
+            transactionKey: "transaction-1",
+            assetExternalId: null,
+            occurredAt: tradeSource.sourceTimestamp,
+            amount: null,
+            paymentMethod: null,
+            pseudonymizationInputs: [],
+          },
+        ],
+      })
+    ).status,
+    "accepted",
+  );
+  assert.deepEqual(calls, ["catalog", "event", "event"]);
 });
 
 test("projection composition rejects empty or mixed families before either handler", async () => {
@@ -105,13 +129,14 @@ test("projection composition rejects empty or mixed families before either handl
         dataQualityEvidence: [],
       },
       {
-        candidateKind: "sale",
-        source: { ...source, recordKind: "sale" },
+        candidateKind: "trade",
+        source: { ...source, recordKind: "trade" },
         eventType: "sale",
         transactionKey: "tx-1",
         assetExternalId: null,
         occurredAt: source.sourceTimestamp,
         amount: null,
+        paymentMethod: null,
         pseudonymizationInputs: [],
         relationships: [],
         dataQualityEvidence: [],

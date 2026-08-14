@@ -1,4 +1,7 @@
-import type { QuarantineEntrySummary } from "@packscout/contracts";
+import {
+  isQuarantineReasonRetryable,
+  type QuarantineEntrySummary,
+} from "@packscout/contracts";
 import { Link } from "react-router-dom";
 import { QuarantineStatus, dateTime, humanize } from "./OperationStatus";
 
@@ -18,7 +21,8 @@ export function QuarantineLedger({ entries, selectable, selected, onSelectionCha
       </header>
       <div className="ops-ledger__rows">
         {entries.map((entry) => {
-          const retryable = entry.state === "open";
+          const sourceConflict = !isQuarantineReasonRetryable(entry.reasonCode);
+          const retryable = entry.state === "open" && !sourceConflict;
           return (
             <article key={entry.id}>
               {selectable ? (
@@ -37,7 +41,7 @@ export function QuarantineLedger({ entries, selectable, selected, onSelectionCha
                 <div><dt>Attempts</dt><dd>{entry.attemptCount}</dd></div>
                 <div><dt>First failure</dt><dd>{dateTime(entry.firstFailureAt)}</dd></div>
                 <div><dt>Latest failure</dt><dd>{dateTime(entry.latestFailureAt)}</dd></div>
-                <div><dt>Evidence</dt><dd>{retryable ? `Retained until ${dateTime(entry.rawExpiresAt)}` : "Unavailable for retry"}</dd></div>
+                <div><dt>Evidence</dt><dd>{sourceConflict ? "Source conflict; manual review only" : retryable ? `Retained until ${dateTime(entry.rawExpiresAt)}` : "Unavailable for retry"}</dd></div>
                 <div><dt>Origin run</dt><dd><Link to={`/runs/${entry.runId}`}>Open run</Link></dd></div>
               </dl>
               <p className="ops-ledger__diagnostic">{entry.sanitizedSummary}</p>

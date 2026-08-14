@@ -17,6 +17,7 @@ const ids = {
   revision: "71000000-0000-4000-8000-000000000020",
   secondRevision: "71000000-0000-4000-8000-000000000021",
   otherRevision: "71000000-0000-4000-8000-000000000022",
+  archiveRevision: "71000000-0000-4000-8000-000000000023",
   acceptedRun: "71000000-0000-4000-8000-000000000030",
   unchangedRun: "71000000-0000-4000-8000-000000000031",
   revisedRun: "71000000-0000-4000-8000-000000000032",
@@ -31,9 +32,12 @@ const rawSecret = "Bearer raw-secret private-user 0xprivate-wallet";
 
 function catalog(content: string) {
   return {
+    stream: "catalog" as const,
     platform: "alpha-platform",
-    external_id: "asset-1",
-    updated_at: sourceTime.toISOString(),
+    entity: "card" as const,
+    record_id: "asset-1",
+    first_seen_at: sourceTime.toISOString(),
+    occurred_at: sourceTime.toISOString(),
     collected_at: startedAt.toISOString(),
     data: { content, rawSecret },
   };
@@ -89,7 +93,7 @@ async function seed() {
       organizationId: provider.organizationId,
       providerId: provider.id,
       version: 1,
-      adapterKey: "http-cursor-v1",
+      adapterKey: "http-cursor-v2",
       endpointUrl: "https://provider.example/feed",
       authMode: "none",
       createdByActorKey: "actor:admin",
@@ -149,6 +153,12 @@ async function seed() {
     ids.revisedRun,
   ].entries()) {
     const envelope = catalog(contents[index]!);
+    const invalidTrade = {
+      stream: "trades",
+      platform: "alpha-platform",
+      record_id: "private-user",
+      data: { wallet: "0xprivate-wallet", rawSecret },
+    };
     await ingestion.commitPage({
       organizationId: ids.organization,
       providerId: ids.provider,
@@ -158,7 +168,13 @@ async function seed() {
       requestedCursor: index === 0 ? null : `cursor-${index}`,
       nextCursor: `cursor-${index + 1}`,
       hasMore: false,
-      payload: { catalog: [envelope], pulls: [], sales: [], rawSecret },
+      payload: {
+        requestedCursor: index === 0 ? null : `cursor-${index}`,
+        nextCursor: `cursor-${index + 1}`,
+        hasMore: false,
+        records: index === 0 ? [envelope, invalidTrade] : [envelope],
+      },
+      checkpointMode: "provider",
       records: [{
         recordKind: "catalog",
         recordIndex: 0,
@@ -178,13 +194,13 @@ async function seed() {
       ...(index === 0
         ? {
             quarantines: [{
-              recordKind: "sale" as const,
-              recordIndex: 0,
+              recordKind: "trade" as const,
+              recordIndex: 1,
               externalId: "private-user",
-              reasonCode: "INVALID_SALE",
-              fieldPath: "sales[0].wallet",
-              sanitizedSummary: "Sale envelope failed validation.",
-              payload: { rawSecret },
+              reasonCode: "INVALID_TRADE",
+              fieldPath: "records[1].data.wallet",
+              sanitizedSummary: "Trade envelope failed validation.",
+              payload: invalidTrade,
             }],
           }
         : {}),
@@ -207,11 +223,32 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
   const harness = await seed();
   try {
     const providers = new PrismaAdminProviderOperationRepository(harness.database);
+    await harness.database.provider_config_revisions.create({
+      data: {
+        id: ids.archiveRevision,
+        organization_id: ids.organization,
+        provider_id: ids.provider,
+        version: 2,
+        adapter_key: "provider-archive-v2",
+        mapping_adapter_key: "collector-crypt-v2",
+        actor_pseudonym_key_fingerprint: "a".repeat(64),
+        archive_importer_build_sha: "b".repeat(40),
+        endpoint_url: `archive://sha256/${"c".repeat(64)}`,
+        auth_mode: "none",
+        schedule_seconds: 60,
+        stale_after_seconds: 1,
+        source_mode: "archive",
+        created_by_actor_key: "actor:archive",
+        created_at: new Date(startedAt.getTime() + 600_000),
+      },
+    });
     const firstProviders = await providers.listPage({
       organizationId: ids.organization,
       limit: 1,
     });
     assert.equal(firstProviders.items[0]?.providerId, ids.provider);
+    assert.equal(firstProviders.items[0]?.configurationRevisionId, ids.revision);
+    assert.equal(firstProviders.items[0]?.configurationVersion, 1);
     assert.equal(firstProviders.hasMore, true);
     const secondProviders = await providers.listPage({
       organizationId: ids.organization,
@@ -255,7 +292,7 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
       pages: 1,
       catalog: 1,
       pulls: 0,
-      sales: 0,
+      trades: 0,
       accepted: 0,
       unchanged: 0,
       revised: 1,
@@ -278,7 +315,7 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
     assert.equal(nextRuns.items[0]?.counters.unchanged, 1);
     assert.equal(nextRuns.items[1]?.counters.accepted, 1);
     assert.equal(nextRuns.items[1]?.counters.quarantined, 1);
-    assert.equal(nextRuns.items[1]?.counters.sales, 1);
+    assert.equal(nextRuns.items[1]?.counters.trades, 1);
     const scheduledRuns = await runs.listPage({
       organizationId: ids.organization,
       state: "succeeded",
@@ -334,8 +371,8 @@ test("quarantine keysets apply run, kind, reason, and effective-state filters be
       ids.organization,
       {
         runId: ids.acceptedRun,
-        recordKind: "sale",
-        reasonCode: "INVALID_SALE",
+        recordKind: "trade",
+        reasonCode: "INVALID_TRADE",
         state: "retrying",
         limit: 1,
       },

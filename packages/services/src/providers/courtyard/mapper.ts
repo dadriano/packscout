@@ -1,247 +1,246 @@
 import type {
-  CatalogEnvelopeV1,
-  ProviderFeedPageV1,
-  PullEnvelopeV1,
-  SaleEnvelopeV1,
+  CatalogRecordV2,
+  PullRecordV2,
+  TradeRecordV2,
 } from "@packscout/contracts";
-import {
-  sourceIdentityForEnvelope,
-  type CatalogAssetCandidate,
-  type CanonicalPackCandidate,
-  type EvInputCandidate,
-  type ProbabilityBucketInput,
-  type ProviderAdapterCandidate,
-  type ProviderMappingAdapter,
-  type ProviderRecordMappingOutcome,
-  type ProviderSourceIdentity,
-  type PullCandidate,
-  type PseudonymousActorInput,
-  type SaleCandidate,
+import type {
+  CatalogAssetCandidate,
+  CanonicalPackCandidate,
+  EvInputCandidate,
+  ProbabilityBucketInput,
+  ProviderDataQualityEvidence,
+  ProviderMappingAdapter,
+  ProviderRecordMappingOutcome,
+  ProviderRelationshipKey,
+  ProviderSourceIdentity,
+  PullCandidate,
+  TradeCandidate,
 } from "../../provider-adapter.ts";
+import {
+  actorInput,
+  information,
+  invalidOutcome,
+  mappedOutcome,
+  nonNegativeNumber,
+  optionalObject,
+  optionalSingleLineString,
+  optionalString,
+  sourceForRecord,
+  uniqueActors,
+  uniqueStrings,
+  warning,
+  type JsonObject,
+} from "../provider-mapping-utils.ts";
 
 export const COURTYARD_PLATFORM_KEY = "courtyard" as const;
-export const COURTYARD_MAPPER_VERSION = "courtyard-v1" as const;
+export const COURTYARD_MAPPER_VERSION = "courtyard-v2" as const;
 
-function object(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
+// Provider-confirmed Polygon USDC reference observed in the V2 feed.
+const COURTYARD_USDC_TOKEN_REFERENCE =
+  "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359";
+
+function relationship(
+  entityKind: ProviderRelationshipKey["entityKind"],
+  externalId: string | null,
+  kind: ProviderRelationshipKey["relationship"],
+): ProviderRelationshipKey[] {
+  return externalId === null
+    ? []
+    : [{
+        entityKind,
+        platform: COURTYARD_PLATFORM_KEY,
+        externalId,
+        relationship: kind,
+      }];
 }
 
-function text(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
+interface LatestPriceEvidence {
+  readonly amount: number;
+  readonly occurredAt: number;
+  readonly title: string | null;
 }
 
-function boundedText(value: unknown, maximumLength: number): string | null {
-  const normalized = text(value);
-  return normalized
-    ? [...normalized]
-        .map((character) => {
-          const code = character.codePointAt(0) ?? 0;
-          return code <= 31 || code === 127 ? " " : character;
-        })
-        .join("")
-        .replace(/\s{2,}/g, " ")
-        .slice(0, maximumLength)
-    : null;
-}
-
-function finite(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (
-    typeof value === "string" &&
-    /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value.trim())
-  ) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
+/** One-pass selection avoids allocating or sorting large provider price histories. */
+function latestPriceEvidence(prices: JsonObject | null): LatestPriceEvidence | null {
+  const histories = Array.isArray(prices?.priceHistory)
+    ? prices.priceHistory
+    : [];
+  let latest: LatestPriceEvidence | null = null;
+  for (const value of histories) {
+    const history = optionalObject(value);
+    const sales = Array.isArray(history?.sales) ? history.sales : [];
+    for (const saleValue of sales) {
+      const sale = optionalObject(saleValue);
+      const amount = nonNegativeNumber(sale?.price);
+      const date = optionalString(sale?.date);
+      const occurredAt = date === null ? Number.NaN : Date.parse(date);
+      if (
+        amount !== null &&
+        Number.isFinite(occurredAt) &&
+        (latest === null || occurredAt > latest.occurredAt)
+      ) {
+        latest = {
+          amount,
+          occurredAt,
+          title: optionalString(history?.title),
+        };
+      }
+    }
   }
-  return null;
+  return latest;
 }
 
-function images(values: unknown[]) {
-  return Object.freeze(
-    [...new Set(values.map(text).filter((value): value is string => value !== null))],
-  );
+function cardAvailability(asset: JsonObject | null, reveal: JsonObject | null) {
+  if (reveal?.burned === true) return "disabled" as const;
+  if (optionalString(asset?.visibility)?.toLowerCase() === "public") {
+    return "active" as const;
+  }
+  if (reveal?.burned === false) return "active" as const;
+  return "unknown" as const;
 }
 
-function invalid(
+function mapCard(
+  record: CatalogRecordV2,
   source: ProviderSourceIdentity,
-  reasonCode: string,
-  fieldPath: string,
 ): ProviderRecordMappingOutcome {
-  return { status: "invalid", source, failure: { reasonCode, fieldPath } };
-}
-
-function mapped(
-  source: ProviderSourceIdentity,
-  candidates: readonly ProviderAdapterCandidate[],
-): ProviderRecordMappingOutcome {
-  return { status: "mapped", source, candidates: Object.freeze([...candidates]) };
-}
-
-function actor(
-  role: PseudonymousActorInput["role"],
-  sourceIdentifier: unknown,
-): PseudonymousActorInput | null {
-  const value = text(sourceIdentifier);
-  return value
-    ? { role, namespace: "courtyard_account", sourceIdentifier: value }
-    : null;
-}
-
-function actorList(...values: (PseudonymousActorInput | null)[]) {
-  return Object.freeze(values.filter((value): value is PseudonymousActorInput => value !== null));
-}
-
-function latestPriceEvidence(data: Record<string, unknown>) {
-  const histories = Array.isArray(data.priceHistory) ? data.priceHistory : [];
-  const candidates = histories.flatMap((history) => {
-    const row = object(history);
-    const sales = Array.isArray(row?.sales) ? row.sales : [];
-    return sales.flatMap((sale) => {
-      const value = object(sale);
-      const amount = finite(value?.price);
-      const date = text(value?.date);
-      return amount !== null && amount >= 0 && date
-        ? [{ amount, date, name: text(row?.title), grade: text(row?.grade), grader: text(row?.grader) }]
-        : [];
-    });
-  });
-  return candidates.sort((left, right) => right.date.localeCompare(left.date))[0] ?? null;
-}
-
-function priceCatalog(
-  envelope: CatalogEnvelopeV1,
-  source: ProviderSourceIdentity,
-  data: Record<string, unknown>,
-) {
-  const assetId = text(data.assetId);
-  if (!assetId) return invalid(source, "COURTYARD_PRICE_ASSET_ID_MISSING", "data.assetId");
-  const evidence = latestPriceEvidence(data);
+  const asset = optionalObject(record.data.asset);
+  const prices = optionalObject(record.data.prices);
+  const reveal = optionalObject(record.data.reveal);
+  const latestPrice = latestPriceEvidence(prices);
+  const name =
+    optionalString(asset?.title) ??
+    optionalString(reveal?.title) ??
+    latestPrice?.title ??
+    null;
+  const assetValue = nonNegativeNumber(asset?.estimatedValueUsd);
+  const revealValue = nonNegativeNumber(reveal?.fmv_estimate_usd);
+  const estimatedValue = assetValue ?? revealValue ?? latestPrice?.amount ?? null;
+  const valueSource = assetValue !== null
+    ? optionalString(asset?.estimatedValueSource) ?? "provider_estimated_value"
+    : revealValue !== null
+      ? "provider_fmv_estimate"
+      : latestPrice !== null
+        ? "latest_provider_sale"
+        : null;
+  const quality: ProviderDataQualityEvidence[] = [
+    ...(name === null
+      ? [warning("COURTYARD_CARD_NAME_UNAVAILABLE", "data")]
+      : []),
+    ...(estimatedValue === null
+      ? [information("COURTYARD_CARD_VALUE_UNAVAILABLE", "data")]
+      : []),
+  ];
+  const sourceStatus = reveal?.burned === true
+    ? "burned"
+    : optionalString(asset?.visibility);
   const candidate: CatalogAssetCandidate = {
     candidateKind: "catalog_asset",
     source,
-    externalId: envelope.external_id,
-    assetType: "price_record",
+    externalId: record.record_id,
+    assetType: "collectible",
     relatedPackExternalId: null,
     parentExternalId: null,
-    name: evidence?.name ?? assetId,
+    name,
     category:
-      evidence?.grader && evidence.grade
-        ? `${evidence.grader} ${evidence.grade}`
-        : evidence?.grader ?? null,
-    availability: "unknown",
-    sourceStatus: "price_history",
-    estimatedValue: evidence ? { amount: evidence.amount, currency: "USD" } : null,
-    valueSource: evidence ? "latest_provider_sale" : null,
-    imageUrls: [],
+      optionalString(asset?.collection) ?? optionalString(reveal?.collection),
+    availability: cardAvailability(asset, reveal),
+    sourceStatus,
+    estimatedValue:
+      estimatedValue === null
+        ? null
+        : { amount: estimatedValue, currency: "USD" },
+    valueSource,
+    imageUrls: uniqueStrings([
+      asset?.imageUrl,
+      reveal?.cropped_image,
+      reveal?.image,
+      ...(Array.isArray(reveal?.asset_pictures)
+        ? reveal.asset_pictures
+        : []),
+    ]),
     relationships: [],
-    dataQualityEvidence: evidence
-      ? []
-      : [{ code: "COURTYARD_PRICE_HISTORY_EMPTY", severity: "warning", fieldPath: "data.priceHistory" }],
+    dataQualityEvidence: quality,
   };
-  return mapped(source, [candidate]);
+  return mappedOutcome(source, [candidate]);
 }
 
-function odds(data: Record<string, unknown>) {
-  const oddsRecord = object(data.odds);
-  const values = Array.isArray(oddsRecord?.buckets) ? oddsRecord.buckets : [];
+function probabilityBuckets(data: JsonObject): {
+  readonly buckets: readonly ProbabilityBucketInput[];
+  readonly coverage: number;
+  readonly complete: boolean;
+} {
+  const odds = optionalObject(data.odds);
+  const values = Array.isArray(odds?.buckets) ? odds.buckets : [];
   const buckets = values.flatMap((value, index): ProbabilityBucketInput[] => {
-    const bucket = object(value);
-    if (!bucket) return [];
+    const bucket = optionalObject(value);
+    if (bucket === null) return [];
+    const oddsPercent = nonNegativeNumber(bucket.oddsPercent);
     return [{
-      bucketId: text(bucket.tier) ?? `bucket-${index + 1}`,
+      bucketId: optionalString(bucket.tier) ?? `bucket-${index + 1}`,
       evidenceKind: "probability_bucket",
-      label: text(bucket.tier),
-      probability:
-        finite(bucket.oddsPercent) === null ? null : finite(bucket.oddsPercent)! / 100,
-      lowerValue: finite(bucket.minValueUsd),
-      upperValue: finite(bucket.maxValueUsd),
+      label: optionalString(bucket.tier),
+      probability: oddsPercent === null ? null : oddsPercent / 100,
+      lowerValue: nonNegativeNumber(bucket.minValueUsd),
+      upperValue: nonNegativeNumber(bucket.maxValueUsd),
     }];
   });
-  const coverage = buckets.reduce((sum, bucket) => sum + (bucket.probability ?? 0), 0);
+  const coverage = Number(
+    buckets
+      .reduce((sum, bucket) => sum + (bucket.probability ?? 0), 0)
+      .toFixed(12),
+  );
   const complete =
     buckets.length > 0 &&
     Math.abs(coverage - 1) <= 0.000001 &&
     buckets.every(
-      (bucket) =>
-        bucket.probability !== null &&
-        bucket.probability >= 0 &&
-        bucket.lowerValue !== null &&
-        bucket.upperValue !== null &&
-        bucket.lowerValue >= 0 &&
-        bucket.upperValue >= bucket.lowerValue,
+      ({ probability, lowerValue, upperValue }) =>
+        probability !== null &&
+        probability <= 1 &&
+        lowerValue !== null &&
+        upperValue !== null &&
+        upperValue >= lowerValue,
     );
   return { buckets: Object.freeze(buckets), coverage, complete };
 }
 
-function inventoryAssets(
-  envelope: CatalogEnvelopeV1,
+function mapPack(
+  record: CatalogRecordV2,
   source: ProviderSourceIdentity,
-  data: Record<string, unknown>,
-): readonly CatalogAssetCandidate[] {
-  const inventory = Array.isArray(data.inventory) ? data.inventory : [];
-  const seen = new Set<string>();
-  return Object.freeze(inventory.flatMap((value, index): CatalogAssetCandidate[] => {
-    const item = object(value);
-    const id = text(item?.collectibleId);
-    if (!id || seen.has(id)) return [];
-    seen.add(id);
-    const valueUsd = finite(item?.fmvEstimateUsd);
-    return [{
-      candidateKind: "catalog_asset",
+): ProviderRecordMappingOutcome {
+  const data = record.data;
+  const name = optionalString(data.title);
+  if (name === null) {
+    return invalidOutcome(
       source,
-      externalId: `inventory:${id}`,
-      assetType: "inventory_item",
-      relatedPackExternalId: envelope.external_id,
-      parentExternalId: null,
-      name: text(item?.title) ?? `Inventory item ${index + 1}`,
-      category: text(item?.tier),
-      availability: "active",
-      sourceStatus: "inventory_evidence",
-      estimatedValue:
-        valueUsd !== null && valueUsd >= 0 ? { amount: valueUsd, currency: "USD" } : null,
-      valueSource: valueUsd === null ? null : "provider_fmv_estimate",
-      imageUrls: images([item?.imageUrl, item?.slabFront, item?.croppedImage]),
-      relationships: [{
-        entityKind: "pack",
-        platform: COURTYARD_PLATFORM_KEY,
-        externalId: envelope.external_id,
-        relationship: "subject",
-      }],
-      dataQualityEvidence: [{ code: "INVENTORY_SAMPLE_NOT_PROVEN_COMPLETE", severity: "info" }],
-    }];
-  }));
-}
-
-function packCatalog(
-  envelope: CatalogEnvelopeV1,
-  source: ProviderSourceIdentity,
-  data: Record<string, unknown>,
-) {
-  const title = text(data.title);
-  const sale = object(data.saleDetails);
-  const price = finite(sale?.salePriceUsd);
-  if (!title) return invalid(source, "COURTYARD_PACK_TITLE_MISSING", "data.title");
-  if (price === null || price <= 0) {
-    return invalid(source, "COURTYARD_PACK_PRICE_INVALID", "data.saleDetails.salePriceUsd");
+      "COURTYARD_PACK_TITLE_MISSING",
+      "data.title",
+    );
   }
-  const status = text(data.status);
+  const sale = optionalObject(data.saleDetails);
+  const price = nonNegativeNumber(sale?.salePriceUsd);
+  if (price === null || price <= 0) {
+    return invalidOutcome(
+      source,
+      "COURTYARD_PACK_PRICE_INVALID",
+      "data.saleDetails.salePriceUsd",
+    );
+  }
+  const providerEv = nonNegativeNumber(sale?.expectedValueUsd);
+  const buybackRatio = nonNegativeNumber(data.buybackRatio);
+  const distribution = probabilityBuckets(data);
+  const category = optionalObject(data.category);
   const outOfStock = data.outOfStock === true;
   const closed = sale?.closed === true;
-  const providerEv = finite(sale?.expectedValueUsd);
-  const buybackRatio = finite(data.buybackRatio);
-  const category = object(data.category);
+  const status = optionalString(data.status);
   const pack: CanonicalPackCandidate = {
     candidateKind: "pack",
     source,
-    externalId: envelope.external_id,
+    externalId: record.record_id,
     parentExternalId: null,
-    name: title,
-    description: boundedText(data.description, 4_000),
-    category: text(category?.title) ?? text(category?.id),
+    name,
+    description: optionalSingleLineString(data.description),
+    category:
+      optionalString(category?.title) ?? optionalString(category?.id),
     availability:
       outOfStock || closed
         ? "sold_out"
@@ -250,7 +249,7 @@ function packCatalog(
           : "disabled",
     sourceStatus: status,
     price: { amount: price, currency: "USD" },
-    imageUrls: images([
+    imageUrls: uniqueStrings([
       data.sealedPackImage,
       data.sealedPackThumbnail,
       data.vendingMachineImage,
@@ -258,132 +257,187 @@ function packCatalog(
       data.socialSharingImage,
     ]),
     providerReportedEv:
-      providerEv !== null && providerEv >= 0
-        ? { amount: providerEv, currency: "USD" }
-        : null,
+      providerEv === null
+        ? null
+        : { amount: providerEv, currency: "USD" },
     buybackPercent:
-      buybackRatio !== null && buybackRatio >= 0 && buybackRatio <= 1
+      buybackRatio !== null && buybackRatio <= 1
         ? buybackRatio * 100
         : null,
     drawCount: 1,
     relationships: [],
-    dataQualityEvidence: [],
+    dataQualityEvidence: [
+      ...(providerEv === null
+        ? [warning(
+            "COURTYARD_PROVIDER_EV_INVALID",
+            "data.saleDetails.expectedValueUsd",
+          )]
+        : []),
+      ...(buybackRatio !== null && buybackRatio > 1
+        ? [warning("COURTYARD_BUYBACK_RATIO_INVALID", "data.buybackRatio")]
+        : []),
+    ],
   };
-  const distribution = odds(data);
   const evInput: EvInputCandidate = {
     candidateKind: "ev_input",
     source,
-    externalId: `${envelope.external_id}:odds`,
-    packExternalId: envelope.external_id,
+    externalId: `${record.record_id}:odds`,
+    packExternalId: record.record_id,
     currency: "USD",
     unitBasis: "per_pack",
     drawCount: 1,
     declaredCoverage: distribution.coverage,
     evidenceCompleteness: distribution.complete ? "complete" : "partial",
     buckets: distribution.buckets,
-    relationships: [{
-      entityKind: "pack",
-      platform: COURTYARD_PLATFORM_KEY,
-      externalId: envelope.external_id,
-      relationship: "subject",
-    }],
+    relationships: relationship("pack", record.record_id, "subject"),
     dataQualityEvidence: distribution.complete
       ? []
-      : [{ code: "COURTYARD_ODDS_INCOMPLETE", severity: "warning", fieldPath: "data.odds.buckets" }],
+      : [warning("COURTYARD_ODDS_UNAVAILABLE", "data.odds.buckets")],
   };
-  return mapped(source, [pack, evInput, ...inventoryAssets(envelope, source, data)]);
+  return mappedOutcome(source, [pack, evInput]);
 }
 
-function mapCatalog(envelope: CatalogEnvelopeV1, recordIndex: number) {
-  const source = sourceIdentityForEnvelope({ recordKind: "catalog", recordIndex, envelope });
-  const data = object(envelope.data);
-  if (!data) return invalid(source, "COURTYARD_CATALOG_DATA_INVALID", "data");
-  return envelope.external_id.startsWith("price:")
-    ? priceCatalog(envelope, source, data)
-    : packCatalog(envelope, source, data);
+function mapCatalog(
+  record: CatalogRecordV2,
+  source: ProviderSourceIdentity,
+): ProviderRecordMappingOutcome {
+  return record.entity === "card"
+    ? mapCard(record, source)
+    : mapPack(record, source);
 }
 
-function mapPull(envelope: PullEnvelopeV1, recordIndex: number) {
-  const source = sourceIdentityForEnvelope({ recordKind: "pull", recordIndex, envelope });
-  const data = object(envelope.data);
-  if (!data) return invalid(source, "COURTYARD_PULL_DATA_INVALID", "data");
-  const pulledBy = object(data.pulled_by);
-  const value = finite(data.fmv_estimate_usd);
+function mapPull(
+  record: PullRecordV2,
+  source: ProviderSourceIdentity,
+): ProviderRecordMappingOutcome {
+  const value = nonNegativeNumber(record.data.fmv_estimate_usd);
+  const pulledBy = optionalObject(record.data.pulled_by);
   const candidate: PullCandidate = {
     candidateKind: "pull",
     source,
-    packExternalId: envelope.pack_external_id,
-    assetExternalId: text(data.proof_of_integrity) ?? envelope.external_id,
-    occurredAt: envelope.occurred_at,
-    value: value !== null && value >= 0 ? { amount: value, currency: "USD" } : null,
+    packExternalId: record.pack_id,
+    assetExternalId: record.card_id,
+    occurredAt: source.sourceTimestamp,
+    value: value === null ? null : { amount: value, currency: "USD" },
     valueSource: value === null ? null : "provider_fmv_estimate",
-    pseudonymizationInputs: actorList(actor("actor", pulledBy?.user_id)),
+    buybackStatus: null,
+    buybackRefund: null,
+    pseudonymizationInputs: uniqueActors([
+      actorInput("actor", "courtyard_account", pulledBy?.user_id),
+    ]),
     relationships: [
-      ...(envelope.pack_external_id ? [{
-        entityKind: "pack" as const,
-        platform: COURTYARD_PLATFORM_KEY,
-        externalId: envelope.pack_external_id,
-        relationship: "subject" as const,
-      }] : []),
+      ...relationship("pack", record.pack_id, "subject"),
+      ...relationship("catalog_asset", record.card_id, "asset"),
     ],
-    dataQualityEvidence: [],
+    dataQualityEvidence: value === null
+      ? [warning(
+          "COURTYARD_PULL_VALUE_UNAVAILABLE",
+          "data.fmv_estimate_usd",
+        )]
+      : [],
   };
-  return mapped(source, [candidate]);
+  return mappedOutcome(source, [candidate]);
 }
 
-function mapSale(envelope: SaleEnvelopeV1, recordIndex: number) {
-  const source = sourceIdentityForEnvelope({ recordKind: "sale", recordIndex, envelope });
-  const data = object(envelope.data);
-  if (!data) return invalid(source, "COURTYARD_SALE_DATA_INVALID", "data");
-  const currency = text(envelope.currency);
-  const safeCurrency = currency && /^[A-Za-z0-9]{2,12}$/.test(currency) ? currency : null;
-  const candidate: SaleCandidate = {
-    candidateKind: "sale",
-    source,
-    eventType: envelope.event_type,
-    transactionKey: envelope.tx_hash ?? envelope.external_id,
-    assetExternalId: text(data.assetID),
-    packExternalId: null,
-    occurredAt: envelope.occurred_at,
-    amount:
-      envelope.amount !== null && safeCurrency
-        ? { amount: envelope.amount, currency: safeCurrency }
-        : null,
-    pseudonymizationInputs: actorList(
-      actor("from", data.from),
-      actor("to", data.to),
-    ),
-    relationships: [],
-    dataQualityEvidence:
-      currency && !safeCurrency
-        ? [{ code: "COURTYARD_SALE_CURRENCY_UNVERIFIED", severity: "warning", fieldPath: "currency" }]
-        : [],
+interface CourtyardTradeMoney {
+  readonly amount: TradeCandidate["amount"];
+  readonly paymentMethod: string | null;
+  readonly quality: readonly ProviderDataQualityEvidence[];
+}
+
+function courtyardTradeMoney(record: TradeRecordV2): CourtyardTradeMoney {
+  const rawCurrency = optionalString(record.currency);
+  const explicitMethod =
+    optionalString(record.payment_method)?.toLowerCase() ?? null;
+  if (record.amount === null && rawCurrency === null) {
+    return { amount: null, paymentMethod: explicitMethod, quality: [] };
+  }
+  if (
+    record.amount === null ||
+    record.amount < 0 ||
+    !Number.isFinite(record.amount) ||
+    rawCurrency === null
+  ) {
+    return {
+      amount: null,
+      paymentMethod: explicitMethod,
+      quality: [warning("COURTYARD_TRADE_MONEY_INCOMPLETE", "currency")],
+    };
+  }
+  const reference = rawCurrency.toLowerCase();
+  if (reference === COURTYARD_USDC_TOKEN_REFERENCE || reference === "usdc") {
+    return {
+      amount: { amount: record.amount, currency: "USDC" },
+      paymentMethod: explicitMethod,
+      quality: [],
+    };
+  }
+  if (reference === "usd") {
+    return {
+      amount: { amount: record.amount, currency: "USD" },
+      paymentMethod: explicitMethod,
+      quality: [],
+    };
+  }
+  if (reference === "stripe" || reference === "partial_payment") {
+    return {
+      // The provider confirmed Courtyard settles in USDC; these raw values
+      // describe collection method, not a different settlement currency.
+      amount: { amount: record.amount, currency: "USDC" },
+      paymentMethod: explicitMethod ?? reference,
+      quality: [],
+    };
+  }
+  return {
+    amount: null,
+    paymentMethod: explicitMethod,
+    quality: [warning("COURTYARD_TRADE_CURRENCY_UNSUPPORTED", "currency")],
   };
-  return mapped(source, [candidate]);
+}
+
+function mapTrade(
+  record: TradeRecordV2,
+  source: ProviderSourceIdentity,
+): ProviderRecordMappingOutcome {
+  const money = courtyardTradeMoney(record);
+  const candidate: TradeCandidate = {
+    candidateKind: "trade",
+    source,
+    eventType: record.event_type,
+    transactionKey: record.tx_hash,
+    assetExternalId: record.card_id,
+    packExternalId: null,
+    occurredAt: source.sourceTimestamp,
+    amount: money.amount,
+    paymentMethod: money.paymentMethod,
+    pseudonymizationInputs: uniqueActors([
+      actorInput("from", "courtyard_account", record.data.from),
+      actorInput("to", "courtyard_account", record.data.to),
+    ]),
+    relationships: relationship("catalog_asset", record.card_id, "asset"),
+    dataQualityEvidence: money.quality,
+  };
+  return mappedOutcome(source, [candidate]);
 }
 
 export class CourtyardMappingAdapter implements ProviderMappingAdapter {
   readonly key = COURTYARD_MAPPER_VERSION;
   readonly platformKey = COURTYARD_PLATFORM_KEY;
 
-  mapPage(input: {
-    configuration: { platform: string };
-    page: ProviderFeedPageV1;
-    recordIndexes: Readonly<{
-      catalog: readonly number[];
-      pulls: readonly number[];
-      sales: readonly number[];
-    }>;
-  }) {
-    if (input.configuration.platform !== this.platformKey) {
+  mapRecord(
+    input: Parameters<ProviderMappingAdapter["mapRecord"]>[0],
+  ): ProviderRecordMappingOutcome {
+    if (
+      input.configuration.platform !== this.platformKey ||
+      input.record.platform !== this.platformKey
+    ) {
       throw new Error("Courtyard mapper received a different platform.");
     }
-    return {
-      outcomes: Object.freeze([
-        ...input.recordIndexes.catalog.map((index) => mapCatalog(input.page.catalog[index]!, index)),
-        ...input.recordIndexes.pulls.map((index) => mapPull(input.page.pulls[index]!, index)),
-        ...input.recordIndexes.sales.map((index) => mapSale(input.page.sales[index]!, index)),
-      ]),
-    };
+    const source = sourceForRecord(input.record, input.recordIndex);
+    return input.record.stream === "catalog"
+      ? mapCatalog(input.record, source)
+      : input.record.stream === "pulls"
+        ? mapPull(input.record, source)
+        : mapTrade(input.record, source);
   }
 }

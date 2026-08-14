@@ -86,7 +86,7 @@ export class ProviderMappingAdapterRegistry {
 
   register(adapter: ProviderMappingAdapter): this {
     if (
-      typeof adapter.mapPage !== "function" ||
+      typeof adapter.mapRecord !== "function" ||
       typeof adapter.platformKey !== "string"
     ) {
       throw new ProviderAdapterRegistryError("invalid_adapter_capability");

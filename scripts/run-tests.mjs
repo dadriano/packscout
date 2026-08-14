@@ -54,7 +54,7 @@ const targets = {
     cwd: ".",
     roots: ["__tests__", "scripts"],
     testFile: /\.test\.mjs$/,
-    loader: false,
+    loader: true,
   },
 };
 

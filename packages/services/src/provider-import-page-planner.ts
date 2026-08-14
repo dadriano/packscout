@@ -1,15 +1,20 @@
-import type {
-  ProviderFeedInvalidRecordOutcomeV1,
-  ProviderFeedValidatedPageV1,
-  ProviderFeedValidRecordOutcomeV1,
+import {
+  providerRecordKindV2,
+  type ProviderRecordKindV2,
+  type ProviderStreamInvalidRecordOutcomeV2,
+  type ProviderStreamRecordV2,
+  type ProviderStreamValidRecordOutcomeV2,
+  type ProviderStreamValidatedPageV2,
 } from "@packscout/contracts";
 import { ProviderMappingAdapterRegistry } from "./provider-adapter-registry.ts";
 import {
+  sourceIdentityForRecord,
   type ProviderRecordMappingOutcome,
   type ProviderSourceIdentity,
 } from "./provider-adapter.ts";
 import type {
   ProviderImportMappedPage,
+  ProviderArchiveImportPagePlanner,
   ProviderImportPagePlanner,
   ProviderImportQuarantineInput,
   ProviderImportSourceRecordInput,
@@ -36,10 +41,6 @@ function stableFieldPath(value: string | undefined): string | undefined {
   return value && safeFieldPathPattern.test(value) ? value : undefined;
 }
 
-function sourceKey(source: ProviderSourceIdentity): string {
-  return `${source.recordKind}:${source.recordIndex}`;
-}
-
 function sameSource(
   left: ProviderSourceIdentity,
   right: ProviderSourceIdentity,
@@ -54,40 +55,35 @@ function sameSource(
   );
 }
 
-function sourceForValidRecord(
-  record: ProviderFeedValidRecordOutcomeV1,
-): ProviderSourceIdentity {
-  return {
-    platform: record.envelope.platform,
-    recordKind: record.recordKind,
-    recordIndex: record.recordIndex,
-    externalId: record.envelope.external_id,
-    collectedAt: record.envelope.collected_at,
-    sourceTimestamp:
-      "updated_at" in record.envelope
-        ? record.envelope.updated_at
-        : record.envelope.occurred_at,
-  };
-}
-
 function parseableExternalId(rawRecord: unknown): string | null {
   if (
     typeof rawRecord !== "object" ||
     rawRecord === null ||
-    !("external_id" in rawRecord)
+    !("record_id" in rawRecord)
   ) {
     return null;
   }
-  const value = rawRecord.external_id;
+  const value = rawRecord.record_id;
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function recordKindForInvalid(rawRecord: unknown): ProviderRecordKindV2 {
+  if (typeof rawRecord !== "object" || rawRecord === null || !("stream" in rawRecord)) {
+    return "catalog";
+  }
+  return rawRecord.stream === "pulls"
+    ? "pull"
+    : rawRecord.stream === "trades"
+      ? "trade"
+      : "catalog";
+}
+
 function invalidEnvelopeQuarantine(
-  outcome: ProviderFeedInvalidRecordOutcomeV1,
+  outcome: ProviderStreamInvalidRecordOutcomeV2,
 ): ProviderImportQuarantineInput {
   const issue = outcome.issues[0];
   return {
-    recordKind: outcome.recordKind,
+    recordKind: recordKindForInvalid(outcome.rawRecord),
     recordIndex: outcome.recordIndex,
     externalId: parseableExternalId(outcome.rawRecord),
     reasonCode: issue
@@ -100,20 +96,20 @@ function invalidEnvelopeQuarantine(
 }
 
 function quarantinedSourceRecord(
-  record: ProviderFeedValidRecordOutcomeV1,
+  record: ProviderStreamRecordV2,
+  recordIndex: number,
   source: ProviderSourceIdentity,
-  payload: Record<string, unknown>,
   reasonCode: string,
   fieldPath: string | undefined,
   summary: string,
 ): ProviderImportSourceRecordInput {
   return {
-    recordKind: record.recordKind,
-    recordIndex: record.recordIndex,
+    recordKind: providerRecordKindV2(record),
+    recordIndex,
     externalId: source.externalId,
     sourceTime: new Date(source.sourceTimestamp),
     collectedAt: new Date(source.collectedAt),
-    payload,
+    payload: record,
     projections: [],
     quarantine: {
       reasonCode,
@@ -123,42 +119,9 @@ function quarantinedSourceRecord(
   };
 }
 
-function rawValidEnvelope(
-  page: ProviderFeedValidatedPageV1,
-  record: ProviderFeedValidRecordOutcomeV1,
-): Record<string, unknown> {
-  const raw =
-    record.recordKind === "catalog"
-      ? page.rawPage.catalog[record.recordIndex]
-      : record.recordKind === "pull"
-        ? page.rawPage.pulls[record.recordIndex]
-        : page.rawPage.sales[record.recordIndex];
-  return typeof raw === "object" && raw !== null
-    ? raw as Record<string, unknown>
-    : record.envelope;
-}
-
-function recordIndexes(page: ProviderFeedValidatedPageV1) {
-  const valid = page.recordOutcomes.filter(
-    (outcome): outcome is ProviderFeedValidRecordOutcomeV1 =>
-      outcome.status === "valid",
-  );
-  return {
-    catalog: valid
-      .filter((outcome) => outcome.recordKind === "catalog")
-      .map((outcome) => outcome.recordIndex),
-    pulls: valid
-      .filter((outcome) => outcome.recordKind === "pull")
-      .map((outcome) => outcome.recordIndex),
-    sales: valid
-      .filter((outcome) => outcome.recordKind === "sale")
-      .map((outcome) => outcome.recordIndex),
-  };
-}
-
-export class DefaultProviderImportPagePlanner
-  implements ProviderImportPagePlanner
-{
+export class DefaultProviderImportPagePlanner implements
+  ProviderImportPagePlanner,
+  ProviderArchiveImportPagePlanner {
   constructor(
     private readonly mappings: ProviderMappingAdapterRegistry,
     private readonly projections: ProviderProjectionPort,
@@ -166,76 +129,76 @@ export class DefaultProviderImportPagePlanner
 
   async plan(input: {
     configuration: Parameters<ProviderImportPagePlanner["plan"]>[0]["configuration"];
-    page: ProviderFeedValidatedPageV1;
+    page: ProviderStreamValidatedPageV2;
   }): Promise<ProviderImportMappedPage> {
     const mapper = this.mappings.resolveForPlatform(input.configuration.platform);
-    // The immutable provider revision selects the transport adapter. Once the
-    // platform manifest selects its mapper, canonical provenance must use the
-    // mapper version instead of incorrectly labelling transport as mapping.
+    return this.planWithMapper(input, mapper);
+  }
+
+  async planArchive(input: {
+    configuration: Parameters<ProviderArchiveImportPagePlanner["planArchive"]>[0]["configuration"];
+    page: ProviderStreamValidatedPageV2;
+  }): Promise<ProviderImportMappedPage> {
+    let mapper;
+    try {
+      mapper = this.mappings.resolve(
+        input.configuration.adapterKey,
+        input.configuration.platform,
+      );
+    } catch {
+      throw new ProviderImportPlanningError();
+    }
+    return this.planWithMapper(input, mapper);
+  }
+
+  private async planWithMapper(
+    input: Parameters<ProviderImportPagePlanner["plan"]>[0],
+    mapper: ReturnType<ProviderMappingAdapterRegistry["resolve"]>,
+  ): Promise<ProviderImportMappedPage> {
     const mappingConfiguration = {
       ...input.configuration,
       adapterKey: mapper.key,
     };
-    let output: Awaited<ReturnType<typeof mapper.mapPage>>;
-    try {
-      output = await mapper.mapPage({
-        configuration: mappingConfiguration,
-        page: input.page.validPage,
-        recordIndexes: recordIndexes(input.page),
-      });
-    } catch {
-      throw new ProviderImportPlanningError();
-    }
-
     const validRecords = input.page.recordOutcomes.filter(
-      (outcome): outcome is ProviderFeedValidRecordOutcomeV1 =>
+      (outcome): outcome is ProviderStreamValidRecordOutcomeV2 =>
         outcome.status === "valid",
     );
-    const expected = new Map(
-      validRecords.map((record) => {
-        const source = sourceForValidRecord(record);
-        return [
-          sourceKey(source),
-          { record, source, payload: rawValidEnvelope(input.page, record) },
-        ] as const;
-      }),
-    );
-    const mappedOutcomes = new Map<string, ProviderRecordMappingOutcome>();
-    for (const outcome of output.outcomes) {
-      const key = sourceKey(outcome.source);
-      const expectedSource = expected.get(key)?.source;
-      if (
-        !expectedSource ||
-        !sameSource(outcome.source, expectedSource) ||
-        mappedOutcomes.has(key)
-      ) {
-        throw new ProviderImportPlanningError();
-      }
-      mappedOutcomes.set(key, outcome);
-    }
-
     const records: ProviderImportSourceRecordInput[] = [];
-    for (const { record, source, payload } of expected.values()) {
-      const outcome = mappedOutcomes.get(sourceKey(source));
-      if (!outcome) {
+
+    for (const valid of validRecords) {
+      const source = sourceIdentityForRecord({
+        record: valid.record,
+        recordIndex: valid.recordIndex,
+      });
+      let outcome: ProviderRecordMappingOutcome;
+      try {
+        outcome = await mapper.mapRecord({
+          configuration: mappingConfiguration,
+          record: valid.record,
+          recordIndex: valid.recordIndex,
+        });
+      } catch {
         records.push(
           quarantinedSourceRecord(
-            record,
+            valid.record,
+            valid.recordIndex,
             source,
-            payload,
-            "MAPPING_OUTCOME_MISSING",
+            "MAPPING_FAILED",
             undefined,
-            "A provider record produced no mapping outcome.",
+            "A provider record could not be mapped.",
           ),
         );
         continue;
       }
+      if (!sameSource(outcome.source, source)) {
+        throw new ProviderImportPlanningError();
+      }
       if (outcome.status === "invalid") {
         records.push(
           quarantinedSourceRecord(
-            record,
+            valid.record,
+            valid.recordIndex,
             source,
-            payload,
             stableReasonCode(outcome.failure.reasonCode, "MAPPING_REJECTED"),
             stableFieldPath(outcome.failure.fieldPath),
             "A provider record failed mapping.",
@@ -246,9 +209,9 @@ export class DefaultProviderImportPagePlanner
       if (outcome.candidates.some((candidate) => !sameSource(candidate.source, source))) {
         records.push(
           quarantinedSourceRecord(
-            record,
+            valid.record,
+            valid.recordIndex,
             source,
-            payload,
             "MAPPING_SOURCE_MISMATCH",
             undefined,
             "A provider mapping referenced inconsistent source evidence.",
@@ -265,9 +228,9 @@ export class DefaultProviderImportPagePlanner
         if (projected.status === "invalid") {
           records.push(
             quarantinedSourceRecord(
-              record,
+              valid.record,
+              valid.recordIndex,
               source,
-              payload,
               stableReasonCode(projected.reasonCode, "PROJECTION_REJECTED"),
               stableFieldPath(projected.fieldPath),
               "A provider record failed canonical projection.",
@@ -276,20 +239,20 @@ export class DefaultProviderImportPagePlanner
           continue;
         }
         records.push({
-          recordKind: record.recordKind,
-          recordIndex: record.recordIndex,
+          recordKind: providerRecordKindV2(valid.record),
+          recordIndex: valid.recordIndex,
           externalId: source.externalId,
           sourceTime: new Date(source.sourceTimestamp),
           collectedAt: new Date(source.collectedAt),
-          payload,
+          payload: valid.record,
           projections: projected.projections,
         });
       } catch {
         records.push(
           quarantinedSourceRecord(
-            record,
+            valid.record,
+            valid.recordIndex,
             source,
-            payload,
             "PROJECTION_FAILED",
             undefined,
             "A provider record could not be projected.",
@@ -297,6 +260,7 @@ export class DefaultProviderImportPagePlanner
         );
       }
     }
+
     return {
       records,
       quarantines: input.page.invalidRecords.map(invalidEnvelopeQuarantine),

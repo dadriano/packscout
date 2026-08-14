@@ -18,7 +18,6 @@ import {
   DefaultProviderImportPagePlanner,
   EventProjectionService,
   HmacProviderActorPseudonymizer,
-  HttpCursorAdapter,
   ProviderHealthService,
   ProviderImportService,
   ProviderProjectionService,
@@ -47,6 +46,8 @@ export interface AdminImportOperationsRuntimeInput {
   readonly credentialKeyVersion?: number;
   readonly environment: ProviderRuntimeEnvironment;
   readonly operational?: ProviderFreshnessOperationalHooks & QuarantineOperationalHooks;
+  /** Empty until a decoder for the observed live API response is supplied. */
+  readonly transportAdapters?: ProviderTransportAdapterRegistry;
 }
 
 export class InvalidOperationCursorError extends Error {
@@ -214,7 +215,7 @@ function toRunDetail(
       committedAt: page.committedAt.toISOString(),
       catalog: page.catalog,
       pulls: page.pulls,
-      sales: page.sales,
+      trades: page.trades,
       accepted: page.accepted,
       unchanged: page.unchanged,
       revised: page.revised,
@@ -249,13 +250,13 @@ export function createAdminImportOperationsRuntime(
       new HmacProviderActorPseudonymizer(input.actorPseudonymKey),
     ),
   );
+  const transportAdapters =
+    input.transportAdapters ?? new ProviderTransportAdapterRegistry();
   const imports = new ProviderImportService({
     runs: new PrismaImportRunRepository(input.database),
     revisions: new PrismaProviderConfigurationRepository(input.database),
     pages: ingestion,
-    transportAdapters: new ProviderTransportAdapterRegistry([
-      new HttpCursorAdapter(),
-    ]),
+    transportAdapters,
     pagePlanner: new DefaultProviderImportPagePlanner(mappings, projections),
     credentialCipher: new AesGcmProviderCredentialCipher({
       primaryVersion: input.credentialKeyVersion ?? 1,
@@ -403,6 +404,9 @@ export function createAdminImportOperationsRuntime(
           expectedConfigurationRevisionId:
             request.expectedConfigurationRevisionId,
         });
+        if (result.run.trigger !== "manual") {
+          throw new Error("Manual import returned a non-manual run.");
+        }
         return {
           run: {
             id: result.run.id,

@@ -1,4 +1,4 @@
-export const sourceRecordKinds = ["catalog", "pull", "sale"] as const;
+export const sourceRecordKinds = ["catalog", "pull", "trade"] as const;
 export type SourceRecordKind = (typeof sourceRecordKinds)[number];
 
 export const canonicalRecordKinds = [
@@ -7,7 +7,7 @@ export const canonicalRecordKinds = [
   "catalog_asset",
   "ev_input",
   "pull",
-  "sale",
+  "trade",
   "estimated_ev",
 ] as const;
 export type CanonicalRecordKind = (typeof canonicalRecordKinds)[number];
@@ -25,7 +25,7 @@ export interface RunCounters {
 export interface RecordCounts {
   catalog: number;
   pulls: number;
-  sales: number;
+  trades: number;
 }
 
 export interface CanonicalIdentity {
@@ -56,7 +56,7 @@ export interface AcceptedSourceRecordInput {
   externalId: string;
   sourceTime: Date;
   collectedAt: Date;
-  payload: Record<string, unknown>;
+  payload: ProviderStreamRecordV2;
   projections: readonly CanonicalProjectionInput[];
   quarantine?: Omit<
     QuarantinedRecordInput,
@@ -83,7 +83,14 @@ export interface CommitPageInput {
   requestedCursor: string | null;
   nextCursor: string | null;
   hasMore: boolean;
+  /** Small, protected page-level evidence. Archive imports must never store raw page bytes here. */
   payload: unknown;
+  /** A caller-supplied SHA-256 of the exact page evidence bytes when available. */
+  payloadHash?: string;
+  /** Exact uncompressed NDJSON bytes represented by an archive page. */
+  archiveUncompressedBytes?: number;
+  /** Archive commits advance only the archive run cursor, never the live provider checkpoint. */
+  checkpointMode: "provider" | "archive";
   records: readonly AcceptedSourceRecordInput[];
   quarantines?: readonly QuarantinedRecordInput[];
   committedAt: Date;
@@ -132,7 +139,7 @@ export interface MaterializeAndProjectSourceRecordInput {
   externalId: string;
   sourceTime: Date;
   collectedAt: Date;
-  payload: Record<string, unknown>;
+  payload: ProviderStreamRecordV2;
   expiresAt: Date;
   projections: readonly CanonicalProjectionInput[];
   acceptedAt: Date;
@@ -159,3 +166,4 @@ export interface RawEvidencePolicy {
   retentionDays: 90;
   actorPseudonymKey: Uint8Array | string;
 }
+import type { ProviderStreamRecordV2 } from "@packscout/contracts";

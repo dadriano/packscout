@@ -23,7 +23,7 @@ const run: ImportRunSummary = {
   finishedAt: "2026-08-06T12:01:00.000Z",
   lastProgressAt: "2026-08-06T12:00:55.000Z",
   reachedProviderHead: false,
-  counters: { pages: 2, catalog: 3, pulls: 4, sales: 5, accepted: 9, unchanged: 2, revised: 1, quarantined: 2, resolvedQuarantines: 1 },
+  counters: { pages: 2, catalog: 3, pulls: 4, trades: 5, accepted: 9, unchanged: 2, revised: 1, quarantined: 2, resolvedQuarantines: 1 },
   failure: { class: "contract", code: "IMPORT_INVALID_CONTRACT", summary: "Provider response failed validation." },
 };
 
@@ -59,6 +59,16 @@ test("run ledger keeps historical outcome separate from current quarantine resol
   assert.doesNotMatch(html, /rawPayload|walletAddress|username|bearerToken/i);
 });
 
+test("archive history is labelled separately from live provider progress", () => {
+  Object.assign(globalThis, { React });
+  const html = renderToStaticMarkup(
+    <MemoryRouter><RunLedger runs={[{ ...run, trigger: "archive" }]} /></MemoryRouter>,
+  );
+  assert.match(html, /Archive source/);
+  assert.match(html, /Not complete/);
+  assert.doesNotMatch(html, /Provider head/);
+});
+
 test("expired quarantine evidence remains visible but cannot be selected for retry", () => {
   Object.assign(globalThis, { React });
   const html = renderToStaticMarkup(
@@ -68,6 +78,26 @@ test("expired quarantine evidence remains visible but cannot be selected for ret
   assert.match(html, /Unavailable for retry/);
   assert.match(html, /type="checkbox" disabled=""/);
   assert.doesNotMatch(html, /raw JSON|walletAddress|username/i);
+});
+
+test("open source conflicts remain visible but cannot be selected for retry", () => {
+  Object.assign(globalThis, { React });
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <QuarantineLedger
+        entries={[{
+          ...quarantine,
+          state: "open",
+          reasonCode: "CATALOG_IDENTITY_CONFLICT",
+        }]}
+        selectable
+        selected={new Set()}
+      />
+    </MemoryRouter>,
+  );
+  assert.match(html, /Open/);
+  assert.match(html, /Source conflict; manual review only/);
+  assert.match(html, /type="checkbox" disabled=""/);
 });
 
 test("provider operations render freshness and quality as independent states", () => {

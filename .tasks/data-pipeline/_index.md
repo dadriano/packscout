@@ -1,5 +1,7 @@
 # Feature: Data Pipeline
 
+> **Superseded implementation artifact (2026-08-14).** This folder preserves aggregate V1/eight-provider completion evidence only. Do not build from its `sales`, per-stream, `http-cursor-v1`, or eight-provider instructions. The executable source of truth is the record-stream V2 contract in [`docs/provider-data-contract-v2.md`](../../docs/provider-data-contract-v2.md): one opaque cursor per provider, mixed `catalog`/`pulls`/`trades` records, and only Collector Crypt plus Courtyard currently validated.
+
 **Progress:** 18/18 tasks complete
 
 ## Context

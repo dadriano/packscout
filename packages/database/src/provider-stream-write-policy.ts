@@ -23,16 +23,24 @@ export type ProviderStreamWriteDecisionV2 =
         | "SOURCE_IDENTITY_MISMATCH";
     };
 
-function sourceIdentity(record: ProviderStreamRecordV2): string {
-  return [record.stream, record.platform, record.record_id].join("\u0000");
-}
-
-function catalogIdentity(record: Extract<ProviderStreamRecordV2, { stream: "catalog" }>) {
-  return [
-    sourceIdentity(record),
-    record.entity,
-    record.first_seen_at,
-  ].join("\u0000");
+export function providerStreamRecordIdentityHashV2(
+  record: ProviderStreamRecordV2,
+): string {
+  return hashJson(
+    record.stream === "catalog"
+      ? {
+          stream: record.stream,
+          platform: record.platform,
+          recordId: record.record_id,
+          entity: record.entity,
+          firstSeenAt: record.first_seen_at,
+        }
+      : {
+          stream: record.stream,
+          platform: record.platform,
+          recordId: record.record_id,
+        },
+  );
 }
 
 /**
@@ -40,18 +48,24 @@ function catalogIdentity(record: Extract<ProviderStreamRecordV2, { stream: "cata
  * facts records an observation but must not manufacture a new catalog revision
  * or immutable-event conflict solely because collection happened later.
  */
-function contentHash(record: ProviderStreamRecordV2): string {
+export function providerStreamSourceFactsHashV2(
+  record: ProviderStreamRecordV2,
+): string {
   const sourceFacts = Object.fromEntries(
     Object.entries(record).filter(([key]) => key !== "collected_at"),
   );
   return hashJson(sourceFacts);
 }
 
+export function providerStreamContentHashV2(record: ProviderStreamRecordV2): string {
+  return hashJson(record);
+}
+
 export function decideProviderStreamWriteV2(input: {
   readonly existing: ProviderStreamRecordV2 | null;
   readonly incoming: ProviderStreamRecordV2;
 }): ProviderStreamWriteDecisionV2 {
-  const nextHash = contentHash(input.incoming);
+  const nextHash = providerStreamSourceFactsHashV2(input.incoming);
   if (input.existing === null) {
     return Object.freeze({ kind: "accept_initial", contentHash: nextHash });
   }
@@ -59,13 +73,16 @@ export function decideProviderStreamWriteV2(input: {
     input.existing.stream === "catalog" &&
     input.incoming.stream === "catalog"
   ) {
-    if (catalogIdentity(input.existing) !== catalogIdentity(input.incoming)) {
+    if (
+      providerStreamRecordIdentityHashV2(input.existing) !==
+      providerStreamRecordIdentityHashV2(input.incoming)
+    ) {
       return Object.freeze({
         kind: "quarantine",
         reasonCode: "CATALOG_IDENTITY_CONFLICT",
       });
     }
-    const previousContentHash = contentHash(input.existing);
+    const previousContentHash = providerStreamSourceFactsHashV2(input.existing);
     return previousContentHash === nextHash
       ? Object.freeze({ kind: "duplicate", contentHash: nextHash })
       : Object.freeze({
@@ -74,30 +91,20 @@ export function decideProviderStreamWriteV2(input: {
           contentHash: nextHash,
         });
   }
-  if (sourceIdentity(input.existing) !== sourceIdentity(input.incoming)) {
+  if (
+    providerStreamRecordIdentityHashV2(input.existing) !==
+    providerStreamRecordIdentityHashV2(input.incoming)
+  ) {
     return Object.freeze({
       kind: "quarantine",
       reasonCode: "SOURCE_IDENTITY_MISMATCH",
     });
   }
-  const previousContentHash = contentHash(input.existing);
+  const previousContentHash = providerStreamSourceFactsHashV2(input.existing);
   return previousContentHash === nextHash
     ? Object.freeze({ kind: "duplicate", contentHash: nextHash })
     : Object.freeze({
         kind: "quarantine",
         reasonCode: "IMMUTABLE_EVENT_CONFLICT",
       });
-}
-
-export function assertStreamLocalPageCommitV2(input: {
-  readonly runStream: ProviderStreamRecordV2["stream"];
-  readonly pageStream: ProviderStreamRecordV2["stream"];
-  readonly records: readonly ProviderStreamRecordV2[];
-}): void {
-  if (
-    input.runStream !== input.pageStream ||
-    input.records.some((record) => record.stream !== input.runStream)
-  ) {
-    throw new RangeError("Provider page cannot cross stream checkpoints.");
-  }
 }

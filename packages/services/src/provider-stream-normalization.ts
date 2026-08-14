@@ -4,30 +4,39 @@ import type {
 } from "@packscout/contracts";
 
 export type CanonicalTradeLifecycleCategory =
-  | "listed"
-  | "unlisted"
   | "sale"
+  | "buyback"
   | "mint"
+  | "burn"
   | "transfer"
+  | "list"
+  | "unlist"
+  | "swap"
+  | "ship"
   | "other";
 
 const canonicalLifecycleByRawValue: Readonly<
   Record<string, CanonicalTradeLifecycleCategory>
 > = Object.freeze({
-  list: "listed",
-  listed: "listed",
-  listing: "listed",
-  unlist: "unlisted",
-  unlisted: "unlisted",
-  unlisting: "unlisted",
+  list: "list",
+  listed: "list",
+  listing: "list",
+  unlist: "unlist",
+  unlisted: "unlist",
+  unlisting: "unlist",
   sale: "sale",
   sold: "sale",
-  buyback: "sale",
+  buyback: "buyback",
   mint: "mint",
   minted: "mint",
+  burn: "burn",
+  burned: "burn",
   transfer: "transfer",
   transferred: "transfer",
-  shipped: "transfer",
+  swap: "swap",
+  swapped: "swap",
+  ship: "ship",
+  shipped: "ship",
 });
 
 export interface CanonicalTradeLifecycleEvidence {
@@ -137,7 +146,7 @@ export type ProviderOuterRelationshipEvidence =
       readonly stream: "pulls";
       readonly recordId: string;
       readonly packId: string;
-      readonly cardId: string;
+      readonly cardId: string | null;
     }
   | {
       readonly stream: "trades";

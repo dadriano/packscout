@@ -15,7 +15,7 @@ const provider: ProviderConfigurationSummary = {
   latestRevision: {
     id: "00000000-0000-4000-8000-000000000021",
     version: 2,
-    adapterKey: "cursor-http",
+    adapterKey: "http-cursor-v2",
     endpoint: "https://feed.packscout.test/cards",
     endpointHost: "feed.packscout.test",
     authMode: "bearer",

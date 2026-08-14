@@ -1,15 +1,13 @@
 import {
-  catalogEnvelopeV1Schema,
-  pullEnvelopeV1Schema,
+  isQuarantineReasonRetryable,
+  providerRecordKindV2,
+  providerStreamOrderingTimestampV2,
+  providerStreamRecordV2Schema,
   quarantineIdSchema,
   quarantineListQuerySchema,
   quarantineRetryBulkRequestSchema,
-  saleEnvelopeV1Schema,
-  type CatalogEnvelopeV1,
   type NormalizedQuarantineListQuery,
-  type ProviderFeedEnvelopeV1,
-  type ProviderFeedPageV1,
-  type PullEnvelopeV1,
+  type ProviderStreamRecordV2,
   type QuarantineAttemptSummary,
   type QuarantineCounts,
   type QuarantineEntryDetail,
@@ -18,7 +16,6 @@ import {
   type QuarantineRetryBulkRequest,
   type QuarantineRetryOutcome,
   type QuarantineServiceErrorCode,
-  type SaleEnvelopeV1,
 } from "@packscout/contracts";
 import {
   ProviderAdapterRegistryError,
@@ -107,7 +104,11 @@ export type QuarantineClaimResult =
       readonly evidence: ProtectedQuarantineEvidence;
     }
   | {
-      readonly kind: "already_retrying" | "already_resolved" | "expired";
+      readonly kind:
+        | "already_retrying"
+        | "already_resolved"
+        | "expired"
+        | "non_retryable";
       readonly entry: StoredQuarantineEntry;
     }
   | { readonly kind: "not_found" };
@@ -185,7 +186,7 @@ export interface QuarantineProjectionRepository {
     externalId: string;
     sourceTime: Date;
     collectedAt: Date;
-    payload: Record<string, unknown>;
+    payload: ProviderStreamRecordV2;
     expiresAt: Date;
     projections: readonly ProviderCanonicalProjectionCommand[];
     acceptedAt: Date;
@@ -310,7 +311,7 @@ function sourceMatches(
 }
 
 interface ValidatedRetryEvidence {
-  readonly rawRecord: ProviderFeedEnvelopeV1;
+  readonly rawRecord: ProviderStreamRecordV2;
   readonly source: ProviderSourceIdentity;
 }
 
@@ -318,20 +319,6 @@ interface RetryFailure {
   readonly code: string;
   readonly fieldPath: string | null;
   readonly summary: string;
-}
-
-function retryPage(
-  recordKind: ProviderRecordKind,
-  rawRecord: ProviderFeedEnvelopeV1,
-): ProviderFeedPageV1 {
-  return {
-    catalog:
-      recordKind === "catalog" ? [rawRecord as CatalogEnvelopeV1] : [],
-    pulls: recordKind === "pull" ? [rawRecord as PullEnvelopeV1] : [],
-    sales: recordKind === "sale" ? [rawRecord as SaleEnvelopeV1] : [],
-    next_cursor: "quarantine-retry",
-    has_more: false,
-  };
 }
 
 export class QuarantineService {
@@ -394,6 +381,21 @@ export class QuarantineService {
     const requestedByActorKey = actorKey(actor, this.dependencies.actorKeyer);
     if (!quarantineIdSchema.safeParse(quarantineId).success) {
       this.throwInvalidRequest();
+    }
+    const current = await this.dependencies.repository.getEntry(
+      actor.organizationId,
+      quarantineId,
+      this.dependencies.clock.now(),
+    );
+    if (
+      current?.state === "open" &&
+      !isQuarantineReasonRetryable(current.reasonCode)
+    ) {
+      return this.withOperationalOutcome(actor.organizationId, {
+        quarantineId,
+        outcome: "non_retryable",
+        entry: toSummary(current),
+      }, null);
     }
     const attemptId = this.dependencies.ids.id();
     const claim = await this.dependencies.repository.claimRetry({
@@ -501,29 +503,16 @@ export class QuarantineService {
   private retryEvidence(evidence: ProtectedQuarantineEvidence):
     | { validated: ValidatedRetryEvidence }
     | { failure: RetryFailure } {
-    const schema =
-      evidence.recordKind === "catalog"
-          ? catalogEnvelopeV1Schema
-          : evidence.recordKind === "pull"
-            ? pullEnvelopeV1Schema
-            : evidence.recordKind === "sale"
-              ? saleEnvelopeV1Schema
-              : null;
-    if (!schema) {
-      return {
-        failure: {
-          code: "SOURCE_REFERENCE_UNAVAILABLE",
-          fieldPath: null,
-          summary: "Retained evidence does not have a retryable record kind.",
-        },
-      };
-    }
-    const parsed = schema.safeParse(evidence.rawRecord);
-    if (!parsed.success || parsed.data.platform !== evidence.configuration.platform) {
+    const parsed = providerStreamRecordV2Schema.safeParse(evidence.rawRecord);
+    if (
+      !parsed.success ||
+      parsed.data.platform !== evidence.configuration.platform ||
+      providerRecordKindV2(parsed.data) !== evidence.recordKind
+    ) {
       return {
         failure: {
           code: "ENVELOPE_VALIDATION_FAILED",
-          fieldPath: parsed.success ? "platform" : issuePath(parsed.error),
+          fieldPath: parsed.success ? "stream" : issuePath(parsed.error),
           summary: "Retained evidence still fails envelope validation.",
         },
       };
@@ -532,12 +521,9 @@ export class QuarantineService {
       platform: parsed.data.platform,
       recordKind: evidence.recordKind,
       recordIndex: evidence.recordIndex,
-      externalId: parsed.data.external_id,
+      externalId: parsed.data.record_id,
       collectedAt: parsed.data.collected_at,
-      sourceTimestamp:
-        "updated_at" in parsed.data
-          ? parsed.data.updated_at
-          : parsed.data.occurred_at,
+      sourceTimestamp: providerStreamOrderingTimestampV2(parsed.data),
     };
     if (evidence.source && !sourceMatches(evidence.source, source)) {
       return {
@@ -576,21 +562,16 @@ export class QuarantineService {
         },
       };
     }
-    const page = retryPage(source.recordKind, validated.rawRecord);
     const mappingConfiguration = {
       ...evidence.configuration,
       adapterKey: mapper.key,
     };
-    let mapping: { readonly outcomes: readonly ProviderRecordMappingOutcome[] };
+    let mapping: ProviderRecordMappingOutcome;
     try {
-      mapping = await mapper.mapPage({
+      mapping = await mapper.mapRecord({
         configuration: mappingConfiguration,
-        page,
-        recordIndexes: {
-          catalog: source.recordKind === "catalog" ? [source.recordIndex] : [],
-          pulls: source.recordKind === "pull" ? [source.recordIndex] : [],
-          sales: source.recordKind === "sale" ? [source.recordIndex] : [],
-        },
+        record: validated.rawRecord,
+        recordIndex: source.recordIndex,
       });
     } catch {
       return {
@@ -601,12 +582,8 @@ export class QuarantineService {
         },
       };
     }
-    const outcome = mapping.outcomes[0];
-    if (
-      mapping.outcomes.length !== 1 ||
-      !outcome ||
-      !sourceMatches(source, outcome.source)
-    ) {
+    const outcome = mapping;
+    if (!sourceMatches(source, outcome.source)) {
       return {
         failure: {
           code: "MAPPING_OUTPUT_INVALID",
@@ -714,7 +691,8 @@ export class QuarantineService {
         ? "RESOLVED"
         : outcome.outcome === "expired"
           ? "EXPIRED"
-          : outcome.outcome === "already_retrying"
+          : outcome.outcome === "already_retrying" ||
+              outcome.outcome === "non_retryable"
             ? "CONFLICT"
             : "FAILED";
     try {

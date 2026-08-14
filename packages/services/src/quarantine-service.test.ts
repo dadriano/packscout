@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { isQuarantineReasonRetryable } from "@packscout/contracts";
 import { ProviderMappingAdapterRegistry } from "./provider-adapter-registry.ts";
 import type {
   ProviderMappingAdapter,
   ProviderSourceIdentity,
 } from "./provider-adapter.ts";
+import { sourceIdentityForRecord } from "./provider-adapter.ts";
 import type { ProviderActor } from "./provider-configuration-service.ts";
 import type { ProviderProjectionPort } from "./provider-import-types.ts";
 import {
@@ -48,9 +50,12 @@ const operator: ProviderActor = {
 
 function envelope(externalId: string) {
   return {
+    stream: "catalog",
     platform,
-    external_id: externalId,
-    updated_at: sourceTimestamp,
+    entity: "card",
+    record_id: externalId,
+    first_seen_at: sourceTimestamp,
+    occurred_at: sourceTimestamp,
     collected_at: collectedAt,
     data: {
       username: "private-user",
@@ -75,21 +80,22 @@ function entry(
   id: string,
   externalId: string | null,
   linkedSourceRecordId: string | null,
+  reasonCode = "ENVELOPE_VALIDATION_FAILED",
 ): StoredQuarantineEntry {
   return {
     id,
     providerId,
     configurationRevisionId: revisionId,
     platformKey: platform,
-    adapterKey: "http-cursor-v1",
+    adapterKey: "http-cursor-v2",
     runId,
     pageId,
     sourceRecordId: linkedSourceRecordId,
     recordKind: "catalog",
     recordIndex: 3,
     externalId,
-    reasonCode: "ENVELOPE_VALIDATION_FAILED",
-    fieldPath: "catalog[3].external_id",
+    reasonCode,
+    fieldPath: "records[3].record_id",
     sanitizedSummary: "Provider record failed validation.",
     state: "open",
     retryCount: 0,
@@ -151,6 +157,9 @@ class MemoryQuarantineRepository implements QuarantineRepository {
     }
     if (current.state === "resolved") {
       return Promise.resolve({ kind: "already_resolved", entry: current });
+    }
+    if (!isQuarantineReasonRetryable(current.reasonCode)) {
+      return Promise.resolve({ kind: "non_retryable", entry: current });
     }
     if (current.state === "expired" || !retained) {
       const expired = { ...current, state: "expired" as const };
@@ -280,31 +289,31 @@ function harness(
   const projectionRepository = new TrackingProjectionRepository();
   let attempt = 0;
   const mapper: ProviderMappingAdapter = {
-    key: "fixture-mapper-v1",
+    key: "fixture-mapper-v2",
     platformKey: platform,
-    mapPage(input) {
-      assert.equal(input.configuration.adapterKey, "fixture-mapper-v1");
-      const record = input.page.catalog[0]!;
-      const recordSource = source(record.external_id, input.recordIndexes.catalog[0]!);
+    mapRecord(input) {
+      assert.equal(input.configuration.adapterKey, "fixture-mapper-v2");
+      assert.equal(input.record.stream, "catalog");
+      const recordSource = sourceIdentityForRecord(input);
       return {
-        outcomes: [{
-          status: "mapped",
-          source: recordSource,
-          candidates: [{
+        status: "mapped",
+        source: recordSource,
+        candidates: [
+          {
             candidateKind: "catalog_asset",
             source: recordSource,
-            externalId: record.external_id,
+            externalId: input.record.record_id,
             name: "Recovered asset",
             relationships: [],
             dataQualityEvidence: [],
-          }],
-        }],
+          },
+        ],
       };
     },
   };
   const projections: ProviderProjectionPort = projectionOverride ?? {
     project: ({ configuration, source: recordSource }) => {
-      assert.equal(configuration.adapterKey, "fixture-mapper-v1");
+      assert.equal(configuration.adapterKey, "fixture-mapper-v2");
       return ({
       status: "accepted",
       projections: [{
@@ -356,7 +365,7 @@ function addEvidence(
       providerId,
       configurationRevisionId: revisionId,
       platform,
-      adapterKey: "http-cursor-v1",
+      adapterKey: "http-cursor-v2",
     },
   });
 }
@@ -417,12 +426,43 @@ test("a formerly invalid unlinked envelope materializes and projects exactly onc
   assert.equal(projectionRepository.linkedCalls, 0);
 });
 
+test("immutable source conflicts return non-retryable without claiming or projecting", async () => {
+  const { service, repository, projectionRepository } = harness();
+  const reasonCodes = [
+    "IDENTITY_CONFLICT",
+    "CATALOG_IDENTITY_CONFLICT",
+    "IMMUTABLE_EVENT_CONFLICT",
+  ] as const;
+
+  for (const [index, reasonCode] of reasonCodes.entries()) {
+    const quarantineId = `10000000-0000-4000-8000-${String(70 + index).padStart(12, "0")}`;
+    addEvidence(repository, quarantineId, `conflict-${index}`, false);
+    repository.entries.set(
+      quarantineId,
+      entry(quarantineId, null, null, reasonCode),
+    );
+
+    const outcome = await service.retryOne(admin, quarantineId);
+
+    assert.equal(outcome.outcome, "non_retryable");
+    assert.equal(outcome.entry?.state, "open");
+    assert.equal(outcome.entry?.attemptCount, 0);
+    assert.deepEqual(repository.attempts.get(quarantineId) ?? [], []);
+  }
+
+  assert.equal(projectionRepository.linkedCalls, 0);
+  assert.equal(projectionRepository.materializedCalls, 0);
+});
+
 test("unchanged invalid evidence records a bounded attempt and returns to open", async () => {
   const { service, repository, projectionRepository } = harness();
   addEvidence(repository, invalidQuarantineId, "ignored", false, {
+    stream: "catalog",
     platform,
-    external_id: "",
-    updated_at: "not-a-time",
+    entity: "card",
+    record_id: "",
+    first_seen_at: sourceTimestamp,
+    occurred_at: "not-a-time",
     collected_at: collectedAt,
     data: { secret: rawSecret },
   });

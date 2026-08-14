@@ -281,7 +281,7 @@ test("provider conflicts map only the organization platform identity", async () 
     const base = {
       organizationId,
       displayName: "Provider",
-      adapterKey: "http-cursor-v1",
+      adapterKey: "http-cursor-v2",
       endpoint: "https://provider.example/feed",
       authMode: "none" as const,
       scheduleSeconds: 300,
@@ -413,7 +413,7 @@ test("protected raw evidence reads remain tenant-scoped and atomically audited",
       organizationId,
       providerId,
       version: 1,
-      adapterKey: "http-cursor-v1",
+      adapterKey: "http-cursor-v2",
       endpointUrl: "https://provider.example/feed",
       authMode: "none",
       createdByActorKey: "actor:setup",
@@ -437,9 +437,14 @@ test("protected raw evidence reads remain tenant-scoped and atomically audited",
         run_id: runId,
         page_number: 1,
         has_more: false,
-        payload_json: { catalog: [], pulls: [], sales: [] },
+        payload_json: {
+          requestedCursor: null,
+          nextCursor: "evidence-head",
+          hasMore: false,
+          records: [],
+        },
         payload_hash: "payload-hash",
-        record_counts_json: { catalog: 0, pulls: 0, sales: 0 },
+        record_counts_json: { catalog: 0, pulls: 0, trades: 0 },
         committed_at: now,
         expires_at: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1_000),
       },
@@ -469,7 +474,12 @@ test("protected raw evidence reads remain tenant-scoped and atomically audited",
       now,
     );
     assert.equal(page?.pageId, pageId);
-    assert.deepEqual(page?.payload, { catalog: [], pulls: [], sales: [] });
+    assert.deepEqual(page?.payload, {
+      requestedCursor: null,
+      nextCursor: "evidence-head",
+      hasMore: false,
+      records: [],
+    });
     assert.deepEqual(
       await harness.database.audit_events.findFirst({
         select: {

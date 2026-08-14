@@ -8,6 +8,7 @@ import {
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import type {
   ProviderConnectionTestResult,
+  ProviderHttpResponseDecoderV2,
   ProviderTransportAdapter,
   ProviderTransportConnectionInput,
   ProviderTransportPageInput,
@@ -37,30 +38,56 @@ const dataOperator: ProviderActor = {
 
 function validPage(platform: string) {
   return {
-    catalog: [
+    fixture_records: [
       {
+        stream: "catalog",
         platform,
-        external_id: `${platform}:pack:1`,
-        updated_at: "2026-08-06T11:00:00.000Z",
+        entity: "pack",
+        record_id: `${platform}:pack:1`,
+        first_seen_at: "2026-08-06T10:00:00.000Z",
+        occurred_at: "2026-08-06T11:00:00.000Z",
         collected_at: "2026-08-06T11:01:00.000Z",
         data: { name: "Fixture Pack" },
       },
     ],
-    pulls: [],
-    sales: [],
-    next_cursor: "fixture-complete",
-    has_more: false,
+    fixture_next_cursor: "fixture-complete",
+    fixture_has_more: false,
   };
 }
 
+const fixtureDecoder: ProviderHttpResponseDecoderV2 = {
+  decode(input) {
+    let rawPage: unknown;
+    try {
+      rawPage = JSON.parse(input.bodyText) as unknown;
+    } catch {
+      return { ok: false, code: "invalid_json" };
+    }
+    if (typeof rawPage !== "object" || rawPage === null) {
+      return { ok: false, code: "invalid_response" };
+    }
+    const wrapper = rawPage as Record<string, unknown>;
+    return {
+      ok: true,
+      page: {
+        rawPage,
+        records: wrapper.fixture_records,
+        nextCursor: wrapper.fixture_next_cursor,
+        hasMore: wrapper.fixture_has_more,
+      },
+    };
+  },
+};
+
 class TrackingTransportAdapter implements ProviderTransportAdapter {
-  readonly key = "http-cursor-v1";
+  readonly key = "http-cursor-v2";
   readonly connectionInputs: ProviderTransportConnectionInput[] = [];
   failConnection = false;
   readonly #inner: HttpCursorAdapter;
 
   constructor() {
     this.#inner = new HttpCursorAdapter({
+      decoder: fixtureDecoder,
       resolveHost: async () => ["93.184.216.34"],
       httpClient: async (input) => {
         const platform = new URL(String(input)).searchParams.get("platform")!;
@@ -100,7 +127,7 @@ class TrackingTransportAdapter implements ProviderTransportAdapter {
 }
 
 class AuthenticationFailureAdapter implements ProviderTransportAdapter {
-  readonly key = "auth-failure-v1";
+  readonly key = "auth-failure-v2";
 
   supportsPlatform(): boolean {
     return true;
@@ -135,7 +162,7 @@ function createRequest(
   return {
     platformKey: "beezie",
     displayName: "Beezie",
-    adapterKey: "http-cursor-v1",
+    adapterKey: "http-cursor-v2",
     endpoint: "https://Provider.Example./feed",
     scheduleSeconds: 300,
     staleAfterSeconds: 900,
@@ -224,7 +251,7 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
     const unknownAdapter = await captureServiceError(
       service.createProvider(
         admin,
-        createRequest({ platformKey: "unknown", adapterKey: "missing-v1" }),
+        createRequest({ platformKey: "unknown", adapterKey: "missing-v2" }),
       ),
     );
     assert.equal(unknownAdapter.code, "UNKNOWN_ADAPTER");
@@ -257,7 +284,7 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       checkedAt: now.toISOString(),
       latencyMs: 1,
       responseStatus: 200,
-      recordCounts: { catalog: 1, pulls: 0, sales: 0 },
+      recordCounts: { catalog: 1, pulls: 0, trades: 0 },
       hasMore: false,
       nextCursorPresent: true,
       sanitizedCode: null,
@@ -338,7 +365,7 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
     const replacements = await Promise.allSettled([
       service.replaceRevision(admin, providerId, {
         expectedRevisionId: firstRevisionId,
-        adapterKey: "http-cursor-v1",
+        adapterKey: "http-cursor-v2",
         endpoint: "https://provider.example/feed?v=2",
         scheduleSeconds: 300,
         staleAfterSeconds: 900,
@@ -346,7 +373,7 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       }),
       service.replaceRevision(admin, providerId, {
         expectedRevisionId: firstRevisionId,
-        adapterKey: "http-cursor-v1",
+        adapterKey: "http-cursor-v2",
         endpoint: "https://provider.example/feed?v=2",
         scheduleSeconds: 300,
         staleAfterSeconds: 900,
@@ -410,7 +437,7 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
     const archivedEdit = await captureServiceError(
       service.replaceRevision(admin, providerId, {
         expectedRevisionId: secondRevisionId,
-        adapterKey: "http-cursor-v1",
+        adapterKey: "http-cursor-v2",
         endpoint: "https://provider.example/feed?v=3",
         scheduleSeconds: 300,
         staleAfterSeconds: 900,
@@ -501,7 +528,7 @@ test("failed connection tests stay sanitized and cannot enable a revision", asyn
       admin,
       createRequest({
         platformKey: "failure-platform",
-        adapterKey: "auth-failure-v1",
+        adapterKey: "auth-failure-v2",
         auth: { mode: "bearer", bearerSecret: "must-never-leak" },
       }),
     );

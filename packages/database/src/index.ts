@@ -1,4 +1,5 @@
 export * from "./auth-repository.ts";
+export * from "./archive-import-repository.ts";
 export * from "./admin-import-run-repository.ts";
 export * from "./admin-operation-read-model.ts";
 export * from "./admin-provider-operation-repository.ts";

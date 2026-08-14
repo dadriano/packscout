@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import type { QuarantineEntryDetail, QuarantineRetryOutcome } from "@packscout/contracts";
+import {
+  isQuarantineReasonRetryable,
+  type QuarantineEntryDetail,
+  type QuarantineRetryOutcome,
+} from "@packscout/contracts";
 import { Link, useParams } from "react-router-dom";
 import { AdminApiError } from "../api/client";
 import { getQuarantineEntry, retryQuarantine } from "../api/import-operations";
@@ -12,6 +16,7 @@ import { useToast } from "../providers/toast";
 function outcomeMessage(outcome: QuarantineRetryOutcome["outcome"]): string {
   if (outcome === "resolved") return "The record was accepted and current quality resolution was updated.";
   if (outcome === "failed") return "The retry finished, but the record still needs review.";
+  if (outcome === "non_retryable") return "This source identity or facts conflict cannot be retried; review the provider data manually.";
   if (outcome === "already_retrying") return "A retry is already in progress for this record.";
   if (outcome === "already_resolved") return "This record was already resolved. No duplicate retry was created.";
   if (outcome === "expired") return "Source evidence expired; this record cannot be retried.";
@@ -70,7 +75,8 @@ export function QuarantineDetailPage() {
   if (loading && !entry) return <div className="ops-loading" aria-busy="true">Loading safe quarantine evidence…</div>;
   if (!entry) return <div className="ops-error" role="alert"><p>{error ?? "Quarantine entry not found."}</p><Link className="admin-button admin-button--secondary" to="/quarantine">Return to quarantine</Link></div>;
 
-  const retryable = entry.state === "open";
+  const sourceConflict = !isQuarantineReasonRetryable(entry.reasonCode);
+  const retryable = entry.state === "open" && !sourceConflict;
   return (
     <div className="admin-page">
       <PageHeader
@@ -80,10 +86,10 @@ export function QuarantineDetailPage() {
         actions={<><Link className="admin-button admin-button--secondary" to={`/runs/${entry.runId}`}>Origin run</Link>{retryable ? <button type="button" className="admin-button admin-button--primary" onClick={() => void retry()}>Retry record</button> : null}</>}
       />
       {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => { setLoading(true); setRefreshIndex((value) => value + 1); }}>Try again</button></div> : null}
-      {outcome ? <section className={`ops-retry-result${outcome.outcome === "failed" || outcome.outcome === "expired" ? " is-failure" : ""}`} aria-live={outcome.outcome === "failed" ? "assertive" : "polite"}><strong>{humanize(outcome.outcome)}</strong><p>{outcomeMessage(outcome.outcome)}</p></section> : null}
+      {outcome ? <section className={`ops-retry-result${outcome.outcome === "failed" || outcome.outcome === "expired" || outcome.outcome === "non_retryable" ? " is-failure" : ""}`} aria-live={outcome.outcome === "failed" || outcome.outcome === "non_retryable" ? "assertive" : "polite"}><strong>{humanize(outcome.outcome)}</strong><p>{outcomeMessage(outcome.outcome)}</p></section> : null}
 
       <section className="ops-run-lead" aria-labelledby="quarantine-state-title">
-        <div><span className="admin-eyebrow">Current quality state</span><h2 id="quarantine-state-title">{humanize(entry.state)}</h2><p>{entry.state === "resolved" ? entry.resolutionSummary ?? "The record is resolved." : entry.state === "expired" ? "Source evidence expired; this record cannot be retried. Expired does not mean corrected." : entry.sanitizedSummary}</p></div>
+        <div><span className="admin-eyebrow">Current quality state</span><h2 id="quarantine-state-title">{humanize(entry.state)}</h2><p>{entry.state === "resolved" ? entry.resolutionSummary ?? "The record is resolved." : entry.state === "expired" ? "Source evidence expired; this record cannot be retried. Expired does not mean corrected." : sourceConflict ? "This source identity or event facts conflict with protected data already stored. Retry is disabled; review the provider data manually." : entry.sanitizedSummary}</p></div>
         <QuarantineStatus state={entry.state} />
       </section>
 
@@ -105,6 +111,7 @@ export function QuarantineDetailPage() {
             <div><dt>First failure</dt><dd>{dateTime(entry.firstFailureAt)}</dd></div>
             <div><dt>Latest failure</dt><dd>{dateTime(entry.latestFailureAt)}</dd></div>
             <div><dt>Evidence expires</dt><dd>{dateTime(entry.rawExpiresAt)}</dd></div>
+            <div><dt>Retry</dt><dd>{sourceConflict ? "Disabled for source conflicts" : retryable ? "Available" : "Unavailable"}</dd></div>
             <div><dt>Attempts</dt><dd>{entry.attemptCount}</dd></div>
             <div><dt>Resolved</dt><dd>{dateTime(entry.resolvedAt)}</dd></div>
             <div><dt>Origin run</dt><dd><Link to={`/runs/${entry.runId}`}>{entry.runId.slice(0, 12)}</Link></dd></div>

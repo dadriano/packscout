@@ -26,6 +26,7 @@ An estimate requires complete usable probabilities and finite lower and upper va
 - Produce estimated gross EV and EV percentage, defined as estimated gross EV divided by current pack price times one hundred.
 - Require finite non-negative bounds, finite non-negative probabilities, probability coverage equal to one hundred percent within one documented tolerance, supported currency, unambiguous basis, positive draw count, positive pack price, and source evidence for every included bucket.
 - Treat configured verified USD stablecoins as one USD. Do not convert other currencies or assume that an unknown token address is a stablecoin.
+- Carry each input's currency and minor-unit exponent through canonical history. Compare USD and allowlisted stablecoin inputs with exact integer/rational scale conversion, then round the gross result once to USD cents; calculate EV percentage from the exact pre-rounding value.
 
 ### Status, provenance, and history
 
@@ -67,10 +68,12 @@ The calculator is deterministic for the same inputs and method version and has n
 - [x] Provider-reported EV remains unchanged and separately identifiable whether PackScout EV is estimated or unavailable.
 - [x] Relevant source changes create calculation history, equivalent inputs are idempotent, and every result identifies method version, source revisions, coverage, source time, and calculation time.
 - [x] Tests prove the shared calculator is provider-neutral and never labels a result exact or calls an external valuation or currency service.
+- [x] Mixed USD/USDC in both directions and USDC/USDC fixtures preserve micro-unit evidence, enforce the verified-stablecoin allowlist, and prove scale-safe EV arithmetic.
 
 ## Spec Compliance
 
 - Added a deterministic integer/rational midpoint calculator with aggregate half-up rounding, explicit probability tolerance, per-pack/per-draw semantics, and allowlisted USD/stablecoin policy.
+- Propagated explicit source minor-unit exponents through pack, provider-EV, asset, EV-input, manifest, fingerprint, result, and explanation evidence. Calculation version V2 converts scales exactly, rounds only the USD gross output to cents, and reports missing or invalid scales as constrained unavailable reasons.
 - Made incomplete inventory, missing/open bounds, incomplete coverage, unsupported currencies, ambiguous basis, invalid draw count, and missing price explicit unavailable reasons instead of synthetic values.
 - Persisted source-linked `estimated_ev` canonical revisions with method/version, input manifest, fingerprint, coverage, timestamps, limitations, and a browser-safe explanation DTO.
 - Proved relevant-input and method changes revise history, equivalent inputs remain idempotent, and provider-reported EV stays separate from PackScout Estimated EV.

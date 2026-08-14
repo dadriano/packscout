@@ -83,13 +83,13 @@ export function RunsPage() {
       <form className="ops-filters" aria-label="Filter import runs" onSubmit={applyFilters}>
         <div className="admin-field"><label htmlFor="runs-provider">Provider</label><select id="runs-provider" value={providerId} onChange={(event) => setProviderId(event.target.value)}><option value="">All providers</option>{providers.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></div>
         <div className="admin-field"><label htmlFor="runs-state">State</label><select id="runs-state" value={state} onChange={(event) => setState(event.target.value)}><option value="">All states</option><option value="queued">Queued</option><option value="running">Running</option><option value="succeeded">Succeeded</option><option value="incomplete">Incomplete</option><option value="failed">Failed</option></select></div>
-        <div className="admin-field"><label htmlFor="runs-trigger">Trigger</label><select id="runs-trigger" value={trigger} onChange={(event) => setTrigger(event.target.value)}><option value="">All triggers</option><option value="scheduled">Scheduled</option><option value="manual">Manual</option><option value="recovery">Recovery</option></select></div>
+        <div className="admin-field"><label htmlFor="runs-trigger">Trigger</label><select id="runs-trigger" value={trigger} onChange={(event) => setTrigger(event.target.value)}><option value="">All triggers</option><option value="scheduled">Scheduled</option><option value="manual">Manual</option><option value="recovery">Recovery</option><option value="archive">Archive</option></select></div>
         <button type="submit" className="admin-button admin-button--secondary">Apply filters</button>
         {filtersActive ? <button type="button" className="admin-button admin-button--secondary" onClick={() => { setProviderId(""); setState(""); setTrigger(""); setCursorStack([]); setLoading(true); setSearchParams({}); }}>Clear</button> : null}
       </form>
       {loading ? <div className="ops-loading" aria-live="polite" aria-busy="true">Loading import history…</div> : null}
       {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => { setLoading(true); setRetryIndex((value) => value + 1); }}>Try again</button></div> : null}
-      {!loading && !error && runs.length === 0 ? <EmptyState title={filtersActive ? "No runs match these filters" : "No import history yet"} description={filtersActive ? "Change or clear the filters to return to import history." : "A run appears here after a scheduled or manual import is requested."} /> : null}
+      {!loading && !error && runs.length === 0 ? <EmptyState title={filtersActive ? "No runs match these filters" : "No import history yet"} description={filtersActive ? "Change or clear the filters to return to import history." : "A run appears here after a live, recovery, or dedicated archive import is requested."} /> : null}
       {runs.length > 0 ? <RunLedger runs={runs} /> : null}
       <KeysetPagination
         page={cursorStack.length + 1}

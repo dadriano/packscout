@@ -69,7 +69,8 @@ export function RunDetailPage() {
     return <div className="ops-error" role="alert"><p>{error ?? "Import run not found."}</p><Link className="admin-button admin-button--secondary" to="/runs">Return to runs</Link></div>;
   }
 
-  const recordTotal = run.counters.catalog + run.counters.pulls + run.counters.sales;
+  const recordTotal = run.counters.catalog + run.counters.pulls + run.counters.trades;
+  const archiveRun = run.trigger === "archive";
   return (
     <div className="admin-page">
       <PageHeader
@@ -88,7 +89,7 @@ export function RunDetailPage() {
 
       <section className="ops-metrics" aria-label="Run metrics">
         <div><span>Pages committed</span><strong>{run.counters.pages}</strong></div>
-        <div><span>Records seen</span><strong>{recordTotal}</strong><small>{run.counters.catalog} catalog · {run.counters.pulls} pulls · {run.counters.sales} sales</small></div>
+        <div><span>Records seen</span><strong>{recordTotal}</strong><small>{run.counters.catalog} catalog · {run.counters.pulls} pulls · {run.counters.trades} trades</small></div>
         <div><span>Accepted</span><strong>{run.counters.accepted}</strong><small>{run.counters.unchanged} unchanged · {run.counters.revised} revised</small></div>
         <div><span>Quarantined then / now</span><strong>{run.counters.quarantined} / {Math.max(0, run.counters.quarantined - run.counters.resolvedQuarantines)}</strong><small>{run.counters.resolvedQuarantines} resolved separately</small></div>
       </section>
@@ -111,9 +112,9 @@ export function RunDetailPage() {
             <div><dt>Last progress</dt><dd>{dateTime(run.lastProgressAt)}</dd></div>
             <div><dt>Finished</dt><dd>{dateTime(run.finishedAt)}</dd></div>
             <div><dt>Duration</dt><dd>{duration(run.startedAt, run.finishedAt)}</dd></div>
-            <div><dt>Provider head</dt><dd>{run.reachedProviderHead ? "Reached" : "Not reached"}</dd></div>
-            <div><dt>Starting cursor</dt><dd className="ops-cursor">{run.cursor.requestedPreview ?? "Feed start"}</dd></div>
-            <div><dt>Final cursor</dt><dd className="ops-cursor">{run.cursor.finalPreview ?? "Not committed"}</dd></div>
+            <div><dt>{archiveRun ? "Archive source" : "Provider head"}</dt><dd>{run.reachedProviderHead ? "Reached" : archiveRun ? "Not complete" : "Not reached"}</dd></div>
+            <div><dt>{archiveRun ? "Starting archive offset" : "Starting cursor"}</dt><dd className="ops-cursor">{run.cursor.requestedPreview ?? (archiveRun ? "Archive start" : "Feed start")}</dd></div>
+            <div><dt>{archiveRun ? "Final archive offset" : "Final cursor"}</dt><dd className="ops-cursor">{run.cursor.finalPreview ?? "Not committed"}</dd></div>
           </dl>
         </section>
         <section className="ops-detail" aria-labelledby="run-timeline-title">
@@ -126,7 +127,7 @@ export function RunDetailPage() {
 
       <section className="ops-pages" aria-labelledby="run-pages-title">
         <header className="admin-section-heading"><div><span className="admin-eyebrow">Durable page commits</span><h2 id="run-pages-title">Page progress</h2></div><span className="admin-section-count">{run.pages.length} shown</span></header>
-        {run.pages.length === 0 ? <EmptyState title="No pages committed" description="A queued run or a failure before the first durable commit has no page progress." /> : <div>{run.pages.map((page) => <article key={page.pageNumber}><strong>Page {page.pageNumber}</strong><span>{dateTime(page.committedAt)}</span><dl><div><dt>Records</dt><dd>{page.catalog} catalog · {page.pulls} pulls · {page.sales} sales</dd></div><div><dt>Outcomes</dt><dd>{page.accepted} accepted · {page.unchanged} unchanged · {page.revised} revised · {page.quarantined} quarantined</dd></div><div><dt>Cursor in</dt><dd className="ops-cursor">{page.requestedCursorPreview ?? "Feed start"}</dd></div><div><dt>Cursor out</dt><dd className="ops-cursor">{page.nextCursorPreview ?? "Provider head"}</dd></div></dl></article>)}</div>}
+        {run.pages.length === 0 ? <EmptyState title="No pages committed" description="A queued run or a failure before the first durable commit has no page progress." /> : <div>{run.pages.map((page) => <article key={page.pageNumber}><strong>Page {page.pageNumber}</strong><span>{dateTime(page.committedAt)}</span><dl><div><dt>Records</dt><dd>{page.catalog} catalog · {page.pulls} pulls · {page.trades} trades</dd></div><div><dt>Outcomes</dt><dd>{page.accepted} accepted · {page.unchanged} unchanged · {page.revised} revised · {page.quarantined} quarantined</dd></div><div><dt>{archiveRun ? "Archive offset in" : "Cursor in"}</dt><dd className="ops-cursor">{page.requestedCursorPreview ?? (archiveRun ? "Archive start" : "Feed start")}</dd></div><div><dt>{archiveRun ? "Archive offset out" : "Cursor out"}</dt><dd className="ops-cursor">{page.nextCursorPreview ?? (archiveRun ? "Archive complete" : "Provider head")}</dd></div></dl></article>)}</div>}
       </section>
 
       <section className="ops-related" aria-labelledby="run-quarantine-title">

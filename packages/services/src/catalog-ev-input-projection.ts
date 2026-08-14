@@ -41,16 +41,19 @@ export class EvInputProjectionValidationError extends Error {
 function normalizedCurrency(
   value: string | null,
   reasons: Set<CanonicalEvInputReadinessReason>,
-): string | null {
+): Readonly<{ currency: string; minorUnitExponent: number }> | null {
   if (value === null) {
     reasons.add("invalid_currency");
     return null;
   }
   try {
-    return normalizeCanonicalMoney(
+    const money = normalizeCanonicalMoney(
       { amount: 0, currency: value },
       "candidates.evInput.currency",
-    )?.currency ?? null;
+    );
+    return money === null
+      ? null
+      : { currency: money.currency, minorUnitExponent: money.minorUnitExponent };
   } catch (error) {
     if (!(error instanceof CanonicalProjectionValidationError)) throw error;
     reasons.add("invalid_currency");
@@ -151,7 +154,8 @@ export function projectEvInputContent(
   dataQualityEvidence: readonly CanonicalDataQualityEvidence[],
 ): CanonicalEvInputProjectionContent {
   const reasons = new Set<CanonicalEvInputReadinessReason>();
-  const currency = normalizedCurrency(candidate.currency, reasons);
+  const normalizedMoney = normalizedCurrency(candidate.currency, reasons);
+  const currency = normalizedMoney?.currency ?? null;
   const buckets = candidate.buckets
     .map((bucket) => normalizedBucket(bucket, currency, reasons))
     .sort((left, right) => left.bucketId.localeCompare(right.bucketId));
@@ -214,6 +218,7 @@ export function projectEvInputContent(
       "candidates.evInput.packExternalId",
     ),
     currency,
+    minorUnitExponent: normalizedMoney?.minorUnitExponent ?? null,
     unitBasis,
     drawCount,
     evidenceCompleteness,

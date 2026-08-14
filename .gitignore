@@ -24,3 +24,6 @@ coverage/
 .tmp/
 .vercel/
 .convex/
+
+# Protected provider archives and extracted source evidence
+/data/

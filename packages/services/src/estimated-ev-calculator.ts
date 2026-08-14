@@ -1,10 +1,11 @@
 export const PACKSCOUT_ESTIMATED_EV_METHOD =
   "probability_bucket_midpoint" as const;
 export const PACKSCOUT_ESTIMATED_EV_METHOD_VERSION =
-  "packscout-estimated-ev-v1" as const;
+  "packscout-estimated-ev-v2" as const;
 export const PACKSCOUT_ESTIMATED_EV_PROBABILITY_TOLERANCE_RATIO = 0.000_001;
+export const PACKSCOUT_ESTIMATED_EV_OUTPUT_MINOR_UNIT_EXPONENT = 2 as const;
 export const PACKSCOUT_ESTIMATED_EV_ROUNDING = Object.freeze({
-  grossValue: "aggregate_half_up_to_minor_unit",
+  grossValue: "aggregate_half_up_to_usd_minor_unit",
   evPercent: "half_up_to_0_01_percent",
   coveragePercent: "half_up_to_0_000001_percent",
 } as const);
@@ -25,6 +26,8 @@ export const PACKSCOUT_ESTIMATED_EV_UNAVAILABLE_REASON_ORDER = [
   "missing_pack_price",
   "invalid_pack_price",
   "unsupported_currency",
+  "missing_money_scale",
+  "invalid_money_scale",
   "missing_probability_buckets",
   "missing_probability",
   "invalid_probability",
@@ -48,6 +51,7 @@ export type PackScoutEstimatedEvUnavailableReason =
 export interface PackScoutEstimatedEvPackPriceInput {
   readonly valueMinor?: number | null;
   readonly currency?: string | null;
+  readonly minorUnitExponent?: number | null;
   readonly sourceRevisionId?: string | null;
 }
 
@@ -66,6 +70,7 @@ export interface PackScoutEstimatedEvCurrencyPolicy {
 export interface CalculatePackScoutEstimatedEvInput {
   readonly packPrice?: PackScoutEstimatedEvPackPriceInput | null;
   readonly distributionCurrency?: string | null;
+  readonly distributionMinorUnitExponent?: number | null;
   readonly unitBasis?: string | null;
   readonly drawCount?: number | null;
   readonly declaredCoverage?: number | null;
@@ -80,11 +85,12 @@ export interface CalculatePackScoutEstimatedEvInput {
 export interface PackScoutEstimatedEvIncludedBucketEvidence {
   readonly probability: number;
   readonly midpointValueMinor: number;
+  readonly minorUnitExponent: number | null;
   readonly sourceRevisionId: string;
 }
 
 export interface PackScoutEstimatedEvEvidence {
-  readonly formula: "sum(probability * midpoint_value_minor) * draw_multiplier";
+  readonly formula: "sum(probability * midpoint_value) * draw_multiplier";
   readonly unitBasis: PackScoutEstimatedEvUnitBasis | null;
   readonly declaredDrawCount: number | null;
   readonly appliedDrawMultiplier: number | null;
@@ -94,7 +100,10 @@ export interface PackScoutEstimatedEvEvidence {
   readonly includedBuckets: readonly PackScoutEstimatedEvIncludedBucketEvidence[];
   readonly sourceRevisionIds: readonly string[];
   readonly priceCurrency: string | null;
+  readonly priceMinorUnitExponent: number | null;
   readonly distributionCurrency: string | null;
+  readonly distributionMinorUnitExponent: number | null;
+  readonly outputMinorUnitExponent: typeof PACKSCOUT_ESTIMATED_EV_OUTPUT_MINOR_UNIT_EXPONENT;
   readonly priceCurrencyTreatment: PackScoutEstimatedEvCurrencyTreatment;
   readonly distributionCurrencyTreatment: PackScoutEstimatedEvCurrencyTreatment;
   readonly currencyPolicy: "usd_and_explicit_verified_usd_stablecoins_v1";
@@ -116,6 +125,7 @@ export interface PackScoutEstimatedEvEstimatedResult
   extends PackScoutEstimatedEvResultBase {
   readonly status: "estimated";
   readonly grossValueMinor: number;
+  readonly minorUnitExponent: typeof PACKSCOUT_ESTIMATED_EV_OUTPUT_MINOR_UNIT_EXPONENT;
   readonly evPercent: number;
   readonly currency: "USD";
   readonly reasonCodes: readonly [];
@@ -125,6 +135,7 @@ export interface PackScoutEstimatedEvUnavailableResult
   extends PackScoutEstimatedEvResultBase {
   readonly status: "unavailable";
   readonly grossValueMinor: null;
+  readonly minorUnitExponent: null;
   readonly evPercent: null;
   readonly currency: null;
   readonly reasonCodes: readonly PackScoutEstimatedEvUnavailableReason[];
@@ -148,6 +159,7 @@ interface ValidatedBucket {
   readonly probabilityFactor: Rational;
   readonly midpointValueMinor: number;
   readonly midpointValueFactor: Rational;
+  readonly minorUnitExponent: number | null;
   readonly sourceRevisionId: string;
 }
 
@@ -158,6 +170,7 @@ interface Rational {
 
 const ZERO_RATIONAL: Rational = { numerator: 0n, denominator: 1n };
 const maximumSafeInteger = BigInt(Number.MAX_SAFE_INTEGER);
+const maximumSupportedMinorUnitExponent = 18;
 
 const instantPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -191,6 +204,31 @@ function currencyTreatment(
   return verifiedStablecoins.has(currency)
     ? "verified_usd_stablecoin"
     : "unsupported";
+}
+
+type MoneyScaleValidation =
+  | { readonly status: "valid"; readonly exponent: number }
+  | { readonly status: "missing" | "invalid" };
+
+function moneyScaleValidation(
+  currency: string | null | undefined,
+  treatment: PackScoutEstimatedEvCurrencyTreatment,
+  exponent: number | null | undefined,
+): MoneyScaleValidation | null {
+  if (treatment !== "usd" && treatment !== "verified_usd_stablecoin") {
+    return null;
+  }
+  if (exponent === null || exponent === undefined) return { status: "missing" };
+  if (
+    !Number.isSafeInteger(exponent) ||
+    exponent < 0 ||
+    exponent > maximumSupportedMinorUnitExponent ||
+    (currency === "USD" && exponent !== 2) ||
+    (currency === "USDC" && exponent !== 6)
+  ) {
+    return { status: "invalid" };
+  }
+  return { status: "valid", exponent };
 }
 
 function greatestCommonDivisor(left: bigint, right: bigint): bigint {
@@ -243,6 +281,24 @@ function multiplyRational(left: Rational, right: Rational): Rational {
 
 function multiplyRationalByInteger(value: Rational, factor: bigint): Rational {
   return rational(value.numerator * factor, value.denominator);
+}
+
+function divideRational(left: Rational, right: Rational): Rational {
+  return rational(
+    left.numerator * right.denominator,
+    left.denominator * right.numerator,
+  );
+}
+
+function convertMinorUnitScale(
+  value: Rational,
+  sourceExponent: number,
+  targetExponent: number,
+): Rational {
+  const difference = targetExponent - sourceExponent;
+  return difference >= 0
+    ? multiplyRationalByInteger(value, 10n ** BigInt(difference))
+    : rational(value.numerator, value.denominator * 10n ** BigInt(-difference));
 }
 
 function rationalToNumber(value: Rational): number {
@@ -313,6 +369,7 @@ function unavailableResult(
     ...common,
     status: "unavailable",
     grossValueMinor: null,
+    minorUnitExponent: null,
     evPercent: null,
     currency: null,
     reasonCodes: orderedReasons(reasons),
@@ -357,6 +414,22 @@ export function calculatePackScoutEstimatedEv(
     )
   ) {
     reasons.add("unsupported_currency");
+  }
+  const priceScale = moneyScaleValidation(
+    input.packPrice?.currency,
+    priceCurrencyTreatment,
+    input.packPrice?.minorUnitExponent,
+  );
+  const distributionScale = moneyScaleValidation(
+    input.distributionCurrency,
+    distributionCurrencyTreatment,
+    input.distributionMinorUnitExponent,
+  );
+  if (priceScale?.status === "missing" || distributionScale?.status === "missing") {
+    reasons.add("missing_money_scale");
+  }
+  if (priceScale?.status === "invalid" || distributionScale?.status === "invalid") {
+    reasons.add("invalid_money_scale");
   }
 
   const unitBasis =
@@ -456,6 +529,10 @@ export function calculatePackScoutEstimatedEv(
         probabilityFactor,
         midpointValueMinor: rationalToNumber(midpointValueFactor),
         midpointValueFactor,
+        minorUnitExponent:
+          distributionScale?.status === "valid"
+            ? distributionScale.exponent
+            : null,
         sourceRevisionId: revisionId,
       });
     }
@@ -516,7 +593,7 @@ export function calculatePackScoutEstimatedEv(
     reasons.add("calculation_overflow");
   }
   const evidenceBase = {
-    formula: "sum(probability * midpoint_value_minor) * draw_multiplier",
+    formula: "sum(probability * midpoint_value) * draw_multiplier",
     unitBasis,
     declaredDrawCount: drawCount,
     appliedDrawMultiplier: null,
@@ -526,16 +603,20 @@ export function calculatePackScoutEstimatedEv(
     includedBucketCount: includedBuckets.length,
     includedBuckets: Object.freeze(
       includedBuckets.map(
-        ({ probability, midpointValueMinor, sourceRevisionId }) => ({
+        ({ probability, midpointValueMinor, minorUnitExponent, sourceRevisionId }) => ({
           probability,
           midpointValueMinor,
+          minorUnitExponent,
           sourceRevisionId,
         }),
       ),
     ),
     sourceRevisionIds: stableUnique(sourceRevisionIds),
     priceCurrency: input.packPrice?.currency ?? null,
+    priceMinorUnitExponent: input.packPrice?.minorUnitExponent ?? null,
     distributionCurrency: input.distributionCurrency ?? null,
+    distributionMinorUnitExponent: input.distributionMinorUnitExponent ?? null,
+    outputMinorUnitExponent: PACKSCOUT_ESTIMATED_EV_OUTPUT_MINOR_UNIT_EXPONENT,
     priceCurrencyTreatment,
     distributionCurrencyTreatment,
     currencyPolicy: "usd_and_explicit_verified_usd_stablecoins_v1",
@@ -552,7 +633,14 @@ export function calculatePackScoutEstimatedEv(
     evidence: evidenceBase,
   } satisfies PackScoutEstimatedEvResultBase;
 
-  if (reasons.size > 0 || !unitBasis || !drawCount || !packPriceMinor) {
+  if (
+    reasons.size > 0 ||
+    !unitBasis ||
+    !drawCount ||
+    !packPriceMinor ||
+    priceScale?.status !== "valid" ||
+    distributionScale?.status !== "valid"
+  ) {
     return unavailableResult(common, reasons);
   }
 
@@ -568,16 +656,31 @@ export function calculatePackScoutEstimatedEv(
     ZERO_RATIONAL,
   );
   const drawMultiplier = unitBasis === "per_draw" ? drawCount : 1;
-  const grossValue = roundRationalHalfUp(
-    multiplyRationalByInteger(perBasisValue, BigInt(drawMultiplier)),
+  const grossDistributionMinor = multiplyRationalByInteger(
+    perBasisValue,
+    BigInt(drawMultiplier),
   );
+  const grossUsdMinor = convertMinorUnitScale(
+    grossDistributionMinor,
+    distributionScale.exponent,
+    PACKSCOUT_ESTIMATED_EV_OUTPUT_MINOR_UNIT_EXPONENT,
+  );
+  const packPriceUsdMinor = convertMinorUnitScale(
+    rational(BigInt(packPriceMinor), 1n),
+    priceScale.exponent,
+    PACKSCOUT_ESTIMATED_EV_OUTPUT_MINOR_UNIT_EXPONENT,
+  );
+  const grossValue = roundRationalHalfUp(grossUsdMinor);
   const grossValueMinor =
     grossValue <= maximumSafeInteger ? Number(grossValue) : null;
   const evPercent =
     grossValueMinor === null
       ? null
       : roundedRationalNumber(
-          rational(BigInt(grossValueMinor) * 100n, BigInt(packPriceMinor)),
+          multiplyRationalByInteger(
+            divideRational(grossUsdMinor, packPriceUsdMinor),
+            100n,
+          ),
           2,
         );
   if (
@@ -593,6 +696,7 @@ export function calculatePackScoutEstimatedEv(
     ...common,
     status: "estimated",
     grossValueMinor,
+    minorUnitExponent: PACKSCOUT_ESTIMATED_EV_OUTPUT_MINOR_UNIT_EXPONENT,
     evPercent,
     currency: "USD",
     reasonCodes: [],

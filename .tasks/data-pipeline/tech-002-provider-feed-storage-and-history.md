@@ -1,9 +1,11 @@
 # Technical Spec: Provider Feed, Storage, and History
 
+> **Superseded implementation artifact (2026-08-14).** Historical aggregate V1/eight-provider evidence only; do not build it. Use the record-stream V2 contract in [`docs/provider-data-contract-v2.md`](../../docs/provider-data-contract-v2.md).
+
 **Spec ID:** tech-002  
 **Related tasks:** [data-pipeline/002](002-establish-provider-feed-contract.md), [data-pipeline/003](003-persist-source-and-canonical-history.md), [data-pipeline/004](004-manage-provider-configurations.md), [data-pipeline/005](005-import-cursor-pages-idempotently.md), [data-pipeline/006](006-quarantine-and-retry-invalid-records.md)  
 **Depends on tech specs:** [tech-001](tech-001-runtime-security-and-service-boundaries.md)  
-**Spec status:** draft
+**Spec status:** superseded (historical V1 evidence)
 
 ## Purpose
 

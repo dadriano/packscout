@@ -214,7 +214,7 @@ export function ProviderDetailPage() {
 
       <section className="provider-test-result" aria-labelledby="provider-test-title" aria-live="polite">
         <header><span className="admin-eyebrow">Revision {revision.version}</span><h2 id="provider-test-title">Latest connection test</h2></header>
-        {test ? <div><StatusBadge label={label(test.verdict)} tone={tone(test.verdict)} /><p>Checked {dateTime(test.checkedAt)} · {test.latencyMs} ms{test.responseStatus ? ` · HTTP ${test.responseStatus}` : ""}</p>{test.recordCounts ? <p>{test.recordCounts.catalog} catalog · {test.recordCounts.pulls} pulls · {test.recordCounts.sales} sales</p> : null}{test.sanitizedCode ? <code>{test.sanitizedCode}</code> : null}</div> : <p>No connection test has been recorded for this revision.</p>}
+        {test ? <div><StatusBadge label={label(test.verdict)} tone={tone(test.verdict)} /><p>Checked {dateTime(test.checkedAt)} · {test.latencyMs} ms{test.responseStatus ? ` · HTTP ${test.responseStatus}` : ""}</p>{test.recordCounts ? <p>{test.recordCounts.catalog} catalog · {test.recordCounts.pulls} pulls · {test.recordCounts.trades} trades</p> : null}{test.sanitizedCode ? <code>{test.sanitizedCode}</code> : null}</div> : <p>No connection test has been recorded for this revision.</p>}
       </section>
     </div>
   );

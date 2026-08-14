@@ -1,9 +1,11 @@
 # Technical Spec: Canonical Projections and Estimated EV
 
+> **Superseded implementation artifact (2026-08-14).** Historical aggregate V1/eight-provider evidence only; do not build it. Use the record-stream V2 contract in [`docs/provider-data-contract-v2.md`](../../docs/provider-data-contract-v2.md).
+
 **Spec ID:** tech-004  
 **Related tasks:** [data-pipeline/007](007-project-catalog-and-inventory-data.md), [data-pipeline/008](008-project-pulls-and-sales.md), [data-pipeline/009](009-calculate-estimated-ev.md), [data-pipeline/014](014-map-beezie-and-clutchpacks.md), [data-pipeline/015](015-map-collector-crypt-and-courtyard.md), [data-pipeline/016](016-map-gamestop-and-phygitals.md), [data-pipeline/017](017-map-stadium-vault-and-trove.md)  
 **Depends on tech specs:** [tech-002](tech-002-provider-feed-storage-and-history.md), [tech-003](tech-003-ingestion-orchestration-and-reliability.md)  
-**Spec status:** draft
+**Spec status:** superseded (historical V1 evidence)
 
 ## Purpose
 

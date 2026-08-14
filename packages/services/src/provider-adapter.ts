@@ -1,19 +1,18 @@
-import type {
-  CatalogEnvelopeV1,
-  ProviderFeedEnvelopeV1,
-  ProviderFeedPageV1,
-  ProviderFeedValidatedPageV1,
-  PullEnvelopeV1,
-  SaleEnvelopeV1,
+import {
+  providerRecordKindV2,
+  providerStreamOrderingTimestampV2,
+  type ProviderConnectionRecordCounts,
+  type ProviderStreamRecordV2,
+  type ProviderStreamValidatedPageV2,
 } from "@packscout/contracts";
 
-export type ProviderRecordKind = "catalog" | "pull" | "sale";
+export type ProviderRecordKind = "catalog" | "pull" | "trade";
 export type AdapterCandidateKind =
   | "catalog_asset"
   | "ev_input"
   | "pack"
   | "pull"
-  | "sale";
+  | "trade";
 
 export interface ProviderConfigurationIdentity {
   readonly providerId: string;
@@ -101,17 +100,20 @@ export interface PullCandidate extends ProviderAdapterCandidateBase {
   readonly occurredAt: string;
   readonly value?: AdapterMoney | null;
   readonly valueSource?: string | null;
+  readonly buybackStatus?: string | null;
+  readonly buybackRefund?: AdapterMoney | null;
   readonly pseudonymizationInputs: readonly PseudonymousActorInput[];
 }
 
-export interface SaleCandidate extends ProviderAdapterCandidateBase {
-  readonly candidateKind: "sale";
+export interface TradeCandidate extends ProviderAdapterCandidateBase {
+  readonly candidateKind: "trade";
   readonly eventType: string;
   readonly transactionKey: string;
   readonly assetExternalId: string | null;
   readonly packExternalId?: string | null;
   readonly occurredAt: string;
   readonly amount: AdapterMoney | null;
+  readonly paymentMethod: string | null;
   readonly pseudonymizationInputs: readonly PseudonymousActorInput[];
 }
 
@@ -140,7 +142,7 @@ export type ProviderAdapterCandidate =
   | CanonicalPackCandidate
   | CatalogAssetCandidate
   | PullCandidate
-  | SaleCandidate
+  | TradeCandidate
   | EvInputCandidate;
 
 export interface ProviderRecordMappingFailure {
@@ -160,18 +162,10 @@ export type ProviderRecordMappingOutcome =
       readonly failure: ProviderRecordMappingFailure;
     };
 
-export interface ProviderMappingPageInput {
+export interface ProviderMappingRecordInput {
   readonly configuration: ProviderConfigurationIdentity;
-  readonly page: ProviderFeedPageV1;
-  readonly recordIndexes: Readonly<{
-    catalog: readonly number[];
-    pulls: readonly number[];
-    sales: readonly number[];
-  }>;
-}
-
-export interface ProviderMappingOutput {
-  readonly outcomes: readonly ProviderRecordMappingOutcome[];
+  readonly record: ProviderStreamRecordV2;
+  readonly recordIndex: number;
 }
 
 export interface ProviderAdapterIdentity {
@@ -180,9 +174,9 @@ export interface ProviderAdapterIdentity {
 
 export interface ProviderMappingAdapter extends ProviderAdapterIdentity {
   readonly platformKey: string;
-  mapPage(
-    input: ProviderMappingPageInput,
-  ): ProviderMappingOutput | Promise<ProviderMappingOutput>;
+  mapRecord(
+    input: ProviderMappingRecordInput,
+  ): ProviderRecordMappingOutcome | Promise<ProviderRecordMappingOutcome>;
 }
 
 export type ProviderAuth =
@@ -206,6 +200,47 @@ export type ProviderTransportConnectionInput = Omit<
   ProviderTransportPageInput,
   "cursor" | "seenCursors"
 >;
+
+export interface ProviderHttpResponseDecoderInputV2 {
+  /** Bounded response text. The common transport does not interpret its format. */
+  readonly bodyText: string;
+  readonly contentType: string | null;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly requestedPlatform: string;
+  readonly requestedCursor: string | null;
+}
+
+export interface ProviderHttpDecodedPageV2 {
+  /** Exact protected response evidence in a JSON-compatible decoder-owned form. */
+  readonly rawPage: unknown;
+  readonly records: unknown;
+  readonly nextCursor: unknown;
+  readonly hasMore: unknown;
+}
+
+export type ProviderHttpResponseDecodeResultV2 =
+  | {
+      readonly ok: true;
+      readonly page: ProviderHttpDecodedPageV2;
+    }
+  | {
+      readonly ok: false;
+      readonly code: "invalid_json" | "invalid_response";
+      readonly fieldPaths?: readonly string[];
+      readonly issueCodes?: readonly string[];
+    };
+
+/**
+ * Provider-local response boundary. Implementations own serialization and raw
+ * wrapper interpretation; the common HTTP transport owns neither.
+ */
+export interface ProviderHttpResponseDecoderV2 {
+  decode(
+    input: ProviderHttpResponseDecoderInputV2,
+  ):
+    | ProviderHttpResponseDecodeResultV2
+    | Promise<ProviderHttpResponseDecodeResultV2>;
+}
 
 export type ProviderTransportFailureCode =
   | "destination_not_allowed"
@@ -260,12 +295,6 @@ export class ProviderTransportRequestError extends Error {
   }
 }
 
-export interface ProviderConnectionRecordCounts {
-  readonly catalog: number;
-  readonly pulls: number;
-  readonly sales: number;
-}
-
 export type ProviderConnectionTestResult =
   | {
       readonly ok: true;
@@ -288,41 +317,18 @@ export interface ProviderTransportAdapter extends ProviderAdapterIdentity {
   ): Promise<ProviderConnectionTestResult>;
   fetchPage(
     input: ProviderTransportPageInput,
-  ): Promise<ProviderFeedValidatedPageV1>;
+  ): Promise<ProviderStreamValidatedPageV2>;
 }
 
-export type ProviderEnvelopeWithKind =
-  | {
-      readonly recordKind: "catalog";
-      readonly recordIndex: number;
-      readonly envelope: CatalogEnvelopeV1;
-    }
-  | {
-      readonly recordKind: "pull";
-      readonly recordIndex: number;
-      readonly envelope: PullEnvelopeV1;
-    }
-  | {
-      readonly recordKind: "sale";
-      readonly recordIndex: number;
-      readonly envelope: SaleEnvelopeV1;
-    };
-
-export function sourceIdentityForEnvelope(
-  input: ProviderEnvelopeWithKind,
+export function sourceIdentityForRecord(
+  input: Pick<ProviderMappingRecordInput, "record" | "recordIndex">,
 ): ProviderSourceIdentity {
-  const envelope: ProviderFeedEnvelopeV1 = input.envelope;
-  const sourceTimestamp =
-    input.recordKind === "catalog"
-      ? input.envelope.updated_at
-      : input.envelope.occurred_at;
-
   return {
-    platform: envelope.platform,
-    recordKind: input.recordKind,
+    platform: input.record.platform,
+    recordKind: providerRecordKindV2(input.record),
     recordIndex: input.recordIndex,
-    externalId: envelope.external_id,
-    collectedAt: envelope.collected_at,
-    sourceTimestamp,
+    externalId: input.record.record_id,
+    collectedAt: input.record.collected_at,
+    sourceTimestamp: providerStreamOrderingTimestampV2(input.record),
   };
 }
