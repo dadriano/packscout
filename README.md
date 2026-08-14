@@ -42,6 +42,58 @@ PACKSCOUT_FRONTEND_PORT=5150 npm run dev
 PACKSCOUT_ADMIN_PORT=5151 PACKSCOUT_ADMIN_HMR_PORT=5152 npm run dev:admin
 ```
 
+Both development servers bind to `127.0.0.1` by default. In development, the
+admin host accepts only explicit loopback values (`127.0.0.1`, `::1`, or
+`localhost`); production self-hosting retains an explicit configurable bind.
+
+### Persistent local services on macOS
+
+The local maintenance workflow generates user-specific launchd jobs for the
+primary checkout, stores logs under `~/Library/Logs/PackScout`, and restarts the
+frontend, admin, and worker without copying secrets into plist files:
+
+```bash
+# Restart all three services in standard frontend mode.
+npm run services:restart:local
+
+# Restart one service and clear only the frontend's build caches.
+npm run services:restart:local -- --clean frontend
+
+# Use the local Convex mock release, with or without advancing Heat frames.
+npm run services:restart:local -- --frontend-mode mock frontend
+npm run services:restart:local -- --frontend-mode mock-heat frontend
+```
+
+The default `standard` frontend mode uses the normal `dev:frontend` command.
+`mock` and `mock-heat` are explicit because they own a local Convex process;
+neither mode deploys cloud functions. Admin and worker continue loading their
+required database and key configuration from the ignored root `.env`. Mock
+frontend modes require the ignored root `.env.local`.
+
+The restart command is intentionally limited to the primary checkout because
+launchd labels and ports are per-user singletons. It validates generated plists,
+refuses to kill unrelated port owners, checks exact frontend/admin health
+payloads, and reports worker process liveness without claiming worker health.
+
+From a completely clean primary `main` checkout, update it safely with:
+
+```bash
+# Fast-forward origin/main, run npm ci, then restart all services.
+npm run workspace:update:main:local
+
+# Preview without fetching, changing refs/files, installing, or restarting.
+npm run workspace:update:main:local -- --dry-run
+
+# Forward explicit restart options after the update.
+npm run workspace:update:main:local -- \
+  --clean --frontend-mode mock-heat frontend worker
+```
+
+The updater refuses linked worktrees, detached or non-target branches, local
+commits ahead of the remote, divergence, and every tracked or untracked change
+(including `.tasks` and `output`). It performs only a fast-forward merge—never
+checkout, reset, clean, or force—and preserves ignored environment files.
+
 ### Local Convex mock data release
 
 The dashboard can use the deterministic six-repack data release in a local Convex

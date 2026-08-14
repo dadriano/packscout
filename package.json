@@ -72,6 +72,8 @@
     "simulate:mock-heat:local": "node --import tsx scripts/local/simulate-convex-repack-heat.mjs",
     "dev:frontend:mock:local": "node scripts/local/start-frontend-with-convex-mock.mjs",
     "dev:frontend:mock-heat:local": "node --import tsx scripts/local/start-frontend-with-convex-mock-heat.mjs",
+    "services:restart:local": "./scripts/local/restart.sh",
+    "workspace:update:main:local": "./scripts/local/update-main.sh",
     "db:migration:check:local": "npm run migration:check:local --workspace=@packscout/database",
     "start:frontend": "npm run start --workspace=@packscout/frontend",
     "start:admin": "npm run start --workspace=@packscout/admin",

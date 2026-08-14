@@ -1,13 +1,61 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  adminDevelopmentAllowedOrigins,
+  adminDevelopmentServerNetwork,
   readAllowedOrigins,
   readBase64Key,
+  readServiceHost,
   readPort,
   readPositiveDuration,
   readRequiredSecret,
   readTrustedProxies,
+  serviceHttpOrigin,
 } from "./runtime-config.ts";
+
+test("admin local host binding accepts only explicit loopback hosts", () => {
+  assert.equal(
+    readServiceHost(undefined, "127.0.0.1", "PACKSCOUT_ADMIN_HOST"),
+    "127.0.0.1",
+  );
+  for (const host of ["127.0.0.1", "::1", "localhost"]) {
+    assert.equal(readServiceHost(host, "127.0.0.1", "HOST"), host);
+  }
+  for (const host of ["0.0.0.0", "::", "admin.local", "127.0.0.2"]) {
+    assert.throws(
+      () => readServiceHost(host, "127.0.0.1", "PACKSCOUT_ADMIN_HOST"),
+      /PACKSCOUT_ADMIN_HOST must be 127\.0\.0\.1, ::1, or localhost/,
+    );
+  }
+  assert.equal(
+    readServiceHost(undefined, "0.0.0.0", "PACKSCOUT_ADMIN_HOST", false),
+    "0.0.0.0",
+  );
+  assert.throws(
+    () => readServiceHost("admin.internal", "0.0.0.0", "HOST", false),
+    /HOST must be a valid IP address or localhost/,
+  );
+});
+
+test("admin Vite HTTP and HMR development sockets share the loopback host", () => {
+  assert.deepEqual(adminDevelopmentServerNetwork("127.0.0.1", 5102), {
+    middlewareMode: true,
+    hmr: { host: "127.0.0.1", port: 5102 },
+  });
+});
+
+test("admin development origins and log URLs format IPv6 loopback safely", () => {
+  assert.equal(serviceHttpOrigin("::1", 5101), "http://[::1]:5101");
+  assert.deepEqual(adminDevelopmentAllowedOrigins("::1", 5101), [
+    "http://localhost:5101",
+    "http://127.0.0.1:5101",
+    "http://[::1]:5101",
+  ]);
+  assert.deepEqual(adminDevelopmentAllowedOrigins("localhost", 5101), [
+    "http://localhost:5101",
+    "http://127.0.0.1:5101",
+  ]);
+});
 
 test("admin ports use a validated fallback", () => {
   assert.equal(readPort(undefined, 5101, "PACKSCOUT_ADMIN_PORT"), 5101);
