@@ -172,6 +172,67 @@ explicit production origin and matching security configuration are supplied.
 The local seed commands above stay local-only and continue to refuse cloud
 deployments and deploy keys.
 
+### Optional Privy authentication
+
+Dashboard, Repacks, Learn, and catalog search remain public. Authentication is
+an optional enhancement for saving a repack or an exact desired collectible;
+an unconfigured build keeps the anonymous application and its existing CSP.
+Even when configured, the browser defers loading and initializing Privy until
+the visitor chooses Sign in or a save action. A successful session stores only
+a fixed, non-identifying returning-session hint so that a later visit can
+restore authentication without persisting a Privy subject or email locally.
+
+For local development, enable the Privy provider with the public app ID in the
+ignored `apps/frontend/.env.development.local` file:
+
+```dotenv
+NEXT_PUBLIC_PRIVY_APP_ID=<public-privy-app-id>
+```
+
+Set the same public identifier as `PRIVY_APP_ID` in the environment of the
+intended Convex deployment (for example,
+`npx convex env set PRIVY_APP_ID <public-privy-app-id>` after confirming that
+deployment). Setting the environment value does not rebuild Convex auth
+configuration: explicitly push the functions and auth config to that same
+confirmed target afterward. For the PackScout development deployment, use
+`npx convex dev --once --deployment abundant-puffin-373`; production must use
+the reviewed deployment workflow for its own target. The frontend and Convex
+values must match exactly so Convex can validate the token audience. Missing
+values disable their respective auth provider instead of making public reads
+require authentication.
+
+These matching values identify a public app; the frontend value is intentionally
+browser-visible, and both are validated as bounded public identifiers. Do not
+put a Privy app secret, token-verification key, access token,
+email address, or any other secret or user data in a `NEXT_PUBLIC_` variable.
+Any future server credential belongs in the deployment secret store under a
+server-only name.
+
+In the Privy Dashboard:
+
+1. Enable only Email and Google under Authentication. This release does not
+   enable wallet login or create embedded wallets.
+2. Under Configuration > App settings > Domains, add every web origin exactly,
+   including its protocol and development port, such as
+   `http://localhost:5100`. Add the exact preproduction and production HTTPS
+   origins separately; do not use a generic hosting-provider wildcard.
+3. Under Configuration > App settings > Advanced, restrict OAuth redirect URLs
+   to the exact PackScout destinations used by the deployment. Redirect entries
+   do not support wildcards, query strings, or an incidental trailing slash.
+4. Remove local and test origins from the production Privy app before launch.
+
+See Privy's current guidance for
+[allowed origins](https://docs.privy.io/recipes/dashboard/allowed-domains) and
+[content security policy](https://docs.privy.io/security/implementation-guide/content-security-policy).
+The app enables only the exact Privy authentication iframe/API and Cloudflare
+Turnstile sources when the app ID is present. It does not allow WalletConnect,
+wallet RPC, Coinbase Wallet, or generic wildcard sources.
+
+Before enabling authentication in a live environment, use an actual Privy app
+to verify email OTP, Google OAuth, logout, session expiry, mobile and keyboard
+flows, exact-origin rejection, and a browser console with no CSP violations.
+Do not infer live readiness from an environment-neutral build.
+
 ## Verification
 
 ```bash

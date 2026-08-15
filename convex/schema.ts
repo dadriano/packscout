@@ -586,10 +586,7 @@ export default defineSchema({
       "heatSnapshotId",
       "publicRepackId",
     ])
-    .index("by_heat_snapshot_id_and_repack_id", [
-      "heatSnapshotId",
-      "repackId",
-    ]),
+    .index("by_heat_snapshot_id_and_repack_id", ["heatSnapshotId", "repackId"]),
 
   vendors: defineTable({
     releaseId: v.id("dataReleases"),
@@ -644,10 +641,7 @@ export default defineSchema({
       "releaseId",
       "publicCollectibleId",
     ])
-    .index("by_release_id_and_normalized_name", [
-      "releaseId",
-      "normalizedName",
-    ])
+    .index("by_release_id_and_normalized_name", ["releaseId", "normalizedName"])
     .searchIndex("search_search_text", {
       searchField: "searchText",
       filterFields: ["releaseId", "collectibleType"],
@@ -660,10 +654,7 @@ export default defineSchema({
     detail: publicRepackChaseValidator,
   })
     .index("by_release_id_and_repack_id", ["releaseId", "repackId"])
-    .index("by_release_id_and_collectible_id", [
-      "releaseId",
-      "collectibleId",
-    ])
+    .index("by_release_id_and_collectible_id", ["releaseId", "collectibleId"])
     .index("by_release_id_and_repack_id_and_collectible_id", [
       "releaseId",
       "repackId",
@@ -726,4 +717,20 @@ export default defineSchema({
     releasedAt: nullableTimestampValidator,
     releaseReceiptHash: v.union(sha256Validator, v.null()),
   }).index("by_fingerprint_and_active", ["fingerprint", "active"]),
+
+  savedRepacks: defineTable({
+    ownerTokenIdentifier: v.string(),
+    publicRepackId: v.string(),
+  }).index("by_owner_token_identifier_and_public_repack_id", [
+    "ownerTokenIdentifier",
+    "publicRepackId",
+  ]),
+
+  savedCollectibles: defineTable({
+    ownerTokenIdentifier: v.string(),
+    publicCollectibleId: v.string(),
+  }).index("by_owner_token_identifier_and_public_collectible_id", [
+    "ownerTokenIdentifier",
+    "publicCollectibleId",
+  ]),
 });

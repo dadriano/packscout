@@ -14,6 +14,7 @@ import type {
   PublicRepackChase,
   PublicRepackViewDetail,
 } from "@packscout/contracts";
+import { SavedRepackButton } from "@/components/auth/SavedItemButton.client";
 import { EstimatedEvMetrics } from "@/components/metrics/EstimatedEvMetrics";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
@@ -316,6 +317,9 @@ export function RepackInspector({
               <small aria-hidden="true">{price.reasonCopy}</small>
             ) : null}
           </p>
+          <div className={styles.saveAction}>
+            <SavedRepackButton publicRepackId={repack.publicRepackId} />
+          </div>
         </div>
       </header>
 

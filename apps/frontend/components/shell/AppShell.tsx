@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { AccountControl } from "@/components/auth/AccountControl.client";
 import { BrandLogo } from "./BrandLogo";
 import { CatalogSearch } from "./CatalogSearch.client";
 import { PrimaryNavigation } from "./PrimaryNavigation.client";
@@ -44,6 +45,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <CatalogSearch />
             </Suspense>
             <DataReleaseStatus />
+            <AccountControl />
             <ThemeControl />
           </div>
         </header>
