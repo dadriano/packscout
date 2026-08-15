@@ -79,9 +79,20 @@ export const activeState = internalMutation({
     ) {
       return refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
     }
-    const [release, catalogStates, finalizeOperations, refreshOperations] =
+    const [
+      release,
+      signalSet,
+      previous,
+      catalogStates,
+      finalizeOperations,
+      refreshOperations,
+    ] =
       await Promise.all([
       ctx.db.get("dataReleases", active.releaseId),
+      ctx.db.get("repackHeatSignalSets", active.signalSetId),
+      state.previousHeatSnapshotId === null
+        ? Promise.resolve(null)
+        : ctx.db.get("repackHeatSnapshots", state.previousHeatSnapshotId),
       ctx.db
         .query("dataReleaseState")
         .withIndex("by_key", (index) => index.eq("key", "singleton"))
@@ -106,6 +117,19 @@ export const activeState = internalMutation({
     const operations = [...finalizeOperations, ...refreshOperations];
     if (
       release === null ||
+      signalSet === null ||
+      signalSet.lifecycle !== "complete" ||
+      signalSet.releaseId !== active.releaseId ||
+      signalSet.sourceKind !== "observed" ||
+      signalSet.scenarioVersion !== null ||
+      signalSet.aggregationVersion !== active.aggregationVersion ||
+      signalSet.heatPolicyVersion !== active.heatPolicyVersion ||
+      signalSet.signalCount !== active.signalCount ||
+      (state.previousHeatSnapshotId === null) !== (previous === null) ||
+      (previous !== null && (
+        previous._id === active._id ||
+        previous.lifecycle !== "retired"
+      )) ||
       catalogStates.length !== 1 ||
       catalogStates[0]!.activeReleaseId !== active.releaseId ||
       !Number.isSafeInteger(catalogStates[0]!.latestObservationSequence) ||
@@ -133,7 +157,14 @@ export const activeState = internalMutation({
       receipt.details.activePublicHeatFrameId !== active.publicHeatSnapshotId ||
       receipt.details.catalogPublicReleaseId !== release.publicReleaseId ||
       receipt.details.sourceWatermark !== active.sourceWatermark ||
-      receipt.details.frameSequence !== active.sequence
+      receipt.details.frameSequence !== active.sequence ||
+      receipt.details.frameHash !== active.contentHash ||
+      receipt.details.signalSetHash !== signalSet.signalSetHash ||
+      receipt.details.signalCount !== active.signalCount ||
+      receipt.details.calculatedAt !== active.calculatedAt ||
+      receipt.details.expiresAt !== active.expiresAt ||
+      receipt.details.previousPublicHeatFrameId !==
+        (previous?.publicHeatSnapshotId ?? null)
     ) {
       return refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
     }

@@ -539,6 +539,24 @@ describe("production Heat publication", () => {
     const firstStartBody = await startResponse.json();
     const replayStartBody = await startReplay.json();
     expect(replayStartBody.receipt).toEqual(firstStartBody.receipt);
+    await expect(invoke(
+      t2,
+      internal.productionHeatLifecycle.start,
+      { ...plan.start, idempotencyKey: "start:conflicting-replay" },
+    )).rejects.toThrow("PUBLICATION_OPERATION_CONFLICT");
+    await expect(t2.run(async (ctx) => ({
+      operations: (await ctx.db.query("repackHeatOperations").collect()).length,
+      publications:
+        (await ctx.db.query("repackHeatPublications").collect()).length,
+      signalSets:
+        (await ctx.db.query("repackHeatSignalSets").collect()).length,
+      signals: (await ctx.db.query("repackHeatSignals").collect()).length,
+    }))).resolves.toEqual({
+      operations: 1,
+      publications: 1,
+      signalSets: 1,
+      signals: 0,
+    });
 
     const batchReceipt = await invoke<Record<string, unknown>>(
       t2,
@@ -571,6 +589,24 @@ describe("production Heat publication", () => {
       },
     );
     expect(status).toEqual(finalReceipt);
+    await expect(invoke(
+      t2,
+      internal.productionHeatLifecycle.status,
+      {
+        schemaVersion: "repack_heat_publication_v1",
+        operationId: plan.finalize.operationId,
+        publicationId: null,
+      },
+    )).rejects.toThrow("PUBLICATION_OPERATION_CONFLICT");
+    await expect(invoke(
+      t2,
+      internal.productionHeatLifecycle.status,
+      {
+        schemaVersion: "repack_heat_publication_v1",
+        operationId: plan.finalize.operationId,
+        publicationId: SECOND_FRAME_ID,
+      },
+    )).rejects.toThrow("PUBLICATION_OPERATION_CONFLICT");
     const stored = await t2.run(async (ctx) => ({
       state: await ctx.db.query("repackHeatState").unique(),
       frames: await ctx.db.query("repackHeatSnapshots").collect(),
@@ -610,6 +646,67 @@ describe("production Heat publication", () => {
       },
     });
     await t2.run(async (ctx) => {
+      const state = await ctx.db.query("repackHeatState").unique();
+      if (state?.activeHeatSnapshotId === null || state === null) {
+        throw new Error("Expected active Heat frame.");
+      }
+      const active = await ctx.db.get(
+        "repackHeatSnapshots",
+        state.activeHeatSnapshotId,
+      );
+      if (active === null) throw new Error("Expected active Heat frame.");
+      await ctx.db.patch("repackHeatSnapshots", active._id, {
+        contentHash: "f".repeat(64),
+      });
+    });
+    const driftedFrameState = await signedFetch(
+      t2,
+      "/internal/repack-heat/v1/active-state",
+      {
+        schemaVersion: "repack_heat_publication_v1",
+        operationId: "heat-active-state-drifted-frame",
+      },
+    );
+    expect(driftedFrameState.status).toBe(409);
+    await t2.run(async (ctx) => {
+      const state = await ctx.db.query("repackHeatState").unique();
+      if (state?.activeHeatSnapshotId === null || state === null) {
+        throw new Error("Expected active Heat frame.");
+      }
+      const active = await ctx.db.get(
+        "repackHeatSnapshots",
+        state.activeHeatSnapshotId,
+      );
+      if (active === null) throw new Error("Expected active Heat frame.");
+      await ctx.db.patch("repackHeatSnapshots", active._id, {
+        contentHash: plan.frame.frameHash,
+      });
+      await ctx.db.patch("repackHeatSignalSets", active.signalSetId, {
+        lifecycle: "retired",
+      });
+    });
+    const driftedSignalSetState = await signedFetch(
+      t2,
+      "/internal/repack-heat/v1/active-state",
+      {
+        schemaVersion: "repack_heat_publication_v1",
+        operationId: "heat-active-state-drifted-signal-set",
+      },
+    );
+    expect(driftedSignalSetState.status).toBe(409);
+    await t2.run(async (ctx) => {
+      const state = await ctx.db.query("repackHeatState").unique();
+      if (state?.activeHeatSnapshotId === null || state === null) {
+        throw new Error("Expected active Heat frame.");
+      }
+      const active = await ctx.db.get(
+        "repackHeatSnapshots",
+        state.activeHeatSnapshotId,
+      );
+      if (active === null) throw new Error("Expected active Heat frame.");
+      await ctx.db.patch("repackHeatSignalSets", active.signalSetId, {
+        lifecycle: "complete",
+      });
       const operation = await ctx.db
         .query("repackHeatOperations")
         .withIndex("by_operation_id", (index) =>

@@ -147,7 +147,7 @@ export async function loadHeatReceiptByOperationId(
   }
   const operation = operations[0] ?? null;
   if (operation === null) return null;
-  if (publicationId !== null && operation.publicationId !== publicationId) {
+  if (operation.publicationId !== publicationId) {
     refuseProductionDataRelease("PUBLICATION_OPERATION_CONFLICT");
   }
   return await parseStoredReceipt(operation);
