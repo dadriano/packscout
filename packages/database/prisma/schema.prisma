@@ -452,58 +452,59 @@ model operators {
 }
 
 model organizations {
-  id                                   String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  slug                                 String                                 @unique(map: "organizations_slug_unique")
-  name                                 String
-  created_at                           DateTime                               @default(now()) @db.Timestamptz(6)
-  admin_alerts                         admin_alerts[]
-  audit_events                         audit_events[]
-  canonical_entities                   canonical_entities[]
-  canonical_relationships              canonical_relationships[]
-  canonical_revisions                  canonical_revisions[]
-  estimated_ev_recomputation_requests  estimated_ev_recomputation_requests[]
-  import_pages                         import_pages[]
-  import_runs                          import_runs[]
-  operational_events                   operational_events[]
-  operator_memberships                 operator_memberships[]
-  operator_sessions                    operator_sessions[]
-  provider_config_revisions            provider_config_revisions[]
-  provider_connection_tests            provider_connection_tests[]
-  provider_cursor_checkpoints          provider_cursor_checkpoints[]
-  provider_health_states               provider_health_states[]
-  provider_schedules                   provider_schedules[]
-  provider_secret_versions             provider_secret_versions[]
-  provider_sources                     provider_sources[]
-  public_change_causes                 public_change_causes[]
-  public_derivation_obligations        public_derivation_obligations[]
-  quarantine_attempts                  quarantine_attempts[]
-  quarantine_records                   quarantine_records[]
-  retention_executions                 retention_executions[]
-  source_record_observations           source_record_observations[]
-  source_record_outcomes               source_record_outcomes[]
-  source_record_projection_revisions   source_record_projection_revisions[]
-  source_records                       source_records[]
-  settled_public_watermarks            settled_public_watermarks?
-  public_repack_identity_mappings      public_repack_identity_mappings[]
-  normalized_heat_observations         normalized_heat_observations[]
-  normalized_heat_observation_outcomes normalized_heat_observation_outcomes[]
-  normalized_heat_window_checkpoints   normalized_heat_window_checkpoints?
+  id                                     String                                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug                                   String                                   @unique(map: "organizations_slug_unique")
+  name                                   String
+  created_at                             DateTime                                 @default(now()) @db.Timestamptz(6)
+  admin_alerts                           admin_alerts[]
+  audit_events                           audit_events[]
+  canonical_entities                     canonical_entities[]
+  canonical_relationships                canonical_relationships[]
+  canonical_revisions                    canonical_revisions[]
+  estimated_ev_recomputation_requests    estimated_ev_recomputation_requests[]
+  import_pages                           import_pages[]
+  import_runs                            import_runs[]
+  operational_events                     operational_events[]
+  operator_memberships                   operator_memberships[]
+  operator_sessions                      operator_sessions[]
+  provider_config_revisions              provider_config_revisions[]
+  provider_connection_tests              provider_connection_tests[]
+  provider_cursor_checkpoints            provider_cursor_checkpoints[]
+  provider_health_states                 provider_health_states[]
+  provider_schedules                     provider_schedules[]
+  provider_secret_versions               provider_secret_versions[]
+  provider_sources                       provider_sources[]
+  public_change_causes                   public_change_causes[]
+  public_derivation_obligations          public_derivation_obligations[]
+  quarantine_attempts                    quarantine_attempts[]
+  quarantine_records                     quarantine_records[]
+  retention_executions                   retention_executions[]
+  source_record_observations             source_record_observations[]
+  source_record_outcomes                 source_record_outcomes[]
+  source_record_projection_revisions     source_record_projection_revisions[]
+  source_records                         source_records[]
+  settled_public_watermarks              settled_public_watermarks?
+  public_repack_identity_mappings        public_repack_identity_mappings[]
+  normalized_heat_observations           normalized_heat_observations[]
+  normalized_heat_observation_outcomes   normalized_heat_observation_outcomes[]
+  normalized_heat_window_checkpoints     normalized_heat_window_checkpoints?
   approved_public_catalog_configurations approved_public_catalog_configurations[]
+  promotion_lanes                        promotion_lanes[]
 }
 
 /// Governed, immutable bridge from private canonical identity to stable public identity.
 /// This table contains check constraints and an immutability trigger defined in its migration.
 model public_repack_identity_mappings {
-  organization_id              String                         @db.Uuid
-  platform_key                 String
-  pack_external_id             String
-  public_repack_id             String                         @db.Uuid
-  approved_configuration_key   String
-  public_change_sequence       BigInt
-  approved_at                  DateTime                       @db.Timestamptz(6)
-  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
-  organizations                organizations                  @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_repack_identity_mappings_organization_fk")
-  public_change_causes         public_change_causes           @relation("public_repack_identity_mapping_change", fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "public_repack_identity_mappings_change_fk")
+  organization_id                        String                                 @db.Uuid
+  platform_key                           String
+  pack_external_id                       String
+  public_repack_id                       String                                 @db.Uuid
+  approved_configuration_key             String
+  public_change_sequence                 BigInt
+  approved_at                            DateTime                               @db.Timestamptz(6)
+  created_at                             DateTime                               @default(now()) @db.Timestamptz(6)
+  organizations                          organizations                          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_repack_identity_mappings_organization_fk")
+  public_change_causes                   public_change_causes                   @relation("public_repack_identity_mapping_change", fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "public_repack_identity_mappings_change_fk")
   approved_public_catalog_configurations approved_public_catalog_configurations @relation(fields: [organization_id, approved_configuration_key, public_change_sequence], references: [organization_id, configuration_key, public_change_sequence], onUpdate: NoAction, map: "public_repack_identity_mappings_configuration_fk")
   normalized_heat_observations normalized_heat_observations[]
   normalized_heat_observation_outcomes normalized_heat_observation_outcomes[]
@@ -582,6 +583,105 @@ model normalized_heat_window_checkpoints {
   next_catalog_sequence    BigInt        @default(1)
   updated_at               DateTime      @default(now()) @db.Timestamptz(6)
   organizations            organizations @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "normalized_heat_window_checkpoints_organization_fk")
+}
+
+/// Server-bound, monotonic scheduling and safe health state for one promotion lane.
+/// This table contains bootstrap and watermark check constraints defined in its migration.
+model promotion_lanes {
+  organization_id                String               @db.Uuid
+  deployment_key                 String
+  lane_key                       String
+  bootstrap_state                String               @default("unverified")
+  bootstrap_verified_at          DateTime?            @db.Timestamptz(6)
+  settled_watermark              BigInt               @default(0)
+  settled_at                     DateTime?            @db.Timestamptz(6)
+  requested_watermark            BigInt               @default(0)
+  requested_at                   DateTime?            @db.Timestamptz(6)
+  confirmed_watermark            BigInt               @default(0)
+  confirmed_publication_identity String?
+  confirmed_receipt_sha256       String?
+  last_activated_watermark       BigInt               @default(0)
+  last_activated_at              DateTime?            @db.Timestamptz(6)
+  last_unchanged_watermark       BigInt?
+  last_unchanged_observed_at     DateTime?            @db.Timestamptz(6)
+  next_retry_at                  DateTime?            @db.Timestamptz(6)
+  delayed_vendor_count           Int                  @default(0)
+  created_at                     DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime             @default(now()) @db.Timestamptz(6)
+  organizations                  organizations        @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "promotion_lanes_organization_fk")
+  promotion_attempts             promotion_attempts[]
+
+  @@id([organization_id, deployment_key, lane_key], map: "promotion_lanes_pkey")
+}
+
+/// One recoverable publication attempt at a settled causal watermark.
+/// Its partial active-lane uniqueness and state invariants are defined in the migration.
+model promotion_attempts {
+  id                            String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id               String                 @db.Uuid
+  deployment_key                String
+  lane_key                      String
+  target_watermark              BigInt
+  state                         String                 @default("assembling")
+  content_identity              String?
+  publication_identity          String?
+  expected_predecessor_identity String?
+  prepared_classification       String?
+  observation_sequence          Int?
+  public_config_hash            String?
+  repack_search_index_hash      String?
+  public_vendor_keys            String[]               @default([])
+  prepared_at                   DateTime?              @db.Timestamptz(6)
+  claim_owner                   String?
+  claim_token                   String?                @db.Uuid
+  claim_expires_at              DateTime?              @db.Timestamptz(6)
+  last_heartbeat_at             DateTime?              @db.Timestamptz(6)
+  claim_count                   Int                    @default(0)
+  retry_count                   Int                    @default(0)
+  retry_at                      DateTime?              @db.Timestamptz(6)
+  delayed_vendor_count          Int                    @default(0)
+  failure_class                 String?
+  failure_code                  String?
+  terminal_receipt_body         String?
+  terminal_receipt_sha256       String?
+  terminal_at                   DateTime?              @db.Timestamptz(6)
+  created_at                    DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime               @default(now()) @db.Timestamptz(6)
+  promotion_lanes               promotion_lanes        @relation(fields: [organization_id, deployment_key, lane_key], references: [organization_id, deployment_key, lane_key], onUpdate: NoAction, map: "promotion_attempts_lane_fk")
+  promotion_operations          promotion_operations[]
+
+  @@unique([id, organization_id, deployment_key, lane_key], map: "promotion_attempts_tenant_unique")
+  @@unique([organization_id, deployment_key, lane_key, target_watermark], map: "promotion_attempts_target_unique")
+  @@unique([organization_id, deployment_key, lane_key, target_watermark, content_identity], map: "promotion_attempts_content_unique")
+}
+
+/// Byte-exact, restart-safe transport operation owned by one promotion attempt.
+/// Its request identity is immutable and its delivery-shape checks live in the migration.
+model promotion_operations {
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attempt_id             String             @db.Uuid
+  organization_id        String             @db.Uuid
+  deployment_key         String
+  lane_key               String
+  operation_index        Int
+  operation_id           String
+  operation_kind         String
+  request_path           String
+  canonical_request_body String
+  request_sha256         String
+  state                  String             @default("pending")
+  send_count             Int                @default(0)
+  last_sent_at           DateTime?          @db.Timestamptz(6)
+  acknowledged_at        DateTime?          @db.Timestamptz(6)
+  receipt_body           String?
+  receipt_sha256         String?
+  created_at             DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime           @default(now()) @db.Timestamptz(6)
+  promotion_attempts     promotion_attempts @relation(fields: [attempt_id, organization_id, deployment_key, lane_key], references: [id, organization_id, deployment_key, lane_key], onUpdate: NoAction, map: "promotion_operations_attempt_fk")
+
+  @@unique([attempt_id, operation_index], map: "promotion_operations_attempt_index_unique")
+  @@unique([attempt_id, operation_id], map: "promotion_operations_attempt_operation_unique")
+  @@unique([organization_id, deployment_key, lane_key, operation_id], map: "promotion_operations_lane_operation_unique")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.

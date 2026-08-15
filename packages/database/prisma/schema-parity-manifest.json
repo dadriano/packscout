@@ -1,17 +1,17 @@
 {
-  "source": "approved public catalog and normalized Heat catalog contract",
+  "source": "durable promotion ledger with approved public catalog and normalized Heat contract",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260815030000_normalized_heat_observations/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260815040000_catalog_promotion_ledger/migration.sql"
   },
   "expectedCounts": {
-    "tables": 36,
+    "tables": 39,
     "enums": 22,
-    "columns": 408,
-    "indexes": 57,
-    "uniqueConstraints": 27,
-    "foreignKeys": 144,
-    "checkConstraints": 96
+    "columns": 477,
+    "indexes": 61,
+    "uniqueConstraints": 33,
+    "foreignKeys": 147,
+    "checkConstraints": 121
   },
   "enums": {
     "admin_alert_state": [
@@ -3212,6 +3212,731 @@
       },
       "foreignKeys": {},
       "checkConstraints": {}
+    },
+    "promotion_attempts": {
+      "columns": {
+        "claim_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "claim_expires_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_owner": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_token": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "content_identity": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "delayed_vendor_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "expected_predecessor_identity": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "failure_class": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "failure_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "lane_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "last_heartbeat_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "observation_sequence": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "prepared_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "prepared_classification": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "public_config_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "public_vendor_keys": {
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "ARRAY[]::text[]"
+        },
+        "publication_identity": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "repack_search_index_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "retry_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "retry_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'assembling'::text"
+        },
+        "target_watermark": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "terminal_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "terminal_receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "terminal_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "promotion_attempts_claimable_idx": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "lane_key",
+            "retry_at",
+            "claim_expires_at"
+          ],
+          "unique": false,
+          "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
+        },
+        "promotion_attempts_one_active_lane": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "lane_key"
+          ],
+          "unique": true,
+          "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
+        }
+      },
+      "uniqueConstraints": {
+        "promotion_attempts_content_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "lane_key",
+            "target_watermark",
+            "content_identity"
+          ],
+          "nullsNotDistinct": false
+        },
+        "promotion_attempts_target_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "lane_key",
+            "target_watermark"
+          ],
+          "nullsNotDistinct": false
+        },
+        "promotion_attempts_tenant_unique": {
+          "columns": [
+            "id",
+            "organization_id",
+            "deployment_key",
+            "lane_key"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "promotion_attempts_lane_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "lane_key"
+          ],
+          "referencedTable": "promotion_lanes",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key",
+            "lane_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "promotion_attempts_claim_shape_check": {
+          "value": "((claim_count >= 0) AND (retry_count >= 0) AND (((claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL)) OR ((claim_owner IS NOT NULL) AND (claim_token IS NOT NULL) AND (claim_expires_at IS NOT NULL) AND (last_heartbeat_at IS NOT NULL) AND (claim_owner = btrim(claim_owner)) AND ((char_length(claim_owner) >= 1) AND (char_length(claim_owner) <= 128)) AND (claim_count > 0))))"
+        },
+        "promotion_attempts_delayed_vendor_count_check": {
+          "value": "((delayed_vendor_count >= 0) AND (delayed_vendor_count <= 100000))"
+        },
+        "promotion_attempts_failure_shape_check": {
+          "value": "(((failure_class IS NULL) AND (failure_code IS NULL)) OR ((failure_class = ANY (ARRAY['technical'::text, 'deterministic'::text, 'reconciliation'::text, 'bootstrap'::text])) AND (failure_code ~ '^[A-Z0-9_]{1,128}$'::text)))"
+        },
+        "promotion_attempts_hashes_check": {
+          "value": "(((content_identity IS NULL) OR (content_identity ~ '^[0-9a-f]{64}$'::text)) AND ((public_config_hash IS NULL) OR (public_config_hash ~ '^[0-9a-f]{64}$'::text)) AND ((repack_search_index_hash IS NULL) OR (repack_search_index_hash ~ '^[0-9a-f]{64}$'::text)) AND ((terminal_receipt_sha256 IS NULL) OR (terminal_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)))"
+        },
+        "promotion_attempts_identities_check": {
+          "value": "(((publication_identity IS NULL) OR ((publication_identity = btrim(publication_identity)) AND ((char_length(publication_identity) >= 1) AND (char_length(publication_identity) <= 256)))) AND ((expected_predecessor_identity IS NULL) OR ((expected_predecessor_identity = btrim(expected_predecessor_identity)) AND ((char_length(expected_predecessor_identity) >= 1) AND (char_length(expected_predecessor_identity) <= 256)))))"
+        },
+        "promotion_attempts_prepared_check": {
+          "value": "(((prepared_classification IS NULL) OR (prepared_classification = ANY (ARRAY['publish'::text, 'refresh_unchanged'::text]))) AND ((observation_sequence IS NULL) OR ((observation_sequence >= 1) AND (observation_sequence <= 2147483647))) AND promotion_public_vendor_keys_valid(public_vendor_keys))"
+        },
+        "promotion_attempts_receipt_size_check": {
+          "value": "(((terminal_receipt_body IS NULL) = (terminal_receipt_sha256 IS NULL)) AND ((terminal_receipt_body IS NULL) OR (octet_length(terminal_receipt_body) <= 262144)))"
+        },
+        "promotion_attempts_retry_shape_check": {
+          "value": "((state = 'retry_wait'::text) = (retry_at IS NOT NULL))"
+        },
+        "promotion_attempts_state_check": {
+          "value": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text, 'published'::text, 'unchanged'::text, 'failed'::text, 'rolled_back'::text]))"
+        },
+        "promotion_attempts_target_check": {
+          "value": "(target_watermark > 0)"
+        },
+        "promotion_attempts_terminal_shape_check": {
+          "value": "(((state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text])) AND (terminal_at IS NULL) AND (terminal_receipt_body IS NULL) AND (terminal_receipt_sha256 IS NULL)) OR ((state = ANY (ARRAY['published'::text, 'unchanged'::text, 'rolled_back'::text])) AND (terminal_at IS NOT NULL) AND (terminal_receipt_body IS NOT NULL) AND (terminal_receipt_sha256 IS NOT NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)) OR ((state = 'failed'::text) AND (terminal_at IS NOT NULL) AND (failure_class IS NOT NULL) AND (failure_code IS NOT NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)))"
+        }
+      }
+    },
+    "promotion_lanes": {
+      "columns": {
+        "bootstrap_state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'unverified'::text"
+        },
+        "bootstrap_verified_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "confirmed_publication_identity": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "confirmed_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "confirmed_watermark": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "delayed_vendor_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "lane_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "last_activated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "last_activated_watermark": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "last_unchanged_observed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "last_unchanged_watermark": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "next_retry_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "requested_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "requested_watermark": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "settled_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "settled_watermark": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "promotion_lanes_requested_idx": {
+          "columns": [
+            "deployment_key",
+            "lane_key",
+            "requested_at",
+            "organization_id"
+          ],
+          "unique": false,
+          "where": "(bootstrap_state <> 'unverified'::text)"
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "promotion_lanes_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "promotion_lanes_activated_time_check": {
+          "value": "((last_activated_watermark = 0) = (last_activated_at IS NULL))"
+        },
+        "promotion_lanes_bootstrap_shape_check": {
+          "value": "(((bootstrap_state = 'unverified'::text) AND (bootstrap_verified_at IS NULL)) OR ((bootstrap_state = 'verified_empty'::text) AND (bootstrap_verified_at IS NOT NULL) AND (confirmed_watermark = 0) AND (confirmed_publication_identity IS NULL) AND (confirmed_receipt_sha256 IS NULL)) OR ((bootstrap_state = 'verified_local'::text) AND (bootstrap_verified_at IS NOT NULL) AND (confirmed_watermark > 0) AND (confirmed_publication_identity IS NOT NULL) AND (confirmed_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)))"
+        },
+        "promotion_lanes_bootstrap_state_check": {
+          "value": "(bootstrap_state = ANY (ARRAY['unverified'::text, 'verified_empty'::text, 'verified_local'::text]))"
+        },
+        "promotion_lanes_confirmed_identity_check": {
+          "value": "((confirmed_publication_identity IS NULL) OR ((confirmed_publication_identity = btrim(confirmed_publication_identity)) AND ((char_length(confirmed_publication_identity) >= 1) AND (char_length(confirmed_publication_identity) <= 256))))"
+        },
+        "promotion_lanes_delayed_vendor_count_check": {
+          "value": "((delayed_vendor_count >= 0) AND (delayed_vendor_count <= 100000))"
+        },
+        "promotion_lanes_keys_check": {
+          "value": "((deployment_key = btrim(deployment_key)) AND (deployment_key ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text) AND (lane_key = btrim(lane_key)) AND (lane_key ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text))"
+        },
+        "promotion_lanes_unchanged_time_check": {
+          "value": "((last_unchanged_watermark IS NULL) = (last_unchanged_observed_at IS NULL))"
+        },
+        "promotion_lanes_watermarks_check": {
+          "value": "((settled_watermark >= 0) AND (requested_watermark >= 0) AND (requested_watermark <= settled_watermark) AND (confirmed_watermark >= 0) AND (last_activated_watermark >= 0) AND (last_activated_watermark <= confirmed_watermark) AND ((last_unchanged_watermark IS NULL) OR (last_unchanged_watermark >= 0)))"
+        }
+      }
+    },
+    "promotion_operations": {
+      "columns": {
+        "acknowledged_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "attempt_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "canonical_request_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "lane_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "last_sent_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "operation_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "operation_index": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "operation_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "request_path": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "request_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "send_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'pending'::text"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "promotion_operations_resume_idx": {
+          "columns": [
+            "attempt_id",
+            "operation_index"
+          ],
+          "unique": false,
+          "where": "(state <> 'acknowledged'::text)"
+        }
+      },
+      "uniqueConstraints": {
+        "promotion_operations_attempt_index_unique": {
+          "columns": [
+            "attempt_id",
+            "operation_index"
+          ],
+          "nullsNotDistinct": false
+        },
+        "promotion_operations_attempt_operation_unique": {
+          "columns": [
+            "attempt_id",
+            "operation_id"
+          ],
+          "nullsNotDistinct": false
+        },
+        "promotion_operations_lane_operation_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "lane_key",
+            "operation_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "promotion_operations_attempt_fk": {
+          "columns": [
+            "attempt_id",
+            "organization_id",
+            "deployment_key",
+            "lane_key"
+          ],
+          "referencedTable": "promotion_attempts",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "deployment_key",
+            "lane_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "promotion_operations_delivery_shape_check": {
+          "value": "((send_count >= 0) AND (((state = 'pending'::text) AND (send_count = 0) AND (last_sent_at IS NULL) AND (acknowledged_at IS NULL) AND (receipt_body IS NULL) AND (receipt_sha256 IS NULL)) OR ((state = 'sent'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NULL) AND (receipt_body IS NULL) AND (receipt_sha256 IS NULL)) OR ((state = 'acknowledged'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NOT NULL) AND (receipt_body IS NOT NULL) AND (receipt_sha256 ~ '^[0-9a-f]{64}$'::text))))"
+        },
+        "promotion_operations_identity_check": {
+          "value": "((operation_id = btrim(operation_id)) AND (operation_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text) AND (operation_kind = btrim(operation_kind)) AND (operation_kind ~ '^[A-Za-z][A-Za-z0-9._:-]{0,63}$'::text) AND (request_path = btrim(request_path)) AND ((char_length(request_path) >= 2) AND (char_length(request_path) <= 512)) AND (request_path ~ '^/[A-Za-z0-9._~!$&''()*+,;=:@%/-]+$'::text))"
+        },
+        "promotion_operations_index_check": {
+          "value": "((operation_index >= 0) AND (operation_index <= 4097))"
+        },
+        "promotion_operations_receipt_size_check": {
+          "value": "((receipt_body IS NULL) OR (octet_length(receipt_body) <= 262144))"
+        },
+        "promotion_operations_request_check": {
+          "value": "((request_sha256 ~ '^[0-9a-f]{64}$'::text) AND ((octet_length(canonical_request_body) >= 2) AND (octet_length(canonical_request_body) <= 131072)))"
+        },
+        "promotion_operations_state_check": {
+          "value": "(state = ANY (ARRAY['pending'::text, 'sent'::text, 'acknowledged'::text]))"
+        }
+      }
     },
     "provider_config_revisions": {
       "columns": {
