@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   canonicalJson,
   classifyProductionDataReleaseError,
+  decodeProductionAuthSecretBase64,
   productionAuthKeyIdSchema,
   productionPublicationReceiptSigningValue,
   productionPublicationRequestSigningValue,
@@ -116,6 +117,17 @@ test("publication signing values are canonical across runtimes", () => {
     productionAuthKeyIdSchema.safeParse(`${"a".repeat(61)}.v1`).success,
     false,
   );
+});
+
+test("publication secrets decode canonical base64 into exact opaque bytes", () => {
+  const bytes = Uint8Array.from([
+    0xff, 0x00, 0x80, 0x7f, 0xde, 0xad, 0xbe, 0xef,
+    ...Array.from({ length: 24 }, (_, index) => index),
+  ]);
+  const encoded = btoa(String.fromCharCode(...bytes));
+  assert.deepEqual(decodeProductionAuthSecretBase64(encoded), bytes);
+  assert.equal(decodeProductionAuthSecretBase64("/x=="), null);
+  assert.equal(decodeProductionAuthSecretBase64("A".repeat(348)), null);
 });
 
 test("batch hashes ignore transport envelope fields", async () => {

@@ -5,6 +5,8 @@ export * from "./provider-feed.ts";
 export * from "./provider-stream-contract-v2.ts";
 export * from "./public-repacks.ts";
 export * from "./repack-heat.ts";
+export * from "./repack-heat-publication.ts";
+export * from "./repack-heat-publication-receipts.ts";
 export * from "./provider.ts";
 export * from "./quarantine.ts";
 export * from "./operations.ts";

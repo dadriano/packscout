@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PRODUCTION_DATA_RELEASE_PATHS } from "./data-release-v2-publication.ts";
+import { PRODUCTION_REPACK_HEAT_PATHS } from "./repack-heat-publication.ts";
 
 export const PRODUCTION_AUTH_SIGNATURE_VERSION = "v1" as const;
 export const PRODUCTION_AUTH_WINDOW_MILLISECONDS = 5 * 60 * 1_000;
@@ -23,6 +24,8 @@ export const PRODUCTION_AUTH_KEY_ID_PATTERN =
   /^(?=.{4,64}$)[A-Za-z0-9](?:[A-Za-z0-9._-]{0,54})[._-]v[1-9][0-9]*$/u;
 export const PRODUCTION_AUTH_NONCE_PATTERN = /^[A-Za-z0-9_-]{16,128}$/u;
 export const PRODUCTION_AUTH_TIMESTAMP_PATTERN = /^\d{13}$/u;
+export const PRODUCTION_AUTH_CANONICAL_BASE64_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 
 export const productionAuthKeyIdSchema = z.string()
   .regex(PRODUCTION_AUTH_KEY_ID_PATTERN);
@@ -31,6 +34,50 @@ export const productionAuthNonceSchema = z.string()
 export const productionAuthTimestampSchema = z.string()
   .regex(PRODUCTION_AUTH_TIMESTAMP_PATTERN)
   .refine((value) => Number.isSafeInteger(Number(value)));
+
+const BASE64_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+export function decodeProductionAuthSecretBase64(
+  value: string,
+): Uint8Array | null {
+  if (
+    value.length === 0 ||
+    value.length > 344 ||
+    !PRODUCTION_AUTH_CANONICAL_BASE64_PATTERN.test(value)
+  ) {
+    return null;
+  }
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  const output = new Uint8Array((value.length / 4) * 3 - padding);
+  let outputIndex = 0;
+  for (let offset = 0; offset < value.length; offset += 4) {
+    const first = BASE64_ALPHABET.indexOf(value[offset]!);
+    const second = BASE64_ALPHABET.indexOf(value[offset + 1]!);
+    const third = value[offset + 2] === "="
+      ? 0
+      : BASE64_ALPHABET.indexOf(value[offset + 2]!);
+    const fourth = value[offset + 3] === "="
+      ? 0
+      : BASE64_ALPHABET.indexOf(value[offset + 3]!);
+    const packed = (first << 18) | (second << 12) | (third << 6) | fourth;
+    if (outputIndex < output.length) output[outputIndex++] = packed >>> 16;
+    if (outputIndex < output.length) output[outputIndex++] = packed >>> 8;
+    if (outputIndex < output.length) output[outputIndex++] = packed;
+  }
+  const lastCompleteOffset = value.length - 4;
+  const secondLast = BASE64_ALPHABET.indexOf(value[lastCompleteOffset + 1]!);
+  const thirdLast = value[lastCompleteOffset + 2] === "="
+    ? 0
+    : BASE64_ALPHABET.indexOf(value[lastCompleteOffset + 2]!);
+  if (
+    (padding === 2 && (secondLast & 0x0f) !== 0) ||
+    (padding === 1 && (thirdLast & 0x03) !== 0)
+  ) {
+    return null;
+  }
+  return output;
+}
 export const productionDataReleasePathSchema = z.enum([
   PRODUCTION_DATA_RELEASE_PATHS.activeState,
   PRODUCTION_DATA_RELEASE_PATHS.start,
@@ -42,13 +89,34 @@ export const productionDataReleasePathSchema = z.enum([
   PRODUCTION_DATA_RELEASE_PATHS.retain,
 ]);
 
+export const productionRepackHeatPathSchema = z.enum([
+  PRODUCTION_REPACK_HEAT_PATHS.activeState,
+  PRODUCTION_REPACK_HEAT_PATHS.start,
+  PRODUCTION_REPACK_HEAT_PATHS.applyBatch,
+  PRODUCTION_REPACK_HEAT_PATHS.finalize,
+  PRODUCTION_REPACK_HEAT_PATHS.status,
+  PRODUCTION_REPACK_HEAT_PATHS.refreshFrame,
+  PRODUCTION_REPACK_HEAT_PATHS.retain,
+]);
+
+export const productionPublicationPathSchema = z.union([
+  productionDataReleasePathSchema,
+  productionRepackHeatPathSchema,
+]);
+
 export type ProductionDataReleasePath = z.infer<
   typeof productionDataReleasePathSchema
+>;
+export type ProductionRepackHeatPath = z.infer<
+  typeof productionRepackHeatPathSchema
+>;
+export type ProductionPublicationPath = z.infer<
+  typeof productionPublicationPathSchema
 >;
 
 export function productionPublicationRequestSigningValue(input: Readonly<{
   method: "POST" | "post";
-  path: ProductionDataReleasePath;
+  path: ProductionPublicationPath;
   bodyDigest: string;
   timestamp: string;
   nonce: string;
