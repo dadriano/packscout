@@ -1,17 +1,17 @@
 {
-  "source": "approved public-change settlement catalog contract",
+  "source": "approved public catalog configuration contract",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260815010000_public_change_settlement/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260815020000_approved_public_catalog_configuration/migration.sql"
   },
   "expectedCounts": {
-    "tables": 31,
+    "tables": 32,
     "enums": 22,
-    "columns": 358,
-    "indexes": 51,
-    "uniqueConstraints": 19,
-    "foreignKeys": 127,
-    "checkConstraints": 68
+    "columns": 367,
+    "indexes": 52,
+    "uniqueConstraints": 22,
+    "foreignKeys": 131,
+    "checkConstraints": 72
   },
   "enums": {
     "admin_alert_state": [
@@ -438,6 +438,146 @@
         }
       }
     },
+    "approved_public_catalog_configurations": {
+      "columns": {
+        "approved_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "configuration_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "configuration_json": {
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "configuration_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "revision": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "approved_public_catalog_configurations_change_idx": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "approved_public_catalog_configurations_hash_unique": {
+          "columns": [
+            "organization_id",
+            "configuration_hash"
+          ],
+          "nullsNotDistinct": false
+        },
+        "approved_public_catalog_configurations_key_unique": {
+          "columns": [
+            "organization_id",
+            "configuration_key"
+          ],
+          "nullsNotDistinct": false
+        },
+        "approved_public_catalog_configurations_revision_unique": {
+          "columns": [
+            "organization_id",
+            "revision"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "approved_public_catalog_configurations_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "approved_public_catalog_configurations_public_change_fk": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "approved_public_catalog_configurations_hash_valid": {
+          "value": "(configuration_hash ~ '^[0-9a-f]{64}$'::text)"
+        },
+        "approved_public_catalog_configurations_json_object": {
+          "value": "(jsonb_typeof(configuration_json) = 'object'::text)"
+        },
+        "approved_public_catalog_configurations_key_bounded": {
+          "value": "((configuration_key = btrim(configuration_key)) AND ((char_length(configuration_key) >= 1) AND (char_length(configuration_key) <= 128)) AND (configuration_key ~ '^[A-Za-z0-9][A-Za-z0-9._:-]*$'::text))"
+        },
+        "approved_public_catalog_configurations_revision_positive": {
+          "value": "(revision > 0)"
+        }
+      }
+    },
     "audit_events": {
       "columns": {
         "action": {
@@ -672,6 +812,21 @@
           "referencedTable": "canonical_revisions",
           "referencedColumns": [
             "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "canonical_entities_current_revision_scope_fk": {
+          "columns": [
+            "current_revision_id",
+            "id",
+            "organization_id"
+          ],
+          "referencedTable": "canonical_revisions",
+          "referencedColumns": [
+            "id",
+            "entity_id",
+            "organization_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -3607,6 +3762,21 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
+        "provider_sources_active_revision_scope_fk": {
+          "columns": [
+            "active_revision_id",
+            "id",
+            "organization_id"
+          ],
+          "referencedTable": "provider_config_revisions",
+          "referencedColumns": [
+            "id",
+            "provider_id",
+            "organization_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "provider_sources_organization_id_organizations_id_fk": {
           "columns": [
             "organization_id"
@@ -5287,42 +5457,6 @@
         "source_records_external_id_not_blank": {
           "value": "(length(TRIM(BOTH FROM external_id)) > 0)"
         }
-      }
-    }
-  },
-  "nativeExtensions": {
-    "foreignKeys": {
-      "canonical_entities_current_revision_scope_fk": {
-        "table": "canonical_entities",
-        "columns": [
-          "current_revision_id",
-          "id",
-          "organization_id"
-        ],
-        "referencedTable": "canonical_revisions",
-        "referencedColumns": [
-          "id",
-          "entity_id",
-          "organization_id"
-        ],
-        "onDelete": "restrict",
-        "onUpdate": "no action"
-      },
-      "provider_sources_active_revision_scope_fk": {
-        "table": "provider_sources",
-        "columns": [
-          "active_revision_id",
-          "id",
-          "organization_id"
-        ],
-        "referencedTable": "provider_config_revisions",
-        "referencedColumns": [
-          "id",
-          "provider_id",
-          "organization_id"
-        ],
-        "onDelete": "restrict",
-        "onUpdate": "no action"
       }
     }
   }

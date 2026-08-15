@@ -1,4 +1,5 @@
 import { httpRouter } from "convex/server";
+import { PRODUCTION_DATA_RELEASE_PATHS } from "@packscout/contracts";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { handleAuthenticatedPublicationRequest } from "./productionDataReleaseAuth";
@@ -6,7 +7,7 @@ import { handleAuthenticatedPublicationRequest } from "./productionDataReleaseAu
 const http = httpRouter();
 
 http.route({
-  path: "/internal/data-release/v2/start",
+  path: PRODUCTION_DATA_RELEASE_PATHS.start,
   method: "POST",
   handler: httpAction((ctx, request) =>
     handleAuthenticatedPublicationRequest(
@@ -18,7 +19,7 @@ http.route({
 });
 
 http.route({
-  path: "/internal/data-release/v2/apply-batch",
+  path: PRODUCTION_DATA_RELEASE_PATHS.applyBatch,
   method: "POST",
   handler: httpAction((ctx, request) =>
     handleAuthenticatedPublicationRequest(
@@ -30,7 +31,7 @@ http.route({
 });
 
 http.route({
-  path: "/internal/data-release/v2/finalize",
+  path: PRODUCTION_DATA_RELEASE_PATHS.finalize,
   method: "POST",
   handler: httpAction((ctx, request) =>
     handleAuthenticatedPublicationRequest(
@@ -42,7 +43,7 @@ http.route({
 });
 
 http.route({
-  path: "/internal/data-release/v2/status",
+  path: PRODUCTION_DATA_RELEASE_PATHS.status,
   method: "POST",
   handler: httpAction((ctx, request) =>
     handleAuthenticatedPublicationRequest(
@@ -54,7 +55,7 @@ http.route({
 });
 
 http.route({
-  path: "/internal/data-release/v2/refresh-observation",
+  path: PRODUCTION_DATA_RELEASE_PATHS.refreshObservation,
   method: "POST",
   handler: httpAction((ctx, request) =>
     handleAuthenticatedPublicationRequest(
@@ -66,7 +67,7 @@ http.route({
 });
 
 http.route({
-  path: "/internal/data-release/v2/rollback",
+  path: PRODUCTION_DATA_RELEASE_PATHS.rollback,
   method: "POST",
   handler: httpAction((ctx, request) =>
     handleAuthenticatedPublicationRequest(
@@ -78,7 +79,7 @@ http.route({
 });
 
 http.route({
-  path: "/internal/data-release/v2/retain",
+  path: PRODUCTION_DATA_RELEASE_PATHS.retain,
   method: "POST",
   handler: httpAction((ctx, request) =>
     handleAuthenticatedPublicationRequest(

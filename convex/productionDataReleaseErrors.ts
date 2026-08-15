@@ -1,31 +1,7 @@
 import { ConvexError } from "convex/values";
+import type { ProductionDataReleaseErrorCode } from "@packscout/contracts";
 
-export type ProductionDataReleaseErrorCode =
-  | "PUBLICATION_AUTH_MISSING"
-  | "PUBLICATION_AUTH_KEY_UNKNOWN"
-  | "PUBLICATION_AUTH_INVALID"
-  | "PUBLICATION_AUTH_STALE"
-  | "PUBLICATION_AUTH_REPLAYED"
-  | "PUBLICATION_BODY_TOO_LARGE"
-  | "PUBLICATION_SCHEMA_UNSUPPORTED"
-  | "PUBLICATION_REQUEST_INVALID"
-  | "PUBLICATION_OPERATION_CONFLICT"
-  | "PUBLICATION_STATE_CONFLICT"
-  | "PUBLICATION_PREDECESSOR_CONFLICT"
-  | "PUBLICATION_SEQUENCE_REGRESSED"
-  | "PUBLICATION_MANIFEST_BLOCKED"
-  | "PUBLICATION_MANIFEST_MISMATCH"
-  | "PUBLICATION_BATCH_CONFLICT"
-  | "PUBLICATION_BATCH_OUT_OF_ORDER"
-  | "PUBLICATION_BATCH_TOO_LARGE"
-  | "PUBLICATION_ENTITY_INVALID"
-  | "PUBLICATION_REFERENCE_INVALID"
-  | "PUBLICATION_PROTECTED_FIELD"
-  | "PUBLICATION_RECONCILIATION_FAILED"
-  | "PUBLICATION_REFRESH_STALE"
-  | "PUBLICATION_ROLLBACK_UNSAFE"
-  | "PUBLICATION_CLEAR_DISABLED"
-  | "PUBLICATION_RETENTION_UNSAFE";
+export type { ProductionDataReleaseErrorCode } from "@packscout/contracts";
 
 const SAFE_MESSAGES: Record<ProductionDataReleaseErrorCode, string> = {
   PUBLICATION_AUTH_MISSING: "Publication authentication is required.",
@@ -53,6 +29,7 @@ const SAFE_MESSAGES: Record<ProductionDataReleaseErrorCode, string> = {
   PUBLICATION_ROLLBACK_UNSAFE: "The requested rollback target is not safe.",
   PUBLICATION_CLEAR_DISABLED: "Catalog clearing is not enabled for this deployment.",
   PUBLICATION_RETENTION_UNSAFE: "Retention refused to delete protected release data.",
+  PUBLICATION_INTERNAL_ERROR: "The publication request failed safely.",
 };
 
 export function refuseProductionDataRelease(

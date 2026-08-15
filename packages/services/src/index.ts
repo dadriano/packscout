@@ -2,6 +2,8 @@ export * from "./auth-service.ts";
 export * from "./canonical-projection-validation.ts";
 export * from "./catalog-ev-input-projection.ts";
 export * from "./catalog-projection-contracts.ts";
+export * from "./catalog-release-assembler.ts";
+export * from "./catalog-release-types.ts";
 export * from "./catalog-projection-service.ts";
 export * from "./estimated-ev-calculator.ts";
 export * from "./estimated-ev-projection-contracts.ts";

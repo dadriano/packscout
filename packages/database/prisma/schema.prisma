@@ -59,6 +59,26 @@ model audit_events {
   @@index([organization_id, occurred_at], map: "audit_events_organization_occurred_idx")
 }
 
+/// Immutable, causally ordered approval for one public catalog policy.
+model approved_public_catalog_configurations {
+  id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id       String                @db.Uuid
+  configuration_key     String
+  revision              Int
+  configuration_json    Json
+  configuration_hash    String
+  approved_at           DateTime              @db.Timestamptz(6)
+  public_change_sequence BigInt
+  created_at            DateTime              @default(now()) @db.Timestamptz(6)
+  organizations         organizations         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "approved_public_catalog_configurations_organization_fk")
+  public_change_causes  public_change_causes  @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "approved_public_catalog_configurations_public_change_fk")
+
+  @@unique([organization_id, configuration_key], map: "approved_public_catalog_configurations_key_unique")
+  @@unique([organization_id, revision], map: "approved_public_catalog_configurations_revision_unique")
+  @@unique([organization_id, configuration_hash], map: "approved_public_catalog_configurations_hash_unique")
+  @@index([organization_id, public_change_sequence], map: "approved_public_catalog_configurations_change_idx")
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model auth_rate_limits {
   bucket_key        String    @id
@@ -218,6 +238,7 @@ model public_change_causes {
   canonical_relationships_created     canonical_relationships[]             @relation("canonical_relationships_created_change")
   canonical_relationships_resolved    canonical_relationships[]             @relation("canonical_relationships_resolved_change")
   public_derivation_obligations       public_derivation_obligations[]       @relation("public_derivation_obligations_cause")
+  approved_public_catalog_configurations approved_public_catalog_configurations[]
 
   @@id([organization_id, sequence], map: "public_change_causes_pkey")
   @@index([organization_id, occurred_at, sequence], map: "public_change_causes_organization_occurred_idx")
@@ -453,6 +474,7 @@ model organizations {
   source_record_projection_revisions  source_record_projection_revisions[]
   source_records                      source_records[]
   settled_public_watermarks           settled_public_watermarks?
+  approved_public_catalog_configurations approved_public_catalog_configurations[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.

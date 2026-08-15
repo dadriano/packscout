@@ -1,30 +1,14 @@
-import { DATA_RELEASE_SCHEMA_VERSION } from "@packscout/contracts";
+import {
+  DATA_RELEASE_SCHEMA_VERSION,
+  productionReceiptSchema,
+  type ProductionOperationKind,
+  type ProductionReceipt,
+} from "@packscout/contracts";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { canonicalJson } from "./dataReleaseCanonicalHash";
 import { refuseProductionDataRelease } from "./productionDataReleaseErrors";
 import { productionReceiptHash } from "./productionDataReleaseProtocol";
-
-export type ProductionOperationKind =
-  | "start"
-  | "applyBatch"
-  | "finalize"
-  | "refreshObservation"
-  | "rollback"
-  | "retain";
-
-export type ProductionReceipt = Readonly<{
-  schemaVersion: typeof DATA_RELEASE_SCHEMA_VERSION;
-  operationId: string;
-  operationKind: ProductionOperationKind;
-  publicationId: string | null;
-  terminalState: string;
-  result: string;
-  serverTime: string;
-  requestDigest: string;
-  details: Readonly<Record<string, unknown>>;
-  receiptDigest: string;
-}>;
 
 async function parseStoredReceipt(
   operation: Doc<"dataReleaseOperations">,
@@ -38,7 +22,9 @@ async function parseStoredReceipt(
     refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
   }
   try {
-    const parsed = JSON.parse(operation.receiptJson) as ProductionReceipt;
+    const parsed = productionReceiptSchema.parse(
+      JSON.parse(operation.receiptJson) as unknown,
+    );
     const { receiptDigest: _storedDigest, ...receiptWithoutDigest } = parsed;
     if (
       parsed.operationId !== operation.operationId ||
@@ -124,10 +110,10 @@ export async function storeProductionReceipt(
     requestDigest: input.requestDigest,
     details: input.details,
   } as const;
-  const receipt: ProductionReceipt = {
+  const receipt = productionReceiptSchema.parse({
     ...receiptWithoutDigest,
     receiptDigest: await productionReceiptHash(receiptWithoutDigest),
-  };
+  });
   const receiptJson = canonicalJson(receipt);
   if (new TextEncoder().encode(receiptJson).byteLength > 16 * 1_024) {
     refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");

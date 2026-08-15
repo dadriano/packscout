@@ -14,14 +14,11 @@ import {
 import { refuseProductionDataRelease } from "./productionDataReleaseErrors";
 import {
   MAX_PRODUCTION_BATCH_BYTES,
-  type productionSearchShardSchema,
+  type ProductionSearchShard,
 } from "./productionDataReleaseProtocol";
 import {
   repackSearchRowMatchesDetail,
 } from "./publicRepackValidation";
-import type { z } from "zod";
-
-type ProductionSearchShard = z.infer<typeof productionSearchShardSchema>;
 
 export type DependentWriteResult = Readonly<{
   unresolvedRepackDelta: number;
@@ -311,7 +308,7 @@ export async function writeSearchShards(
       rowCount: shard.rowCount,
       byteCount: shard.byteCount,
       contentHash: shard.contentHash,
-      rows: shard.rows,
+      rows: [...shard.rows],
     });
   }
   return {

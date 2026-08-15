@@ -1,5 +1,22 @@
 import type { FunctionReference } from "convex/server";
 import { ConvexError, v } from "convex/values";
+import {
+  MAX_PRODUCTION_AUTH_SECRET_BYTES,
+  MIN_PRODUCTION_AUTH_SECRET_BYTES,
+  PRODUCTION_AUTH_HEADER_NAMES,
+  PRODUCTION_AUTH_KEY_ID_PATTERN,
+  PRODUCTION_AUTH_NONCE_HASH_DOMAIN,
+  PRODUCTION_AUTH_NONCE_PATTERN,
+  PRODUCTION_AUTH_NONCE_RETENTION_MILLISECONDS,
+  PRODUCTION_AUTH_SHA256_PATTERN,
+  PRODUCTION_AUTH_SIGNATURE_VERSION,
+  PRODUCTION_AUTH_TIMESTAMP_PATTERN,
+  PRODUCTION_AUTH_WINDOW_MILLISECONDS,
+  productionDataReleaseErrorCodeSchema,
+  productionDataReleasePathSchema,
+  productionPublicationReceiptSigningValue,
+  productionPublicationRequestSigningValue,
+} from "@packscout/contracts";
 import { internal } from "./_generated/api";
 import {
   env,
@@ -16,14 +33,6 @@ import {
   MAX_PRODUCTION_HTTP_BODY_BYTES,
   productionReceiptHash,
 } from "./productionDataReleaseProtocol";
-
-const AUTH_VERSION = "v1" as const;
-const AUTH_WINDOW_MILLISECONDS = 5 * 60 * 1_000;
-const NONCE_RETENTION_MILLISECONDS = 10 * 60 * 1_000;
-const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
-const KEY_ID_PATTERN =
-  /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,54})[._-]v[1-9][0-9]*$/u;
-const NONCE_PATTERN = /^[A-Za-z0-9_-]{16,128}$/u;
 
 type ExecutionReference = FunctionReference<
   "mutation",
@@ -55,7 +64,7 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 function hexToBytes(value: string): Uint8Array | null {
-  if (!SHA256_PATTERN.test(value)) return null;
+  if (!PRODUCTION_AUTH_SHA256_PATTERN.test(value)) return null;
   return Uint8Array.from(
     value.match(/.{2}/gu)!.map((pair) => Number.parseInt(pair, 16)),
   );
@@ -74,7 +83,7 @@ async function sha256Bytes(bytes: Uint8Array): Promise<string> {
 }
 
 function configuredKeySecret(keyId: string): string | null {
-  if (!KEY_ID_PATTERN.test(keyId)) return null;
+  if (!PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId)) return null;
   const raw = env.PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS;
   if (raw === undefined) return null;
   try {
@@ -89,8 +98,8 @@ function configuredKeySecret(keyId: string): string | null {
     }
     const secret = (parsed as Record<string, unknown>)[keyId];
     return typeof secret === "string" &&
-        new TextEncoder().encode(secret).byteLength >= 32 &&
-        new TextEncoder().encode(secret).byteLength <= 256
+        new TextEncoder().encode(secret).byteLength >= MIN_PRODUCTION_AUTH_SECRET_BYTES &&
+        new TextEncoder().encode(secret).byteLength <= MAX_PRODUCTION_AUTH_SECRET_BYTES
       ? secret
       : null;
   } catch {
@@ -112,12 +121,12 @@ async function authenticateRequest(
   ctx: ActionCtx,
   request: Request,
 ): Promise<AuthenticatedRequest> {
-  const version = request.headers.get("x-packscout-signature-version");
-  const keyId = request.headers.get("x-packscout-key-id");
-  const timestamp = request.headers.get("x-packscout-timestamp");
-  const nonce = request.headers.get("x-packscout-nonce");
-  const declaredDigest = request.headers.get("x-packscout-content-sha256");
-  const signature = request.headers.get("x-packscout-signature");
+  const version = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.signatureVersion);
+  const keyId = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.keyId);
+  const timestamp = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.timestamp);
+  const nonce = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.nonce);
+  const declaredDigest = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.contentSha256);
+  const signature = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.signature);
   if (
     version === null ||
     keyId === null ||
@@ -145,14 +154,14 @@ async function authenticateRequest(
   }
   const timestampMilliseconds = Number(timestamp);
   if (
-    version !== AUTH_VERSION ||
-    !/^\d{13}$/u.test(timestamp) ||
+    version !== PRODUCTION_AUTH_SIGNATURE_VERSION ||
+    !PRODUCTION_AUTH_TIMESTAMP_PATTERN.test(timestamp) ||
     !Number.isSafeInteger(timestampMilliseconds) ||
-    Math.abs(Date.now() - timestampMilliseconds) > AUTH_WINDOW_MILLISECONDS
+    Math.abs(Date.now() - timestampMilliseconds) > PRODUCTION_AUTH_WINDOW_MILLISECONDS
   ) {
     throw new HttpRefusal("PUBLICATION_AUTH_STALE", 401);
   }
-  if (!NONCE_PATTERN.test(nonce)) {
+  if (!PRODUCTION_AUTH_NONCE_PATTERN.test(nonce)) {
     throw new HttpRefusal("PUBLICATION_AUTH_INVALID", 401);
   }
   const bodyDigest = await sha256Bytes(bodyBytes);
@@ -164,14 +173,19 @@ async function authenticateRequest(
     throw new HttpRefusal("PUBLICATION_AUTH_INVALID", 401);
   }
   const key = await hmacKey(secret);
-  const signedValue = [
-    AUTH_VERSION,
-    request.method.toUpperCase(),
+  const path = productionDataReleasePathSchema.safeParse(
     new URL(request.url).pathname,
+  );
+  if (request.method.toUpperCase() !== "POST" || !path.success) {
+    throw new HttpRefusal("PUBLICATION_AUTH_INVALID", 401);
+  }
+  const signedValue = productionPublicationRequestSigningValue({
+    method: "POST",
+    path: path.data,
     bodyDigest,
     timestamp,
     nonce,
-  ].join("\n");
+  });
   const valid = await crypto.subtle.verify(
     "HMAC",
     key,
@@ -182,7 +196,7 @@ async function authenticateRequest(
     throw new HttpRefusal("PUBLICATION_AUTH_INVALID", 401);
   }
   const nonceHash = await sha256CanonicalJson(
-    "packscout.data-release.auth-nonce.v1",
+    PRODUCTION_AUTH_NONCE_HASH_DOMAIN,
     { keyId, nonce },
   );
   await ctx.runMutation(internal.productionDataReleaseAuth.consumeNonce, {
@@ -190,7 +204,7 @@ async function authenticateRequest(
     nonceHash,
     requestDigest: bodyDigest,
     expiresAt: new Date(
-      Date.now() + NONCE_RETENTION_MILLISECONDS,
+      Date.now() + PRODUCTION_AUTH_NONCE_RETENTION_MILLISECONDS,
     ).toISOString(),
   });
   let bodyJson: string;
@@ -203,6 +217,7 @@ async function authenticateRequest(
 }
 
 function errorStatus(code: ProductionDataReleaseErrorCode): number {
+  if (code === "PUBLICATION_INTERNAL_ERROR") return 500;
   if (code === "PUBLICATION_BODY_TOO_LARGE") return 413;
   if (code.startsWith("PUBLICATION_AUTH_")) return 401;
   if (
@@ -221,9 +236,8 @@ function errorCode(error: unknown): ProductionDataReleaseErrorCode | null {
   if (error instanceof HttpRefusal) return error.code;
   if (!(error instanceof ConvexError)) return null;
   const data = error.data as { code?: unknown };
-  return typeof data.code === "string"
-    ? (data.code as ProductionDataReleaseErrorCode)
-    : null;
+  const parsed = productionDataReleaseErrorCodeSchema.safeParse(data.code);
+  return parsed.success ? parsed.data : null;
 }
 
 async function signReceipt(
@@ -237,7 +251,9 @@ async function signReceipt(
       await crypto.subtle.sign(
         "HMAC",
         key,
-        new TextEncoder().encode(`${AUTH_VERSION}\nreceipt\n${receiptDigest}`),
+        new TextEncoder().encode(
+          productionPublicationReceiptSigningValue(receiptDigest),
+        ),
       ),
     ),
   );
@@ -245,7 +261,7 @@ async function signReceipt(
     ok: true,
     receipt,
     responseAuth: {
-      signatureVersion: AUTH_VERSION,
+      signatureVersion: PRODUCTION_AUTH_SIGNATURE_VERSION,
       keyId,
       receiptDigest,
       signature,
@@ -310,9 +326,9 @@ export const consumeNonce = internalMutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     if (
-      !KEY_ID_PATTERN.test(args.keyId) ||
-      !SHA256_PATTERN.test(args.nonceHash) ||
-      !SHA256_PATTERN.test(args.requestDigest) ||
+      !PRODUCTION_AUTH_KEY_ID_PATTERN.test(args.keyId) ||
+      !PRODUCTION_AUTH_SHA256_PATTERN.test(args.nonceHash) ||
+      !PRODUCTION_AUTH_SHA256_PATTERN.test(args.requestDigest) ||
       !Number.isFinite(Date.parse(args.expiresAt))
     ) {
       refuseProductionDataRelease("PUBLICATION_AUTH_INVALID");
