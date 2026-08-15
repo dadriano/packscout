@@ -28,9 +28,9 @@ export const PACKSCOUT_TRANSACTION_OPTIONS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION = Object.freeze({
-  name: "20260815020000_approved_public_catalog_configuration",
-  checksum: "bf82bc2e5dc8d8c04eb053575f6d96b7cdd1c3c758037b3c2ade551c96122d78",
-  tableCount: 32,
+  name: "20260815030000_normalized_heat_observations",
+  checksum: "7eda052649c99ea5a94529fe0dd2a4f57a3d30653e1679ad78e6524f9defaafd",
+  tableCount: 36,
 });
 
 interface MigrationReadinessRow {

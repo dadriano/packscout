@@ -137,13 +137,6 @@ export class PrismaCatalogReleaseSourceRepository
         }],
       });
       if (!cause) throw new Error("Public configuration cause was not allocated.");
-      await identityMaterializer.materializeApprovedMappings(transaction, {
-        organizationId: this.organizationId,
-        approvedConfigurationKey: configuration.configurationKey,
-        publicChangeSequence: cause.sequence,
-        approvedAt,
-        mappings: configuration.repacks,
-      });
       const created = await transaction.approved_public_catalog_configurations.create({
         data: {
           organization_id: this.organizationId,
@@ -155,6 +148,13 @@ export class PrismaCatalogReleaseSourceRepository
           public_change_sequence: cause.sequence,
           created_at: approvedAt,
         },
+      });
+      await identityMaterializer.materializeApprovedMappings(transaction, {
+        organizationId: this.organizationId,
+        approvedConfigurationKey: configuration.configurationKey,
+        publicChangeSequence: cause.sequence,
+        approvedAt,
+        mappings: configuration.repacks,
       });
       await advanceSettledPublicWatermark(transaction, {
         organizationId: this.organizationId,

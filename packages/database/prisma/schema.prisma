@@ -61,21 +61,23 @@ model audit_events {
 
 /// Immutable, causally ordered approval for one public catalog policy.
 model approved_public_catalog_configurations {
-  id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organization_id       String                @db.Uuid
-  configuration_key     String
-  revision              Int
-  configuration_json    Json
-  configuration_hash    String
-  approved_at           DateTime              @db.Timestamptz(6)
-  public_change_sequence BigInt
-  created_at            DateTime              @default(now()) @db.Timestamptz(6)
-  organizations         organizations         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "approved_public_catalog_configurations_organization_fk")
-  public_change_causes  public_change_causes  @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "approved_public_catalog_configurations_public_change_fk")
+  id                              String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                 String                            @db.Uuid
+  configuration_key               String
+  revision                        Int
+  configuration_json              Json
+  configuration_hash              String
+  approved_at                     DateTime                          @db.Timestamptz(6)
+  public_change_sequence          BigInt
+  created_at                      DateTime                          @default(now()) @db.Timestamptz(6)
+  organizations                   organizations                     @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "approved_public_catalog_configurations_organization_fk")
+  public_change_causes            public_change_causes              @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "approved_public_catalog_configurations_public_change_fk")
+  public_repack_identity_mappings public_repack_identity_mappings[]
 
   @@unique([organization_id, configuration_key], map: "approved_public_catalog_configurations_key_unique")
   @@unique([organization_id, revision], map: "approved_public_catalog_configurations_revision_unique")
   @@unique([organization_id, configuration_hash], map: "approved_public_catalog_configurations_hash_unique")
+  @@unique([organization_id, configuration_key, public_change_sequence], map: "approved_public_catalog_configurations_mapping_source_unique")
   @@index([organization_id, public_change_sequence], map: "approved_public_catalog_configurations_change_idx")
 }
 
@@ -139,40 +141,43 @@ model canonical_relationships {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model canonical_revisions {
-  id                                                                                                                                   String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organization_id                                                                                                                      String                                @db.Uuid
-  entity_id                                                                                                                            String                                @db.Uuid
+  id                                                                                                                                   String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                                                      String                                 @db.Uuid
+  entity_id                                                                                                                            String                                 @db.Uuid
   revision_number                                                                                                                      Int
-  source_record_id                                                                                                                     String                                @db.Uuid
+  source_record_id                                                                                                                     String                                 @db.Uuid
   content_json                                                                                                                         Json
   content_hash                                                                                                                         String
   provenance_json                                                                                                                      Json
   provenance_hash                                                                                                                      String
   actor_key                                                                                                                            String?
-  source_updated_at                                                                                                                    DateTime                              @db.Timestamptz(6)
-  source_collected_at                                                                                                                  DateTime                              @db.Timestamptz(6)
-  accepted_at                                                                                                                          DateTime                              @default(now()) @db.Timestamptz(6)
+  source_updated_at                                                                                                                    DateTime                               @db.Timestamptz(6)
+  source_collected_at                                                                                                                  DateTime                               @db.Timestamptz(6)
+  accepted_at                                                                                                                          DateTime                               @default(now()) @db.Timestamptz(6)
   public_change_sequence                                                                                                               BigInt
-  canonical_entities_canonical_entities_current_revision_idTocanonical_revisions                                                       canonical_entities[]                  @relation("canonical_entities_current_revision_idTocanonical_revisions")
-  canonical_entities_canonical_revisions_entity_idTocanonical_entities                                                                 canonical_entities                    @relation("canonical_revisions_entity_idTocanonical_entities", fields: [entity_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_entity_id_canonical_entities_id_fk")
-  canonical_entities_canonical_revisions_entity_id_organization_idTocanonical_entities                                                 canonical_entities                    @relation("canonical_revisions_entity_id_organization_idTocanonical_entities", fields: [entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_entity_tenant_fk")
-  organizations                                                                                                                        organizations                         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_organization_id_organizations_id_fk")
-  source_records_canonical_revisions_source_record_idTosource_records                                                                  source_records                        @relation("canonical_revisions_source_record_idTosource_records", fields: [source_record_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_source_record_id_source_records_id_fk")
-  source_records_canonical_revisions_source_record_id_organization_idTosource_records                                                  source_records                        @relation("canonical_revisions_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_source_tenant_fk")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions    estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions        estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions                 estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions                    estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                        estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions")
-  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_idTocanonical_revisions                     source_record_projection_revisions[]  @relation("source_record_projection_revisions_canonical_revision_idTocanonical_revisions")
-  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions     source_record_projection_revisions[]  @relation("source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions")
-  public_change_causes                                                                                                                 public_change_causes                  @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "canonical_revisions_public_change_fk")
+  canonical_entities_canonical_entities_current_revision_idTocanonical_revisions                                                       canonical_entities[]                   @relation("canonical_entities_current_revision_idTocanonical_revisions")
+  canonical_entities_canonical_revisions_entity_idTocanonical_entities                                                                 canonical_entities                     @relation("canonical_revisions_entity_idTocanonical_entities", fields: [entity_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_entity_id_canonical_entities_id_fk")
+  canonical_entities_canonical_revisions_entity_id_organization_idTocanonical_entities                                                 canonical_entities                     @relation("canonical_revisions_entity_id_organization_idTocanonical_entities", fields: [entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_entity_tenant_fk")
+  organizations                                                                                                                        organizations                          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_organization_id_organizations_id_fk")
+  source_records_canonical_revisions_source_record_idTosource_records                                                                  source_records                         @relation("canonical_revisions_source_record_idTosource_records", fields: [source_record_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_source_record_id_source_records_id_fk")
+  source_records_canonical_revisions_source_record_id_organization_idTosource_records                                                  source_records                         @relation("canonical_revisions_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_source_tenant_fk")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions    estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions        estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions                 estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions                    estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                        estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions")
+  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_idTocanonical_revisions                     source_record_projection_revisions[]   @relation("source_record_projection_revisions_canonical_revision_idTocanonical_revisions")
+  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions     source_record_projection_revisions[]   @relation("source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions")
+  public_change_causes                                                                                                                 public_change_causes                   @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "canonical_revisions_public_change_fk")
+  normalized_heat_observations                                                                                                         normalized_heat_observations[]
+  normalized_heat_observation_outcomes                                                                                                 normalized_heat_observation_outcomes[]
 
   @@unique([entity_id, content_hash, provenance_hash], map: "canonical_revisions_content_provenance_unique")
   @@unique([entity_id, revision_number], map: "canonical_revisions_entity_number_unique")
   @@unique([id, entity_id, organization_id], map: "canonical_revisions_id_entity_organization_unique")
   @@unique([id, organization_id], map: "canonical_revisions_id_organization_unique")
+  @@unique([id, organization_id, public_change_sequence], map: "canonical_revisions_heat_source_unique")
   @@index([organization_id, accepted_at], map: "canonical_revisions_organization_accepted_idx")
   @@index([organization_id, public_change_sequence], map: "canonical_revisions_public_change_idx")
 }
@@ -222,22 +227,26 @@ model estimated_ev_recomputation_requests {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model public_change_causes {
-  organization_id                     String                                @db.Uuid
-  sequence                            BigInt
-  change_kind                         public_change_kind
-  entity_key                          String
-  source_key                          String?
-  source_revision_key                 String?
-  metadata_json                       Json                                  @default("{}")
-  occurred_at                         DateTime                              @db.Timestamptz(6)
-  authoritative_transaction_id        String
-  created_at                          DateTime                              @default(now()) @db.Timestamptz(6)
-  organizations                       organizations                         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_change_causes_organization_id_organizations_id_fk")
-  estimated_ev_recomputation_requests estimated_ev_recomputation_requests[]
-  canonical_revisions                 canonical_revisions[]
-  canonical_relationships_created     canonical_relationships[]             @relation("canonical_relationships_created_change")
-  canonical_relationships_resolved    canonical_relationships[]             @relation("canonical_relationships_resolved_change")
-  public_derivation_obligations       public_derivation_obligations[]       @relation("public_derivation_obligations_cause")
+  organization_id                      String                                 @db.Uuid
+  sequence                             BigInt
+  change_kind                          public_change_kind
+  entity_key                           String
+  source_key                           String?
+  source_revision_key                  String?
+  metadata_json                        Json                                   @default("{}")
+  occurred_at                          DateTime                               @db.Timestamptz(6)
+  authoritative_transaction_id         String
+  created_at                           DateTime                               @default(now()) @db.Timestamptz(6)
+  organizations                        organizations                          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_change_causes_organization_id_organizations_id_fk")
+  estimated_ev_recomputation_requests  estimated_ev_recomputation_requests[]
+  canonical_revisions                  canonical_revisions[]
+  canonical_relationships_created      canonical_relationships[]              @relation("canonical_relationships_created_change")
+  canonical_relationships_resolved     canonical_relationships[]              @relation("canonical_relationships_resolved_change")
+  public_derivation_obligations        public_derivation_obligations[]        @relation("public_derivation_obligations_cause")
+  public_repack_identity_mappings      public_repack_identity_mappings[]      @relation("public_repack_identity_mapping_change")
+  normalized_heat_observations_source  normalized_heat_observations[]         @relation("normalized_heat_observation_source_change")
+  normalized_heat_observations_mapping normalized_heat_observations[]         @relation("normalized_heat_observation_mapping_change")
+  normalized_heat_observation_outcomes normalized_heat_observation_outcomes[]
   approved_public_catalog_configurations approved_public_catalog_configurations[]
 
   @@id([organization_id, sequence], map: "public_change_causes_pkey")
@@ -442,39 +451,130 @@ model operators {
 }
 
 model organizations {
-  id                                  String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  slug                                String                                @unique(map: "organizations_slug_unique")
-  name                                String
-  created_at                          DateTime                              @default(now()) @db.Timestamptz(6)
-  admin_alerts                        admin_alerts[]
-  audit_events                        audit_events[]
-  canonical_entities                  canonical_entities[]
-  canonical_relationships             canonical_relationships[]
-  canonical_revisions                 canonical_revisions[]
-  estimated_ev_recomputation_requests estimated_ev_recomputation_requests[]
-  import_pages                        import_pages[]
-  import_runs                         import_runs[]
-  operational_events                  operational_events[]
-  operator_memberships                operator_memberships[]
-  operator_sessions                   operator_sessions[]
-  provider_config_revisions           provider_config_revisions[]
-  provider_connection_tests           provider_connection_tests[]
-  provider_cursor_checkpoints         provider_cursor_checkpoints[]
-  provider_health_states              provider_health_states[]
-  provider_schedules                  provider_schedules[]
-  provider_secret_versions            provider_secret_versions[]
-  provider_sources                    provider_sources[]
-  public_change_causes                public_change_causes[]
-  public_derivation_obligations       public_derivation_obligations[]
-  quarantine_attempts                 quarantine_attempts[]
-  quarantine_records                  quarantine_records[]
-  retention_executions                retention_executions[]
-  source_record_observations          source_record_observations[]
-  source_record_outcomes              source_record_outcomes[]
-  source_record_projection_revisions  source_record_projection_revisions[]
-  source_records                      source_records[]
-  settled_public_watermarks           settled_public_watermarks?
+  id                                   String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug                                 String                                 @unique(map: "organizations_slug_unique")
+  name                                 String
+  created_at                           DateTime                               @default(now()) @db.Timestamptz(6)
+  admin_alerts                         admin_alerts[]
+  audit_events                         audit_events[]
+  canonical_entities                   canonical_entities[]
+  canonical_relationships              canonical_relationships[]
+  canonical_revisions                  canonical_revisions[]
+  estimated_ev_recomputation_requests  estimated_ev_recomputation_requests[]
+  import_pages                         import_pages[]
+  import_runs                          import_runs[]
+  operational_events                   operational_events[]
+  operator_memberships                 operator_memberships[]
+  operator_sessions                    operator_sessions[]
+  provider_config_revisions            provider_config_revisions[]
+  provider_connection_tests            provider_connection_tests[]
+  provider_cursor_checkpoints          provider_cursor_checkpoints[]
+  provider_health_states               provider_health_states[]
+  provider_schedules                   provider_schedules[]
+  provider_secret_versions             provider_secret_versions[]
+  provider_sources                     provider_sources[]
+  public_change_causes                 public_change_causes[]
+  public_derivation_obligations        public_derivation_obligations[]
+  quarantine_attempts                  quarantine_attempts[]
+  quarantine_records                   quarantine_records[]
+  retention_executions                 retention_executions[]
+  source_record_observations           source_record_observations[]
+  source_record_outcomes               source_record_outcomes[]
+  source_record_projection_revisions   source_record_projection_revisions[]
+  source_records                       source_records[]
+  settled_public_watermarks            settled_public_watermarks?
+  public_repack_identity_mappings      public_repack_identity_mappings[]
+  normalized_heat_observations         normalized_heat_observations[]
+  normalized_heat_observation_outcomes normalized_heat_observation_outcomes[]
+  normalized_heat_window_checkpoints   normalized_heat_window_checkpoints?
   approved_public_catalog_configurations approved_public_catalog_configurations[]
+}
+
+/// Governed, immutable bridge from private canonical identity to stable public identity.
+/// This table contains check constraints and an immutability trigger defined in its migration.
+model public_repack_identity_mappings {
+  organization_id              String                         @db.Uuid
+  platform_key                 String
+  pack_external_id             String
+  public_repack_id             String                         @db.Uuid
+  approved_configuration_key   String
+  public_change_sequence       BigInt
+  approved_at                  DateTime                       @db.Timestamptz(6)
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  organizations                organizations                  @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_repack_identity_mappings_organization_fk")
+  public_change_causes         public_change_causes           @relation("public_repack_identity_mapping_change", fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "public_repack_identity_mappings_change_fk")
+  approved_public_catalog_configurations approved_public_catalog_configurations @relation(fields: [organization_id, approved_configuration_key, public_change_sequence], references: [organization_id, configuration_key, public_change_sequence], onUpdate: NoAction, map: "public_repack_identity_mappings_configuration_fk")
+  normalized_heat_observations normalized_heat_observations[]
+
+  @@id([organization_id, platform_key, pack_external_id], map: "public_repack_identity_mappings_pkey")
+  @@unique([organization_id, public_repack_id], map: "public_repack_identity_mappings_public_id_unique")
+  @@unique([organization_id, public_repack_id, public_change_sequence], map: "public_repack_identity_mappings_heat_source_unique")
+  @@index([organization_id, public_change_sequence], map: "public_repack_identity_mappings_change_idx")
+}
+
+/// Append-only, public-safe calculator inputs derived from canonical PostgreSQL evidence.
+/// This table contains shape and bounded-retention check constraints defined in its migration.
+model normalized_heat_observations {
+  id                                   String                                 @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                      String                                 @db.Uuid
+  observation_key                      String
+  canonical_revision_id                String                                 @db.Uuid
+  public_change_sequence               BigInt
+  mapping_public_change_sequence       BigInt
+  public_repack_id                     String                                 @db.Uuid
+  observation_kind                     String
+  occurred_at                          DateTime                               @db.Timestamptz(6)
+  catalog_sequence                     Int?
+  realized_return_basis_points         Int?
+  value_multiple_basis_points          Int?
+  available_chase_count                Int?
+  outcome_keys                         String[]                               @default([])
+  retained_until                       DateTime                               @db.Timestamptz(6)
+  created_at                           DateTime                               @default(now()) @db.Timestamptz(6)
+  organizations                        organizations                          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "normalized_heat_observations_organization_fk")
+  canonical_revisions                  canonical_revisions                    @relation(fields: [canonical_revision_id, organization_id, public_change_sequence], references: [id, organization_id, public_change_sequence], onUpdate: NoAction, map: "normalized_heat_observations_revision_fk")
+  public_change_causes_source          public_change_causes                   @relation("normalized_heat_observation_source_change", fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observations_source_change_fk")
+  public_change_causes_mapping         public_change_causes                   @relation("normalized_heat_observation_mapping_change", fields: [organization_id, mapping_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observations_mapping_change_fk")
+  public_repack_identity_mappings      public_repack_identity_mappings        @relation(fields: [organization_id, public_repack_id, mapping_public_change_sequence], references: [organization_id, public_repack_id, public_change_sequence], onUpdate: NoAction, map: "normalized_heat_observations_identity_mapping_fk")
+  normalized_heat_observation_outcomes normalized_heat_observation_outcomes[]
+
+  @@id([id, organization_id], map: "normalized_heat_observations_pkey")
+  @@unique([organization_id, observation_key], map: "normalized_heat_observations_key_unique")
+  @@index([organization_id, public_repack_id, occurred_at, public_change_sequence], map: "normalized_heat_observations_window_idx")
+  @@index([organization_id, retained_until], map: "normalized_heat_observations_retention_idx")
+}
+
+/// Bounded internal normalization disposition; contains no raw/provider evidence.
+/// This table contains status and reason check constraints defined in its migration.
+model normalized_heat_observation_outcomes {
+  organization_id              String                        @db.Uuid
+  canonical_revision_id        String                        @db.Uuid
+  public_change_sequence       BigInt
+  occurred_at                  DateTime                      @db.Timestamptz(6)
+  status                       String
+  reason_code                  String
+  observation_id               String?                       @db.Uuid
+  retained_until               DateTime                      @db.Timestamptz(6)
+  created_at                   DateTime                      @default(now()) @db.Timestamptz(6)
+  organizations                organizations                 @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_organization_fk")
+  canonical_revisions          canonical_revisions           @relation(fields: [canonical_revision_id, organization_id, public_change_sequence], references: [id, organization_id, public_change_sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_revision_fk")
+  public_change_causes         public_change_causes          @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_change_fk")
+  normalized_heat_observations normalized_heat_observations? @relation(fields: [observation_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_observation_fk")
+
+  @@id([organization_id, canonical_revision_id], map: "normalized_heat_observation_outcomes_pkey")
+  @@index([organization_id, occurred_at, public_change_sequence, status], map: "normalized_heat_observation_outcomes_coverage_idx")
+  @@index([organization_id, retained_until], map: "normalized_heat_observation_outcomes_retention_idx")
+}
+
+/// Exclusive event-time boundary for windows whose published Heat must remain immutable.
+/// This table contains monotonicity constraints defined in its migration.
+model normalized_heat_window_checkpoints {
+  organization_id          String        @id @db.Uuid
+  closed_before            DateTime      @default(dbgenerated("'-infinity'::timestamp with time zone")) @db.Timestamptz(6)
+  through_settled_sequence BigInt        @default(0)
+  next_catalog_sequence    BigInt        @default(1)
+  updated_at               DateTime      @default(now()) @db.Timestamptz(6)
+  organizations            organizations @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "normalized_heat_window_checkpoints_organization_fk")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.

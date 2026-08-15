@@ -13,6 +13,7 @@ import {
   relationshipPublicEntityKey,
   type PublicChangeKind,
 } from "./public-change-settlement-repository.ts";
+import { persistNormalizedHeatObservationsForCanonicalWrites } from "./normalized-heat-observation-repository.ts";
 import {
   assertCanonicalActorDataSafe,
   hashJson,
@@ -859,6 +860,24 @@ export async function writeCanonicalProjectionBatch(
       `);
     }
   }
+  await persistNormalizedHeatObservationsForCanonicalWrites(database, {
+    organizationId: scope.organizationId,
+    createdAt: scope.acceptedAt,
+    revisions: revisionsToInsert.map((revision) => {
+      const projection = projectionByRevisionId.get(revision.id);
+      if (!projection) throw new Error("Canonical Heat source projection is missing.");
+      return {
+        revisionId: revision.id,
+        entityId: revision.entityId,
+        platformKey: projection.projection.platformKey,
+        recordKind: projection.projection.recordKind,
+        externalId: projection.projection.externalId,
+        content: revision.content,
+        publicChangeSequence: revision.publicChangeSequence,
+        occurredAt: revision.sourceUpdatedAt,
+      };
+    }),
+  });
   return results;
 }
 

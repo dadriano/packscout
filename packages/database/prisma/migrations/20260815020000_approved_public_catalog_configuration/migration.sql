@@ -36,7 +36,9 @@ alter table public.approved_public_catalog_configurations
   add constraint approved_public_catalog_configurations_revision_unique
     unique (organization_id, revision),
   add constraint approved_public_catalog_configurations_hash_unique
-    unique (organization_id, configuration_hash);
+    unique (organization_id, configuration_hash),
+  add constraint approved_public_catalog_configurations_mapping_source_unique
+    unique (organization_id, configuration_key, public_change_sequence);
 
 create index approved_public_catalog_configurations_change_idx
   on public.approved_public_catalog_configurations

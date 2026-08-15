@@ -7,6 +7,7 @@ export * from "./database.ts";
 export * from "./estimated-ev-recomputation-repository.ts";
 export * from "./ingestion-repository.ts";
 export * from "./import-run-repository.ts";
+export * from "./normalized-heat-observation-repository.ts";
 export * from "./operational-alert-repository.ts";
 export * from "./operational-health-repository.ts";
 export * from "./persistence-error.ts";

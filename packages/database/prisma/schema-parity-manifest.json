@@ -1,17 +1,17 @@
 {
-  "source": "approved public catalog configuration contract",
+  "source": "approved public catalog and normalized Heat catalog contract",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260815020000_approved_public_catalog_configuration/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260815030000_normalized_heat_observations/migration.sql"
   },
   "expectedCounts": {
-    "tables": 32,
+    "tables": 36,
     "enums": 22,
-    "columns": 367,
-    "indexes": 52,
-    "uniqueConstraints": 22,
-    "foreignKeys": 131,
-    "checkConstraints": 72
+    "columns": 405,
+    "indexes": 57,
+    "uniqueConstraints": 27,
+    "foreignKeys": 142,
+    "checkConstraints": 94
   },
   "enums": {
     "admin_alert_state": [
@@ -529,6 +529,14 @@
           ],
           "nullsNotDistinct": false
         },
+        "approved_public_catalog_configurations_mapping_source_unique": {
+          "columns": [
+            "organization_id",
+            "configuration_key",
+            "public_change_sequence"
+          ],
+          "nullsNotDistinct": false
+        },
         "approved_public_catalog_configurations_revision_unique": {
           "columns": [
             "organization_id",
@@ -812,21 +820,6 @@
           "referencedTable": "canonical_revisions",
           "referencedColumns": [
             "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "canonical_entities_current_revision_scope_fk": {
-          "columns": [
-            "current_revision_id",
-            "id",
-            "organization_id"
-          ],
-          "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id",
-            "entity_id",
-            "organization_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -1190,6 +1183,14 @@
         }
       },
       "uniqueConstraints": {
+        "canonical_revisions_heat_source_unique": {
+          "columns": [
+            "id",
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "nullsNotDistinct": false
+        },
         "canonical_revisions_id_entity_organization_unique": {
           "columns": [
             "id",
@@ -2126,6 +2127,470 @@
         },
         "import_runs_requested_cursor_bounded": {
           "value": "((requested_cursor IS NULL) OR (length(requested_cursor) <= 2048))"
+        }
+      }
+    },
+    "normalized_heat_observation_outcomes": {
+      "columns": {
+        "canonical_revision_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "observation_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "occurred_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "reason_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "retained_until": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "status": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "normalized_heat_observation_outcomes_coverage_idx": {
+          "columns": [
+            "organization_id",
+            "occurred_at",
+            "public_change_sequence",
+            "status"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "normalized_heat_observation_outcomes_retention_idx": {
+          "columns": [
+            "organization_id",
+            "retained_until"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "normalized_heat_observation_outcomes_change_fk": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observation_outcomes_observation_fk": {
+          "columns": [
+            "observation_id",
+            "organization_id"
+          ],
+          "referencedTable": "normalized_heat_observations",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observation_outcomes_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observation_outcomes_revision_fk": {
+          "columns": [
+            "canonical_revision_id",
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "referencedTable": "canonical_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "normalized_heat_observation_outcomes_occurred_at_milliseconds_c": {
+          "value": "(date_trunc('milliseconds'::text, occurred_at) = occurred_at)"
+        },
+        "normalized_heat_observation_outcomes_reason_check": {
+          "value": "(reason_code = ANY (ARRAY['NORMALIZED'::text, 'MAPPING_MISSING'::text, 'EVIDENCE_UNSUPPORTED'::text, 'EVIDENCE_MALFORMED'::text, 'WINDOW_CLOSED'::text, 'CATALOG_LIMIT_EXCEEDED'::text, 'DUPLICATE_SOURCE_EVENT'::text]))"
+        },
+        "normalized_heat_observation_outcomes_retention_check": {
+          "value": "(retained_until >= (occurred_at + '7 days'::interval))"
+        },
+        "normalized_heat_observation_outcomes_shape_check": {
+          "value": "((status = 'normalized'::text) = (observation_id IS NOT NULL))"
+        },
+        "normalized_heat_observation_outcomes_status_check": {
+          "value": "(status = ANY (ARRAY['normalized'::text, 'deferred'::text, 'rejected'::text, 'duplicate'::text]))"
+        }
+      }
+    },
+    "normalized_heat_observations": {
+      "columns": {
+        "available_chase_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "canonical_revision_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "catalog_sequence": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "mapping_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "observation_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "observation_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "occurred_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "outcome_keys": {
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "ARRAY[]::text[]"
+        },
+        "public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "public_repack_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "realized_return_basis_points": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "retained_until": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "value_multiple_basis_points": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "normalized_heat_observations_retention_idx": {
+          "columns": [
+            "organization_id",
+            "retained_until"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "normalized_heat_observations_window_idx": {
+          "columns": [
+            "organization_id",
+            "public_repack_id",
+            "occurred_at",
+            "public_change_sequence"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "normalized_heat_observations_key_unique": {
+          "columns": [
+            "organization_id",
+            "observation_key"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "normalized_heat_observations_identity_mapping_fk": {
+          "columns": [
+            "organization_id",
+            "public_repack_id",
+            "mapping_public_change_sequence"
+          ],
+          "referencedTable": "public_repack_identity_mappings",
+          "referencedColumns": [
+            "organization_id",
+            "public_repack_id",
+            "public_change_sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observations_mapping_change_fk": {
+          "columns": [
+            "organization_id",
+            "mapping_public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observations_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observations_revision_fk": {
+          "columns": [
+            "canonical_revision_id",
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "referencedTable": "canonical_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observations_source_change_fk": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "normalized_heat_observations_basis_points_check": {
+          "value": "(((realized_return_basis_points IS NULL) OR ((realized_return_basis_points >= 0) AND (realized_return_basis_points <= 10000000))) AND ((value_multiple_basis_points IS NULL) OR ((value_multiple_basis_points >= 0) AND (value_multiple_basis_points <= 10000000))))"
+        },
+        "normalized_heat_observations_catalog_bounds_check": {
+          "value": "(((available_chase_count IS NULL) OR ((available_chase_count >= 0) AND (available_chase_count <= 10000))) AND normalized_heat_outcome_keys_valid(outcome_keys))"
+        },
+        "normalized_heat_observations_key_check": {
+          "value": "(observation_key ~ '^[0-9a-f]{64}$'::text)"
+        },
+        "normalized_heat_observations_kind_check": {
+          "value": "(observation_kind = ANY (ARRAY['pull'::text, 'catalog_snapshot'::text]))"
+        },
+        "normalized_heat_observations_occurred_at_milliseconds_check": {
+          "value": "(date_trunc('milliseconds'::text, occurred_at) = occurred_at)"
+        },
+        "normalized_heat_observations_public_uuid_v5_check": {
+          "value": "((get_byte(uuid_send(public_repack_id), 6) >> 4) = 5)"
+        },
+        "normalized_heat_observations_retention_check": {
+          "value": "(retained_until >= (occurred_at + '7 days'::interval))"
+        },
+        "normalized_heat_observations_sequence_check": {
+          "value": "((public_change_sequence > 0) AND (mapping_public_change_sequence > 0) AND ((catalog_sequence IS NULL) OR ((catalog_sequence >= 1) AND (catalog_sequence <= 2147483647))))"
+        },
+        "normalized_heat_observations_shape_check": {
+          "value": "(((observation_kind = 'pull'::text) AND (catalog_sequence IS NULL) AND (available_chase_count IS NULL) AND (outcome_keys = ARRAY[]::text[])) OR ((observation_kind = 'catalog_snapshot'::text) AND (catalog_sequence IS NOT NULL) AND (realized_return_basis_points IS NULL) AND (value_multiple_basis_points IS NULL) AND (available_chase_count IS NOT NULL)))"
+        }
+      }
+    },
+    "normalized_heat_window_checkpoints": {
+      "columns": {
+        "closed_before": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'-infinity'::timestamp with time zone"
+        },
+        "next_catalog_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "1"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "through_settled_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "normalized_heat_window_checkpoints_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "normalized_heat_window_checkpoints_closed_before_milliseconds_c": {
+          "value": "((closed_before = '-infinity'::timestamp with time zone) OR (date_trunc('milliseconds'::text, closed_before) = closed_before))"
+        },
+        "normalized_heat_window_checkpoints_sequence_check": {
+          "value": "((through_settled_sequence >= 0) AND ((next_catalog_sequence >= 1) AND (next_catalog_sequence <= '2147483648'::bigint)))"
         }
       }
     },
@@ -3762,21 +4227,6 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "provider_sources_active_revision_scope_fk": {
-          "columns": [
-            "active_revision_id",
-            "id",
-            "organization_id"
-          ],
-          "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
         "provider_sources_organization_id_organizations_id_fk": {
           "columns": [
             "organization_id"
@@ -4102,6 +4552,154 @@
         },
         "public_derivation_obligations_worker_bounded": {
           "value": "((claimed_by IS NULL) OR ((length(btrim(claimed_by)) >= 1) AND (length(btrim(claimed_by)) <= 256)))"
+        }
+      }
+    },
+    "public_repack_identity_mappings": {
+      "columns": {
+        "approved_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "approved_configuration_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "pack_external_id": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "public_repack_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "public_repack_identity_mappings_change_idx": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "public_repack_identity_mappings_heat_source_unique": {
+          "columns": [
+            "organization_id",
+            "public_repack_id",
+            "public_change_sequence"
+          ],
+          "nullsNotDistinct": false
+        },
+        "public_repack_identity_mappings_public_id_unique": {
+          "columns": [
+            "organization_id",
+            "public_repack_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "public_repack_identity_mappings_change_fk": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "public_repack_identity_mappings_configuration_fk": {
+          "columns": [
+            "organization_id",
+            "approved_configuration_key",
+            "public_change_sequence"
+          ],
+          "referencedTable": "approved_public_catalog_configurations",
+          "referencedColumns": [
+            "organization_id",
+            "configuration_key",
+            "public_change_sequence"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "public_repack_identity_mappings_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "public_repack_identity_mappings_approved_at_milliseconds_check": {
+          "value": "(date_trunc('milliseconds'::text, approved_at) = approved_at)"
+        },
+        "public_repack_identity_mappings_configuration_key_check": {
+          "value": "((approved_configuration_key = btrim(approved_configuration_key)) AND ((char_length(approved_configuration_key) >= 1) AND (char_length(approved_configuration_key) <= 128)))"
+        },
+        "public_repack_identity_mappings_pack_external_id_check": {
+          "value": "((pack_external_id = btrim(pack_external_id)) AND ((char_length(pack_external_id) >= 1) AND (char_length(pack_external_id) <= 512)))"
+        },
+        "public_repack_identity_mappings_platform_key_check": {
+          "value": "((platform_key = btrim(platform_key)) AND ((char_length(platform_key) >= 1) AND (char_length(platform_key) <= 128)))"
+        },
+        "public_repack_identity_mappings_public_uuid_v5_check": {
+          "value": "((get_byte(uuid_send(public_repack_id), 6) >> 4) = 5)"
+        },
+        "public_repack_identity_mappings_sequence_check": {
+          "value": "(public_change_sequence > 0)"
         }
       }
     },
@@ -5457,6 +6055,42 @@
         "source_records_external_id_not_blank": {
           "value": "(length(TRIM(BOTH FROM external_id)) > 0)"
         }
+      }
+    }
+  },
+  "nativeExtensions": {
+    "foreignKeys": {
+      "canonical_entities_current_revision_scope_fk": {
+        "table": "canonical_entities",
+        "columns": [
+          "current_revision_id",
+          "id",
+          "organization_id"
+        ],
+        "referencedTable": "canonical_revisions",
+        "referencedColumns": [
+          "id",
+          "entity_id",
+          "organization_id"
+        ],
+        "onDelete": "restrict",
+        "onUpdate": "no action"
+      },
+      "provider_sources_active_revision_scope_fk": {
+        "table": "provider_sources",
+        "columns": [
+          "active_revision_id",
+          "id",
+          "organization_id"
+        ],
+        "referencedTable": "provider_config_revisions",
+        "referencedColumns": [
+          "id",
+          "provider_id",
+          "organization_id"
+        ],
+        "onDelete": "restrict",
+        "onUpdate": "no action"
       }
     }
   }

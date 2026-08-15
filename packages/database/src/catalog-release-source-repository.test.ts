@@ -9,8 +9,10 @@ import { Prisma } from "@prisma/client";
 import {
   PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN,
   PrismaCatalogReleaseSourceRepository,
-  type ApprovedPublicRepackIdentityMaterializer,
 } from "./catalog-release-source-repository.ts";
+import {
+  prismaApprovedPublicRepackIdentityMaterializer as materializer,
+} from "./normalized-heat-observation-repository.ts";
 import {
   advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
@@ -78,51 +80,12 @@ function configuration(overrides: {
   };
 }
 
-async function installMappingTable(database: { $executeRawUnsafe(query: string): Promise<number> }) {
-  await database.$executeRawUnsafe(`
-    create table public.public_repack_identity_mappings (
-      organization_id uuid not null references public.organizations(id),
-      platform_key text not null,
-      pack_external_id text not null,
-      public_repack_id uuid not null,
-      approved_configuration_key text not null,
-      public_change_sequence bigint not null,
-      approved_at timestamptz(6) not null,
-      created_at timestamptz(6) not null default current_timestamp,
-      primary key (organization_id, platform_key, pack_external_id),
-      unique (organization_id, public_repack_id),
-      foreign key (organization_id, public_change_sequence)
-        references public.public_change_causes(organization_id, sequence)
-    )
-  `);
-}
-
-const materializer: ApprovedPublicRepackIdentityMaterializer = {
-  async materializeApprovedMappings(database, input) {
-    for (const mapping of input.mappings) {
-      await database.$executeRaw(Prisma.sql`
-        insert into public.public_repack_identity_mappings (
-          organization_id, platform_key, pack_external_id, public_repack_id,
-          approved_configuration_key, public_change_sequence, approved_at
-        ) values (
-          cast(${input.organizationId} as uuid), ${mapping.platformKey},
-          ${mapping.packExternalId}, cast(${mapping.publicRepackId} as uuid),
-          ${input.approvedConfigurationKey}, ${input.publicChangeSequence},
-          ${input.approvedAt}
-        )
-        on conflict (organization_id, platform_key, pack_external_id) do nothing
-      `);
-    }
-  },
-};
-
 test("configuration approval, governed identities, and settlement commit atomically and immutably", async () => {
   const harness = await createMigratedTestDatabase();
   try {
     await harness.client.organizations.create({
       data: { id: organizationId, slug: "public-catalog", name: "Public Catalog" },
     });
-    await installMappingTable(harness.client);
     const repository = new PrismaCatalogReleaseSourceRepository(
       harness.client,
       organizationId,
@@ -192,7 +155,6 @@ test("readiness is tied to the active causal provider revision, not an old compl
     await harness.client.organizations.create({
       data: { id: organizationId, slug: "revision-readiness", name: "Revision Readiness" },
     });
-    await installMappingTable(harness.client);
     const providerId = randomUUID();
     const oldRevisionId = randomUUID();
     const activeRevisionId = randomUUID();
@@ -293,7 +255,6 @@ test("one repeatable-read snapshot cannot mix a newer configuration mapping into
     await harness.client.organizations.create({
       data: { id: organizationId, slug: "snapshot-coherence", name: "Snapshot Coherence" },
     });
-    await installMappingTable(harness.client);
     const repository = new PrismaCatalogReleaseSourceRepository(harness.client, organizationId);
     await repository.approveConfiguration(configuration(), materializer);
     const writer = await harness.createIndependentClient();
