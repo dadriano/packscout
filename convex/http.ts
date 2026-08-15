@@ -7,6 +7,18 @@ import { handleAuthenticatedPublicationRequest } from "./productionDataReleaseAu
 const http = httpRouter();
 
 http.route({
+  path: PRODUCTION_DATA_RELEASE_PATHS.activeState,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPublicationRequest(
+      ctx,
+      request,
+      internal.productionDataReleaseActiveState.activeState,
+    ),
+  ),
+});
+
+http.route({
   path: PRODUCTION_DATA_RELEASE_PATHS.start,
   method: "POST",
   handler: httpAction((ctx, request) =>

@@ -143,6 +143,38 @@ test("signed Convex client sends exact bytes and verifies both receipt digests",
   assert.equal(receipt.operationKind, "refreshObservation");
 });
 
+test("signed Convex client observes the deployment pointer for strict bootstrap", async () => {
+  const terminalReceiptSha256 = "d".repeat(64);
+  const transport = client(async (input, init) => {
+    assert.equal(
+      String(input),
+      "https://convex.example/internal/data-release/v2/active-state",
+    );
+    const bodyJson = String(init?.body);
+    return new Response(JSON.stringify(await signedEnvelope({
+      schemaVersion: DATA_RELEASE_SCHEMA_VERSION,
+      operationId: "catalog-active-state",
+      operationKind: "activeState",
+      publicationId,
+      terminalState: "observed",
+      result: "active_state",
+      serverTime: now.toISOString(),
+      requestDigest: sha256(bodyJson),
+      details: {
+        activePublicReleaseId: publicationId,
+        observationSequence: 21,
+        terminalReceiptSha256,
+      },
+    })), { status: 200 });
+  });
+
+  assert.deepEqual(await transport.activeState(), {
+    activePublicReleaseId: publicationId,
+    observationSequence: 21,
+    terminalReceiptSha256,
+  });
+});
+
 test("signed Convex client rejects outer signatures and inner digest drift", async () => {
   const operation = refreshOperation();
   for (const tampering of [{ tamperOuter: true }, { tamperInner: true }]) {

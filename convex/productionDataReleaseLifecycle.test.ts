@@ -270,6 +270,27 @@ afterEach(() => {
 });
 
 describe("production data release lifecycle", () => {
+  test("authenticated active state reports an empty deployment", async () => {
+    configureEnvironment("a".repeat(64));
+    const observed = await receipt(await signedFetch(
+      createTest(),
+      "/internal/data-release/v2/active-state",
+      {
+        schemaVersion: "data_release_v2",
+        operationId: "catalog-active-state",
+      },
+    ));
+    expect(observed).toMatchObject({
+      operationKind: "activeState",
+      publicationId: null,
+      details: {
+        activePublicReleaseId: null,
+        observationSequence: 0,
+        terminalReceiptSha256: null,
+      },
+    });
+  });
+
   test("keeps the prior release visible until exact reconciliation atomically finalizes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime("2026-08-15T12:00:00.000Z");
@@ -502,6 +523,23 @@ describe("production data release lifecycle", () => {
     const finalized = await receipt(
       await signedFetch(t, "/internal/data-release/v2/finalize", plan.finalize),
     );
+    const activeAfterFinalize = await receipt(await signedFetch(
+      t,
+      "/internal/data-release/v2/active-state",
+      {
+        schemaVersion: "data_release_v2",
+        operationId: "catalog-active-state",
+      },
+    ));
+    expect(activeAfterFinalize).toMatchObject({
+      operationKind: "activeState",
+      publicationId: PUBLICATION_ID,
+      details: {
+        activePublicReleaseId: PUBLICATION_ID,
+        observationSequence: 2,
+        terminalReceiptSha256: await bodyDigest(canonicalJson(finalized)),
+      },
+    });
     expect(finalized).toMatchObject({
       operationId: plan.finalize.operationId,
       terminalState: "complete",
@@ -587,13 +625,28 @@ describe("production data release lifecycle", () => {
       freshness: "delayed",
       delayedVendorCount: 1,
     };
-    await receipt(
+    const refreshed = await receipt(
       await signedFetch(
         t,
         "/internal/data-release/v2/refresh-observation",
         refresh,
       ),
     );
+    const activeAfterRefresh = await receipt(await signedFetch(
+      t,
+      "/internal/data-release/v2/active-state",
+      {
+        schemaVersion: "data_release_v2",
+        operationId: "catalog-active-state",
+      },
+    ));
+    expect(activeAfterRefresh).toMatchObject({
+      publicationId: PUBLICATION_ID,
+      details: {
+        observationSequence: 3,
+        terminalReceiptSha256: await bodyDigest(canonicalJson(refreshed)),
+      },
+    });
     const after = await t.run(async (ctx) => ({
       release: await ctx.db
         .query("dataReleases")

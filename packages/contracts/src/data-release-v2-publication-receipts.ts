@@ -23,7 +23,7 @@ const productionBatchKindSchema = z.enum([
   "repack_chases", "search_shards",
 ]);
 export const productionOperationKindSchema = z.enum([
-  "start", "applyBatch", "finalize",
+  "activeState", "start", "applyBatch", "finalize",
   "refreshObservation", "rollback", "retain",
 ]);
 
@@ -34,6 +34,33 @@ const receiptBaseShape = {
   requestDigest: sha256Schema,
   receiptDigest: sha256Schema,
 } as const;
+
+export const productionActiveStateReceiptSchema = z.union([
+  z.object({
+    ...receiptBaseShape,
+    operationKind: z.literal("activeState"),
+    publicationId: z.null(),
+    terminalState: z.literal("observed"),
+    result: z.literal("active_state"),
+    details: z.object({
+      activePublicReleaseId: z.null(),
+      observationSequence: z.literal(0),
+      terminalReceiptSha256: z.null(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...receiptBaseShape,
+    operationKind: z.literal("activeState"),
+    publicationId: publicReleaseIdSchema,
+    terminalState: z.literal("observed"),
+    result: z.literal("active_state"),
+    details: z.object({
+      activePublicReleaseId: publicReleaseIdSchema,
+      observationSequence: z.number().int().safe().positive(),
+      terminalReceiptSha256: sha256Schema,
+    }).strict(),
+  }).strict(),
+]);
 
 export const productionStartReceiptSchema = z.object({
   ...receiptBaseShape,
@@ -176,6 +203,7 @@ export const productionNonceCleanupReceiptSchema = z.object({
 }).strict();
 
 export const productionReceiptSchema = z.union([
+  productionActiveStateReceiptSchema,
   productionStartReceiptSchema,
   productionBatchReceiptSchema,
   productionFinalizeReceiptSchema,
@@ -214,6 +242,9 @@ export const productionSignedReceiptEnvelopeSchema = z.object({
 
 export type ProductionOperationKind = z.infer<
   typeof productionOperationKindSchema
+>;
+export type ProductionActiveStateReceipt = z.infer<
+  typeof productionActiveStateReceiptSchema
 >;
 export type ProductionReceipt = z.infer<typeof productionReceiptSchema>;
 export type ProductionStatusNotFoundReceipt = z.infer<

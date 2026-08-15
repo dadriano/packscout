@@ -17,6 +17,7 @@ import {
   PRODUCTION_DATA_RELEASE_PATHS,
   canonicalJson,
   classifyProductionDataReleaseError,
+  productionActiveStateReceiptSchema,
   productionErrorEnvelopeSchema,
   productionPublicationReceiptSigningValue,
   productionPublicationRequestSigningValue,
@@ -33,6 +34,8 @@ import {
 } from "./catalog-promotion-operations.ts";
 import type {
   CatalogPromotionOperation,
+  CatalogPublicationActiveState,
+  CatalogPublicationActiveStateTransport,
   CatalogPublicationStatusInput,
   CatalogPublicationTransport,
 } from "./catalog-promotion-types.ts";
@@ -149,7 +152,7 @@ async function boundedResponseText(
 }
 
 export class SignedConvexCatalogPublicationClient
-  implements CatalogPublicationTransport
+  implements CatalogPublicationTransport, CatalogPublicationActiveStateTransport
 {
   readonly #baseUrl: URL;
   readonly #fetch: typeof fetch;
@@ -209,6 +212,30 @@ export class SignedConvexCatalogPublicationClient
       kind: operation.kind,
       bodyJson: operation.bodyJson,
     });
+  }
+
+  async activeState(): Promise<CatalogPublicationActiveState> {
+    const bodyJson = canonicalJson({
+      schemaVersion: DATA_RELEASE_SCHEMA_VERSION,
+      operationId: "catalog-active-state",
+    });
+    const receipt = productionActiveStateReceiptSchema.parse(
+      await this.request(PRODUCTION_DATA_RELEASE_PATHS.activeState, bodyJson),
+    );
+    if (
+      receipt.operationId !== "catalog-active-state" ||
+      receipt.requestDigest !== sha256Utf8(bodyJson) ||
+      receipt.publicationId !== receipt.details.activePublicReleaseId
+    ) {
+      throw new CatalogPublicationClientError(
+        "PUBLICATION_RESPONSE_INVALID", "terminal", false,
+      );
+    }
+    return {
+      activePublicReleaseId: receipt.details.activePublicReleaseId,
+      observationSequence: receipt.details.observationSequence,
+      terminalReceiptSha256: receipt.details.terminalReceiptSha256,
+    };
   }
 
   async status(input: CatalogPublicationStatusInput): Promise<ProductionReceipt | null> {

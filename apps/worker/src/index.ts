@@ -4,11 +4,18 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { createPrismaClientLifecycle } from "@packscout/database";
-import { createProviderWorkerRuntime } from "./provider-worker-composition.ts";
+import { createProductionWorkerRuntime } from "./production-worker-composition.ts";
 import { JsonConsoleProviderWorkerObservability } from "./provider-worker-observability.ts";
 import {
   JsonConsoleProviderWorkerLogger,
 } from "./provider-worker-runtime.ts";
+import {
+  CatalogPromotionWorkerConfigurationError,
+  readCatalogPromotionWorkerConfiguration,
+} from "./catalog-promotion-worker-config.ts";
+import {
+  JsonConsoleCatalogPromotionWorkerLogger,
+} from "./catalog-promotion-worker-runtime.ts";
 import {
   ProviderWorkerConfigurationError,
   readProviderWorkerConfiguration,
@@ -33,7 +40,11 @@ async function runProviderWorker(): Promise<void> {
     process.env,
     fallbackWorkerId(),
   );
+  const catalogConfiguration = readCatalogPromotionWorkerConfiguration(
+    process.env,
+  );
   const logger = new JsonConsoleProviderWorkerLogger();
+  const catalogLogger = new JsonConsoleCatalogPromotionWorkerLogger();
   const databaseLifecycle = createPrismaClientLifecycle({
     databaseUrl: configuration.databaseUrl,
   });
@@ -42,10 +53,12 @@ async function runProviderWorker(): Promise<void> {
     const observability = new JsonConsoleProviderWorkerObservability(
       configuration.workerId,
     );
-    const runtime = createProviderWorkerRuntime({
-      configuration,
+    const runtime = createProductionWorkerRuntime({
+      provider: configuration,
+      catalog: catalogConfiguration,
       database: databaseLifecycle.client,
-      logger,
+      providerLogger: logger,
+      catalogLogger,
       observability,
     });
     const stop = () => runtime.stop();
@@ -66,6 +79,8 @@ runProviderWorker().catch((error: unknown) => {
   const failureCode =
     error instanceof ProviderWorkerConfigurationError
       ? error.code
+      : error instanceof CatalogPromotionWorkerConfigurationError
+        ? error.code
       : "PROVIDER_WORKER_FATAL";
   console.error(
     JSON.stringify({

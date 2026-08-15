@@ -9,6 +9,7 @@ import {
 } from "./convex-catalog-publication-client.ts";
 import type {
   CatalogPromotionAlertSink,
+  CatalogPromotionBootstrapPort,
   CatalogPromotionClaim,
   CatalogPromotionClock,
   CatalogPromotionHealthSink,
@@ -47,6 +48,7 @@ export interface CatalogPromotionRunnerOptions {
   readonly settlement: CatalogPromotionSettlementPort;
   readonly assembler: CatalogReleaseAssemblerPort;
   readonly transport: CatalogPublicationTransport;
+  readonly bootstrap?: CatalogPromotionBootstrapPort;
   readonly clock: CatalogPromotionClock;
   readonly alerts: CatalogPromotionAlertSink;
   readonly health?: CatalogPromotionHealthSink;
@@ -152,6 +154,10 @@ export class CatalogPromotionRunner {
       ...this.#scope,
       settledWatermark: checkpoint.settledSequence,
       requestedAt: now,
+    });
+    await this.options.bootstrap?.ensureVerified({
+      ...this.#scope,
+      verifiedAt: now,
     });
     const claim = await this.options.ledger.claim({
       ...this.#scope,

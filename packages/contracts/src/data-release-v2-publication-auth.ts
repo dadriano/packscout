@@ -32,6 +32,7 @@ export const productionAuthTimestampSchema = z.string()
   .regex(PRODUCTION_AUTH_TIMESTAMP_PATTERN)
   .refine((value) => Number.isSafeInteger(Number(value)));
 export const productionDataReleasePathSchema = z.enum([
+  PRODUCTION_DATA_RELEASE_PATHS.activeState,
   PRODUCTION_DATA_RELEASE_PATHS.start,
   PRODUCTION_DATA_RELEASE_PATHS.applyBatch,
   PRODUCTION_DATA_RELEASE_PATHS.finalize,

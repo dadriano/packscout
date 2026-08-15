@@ -1,4 +1,5 @@
 import type {
+  CatalogPromotionAlertSink,
   CatalogPromotionCycleResult,
   CatalogPromotionHealth,
   CatalogPromotionHealthSink,
@@ -19,6 +20,7 @@ export type CatalogPromotionWorkerLogEvent = Readonly<{
     | "catalog_promotion_worker_stopped"
     | "catalog_promotion_cycle_finished"
     | "catalog_promotion_cycle_failed"
+    | "catalog_promotion_terminal_alert"
     | "catalog_promotion_health";
   workerId: string;
   outcome?: CatalogPromotionCycleResult["outcome"];
@@ -35,6 +37,7 @@ export type CatalogPromotionWorkerLogEvent = Readonly<{
   lastUnchangedAt?: string;
   retryAt?: string;
   delayedVendorCount?: number;
+  occurredAt?: string;
 }>;
 
 export interface CatalogPromotionWorkerLogger {
@@ -131,6 +134,33 @@ export class CatalogPromotionWorkerHealthLogger
         delayedVendorCount: safeCount(health.delayedVendorCount),
       }),
     });
+  }
+}
+
+export class CatalogPromotionWorkerTerminalAlertLogger
+  implements CatalogPromotionAlertSink
+{
+  constructor(
+    private readonly logger: CatalogPromotionWorkerLogger,
+    private readonly workerId: string,
+  ) {}
+
+  notify(input: {
+    attemptId: string;
+    requestedWatermark: bigint;
+    failureCode: string;
+    occurredAt: Date;
+  }): Promise<void> {
+    this.logger.write({
+      level: "error",
+      event: "catalog_promotion_terminal_alert",
+      workerId: safeId(this.workerId),
+      attemptId: safeId(input.attemptId),
+      requestedWatermark: String(input.requestedWatermark),
+      failureCode: safeFailure(input.failureCode) ?? "CATALOG_FAILURE_INVALID",
+      occurredAt: input.occurredAt.toISOString(),
+    });
+    return Promise.resolve();
   }
 }
 

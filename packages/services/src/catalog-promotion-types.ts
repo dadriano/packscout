@@ -196,6 +196,22 @@ export interface CatalogPublicationTransport {
   status(input: CatalogPublicationStatusInput): Promise<ProductionReceipt | null>;
 }
 
+export interface CatalogPublicationActiveState {
+  readonly activePublicReleaseId: string | null;
+  readonly observationSequence: number;
+  readonly terminalReceiptSha256: string | null;
+}
+
+export interface CatalogPublicationActiveStateTransport {
+  activeState(): Promise<CatalogPublicationActiveState>;
+}
+
+export interface CatalogPromotionBootstrapPort {
+  ensureVerified(input: CatalogPromotionScope & Readonly<{
+    verifiedAt: Date;
+  }>): Promise<void>;
+}
+
 export interface CatalogPromotionClock {
   now(): Date;
 }

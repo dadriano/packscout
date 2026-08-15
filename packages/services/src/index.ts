@@ -4,6 +4,7 @@ export * from "./catalog-ev-input-projection.ts";
 export * from "./catalog-projection-contracts.ts";
 export * from "./catalog-release-assembler.ts";
 export * from "./catalog-release-types.ts";
+export * from "./catalog-promotion-bootstrap.ts";
 export * from "./catalog-promotion-operations.ts";
 export * from "./catalog-promotion-runner.ts";
 export * from "./catalog-promotion-types.ts";

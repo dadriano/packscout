@@ -15,6 +15,7 @@ import type * as mockDataReleaseSeed from "../mockDataReleaseSeed.js";
 import type * as mockHeatSimulationFixture from "../mockHeatSimulationFixture.js";
 import type * as mockHeatSimulationPublisher from "../mockHeatSimulationPublisher.js";
 import type * as productionDataReleaseAuth from "../productionDataReleaseAuth.js";
+import type * as productionDataReleaseActiveState from "../productionDataReleaseActiveState.js";
 import type * as productionDataReleaseBatch from "../productionDataReleaseBatch.js";
 import type * as productionDataReleaseCatalogWrites from "../productionDataReleaseCatalogWrites.js";
 import type * as productionDataReleaseDependentWrites from "../productionDataReleaseDependentWrites.js";
@@ -44,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   mockHeatSimulationFixture: typeof mockHeatSimulationFixture;
   mockHeatSimulationPublisher: typeof mockHeatSimulationPublisher;
   productionDataReleaseAuth: typeof productionDataReleaseAuth;
+  productionDataReleaseActiveState: typeof productionDataReleaseActiveState;
   productionDataReleaseBatch: typeof productionDataReleaseBatch;
   productionDataReleaseCatalogWrites: typeof productionDataReleaseCatalogWrites;
   productionDataReleaseDependentWrites: typeof productionDataReleaseDependentWrites;

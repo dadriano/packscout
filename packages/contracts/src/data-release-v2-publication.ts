@@ -41,6 +41,7 @@ export const MAX_PRODUCTION_HTTP_BODY_BYTES = 128 * 1_024;
 export const MAX_PRODUCTION_BATCH_COUNT = 4_096;
 
 export const PRODUCTION_DATA_RELEASE_PATHS = Object.freeze({
+  activeState: "/internal/data-release/v2/active-state",
   start: "/internal/data-release/v2/start",
   applyBatch: "/internal/data-release/v2/apply-batch",
   finalize: "/internal/data-release/v2/finalize",
@@ -146,6 +147,11 @@ export type ProductionStatusRequest = Readonly<{
   schemaVersion: typeof DATA_RELEASE_SCHEMA_VERSION;
   operationId: string;
   publicationId: string | null;
+}>;
+
+export type ProductionActiveStateRequest = Readonly<{
+  schemaVersion: typeof DATA_RELEASE_SCHEMA_VERSION;
+  operationId: string;
 }>;
 
 export type ProductionRefreshRequest = OperationEnvelope & Readonly<{
@@ -254,6 +260,11 @@ export const productionStatusRequestSchema = z.object({
   schemaVersion: z.literal(DATA_RELEASE_SCHEMA_VERSION),
   operationId: operationIdSchema,
   publicationId: publicReleaseIdSchema.nullable(),
+}).strict();
+
+export const productionActiveStateRequestSchema = z.object({
+  schemaVersion: z.literal(DATA_RELEASE_SCHEMA_VERSION),
+  operationId: operationIdSchema,
 }).strict();
 
 export const productionRefreshRequestSchema = z.object({

@@ -1,8 +1,10 @@
 import {
   CatalogPromotionRunner,
+  CatalogPromotionBootstrapCoordinator,
   SignedConvexCatalogPublicationClient,
   type CatalogPromotionAlertSink,
   type CatalogPromotionLedgerPort,
+  type CatalogPromotionBootstrapLedgerPort,
   type CatalogPromotionRandom,
   type CatalogPromotionSettlementPort,
   type CatalogReleaseAssemblerPort,
@@ -20,6 +22,7 @@ export interface CatalogPromotionWorkerCompositionInput {
   readonly organizationId: string;
   readonly workerId: string;
   readonly ledger: CatalogPromotionLedgerPort;
+  readonly bootstrapLedger: CatalogPromotionBootstrapLedgerPort;
   readonly settlement: CatalogPromotionSettlementPort;
   readonly assembler: CatalogReleaseAssemblerPort;
   readonly alerts: CatalogPromotionAlertSink;
@@ -49,6 +52,10 @@ export function createCatalogPromotionWorkerRuntime(
     deploymentKey: input.configuration.deploymentKey,
     workerId: input.workerId,
     ledger: input.ledger,
+    bootstrap: new CatalogPromotionBootstrapCoordinator(
+      input.bootstrapLedger,
+      transport,
+    ),
     settlement: input.settlement,
     assembler: input.assembler,
     transport,
