@@ -75,7 +75,7 @@ async function configure() {
   const originSetHash = await recomputeProductionOriginSetHash([]);
   vi.stubEnv(
     "PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS",
-    JSON.stringify({ [KEY_ID]: SECRET }),
+    JSON.stringify({ [KEY_ID]: btoa(SECRET) }),
   );
   vi.stubEnv("PACKSCOUT_PUBLIC_ORIGIN_SET_HASH", originSetHash);
   return originSetHash;
@@ -409,6 +409,73 @@ describe("production release recovery and retention", () => {
         }),
       );
     }
+    const heatOwned = await t.run(async (ctx) => {
+      const signalSetId = await ctx.db.insert("repackHeatSignalSets", {
+        releaseId: expiredId,
+        signalSetHash: "a".repeat(64),
+        lifecycle: "complete",
+        sourceKind: "observed",
+        scenarioVersion: null,
+        aggregationVersion: "packscout_repack_heat_v1",
+        heatPolicyVersion: "packscout_heat_policy_v1",
+        signalCount: 0,
+        originatingPublicationId:
+          "51000000-0000-4000-8000-000000000001",
+        createdAt: "2026-06-01T00:00:00.000Z",
+        completedAt: "2026-06-01T00:00:00.000Z",
+      });
+      const publicationId = "51000000-0000-4000-8000-000000000001";
+      const publicationDocumentId = await ctx.db.insert(
+        "repackHeatPublications",
+        {
+          publicationId,
+          releaseId: expiredId,
+          signalSetId,
+          frame: {
+            publicHeatFrameId: publicationId,
+            catalogPublicReleaseId: expiredPublicReleaseId,
+            frameSequence: 29_779_920,
+            sourceWatermark: "1",
+            signalSetHash: "a".repeat(64),
+            frameHash: "b".repeat(64),
+            signalCount: 0,
+            aggregationVersion: "packscout_repack_heat_v1",
+            heatPolicyVersion: "packscout_heat_policy_v1",
+            baselineWindowStartedAt: "2026-08-14T11:45:00.000Z",
+            baselineWindowEndedAt: "2026-08-15T11:45:00.000Z",
+            currentWindowStartedAt: "2026-08-15T11:45:00.000Z",
+            currentWindowEndedAt: "2026-08-15T12:00:00.000Z",
+            calculatedAt: "2026-08-15T12:00:00.000Z",
+            expiresAt: "2026-08-15T12:15:00.000Z",
+          },
+          expectedBatchCount: 1,
+          acceptedBatchCount: 1,
+          acceptedSignalCount: 0,
+          acceptedSignalSetHash: "a".repeat(64),
+          lastPublicRepackId: null,
+          state: "complete",
+          createdAt: "2026-06-01T00:00:00.000Z",
+          completedAt: "2026-06-01T00:00:00.000Z",
+          retentionEligibleAt: "2026-06-08T00:00:00.000Z",
+        },
+      );
+      const batchId = await ctx.db.insert("repackHeatBatches", {
+        publicationId,
+        releaseId: expiredId,
+        signalSetId,
+        batchIndex: 0,
+        idempotencyKey: "heat-expired-batch",
+        bodyHash: "c".repeat(64),
+        batchHash: "d".repeat(64),
+        recordCount: 0,
+        byteCount: 0,
+        coreByteCount: 0,
+        signalSetProgressHash: "a".repeat(64),
+        acceptedAt: "2026-06-01T00:00:00.000Z",
+        operationId: "heat-expired-batch",
+      });
+      return { signalSetId, publicationDocumentId, batchId };
+    });
     await t.run(async (ctx) => {
       await ctx.db.insert("dataReleaseState", {
         key: "singleton",
@@ -440,6 +507,14 @@ describe("production release recovery and retention", () => {
       hasMore: false,
     });
     expect(await t.run((ctx) => ctx.db.get("dataReleases", expiredId))).toBeNull();
+    await expect(t.run(async (ctx) => ({
+      signalSet: await ctx.db.get("repackHeatSignalSets", heatOwned.signalSetId),
+      publication: await ctx.db.get(
+        "repackHeatPublications",
+        heatOwned.publicationDocumentId,
+      ),
+      batch: await ctx.db.get("repackHeatBatches", heatOwned.batchId),
+    }))).resolves.toEqual({ signalSet: null, publication: null, batch: null });
     expect(
       await t.run((ctx) => ctx.db.get("dataReleases", recentIds[11]!)),
     ).not.toBeNull();
@@ -461,11 +536,27 @@ describe("production release recovery and retention", () => {
       retentionEligibleAt: "2026-06-08T00:00:00.000Z",
     });
     await t.run(async (ctx) => {
+      const signalSetId = await ctx.db.insert("repackHeatSignalSets", {
+        releaseId: heatReleaseId,
+        signalSetHash: "8".repeat(64),
+        lifecycle: "complete",
+        sourceKind: "observed",
+        scenarioVersion: null,
+        aggregationVersion: "packscout_repack_heat_v1",
+        heatPolicyVersion: "packscout_heat_policy_v1",
+        signalCount: 0,
+        originatingPublicationId: null,
+        createdAt: "2026-08-15T12:00:00.000Z",
+        completedAt: "2026-08-15T12:00:00.000Z",
+      });
       const snapshotId = await ctx.db.insert("repackHeatSnapshots", {
         releaseId: heatReleaseId,
+        signalSetId,
         publicHeatSnapshotId: "heat-pointer-target",
+        publicationId: null,
         simulationRunId: null,
         sequence: 1,
+        sourceWatermark: "1",
         lifecycle: "complete",
         sourceKind: "observed",
         scenarioVersion: null,

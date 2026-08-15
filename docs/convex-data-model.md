@@ -36,9 +36,10 @@ DATA_RELEASES ───────────────▶ REPACK_SEARCH_SHA
 DATA_RELEASES ───────────────▶ DATA_RELEASE_BATCHES
 DATA_RELEASES ───────────────▶ DATA_RELEASE_OPERATIONS
 
-DATA_RELEASES ──────────────▶ REPACK_HEAT_SNAPSHOTS
+DATA_RELEASES ──────────────▶ REPACK_HEAT_SIGNAL_SETS ──▶ REPACK_HEAT_SIGNALS
+DATA_RELEASES ──────────────▶ REPACK_HEAT_SNAPSHOTS ────▶ REPACK_HEAT_SIGNAL_SETS
 REPACK_HEAT_STATE ──────────▶ active + previous REPACK_HEAT_SNAPSHOTS
-REPACK_HEAT_SNAPSHOTS ──────▶ REPACK_HEAT_SIGNALS ─────▶ REPACKS
+REPACK_HEAT_SIGNALS ────────▶ REPACKS
 ```
 
 Every public entity belongs to exactly one immutable data release. Public
@@ -135,9 +136,11 @@ repackHeatState
 repackHeatSnapshots
   _id
   releaseId             -> dataReleases._id
-  publicHeatSnapshotId  (content-bound public identity)
+  signalSetId           -> repackHeatSignalSets._id
+  publicHeatSnapshotId  (temporal frame/publication identity)
+  publicationId?        (required for observed production frames)
   simulationRunId?      (required only for simulated frames)
-  sequence, lifecycle, sourceKind
+  sequence, sourceWatermark?, lifecycle, sourceKind
   scenarioVersion?      (required only for simulated frames)
   aggregationVersion, heatPolicyVersion, contentHash
   signalCount
@@ -145,13 +148,25 @@ repackHeatSnapshots
   currentWindowStartedAt, currentWindowEndedAt
   calculatedAt, expiresAt
 
+repackHeatSignalSets
+  _id
+  releaseId             -> dataReleases._id
+  signalSetHash         (content address over temporal-free signal cores)
+  lifecycle, sourceKind, scenarioVersion?
+  aggregationVersion, heatPolicyVersion, signalCount
+  originatingPublicationId?, createdAt, completedAt?, retentionEligibleAt?
+
 repackHeatSignals
   _id
-  heatSnapshotId        -> repackHeatSnapshots._id
+  signalSetId           -> repackHeatSignalSets._id
   releaseId             -> dataReleases._id
   repackId              -> repacks._id
   publicRepackId
-  detail                (bounded public heat aggregate and evidence components)
+  detail                (bounded temporal-free public aggregate core)
+
+repackHeatPublications / repackHeatBatches / repackHeatOperations
+  staged frame manifest, bounded batch reconciliation, and exact receipts
+  never contain organization, provider, actor, credential, or raw source fields
 ```
 
 Convex document IDs provide table-aware references, not SQL foreign keys or
@@ -251,11 +266,12 @@ certain PackScout is that a collectible can occur in a repack.
 ## Repack heat boundary
 
 Heat is a mutable, release-aligned read projection next to the immutable catalog;
-it is not part of the catalog release hash. Each signal keeps observed activity,
-observed return, large-hit frequency, chase availability, and pool-composition
-components separate. It also carries its current and baseline windows, sample
-requirements, limitations, provenance, policy version, calculation time, and
-expiry. Heat never substitutes for vendor-reported EV or PackScout modeled EV.
+it is not part of the catalog release hash. Immutable, content-addressed signal
+sets hold only temporal-free aggregate cores. Temporal frame envelopes hold the
+catalog release, settled source watermark, closed minute, 24-hour baseline,
+15-minute current window, calculation time, and 15-minute expiry. Public reads
+hydrate the existing signal DTO from those two records. Heat never substitutes
+for vendor-reported EV or PackScout modeled EV.
 
 Public reads first resolve `repackHeatState`, then require one complete active
 snapshot for the same active catalog release. Each signal must match its repack,
@@ -268,16 +284,41 @@ queries do not rerun merely as time passes. Freshness is materialized by the
 ID-bound scheduled expiry; already-open browser views also stop presenting a
 current signal at its explicit deadline.
 
-Publishing a current frame atomically advances the heat pointer and retains at
-most the current and previous snapshots. Frames must be canonical, not already
-expired, within the publish-lag/future-skew policy, and bounded by the policy
-TTL. Every frame strictly advances the active baseline window, current window,
-calculation time, and expiry even when a new simulation run starts. The public
-snapshot ID is derived from the aggregate frame hash: an exact replay is
-unchanged, while the same ID with different content is a conflict. Sequence
-gaps and unsorted or duplicate signal identities fail before writes. Publishing
-also schedules an expiry operation bound to the exact snapshot ID and expected
-`expiresAt`; a stale job cannot expire a newer frame.
+Production publishing uses authenticated private `active-state`, `start`,
+`apply-batch`, `finalize`, `status`, `refresh-frame`, and `retain` endpoints
+under `/internal/repack-heat/v1/`. Changed signal content stages at most 100
+records and 48 KiB per batch, reconciles exactly one valid signal for every
+repack in the active canonical catalog, and changes the pointer only in the
+successful finalize transaction. Finalize compares the expected active Heat
+frame, so concurrent or restarted publishers cannot overwrite a newer frame.
+Exact operation replay returns the stored receipt; conflicting reuse fails
+closed.
+
+Every frame sequence equals its closed UTC minute. Frame sequence, all window
+boundaries, calculation time, expiry, and active frame identity strictly
+advance. The settled source watermark never decreases; equality is expected
+during quiet minutes. `refresh-frame` can reuse any completed immutable signal
+set for the same catalog release, including A → B → A, without rewriting signal
+documents. The active-state probe returns an exact canonical terminal-receipt
+SHA only when the Heat and catalog pointers remain aligned, which lets a fresh
+durable runner prove bootstrap state without adopting an unknown remote frame.
+
+Activation schedules an expiry mutation bound to the exact frame ID and
+`expiresAt`. At the 15-minute boundary it materializes expired state and
+reactively invalidates public queries even when the PostgreSQL worker is down;
+a delayed callback for an older frame cannot expire its successor. Queries do
+not read the wall clock. Hourly retention preserves active and previous frames
+and their proving terminal receipts, deletes retired frames and unreferenced
+signal sets after seven days, and removes abandoned staging data after its
+unactivatable frame expires.
+
+`PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` is a JSON object keyed by active key ID.
+Each value is canonical padded base64 for 32–256 opaque secret bytes, matching
+the worker's `PACKSCOUT_CONVEX_PUBLICATION_SECRET_BASE64`; values are decoded
+before HMAC-SHA256 import and are never stored in Convex documents. Rotate by
+adding the new key ID and base64 secret to the map, deploying workers with the
+new key ID, then removing the retired entry only after the authentication and
+nonce windows have elapsed.
 
 ### Local simulation lifecycle
 
@@ -360,11 +401,10 @@ hashes; reconciles all counts and references; and compares `originSetHash` with
 the deployment-approved origin-set hash. Public reads already fail closed for a
 canonical release when that deployment hash is absent or does not match.
 
-The production publisher/finalizer that performs the full canonical activation
-gate is not implemented by this frontend-serving schema slice. Canonical
-publication therefore remains blocked until that pipeline-owned boundary is
-delivered and verified. The development-only mock seed independently
-recomputes its complete release and projection hashes before writing.
+The production catalog and Heat publisher/finalizer boundaries both stage,
+reconcile, authenticate, and atomically activate their independent pointers.
+The development-only mock seed independently recomputes its complete release
+and projection hashes before writing.
 
 ## Cutover and deployment boundary
 
@@ -379,3 +419,12 @@ remove them only through a separately approved, environment-scoped cleanup
 after a V2 release has been published, activated, and read back successfully.
 The development mock seed creates only the V2 entities described above and is
 guarded from production use.
+
+The signal-set split changes the required shape of the pre-production mock Heat
+tables. Before deploying this schema to an environment that ran the earlier
+snapshot-owned Heat simulator, perform a coordinated environment-scoped reset
+of `repackHeatState`, `repackHeatSnapshots`, and `repackHeatSignals` (or an
+approved one-time migration) and verify no production observed Heat rows exist.
+Do not use dual reads or optional legacy fields. Production Heat activation was
+not previously enabled, so any observed row requires investigation rather than
+automatic deletion.

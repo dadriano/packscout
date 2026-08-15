@@ -12,7 +12,12 @@ import {
 const modules = import.meta.glob("./**/*.ts");
 const PATH = "/internal/data-release/v2/start";
 const KEY_ID = "publisher-v1";
-const SECRET = "packscout-test-publication-secret-000000000001";
+const SECRET = Uint8Array.from([
+  0xff, 0x00, 0x80, 0x7f, 0x01, 0xfe, 0x81, 0x42,
+  0xc3, 0x28, 0xa0, 0xa1, 0xf5, 0x90, 0x80, 0x80,
+  0xde, 0xad, 0xbe, 0xef, 0x10, 0x20, 0x30, 0x40,
+  0x50, 0x60, 0x70, 0x90, 0xaa, 0xbb, 0xcc, 0xdd,
+]);
 
 function createTest() {
   return convexTest({ schema, modules, transactionLimits: true });
@@ -32,10 +37,15 @@ async function digest(value: string): Promise<string> {
   );
 }
 
-async function sign(value: string, secret = SECRET): Promise<string> {
+async function sign(
+  value: string,
+  secret: Uint8Array = SECRET,
+): Promise<string> {
+  const keyBytes = new Uint8Array(secret.byteLength);
+  keyBytes.set(secret);
   const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(secret),
+    keyBytes.buffer,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
@@ -57,7 +67,7 @@ async function signedInit(
     timestamp?: string;
     nonce?: string;
     keyId?: string;
-    secret?: string;
+    secret?: Uint8Array;
     signature?: string;
     bodyJson?: string;
   } = {},
@@ -134,7 +144,9 @@ async function configure() {
   const originSetHash = await recomputeProductionOriginSetHash([]);
   vi.stubEnv(
     "PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS",
-    JSON.stringify({ [KEY_ID]: SECRET }),
+    JSON.stringify({
+      [KEY_ID]: btoa(String.fromCharCode(...SECRET)),
+    }),
   );
   vi.stubEnv("PACKSCOUT_PUBLIC_ORIGIN_SET_HASH", originSetHash);
 }
@@ -167,7 +179,9 @@ describe("production publication authentication", () => {
         PATH,
         await signedInit(request, {
           keyId: "retired-v1",
-          secret: "packscout-retired-publication-secret-00000000001",
+          secret: new TextEncoder().encode(
+            "packscout-retired-publication-secret-00000000001",
+          ),
           nonce: "nonce0000000000000002",
         }),
       ),

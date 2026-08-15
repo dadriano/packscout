@@ -3,8 +3,13 @@ import {
   REPACK_HEAT_MAXIMUM_FUTURE_SKEW_MILLISECONDS,
   REPACK_HEAT_MAXIMUM_PUBLISH_LAG_MILLISECONDS,
   REPACK_HEAT_MAXIMUM_TTL_MILLISECONDS,
+  EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
+  extendProductionHeatSignalSetHash,
   parseRepackHeatTimestampMillis,
+  productionHeatCoreByteCount,
   publicRepackHeatSignalSchema,
+  recomputeProductionHeatBatchHash,
+  repackHeatSignalCore,
   type PublicRepackHeatSignal,
 } from "@packscout/contracts";
 import { ConvexError, v } from "convex/values";
@@ -118,6 +123,19 @@ async function repacksByPublicId(
   return new Map(repacks.map((repack) => [repack.publicRepackId, repack]));
 }
 
+async function mockSignalSetHash(
+  signals: readonly PublicRepackHeatSignal[],
+): Promise<string> {
+  const batchHash = await recomputeProductionHeatBatchHash(signals);
+  return await extendProductionHeatSignalSetHash({
+    previousHash: EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
+    batchIndex: 0,
+    batchHash,
+    recordCount: signals.length,
+    coreByteCount: productionHeatCoreByteCount(signals),
+  });
+}
+
 async function deleteRetainedSnapshot(
   ctx: MutationCtx,
   snapshotId: Id<"repackHeatSnapshots"> | null,
@@ -133,10 +151,29 @@ async function deleteRetainedSnapshot(
   ) {
     refuse("MOCK_HEAT_STATE_INVALID");
   }
+  await ctx.db.delete("repackHeatSnapshots", snapshotId);
+  const remainingFrames = await ctx.db
+    .query("repackHeatSnapshots")
+    .withIndex("by_signal_set_id", (index) =>
+      index.eq("signalSetId", snapshot.signalSetId),
+    )
+    .take(1);
+  if (remainingFrames.length > 0) return;
+  const signalSet = await ctx.db.get(
+    "repackHeatSignalSets",
+    snapshot.signalSetId,
+  );
+  if (
+    signalSet === null ||
+    signalSet.releaseId !== releaseId ||
+    signalSet.sourceKind !== "simulated"
+  ) {
+    refuse("MOCK_HEAT_STATE_INVALID");
+  }
   const signals = await ctx.db
     .query("repackHeatSignals")
-    .withIndex("by_heat_snapshot_id_and_public_repack_id", (index) =>
-      index.eq("heatSnapshotId", snapshotId),
+    .withIndex("by_signal_set_id_and_public_repack_id", (index) =>
+      index.eq("signalSetId", signalSet._id),
     )
     .take(MAX_PUBLIC_REPACKS_PER_RELEASE + 1);
   if (signals.length > MAX_PUBLIC_REPACKS_PER_RELEASE) {
@@ -145,7 +182,7 @@ async function deleteRetainedSnapshot(
   for (const signal of signals) {
     await ctx.db.delete("repackHeatSignals", signal._id);
   }
-  await ctx.db.delete("repackHeatSnapshots", snapshotId);
+  await ctx.db.delete("repackHeatSignalSets", signalSet._id);
 }
 
 async function replayIsExact(
@@ -155,7 +192,17 @@ async function replayIsExact(
   args: Omit<PublishFrameInput, "signals">,
   parsedSignals: readonly PublicRepackHeatSignal[],
 ): Promise<boolean> {
+  const signalSet = await ctx.db.get(
+    "repackHeatSignalSets",
+    snapshot.signalSetId,
+  );
   if (
+    signalSet === null ||
+    signalSet.lifecycle !== "complete" ||
+    signalSet.releaseId !== releaseId ||
+    signalSet.sourceKind !== "simulated" ||
+    signalSet.signalSetHash !== await mockSignalSetHash(parsedSignals) ||
+    signalSet.signalCount !== parsedSignals.length ||
     snapshot.releaseId !== releaseId ||
     snapshot.publicHeatSnapshotId !== args.publicHeatSnapshotId ||
     snapshot.simulationRunId !== args.simulationRunId ||
@@ -179,14 +226,14 @@ async function replayIsExact(
   }
   const stored = await ctx.db
     .query("repackHeatSignals")
-    .withIndex("by_heat_snapshot_id_and_public_repack_id", (index) =>
-      index.eq("heatSnapshotId", snapshot._id),
+    .withIndex("by_signal_set_id_and_public_repack_id", (index) =>
+      index.eq("signalSetId", signalSet._id),
     )
     .take(MAX_PUBLIC_REPACKS_PER_RELEASE + 1);
   return (
     stored.length === parsedSignals.length &&
     canonicalJson(stored.map(({ detail }) => detail)) ===
-      canonicalJson(parsedSignals)
+      canonicalJson(parsedSignals.map(repackHeatSignalCore))
   );
 }
 
@@ -275,6 +322,7 @@ async function publishMockHeatFrame(
   ) {
     refuse("MOCK_HEAT_FRAME_INVALID");
   }
+  const signalSetHash = await mockSignalSetHash(parsedSignals);
 
   const release = await loadMockRelease(ctx);
   const repacks = await repacksByPublicId(ctx, release._id);
@@ -404,11 +452,66 @@ async function publishMockHeatFrame(
     }
   }
 
+  const matchingSignalSets = await ctx.db
+    .query("repackHeatSignalSets")
+    .withIndex("by_signal_set_hash", (index) =>
+      index.eq("signalSetHash", signalSetHash),
+    )
+    .take(2);
+  if (matchingSignalSets.length > 1) refuse("MOCK_HEAT_STATE_INVALID");
+  let signalSet = matchingSignalSets[0] ?? null;
+  if (signalSet === null) {
+    const now = new Date(serverNow).toISOString();
+    const signalSetId = await ctx.db.insert("repackHeatSignalSets", {
+      releaseId: release._id,
+      signalSetHash,
+      lifecycle: "complete",
+      sourceKind: "simulated",
+      scenarioVersion: MOCK_HEAT_SCENARIO_VERSION,
+      aggregationVersion: MOCK_HEAT_AGGREGATION_VERSION,
+      heatPolicyVersion: MOCK_HEAT_POLICY_VERSION,
+      signalCount: parsedSignals.length,
+      originatingPublicationId: null,
+      createdAt: now,
+      completedAt: now,
+    });
+    for (const detail of parsedSignals) {
+      const repack = repacks.get(detail.publicRepackId)!;
+      await ctx.db.insert("repackHeatSignals", {
+        signalSetId,
+        releaseId: release._id,
+        repackId: repack._id,
+        publicRepackId: detail.publicRepackId,
+        detail: repackHeatSignalCore(detail),
+      });
+    }
+    signalSet = (await ctx.db.get("repackHeatSignalSets", signalSetId))!;
+  } else {
+    const stored = await ctx.db
+      .query("repackHeatSignals")
+      .withIndex("by_signal_set_id_and_public_repack_id", (index) =>
+        index.eq("signalSetId", signalSet!._id),
+      )
+      .take(MAX_PUBLIC_REPACKS_PER_RELEASE + 1);
+    if (
+      signalSet.lifecycle !== "complete" ||
+      signalSet.releaseId !== release._id ||
+      signalSet.sourceKind !== "simulated" ||
+      signalSet.signalCount !== parsedSignals.length ||
+      canonicalJson(stored.map(({ detail }) => detail)) !==
+        canonicalJson(parsedSignals.map(repackHeatSignalCore))
+    ) {
+      refuse("MOCK_HEAT_STATE_INVALID");
+    }
+  }
   const snapshotId = await ctx.db.insert("repackHeatSnapshots", {
     releaseId: release._id,
+    signalSetId: signalSet._id,
     publicHeatSnapshotId: args.publicHeatSnapshotId,
+    publicationId: null,
     simulationRunId: args.simulationRunId,
     sequence: args.sequence,
+    sourceWatermark: null,
     lifecycle: "staging",
     sourceKind: "simulated",
     scenarioVersion: MOCK_HEAT_SCENARIO_VERSION,
@@ -423,16 +526,6 @@ async function publishMockHeatFrame(
     calculatedAt: args.calculatedAt,
     expiresAt: args.expiresAt,
   });
-  for (const detail of parsedSignals) {
-    const repack = repacks.get(detail.publicRepackId)!;
-    await ctx.db.insert("repackHeatSignals", {
-      heatSnapshotId: snapshotId,
-      releaseId: release._id,
-      repackId: repack._id,
-      publicRepackId: detail.publicRepackId,
-      detail,
-    });
-  }
   await ctx.db.patch("repackHeatSnapshots", snapshotId, {
     lifecycle: "complete",
   });

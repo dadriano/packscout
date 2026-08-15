@@ -25,6 +25,12 @@ import type * as productionDataReleaseOperations from "../productionDataReleaseO
 import type * as productionDataReleaseProtocol from "../productionDataReleaseProtocol.js";
 import type * as productionDataReleaseRollback from "../productionDataReleaseRollback.js";
 import type * as productionDataReleaseRetention from "../productionDataReleaseRetention.js";
+import type * as productionHeatActiveState from "../productionHeatActiveState.js";
+import type * as productionHeatBatch from "../productionHeatBatch.js";
+import type * as productionHeatLifecycle from "../productionHeatLifecycle.js";
+import type * as productionHeatOperations from "../productionHeatOperations.js";
+import type * as productionHeatProtocol from "../productionHeatProtocol.js";
+import type * as productionHeatRetention from "../productionHeatRetention.js";
 import type * as publicRepackAggregates from "../publicRepackAggregates.js";
 import type * as publicRepackReadModel from "../publicRepackReadModel.js";
 import type * as publicRepackValidation from "../publicRepackValidation.js";
@@ -55,6 +61,12 @@ declare const fullApi: ApiFromModules<{
   productionDataReleaseProtocol: typeof productionDataReleaseProtocol;
   productionDataReleaseRollback: typeof productionDataReleaseRollback;
   productionDataReleaseRetention: typeof productionDataReleaseRetention;
+  productionHeatActiveState: typeof productionHeatActiveState;
+  productionHeatBatch: typeof productionHeatBatch;
+  productionHeatLifecycle: typeof productionHeatLifecycle;
+  productionHeatOperations: typeof productionHeatOperations;
+  productionHeatProtocol: typeof productionHeatProtocol;
+  productionHeatRetention: typeof productionHeatRetention;
   publicRepackAggregates: typeof publicRepackAggregates;
   publicRepackReadModel: typeof publicRepackReadModel;
   publicRepackValidation: typeof publicRepackValidation;

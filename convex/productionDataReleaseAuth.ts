@@ -12,8 +12,9 @@ import {
   PRODUCTION_AUTH_SIGNATURE_VERSION,
   PRODUCTION_AUTH_TIMESTAMP_PATTERN,
   PRODUCTION_AUTH_WINDOW_MILLISECONDS,
+  decodeProductionAuthSecretBase64,
   productionDataReleaseErrorCodeSchema,
-  productionDataReleasePathSchema,
+  productionPublicationPathSchema,
   productionPublicationReceiptSigningValue,
   productionPublicationRequestSigningValue,
 } from "@packscout/contracts";
@@ -82,7 +83,7 @@ async function sha256Bytes(bytes: Uint8Array): Promise<string> {
   );
 }
 
-function configuredKeySecret(keyId: string): string | null {
+function configuredKeySecret(keyId: string): Uint8Array | null {
   if (!PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId)) return null;
   const raw = env.PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS;
   if (raw === undefined) return null;
@@ -96,21 +97,22 @@ function configuredKeySecret(keyId: string): string | null {
     ) {
       return null;
     }
-    const secret = (parsed as Record<string, unknown>)[keyId];
-    return typeof secret === "string" &&
-        new TextEncoder().encode(secret).byteLength >= MIN_PRODUCTION_AUTH_SECRET_BYTES &&
-        new TextEncoder().encode(secret).byteLength <= MAX_PRODUCTION_AUTH_SECRET_BYTES
-      ? secret
-      : null;
+    const encoded = (parsed as Record<string, unknown>)[keyId];
+    if (typeof encoded !== "string") return null;
+    const secret = decodeProductionAuthSecretBase64(encoded);
+    return secret !== null &&
+        secret.byteLength >= MIN_PRODUCTION_AUTH_SECRET_BYTES &&
+        secret.byteLength <= MAX_PRODUCTION_AUTH_SECRET_BYTES
+      ? secret : null;
   } catch {
     return null;
   }
 }
 
-async function hmacKey(secret: string): Promise<CryptoKey> {
+async function hmacKey(secret: Uint8Array): Promise<CryptoKey> {
   return await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(secret),
+    toArrayBuffer(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign", "verify"],
@@ -173,7 +175,7 @@ async function authenticateRequest(
     throw new HttpRefusal("PUBLICATION_AUTH_INVALID", 401);
   }
   const key = await hmacKey(secret);
-  const path = productionDataReleasePathSchema.safeParse(
+  const path = productionPublicationPathSchema.safeParse(
     new URL(request.url).pathname,
   );
   if (request.method.toUpperCase() !== "POST" || !path.success) {

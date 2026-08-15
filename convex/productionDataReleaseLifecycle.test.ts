@@ -42,7 +42,7 @@ function configureEnvironment(originSetHash: string) {
   vi.stubEnv("PACKSCOUT_MOCK_DATA_RELEASE_SEED_ENABLED", "1");
   vi.stubEnv(
     "PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS",
-    JSON.stringify({ [KEY_ID]: KEY_SECRET }),
+    JSON.stringify({ [KEY_ID]: btoa(KEY_SECRET) }),
   );
   vi.stubEnv("PACKSCOUT_PUBLIC_ORIGIN_SET_HASH", originSetHash);
 }

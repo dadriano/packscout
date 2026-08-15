@@ -1,3 +1,11 @@
+import {
+  REPACK_HEAT_AGGREGATION_VERSION,
+  REPACK_HEAT_LARGE_HIT_MULTIPLE_BASIS_POINTS,
+  REPACK_HEAT_MINIMUM_BASELINE_PULLS,
+  REPACK_HEAT_MINIMUM_CURRENT_PULLS,
+  REPACK_HEAT_POLICY_VERSION,
+  REPACK_HEAT_SCENARIO_VERSION,
+} from "@packscout/contracts";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { repackSearchRowValidator } from "./publicRepackValidation";
@@ -91,11 +99,14 @@ const repackHeatComponentUnavailableValidator = v.object({
 });
 
 const repackHeatProvenanceValidator = v.union(
-  v.object({ kind: v.literal("observed"), aggregationVersion: v.string() }),
+  v.object({
+    kind: v.literal("observed"),
+    aggregationVersion: v.literal(REPACK_HEAT_AGGREGATION_VERSION),
+  }),
   v.object({
     kind: v.literal("simulated"),
-    aggregationVersion: v.string(),
-    scenarioVersion: v.string(),
+    aggregationVersion: v.literal(REPACK_HEAT_AGGREGATION_VERSION),
+    scenarioVersion: v.literal(REPACK_HEAT_SCENARIO_VERSION),
   }),
 );
 
@@ -127,8 +138,8 @@ export const publicRepackHeatSignalValidator = v.object({
   currentWindow: repackHeatWindowValidator,
   baselineWindow: repackHeatWindowValidator,
   sampleRequirements: v.object({
-    minimumCurrentPullCount: v.number(),
-    minimumBaselinePullCount: v.number(),
+    minimumCurrentPullCount: v.literal(REPACK_HEAT_MINIMUM_CURRENT_PULLS),
+    minimumBaselinePullCount: v.literal(REPACK_HEAT_MINIMUM_BASELINE_PULLS),
   }),
   components: v.object({
     activity: v.union(
@@ -157,7 +168,9 @@ export const publicRepackHeatSignalValidator = v.object({
         currentRateBasisPoints: v.number(),
         baselineRateBasisPoints: v.number(),
         rateDeltaBasisPoints: v.number(),
-        thresholdMultipleBasisPoints: v.number(),
+        thresholdMultipleBasisPoints: v.literal(
+          REPACK_HEAT_LARGE_HIT_MULTIPLE_BASIS_POINTS,
+        ),
       }),
       repackHeatComponentUnavailableValidator,
     ),
@@ -209,7 +222,32 @@ export const publicRepackHeatSignalValidator = v.object({
       v.literal("simulated_data"),
     ),
   ),
-  heatPolicyVersion: v.string(),
+  heatPolicyVersion: v.literal(REPACK_HEAT_POLICY_VERSION),
+  calculatedAt: timestampValidator,
+  expiresAt: timestampValidator,
+});
+
+export const repackHeatSignalCoreValidator = publicRepackHeatSignalValidator
+  .omit("baselineWindow", "currentWindow", "calculatedAt", "expiresAt")
+  .extend({
+    baselinePullCount: v.number(),
+    currentPullCount: v.number(),
+  });
+
+export const productionHeatFrameEnvelopeValidator = v.object({
+  publicHeatFrameId: v.string(),
+  catalogPublicReleaseId: v.string(),
+  frameSequence: v.number(),
+  sourceWatermark: v.string(),
+  signalSetHash: sha256Validator,
+  frameHash: sha256Validator,
+  signalCount: v.number(),
+  aggregationVersion: v.literal(REPACK_HEAT_AGGREGATION_VERSION),
+  heatPolicyVersion: v.literal(REPACK_HEAT_POLICY_VERSION),
+  baselineWindowStartedAt: timestampValidator,
+  baselineWindowEndedAt: timestampValidator,
+  currentWindowStartedAt: timestampValidator,
+  currentWindowEndedAt: timestampValidator,
   calculatedAt: timestampValidator,
   expiresAt: timestampValidator,
 });
@@ -630,11 +668,43 @@ export default defineSchema({
     updatedAt: timestampValidator,
   }).index("by_key", ["key"]),
 
+  repackHeatSignalSets: defineTable({
+    releaseId: v.id("dataReleases"),
+    signalSetHash: sha256Validator,
+    lifecycle: v.union(
+      v.literal("staging"),
+      v.literal("complete"),
+      v.literal("retired"),
+      v.literal("failed"),
+    ),
+    sourceKind: v.union(v.literal("observed"), v.literal("simulated")),
+    scenarioVersion: nullableTextValidator,
+    aggregationVersion: v.string(),
+    heatPolicyVersion: v.string(),
+    signalCount: v.number(),
+    originatingPublicationId: nullableTextValidator,
+    createdAt: timestampValidator,
+    completedAt: nullableTimestampValidator,
+    retentionEligibleAt: v.optional(timestampValidator),
+  })
+    .index("by_signal_set_hash", ["signalSetHash"])
+    .index("by_release_id_and_signal_set_hash", [
+      "releaseId",
+      "signalSetHash",
+    ])
+    .index("by_lifecycle_and_retention_eligible_at", [
+      "lifecycle",
+      "retentionEligibleAt",
+    ]),
+
   repackHeatSnapshots: defineTable({
     releaseId: v.id("dataReleases"),
+    signalSetId: v.id("repackHeatSignalSets"),
     publicHeatSnapshotId: v.string(),
+    publicationId: nullableTextValidator,
     simulationRunId: v.union(v.string(), v.null()),
     sequence: v.number(),
+    sourceWatermark: nullableTextValidator,
     lifecycle: v.union(
       v.literal("staging"),
       v.literal("complete"),
@@ -653,30 +723,102 @@ export default defineSchema({
     currentWindowEndedAt: timestampValidator,
     calculatedAt: timestampValidator,
     expiresAt: timestampValidator,
+    retentionEligibleAt: v.optional(timestampValidator),
   })
     .index("by_public_heat_snapshot_id", ["publicHeatSnapshotId"])
     .index("by_release_id_and_sequence", ["releaseId", "sequence"])
+    .index("by_signal_set_id", ["signalSetId"])
+    .index("by_lifecycle_and_expires_at", ["lifecycle", "expiresAt"])
     .index("by_simulation_run_id_and_sequence", [
       "simulationRunId",
       "sequence",
     ]),
 
   repackHeatSignals: defineTable({
-    heatSnapshotId: v.id("repackHeatSnapshots"),
+    signalSetId: v.id("repackHeatSignalSets"),
     releaseId: v.id("dataReleases"),
     repackId: v.id("repacks"),
     publicRepackId: v.string(),
-    detail: publicRepackHeatSignalValidator,
+    detail: repackHeatSignalCoreValidator,
   })
     .index("by_release_id", ["releaseId"])
-    .index("by_heat_snapshot_id_and_public_repack_id", [
-      "heatSnapshotId",
+    .index("by_signal_set_id_and_public_repack_id", [
+      "signalSetId",
       "publicRepackId",
     ])
-    .index("by_heat_snapshot_id_and_repack_id", [
-      "heatSnapshotId",
+    .index("by_signal_set_id_and_repack_id", [
+      "signalSetId",
       "repackId",
     ]),
+
+  repackHeatPublications: defineTable({
+    publicationId: v.string(),
+    releaseId: v.id("dataReleases"),
+    signalSetId: v.id("repackHeatSignalSets"),
+    frame: productionHeatFrameEnvelopeValidator,
+    expectedBatchCount: v.number(),
+    acceptedBatchCount: v.number(),
+    acceptedSignalCount: v.number(),
+    acceptedSignalSetHash: sha256Validator,
+    lastPublicRepackId: nullableTextValidator,
+    state: v.union(
+      v.literal("staging"),
+      v.literal("complete"),
+      v.literal("failed"),
+    ),
+    createdAt: timestampValidator,
+    completedAt: nullableTimestampValidator,
+    retentionEligibleAt: timestampValidator,
+  })
+    .index("by_publication_id", ["publicationId"])
+    .index("by_release_id", ["releaseId"])
+    .index("by_signal_set_id", ["signalSetId"])
+    .index("by_state_and_completed_at", ["state", "completedAt"])
+    .index("by_state_and_retention_eligible_at", [
+      "state",
+      "retentionEligibleAt",
+    ]),
+
+  repackHeatBatches: defineTable({
+    publicationId: v.string(),
+    releaseId: v.id("dataReleases"),
+    signalSetId: v.id("repackHeatSignalSets"),
+    batchIndex: v.number(),
+    idempotencyKey: v.string(),
+    bodyHash: sha256Validator,
+    batchHash: sha256Validator,
+    recordCount: v.number(),
+    byteCount: v.number(),
+    coreByteCount: v.number(),
+    signalSetProgressHash: sha256Validator,
+    acceptedAt: timestampValidator,
+    operationId: v.string(),
+  })
+    .index("by_publication_id_and_batch_index", [
+      "publicationId",
+      "batchIndex",
+    ])
+    .index("by_idempotency_key", ["idempotencyKey"])
+    .index("by_release_id", ["releaseId"]),
+
+  repackHeatOperations: defineTable({
+    operationId: v.string(),
+    kind: v.string(),
+    idempotencyKey: v.string(),
+    bodyHash: sha256Validator,
+    publicationId: nullableTextValidator,
+    status: v.string(),
+    result: v.string(),
+    confirmationReceiptHash: v.union(sha256Validator, v.null()),
+    acceptedAt: timestampValidator,
+    completedAt: nullableTimestampValidator,
+    receiptJson: v.optional(v.string()),
+  })
+    .index("by_kind_and_idempotency_key", ["kind", "idempotencyKey"])
+    .index("by_operation_id", ["operationId"])
+    .index("by_publication_id", ["publicationId"])
+    .index("by_publication_id_and_kind", ["publicationId", "kind"])
+    .index("by_completed_at", ["completedAt"]),
 
   vendors: defineTable({
     releaseId: v.id("dataReleases"),

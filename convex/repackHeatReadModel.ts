@@ -1,5 +1,6 @@
 import {
   REPACK_HEAT_MAXIMUM_TTL_MILLISECONDS,
+  hydrateRepackHeatSignal,
   parseRepackHeatTimestampMillis,
   publicRepackHeatSignalSchema,
   unavailableRepackHeat,
@@ -11,7 +12,11 @@ import type { Doc } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 
 type HeatSnapshotContext =
-  | Readonly<{ status: "current"; snapshot: Doc<"repackHeatSnapshots"> }>
+  | Readonly<{
+      status: "current";
+      snapshot: Doc<"repackHeatSnapshots">;
+      signalSet: Doc<"repackHeatSignalSets">;
+    }>
   | Readonly<{
       status: "expired";
       lastCalculatedAt: string;
@@ -44,6 +49,9 @@ async function loadHeatSnapshotContext(
     "repackHeatSnapshots",
     state.activeHeatSnapshotId,
   );
+  const signalSet = snapshot === null
+    ? null
+    : await ctx.db.get("repackHeatSignalSets", snapshot.signalSetId);
   const baselineWindowStartedAt =
     snapshot === null
       ? null
@@ -68,15 +76,19 @@ async function loadHeatSnapshotContext(
     snapshot === null ? null : parseRepackHeatTimestampMillis(snapshot.expiresAt);
   if (
     snapshot === null ||
+    signalSet === null ||
     snapshot.lifecycle !== "complete" ||
+    signalSet.lifecycle !== "complete" ||
     snapshot.releaseId !== release._id ||
+    signalSet.releaseId !== release._id ||
+    signalSet._id !== snapshot.signalSetId ||
     !Number.isSafeInteger(snapshot.sequence) ||
     snapshot.sequence < 0 ||
     state.latestSequence !== snapshot.sequence ||
     state.activeHeatSnapshotId === state.previousHeatSnapshotId ||
     !Number.isSafeInteger(snapshot.signalCount) ||
-    snapshot.signalCount < 0 ||
-    snapshot.signalCount > release.metadata.repackCount ||
+    snapshot.signalCount !== release.metadata.repackCount ||
+    signalSet.signalCount !== snapshot.signalCount ||
     baselineWindowStartedAt === null ||
     baselineWindowEndedAt === null ||
     currentWindowStartedAt === null ||
@@ -94,10 +106,22 @@ async function loadHeatSnapshotContext(
       snapshot.sourceKind !== "simulated") ||
     (release.metadata.dataSource === "canonical" &&
       snapshot.sourceKind !== "observed") ||
+    signalSet.sourceKind !== snapshot.sourceKind ||
+    signalSet.scenarioVersion !== snapshot.scenarioVersion ||
+    signalSet.aggregationVersion !== snapshot.aggregationVersion ||
+    signalSet.heatPolicyVersion !== snapshot.heatPolicyVersion ||
     (snapshot.sourceKind === "observed" &&
-      (snapshot.simulationRunId !== null || snapshot.scenarioVersion !== null)) ||
+      (snapshot.simulationRunId !== null ||
+        snapshot.scenarioVersion !== null ||
+        snapshot.publicationId === null ||
+        snapshot.publicationId !== snapshot.publicHeatSnapshotId ||
+        snapshot.sourceWatermark === null ||
+        !/^[1-9][0-9]{0,18}$/u.test(snapshot.sourceWatermark))) ||
     (snapshot.sourceKind === "simulated" &&
-      (snapshot.simulationRunId === null || snapshot.scenarioVersion === null))
+      (snapshot.simulationRunId === null ||
+        snapshot.scenarioVersion === null ||
+        snapshot.publicationId !== null ||
+        snapshot.sourceWatermark !== null))
   ) {
     return unavailable("RELEASE_MISMATCH");
   }
@@ -111,7 +135,7 @@ async function loadHeatSnapshotContext(
   if (state.freshness !== "current") {
     return unavailable("NOT_PUBLISHED");
   }
-  return { status: "current", snapshot };
+  return { status: "current", snapshot, signalSet };
 }
 
 function heatWrapperFromContext(
@@ -131,13 +155,14 @@ async function loadCurrentHeat(
   ctx: QueryCtx,
   release: Doc<"dataReleases">,
   snapshot: Doc<"repackHeatSnapshots">,
+  signalSet: Doc<"repackHeatSignalSets">,
   publicRepackId: string,
 ): Promise<PublicRepackHeat> {
   const documents = await ctx.db
     .query("repackHeatSignals")
-    .withIndex("by_heat_snapshot_id_and_public_repack_id", (index) =>
+    .withIndex("by_signal_set_id_and_public_repack_id", (index) =>
       index
-        .eq("heatSnapshotId", snapshot._id)
+        .eq("signalSetId", signalSet._id)
         .eq("publicRepackId", publicRepackId),
     )
     .take(2);
@@ -145,13 +170,27 @@ async function loadCurrentHeat(
   if (documents.length !== 1) return unavailableRepackHeat("RELEASE_MISMATCH");
   const document = documents[0]!;
   const repack = await ctx.db.get("repacks", document.repackId);
-  const parsed = publicRepackHeatSignalSchema.safeParse(document.detail);
+  let hydrated: unknown;
+  try {
+    hydrated = hydrateRepackHeatSignal(document.detail, {
+      baselineWindowStartedAt: snapshot.baselineWindowStartedAt,
+      baselineWindowEndedAt: snapshot.baselineWindowEndedAt,
+      currentWindowStartedAt: snapshot.currentWindowStartedAt,
+      currentWindowEndedAt: snapshot.currentWindowEndedAt,
+      calculatedAt: snapshot.calculatedAt,
+      expiresAt: snapshot.expiresAt,
+    });
+  } catch {
+    return unavailableRepackHeat("RELEASE_MISMATCH");
+  }
+  const parsed = publicRepackHeatSignalSchema.safeParse(hydrated);
   if (
     !parsed.success ||
     repack === null ||
     repack.releaseId !== release._id ||
     repack.publicRepackId !== publicRepackId ||
     document.releaseId !== release._id ||
+    document.signalSetId !== signalSet._id ||
     document.publicRepackId !== publicRepackId ||
     parsed.data.publicRepackId !== publicRepackId ||
     parsed.data.baselineWindow.startedAt !==
@@ -188,6 +227,7 @@ export async function attachHeatToRepackDetails(
         ctx,
         release,
         context.snapshot,
+        context.signalSet,
         detail.publicRepackId,
       ),
     ),

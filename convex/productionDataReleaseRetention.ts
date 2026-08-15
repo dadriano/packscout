@@ -166,6 +166,27 @@ async function deleteOwnedReleaseDocuments(
         .take(limit),
     (limit) =>
       ctx.db
+        .query("repackHeatBatches")
+        .withIndex("by_release_id", (index) =>
+          index.eq("releaseId", release._id),
+        )
+        .take(limit),
+    (limit) =>
+      ctx.db
+        .query("repackHeatPublications")
+        .withIndex("by_release_id", (index) =>
+          index.eq("releaseId", release._id),
+        )
+        .take(limit),
+    (limit) =>
+      ctx.db
+        .query("repackHeatSignalSets")
+        .withIndex("by_release_id_and_signal_set_hash", (index) =>
+          index.eq("releaseId", release._id),
+        )
+        .take(limit),
+    (limit) =>
+      ctx.db
         .query("repackChases")
         .withIndex("by_release_id_and_repack_id", (index) =>
           index.eq("releaseId", release._id),

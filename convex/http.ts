@@ -1,5 +1,8 @@
 import { httpRouter } from "convex/server";
-import { PRODUCTION_DATA_RELEASE_PATHS } from "@packscout/contracts";
+import {
+  PRODUCTION_DATA_RELEASE_PATHS,
+  PRODUCTION_REPACK_HEAT_PATHS,
+} from "@packscout/contracts";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { handleAuthenticatedPublicationRequest } from "./productionDataReleaseAuth";
@@ -14,6 +17,18 @@ http.route({
       ctx,
       request,
       internal.productionDataReleaseActiveState.activeState,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_REPACK_HEAT_PATHS.activeState,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPublicationRequest(
+      ctx,
+      request,
+      internal.productionHeatActiveState.activeState,
     ),
   ),
 });
@@ -98,6 +113,78 @@ http.route({
       ctx,
       request,
       internal.productionDataReleaseRetention.retain,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_REPACK_HEAT_PATHS.start,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPublicationRequest(
+      ctx,
+      request,
+      internal.productionHeatLifecycle.start,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_REPACK_HEAT_PATHS.applyBatch,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPublicationRequest(
+      ctx,
+      request,
+      internal.productionHeatBatch.applyBatch,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_REPACK_HEAT_PATHS.finalize,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPublicationRequest(
+      ctx,
+      request,
+      internal.productionHeatLifecycle.finalize,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_REPACK_HEAT_PATHS.status,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPublicationRequest(
+      ctx,
+      request,
+      internal.productionHeatLifecycle.status,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_REPACK_HEAT_PATHS.refreshFrame,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPublicationRequest(
+      ctx,
+      request,
+      internal.productionHeatLifecycle.refreshFrame,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_REPACK_HEAT_PATHS.retain,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPublicationRequest(
+      ctx,
+      request,
+      internal.productionHeatRetention.retain,
     ),
   ),
 });
