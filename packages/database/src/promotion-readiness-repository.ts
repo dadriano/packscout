@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PackscoutPrismaClient } from "./database.ts";
 
 export interface PersistedPromotionReadinessDiagnostic {
   readonly activeAlertCount: number;
   readonly activeFailureAlertCount: number;
+  readonly activeFailureAttemptId: string | null;
   readonly canonicalSettledWatermark: bigint;
   readonly canonicalSettledAt: Date | null;
   readonly canonicalSourceHeadWatermark: bigint;
@@ -19,6 +21,7 @@ export interface PersistedPromotionReadinessDiagnostic {
 interface ReadinessRow {
   activeAlertCount: number;
   activeFailureAlertCount: number;
+  activeFailureAttemptId: string | null;
   canonicalSettledWatermark: bigint;
   canonicalSettledAt: Date | null;
   canonicalSourceHeadWatermark: bigint;
@@ -35,11 +38,24 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const deploymentKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/u;
 
+export function promotionDeploymentScopeDigest(deploymentKey: string): string {
+  if (!deploymentKeyPattern.test(deploymentKey)) {
+    throw new RangeError("Promotion deployment scope is invalid.");
+  }
+  return createHash("sha256")
+    .update("packscout.promotion.deployment.v1\0", "utf8")
+    .update(deploymentKey, "utf8")
+    .digest("hex");
+}
+
 /** Loads only allowlisted lane and settlement health for one server-bound scope. */
 export class PrismaPromotionReadinessRepository {
+  readonly deploymentScopeDigest: string;
   readonly #deploymentKey: string;
+  readonly #failureDedupeKey: string;
   readonly #lane: "catalog" | "heat";
   readonly #organizationId: string;
+  readonly #recoveryKey: string;
 
   constructor(
     private readonly database: PackscoutPrismaClient,
@@ -58,6 +74,13 @@ export class PrismaPromotionReadinessRepository {
     this.#organizationId = scope.organizationId.toLowerCase();
     this.#deploymentKey = scope.deploymentKey;
     this.#lane = scope.lane;
+    this.deploymentScopeDigest = promotionDeploymentScopeDigest(
+      scope.deploymentKey,
+    );
+    const alertScope =
+      `promotion:${this.deploymentScopeDigest}:${this.#lane}`;
+    this.#failureDedupeKey = `${alertScope}:failed`;
+    this.#recoveryKey = `${alertScope}:health`;
   }
 
   async load(): Promise<PersistedPromotionReadinessDiagnostic> {
@@ -81,16 +104,23 @@ export class PrismaPromotionReadinessRepository {
       ), alerts as (
         select count(*)::integer as "activeAlertCount",
                count(*) filter (
-                 where dedupe_key = ${`promotion:${this.#lane}:failed`}
-               )::integer as "activeFailureAlertCount"
-        from public.admin_alerts
-        where organization_id = cast(${this.#organizationId} as uuid)
-          and recovery_key = ${`promotion:${this.#lane}:health`}
-          and state <> 'resolved'::public.admin_alert_state
+                 where admin_alert.dedupe_key = ${this.#failureDedupeKey}
+               )::integer as "activeFailureAlertCount",
+               max(latest_event.evidence_json ->> 'attemptId') filter (
+                 where admin_alert.dedupe_key = ${this.#failureDedupeKey}
+               ) as "activeFailureAttemptId"
+        from public.admin_alerts admin_alert
+        left join public.operational_events latest_event
+          on latest_event.id = admin_alert.latest_event_id
+         and latest_event.organization_id = admin_alert.organization_id
+        where admin_alert.organization_id = cast(${this.#organizationId} as uuid)
+          and admin_alert.recovery_key = ${this.#recoveryKey}
+          and admin_alert.state <> 'resolved'::public.admin_alert_state
       )
       select
         alerts."activeAlertCount",
         alerts."activeFailureAlertCount",
+        alerts."activeFailureAttemptId",
         canonical."canonicalSettledWatermark",
         canonical."canonicalSettledAt",
         canonical."canonicalSourceHeadWatermark",
@@ -124,6 +154,7 @@ export class PrismaPromotionReadinessRepository {
     return rows[0] ?? {
       activeAlertCount: 0,
       activeFailureAlertCount: 0,
+      activeFailureAttemptId: null,
       canonicalSettledWatermark: 0n,
       canonicalSettledAt: null,
       canonicalSourceHeadWatermark: 0n,

@@ -23,8 +23,11 @@ request, provider payload, or Convex mutation may select an organization.
 - Heat is a separate minute-boundary lane. Catalog activation never waits for
   Heat, and Heat must match the active catalog release or fail closed.
 - Durable alerts contain only a lane, bounded condition/code/count/duration,
-  public watermark strings, and a PostgreSQL attempt UUID. Tenant binding stays
-  in protected PostgreSQL columns; logs and evidence exports omit it.
+  public watermark strings, and a PostgreSQL attempt UUID. The server derives a
+  domain-separated SHA-256 deployment-scope digest for dedupe and recovery keys;
+  alert reads match organization, deployment digest, and lane exactly. The raw
+  deployment key never enters notifications, logs, or portable evidence, and
+  tenant binding stays in protected PostgreSQL columns.
 
 ## Production configuration contract
 
@@ -109,6 +112,10 @@ retain its last settled public values. The release must then report a nonzero
 
 The protected PostgreSQL alert ledger is authoritative for operator alerts.
 Console logs are diagnostic only.
+
+Alert and recovery keys are isolated by the server-derived deployment digest
+and lane. A recovery in one deployment must not resolve, suppress, or count an
+alert for another deployment in the same organization.
 
 | Condition | Durable kind | Required safe evidence | Recovery condition |
 |---|---|---|---|

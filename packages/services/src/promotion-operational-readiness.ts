@@ -12,6 +12,7 @@ export const PROMOTION_ACTIVATION_ALERT_AFTER_MILLISECONDS = 60_000;
 export interface PromotionReadinessDiagnostic {
   readonly activeAlertCount: number;
   readonly activeFailureAlertCount: number;
+  readonly activeFailureAttemptId: string | null;
   readonly canonicalSettledWatermark: bigint;
   readonly canonicalSettledAt: Date | null;
   readonly canonicalSourceHeadWatermark: bigint;
@@ -30,6 +31,7 @@ export interface PromotionReadinessDiagnosticPort {
 
 export interface PromotionOperationalReadinessConfiguration {
   readonly organizationId: string;
+  readonly deploymentScopeDigest: string;
   readonly lane: PromotionLane;
   readonly targetSource: "canonical_settlement" | "promotion_lane";
   readonly monitorTechnicalSettlement?: boolean;
@@ -38,6 +40,7 @@ export interface PromotionOperationalReadinessConfiguration {
 
 const organizationIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const deploymentScopeDigestPattern = /^[0-9a-f]{64}$/u;
 const reconciliationFailurePattern =
   /(?:BASELINE_CONFLICT|LEDGER|RECEIPT|RESPONSE|RETRY_EXHAUSTED|STATUS|WATERMARK)/u;
 
@@ -88,8 +91,11 @@ export class PromotionOperationalReadinessService {
     private readonly clock: ProviderClock,
     configuration: PromotionOperationalReadinessConfiguration,
   ) {
-    if (!organizationIdPattern.test(configuration.organizationId)) {
-      throw new RangeError("Promotion readiness organization is invalid.");
+    if (
+      !organizationIdPattern.test(configuration.organizationId) ||
+      !deploymentScopeDigestPattern.test(configuration.deploymentScopeDigest)
+    ) {
+      throw new RangeError("Promotion readiness scope is invalid.");
     }
     const threshold = configuration.activationAlertAfterMilliseconds ??
       PROMOTION_ACTIVATION_ALERT_AFTER_MILLISECONDS;
@@ -149,7 +155,11 @@ export class PromotionOperationalReadinessService {
 
     if (
       unrecoveredFailure &&
-      nonNegativeCount(diagnostic.activeFailureAlertCount) === 0 &&
+      (
+        nonNegativeCount(diagnostic.activeFailureAlertCount) === 0 ||
+        diagnostic.activeFailureAttemptId !==
+          diagnostic.latestFailedAttemptId
+      ) &&
       this.#lastFailureAlertedAttemptId !==
         diagnostic.latestFailedAttemptId
     ) {
@@ -165,6 +175,7 @@ export class PromotionOperationalReadinessService {
     if (settlementBlocked && !this.#settlementBlocked) {
       const result = await this.events.promotionSettlementBlocked({
         organizationId: this.#configuration.organizationId,
+        deploymentScopeDigest: this.#configuration.deploymentScopeDigest,
         lane: this.#configuration.lane,
         sourceHeadWatermark: nonNegativeWatermark(
           diagnostic.canonicalSourceHeadWatermark,
@@ -179,6 +190,7 @@ export class PromotionOperationalReadinessService {
     if (activationDelayed && !this.#activationDelayed) {
       const result = await this.events.promotionActivationDelayed({
         organizationId: this.#configuration.organizationId,
+        deploymentScopeDigest: this.#configuration.deploymentScopeDigest,
         lane: this.#configuration.lane,
         targetWatermark: target.watermark,
         confirmedWatermark,
@@ -202,6 +214,7 @@ export class PromotionOperationalReadinessService {
     ) {
       const result = await this.events.promotionRecovered({
         organizationId: this.#configuration.organizationId,
+        deploymentScopeDigest: this.#configuration.deploymentScopeDigest,
         lane: this.#configuration.lane,
         targetWatermark: target.watermark,
         confirmedWatermark,
@@ -238,6 +251,7 @@ export class PromotionOperationalReadinessService {
   }): Promise<void> {
     const result = await this.events.promotionFailed({
       organizationId: this.#configuration.organizationId,
+      deploymentScopeDigest: this.#configuration.deploymentScopeDigest,
       lane: this.#configuration.lane,
       attemptId: input.attemptId,
       targetWatermark: nonNegativeWatermark(input.targetWatermark),

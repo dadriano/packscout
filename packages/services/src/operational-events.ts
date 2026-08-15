@@ -75,6 +75,15 @@ function laneLabel(lane: PromotionLane): "Catalog" | "Heat" {
   return lane === "catalog" ? "Catalog" : "Heat";
 }
 
+function promotionAlertScope(
+  deploymentScopeDigest: string,
+  lane: PromotionLane,
+): string | null {
+  return /^[0-9a-f]{64}$/u.test(deploymentScopeDigest)
+    ? `promotion:${deploymentScopeDigest}:${lane}`
+    : null;
+}
+
 function failedNotification(): NotificationPublishResult {
   return {
     status: "failed",
@@ -286,11 +295,17 @@ export class OperationalEventService {
 
   promotionActivationDelayed(input: {
     organizationId: string;
+    deploymentScopeDigest: string;
     lane: PromotionLane;
     targetWatermark: bigint;
     confirmedWatermark: bigint;
     durationMs: number;
   }): Promise<NotificationPublishResult> {
+    const alertScope = promotionAlertScope(
+      input.deploymentScopeDigest,
+      input.lane,
+    );
+    if (alertScope === null) return Promise.resolve(failedNotification());
     return this.emit({
       organizationId: input.organizationId,
       kind: "promotion_activation_delayed",
@@ -298,8 +313,8 @@ export class OperationalEventService {
       providerId: null,
       runId: null,
       quarantineId: null,
-      dedupeKey: `promotion:${input.lane}:activation-delayed`,
-      recoveryKey: `promotion:${input.lane}:health`,
+      dedupeKey: `${alertScope}:activation-delayed`,
+      recoveryKey: `${alertScope}:health`,
       title: `${laneLabel(input.lane)} publication is delayed`,
       summary: "A ready public watermark has not been confirmed within its activation target.",
       evidence: {
@@ -314,11 +329,17 @@ export class OperationalEventService {
 
   promotionSettlementBlocked(input: {
     organizationId: string;
+    deploymentScopeDigest: string;
     lane: PromotionLane;
     sourceHeadWatermark: bigint;
     settledWatermark: bigint;
     technicalFailureCount: number;
   }): Promise<NotificationPublishResult> {
+    const alertScope = promotionAlertScope(
+      input.deploymentScopeDigest,
+      input.lane,
+    );
+    if (alertScope === null) return Promise.resolve(failedNotification());
     return this.emit({
       organizationId: input.organizationId,
       kind: "promotion_settlement_blocked",
@@ -326,8 +347,8 @@ export class OperationalEventService {
       providerId: null,
       runId: null,
       quarantineId: null,
-      dedupeKey: `promotion:${input.lane}:settlement-blocked`,
-      recoveryKey: `promotion:${input.lane}:health`,
+      dedupeKey: `${alertScope}:settlement-blocked`,
+      recoveryKey: `${alertScope}:health`,
       title: `${laneLabel(input.lane)} settlement is blocked`,
       summary: "A technical derivation outcome is preventing the public watermark from settling.",
       evidence: {
@@ -342,6 +363,7 @@ export class OperationalEventService {
 
   promotionFailed(input: {
     organizationId: string;
+    deploymentScopeDigest: string;
     lane: PromotionLane;
     attemptId: string;
     targetWatermark: bigint;
@@ -349,6 +371,11 @@ export class OperationalEventService {
     failureCode: string;
     reconciliation: boolean;
   }): Promise<NotificationPublishResult> {
+    const alertScope = promotionAlertScope(
+      input.deploymentScopeDigest,
+      input.lane,
+    );
+    if (alertScope === null) return Promise.resolve(failedNotification());
     return this.emit({
       organizationId: input.organizationId,
       kind: "promotion_failed",
@@ -356,8 +383,8 @@ export class OperationalEventService {
       providerId: null,
       runId: null,
       quarantineId: null,
-      dedupeKey: `promotion:${input.lane}:failed`,
-      recoveryKey: `promotion:${input.lane}:health`,
+      dedupeKey: `${alertScope}:failed`,
+      recoveryKey: `${alertScope}:health`,
       title: `${laneLabel(input.lane)} publication failed`,
       summary: input.reconciliation
         ? "Publication reconciliation reached a safe terminal failure."
@@ -380,10 +407,16 @@ export class OperationalEventService {
 
   promotionRecovered(input: {
     organizationId: string;
+    deploymentScopeDigest: string;
     lane: PromotionLane;
     targetWatermark: bigint;
     confirmedWatermark: bigint;
   }): Promise<NotificationPublishResult> {
+    const alertScope = promotionAlertScope(
+      input.deploymentScopeDigest,
+      input.lane,
+    );
+    if (alertScope === null) return Promise.resolve(failedNotification());
     return this.emit({
       organizationId: input.organizationId,
       kind: "promotion_recovered",
@@ -391,8 +424,8 @@ export class OperationalEventService {
       providerId: null,
       runId: null,
       quarantineId: null,
-      dedupeKey: `promotion:${input.lane}:recovered`,
-      recoveryKey: `promotion:${input.lane}:health`,
+      dedupeKey: `${alertScope}:recovered`,
+      recoveryKey: `${alertScope}:health`,
       title: `${laneLabel(input.lane)} publication recovered`,
       summary: "The public lane is fully confirmed and has no technical settlement block.",
       evidence: {

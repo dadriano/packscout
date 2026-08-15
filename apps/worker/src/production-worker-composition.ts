@@ -53,6 +53,14 @@ export function createProductionWorkerRuntime(
     deploymentKey: input.catalog.deploymentKey,
   });
   const clock = { now: () => new Date() };
+  const readinessRepository = new PrismaPromotionReadinessRepository(
+    input.database,
+    {
+      organizationId: input.provider.publicOrganizationId,
+      deploymentKey: input.catalog.deploymentKey,
+      lane: "catalog",
+    },
+  );
   const readiness = new CatalogPromotionOperationalReadinessSink(
     new PromotionOperationalReadinessService(
       new OperationalEventService(
@@ -60,14 +68,11 @@ export function createProductionWorkerRuntime(
         { id: randomUUID },
         clock,
       ),
-      new PrismaPromotionReadinessRepository(input.database, {
-        organizationId: input.provider.publicOrganizationId,
-        deploymentKey: input.catalog.deploymentKey,
-        lane: "catalog",
-      }),
+      readinessRepository,
       clock,
       {
         organizationId: input.provider.publicOrganizationId,
+        deploymentScopeDigest: readinessRepository.deploymentScopeDigest,
         lane: "catalog",
         targetSource: "canonical_settlement",
         monitorTechnicalSettlement: true,
