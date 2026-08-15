@@ -435,6 +435,7 @@ export class PackScoutEstimatedEvService {
         calculationRevisionId: inputs.calculation.revisionId,
         calculationRevisionNumber: inputs.calculation.revisionNumber,
         explanation: explanation(current, inputs.pack),
+        derivationAcknowledged: false,
       };
       this.reportAvailability(organizationId, providerId, unchanged.explanation);
       return unchanged;
@@ -467,6 +468,17 @@ export class PackScoutEstimatedEvService {
         sourceCollectedAt,
       }),
       acceptedAt: calculatedAt,
+      ...(command.recomputation
+        ? {
+            recomputation: {
+              ...command.recomputation,
+              resultStatus: result.status,
+              ...(result.status === "unavailable"
+                ? { outcomeReasonCode: result.reasonCodes[0] }
+                : {}),
+            },
+          }
+        : {}),
     });
     const persistedCalculation = persistedContent(persisted.calculation);
     if (!persistedCalculation) {
@@ -477,6 +489,7 @@ export class PackScoutEstimatedEvService {
       calculationRevisionId: persisted.calculation.revisionId,
       calculationRevisionNumber: persisted.calculation.revisionNumber,
       explanation: explanation(persistedCalculation, inputs.pack),
+      derivationAcknowledged: persisted.derivationAcknowledged ?? false,
     };
     this.reportAvailability(organizationId, providerId, recalculated.explanation);
     return recalculated;

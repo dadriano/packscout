@@ -491,7 +491,7 @@ export const dataReleaseMetadataValidator = v.object({
   repackSearchIndexHash: sha256Validator,
   confidencePolicyVersion: v.string(),
   createdAt: timestampValidator,
-  completedAt: timestampValidator,
+  completedAt: v.union(timestampValidator, v.null()),
   dataAsOf: timestampValidator,
   lastSuccessfulObservationAt: timestampValidator,
   staleAt: timestampValidator,
@@ -528,7 +528,93 @@ export default defineSchema({
     ),
     metadata: dataReleaseMetadataValidator,
     searchShardCount: v.number(),
-  }).index("by_public_release_id", ["publicReleaseId"]),
+    retentionEligibleAt: v.optional(timestampValidator),
+  })
+    .index("by_public_release_id", ["publicReleaseId"])
+    .index("by_lifecycle_and_retention_eligible_at", [
+      "lifecycle",
+      "retentionEligibleAt",
+    ]),
+
+  dataReleasePublications: defineTable({
+    publicationId: v.string(),
+    releaseId: v.id("dataReleases"),
+    expectedPredecessorPublicReleaseId: nullableTextValidator,
+    publicAssetOrigins: v.array(v.string()),
+    expectedBatchCount: v.number(),
+    expectedBatchChainHash: sha256Validator,
+    acceptedBatchCount: v.number(),
+    acceptedBatchChainHash: sha256Validator,
+    expectedCounts: v.object({
+      vendors: v.number(),
+      categories: v.number(),
+      collectibles: v.number(),
+      repacks: v.number(),
+      repackChases: v.number(),
+      searchShards: v.number(),
+    }),
+    acceptedCounts: v.object({
+      vendors: v.number(),
+      categories: v.number(),
+      collectibles: v.number(),
+      repacks: v.number(),
+      repackChases: v.number(),
+      searchShards: v.number(),
+    }),
+    observationSequence: v.number(),
+    lastBatchKind: nullableTextValidator,
+    lastRecordKey: nullableTextValidator,
+    lastSearchPublicRepackId: nullableTextValidator,
+    unresolvedRepackCount: v.number(),
+    latestEvidenceAt: nullableTimestampValidator,
+    state: v.union(
+      v.literal("staging"),
+      v.literal("complete"),
+      v.literal("failed"),
+    ),
+    createdAt: timestampValidator,
+    completedAt: nullableTimestampValidator,
+  })
+    .index("by_publication_id", ["publicationId"])
+    .index("by_release_id", ["releaseId"]),
+
+  dataReleaseRepackReconciliation: defineTable({
+    releaseId: v.id("dataReleases"),
+    repackId: v.id("repacks"),
+    publicRepackId: v.string(),
+    expectedChaseCount: v.number(),
+    acceptedChaseCount: v.number(),
+    expectedTopChaseJson: nullableTextValidator,
+    bestChaseJson: nullableTextValidator,
+    complete: v.boolean(),
+  })
+    .index("by_release_id_and_public_repack_id", [
+      "releaseId",
+      "publicRepackId",
+    ])
+    .index("by_release_id", ["releaseId"]),
+
+  dataReleaseCollectibleReconciliation: defineTable({
+    releaseId: v.id("dataReleases"),
+    collectibleId: v.id("collectibles"),
+    publicCollectibleId: v.string(),
+    chaseCount: v.number(),
+  })
+    .index("by_release_id_and_public_collectible_id", [
+      "releaseId",
+      "publicCollectibleId",
+    ])
+    .index("by_release_id", ["releaseId"]),
+
+  dataReleaseAuthNonces: defineTable({
+    keyId: v.string(),
+    nonceHash: sha256Validator,
+    requestDigest: sha256Validator,
+    acceptedAt: timestampValidator,
+    expiresAt: timestampValidator,
+  })
+    .index("by_key_id_and_nonce_hash", ["keyId", "nonceHash"])
+    .index("by_expires_at", ["expiresAt"]),
 
   repackHeatState: defineTable({
     key: v.literal("singleton"),
@@ -582,6 +668,7 @@ export default defineSchema({
     publicRepackId: v.string(),
     detail: publicRepackHeatSignalValidator,
   })
+    .index("by_release_id", ["releaseId"])
     .index("by_heat_snapshot_id_and_public_repack_id", [
       "heatSnapshotId",
       "publicRepackId",
@@ -695,6 +782,8 @@ export default defineSchema({
     recordCount: v.number(),
     byteCount: v.number(),
     acceptedAt: timestampValidator,
+    operationId: v.optional(v.string()),
+    chainHash: v.optional(sha256Validator),
   })
     .index("by_release_id_and_batch_index", ["releaseId", "batchIndex"])
     .index("by_idempotency_key", ["idempotencyKey"]),
@@ -712,9 +801,11 @@ export default defineSchema({
     confirmationReceiptHash: v.union(sha256Validator, v.null()),
     acceptedAt: timestampValidator,
     completedAt: nullableTimestampValidator,
+    receiptJson: v.optional(v.string()),
   })
     .index("by_kind_and_idempotency_key", ["kind", "idempotencyKey"])
-    .index("by_public_release_id_and_kind", ["publicReleaseId", "kind"]),
+    .index("by_public_release_id_and_kind", ["publicReleaseId", "kind"])
+    .index("by_operation_id", ["operationId"]),
 
   blockedDataReleaseManifests: defineTable({
     fingerprint: sha256Validator,

@@ -17,6 +17,8 @@ function validEnvironment(
     PACKSCOUT_DATABASE_URL: "postgresql://worker:password@db.test/packscout",
     PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64: actorKey,
     PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64: credentialKey,
+    PACKSCOUT_PUBLIC_ORGANIZATION_ID:
+      "54000000-0000-4000-8000-000000000001",
     ...overrides,
   };
 }
@@ -45,6 +47,10 @@ test("worker configuration validates production defaults and bounded overrides",
   assert.equal(configuration.environment, "production");
   assert.equal(configuration.workerId, "worker:production:1");
   assert.equal(configuration.pollIntervalMilliseconds, 2_500);
+  assert.equal(
+    configuration.publicOrganizationId,
+    "54000000-0000-4000-8000-000000000001",
+  );
   assert.equal(configuration.maximumClaimsPerCycle, 12);
   assert.equal(configuration.retentionBatchSize, 250);
   assert.equal(configuration.retentionMaximumBatchesPerCycle, 8);
@@ -103,6 +109,18 @@ test("worker configuration fails closed for invalid secrets and destinations", (
       ),
     hasConfigurationCode("DATABASE_URL_INVALID"),
   );
+  for (const publicOrganizationId of [undefined, "organization-from-request"]) {
+    assert.throws(
+      () =>
+        readProviderWorkerConfiguration(
+          validEnvironment({
+            PACKSCOUT_PUBLIC_ORGANIZATION_ID: publicOrganizationId,
+          }),
+          "worker:1",
+        ),
+      hasConfigurationCode("PUBLIC_ORGANIZATION_ID_INVALID"),
+    );
+  }
 });
 
 test("worker configuration rejects ambiguous environments and unsafe bounds", () => {

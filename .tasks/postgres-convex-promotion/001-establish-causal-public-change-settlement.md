@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/002, postgres-convex-promotion/005
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including migration and concurrency verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -49,14 +49,21 @@ Downstream tasks consume only the settled watermark and public-safe change ident
 
 ## Acceptance Criteria
 
-- [ ] A canonical write and its public-change cause commit or roll back together.
-- [ ] A public-affecting change with pending Estimated EV work does not advance the settled watermark when the provider cycle finishes.
-- [ ] A successful Estimated EV result advances settlement after all earlier obligations are terminal.
-- [ ] A legitimate unavailable Estimated EV result also advances settlement with its bounded business reason preserved.
-- [ ] A technical derivation failure blocks contiguous settlement and is claimable/retryable without duplicate obligations.
-- [ ] Concurrent workers cannot skip a sequence, acknowledge a stale lease, or regress the settled watermark.
-- [ ] Existing canonical writer, quarantine recovery, relationship, EV, configuration, and lifecycle paths use the causal boundary for public-affecting changes.
+- [x] A canonical write and its public-change cause commit or roll back together.
+- [x] A public-affecting change with pending Estimated EV work does not advance the settled watermark when the provider cycle finishes.
+- [x] A successful Estimated EV result advances settlement after all earlier obligations are terminal.
+- [x] A legitimate unavailable Estimated EV result also advances settlement with its bounded business reason preserved.
+- [x] A technical derivation failure blocks contiguous settlement and is claimable/retryable without duplicate obligations.
+- [x] Concurrent workers cannot skip a sequence, acknowledge a stale lease, or regress the settled watermark.
+- [x] Existing canonical writer, quarantine recovery, relationship, EV, configuration, and lifecycle paths use the causal boundary for public-affecting changes.
 
 ## Verification
 
 `npm run test:database && npm run test:services && npm run test:worker`
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: implemented an organization-scoped transactional cause ledger, derivation obligations, contiguous settled watermark, causal EV propagation, lease-safe acknowledgements, and server-bound PackScout organization resolution across production canonical/configuration/lifecycle writers.
+- Divergences: no production manual-correction writer exists yet; the causal cause kind and transaction helper support that future approved path without adding a compatibility branch. Test-only setup helpers remain outside the production causal boundary.
+- Verification: `npm run test:database && npm run test:services && npm run test:worker` (48 database, 150 service, and 20 worker tests passing); `npm run scan:framework-standards:ratchet` (0 findings); orchestrator independently reran both anchors.

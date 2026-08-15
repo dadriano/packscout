@@ -1,6 +1,8 @@
 import type { ProviderRuntimeEnvironment } from "@packscout/services";
 
 const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
+const organizationIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const canonicalBase64Pattern =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
@@ -14,6 +16,7 @@ export type ProviderWorkerConfigurationErrorCode =
   | "MAXIMUM_CLAIMS_INVALID"
   | "NODE_ENV_INVALID"
   | "POLL_INTERVAL_INVALID"
+  | "PUBLIC_ORGANIZATION_ID_INVALID"
   | "RETENTION_BATCH_SIZE_INVALID"
   | "RETENTION_DISCOVERY_LIMIT_INVALID"
   | "RETENTION_MAX_BATCHES_INVALID"
@@ -36,6 +39,7 @@ export interface ProviderWorkerConfiguration {
   readonly estimatedEvVerifiedUsdStablecoins: readonly string[];
   readonly maximumClaimsPerCycle: number;
   readonly pollIntervalMilliseconds: number;
+  readonly publicOrganizationId: string;
   readonly retentionBatchSize: number;
   readonly retentionMaximumBatchesPerCycle: number;
   readonly retentionOrganizationDiscoveryLimit: number;
@@ -108,6 +112,15 @@ function workerIdFor(value: string | undefined, fallback: string): string {
   return resolved;
 }
 
+function publicOrganizationIdFor(value: string | undefined): string {
+  if (!value || !organizationIdPattern.test(value)) {
+    throw new ProviderWorkerConfigurationError(
+      "PUBLIC_ORGANIZATION_ID_INVALID",
+    );
+  }
+  return value.toLowerCase();
+}
+
 function verifiedUsdStablecoinsFor(
   value: string | undefined,
 ): readonly string[] {
@@ -178,6 +191,9 @@ export function readProviderWorkerConfiguration(
       100,
       60_000,
       "POLL_INTERVAL_INVALID",
+    ),
+    publicOrganizationId: publicOrganizationIdFor(
+      environment.PACKSCOUT_PUBLIC_ORGANIZATION_ID,
     ),
     retentionBatchSize: boundedInteger(
       environment.PACKSCOUT_WORKER_RETENTION_BATCH_SIZE,

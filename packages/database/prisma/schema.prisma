@@ -101,6 +101,8 @@ model canonical_relationships {
   target_record_kind                                                                              canonical_record_kind
   target_external_id                                                                              String?
   target_entity_id                                                                                String?               @db.Uuid
+  created_public_change_sequence                                                                  BigInt
+  resolved_public_change_sequence                                                                 BigInt?
   created_at                                                                                      DateTime              @default(now()) @db.Timestamptz(6)
   resolved_at                                                                                     DateTime?             @db.Timestamptz(6)
   organizations                                                                                   organizations         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_relationships_organization_id_organizations_id_fk")
@@ -108,6 +110,8 @@ model canonical_relationships {
   canonical_entities_canonical_relationships_source_entity_id_organization_idTocanonical_entities canonical_entities    @relation("canonical_relationships_source_entity_id_organization_idTocanonical_entities", fields: [source_entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_relationships_source_tenant_fk")
   canonical_entities_canonical_relationships_target_entity_idTocanonical_entities                 canonical_entities?   @relation("canonical_relationships_target_entity_idTocanonical_entities", fields: [target_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "canonical_relationships_target_entity_id_canonical_entities_id_")
   canonical_entities_canonical_relationships_target_entity_id_organization_idTocanonical_entities canonical_entities?   @relation("canonical_relationships_target_entity_id_organization_idTocanonical_entities", fields: [target_entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_relationships_target_tenant_fk")
+  public_change_causes_created                                                                    public_change_causes  @relation("canonical_relationships_created_change", fields: [organization_id, created_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "canonical_relationships_created_change_fk")
+  public_change_causes_resolved                                                                   public_change_causes? @relation("canonical_relationships_resolved_change", fields: [organization_id, resolved_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "canonical_relationships_resolved_change_fk")
 
   @@unique([source_entity_id, relationship_kind, target_platform_key, target_record_kind, target_external_id], map: "canonical_relationships_source_kind_target_unique")
   @@index([organization_id, target_platform_key, target_record_kind, target_external_id, resolved_at], map: "canonical_relationships_unresolved_lookup_idx")
@@ -128,6 +132,7 @@ model canonical_revisions {
   source_updated_at                                                                                                                    DateTime                              @db.Timestamptz(6)
   source_collected_at                                                                                                                  DateTime                              @db.Timestamptz(6)
   accepted_at                                                                                                                          DateTime                              @default(now()) @db.Timestamptz(6)
+  public_change_sequence                                                                                                               BigInt
   canonical_entities_canonical_entities_current_revision_idTocanonical_revisions                                                       canonical_entities[]                  @relation("canonical_entities_current_revision_idTocanonical_revisions")
   canonical_entities_canonical_revisions_entity_idTocanonical_entities                                                                 canonical_entities                    @relation("canonical_revisions_entity_idTocanonical_entities", fields: [entity_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_entity_id_canonical_entities_id_fk")
   canonical_entities_canonical_revisions_entity_id_organization_idTocanonical_entities                                                 canonical_entities                    @relation("canonical_revisions_entity_id_organization_idTocanonical_entities", fields: [entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_entity_tenant_fk")
@@ -142,12 +147,14 @@ model canonical_revisions {
   estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                        estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions")
   source_record_projection_revisions_source_record_projection_revisions_canonical_revision_idTocanonical_revisions                     source_record_projection_revisions[]  @relation("source_record_projection_revisions_canonical_revision_idTocanonical_revisions")
   source_record_projection_revisions_source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions     source_record_projection_revisions[]  @relation("source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions")
+  public_change_causes                                                                                                                 public_change_causes                  @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "canonical_revisions_public_change_fk")
 
   @@unique([entity_id, content_hash, provenance_hash], map: "canonical_revisions_content_provenance_unique")
   @@unique([entity_id, revision_number], map: "canonical_revisions_entity_number_unique")
   @@unique([id, entity_id, organization_id], map: "canonical_revisions_id_entity_organization_unique")
   @@unique([id, organization_id], map: "canonical_revisions_id_organization_unique")
   @@index([organization_id, accepted_at], map: "canonical_revisions_organization_accepted_idx")
+  @@index([organization_id, public_change_sequence], map: "canonical_revisions_public_change_idx")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -174,6 +181,7 @@ model estimated_ev_recomputation_requests {
   created_at                                                                                                                                     DateTime                           @default(now()) @db.Timestamptz(6)
   updated_at                                                                                                                                     DateTime                           @default(now()) @db.Timestamptz(6)
   completed_at                                                                                                                                   DateTime?                          @db.Timestamptz(6)
+  originating_public_change_sequence                                                                                                             BigInt
   canonical_revisions_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions                           canonical_revisions?               @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions", fields: [calculation_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_calculation_revision_tenant_fk")
   provider_config_revisions_estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions provider_config_revisions          @relation("estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions", fields: [configuration_revision_id, provider_id, organization_id], references: [id, provider_id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_config_tenant_fk")
   canonical_revisions_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions                              canonical_revisions?               @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions", fields: [ev_input_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_input_revision_tenant_fk")
@@ -185,9 +193,72 @@ model estimated_ev_recomputation_requests {
   organizations                                                                                                                                  organizations                      @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_organization_id_organizatio")
   canonical_revisions_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                                                  canonical_revisions?               @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions", fields: [pack_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "estimated_ev_recomputation_requests_pack_revision_id_canonical_")
   provider_sources_estimated_ev_recomputation_requests_provider_idToprovider_sources                                                             provider_sources                   @relation("estimated_ev_recomputation_requests_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_provider_id_provider_source")
+  public_change_causes                                                                                                                           public_change_causes               @relation(fields: [organization_id, originating_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "estimated_ev_recomputation_originating_change_fk")
 
   @@index([state, available_at, created_at, id], map: "estimated_ev_recomputation_claim_idx")
+  @@index([organization_id, originating_public_change_sequence], map: "estimated_ev_recomputation_originating_change_idx")
   @@index([organization_id, platform_key, pack_external_id, created_at], map: "estimated_ev_recomputation_tenant_pack_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model public_change_causes {
+  organization_id                     String                                @db.Uuid
+  sequence                            BigInt
+  change_kind                         public_change_kind
+  entity_key                          String
+  source_key                          String?
+  source_revision_key                 String?
+  metadata_json                       Json                                  @default("{}")
+  occurred_at                         DateTime                              @db.Timestamptz(6)
+  authoritative_transaction_id        String
+  created_at                          DateTime                              @default(now()) @db.Timestamptz(6)
+  organizations                       organizations                         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_change_causes_organization_id_organizations_id_fk")
+  estimated_ev_recomputation_requests estimated_ev_recomputation_requests[]
+  canonical_revisions                 canonical_revisions[]
+  canonical_relationships_created     canonical_relationships[]             @relation("canonical_relationships_created_change")
+  canonical_relationships_resolved    canonical_relationships[]             @relation("canonical_relationships_resolved_change")
+  public_derivation_obligations       public_derivation_obligations[]       @relation("public_derivation_obligations_cause")
+
+  @@id([organization_id, sequence], map: "public_change_causes_pkey")
+  @@index([organization_id, occurred_at, sequence], map: "public_change_causes_organization_occurred_idx")
+  @@index([organization_id, source_key, sequence], map: "public_change_causes_source_head_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model public_derivation_obligations {
+  id                       String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id          String                     @db.Uuid
+  cause_sequence           BigInt
+  derivation_kind          public_derivation_kind
+  derivation_key           String
+  state                    public_derivation_state    @default(pending)
+  claimed_by               String?
+  claim_token              String?                    @db.Uuid
+  claim_expires_at         DateTime?                  @db.Timestamptz(6)
+  outcome_classification   public_derivation_outcome?
+  outcome_reason_code      String?
+  acknowledged_claim_token String?                    @db.Uuid
+  created_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  outcome_at               DateTime?                  @db.Timestamptz(6)
+  organizations            organizations              @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_derivation_obligations_organization_fk")
+  public_change_causes     public_change_causes       @relation("public_derivation_obligations_cause", fields: [organization_id, cause_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "public_derivation_obligations_cause_tenant_fk")
+
+  @@unique([organization_id, cause_sequence, derivation_kind, derivation_key], map: "public_derivation_obligations_cause_derivation_unique")
+  @@index([organization_id, state, claim_expires_at, created_at, id], map: "public_derivation_obligations_claim_idx")
+  @@index([organization_id, derivation_kind, derivation_key], map: "public_derivation_obligations_derivation_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model settled_public_watermarks {
+  organization_id      String        @id @db.Uuid
+  next_sequence        BigInt        @default(1)
+  settled_sequence     BigInt        @default(0)
+  source_head_sequence BigInt        @default(0)
+  settled_at           DateTime?     @db.Timestamptz(6)
+  source_head_at       DateTime?     @db.Timestamptz(6)
+  updated_at           DateTime      @default(now()) @db.Timestamptz(6)
+  organizations        organizations @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "settled_public_watermarks_organization_id_organizations_id_fk")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -372,6 +443,8 @@ model organizations {
   provider_schedules                  provider_schedules[]
   provider_secret_versions            provider_secret_versions[]
   provider_sources                    provider_sources[]
+  public_change_causes                public_change_causes[]
+  public_derivation_obligations       public_derivation_obligations[]
   quarantine_attempts                 quarantine_attempts[]
   quarantine_records                  quarantine_records[]
   retention_executions                retention_executions[]
@@ -379,6 +452,7 @@ model organizations {
   source_record_outcomes              source_record_outcomes[]
   source_record_projection_revisions  source_record_projection_revisions[]
   source_records                      source_records[]
+  settled_public_watermarks           settled_public_watermarks?
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -829,6 +903,34 @@ enum provider_state {
   active
   disabled
   archived
+}
+
+enum public_change_kind {
+  provider_projection
+  quarantine_correction
+  relationship_resolution
+  estimated_ev_outcome
+  public_configuration
+  provider_lifecycle
+  manual_correction
+}
+
+enum public_derivation_kind {
+  estimated_ev
+}
+
+enum public_derivation_state {
+  pending
+  claimed
+  succeeded
+  business_unavailable
+  technical_failure
+}
+
+enum public_derivation_outcome {
+  success
+  business_unavailable
+  technical_failure
 }
 
 enum quarantine_attempt_state {

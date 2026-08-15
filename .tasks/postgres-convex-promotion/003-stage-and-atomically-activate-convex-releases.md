@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/004, postgres-convex-promotion/006
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including authenticated replay and retention tests
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -55,15 +55,22 @@ Every receipt includes operation identity, publication identity where relevant, 
 
 ## Acceptance Criteria
 
-- [ ] Public queries continue returning the prior complete release throughout staging and batch application.
-- [ ] Exact start/batch/finalize replay is idempotent; conflicting replay returns a stable error and changes no data.
-- [ ] Invalid authentication, stale requests, reused nonces, invalid schema, protected data, blocked fingerprints, and hash/count mismatches fail closed.
-- [ ] Finalize exposes the new release only when every expected count, hash, reference, and predecessor guard reconciles.
-- [ ] An unchanged observation refresh changes freshness only and rejects stale metadata.
-- [ ] A lost response can be reconciled through an authenticated status receipt.
-- [ ] Rollback/clear and bounded retention preserve pointer safety and delete no active or previous data.
-- [ ] Existing public catalog tests pass without public DTO or query-shape changes.
+- [x] Public queries continue returning the prior complete release throughout staging and batch application.
+- [x] Exact start/batch/finalize replay is idempotent; conflicting replay returns a stable error and changes no data.
+- [x] Invalid authentication, stale requests, reused nonces, invalid schema, protected data, blocked fingerprints, and hash/count mismatches fail closed.
+- [x] Finalize exposes the new release only when every expected count, hash, reference, and predecessor guard reconciles.
+- [x] An unchanged observation refresh changes freshness only and rejects stale metadata.
+- [x] A lost response can be reconciled through an authenticated status receipt.
+- [x] Rollback/clear and bounded retention preserve pointer safety and delete no active or previous data.
+- [x] Existing public catalog tests pass without public DTO or query-shape changes.
 
 ## Verification
 
 `npm run test:convex && npm run typecheck:convex`
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: implemented as specified, including authenticated bounded staging, exact replay/status receipts, atomic activation, rollback safety, and count-or-age retention.
+- Divergences: none
+- Verification: `npm run test:convex && npm run typecheck:convex`; `npm run scan:framework-standards:ratchet`; orchestrator reran the declared anchor with 30 tests passing and a clean Convex typecheck.

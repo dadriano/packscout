@@ -4,7 +4,7 @@
 
 Open `postgres-convex-promotion/001`, define one public-affecting change and its derived obligations, and finish with a durable settled-watermark contract that does not depend on provider-run completion.
 
-**Progress:** 0/7 tasks complete
+**Progress:** 2/7 tasks complete
 
 ## Context
 
@@ -42,9 +42,9 @@ This feature completes that boundary without creating a second public data model
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
-| 001 | Establish causal public-change settlement | large | 2–4 days | in_progress | none |
+| 001 | Establish causal public-change settlement | large | 2–4 days | done | none |
 | 002 | Assemble deterministic catalog releases | large | 2–4 days | todo | 001 |
-| 003 | Stage and atomically activate Convex releases | large | 2–4 days | in_progress | none |
+| 003 | Stage and atomically activate Convex releases | large | 2–4 days | done | none |
 | 004 | Run and reconcile catalog promotions | large | 2–4 days | todo | 002, 003 |
 
 ## Tasks: Heat and Operations

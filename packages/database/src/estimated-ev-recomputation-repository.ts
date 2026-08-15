@@ -2,11 +2,14 @@ import { Prisma } from "@prisma/client";
 import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   type PackscoutPrismaClient,
+  type PackscoutQueryClient,
 } from "./database.ts";
 import { hashJson } from "./security.ts";
+import { advanceSettledPublicWatermark } from "./public-change-settlement-repository.ts";
 
 const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const failureCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
+const businessOutcomeReasonPattern = /^[a-z][a-z0-9_]{0,127}$/;
 
 export interface EstimatedEvRecomputationIdentity {
   readonly organizationId: string;
@@ -24,6 +27,7 @@ export interface ClaimedEstimatedEvRecomputation
   readonly configurationRevisionId: string;
   readonly claimToken: string;
   readonly attemptCount: number;
+  readonly originatingPublicChangeSequence: bigint;
 }
 
 export interface EstimatedEvRecomputationQueuePort {
@@ -39,6 +43,8 @@ export interface EstimatedEvRecomputationQueuePort {
     completedAt: Date;
     resultStatus: "estimated" | "unavailable";
     calculationRevisionId: string;
+    outcomeReasonCode?: string;
+    originatingPublicChangeSequence?: bigint;
   }): Promise<boolean>;
   recordFailure(input: {
     requestId: string;
@@ -48,6 +54,10 @@ export interface EstimatedEvRecomputationQueuePort {
     failureCode: string;
     maximumAttempts: number;
   }): Promise<"failed" | "lost" | "retrying">;
+  retryTechnicalFailure(input: {
+    requestId: string;
+    retryAt: Date;
+  }): Promise<"already_queued" | "not_failed" | "retried">;
 }
 
 interface ClaimedRequestRow {
@@ -62,6 +72,8 @@ interface ClaimedRequestRow {
   readonly ev_input_revision_id: string | null;
   readonly claim_token: string;
   readonly attempt_count: number;
+  readonly request_key: string;
+  readonly originating_public_change_sequence: bigint;
 }
 
 export function estimatedEvRecomputationRequestKey(
@@ -88,6 +100,131 @@ function boundedInteger(
     throw new RangeError(`${label} is outside its safe bounds.`);
   }
   return value;
+}
+
+export async function completeEstimatedEvRecomputation(
+  database: PackscoutQueryClient,
+  input: {
+    requestId: string;
+    claimToken: string;
+    completedAt: Date;
+    resultStatus: "estimated" | "unavailable";
+    calculationRevisionId: string;
+    outcomeReasonCode?: string;
+    originatingPublicChangeSequence?: bigint;
+  },
+): Promise<boolean> {
+  const reasonCode = input.outcomeReasonCode ?? null;
+  if (
+    (input.resultStatus === "estimated" && reasonCode !== null) ||
+    (input.resultStatus === "unavailable" &&
+      (reasonCode === null || !businessOutcomeReasonPattern.test(reasonCode)))
+  ) {
+    throw new RangeError("Estimated EV outcome reason is invalid.");
+  }
+  const completed = await database.$queryRaw<Array<{
+    organizationId: string;
+    requestKey: string;
+  }>>(Prisma.sql`
+    update public.estimated_ev_recomputation_requests
+    set state = 'completed'::public.estimated_ev_recomputation_state,
+        result_status = cast(${input.resultStatus} as public.estimated_ev_recomputation_result),
+        calculation_revision_id = ${input.calculationRevisionId}::uuid,
+        claimed_by = null,
+        claim_token = null,
+        claim_expires_at = null,
+        failure_code = null,
+        completed_at = ${input.completedAt},
+        updated_at = ${input.completedAt}
+    where id = ${input.requestId}::uuid
+      and state = 'running'::public.estimated_ev_recomputation_state
+      and claim_token = ${input.claimToken}::uuid
+      ${input.originatingPublicChangeSequence === undefined
+        ? Prisma.empty
+        : Prisma.sql`and originating_public_change_sequence = ${input.originatingPublicChangeSequence}`}
+    returning organization_id as "organizationId", request_key as "requestKey"
+  `);
+  const request = completed[0];
+  if (!request) {
+    const repeated = await database.$queryRaw<Array<{ acknowledged: boolean }>>(
+      Prisma.sql`
+        select true as acknowledged
+        from public.estimated_ev_recomputation_requests as request
+        where request.id = ${input.requestId}::uuid
+          and request.state = 'completed'::public.estimated_ev_recomputation_state
+          and request.result_status = cast(
+            ${input.resultStatus} as public.estimated_ev_recomputation_result
+          )
+          and request.calculation_revision_id = ${input.calculationRevisionId}::uuid
+          ${input.originatingPublicChangeSequence === undefined
+            ? Prisma.empty
+            : Prisma.sql`and request.originating_public_change_sequence = ${input.originatingPublicChangeSequence}`}
+          and exists (
+            select 1
+            from public.public_derivation_obligations as obligation
+            where obligation.organization_id = request.organization_id
+              and obligation.derivation_kind = 'estimated_ev'::public.public_derivation_kind
+              and obligation.derivation_key = request.request_key
+          )
+          and not exists (
+            select 1
+            from public.public_derivation_obligations as obligation
+            where obligation.organization_id = request.organization_id
+              and obligation.derivation_kind = 'estimated_ev'::public.public_derivation_kind
+              and obligation.derivation_key = request.request_key
+              and (
+                obligation.acknowledged_claim_token is distinct from ${input.claimToken}::uuid
+                or obligation.state <> cast(
+                  ${input.resultStatus === "estimated" ? "succeeded" : "business_unavailable"}
+                  as public.public_derivation_state
+                )
+                or obligation.outcome_reason_code is distinct from ${reasonCode}
+              )
+          )
+        limit 1
+      `,
+    );
+    return repeated[0]?.acknowledged === true;
+  }
+  const acknowledged = await database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    update public.public_derivation_obligations
+    set state = cast(
+          ${input.resultStatus === "estimated" ? "succeeded" : "business_unavailable"}
+          as public.public_derivation_state
+        ),
+        claimed_by = null,
+        claim_token = null,
+        claim_expires_at = null,
+        outcome_classification = cast(
+          ${input.resultStatus === "estimated" ? "success" : "business_unavailable"}
+          as public.public_derivation_outcome
+        ),
+        outcome_reason_code = ${reasonCode},
+        acknowledged_claim_token = ${input.claimToken}::uuid,
+        outcome_at = ${input.completedAt},
+        updated_at = ${input.completedAt}
+    where organization_id = ${request.organizationId}::uuid
+      and derivation_kind = 'estimated_ev'::public.public_derivation_kind
+      and derivation_key = ${request.requestKey}
+      and state = 'claimed'::public.public_derivation_state
+      and claim_token = ${input.claimToken}::uuid
+    returning id
+  `);
+  const totals = await database.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+    select count(*)::bigint as count
+    from public.public_derivation_obligations
+    where organization_id = ${request.organizationId}::uuid
+      and derivation_kind = 'estimated_ev'::public.public_derivation_kind
+      and derivation_key = ${request.requestKey}
+  `);
+  if (acknowledged.length === 0 || BigInt(acknowledged.length) !== totals[0]?.count) {
+    throw new Error("Estimated EV obligations did not share the active claim.");
+  }
+  await advanceSettledPublicWatermark(database, {
+    organizationId: request.organizationId,
+    settledAt: input.completedAt,
+  });
+  return true;
 }
 
 export class PrismaEstimatedEvRecomputationRepository
@@ -147,6 +284,8 @@ export class PrismaEstimatedEvRecomputationRepository
                     requests.ev_input_external_id,
                     requests.pack_revision_id,
                     requests.ev_input_revision_id,
+                    requests.request_key,
+                    requests.originating_public_change_sequence,
                     requests.claim_token,
                     requests.attempt_count
         )
@@ -155,6 +294,37 @@ export class PrismaEstimatedEvRecomputationRepository
         inner join candidates on candidates.id = claimed.id
         order by candidates.available_at asc, candidates.created_at asc, candidates.id asc
       `);
+      if (rows.length > 0) {
+        const claims = rows.map((row) => Prisma.sql`(
+          ${row.organization_id}::uuid, ${row.request_key},
+          ${input.workerId}, ${row.claim_token}::uuid, ${claimExpiresAt}
+        )`);
+        await transaction.$executeRaw(Prisma.sql`
+          update public.public_derivation_obligations as obligation
+          set state = 'claimed'::public.public_derivation_state,
+              claimed_by = claims.worker_id,
+              claim_token = claims.claim_token,
+              claim_expires_at = claims.claim_expires_at,
+              outcome_classification = null,
+              outcome_reason_code = null,
+              acknowledged_claim_token = null,
+              outcome_at = null,
+              updated_at = ${input.now}
+          from (values ${Prisma.join(claims)})
+            as claims(
+              organization_id, derivation_key, worker_id, claim_token,
+              claim_expires_at
+            )
+          where obligation.organization_id = claims.organization_id
+            and obligation.derivation_kind = 'estimated_ev'::public.public_derivation_kind
+            and obligation.derivation_key = claims.derivation_key
+            and obligation.state in (
+              'pending'::public.public_derivation_state,
+              'claimed'::public.public_derivation_state,
+              'technical_failure'::public.public_derivation_state
+            )
+        `);
+      }
       return rows.map((row) => ({
         id: row.id,
         organizationId: row.organization_id,
@@ -167,6 +337,8 @@ export class PrismaEstimatedEvRecomputationRepository
         evInputRevisionId: row.ev_input_revision_id,
         claimToken: row.claim_token,
         attemptCount: row.attempt_count,
+        originatingPublicChangeSequence:
+          row.originating_public_change_sequence,
       }));
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
@@ -177,26 +349,13 @@ export class PrismaEstimatedEvRecomputationRepository
     completedAt: Date;
     resultStatus: "estimated" | "unavailable";
     calculationRevisionId: string;
+    outcomeReasonCode?: string;
+    originatingPublicChangeSequence?: bigint;
   }): Promise<boolean> {
-    const completed = await this.database.estimated_ev_recomputation_requests.updateMany({
-      where: {
-        id: input.requestId,
-        state: "running",
-        claim_token: input.claimToken,
-      },
-      data: {
-        state: "completed",
-        result_status: input.resultStatus,
-        calculation_revision_id: input.calculationRevisionId,
-        claimed_by: null,
-        claim_token: null,
-        claim_expires_at: null,
-        failure_code: null,
-        completed_at: input.completedAt,
-        updated_at: input.completedAt,
-      },
-    });
-    return completed.count === 1;
+    return this.database.$transaction(
+      (transaction) => completeEstimatedEvRecomputation(transaction, input),
+      PACKSCOUT_TRANSACTION_OPTIONS,
+    );
   }
 
   async recordFailure(input: {
@@ -216,30 +375,135 @@ export class PrismaEstimatedEvRecomputationRepository
     const failureCode = failureCodePattern.test(input.failureCode)
       ? input.failureCode
       : "ESTIMATED_EV_RECOMPUTATION_FAILED";
-    const [updated] = await this.database.$queryRaw<
-      { state: "failed" | "queued" }[]
-    >(Prisma.sql`
-      update estimated_ev_recomputation_requests
-      set state = case
-            when attempt_count >= ${maximumAttempts}
-              then 'failed'::estimated_ev_recomputation_state
-            else 'queued'::estimated_ev_recomputation_state
-          end,
-          available_at = case
-            when attempt_count >= ${maximumAttempts} then ${input.failedAt}
-            else ${input.retryAt}
-          end,
-          claimed_by = null,
-          claim_token = null,
-          claim_expires_at = null,
-          failure_code = ${failureCode},
-          updated_at = ${input.failedAt}
-      where id = cast(${input.requestId} as uuid)
-        and state = 'running'::estimated_ev_recomputation_state
-        and claim_token = cast(${input.claimToken} as uuid)
-      returning state
-    `);
-    if (!updated) return "lost";
-    return updated.state === "failed" ? "failed" : "retrying";
+    return this.database.$transaction(async (transaction) => {
+      const [updated] = await transaction.$queryRaw<Array<{
+        state: "failed" | "queued";
+        organizationId: string;
+        requestKey: string;
+      }>>(Prisma.sql`
+        update public.estimated_ev_recomputation_requests
+        set state = case
+              when attempt_count >= ${maximumAttempts}
+                then 'failed'::public.estimated_ev_recomputation_state
+              else 'queued'::public.estimated_ev_recomputation_state
+            end,
+            available_at = case
+              when attempt_count >= ${maximumAttempts} then ${input.failedAt}
+              else ${input.retryAt}
+            end,
+            claimed_by = null,
+            claim_token = null,
+            claim_expires_at = null,
+            failure_code = ${failureCode},
+            updated_at = ${input.failedAt}
+        where id = ${input.requestId}::uuid
+          and state = 'running'::public.estimated_ev_recomputation_state
+          and claim_token = ${input.claimToken}::uuid
+        returning state,
+                  organization_id as "organizationId",
+                  request_key as "requestKey"
+      `);
+      if (!updated) {
+        const repeated = await transaction.$queryRaw<Array<{
+          state: "failed" | "queued";
+        }>>(Prisma.sql`
+          select request.state::text as state
+          from public.estimated_ev_recomputation_requests as request
+          where request.id = ${input.requestId}::uuid
+            and request.state in (
+              'queued'::public.estimated_ev_recomputation_state,
+              'failed'::public.estimated_ev_recomputation_state
+            )
+            and exists (
+              select 1
+              from public.public_derivation_obligations as obligation
+              where obligation.organization_id = request.organization_id
+                and obligation.derivation_kind = 'estimated_ev'::public.public_derivation_kind
+                and obligation.derivation_key = request.request_key
+                and obligation.state = 'technical_failure'::public.public_derivation_state
+                and obligation.acknowledged_claim_token = ${input.claimToken}::uuid
+            )
+          limit 1
+        `);
+        if (!repeated[0]) return "lost";
+        return repeated[0].state === "failed" ? "failed" : "retrying";
+      }
+      const obligations = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        update public.public_derivation_obligations
+        set state = 'technical_failure'::public.public_derivation_state,
+            claimed_by = null,
+            claim_token = null,
+            claim_expires_at = null,
+            outcome_classification = 'technical_failure'::public.public_derivation_outcome,
+            outcome_reason_code = ${failureCode},
+            acknowledged_claim_token = ${input.claimToken}::uuid,
+            outcome_at = ${input.failedAt},
+            updated_at = ${input.failedAt}
+        where organization_id = ${updated.organizationId}::uuid
+          and derivation_kind = 'estimated_ev'::public.public_derivation_kind
+          and derivation_key = ${updated.requestKey}
+          and state = 'claimed'::public.public_derivation_state
+          and claim_token = ${input.claimToken}::uuid
+        returning id
+      `);
+      const totals = await transaction.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+        select count(*)::bigint as count
+        from public.public_derivation_obligations
+        where organization_id = ${updated.organizationId}::uuid
+          and derivation_kind = 'estimated_ev'::public.public_derivation_kind
+          and derivation_key = ${updated.requestKey}
+      `);
+      if (obligations.length === 0 || BigInt(obligations.length) !== totals[0]?.count) {
+        throw new Error("Estimated EV obligations did not share the active claim.");
+      }
+      return updated.state === "failed" ? "failed" : "retrying";
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
+  async retryTechnicalFailure(input: {
+    requestId: string;
+    retryAt: Date;
+  }): Promise<"already_queued" | "not_failed" | "retried"> {
+    return this.database.$transaction(async (transaction) => {
+      const requests = await transaction.$queryRaw<Array<{
+        organizationId: string;
+        requestKey: string;
+        state: "failed" | "queued" | "running" | "completed";
+      }>>(Prisma.sql`
+        select organization_id as "organizationId",
+               request_key as "requestKey",
+               state::text as state
+        from public.estimated_ev_recomputation_requests
+        where id = ${input.requestId}::uuid
+        for update
+      `);
+      const request = requests[0];
+      if (!request) return "not_failed";
+      if (request.state === "queued") return "already_queued";
+      if (request.state !== "failed") return "not_failed";
+      await transaction.$executeRaw(Prisma.sql`
+        update public.estimated_ev_recomputation_requests
+        set state = 'queued'::public.estimated_ev_recomputation_state,
+            attempt_count = 0,
+            available_at = ${input.retryAt},
+            failure_code = null,
+            updated_at = ${input.retryAt}
+        where id = ${input.requestId}::uuid
+      `);
+      await transaction.$executeRaw(Prisma.sql`
+        update public.public_derivation_obligations
+        set state = 'pending'::public.public_derivation_state,
+            outcome_classification = null,
+            outcome_reason_code = null,
+            acknowledged_claim_token = null,
+            outcome_at = null,
+            updated_at = ${input.retryAt}
+        where organization_id = ${request.organizationId}::uuid
+          and derivation_kind = 'estimated_ev'::public.public_derivation_kind
+          and derivation_key = ${request.requestKey}
+          and state = 'technical_failure'::public.public_derivation_state
+      `);
+      return "retried";
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 }

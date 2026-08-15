@@ -1,53 +1,17 @@
 {
-  "source": "approved pre-cutover catalog contract",
+  "source": "approved public-change settlement catalog contract",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260812000000_clean_baseline/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260815010000_public_change_settlement/migration.sql"
   },
   "expectedCounts": {
-    "tables": 28,
-    "enums": 18,
-    "columns": 322,
-    "indexes": 44,
+    "tables": 31,
+    "enums": 22,
+    "columns": 358,
+    "indexes": 51,
     "uniqueConstraints": 19,
-    "foreignKeys": 119,
-    "checkConstraints": 55
-  },
-  "nativeExtensions": {
-    "foreignKeys": {
-      "canonical_entities_current_revision_scope_fk": {
-        "table": "canonical_entities",
-        "columns": [
-          "current_revision_id",
-          "id",
-          "organization_id"
-        ],
-        "referencedTable": "canonical_revisions",
-        "referencedColumns": [
-          "id",
-          "entity_id",
-          "organization_id"
-        ],
-        "onDelete": "restrict",
-        "onUpdate": "no action"
-      },
-      "provider_sources_active_revision_scope_fk": {
-        "table": "provider_sources",
-        "columns": [
-          "active_revision_id",
-          "id",
-          "organization_id"
-        ],
-        "referencedTable": "provider_config_revisions",
-        "referencedColumns": [
-          "id",
-          "provider_id",
-          "organization_id"
-        ],
-        "onDelete": "restrict",
-        "onUpdate": "no action"
-      }
-    }
+    "foreignKeys": 127,
+    "checkConstraints": 68
   },
   "enums": {
     "admin_alert_state": [
@@ -123,6 +87,30 @@
       "active",
       "disabled",
       "archived"
+    ],
+    "public_change_kind": [
+      "provider_projection",
+      "quarantine_correction",
+      "relationship_resolution",
+      "estimated_ev_outcome",
+      "public_configuration",
+      "provider_lifecycle",
+      "manual_correction"
+    ],
+    "public_derivation_kind": [
+      "estimated_ev"
+    ],
+    "public_derivation_outcome": [
+      "success",
+      "business_unavailable",
+      "technical_failure"
+    ],
+    "public_derivation_state": [
+      "pending",
+      "claimed",
+      "succeeded",
+      "business_unavailable",
+      "technical_failure"
     ],
     "quarantine_attempt_state": [
       "running",
@@ -214,7 +202,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 1
+          "default": "1"
         },
         "organization_id": {
           "type": "uuid",
@@ -249,7 +237,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "resolved_at": {
           "type": "timestamp with time zone",
@@ -284,7 +272,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'active'"
+          "default": "'active'::admin_alert_state"
         },
         "summary": {
           "type": "text",
@@ -549,7 +537,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "blocked_until": {
           "type": "timestamp with time zone",
@@ -718,6 +706,13 @@
           "identity": null,
           "default": "now()"
         },
+        "created_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "id": {
           "type": "uuid",
           "primaryKey": true,
@@ -741,6 +736,13 @@
         },
         "resolved_at": {
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "resolved_public_change_sequence": {
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
@@ -808,6 +810,19 @@
       },
       "uniqueConstraints": {},
       "foreignKeys": {
+        "canonical_relationships_created_change_fk": {
+          "columns": [
+            "organization_id",
+            "created_public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "canonical_relationships_organization_id_organizations_id_fk": {
           "columns": [
             "organization_id"
@@ -815,6 +830,19 @@
           "referencedTable": "organizations",
           "referencedColumns": [
             "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "canonical_relationships_resolved_change_fk": {
+          "columns": [
+            "organization_id",
+            "resolved_public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -935,6 +963,13 @@
           "identity": null,
           "default": null
         },
+        "public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "revision_number": {
           "type": "integer",
           "primaryKey": false,
@@ -986,6 +1021,14 @@
           "columns": [
             "organization_id",
             "accepted_at"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "canonical_revisions_public_change_idx": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence"
           ],
           "unique": false,
           "where": null
@@ -1044,6 +1087,19 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
+        "canonical_revisions_public_change_fk": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "canonical_revisions_source_record_id_source_records_id_fk": {
           "columns": [
             "source_record_id"
@@ -1082,7 +1138,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "available_at": {
           "type": "timestamp with time zone",
@@ -1175,6 +1231,13 @@
           "identity": null,
           "default": null
         },
+        "originating_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "pack_external_id": {
           "type": "text",
           "primaryKey": false,
@@ -1222,7 +1285,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'queued'"
+          "default": "'queued'::estimated_ev_recomputation_state"
         },
         "updated_at": {
           "type": "timestamp with time zone",
@@ -1239,6 +1302,14 @@
             "available_at",
             "created_at",
             "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "estimated_ev_recomputation_originating_change_idx": {
+          "columns": [
+            "organization_id",
+            "originating_public_change_sequence"
           ],
           "unique": false,
           "where": null
@@ -1300,6 +1371,19 @@
           "referencedColumns": [
             "id",
             "organization_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "estimated_ev_recomputation_originating_change_fk": {
+          "columns": [
+            "organization_id",
+            "originating_public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -1632,7 +1716,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "config_revision_id": {
           "type": "uuid",
@@ -1646,7 +1730,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'{\"accepted\":0,\"duplicate\":0,\"quarantined\":0,\"pages\":0,\"records\":0,\"requestAttempts\":0,\"transientRetries\":0}'::jsonb"
+          "default": "'{\"pages\": 0, \"records\": 0, \"accepted\": 0, \"duplicate\": 0, \"quarantined\": 0, \"requestAttempts\": 0, \"transientRetries\": 0}'::jsonb"
         },
         "created_at": {
           "type": "timestamp with time zone",
@@ -1730,7 +1814,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": false
+          "default": "false"
         },
         "requested_by_actor_key": {
           "type": "text",
@@ -1758,7 +1842,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'queued'"
+          "default": "'queued'::import_run_state"
         },
         "trigger": {
           "type": "import_trigger",
@@ -2380,7 +2464,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'active'"
+          "default": "'active'::operator_state"
         },
         "updated_at": {
           "type": "timestamp with time zone",
@@ -2516,14 +2600,14 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 300
+          "default": "300"
         },
         "stale_after_seconds": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 900
+          "default": "900"
         },
         "tested_at": {
           "type": "timestamp with time zone",
@@ -2922,7 +3006,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": false
+          "default": "false"
         },
         "calculation_warning_severity": {
           "type": "text",
@@ -2936,7 +3020,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "last_attempted_at": {
           "type": "timestamp with time zone",
@@ -2978,7 +3062,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": false
+          "default": "false"
         },
         "mapping_warning_severity": {
           "type": "text",
@@ -3482,7 +3566,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'draft'"
+          "default": "'draft'::provider_state"
         },
         "updated_at": {
           "type": "timestamp with time zone",
@@ -3538,6 +3622,316 @@
       "checkConstraints": {
         "provider_sources_platform_key_not_blank": {
           "value": "(length(TRIM(BOTH FROM platform_key)) > 0)"
+        }
+      }
+    },
+    "public_change_causes": {
+      "columns": {
+        "authoritative_transaction_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "change_kind": {
+          "type": "public_change_kind",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "entity_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "metadata_json": {
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'{}'::jsonb"
+        },
+        "occurred_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "sequence": {
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_revision_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "public_change_causes_organization_occurred_idx": {
+          "columns": [
+            "organization_id",
+            "occurred_at",
+            "sequence"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "public_change_causes_source_head_idx": {
+          "columns": [
+            "organization_id",
+            "source_key",
+            "sequence"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "public_change_causes_organization_id_organizations_id_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "public_change_causes_entity_key_bounded": {
+          "value": "((length(btrim(entity_key)) >= 1) AND (length(btrim(entity_key)) <= 512))"
+        },
+        "public_change_causes_sequence_positive": {
+          "value": "(sequence > 0)"
+        },
+        "public_change_causes_source_key_bounded": {
+          "value": "((source_key IS NULL) OR ((length(btrim(source_key)) >= 1) AND (length(btrim(source_key)) <= 128)))"
+        },
+        "public_change_causes_source_revision_key_bounded": {
+          "value": "((source_revision_key IS NULL) OR ((length(btrim(source_revision_key)) >= 1) AND (length(btrim(source_revision_key)) <= 128)))"
+        },
+        "public_change_causes_transaction_bounded": {
+          "value": "((length(btrim(authoritative_transaction_id)) >= 1) AND (length(btrim(authoritative_transaction_id)) <= 128))"
+        }
+      }
+    },
+    "public_derivation_obligations": {
+      "columns": {
+        "acknowledged_claim_token": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cause_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "claim_expires_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_token": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claimed_by": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "derivation_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "derivation_kind": {
+          "type": "public_derivation_kind",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "outcome_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "outcome_classification": {
+          "type": "public_derivation_outcome",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "outcome_reason_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "state": {
+          "type": "public_derivation_state",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'pending'::public_derivation_state"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "public_derivation_obligations_cause_derivation_unique": {
+          "columns": [
+            "organization_id",
+            "cause_sequence",
+            "derivation_kind",
+            "derivation_key"
+          ],
+          "unique": true,
+          "where": null
+        },
+        "public_derivation_obligations_claim_idx": {
+          "columns": [
+            "organization_id",
+            "state",
+            "claim_expires_at",
+            "created_at",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "public_derivation_obligations_derivation_idx": {
+          "columns": [
+            "organization_id",
+            "derivation_kind",
+            "derivation_key"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "public_derivation_obligations_cause_tenant_fk": {
+          "columns": [
+            "organization_id",
+            "cause_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "public_derivation_obligations_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "public_derivation_obligations_claim_consistency": {
+          "value": "(((state = 'claimed'::public_derivation_state) AND (claimed_by IS NOT NULL) AND (claim_token IS NOT NULL) AND (claim_expires_at IS NOT NULL)) OR ((state <> 'claimed'::public_derivation_state) AND (claimed_by IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL)))"
+        },
+        "public_derivation_obligations_identity_bounded": {
+          "value": "((length(btrim(derivation_key)) >= 1) AND (length(btrim(derivation_key)) <= 256))"
+        },
+        "public_derivation_obligations_outcome_consistency": {
+          "value": "(((state = ANY (ARRAY['pending'::public_derivation_state, 'claimed'::public_derivation_state])) AND (outcome_classification IS NULL) AND (outcome_reason_code IS NULL) AND (acknowledged_claim_token IS NULL) AND (outcome_at IS NULL)) OR ((state = 'succeeded'::public_derivation_state) AND (outcome_classification = 'success'::public_derivation_outcome) AND (outcome_reason_code IS NULL) AND (acknowledged_claim_token IS NOT NULL) AND (outcome_at IS NOT NULL)) OR ((state = 'business_unavailable'::public_derivation_state) AND (outcome_classification = 'business_unavailable'::public_derivation_outcome) AND (outcome_reason_code IS NOT NULL) AND (acknowledged_claim_token IS NOT NULL) AND (outcome_at IS NOT NULL)) OR ((state = 'technical_failure'::public_derivation_state) AND (outcome_classification = 'technical_failure'::public_derivation_outcome) AND (outcome_reason_code IS NOT NULL) AND (acknowledged_claim_token IS NOT NULL) AND (outcome_at IS NOT NULL)))"
+        },
+        "public_derivation_obligations_reason_bounded": {
+          "value": "((outcome_reason_code IS NULL) OR (outcome_reason_code ~ '^[A-Za-z][A-Za-z0-9_]{0,127}$'::text))"
+        },
+        "public_derivation_obligations_worker_bounded": {
+          "value": "((claimed_by IS NULL) OR ((length(btrim(claimed_by)) >= 1) AND (length(btrim(claimed_by)) <= 256)))"
         }
       }
     },
@@ -3625,7 +4019,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'running'"
+          "default": "'running'::quarantine_attempt_state"
         }
       },
       "indexes": {
@@ -3832,7 +4226,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "run_id": {
           "type": "uuid",
@@ -3860,7 +4254,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'open'"
+          "default": "'open'::quarantine_state"
         }
       },
       "indexes": {
@@ -4011,7 +4405,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "batch_size": {
           "type": "integer",
@@ -4032,14 +4426,14 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "failed_count": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "failure_code": {
           "type": "text",
@@ -4074,21 +4468,21 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "quarantines_expired_count": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "remaining_count": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "sanitized_summary": {
           "type": "text",
@@ -4102,14 +4496,14 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "source_records_expired_count": {
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": 0
+          "default": "0"
         },
         "started_at": {
           "type": "timestamp with time zone",
@@ -4123,7 +4517,7 @@
           "primaryKey": false,
           "notNull": true,
           "identity": null,
-          "default": "'running'"
+          "default": "'running'::retention_execution_state"
         }
       },
       "indexes": {
@@ -4167,6 +4561,85 @@
         },
         "retention_executions_failure_bounded": {
           "value": "(((failure_code IS NULL) OR ((length(failure_code) >= 1) AND (length(failure_code) <= 128))) AND ((sanitized_summary IS NULL) OR ((length(sanitized_summary) >= 1) AND (length(sanitized_summary) <= 500))))"
+        }
+      }
+    },
+    "settled_public_watermarks": {
+      "columns": {
+        "next_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "1"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "settled_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "settled_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "source_head_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_head_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "settled_public_watermarks_organization_id_organizations_id_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "settled_public_watermarks_head_timestamp": {
+          "value": "(((source_head_sequence = 0) AND (source_head_at IS NULL)) OR ((source_head_sequence > 0) AND (source_head_at IS NOT NULL)))"
+        },
+        "settled_public_watermarks_sequence_bounds": {
+          "value": "((next_sequence >= 1) AND (settled_sequence >= 0) AND (source_head_sequence >= 0) AND (next_sequence = (source_head_sequence + 1)) AND (settled_sequence <= source_head_sequence))"
+        },
+        "settled_public_watermarks_settled_timestamp": {
+          "value": "(((settled_sequence = 0) AND (settled_at IS NULL)) OR ((settled_sequence > 0) AND (settled_at IS NOT NULL)))"
         }
       }
     },
@@ -4814,6 +5287,42 @@
         "source_records_external_id_not_blank": {
           "value": "(length(TRIM(BOTH FROM external_id)) > 0)"
         }
+      }
+    }
+  },
+  "nativeExtensions": {
+    "foreignKeys": {
+      "canonical_entities_current_revision_scope_fk": {
+        "table": "canonical_entities",
+        "columns": [
+          "current_revision_id",
+          "id",
+          "organization_id"
+        ],
+        "referencedTable": "canonical_revisions",
+        "referencedColumns": [
+          "id",
+          "entity_id",
+          "organization_id"
+        ],
+        "onDelete": "restrict",
+        "onUpdate": "no action"
+      },
+      "provider_sources_active_revision_scope_fk": {
+        "table": "provider_sources",
+        "columns": [
+          "active_revision_id",
+          "id",
+          "organization_id"
+        ],
+        "referencedTable": "provider_config_revisions",
+        "referencedColumns": [
+          "id",
+          "provider_id",
+          "organization_id"
+        ],
+        "onDelete": "restrict",
+        "onUpdate": "no action"
       }
     }
   }

@@ -5,6 +5,10 @@ import {
   estimatedEvRecomputationRequestKey,
   type EstimatedEvRecomputationIdentity,
 } from "./estimated-ev-recomputation-repository.ts";
+import {
+  allocatePublicChangeCauses,
+  createPublicDerivationObligations,
+} from "./public-change-settlement-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
 const organizationId = "51000000-0000-4000-8000-000000000001";
@@ -55,8 +59,20 @@ test("EV workers claim disjoint work, recover leases, and reject stale acknowled
     const firstIdentity = identity("pack-1");
     const secondIdentity = identity("pack-2");
     const availableAt = new Date("2026-08-06T12:00:00.000Z");
-    await harness.client.estimated_ev_recomputation_requests.createMany({
-      data: [
+    await harness.client.$transaction(async (transaction) => {
+      const causes = await allocatePublicChangeCauses(transaction, {
+        organizationId,
+        changes: [firstIdentity, secondIdentity].map((requestIdentity) => ({
+          changeKind: "manual_correction",
+          entityKey: `canonical:v1:${requestIdentity.packExternalId}`,
+          sourceKey: requestIdentity.platformKey,
+          sourceRevisionKey: requestIdentity.packExternalId,
+          metadata: {},
+          occurredAt: availableAt,
+        })),
+      });
+      await transaction.estimated_ev_recomputation_requests.createMany({
+        data: [
         {
           id: "51000000-0000-4000-8000-000000000011",
           request_key: estimatedEvRecomputationRequestKey(firstIdentity),
@@ -66,6 +82,7 @@ test("EV workers claim disjoint work, recover leases, and reject stale acknowled
           platform_key: firstIdentity.platformKey,
           pack_external_id: firstIdentity.packExternalId,
           ev_input_external_id: firstIdentity.evInputExternalId,
+          originating_public_change_sequence: causes[0]!.sequence,
           available_at: availableAt,
           created_at: availableAt,
           updated_at: availableAt,
@@ -79,11 +96,24 @@ test("EV workers claim disjoint work, recover leases, and reject stale acknowled
           platform_key: secondIdentity.platformKey,
           pack_external_id: secondIdentity.packExternalId,
           ev_input_external_id: secondIdentity.evInputExternalId,
+          originating_public_change_sequence: causes[1]!.sequence,
           available_at: availableAt,
           created_at: new Date("2026-08-06T12:00:00.001Z"),
           updated_at: availableAt,
         },
-      ],
+        ],
+      });
+      await Promise.all(
+        [firstIdentity, secondIdentity].map((requestIdentity, index) =>
+          createPublicDerivationObligations(transaction, {
+            organizationId,
+            causeSequences: [causes[index]!.sequence],
+            derivationKind: "estimated_ev",
+            derivationKey: estimatedEvRecomputationRequestKey(requestIdentity),
+            createdAt: availableAt,
+          }),
+        ),
+      );
     });
 
     const independentClient = await harness.createIndependentClient();
@@ -216,6 +246,36 @@ test("EV workers claim disjoint work, recover leases, and reject stale acknowled
     assert.equal(stored.attempt_count, 3);
     assert.equal(stored.result_status, null);
     assert.equal(stored.calculation_revision_id, null);
+    const watermark = await harness.client.settled_public_watermarks.findUniqueOrThrow({
+      where: { organization_id: organizationId },
+    });
+    assert.equal(watermark.settled_sequence, 0n);
+    assert.equal(
+      await firstQueue.retryTechnicalFailure({
+        requestId: crashed.id,
+        retryAt: new Date("2026-08-06T12:00:07.000Z"),
+      }),
+      "retried",
+    );
+    assert.equal(
+      await firstQueue.retryTechnicalFailure({
+        requestId: crashed.id,
+        retryAt: new Date("2026-08-06T12:00:08.000Z"),
+      }),
+      "already_queued",
+    );
+    assert.equal(await harness.client.estimated_ev_recomputation_requests.count(), 2);
+    assert.equal(await harness.client.public_derivation_obligations.count(), 2);
+    assert.equal(
+      await harness.client.public_derivation_obligations.count({
+        where: {
+          organization_id: organizationId,
+          derivation_key: estimatedEvRecomputationRequestKey(firstIdentity),
+          state: "pending",
+        },
+      }),
+      1,
+    );
   } finally {
     await harness.close();
   }

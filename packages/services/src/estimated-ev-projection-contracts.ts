@@ -95,6 +95,11 @@ export interface RecalculatePackScoutEstimatedEvCommand {
   readonly currencyPolicy: Readonly<{
     verifiedUsdStablecoins: readonly string[];
   }>;
+  readonly recomputation?: Readonly<{
+    requestId: string;
+    claimToken: string;
+    originatingPublicChangeSequence: bigint;
+  }>;
 }
 
 export interface ExplainPackScoutEstimatedEvQuery {
@@ -108,4 +113,5 @@ export type RecalculatePackScoutEstimatedEvResult = Readonly<{
   calculationRevisionId: string;
   calculationRevisionNumber: number;
   explanation: PackScoutEstimatedEvExplanation;
+  derivationAcknowledged?: boolean;
 }>;

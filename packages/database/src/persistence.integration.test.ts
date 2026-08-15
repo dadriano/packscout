@@ -246,6 +246,25 @@ test("unchanged replay is a no-op while changed content advances one current rev
   try {
     const first = await harness.ingestion.commitPage(initialPage());
     assert.equal(first.newCanonicalRevisions, 3);
+    const firstCanonicalRevisions =
+      await harness.database.canonical_revisions.findMany({
+        where: { organization_id: ids.organization },
+        select: { public_change_sequence: true },
+      });
+    assert.equal(firstCanonicalRevisions.length, 3);
+    assert.equal(
+      await harness.database.public_change_causes.count({
+        where: {
+          organization_id: ids.organization,
+          sequence: {
+            in: firstCanonicalRevisions.map(
+              ({ public_change_sequence }) => public_change_sequence,
+            ),
+          },
+        },
+      }),
+      3,
+    );
     await addRun(harness.setup, ids.secondRun);
     const replay = await harness.ingestion.commitPage(
       initialPage({ runId: ids.secondRun, committedAt: new Date(committedAt.getTime() + 1_000) }),
@@ -566,6 +585,130 @@ test("unresolved pull relationships persist and reconcile when a pack arrives", 
   }
 });
 
+test("a replay that adds a relationship after settlement receives a fresh causal sequence", async () => {
+  const harness = await createPipelineHarness();
+  try {
+    const replayablePage = initialPage({
+      payload: { catalog: [{ id: "asset-1" }], pulls: [{ id: "pull-1" }] },
+      records: [
+        {
+          recordKind: "catalog",
+          externalId: "asset-source-1",
+          sourceTime,
+          collectedAt,
+          payload: { id: "asset-1" },
+          projections: [
+            {
+              platformKey: "beezie",
+              recordKind: "catalog_asset",
+              externalId: "asset-1",
+              content: { name: "Asset One" },
+              sourceUpdatedAt: sourceTime,
+              sourceCollectedAt: collectedAt,
+            },
+          ],
+        },
+        {
+          recordKind: "pull",
+          externalId: "pull-source-1",
+          sourceTime,
+          collectedAt,
+          payload: { id: "pull-1" },
+          projections: [
+            {
+              platformKey: "beezie",
+              recordKind: "pull",
+              externalId: "pull-1",
+              content: { cardExternalId: "asset-1" },
+              sourceUpdatedAt: sourceTime,
+              sourceCollectedAt: collectedAt,
+              relationships: [],
+            },
+          ],
+        },
+      ],
+      quarantines: [],
+    });
+    await harness.ingestion.commitPage(replayablePage);
+    const settledBeforeReplay =
+      await harness.database.settled_public_watermarks.findUniqueOrThrow({
+        where: { organization_id: ids.organization },
+      });
+    assert.equal(
+      settledBeforeReplay.settled_sequence,
+      settledBeforeReplay.source_head_sequence,
+    );
+
+    await addRun(harness.setup, ids.secondRun);
+    const replayPage = {
+      ...replayablePage,
+      runId: ids.secondRun,
+      committedAt: new Date(committedAt.getTime() + 1_000),
+    };
+    const pullRecord = replayPage.records[1]!;
+    const pullProjection = pullRecord.projections[0]!;
+    replayPage.records = [
+      replayPage.records[0]!,
+      {
+        ...pullRecord,
+        projections: [
+          {
+            ...pullProjection,
+            relationships: [
+              ...(pullProjection.relationships ?? []),
+              {
+                relationshipKind: "opened_from_pack",
+                targetPlatformKey: "beezie",
+                targetRecordKind: "catalog_asset",
+                targetExternalId: "asset-1",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const replay = await harness.ingestion.commitPage(replayPage);
+    assert.equal(replay.newCanonicalRevisions, 0);
+
+    const relationship =
+      await harness.database.canonical_relationships.findFirstOrThrow({
+        where: {
+          organization_id: ids.organization,
+          relationship_kind: "opened_from_pack",
+          target_external_id: "asset-1",
+        },
+      });
+    assert.ok(
+      relationship.created_public_change_sequence >
+        settledBeforeReplay.settled_sequence,
+    );
+    assert.equal(
+      relationship.resolved_public_change_sequence,
+      relationship.created_public_change_sequence,
+    );
+    const relationshipCause =
+      await harness.database.public_change_causes.findUniqueOrThrow({
+        where: {
+          organization_id_sequence: {
+            organization_id: ids.organization,
+            sequence: relationship.created_public_change_sequence,
+          },
+        },
+      });
+    assert.equal(relationshipCause.change_kind, "relationship_resolution");
+    const settledAfterReplay =
+      await harness.database.settled_public_watermarks.findUniqueOrThrow({
+        where: { organization_id: ids.organization },
+      });
+    assert.ok(
+      settledAfterReplay.settled_sequence >=
+        relationship.created_public_change_sequence,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 test("actor PII stays in protected evidence and unsafe canonical writes roll back atomically", async () => {
   const harness = await createPipelineHarness();
   try {
@@ -631,6 +774,10 @@ test("actor PII stays in protected evidence and unsafe canonical writes roll bac
       ],
       quarantines: [],
     });
+    const causeCountBeforeRejectedWrite =
+      await harness.database.public_change_causes.count({
+        where: { organization_id: ids.organization },
+      });
     await assert.rejects(
       harness.ingestion.commitPage(bad),
       (error: unknown) =>
@@ -641,6 +788,12 @@ test("actor PII stays in protected evidence and unsafe canonical writes roll bac
       select: { id: true },
     });
     assert.equal(failedPage, null);
+    assert.equal(
+      await harness.database.public_change_causes.count({
+        where: { organization_id: ids.organization },
+      }),
+      causeCountBeforeRejectedWrite,
+    );
     const checkpoint = await harness.database.provider_cursor_checkpoints.findUnique({
       where: { config_revision_id: ids.configuration },
       select: { cursor: true },
