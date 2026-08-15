@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/006, postgres-convex-promotion/007
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including retry and lost-acknowledgement verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -46,14 +46,14 @@ Its durable ledger exposes claim, heartbeat, progress acknowledgement, terminal 
 
 ## Acceptance Criteria
 
-- [ ] Multiple settled changes arriving close together coalesce into a publication of the highest safe watermark.
-- [ ] A worker restart resumes at the first unacknowledged operation without duplicating staged entities or publication ledger rows.
-- [ ] A lost start, batch, or finalize response is resolved through status and reaches the correct terminal PostgreSQL state.
-- [ ] Exact replay is harmless; stale claims and lower-watermark activations are rejected.
-- [ ] Retryable errors back off and recover, while deterministic failures terminate and leave the prior Convex release active.
-- [ ] Unchanged content records a terminal `unchanged` attempt and advances observation freshness without a new immutable release.
-- [ ] The existing runtime schedules catalog promotion independently of provider cycles and reports the required safe health facts.
-- [ ] Timing tests demonstrate the one-minute service target under normal settled, healthy conditions.
+- [x] Multiple settled changes arriving close together coalesce into a publication of the highest safe watermark.
+- [x] A worker restart resumes at the first unacknowledged operation without duplicating staged entities or publication ledger rows.
+- [x] A lost start, batch, or finalize response is resolved through status and reaches the correct terminal PostgreSQL state.
+- [x] Exact replay is harmless; stale claims and lower-watermark activations are rejected.
+- [x] Retryable errors back off and recover, while deterministic failures terminate and leave the prior Convex release active.
+- [x] Unchanged content records a terminal `unchanged` attempt and advances observation freshness without a new immutable release.
+- [x] The existing runtime schedules catalog promotion independently of provider cycles and reports the required safe health facts.
+- [x] Timing tests demonstrate the one-minute service target under normal settled, healthy conditions.
 
 ## Verification
 

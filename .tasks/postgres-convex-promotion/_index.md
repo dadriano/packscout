@@ -4,7 +4,7 @@
 
 Open `postgres-convex-promotion/001`, define one public-affecting change and its derived obligations, and finish with a durable settled-watermark contract that does not depend on provider-run completion.
 
-**Progress:** 4/7 tasks complete
+**Progress:** 5/7 tasks complete
 
 ## Context
 
@@ -45,7 +45,7 @@ This feature completes that boundary without creating a second public data model
 | 001 | Establish causal public-change settlement | large | 2–4 days | done | none |
 | 002 | Assemble deterministic catalog releases | large | 2–4 days | done | 001 |
 | 003 | Stage and atomically activate Convex releases | large | 2–4 days | done | none |
-| 004 | Run and reconcile catalog promotions | large | 2–4 days | in_progress | 002, 003 |
+| 004 | Run and reconcile catalog promotions | large | 2–4 days | done | 002, 003 |
 
 ## Tasks: Heat and Operations
 
@@ -73,4 +73,4 @@ This feature completes that boundary without creating a second public data model
 
 ## Next Action
 
-Complete `004-run-and-reconcile-catalog-promotions.md`, then reuse that durable runner ledger for the independent Heat lane.
+Complete `006-publish-release-aligned-heat-frames.md` by reusing the durable runner ledger for the independent Heat lane.
