@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/006
 **Estimated scope:** medium
 **Estimated effort:** 1–3 days for one builder, including mapping and idempotency fixtures
-**Status:** todo
+**Status:** done
 
 ## Start Here
 
@@ -48,13 +48,13 @@ No Convex client or public DTO is part of this boundary.
 
 ## Acceptance Criteria
 
-- [ ] Supported canonical pull and catalog changes create calculator-compatible observations with stable public identities and causal sequence.
-- [ ] Replaying the same canonical source creates no duplicate observation or Heat contribution.
-- [ ] Unsettled observations are excluded until their sequence is within the settled watermark.
-- [ ] Equal-time observations order deterministically and yield repeatable calculator output.
-- [ ] Missing numeric evidence remains null and malformed/unsupported evidence cannot enter aggregation.
-- [ ] Bounded 15-minute/24-hour reads return only the approved organization's normalized, settled observations.
-- [ ] Protected provider, actor, tenant, and raw fields cannot enter the observation contract.
+- [x] Supported canonical pull and catalog changes create calculator-compatible observations with stable public identities and causal sequence.
+- [x] Replaying the same canonical source creates no duplicate observation or Heat contribution.
+- [x] Unsettled observations are excluded until their sequence is within the settled watermark.
+- [x] Equal-time observations order deterministically and yield repeatable calculator output.
+- [x] Missing numeric evidence remains null and malformed/unsupported evidence cannot enter aggregation.
+- [x] Bounded 15-minute/24-hour reads return only the approved organization's normalized, settled observations.
+- [x] Protected provider, actor, tenant, and raw fields cannot enter the observation contract.
 
 ## Verification
 

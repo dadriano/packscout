@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import type {
   PackscoutPrismaClient,
   PackscoutQueryClient,
+  PackscoutTransactionClient,
 } from "./database.ts";
 import {
   advanceSettledPublicWatermark,
@@ -80,7 +81,7 @@ export interface CatalogReleaseSourceRepository {
 
 export interface ApprovedPublicRepackIdentityMaterializer {
   materializeApprovedMappings(
-    database: PackscoutQueryClient,
+    database: PackscoutTransactionClient,
     input: {
       organizationId: string;
       approvedConfigurationKey: string;

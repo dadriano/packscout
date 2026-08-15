@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { IngestionPersistenceRepository } from "./ingestion-repository.ts";
 import {
+  persistNormalizedHeatObservationsForCanonicalWrites,
   PrismaNormalizedHeatObservationRepository,
+} from "./normalized-heat-observation-repository.ts";
+import {
   PrismaPublicRepackIdentityMappingRepository,
   PublicRepackIdentityMappingConflictError,
-} from "./normalized-heat-observation-repository.ts";
+} from "./public-repack-identity-mapping-repository.ts";
+import { cleanupExpiredNormalizedHeatHistory } from "./normalized-heat-retention-repository.ts";
+import type { PackscoutTransactionClient } from "./database.ts";
 import type { CommitPageInput } from "./pipeline-types.ts";
 import {
   advanceSettledPublicWatermark,
@@ -26,6 +31,9 @@ const ids = {
   missingMappingRun: "55000000-0000-4000-8000-000000000034",
   mappedAfterApprovalRun: "55000000-0000-4000-8000-000000000035",
   highSequenceRun: "55000000-0000-4000-8000-000000000036",
+  reparentRun: "55000000-0000-4000-8000-000000000037",
+  removalRun: "55000000-0000-4000-8000-000000000038",
+  exactArithmeticRun: "55000000-0000-4000-8000-000000000039",
   publicRepack: "11111111-1111-5111-8111-111111111111",
   secondPublicRepack: "33333333-3333-5333-8333-333333333333",
 } as const;
@@ -214,6 +222,121 @@ async function commitSinglePull(input: {
   });
 }
 
+async function commitCatalogAssetChange(input: {
+  ingestion: IngestionPersistenceRepository;
+  setup: PipelineSetupRepository;
+  runId: string;
+  occurredAt: Date;
+  relatedPackExternalId: string | null;
+}): Promise<void> {
+  await createRun(input.setup, input.runId, input.occurredAt);
+  await input.ingestion.commitPage({
+    organizationId: ids.organization,
+    providerId: ids.provider,
+    configRevisionId: ids.configuration,
+    runId: input.runId,
+    pageNumber: 1,
+    requestedCursor: null,
+    nextCursor: null,
+    hasMore: false,
+    payload: { asset: "asset-2" },
+    committedAt: input.occurredAt,
+    records: [{
+      recordKind: "catalog",
+      externalId: `catalog-${input.runId}`,
+      sourceTime: input.occurredAt,
+      collectedAt: input.occurredAt,
+      payload: { protected: "never-normalized" },
+      projections: [
+        ...(input.relatedPackExternalId === "unmapped-pack" ? [{
+          platformKey: "platform-a",
+          recordKind: "pack" as const,
+          externalId: "unmapped-pack",
+          content: packContent(),
+          sourceUpdatedAt: new Date(input.occurredAt.getTime() - 1),
+          sourceCollectedAt: input.occurredAt,
+        }] : []),
+        {
+          platformKey: "platform-a",
+          recordKind: "catalog_asset",
+          externalId: "asset-2",
+          content: {
+            schemaVersion: "catalog-projection-v1",
+            entityType: "catalog_asset",
+            relatedPackExternalId: input.relatedPackExternalId,
+            availability: "active",
+            name: "asset-2",
+          },
+          sourceUpdatedAt: input.occurredAt,
+          sourceCollectedAt: input.occurredAt,
+        },
+      ],
+    }],
+  });
+}
+
+async function commitExactArithmeticEvidence(input: {
+  ingestion: IngestionPersistenceRepository;
+  setup: PipelineSetupRepository;
+  occurredAt: Date;
+}): Promise<void> {
+  await createRun(input.setup, ids.exactArithmeticRun, input.occurredAt);
+  await input.ingestion.commitPage({
+    organizationId: ids.organization,
+    providerId: ids.provider,
+    configRevisionId: ids.configuration,
+    runId: ids.exactArithmeticRun,
+    pageNumber: 1,
+    requestedCursor: null,
+    nextCursor: null,
+    hasMore: false,
+    payload: { calculation: "exact" },
+    committedAt: input.occurredAt,
+    records: [
+      {
+        recordKind: "catalog",
+        externalId: "catalog-exact-arithmetic",
+        sourceTime: input.occurredAt,
+        collectedAt: input.occurredAt,
+        payload: { protected: "pack-price" },
+        projections: [{
+          platformKey: "platform-a",
+          recordKind: "pack",
+          externalId: "pack-1",
+          content: {
+            ...packContent(),
+            priceValueMinor: 1_229_539_150_168_567,
+            buybackPercent: null,
+          },
+          sourceUpdatedAt: input.occurredAt,
+          sourceCollectedAt: input.occurredAt,
+        }],
+      },
+      {
+        recordKind: "pull",
+        externalId: "pull-exact-arithmetic",
+        sourceTime: input.occurredAt,
+        collectedAt: input.occurredAt,
+        payload: { protected: "pull-value" },
+        projections: [{
+          platformKey: "platform-a",
+          recordKind: "pull",
+          externalId: "pull-exact-arithmetic",
+          content: {
+            ...pullContent("pull-exact-arithmetic", {
+              amountMinor: 5_505_323_021_837_267,
+              currency: "USD",
+            }),
+            occurredAt: input.occurredAt.toISOString(),
+          },
+          sourceUpdatedAt: input.occurredAt,
+          sourceCollectedAt: input.occurredAt,
+        }],
+      },
+    ],
+  });
+}
+
 test("canonical writes persist settled, bounded, public-safe Heat observations without replay duplication", async () => {
   const harness = await createMigratedTestDatabase();
   try {
@@ -277,6 +400,18 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           occurredAt: configuredAt,
         }],
       });
+      await transaction.approved_public_catalog_configurations.create({
+        data: {
+          organization_id: ids.organization,
+          configuration_key: "catalog-config-v1",
+          revision: 1,
+          configuration_json: {},
+          configuration_hash: "1".padStart(64, "0"),
+          approved_at: configuredAt,
+          public_change_sequence: causes[0]!.sequence,
+          created_at: configuredAt,
+        },
+      });
       const mapping = new PrismaPublicRepackIdentityMappingRepository(transaction);
       assert.deepEqual(
         await mapping.registerApprovedMappings({
@@ -298,31 +433,39 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       });
     });
 
-    const mapping = new PrismaPublicRepackIdentityMappingRepository(harness.client);
-    assert.deepEqual(
-      await mapping.registerApprovedMapping({
-        organizationId: ids.organization,
-        platformKey: "platform-a",
-        packExternalId: "pack-1",
-        publicRepackId: ids.publicRepack,
-        approvedConfigurationKey: "catalog-config-v1",
-        publicChangeSequence: 1n,
-        approvedAt: configuredAt,
-      }),
-      { status: "existing" },
+    assert.throws(
+      () => new PrismaPublicRepackIdentityMappingRepository(
+        harness.client as unknown as PackscoutTransactionClient,
+      ),
+      /active database transaction/,
     );
-    await assert.rejects(
-      mapping.registerApprovedMapping({
-        organizationId: ids.organization,
-        platformKey: "platform-a",
-        packExternalId: "pack-1",
-        publicRepackId: "22222222-2222-5222-8222-222222222222",
-        approvedConfigurationKey: "conflicting-config",
-        publicChangeSequence: 1n,
-        approvedAt: configuredAt,
-      }),
-      PublicRepackIdentityMappingConflictError,
-    );
+    await harness.client.$transaction(async (transaction) => {
+      const mapping = new PrismaPublicRepackIdentityMappingRepository(transaction);
+      assert.deepEqual(
+        await mapping.registerApprovedMapping({
+          organizationId: ids.organization,
+          platformKey: "platform-a",
+          packExternalId: "pack-1",
+          publicRepackId: ids.publicRepack,
+          approvedConfigurationKey: "catalog-config-v1",
+          publicChangeSequence: 1n,
+          approvedAt: configuredAt,
+        }),
+        { status: "existing" },
+      );
+      await assert.rejects(
+        mapping.registerApprovedMapping({
+          organizationId: ids.organization,
+          platformKey: "platform-a",
+          packExternalId: "pack-1",
+          publicRepackId: "22222222-2222-5222-8222-222222222222",
+          approvedConfigurationKey: "conflicting-config",
+          publicChangeSequence: 1n,
+          approvedAt: configuredAt,
+        }),
+        PublicRepackIdentityMappingConflictError,
+      );
+    });
     await assert.rejects(
       harness.client.public_repack_identity_mappings.update({
         where: {
@@ -350,6 +493,150 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       }),
       5,
     );
+
+    const replaySources = await harness.client.$queryRaw<Array<{
+      revisionId: string;
+      entityId: string;
+      platformKey: string;
+      externalId: string;
+      content: Record<string, unknown>;
+      publicChangeSequence: bigint;
+      occurredAt: Date;
+    }>>`
+      select revision.id::text as "revisionId",
+             entity.id::text as "entityId",
+             entity.platform_key as "platformKey",
+             entity.external_id as "externalId",
+             revision.content_json as content,
+             revision.public_change_sequence as "publicChangeSequence",
+             revision.source_updated_at as "occurredAt"
+      from canonical_revisions as revision
+      join canonical_entities as entity on entity.id = revision.entity_id
+      where revision.organization_id = ${ids.organization}::uuid
+        and entity.record_kind = 'pack'
+      order by revision.public_change_sequence
+      limit 1
+    `;
+    const replaySource = replaySources[0]!;
+    const directReplayInput = {
+      organizationId: ids.organization,
+      revisions: [{ ...replaySource, recordKind: "pack" }],
+      createdAt: new Date(committedAt.getTime() + 1),
+    } as const;
+    await assert.rejects(
+      persistNormalizedHeatObservationsForCanonicalWrites(
+        harness.client as unknown as PackscoutTransactionClient,
+        directReplayInput,
+      ),
+      /active database transaction/,
+    );
+    const sequenceBeforeReplay =
+      await harness.client.normalized_heat_window_checkpoints.findUniqueOrThrow({
+        where: { organization_id: ids.organization },
+        select: { next_catalog_sequence: true },
+      });
+    const directReplay = await harness.client.$transaction((transaction) =>
+      persistNormalizedHeatObservationsForCanonicalWrites(
+        transaction,
+        directReplayInput,
+      ));
+    assert.deepEqual(directReplay, {
+      normalized: 0,
+      deferred: 0,
+      rejected: 0,
+      duplicate: 1,
+    });
+    const sequenceAfterReplay =
+      await harness.client.normalized_heat_window_checkpoints.findUniqueOrThrow({
+        where: { organization_id: ids.organization },
+        select: { next_catalog_sequence: true },
+      });
+    assert.equal(
+      sequenceAfterReplay.next_catalog_sequence,
+      sequenceBeforeReplay.next_catalog_sequence,
+    );
+
+    const retainedHistoryAt = new Date("2026-08-01T00:00:00.000Z");
+    const retainedHistoryUntil = new Date("2026-08-08T00:00:00.000Z");
+    const retainedObservationId = "55000000-0000-4000-8000-000000000040";
+    await harness.client.normalized_heat_observations.create({
+      data: {
+        id: retainedObservationId,
+        organization_id: ids.organization,
+        observation_key: "a".repeat(64),
+        canonical_revision_id: replaySource.revisionId,
+        public_change_sequence: replaySource.publicChangeSequence,
+        mapping_public_change_sequence: 1n,
+        public_repack_id: ids.publicRepack,
+        observation_kind: "catalog_snapshot",
+        occurred_at: retainedHistoryAt,
+        catalog_sequence: 2_000_000_000,
+        realized_return_basis_points: null,
+        value_multiple_basis_points: null,
+        available_chase_count: 0,
+        outcome_keys: [],
+        retained_until: retainedHistoryUntil,
+        created_at: configuredAt,
+      },
+    });
+    await harness.client.normalized_heat_observation_outcomes.create({
+      data: {
+        organization_id: ids.organization,
+        candidate_key: "b".repeat(64),
+        canonical_revision_id: replaySource.revisionId,
+        public_change_sequence: replaySource.publicChangeSequence,
+        mapping_public_change_sequence: 1n,
+        public_repack_id: ids.publicRepack,
+        occurred_at: retainedHistoryAt,
+        status: "normalized",
+        reason_code: "NORMALIZED",
+        observation_id: retainedObservationId,
+        retained_until: retainedHistoryUntil,
+        created_at: configuredAt,
+      },
+    });
+    const protectedObservation =
+      await harness.client.normalized_heat_observations.findFirstOrThrow({
+        where: {
+          organization_id: ids.organization,
+          id: { not: retainedObservationId },
+        },
+        select: { id: true, organization_id: true },
+      });
+    await assert.rejects(
+      harness.client.normalized_heat_observations.delete({
+        where: {
+          id_organization_id: {
+            id: protectedObservation.id,
+            organization_id: protectedObservation.organization_id,
+          },
+        },
+      }),
+      /retention has not elapsed/,
+    );
+    const firstCleanup = await harness.client.$transaction((transaction) =>
+      cleanupExpiredNormalizedHeatHistory(transaction, {
+        organizationId: ids.organization,
+        cutoffAt: configuredAt,
+        limit: 1,
+      }));
+    assert.deepEqual(firstCleanup, {
+      deletedOutcomes: 1,
+      deletedObservations: 0,
+      hasMore: true,
+    });
+    const secondCleanup = await harness.client.$transaction((transaction) =>
+      cleanupExpiredNormalizedHeatHistory(transaction, {
+        organizationId: ids.organization,
+        cutoffAt: configuredAt,
+        limit: 1,
+      }));
+    assert.deepEqual(secondCleanup, {
+      deletedOutcomes: 0,
+      deletedObservations: 1,
+      hasMore: false,
+    });
+    assert.equal(await harness.client.normalized_heat_observations.count(), 5);
 
     const reader = new PrismaNormalizedHeatObservationRepository(harness.client, {
       organizationId: ids.organization,
@@ -510,6 +797,19 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           occurredAt: new Date(settledAt.getTime() + 500),
         }],
       });
+      const approvedAt = new Date(settledAt.getTime() + 500);
+      await transaction.approved_public_catalog_configurations.create({
+        data: {
+          organization_id: ids.organization,
+          configuration_key: "catalog-config-v2",
+          revision: 2,
+          configuration_json: {},
+          configuration_hash: "2".padStart(64, "0"),
+          approved_at: approvedAt,
+          public_change_sequence: causes[0]!.sequence,
+          created_at: approvedAt,
+        },
+      });
       const transactionalMapping =
         new PrismaPublicRepackIdentityMappingRepository(transaction);
       assert.deepEqual(
@@ -517,7 +817,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           organizationId: ids.organization,
           approvedConfigurationKey: "catalog-config-v2",
           publicChangeSequence: causes[0]!.sequence,
-          approvedAt: new Date(settledAt.getTime() + 500),
+          approvedAt,
           mappings: [{
             platformKey: "platform-a",
             packExternalId: "pack-1",
@@ -591,6 +891,27 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         ["deferred", "MAPPING_MISSING"],
       ],
     );
+    const unrelatedUnmappedCoverage =
+      await reader.listSettledNormalizedHeatObservations({
+        organizationId: ids.organization,
+        publicRepackIds: [ids.publicRepack],
+        occurredAtGte: new Date(sourceAt.getTime() + 2).toISOString(),
+        occurredAtLt: new Date(sourceAt.getTime() + 3).toISOString(),
+        causalSequenceLte: 10n,
+        limit: 100,
+      });
+    assert.equal(unrelatedUnmappedCoverage.sourceCoverageComplete, true);
+    assert.deepEqual(unrelatedUnmappedCoverage.observations, []);
+    const mappedMalformedCoverage =
+      await reader.listSettledNormalizedHeatObservations({
+        organizationId: ids.organization,
+        publicRepackIds: [ids.publicRepack],
+        occurredAtGte: new Date(sourceAt.getTime() + 1).toISOString(),
+        occurredAtLt: new Date(sourceAt.getTime() + 2).toISOString(),
+        causalSequenceLte: 10n,
+        limit: 100,
+      });
+    assert.equal(mappedMalformedCoverage.sourceCoverageComplete, false);
     const incompleteCoverage =
       await reader.listSettledNormalizedHeatObservations({
         organizationId: ids.organization,
@@ -615,6 +936,19 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           occurredAt: new Date(sourceAt.getTime() + 3),
         }],
       });
+      const approvedAt = new Date(sourceAt.getTime() + 3);
+      await transaction.approved_public_catalog_configurations.create({
+        data: {
+          organization_id: ids.organization,
+          configuration_key: "catalog-config-v3",
+          revision: 3,
+          configuration_json: {},
+          configuration_hash: "3".padStart(64, "0"),
+          approved_at: approvedAt,
+          public_change_sequence: causes[0]!.sequence,
+          created_at: approvedAt,
+        },
+      });
       const transactionalMapping =
         new PrismaPublicRepackIdentityMappingRepository(transaction);
       assert.deepEqual(
@@ -622,7 +956,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           organizationId: ids.organization,
           approvedConfigurationKey: "catalog-config-v3",
           publicChangeSequence: causes[0]!.sequence,
-          approvedAt: new Date(sourceAt.getTime() + 3),
+          approvedAt,
           mappings: [{
             platformKey: "platform-a",
             packExternalId: "unmapped-pack",
@@ -656,6 +990,88 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     });
     assert.equal(newlyMapped.observations.length, 1);
     assert.equal(newlyMapped.observations[0]?.kind, "pull");
+
+    const reparentAt = new Date(sourceAt.getTime() + 5);
+    await commitCatalogAssetChange({
+      ingestion,
+      setup,
+      runId: ids.reparentRun,
+      occurredAt: reparentAt,
+      relatedPackExternalId: "unmapped-pack",
+    });
+    const reparentSnapshots =
+      await harness.client.normalized_heat_observations.findMany({
+        where: {
+          organization_id: ids.organization,
+          occurred_at: reparentAt,
+          observation_kind: "catalog_snapshot",
+        },
+        orderBy: { catalog_sequence: "asc" },
+      });
+    assert.equal(
+      reparentSnapshots.length,
+      2,
+      JSON.stringify(reparentSnapshots.map((row) => ({
+        repack: row.public_repack_id,
+        count: row.available_chase_count,
+        sequence: row.catalog_sequence,
+      }))),
+    );
+    assert.deepEqual(
+      reparentSnapshots.map(({ public_repack_id }) => public_repack_id).sort(),
+      [ids.publicRepack, ids.secondPublicRepack].sort(),
+    );
+    assert.equal(
+      reparentSnapshots[1]!.catalog_sequence,
+      reparentSnapshots[0]!.catalog_sequence! + 1,
+    );
+    assert.deepEqual(
+      reparentSnapshots.map(({ available_chase_count }) =>
+        available_chase_count).sort(),
+      [1, 1],
+      "the old pack loses the moved asset while the new pack gains it",
+    );
+    assert.notEqual(
+      reparentSnapshots[0]!.observation_key,
+      reparentSnapshots[1]!.observation_key,
+    );
+
+    const removalAt = new Date(sourceAt.getTime() + 6);
+    await commitCatalogAssetChange({
+      ingestion,
+      setup,
+      runId: ids.removalRun,
+      occurredAt: removalAt,
+      relatedPackExternalId: null,
+    });
+    const removalSnapshot =
+      await harness.client.normalized_heat_observations.findFirstOrThrow({
+        where: {
+          organization_id: ids.organization,
+          occurred_at: removalAt,
+          observation_kind: "catalog_snapshot",
+        },
+      });
+    assert.equal(removalSnapshot.public_repack_id, ids.secondPublicRepack);
+    assert.equal(removalSnapshot.available_chase_count, 0);
+    assert.deepEqual(removalSnapshot.outcome_keys, []);
+
+    const exactArithmeticAt = new Date(sourceAt.getTime() + 7);
+    await commitExactArithmeticEvidence({
+      ingestion,
+      setup,
+      occurredAt: exactArithmeticAt,
+    });
+    const exactPull =
+      await harness.client.normalized_heat_observations.findFirstOrThrow({
+        where: {
+          organization_id: ids.organization,
+          occurred_at: exactArithmeticAt,
+          observation_kind: "pull",
+        },
+      });
+    assert.equal(exactPull.value_multiple_basis_points, 44_775);
+    assert.equal(exactPull.realized_return_basis_points, null);
 
     const highSequence = BigInt(2_147_483_647) + 1n;
     await harness.client.settled_public_watermarks.update({
@@ -700,9 +1116,9 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       orderBy: [{ public_change_sequence: "asc" }],
       select: { observation_key: true, retained_until: true, occurred_at: true },
     });
-    assert.equal(immutableHistory.length, 7);
+    assert.equal(immutableHistory.length, 13);
     assert.ok(immutableHistory.every(({ retained_until, occurred_at }) =>
-      retained_until.getTime() - occurred_at.getTime() >= 7 * 24 * 60 * 60 * 1_000));
+      retained_until.getTime() - occurred_at.getTime() === 7 * 24 * 60 * 60 * 1_000));
   } finally {
     await harness.close();
   }

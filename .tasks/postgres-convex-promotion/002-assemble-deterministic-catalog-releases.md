@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/004
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including export fixtures and rebuild equivalence
-**Status:** todo
+**Status:** done
 
 ## Start Here
 
@@ -53,13 +53,13 @@ The plan contains no database handles, secrets, provider payloads, or caller-sel
 
 ## Acceptance Criteria
 
-- [ ] Repeated assembly at the same settled watermark produces byte-stable canonical manifest content, hashes, counts, and batch ordering.
-- [ ] Full rebuild and change-triggered assembly at the same canonical state reconcile to the same release content hash.
-- [ ] Unsettled/regressed watermarks, incomplete first backfills, and unapproved public configuration fail closed before publication.
-- [ ] Later delayed-provider input retains only the provider's last settled public projection and increments `delayedVendorCount`.
-- [ ] Disabled records are absent, sold-out records are present and non-actionable, and unavailable metrics use bounded reasons rather than zero.
-- [ ] Referential order and approved origin/action checks pass the existing strict release contract.
-- [ ] Protected canonical and operational fields cannot enter any release plan or batch.
+- [x] Repeated assembly at the same settled watermark produces byte-stable canonical manifest content, hashes, counts, and batch ordering.
+- [x] Full rebuild and change-triggered assembly at the same canonical state reconcile to the same release content hash.
+- [x] Unsettled/regressed watermarks, incomplete first backfills, and unapproved public configuration fail closed before publication.
+- [x] Later delayed-provider input retains only the provider's last settled public projection and increments `delayedVendorCount`.
+- [x] Disabled records are absent, sold-out records are present and non-actionable, and unavailable metrics use bounded reasons rather than zero.
+- [x] Referential order and approved origin/action checks pass the existing strict release contract.
+- [x] Protected canonical and operational fields cannot enter any release plan or batch.
 
 ## Verification
 

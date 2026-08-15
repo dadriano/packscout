@@ -7,11 +7,11 @@
   "expectedCounts": {
     "tables": 36,
     "enums": 22,
-    "columns": 405,
+    "columns": 408,
     "indexes": 57,
     "uniqueConstraints": 27,
-    "foreignKeys": 142,
-    "checkConstraints": 94
+    "foreignKeys": 144,
+    "checkConstraints": 96
   },
   "enums": {
     "admin_alert_state": [
@@ -2132,9 +2132,16 @@
     },
     "normalized_heat_observation_outcomes": {
       "columns": {
+        "candidate_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "canonical_revision_id": {
           "type": "uuid",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true,
           "identity": null,
           "default": null
@@ -2145,6 +2152,13 @@
           "notNull": true,
           "identity": null,
           "default": "CURRENT_TIMESTAMP"
+        },
+        "mapping_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
         },
         "observation_id": {
           "type": "uuid",
@@ -2174,6 +2188,13 @@
           "identity": null,
           "default": null
         },
+        "public_repack_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "reason_code": {
           "type": "text",
           "primaryKey": false,
@@ -2200,6 +2221,7 @@
         "normalized_heat_observation_outcomes_coverage_idx": {
           "columns": [
             "organization_id",
+            "public_repack_id",
             "occurred_at",
             "public_change_sequence",
             "status"
@@ -2222,6 +2244,34 @@
           "columns": [
             "organization_id",
             "public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observation_outcomes_identity_mapping_fk": {
+          "columns": [
+            "organization_id",
+            "public_repack_id",
+            "mapping_public_change_sequence"
+          ],
+          "referencedTable": "public_repack_identity_mappings",
+          "referencedColumns": [
+            "organization_id",
+            "public_repack_id",
+            "public_change_sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observation_outcomes_mapping_change_fk": {
+          "columns": [
+            "organization_id",
+            "mapping_public_change_sequence"
           ],
           "referencedTable": "public_change_causes",
           "referencedColumns": [
@@ -2272,6 +2322,12 @@
         }
       },
       "checkConstraints": {
+        "normalized_heat_observation_outcomes_candidate_key_check": {
+          "value": "(candidate_key ~ '^[0-9a-f]{64}$'::text)"
+        },
+        "normalized_heat_observation_outcomes_mapping_shape_check": {
+          "value": "(((mapping_public_change_sequence IS NULL) AND (public_repack_id IS NULL)) OR ((mapping_public_change_sequence > 0) AND (public_repack_id IS NOT NULL)))"
+        },
         "normalized_heat_observation_outcomes_occurred_at_milliseconds_c": {
           "value": "(date_trunc('milliseconds'::text, occurred_at) = occurred_at)"
         },
@@ -2279,7 +2335,7 @@
           "value": "(reason_code = ANY (ARRAY['NORMALIZED'::text, 'MAPPING_MISSING'::text, 'EVIDENCE_UNSUPPORTED'::text, 'EVIDENCE_MALFORMED'::text, 'WINDOW_CLOSED'::text, 'CATALOG_LIMIT_EXCEEDED'::text, 'DUPLICATE_SOURCE_EVENT'::text]))"
         },
         "normalized_heat_observation_outcomes_retention_check": {
-          "value": "(retained_until >= (occurred_at + '7 days'::interval))"
+          "value": "(retained_until = (occurred_at + '7 days'::interval))"
         },
         "normalized_heat_observation_outcomes_shape_check": {
           "value": "((status = 'normalized'::text) = (observation_id IS NOT NULL))"
@@ -2522,7 +2578,7 @@
           "value": "((get_byte(uuid_send(public_repack_id), 6) >> 4) = 5)"
         },
         "normalized_heat_observations_retention_check": {
-          "value": "(retained_until >= (occurred_at + '7 days'::interval))"
+          "value": "(retained_until = (occurred_at + '7 days'::interval))"
         },
         "normalized_heat_observations_sequence_check": {
           "value": "((public_change_sequence > 0) AND (mapping_public_change_sequence > 0) AND ((catalog_sequence IS NULL) OR ((catalog_sequence >= 1) AND (catalog_sequence <= 2147483647))))"

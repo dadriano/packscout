@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import type { PackscoutQueryClient } from "./database.ts";
+import type {
+  PackscoutQueryClient,
+  PackscoutTransactionClient,
+} from "./database.ts";
 import type {
   CanonicalProjectionInput,
   CommitPageInput,
@@ -21,6 +24,16 @@ import {
 } from "./security.ts";
 
 const maximumRowsPerWrite = 500;
+
+function assertCanonicalWriteTransaction(
+  database: PackscoutTransactionClient,
+): void {
+  if ("$transaction" in (database as unknown as Record<string, unknown>)) {
+    throw new TypeError(
+      "Canonical projection writes require the caller's active database transaction.",
+    );
+  }
+}
 
 interface CanonicalProjectionWriteInput {
   readonly organizationId: string;
@@ -431,10 +444,11 @@ async function loadRelationshipTargets(
 }
 
 export async function writeCanonicalProjectionBatch(
-  database: PackscoutQueryClient,
+  database: PackscoutTransactionClient,
   policy: RawEvidencePolicy,
   inputs: readonly CanonicalProjectionWriteInput[],
 ): Promise<CanonicalProjectionWriteResult[]> {
+  assertCanonicalWriteTransaction(database);
   if (inputs.length === 0) return [];
   const scope = inputs[0]!;
   if (
@@ -882,12 +896,13 @@ export async function writeCanonicalProjectionBatch(
 }
 
 export async function persistPageRecordsInBatches(
-  database: PackscoutQueryClient,
+  database: PackscoutTransactionClient,
   policy: RawEvidencePolicy,
   input: CommitPageInput,
   pageId: string,
   expiresAt: Date,
 ): Promise<PageRecordBatchResult> {
+  assertCanonicalWriteTransaction(database);
   const prepared = input.records.map((record, sourcePosition) => {
     const contentHash = hashJson(record.payload);
     return {

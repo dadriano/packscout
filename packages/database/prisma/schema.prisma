@@ -246,7 +246,8 @@ model public_change_causes {
   public_repack_identity_mappings      public_repack_identity_mappings[]      @relation("public_repack_identity_mapping_change")
   normalized_heat_observations_source  normalized_heat_observations[]         @relation("normalized_heat_observation_source_change")
   normalized_heat_observations_mapping normalized_heat_observations[]         @relation("normalized_heat_observation_mapping_change")
-  normalized_heat_observation_outcomes normalized_heat_observation_outcomes[]
+  normalized_heat_observation_outcomes_source  normalized_heat_observation_outcomes[] @relation("normalized_heat_observation_outcome_source_change")
+  normalized_heat_observation_outcomes_mapping normalized_heat_observation_outcomes[] @relation("normalized_heat_observation_outcome_mapping_change")
   approved_public_catalog_configurations approved_public_catalog_configurations[]
 
   @@id([organization_id, sequence], map: "public_change_causes_pkey")
@@ -505,6 +506,7 @@ model public_repack_identity_mappings {
   public_change_causes         public_change_causes           @relation("public_repack_identity_mapping_change", fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "public_repack_identity_mappings_change_fk")
   approved_public_catalog_configurations approved_public_catalog_configurations @relation(fields: [organization_id, approved_configuration_key, public_change_sequence], references: [organization_id, configuration_key, public_change_sequence], onUpdate: NoAction, map: "public_repack_identity_mappings_configuration_fk")
   normalized_heat_observations normalized_heat_observations[]
+  normalized_heat_observation_outcomes normalized_heat_observation_outcomes[]
 
   @@id([organization_id, platform_key, pack_external_id], map: "public_repack_identity_mappings_pkey")
   @@unique([organization_id, public_repack_id], map: "public_repack_identity_mappings_public_id_unique")
@@ -548,8 +550,11 @@ model normalized_heat_observations {
 /// This table contains status and reason check constraints defined in its migration.
 model normalized_heat_observation_outcomes {
   organization_id              String                        @db.Uuid
+  candidate_key                String
   canonical_revision_id        String                        @db.Uuid
   public_change_sequence       BigInt
+  mapping_public_change_sequence BigInt?
+  public_repack_id              String?                       @db.Uuid
   occurred_at                  DateTime                      @db.Timestamptz(6)
   status                       String
   reason_code                  String
@@ -558,11 +563,13 @@ model normalized_heat_observation_outcomes {
   created_at                   DateTime                      @default(now()) @db.Timestamptz(6)
   organizations                organizations                 @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_organization_fk")
   canonical_revisions          canonical_revisions           @relation(fields: [canonical_revision_id, organization_id, public_change_sequence], references: [id, organization_id, public_change_sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_revision_fk")
-  public_change_causes         public_change_causes          @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_change_fk")
+  public_change_causes_source  public_change_causes          @relation("normalized_heat_observation_outcome_source_change", fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_change_fk")
+  public_change_causes_mapping public_change_causes?         @relation("normalized_heat_observation_outcome_mapping_change", fields: [organization_id, mapping_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_mapping_change_fk")
+  public_repack_identity_mappings public_repack_identity_mappings? @relation(fields: [organization_id, public_repack_id, mapping_public_change_sequence], references: [organization_id, public_repack_id, public_change_sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_identity_mapping_fk")
   normalized_heat_observations normalized_heat_observations? @relation(fields: [observation_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_observation_fk")
 
-  @@id([organization_id, canonical_revision_id], map: "normalized_heat_observation_outcomes_pkey")
-  @@index([organization_id, occurred_at, public_change_sequence, status], map: "normalized_heat_observation_outcomes_coverage_idx")
+  @@id([organization_id, candidate_key], map: "normalized_heat_observation_outcomes_pkey")
+  @@index([organization_id, public_repack_id, occurred_at, public_change_sequence, status], map: "normalized_heat_observation_outcomes_coverage_idx")
   @@index([organization_id, retained_until], map: "normalized_heat_observation_outcomes_retention_idx")
 }
 

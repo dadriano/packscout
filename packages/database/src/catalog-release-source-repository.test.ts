@@ -12,7 +12,7 @@ import {
 } from "./catalog-release-source-repository.ts";
 import {
   prismaApprovedPublicRepackIdentityMaterializer as materializer,
-} from "./normalized-heat-observation-repository.ts";
+} from "./public-repack-identity-mapping-repository.ts";
 import {
   advanceSettledPublicWatermark,
   allocatePublicChangeCauses,

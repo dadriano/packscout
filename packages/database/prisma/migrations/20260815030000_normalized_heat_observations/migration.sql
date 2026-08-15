@@ -194,7 +194,7 @@ create table public.normalized_heat_observations (
         and available_chase_count is not null)
     ),
   constraint normalized_heat_observations_retention_check
-    check (retained_until >= occurred_at + interval '7 days')
+    check (retained_until = occurred_at + interval '7 days')
 );
 
 create index normalized_heat_observations_window_idx
@@ -210,8 +210,11 @@ create index normalized_heat_observations_retention_idx
 
 create table public.normalized_heat_observation_outcomes (
   organization_id uuid not null,
+  candidate_key text not null,
   canonical_revision_id uuid not null,
   public_change_sequence bigint not null,
+  mapping_public_change_sequence bigint,
+  public_repack_id uuid,
   occurred_at timestamp(6) with time zone not null,
   status text not null,
   reason_code text not null,
@@ -219,7 +222,7 @@ create table public.normalized_heat_observation_outcomes (
   retained_until timestamp(6) with time zone not null,
   created_at timestamp(6) with time zone not null default current_timestamp,
   constraint normalized_heat_observation_outcomes_pkey
-    primary key (organization_id, canonical_revision_id),
+    primary key (organization_id, candidate_key),
   constraint normalized_heat_observation_outcomes_organization_fk
     foreign key (organization_id) references public.organizations(id),
   constraint normalized_heat_observation_outcomes_revision_fk
@@ -231,6 +234,15 @@ create table public.normalized_heat_observation_outcomes (
   constraint normalized_heat_observation_outcomes_change_fk
     foreign key (organization_id, public_change_sequence)
     references public.public_change_causes(organization_id, sequence),
+  constraint normalized_heat_observation_outcomes_mapping_change_fk
+    foreign key (organization_id, mapping_public_change_sequence)
+    references public.public_change_causes(organization_id, sequence),
+  constraint normalized_heat_observation_outcomes_identity_mapping_fk
+    foreign key (
+      organization_id, public_repack_id, mapping_public_change_sequence
+    ) references public.public_repack_identity_mappings(
+      organization_id, public_repack_id, public_change_sequence
+    ),
   constraint normalized_heat_observation_outcomes_observation_fk
     foreign key (observation_id, organization_id)
     references public.normalized_heat_observations(id, organization_id),
@@ -250,15 +262,26 @@ create table public.normalized_heat_observation_outcomes (
     ),
   constraint normalized_heat_observation_outcomes_shape_check
     check ((status = 'normalized') = (observation_id is not null)),
+  constraint normalized_heat_observation_outcomes_candidate_key_check
+    check (candidate_key ~ '^[0-9a-f]{64}$'),
+  constraint normalized_heat_observation_outcomes_mapping_shape_check
+    check (
+      (mapping_public_change_sequence is null and public_repack_id is null)
+      or
+      (mapping_public_change_sequence > 0 and public_repack_id is not null)
+    ),
   constraint normalized_heat_observation_outcomes_occurred_at_milliseconds_check
     check (date_trunc('milliseconds', occurred_at) = occurred_at),
   constraint normalized_heat_observation_outcomes_retention_check
-    check (retained_until >= occurred_at + interval '7 days')
+    check (retained_until = occurred_at + interval '7 days')
 );
 
 create index normalized_heat_observation_outcomes_coverage_idx
   on public.normalized_heat_observation_outcomes
-  (organization_id, occurred_at, public_change_sequence, status);
+  (
+    organization_id, public_repack_id, occurred_at,
+    public_change_sequence, status
+  );
 
 create index normalized_heat_observation_outcomes_retention_idx
   on public.normalized_heat_observation_outcomes
