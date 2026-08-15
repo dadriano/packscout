@@ -4,7 +4,7 @@
 
 Open `postgres-convex-promotion/001`, define one public-affecting change and its derived obligations, and finish with a durable settled-watermark contract that does not depend on provider-run completion.
 
-**Progress:** 5/7 tasks complete
+**Progress:** 6/7 tasks complete
 
 ## Context
 
@@ -52,8 +52,8 @@ This feature completes that boundary without creating a second public data model
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
 | 005 | Normalize settled live Heat observations | medium | 1–3 days | done | 001 |
-| 006 | Publish release-aligned Heat frames | large | 2–4 days | in_progress | 004, 005 |
-| 007 | Certify recovery and live readiness | large | 2–4 days | todo | 004, 006 |
+| 006 | Publish release-aligned Heat frames | large | 2–4 days | done | 004, 005 |
+| 007 | Certify recovery and live readiness | large | 2–4 days | blocked | 004, 006 |
 
 ## Build Order
 
@@ -73,4 +73,4 @@ This feature completes that boundary without creating a second public data model
 
 ## Next Action
 
-Complete `006-publish-release-aligned-heat-frames.md` by reusing the durable runner ledger for the independent Heat lane.
+Complete the target-environment launch gates in `007-certify-recovery-and-live-readiness.md`: preproduction p95 measurement, signing-key overlap rehearsal, external process-down monitoring, and the approved legacy Heat cutover.

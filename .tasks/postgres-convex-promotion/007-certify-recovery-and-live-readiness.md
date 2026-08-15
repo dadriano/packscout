@@ -5,7 +5,7 @@
 **Blocks:** none
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including end-to-end and failure-injection evidence
-**Status:** todo
+**Status:** blocked
 
 ## Start Here
 
@@ -53,16 +53,32 @@ The runbook names only protected operator actions and stable outcomes; it does n
 
 ## Acceptance Criteria
 
-- [ ] Production startup rejects missing/unsafe organization, deployment, signing, timing, or batch configuration.
-- [ ] Initial backfill and later delayed-provider scenarios produce the resolved readiness and freshness behavior.
-- [ ] Full rebuild and incremental publication at the same settled state have identical public hashes and counts.
-- [ ] Restart, replay, lost-acknowledgement, network retry, and stale-claim scenarios terminate without duplicate or regressed public data.
-- [ ] Contract/auth/hash/block failures leave the prior complete release active and produce safe terminal evidence and alerts.
+- [x] Production startup rejects missing/unsafe organization, deployment, signing, timing, or batch configuration.
+- [x] Initial backfill and later delayed-provider scenarios produce the resolved readiness and freshness behavior.
+- [x] Full rebuild and incremental publication at the same settled state have identical public hashes and counts.
+- [x] Restart, replay, lost-acknowledgement, network retry, and stale-claim scenarios terminate without duplicate or regressed public data.
+- [x] Contract/auth/hash/block failures leave the prior complete release active and produce safe terminal evidence and alerts.
 - [ ] Rollback/clear, key rotation, retention, and bounded cleanup preserve pointer and manifest-block safety.
 - [ ] Catalog and Heat meet their normal one-minute targets at representative volume; misaligned or 15-minute-stale Heat fails closed without blocking catalog.
-- [ ] The operational runbook and reproducible evidence contain no secret, tenant, raw payload, actor, or quarantine detail.
-- [ ] `npm run verify:framework` passes on the integrated branch.
+- [x] The operational runbook and reproducible evidence contain no secret, tenant, raw payload, actor, or quarantine detail.
+- [x] `npm run verify:framework` passes on the integrated branch.
 
 ## Verification
 
 `npm run verify:framework`
+
+## Completed Evidence
+
+- The integrated local suites cover deterministic full/incremental assembly, initial and delayed-provider readiness, exact-byte restart/status recovery, stale claims, ambiguous signed responses, pointer safety, rollback/clear, nonce replay, bounded catalog/Heat retention, and 15-minute Heat expiry.
+- Durable alerts are scoped by organization, a one-way deployment digest, and lane. They cover activation delay, technical settlement blocks, terminal/reconciliation failures, and cross-restart recovery without storing secrets or deployment keys.
+- The protocol-maximum local catalog fixture completed preparation within one minute, and the 8,000-repack Heat fixture completed all 252 operations in one cycle. These are local/fake-transport diagnostics only.
+- The operational runbook records the exact configuration, recovery, retention, rollback, clear, rotation, shutdown, evidence-redaction, and launch-gate procedures.
+
+## Blocked
+
+The remaining acceptance evidence requires a configured target environment and operator authority that this build does not have:
+
+- Measure settled-to-confirmed catalog and Heat p50/p95/max/error results at representative volume against preproduction PostgreSQL and hosted Convex.
+- Rehearse overlapping signing-key rotation, rollback, and retention through the target secret manager and authenticated deployment, then retire the old key only after the documented overlap.
+- Configure and fire an external worker-liveness/no-advancing-Heat monitor before the 15-minute expiry boundary; an in-process worker cannot alert while its process is down.
+- Execute the approved legacy Heat data reset/migration before deploying the incompatible production Heat schema. No compatibility shim or destructive live action is authorized by this task.

@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/007
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including alignment and expiry verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -46,15 +46,22 @@ Convex activation validates catalog alignment and monotonic frame identity. Post
 
 ## Acceptance Criteria
 
-- [ ] A healthy minute publishes one aggregate frame built only from settled normalized observations and public repacks in the active catalog release.
-- [ ] Exact frame replay is idempotent; conflicting or regressed frame content fails closed.
-- [ ] Raw observation or protected source fields cannot enter Convex Heat documents.
-- [ ] A frame aligned to a non-active catalog release is unavailable and cannot replace the aligned active frame.
-- [ ] Heat transport/calculation failure does not block catalog activation or alter catalog data.
-- [ ] Catalog publication failure preserves the prior aligned Heat until its normal expiry.
-- [ ] Heat becomes unavailable after 15 minutes without a valid aligned refresh, including when the worker is down.
-- [ ] Lost acknowledgements and worker restart reconcile to one terminal PostgreSQL attempt and one active frame.
+- [x] A healthy minute publishes one aggregate frame built only from settled normalized observations and public repacks in the active catalog release.
+- [x] Exact frame replay is idempotent; conflicting or regressed frame content fails closed.
+- [x] Raw observation or protected source fields cannot enter Convex Heat documents.
+- [x] A frame aligned to a non-active catalog release is unavailable and cannot replace the aligned active frame.
+- [x] Heat transport/calculation failure does not block catalog activation or alter catalog data.
+- [x] Catalog publication failure preserves the prior aligned Heat until its normal expiry.
+- [x] Heat becomes unavailable after 15 minutes without a valid aligned refresh, including when the worker is down.
+- [x] Lost acknowledgements and worker restart reconcile to one terminal PostgreSQL attempt and one active frame.
 
 ## Verification
 
 `npm run test:services && npm run test:database && npm run test:worker && npm run test:convex`
+
+## Build Evidence
+
+- The protocol-maximum fixture publishes 8,000 repacks as 252 bounded operations in one runner cycle; the integrated local run completed in about 10 seconds. This is deterministic local evidence, not a hosted p95 measurement.
+- PostgreSQL proof tests bind the active catalog receipt, every canonical catalog batch, the Heat predecessor, and exact terminal receipt bytes before activation or recovery.
+- Convex tests cover atomic activation, catalog alignment, unchanged signal-set reuse, 15-minute scheduled expiry, status reconciliation, retention, and stale/conflicting frames.
+- `npm run verify:framework` passed on the integrated branch.
