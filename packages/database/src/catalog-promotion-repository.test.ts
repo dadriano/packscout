@@ -213,6 +213,18 @@ test("settled requests coalesce atomically and unknown remote bootstrap state fa
         updated_at: new Date("2026-08-15T12:00:15.000Z"),
       },
     });
+    // Model startup recovery before the lane is verified. Once a lane is
+    // verified, a stale remote probe is intentionally ignored instead.
+    await harness.client.promotion_lanes.update({
+      where: {
+        organization_id_deployment_key_lane_key: {
+          organization_id: organizationId,
+          deployment_key: deploymentKey,
+          lane_key: catalogLane,
+        },
+      },
+      data: { bootstrap_state: "unverified", bootstrap_verified_at: null },
+    });
     await repository.verifyBootstrap({
       laneKey: catalogLane,
       observedPublicationIdentity: higherPublicationIdentity,

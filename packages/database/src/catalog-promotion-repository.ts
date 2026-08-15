@@ -13,6 +13,10 @@ import {
   type PackscoutTransactionClient,
 } from "./database.ts";
 import {
+  loadPromotionBootstrapState,
+  verifyPromotionBootstrap,
+} from "./catalog-promotion-bootstrap-repository.ts";
+import {
   PromotionLedgerError,
   activeStates,
   catalogPreparedMatches,
@@ -42,6 +46,7 @@ import {
   type PromotionAttemptClaim,
   type PromotionAttemptRow as AttemptRow,
   type PromotionAttemptState,
+  type PromotionBootstrapState,
   type PromotionFailureClass,
   type PromotionHealthSnapshot,
   type PromotionLaneRow as LaneRow,
@@ -62,6 +67,10 @@ export class PrismaCatalogPromotionRepository {
     }>,
   ) {
     requireBoundRepositoryKey(binding.deploymentKey);
+  }
+
+  loadBootstrapState(laneKey: string): Promise<PromotionBootstrapState> {
+    return loadPromotionBootstrapState(this.database, this.binding, laneKey);
   }
 
   async coalesce(input: CatalogPromotionScope & {
@@ -354,88 +363,7 @@ export class PrismaCatalogPromotionRepository {
     observedReceiptSha256: string | null;
     verifiedAt: Date;
   }): Promise<void> {
-    this.requireLaneInput(input.laneKey);
-    if (
-      input.observedWatermark < 0n
-      || !Number.isFinite(input.verifiedAt.getTime())
-      || ((input.observedPublicationIdentity === null) !==
-        (input.observedWatermark === 0n))
-      || ((input.observedPublicationIdentity === null) !==
-        (input.observedReceiptSha256 === null))
-      || (input.observedReceiptSha256 !== null
-        && !sha256Pattern.test(input.observedReceiptSha256))
-    ) {
-      throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
-    }
-    await this.database.$transaction(async (transaction) => {
-      const lane = await this.lockLane(transaction, input.laneKey);
-      if (!lane) {
-        throw new PromotionLedgerError("PROMOTION_BOOTSTRAP_UNVERIFIED");
-      }
-      if (input.observedPublicationIdentity === null) {
-        if (
-          lane.confirmedWatermark !== 0n
-          || lane.confirmedPublicationIdentity !== null
-          || lane.bootstrapState === "verified_local"
-        ) {
-          throw new PromotionLedgerError("PROMOTION_BOOTSTRAP_CONFLICT");
-        }
-        await transaction.$executeRaw(Prisma.sql`
-          update public.promotion_lanes
-          set bootstrap_state = 'verified_empty',
-              bootstrap_verified_at = ${input.verifiedAt},
-              updated_at = ${input.verifiedAt}
-          where organization_id = ${uuid(this.binding.organizationId)}
-            and deployment_key = ${this.binding.deploymentKey}
-            and lane_key = ${input.laneKey}
-        `);
-        return;
-      }
-      const proven = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        select id
-        from public.promotion_attempts
-        where organization_id = ${uuid(this.binding.organizationId)}
-          and deployment_key = ${this.binding.deploymentKey}
-          and lane_key = ${input.laneKey}
-          and state = 'published'
-          and target_watermark = ${input.observedWatermark}
-          and publication_identity = ${input.observedPublicationIdentity}
-          and terminal_receipt_sha256 = ${input.observedReceiptSha256}
-        limit 1
-      `);
-      if (proven.length !== 1) {
-        throw new PromotionLedgerError("PROMOTION_BOOTSTRAP_UNPROVEN");
-      }
-      if (
-        lane.lastActivatedWatermark > input.observedWatermark
-        || (lane.confirmedPublicationIdentity !== null
-          && lane.confirmedPublicationIdentity !== input.observedPublicationIdentity)
-      ) {
-        throw new PromotionLedgerError("PROMOTION_BOOTSTRAP_CONFLICT");
-      }
-      await transaction.$executeRaw(Prisma.sql`
-        update public.promotion_lanes
-        set bootstrap_state = 'verified_local',
-            bootstrap_verified_at = ${input.verifiedAt},
-            confirmed_watermark = greatest(
-              confirmed_watermark, ${input.observedWatermark}
-            ),
-            confirmed_publication_identity = ${input.observedPublicationIdentity},
-            confirmed_receipt_sha256 = case
-              when ${input.observedWatermark} >= confirmed_watermark
-                then ${input.observedReceiptSha256}
-              else confirmed_receipt_sha256
-            end,
-            last_activated_watermark = greatest(
-              last_activated_watermark, ${input.observedWatermark}
-            ),
-            last_activated_at = coalesce(last_activated_at, ${input.verifiedAt}),
-            updated_at = ${input.verifiedAt}
-        where organization_id = ${uuid(this.binding.organizationId)}
-          and deployment_key = ${this.binding.deploymentKey}
-          and lane_key = ${input.laneKey}
-      `);
-    }, PACKSCOUT_TRANSACTION_OPTIONS);
+    return verifyPromotionBootstrap(this.database, this.binding, input);
   }
 
   async claimAttempt(input: {

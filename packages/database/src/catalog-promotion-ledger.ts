@@ -27,6 +27,11 @@ export type PromotionFailureClass =
   | "reconciliation"
   | "bootstrap";
 
+export type PromotionBootstrapState =
+  | "unverified"
+  | "verified_empty"
+  | "verified_local";
+
 export type PromotionLedgerErrorCode =
   | "PROMOTION_INPUT_INVALID"
   | "PROMOTION_BOOTSTRAP_UNVERIFIED"
@@ -79,7 +84,7 @@ export interface PromotionOperationRecord extends PromotionOperationInput {
 
 export interface PromotionHealthSnapshot {
   readonly laneKey: string;
-  readonly bootstrapState: "unverified" | "verified_empty" | "verified_local";
+  readonly bootstrapState: PromotionBootstrapState;
   readonly settledWatermark: bigint;
   readonly settledAt: Date | null;
   readonly requestedWatermark: bigint;
