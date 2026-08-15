@@ -60,9 +60,10 @@ const idempotencyKeySchema = z.string()
   .regex(/^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,255})$/u);
 const publicIdSchema = z.uuid();
 const nonNegativeSafeIntegerSchema = z.number().int().safe().min(0);
+const MAX_SIGNED_INT64 = BigInt("9223372036854775807");
 const sourceWatermarkSchema = z.string()
   .regex(/^[1-9][0-9]{0,18}$/u)
-  .refine((value) => BigInt(value) <= 9_223_372_036_854_775_807n, {
+  .refine((value) => BigInt(value) <= MAX_SIGNED_INT64, {
     message: "repack_heat_publication.source_watermark_invalid",
   });
 
