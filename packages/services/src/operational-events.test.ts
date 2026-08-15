@@ -104,6 +104,67 @@ test("adding a test sink requires only composition and no pipeline branch", asyn
   assert.deepEqual(testSink.events, adminSink.events);
 });
 
+test("promotion events expose only bounded reusable lane evidence", async () => {
+  const sink = new CapturePublisher();
+  const service = new OperationalEventService(
+    sink,
+    ids(),
+    { now: () => new Date(occurredAt) },
+  );
+  await service.promotionActivationDelayed({
+    organizationId,
+    lane: "catalog",
+    targetWatermark: 42n,
+    confirmedWatermark: 41n,
+    durationMs: 60_001,
+  });
+  await service.promotionSettlementBlocked({
+    organizationId,
+    lane: "catalog",
+    sourceHeadWatermark: 44n,
+    settledWatermark: 42n,
+    technicalFailureCount: 2,
+  });
+  await service.promotionFailed({
+    organizationId,
+    lane: "heat",
+    attemptId: "50000000-0000-4000-8000-000000000098",
+    targetWatermark: 45n,
+    confirmedWatermark: 44n,
+    failureCode: sensitive,
+    reconciliation: true,
+  });
+  await service.promotionRecovered({
+    organizationId,
+    lane: "catalog",
+    targetWatermark: 44n,
+    confirmedWatermark: 44n,
+  });
+
+  assert.deepEqual(sink.events.map(({ kind }) => kind), [
+    "promotion_activation_delayed",
+    "promotion_settlement_blocked",
+    "promotion_failed",
+    "promotion_recovered",
+  ]);
+  assert.deepEqual(sink.events[0]?.evidence, {
+    lane: "catalog",
+    condition: "activation_lag",
+    targetWatermark: "42",
+    confirmedWatermark: "41",
+    durationMs: 60_001,
+  });
+  assert.equal(
+    sink.events[2]?.evidence.failureCode,
+    "PROMOTION_PUBLICATION_FAILED",
+  );
+  const rendered = JSON.stringify(sink.events);
+  assert.equal(rendered.includes(sensitive), false);
+  assert.equal(rendered.includes("secret-token"), false);
+  assert.equal(rendered.includes("providerId"), true);
+  assert.equal(sink.events.every(({ providerId }) => providerId === null), true);
+});
+
 test("sink failures are isolated from the event caller", async () => {
   const service = new OperationalEventService(
     { publish: () => Promise.reject(new Error(sensitive)) },

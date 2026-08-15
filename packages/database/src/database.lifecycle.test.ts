@@ -110,7 +110,7 @@ test("startup fails closed when the expected Prisma migration is not ready", asy
   try {
     await harness.client.$executeRaw`
       delete from public."_prisma_migrations"
-      where migration_name = '20260815040000_catalog_promotion_ledger'
+      where migration_name = '20260815050000_promotion_operational_readiness'
     `;
     const lifecycle = harness.createClientLifecycle();
     try {

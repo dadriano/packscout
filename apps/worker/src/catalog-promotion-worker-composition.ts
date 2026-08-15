@@ -5,6 +5,7 @@ import {
   type CatalogPromotionAlertSink,
   type CatalogPromotionLedgerPort,
   type CatalogPromotionBootstrapLedgerPort,
+  type CatalogPromotionHealthSink,
   type CatalogPromotionRandom,
   type CatalogPromotionSettlementPort,
   type CatalogReleaseAssemblerPort,
@@ -26,6 +27,7 @@ export interface CatalogPromotionWorkerCompositionInput {
   readonly settlement: CatalogPromotionSettlementPort;
   readonly assembler: CatalogReleaseAssemblerPort;
   readonly alerts: CatalogPromotionAlertSink;
+  readonly health?: CatalogPromotionHealthSink;
   readonly logger: CatalogPromotionWorkerLogger;
   readonly clock?: { now(): Date };
   readonly random?: CatalogPromotionRandom;
@@ -47,6 +49,11 @@ export function createCatalogPromotionWorkerRuntime(
     fetch: input.fetch,
     nonce: input.nonce,
   });
+  const healthLogger = new CatalogPromotionWorkerHealthLogger(
+    input.logger,
+    input.workerId,
+    () => clock.now(),
+  );
   const runner = new CatalogPromotionRunner({
     organizationId: input.organizationId,
     deploymentKey: input.configuration.deploymentKey,
@@ -62,11 +69,12 @@ export function createCatalogPromotionWorkerRuntime(
     clock,
     random: input.random,
     alerts: input.alerts,
-    health: new CatalogPromotionWorkerHealthLogger(
-      input.logger,
-      input.workerId,
-      () => clock.now(),
-    ),
+    health: {
+      async report(health) {
+        healthLogger.report(health);
+        await input.health?.report(health);
+      },
+    },
   });
   return new CatalogPromotionWorkerRuntime({
     runner,

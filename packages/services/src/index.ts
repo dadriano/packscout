@@ -34,6 +34,7 @@ export * from "./provider-import-page-planner.ts";
 export * from "./provider-import-health-service.ts";
 export * from "./provider-import-service.ts";
 export * from "./provider-import-types.ts";
+export * from "./promotion-operational-readiness.ts";
 export * from "./public-confidence-projection.ts";
 export * from "./public-change-settlement-service.ts";
 export * from "./provider-health-service.ts";

@@ -141,11 +141,13 @@ export class CatalogPromotionRunner {
     }
     this.#cycleInProgress = true;
     try {
-      const cycle = await this.executeCycle(signal);
-      if (!isCancelled(signal)) await this.reportHealth();
-      return cycle;
+      return await this.executeCycle(signal);
     } finally {
-      this.#cycleInProgress = false;
+      try {
+        if (!isCancelled(signal)) await this.reportHealth();
+      } finally {
+        this.#cycleInProgress = false;
+      }
     }
   }
 
@@ -530,7 +532,7 @@ export class CatalogPromotionRunner {
   private async reportHealth(): Promise<void> {
     if (this.options.health === undefined) return;
     try {
-      this.options.health.report(
+      await this.options.health.report(
         await this.options.ledger.loadHealth(this.#scope),
       );
     } catch {

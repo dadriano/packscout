@@ -12,6 +12,8 @@ import {
   MutableTestClock,
 } from "./catalog-promotion-runner.test-support.ts";
 import type {
+  CatalogPromotionBootstrapPort,
+  CatalogPromotionHealthSink,
   CatalogPromotionOperation,
   CatalogPublicationStatusInput,
   CatalogPublicationTransport,
@@ -59,6 +61,8 @@ function runner(input: {
   checkpoint?: { settledSequence: bigint; settledAt: Date | null };
   maximumOperationsPerCycle?: number;
   alerts?: string[];
+  bootstrap?: CatalogPromotionBootstrapPort;
+  health?: CatalogPromotionHealthSink;
 }) {
   const checkpoint = input.checkpoint ?? {
     settledSequence: input.plan.requestedWatermark,
@@ -72,16 +76,46 @@ function runner(input: {
     settlement: { async getCheckpoint() { return checkpoint; } },
     assembler: { async assemble() { return input.plan; } },
     transport: input.transport,
+    bootstrap: input.bootstrap,
     clock: input.clock,
     alerts: {
       async notify(alert) { input.alerts?.push(alert.failureCode); },
     },
+    health: input.health,
     random: { fraction: () => 0 },
     initialRetryMilliseconds: 100,
     maximumRetryMilliseconds: 1_000,
     maximumOperationsPerCycle: input.maximumOperationsPerCycle,
   });
 }
+
+test("bootstrap failure still evaluates durable readiness after coalescing", async () => {
+  const clock = new MutableTestClock();
+  const ledger = new MemoryCatalogPromotionLedger();
+  const plan = await assembledPlan();
+  const failure = new Error("bootstrap unavailable");
+  let healthReports = 0;
+  const cycle = runner({
+    clock,
+    ledger,
+    transport: new FakeCatalogPublicationTransport(),
+    plan,
+    bootstrap: {
+      async ensureVerified() {
+        throw failure;
+      },
+    },
+    health: {
+      report() {
+        healthReports += 1;
+      },
+    },
+  }).runCycle();
+
+  await assert.rejects(cycle, (error) => error === failure);
+  assert.equal(ledger.attempt?.requestedWatermark, plan.requestedWatermark);
+  assert.equal(healthReports, 1);
+});
 
 async function planForOperationKind(
   kind: CatalogPromotionOperation["kind"],

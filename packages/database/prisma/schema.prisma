@@ -1104,6 +1104,10 @@ enum operational_event_kind {
   quarantine_expired
   retention_failed
   retention_recovered
+  promotion_activation_delayed
+  promotion_settlement_blocked
+  promotion_failed
+  promotion_recovered
 }
 
 enum operational_severity {

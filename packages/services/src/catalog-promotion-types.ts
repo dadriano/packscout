@@ -237,5 +237,5 @@ export interface CatalogPromotionAlertSink {
 }
 
 export interface CatalogPromotionHealthSink {
-  report(health: CatalogPromotionHealth): void;
+  report(health: CatalogPromotionHealth): void | Promise<void>;
 }

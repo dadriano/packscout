@@ -9,12 +9,27 @@ export const operationalEventKindSchema = z.enum([
   "quarantine_expired",
   "retention_failed",
   "retention_recovered",
+  "promotion_activation_delayed",
+  "promotion_settlement_blocked",
+  "promotion_failed",
+  "promotion_recovered",
 ]);
 
 export const operationalSeveritySchema = z.enum(["info", "warning", "critical"]);
 export const operationalStableCodeSchema = z
   .string()
   .regex(/^[A-Z][A-Z0-9_]{0,127}$/);
+export const promotionLaneSchema = z.enum(["catalog", "heat"]);
+export const promotionOperationalConditionSchema = z.enum([
+  "activation_lag",
+  "settlement_blocked",
+  "terminal_failure",
+  "reconciliation_failure",
+  "recovered",
+]);
+const promotionWatermarkSchema = z
+  .string()
+  .regex(/^(?:0|[1-9][0-9]{0,19})$/);
 const boundedKeySchema = z
   .string()
   .min(1)
@@ -53,14 +68,108 @@ export const operationalNotificationSchema = z
         outcome: operationalStableCodeSchema.optional(),
         count: z.number().int().nonnegative().optional(),
         durationMs: z.number().int().nonnegative().optional(),
+        lane: promotionLaneSchema.optional(),
+        condition: promotionOperationalConditionSchema.optional(),
+        targetWatermark: promotionWatermarkSchema.optional(),
+        confirmedWatermark: promotionWatermarkSchema.optional(),
+        attemptId: z.uuid().optional(),
       })
       .strict(),
     occurredAt: z.iso.datetime({ offset: true }),
   })
-  .strict();
+  .strict()
+  .superRefine((event, context) => {
+    const promotionEvidence = [
+      event.evidence.lane,
+      event.evidence.condition,
+      event.evidence.targetWatermark,
+      event.evidence.confirmedWatermark,
+      event.evidence.attemptId,
+    ];
+    if (!event.kind.startsWith("promotion_")) {
+      if (promotionEvidence.some((value) => value !== undefined)) {
+        context.addIssue({
+          code: "custom",
+          message: "Promotion evidence is not valid for this event kind.",
+          path: ["evidence"],
+        });
+      }
+      return;
+    }
+    if (
+      event.providerId !== null ||
+      event.runId !== null ||
+      event.quarantineId !== null ||
+      event.evidence.lane === undefined ||
+      event.evidence.condition === undefined ||
+      event.evidence.targetWatermark === undefined ||
+      event.evidence.confirmedWatermark === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Promotion events require lane-bound public evidence.",
+        path: ["evidence"],
+      });
+      return;
+    }
+    const condition = event.evidence.condition;
+    const allowedEvidenceKeys = new Set<string>(
+      event.kind === "promotion_activation_delayed"
+        ? ["lane", "condition", "targetWatermark", "confirmedWatermark", "durationMs"]
+        : event.kind === "promotion_settlement_blocked"
+          ? ["lane", "condition", "targetWatermark", "confirmedWatermark", "count"]
+          : event.kind === "promotion_failed"
+            ? [
+                "lane",
+                "condition",
+                "targetWatermark",
+                "confirmedWatermark",
+                "attemptId",
+                "failureCode",
+              ]
+            : [
+                "lane",
+                "condition",
+                "targetWatermark",
+                "confirmedWatermark",
+                "outcome",
+              ],
+    );
+    const exactEvidence = Object.keys(event.evidence).every((key) =>
+      allowedEvidenceKeys.has(key)
+    );
+    const valid =
+      exactEvidence &&
+      ((event.kind === "promotion_activation_delayed" &&
+        condition === "activation_lag" &&
+        event.evidence.durationMs !== undefined) ||
+      (event.kind === "promotion_settlement_blocked" &&
+        condition === "settlement_blocked" &&
+        event.evidence.count !== undefined &&
+        event.evidence.count > 0) ||
+      (event.kind === "promotion_failed" &&
+        (condition === "terminal_failure" ||
+          condition === "reconciliation_failure") &&
+        event.evidence.failureCode !== undefined &&
+        event.evidence.attemptId !== undefined) ||
+      (event.kind === "promotion_recovered" &&
+        condition === "recovered" &&
+        event.evidence.outcome === "PROMOTION_RECOVERED"));
+    if (!valid) {
+      context.addIssue({
+        code: "custom",
+        message: "Promotion event evidence does not match its kind.",
+        path: ["evidence"],
+      });
+    }
+  });
 
 export type OperationalEventKind = z.infer<typeof operationalEventKindSchema>;
 export type OperationalSeverity = z.infer<typeof operationalSeveritySchema>;
+export type PromotionLane = z.infer<typeof promotionLaneSchema>;
+export type PromotionOperationalCondition = z.infer<
+  typeof promotionOperationalConditionSchema
+>;
 export type OperationalNotification = z.infer<
   typeof operationalNotificationSchema
 >;

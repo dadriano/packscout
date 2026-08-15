@@ -1,15 +1,23 @@
+import { randomUUID } from "node:crypto";
 import {
+  PrismaAdminNotificationPublisher,
   PrismaCatalogPromotionRepository,
   PrismaCatalogReleaseSourceRepository,
+  PrismaPromotionReadinessRepository,
   type PackscoutPrismaClient,
 } from "@packscout/database";
 import {
   CatalogReleaseAssembler,
+  OperationalEventService,
+  PromotionOperationalReadinessService,
   type OperationalObservability,
 } from "@packscout/services";
 import {
   createCatalogPromotionWorkerRuntime,
 } from "./catalog-promotion-worker-composition.ts";
+import {
+  CatalogPromotionOperationalReadinessSink,
+} from "./catalog-promotion-operational-readiness.ts";
 import type {
   CatalogPromotionWorkerConfiguration,
 } from "./catalog-promotion-worker-config.ts";
@@ -44,6 +52,32 @@ export function createProductionWorkerRuntime(
     organizationId: input.provider.publicOrganizationId,
     deploymentKey: input.catalog.deploymentKey,
   });
+  const clock = { now: () => new Date() };
+  const readiness = new CatalogPromotionOperationalReadinessSink(
+    new PromotionOperationalReadinessService(
+      new OperationalEventService(
+        new PrismaAdminNotificationPublisher(input.database),
+        { id: randomUUID },
+        clock,
+      ),
+      new PrismaPromotionReadinessRepository(input.database, {
+        organizationId: input.provider.publicOrganizationId,
+        deploymentKey: input.catalog.deploymentKey,
+        lane: "catalog",
+      }),
+      clock,
+      {
+        organizationId: input.provider.publicOrganizationId,
+        lane: "catalog",
+        targetSource: "canonical_settlement",
+        monitorTechnicalSettlement: true,
+      },
+    ),
+  );
+  const terminalLogger = new CatalogPromotionWorkerTerminalAlertLogger(
+    input.catalogLogger,
+    input.provider.workerId,
+  );
   const catalogPromotion = createCatalogPromotionWorkerRuntime({
     configuration: input.catalog,
     organizationId: input.provider.publicOrganizationId,
@@ -58,10 +92,13 @@ export function createProductionWorkerRuntime(
         input.provider.publicOrganizationId,
       ),
     ),
-    alerts: new CatalogPromotionWorkerTerminalAlertLogger(
-      input.catalogLogger,
-      input.provider.workerId,
-    ),
+    alerts: {
+      async notify(alert) {
+        await terminalLogger.notify(alert);
+        await readiness.notify(alert);
+      },
+    },
+    health: readiness,
     logger: input.catalogLogger,
     fetch: input.fetch,
   });

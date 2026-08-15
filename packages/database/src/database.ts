@@ -28,8 +28,8 @@ export const PACKSCOUT_TRANSACTION_OPTIONS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION = Object.freeze({
-  name: "20260815040000_catalog_promotion_ledger",
-  checksum: "09d6d5896f825a1e36a2ca39e41ed70b6ac005e25722a8b9189bffec5f1f75b4",
+  name: "20260815050000_promotion_operational_readiness",
+  checksum: "9d0c7276085648b470ddb5d05ab16bda41b86605b8f7a346da2286c786232823",
   tableCount: 39,
 });
 

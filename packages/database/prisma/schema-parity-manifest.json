@@ -1,8 +1,8 @@
 {
-  "source": "durable promotion ledger with approved public catalog and normalized Heat contract",
+  "source": "durable promotion readiness with approved public catalog and normalized Heat contract",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260815040000_catalog_promotion_ledger/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260815050000_promotion_operational_readiness/migration.sql"
   },
   "expectedCounts": {
     "tables": 39,
@@ -63,7 +63,11 @@
       "quarantine_resolved",
       "quarantine_expired",
       "retention_failed",
-      "retention_recovered"
+      "retention_recovered",
+      "promotion_activation_delayed",
+      "promotion_settlement_blocked",
+      "promotion_failed",
+      "promotion_recovered"
     ],
     "operational_severity": [
       "info",

@@ -17,6 +17,7 @@ export * from "./pipeline-types.ts";
 export * from "./provider-configuration-repository.ts";
 export * from "./provider-scheduling-repository.ts";
 export * from "./provider-stream-write-policy.ts";
+export * from "./promotion-readiness-repository.ts";
 export * from "./protected-payload-retention-repository.ts";
 export * from "./public-change-settlement-repository.ts";
 export * from "./public-repack-identity-mapping-repository.ts";
