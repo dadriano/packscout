@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/007
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including alignment and expiry verification
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 

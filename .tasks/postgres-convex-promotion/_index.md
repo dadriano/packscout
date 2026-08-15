@@ -52,7 +52,7 @@ This feature completes that boundary without creating a second public data model
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
 | 005 | Normalize settled live Heat observations | medium | 1–3 days | done | 001 |
-| 006 | Publish release-aligned Heat frames | large | 2–4 days | todo | 004, 005 |
+| 006 | Publish release-aligned Heat frames | large | 2–4 days | in_progress | 004, 005 |
 | 007 | Certify recovery and live readiness | large | 2–4 days | todo | 004, 006 |
 
 ## Build Order
