@@ -60,6 +60,7 @@ export interface PromotionAttemptClaim {
   readonly claimToken: string;
   readonly claimExpiresAt: Date;
   readonly claimCount: number;
+  readonly retryCount: number;
   readonly recovered: boolean;
 }
 

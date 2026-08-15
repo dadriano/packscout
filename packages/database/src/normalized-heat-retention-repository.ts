@@ -1,5 +1,9 @@
 import { Prisma } from "@prisma/client";
-import type { PackscoutTransactionClient } from "./database.ts";
+import {
+  PACKSCOUT_TRANSACTION_OPTIONS,
+  type PackscoutPrismaClient,
+  type PackscoutTransactionClient,
+} from "./database.ts";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -111,4 +115,36 @@ export async function cleanupExpiredNormalizedHeatHistory(
     deletedObservations,
     hasMore: pendingRows[0]?.pending ?? false,
   };
+}
+
+/** Opens the required transaction while keeping tenant selection server-bound. */
+export class PrismaNormalizedHeatRetentionRepository {
+  readonly #organizationId: string;
+
+  constructor(
+    private readonly database: PackscoutPrismaClient,
+    configuration: { organizationId: string },
+  ) {
+    if (!uuidPattern.test(configuration.organizationId)) {
+      throw new RangeError("organizationId is invalid.");
+    }
+    this.#organizationId = configuration.organizationId.toLowerCase();
+  }
+
+  cleanup(input: {
+    cutoffAt: Date;
+    limit: number;
+  }): Promise<NormalizedHeatRetentionCleanupResult> {
+    return this.database.$transaction(
+      async (transaction) => await cleanupExpiredNormalizedHeatHistory(
+        transaction,
+        {
+          organizationId: this.#organizationId,
+          cutoffAt: input.cutoffAt,
+          limit: input.limit,
+        },
+      ),
+      PACKSCOUT_TRANSACTION_OPTIONS,
+    );
+  }
 }

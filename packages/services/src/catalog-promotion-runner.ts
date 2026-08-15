@@ -22,6 +22,7 @@ import type {
   CatalogPublicationTransport,
   CatalogReleaseAssemblerPort,
 } from "./catalog-promotion-types.ts";
+import { promotionRetryDelay } from "./promotion-retry-policy.ts";
 import { CATALOG_PROMOTION_PATH_BY_KIND } from "./catalog-promotion-types.ts";
 import type { ProductionReceipt } from "@packscout/contracts";
 
@@ -61,7 +62,7 @@ export interface CatalogPromotionRunnerOptions {
   readonly maximumRetryMilliseconds?: number;
 }
 
-const safeIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/u;
+const safeIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/u;
 const safeUuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -458,19 +459,13 @@ export class CatalogPromotionRunner {
         claim, "CATALOG_RETRY_EXHAUSTED", null, prepared,
       );
     }
-    const exponent = Math.min(20, retryCount - 1);
-    const ceiling = Math.min(
-      this.#maximumRetryMilliseconds,
-      this.#initialRetryMilliseconds * (2 ** exponent),
-    );
-    const fraction = this.#random.fraction();
-    const safeFraction = Number.isFinite(fraction)
-      ? Math.min(1, Math.max(0, fraction)) : 0.5;
-    const jittered = Math.round((ceiling / 2) + (ceiling / 2) * safeFraction);
-    const delay = Math.min(
-      this.#maximumRetryMilliseconds,
-      Math.max(jittered, retryAfterMilliseconds ?? 0),
-    );
+    const delay = promotionRetryDelay({
+      currentRetryCount: claim.retryCount,
+      initialRetryMilliseconds: this.#initialRetryMilliseconds,
+      maximumRetryMilliseconds: this.#maximumRetryMilliseconds,
+      retryAfterMilliseconds,
+      randomFraction: this.#random.fraction(),
+    });
     const now = this.options.clock.now();
     const scheduled = await this.options.ledger.scheduleRetry({
       attemptId: claim.attemptId,

@@ -513,6 +513,7 @@ export class PrismaCatalogPromotionRepository {
     publicationIdentity: string | null;
     operations: readonly PromotionOperationInput[];
     catalogPrepared?: CatalogPromotionPreparedSummary;
+    preparedClassification?: CatalogPromotionPreparedSummary["classification"];
   }): Promise<readonly PromotionOperationRecord[] | null> {
     if (!sha256Pattern.test(input.contentIdentity)) {
       throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
@@ -524,6 +525,11 @@ export class PrismaCatalogPromotionRepository {
         || input.catalogPrepared.publicReleaseId !== input.publicationIdentity
       ) throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
     }
+    if (
+      input.catalogPrepared !== undefined &&
+      input.preparedClassification !== undefined &&
+      input.catalogPrepared.classification !== input.preparedClassification
+    ) throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
     this.requireOperations(input.operations);
     return this.database.$transaction(async (transaction) => {
       const attempt = await this.lockClaimedAttempt(transaction, input, input.now);
@@ -533,6 +539,9 @@ export class PrismaCatalogPromotionRepository {
           && attempt.contentIdentity !== input.contentIdentity)
         || (attempt.publicationIdentity !== null
           && attempt.publicationIdentity !== input.publicationIdentity)
+        || (input.preparedClassification !== undefined &&
+          attempt.preparedClassification !== null &&
+          attempt.preparedClassification !== input.preparedClassification)
         || (input.catalogPrepared !== undefined && (
           attempt.targetWatermark !== input.catalogPrepared.requestedWatermark
           || attempt.expectedPredecessorIdentity !==
@@ -585,6 +594,7 @@ export class PrismaCatalogPromotionRepository {
         set content_identity = ${input.contentIdentity},
             publication_identity = ${input.publicationIdentity},
             prepared_classification = ${input.catalogPrepared?.classification
+              ?? input.preparedClassification
               ?? attempt.preparedClassification},
             observation_sequence = ${input.catalogPrepared?.observationSequence
               ?? attempt.observationSequence},
@@ -594,7 +604,8 @@ export class PrismaCatalogPromotionRepository {
               ?? attempt.repackSearchIndexHash},
             public_vendor_keys = ${input.catalogPrepared?.publicVendorKeys
               ?? attempt.publicVendorKeys},
-            prepared_at = ${input.catalogPrepared === undefined
+            prepared_at = ${input.catalogPrepared === undefined &&
+                input.preparedClassification === undefined
               ? attempt.preparedAt : input.now},
             delayed_vendor_count = ${input.catalogPrepared?.delayedVendorCount
               ?? 0},
@@ -644,6 +655,14 @@ export class PrismaCatalogPromotionRepository {
       limit 1
     `);
     return rows[0] ? mapOperation(rows[0]) : null;
+  }
+
+  async listAttemptOperations(input: {
+    attemptId: string;
+  }): Promise<readonly PromotionOperationRecord[]> {
+    const attempt = await this.loadBoundAttempt(input.attemptId);
+    if (attempt === null) return [];
+    return (await this.loadOperations(this.database, attempt.id)).map(mapOperation);
   }
 
   async markOperationSent(input: {
@@ -1012,6 +1031,7 @@ export class PrismaCatalogPromotionRepository {
       claimToken: row.claimToken,
       claimExpiresAt: row.claimExpiresAt,
       claimCount: row.claimCount,
+      retryCount: row.retryCount,
       recovered,
     };
   }

@@ -63,6 +63,7 @@ function runner(input: {
   alerts?: string[];
   bootstrap?: CatalogPromotionBootstrapPort;
   health?: CatalogPromotionHealthSink;
+  workerId?: string;
 }) {
   const checkpoint = input.checkpoint ?? {
     settledSequence: input.plan.requestedWatermark,
@@ -71,7 +72,7 @@ function runner(input: {
   return new CatalogPromotionRunner({
     organizationId,
     deploymentKey: "production-us",
-    workerId: "worker-1",
+    workerId: input.workerId ?? "worker-1",
     ledger: input.ledger,
     settlement: { async getCheckpoint() { return checkpoint; } },
     assembler: { async assemble() { return input.plan; } },
@@ -115,6 +116,22 @@ test("bootstrap failure still evaluates durable readiness after coalescing", asy
   await assert.rejects(cycle, (error) => error === failure);
   assert.equal(ledger.attempt?.requestedWatermark, plan.requestedWatermark);
   assert.equal(healthReports, 1);
+});
+
+test("catalog runner rejects identities beyond the durable ledger bound", async () => {
+  const clock = new MutableTestClock();
+  const ledger = new MemoryCatalogPromotionLedger();
+  const plan = await assembledPlan();
+  assert.throws(
+    () => runner({
+      clock,
+      ledger,
+      transport: new FakeCatalogPublicationTransport(),
+      plan,
+      workerId: `w${"x".repeat(128)}`,
+    }),
+    /identity is invalid/u,
+  );
 });
 
 async function planForOperationKind(

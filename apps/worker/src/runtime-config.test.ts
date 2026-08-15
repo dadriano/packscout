@@ -151,6 +151,14 @@ test("worker configuration rejects ambiguous environments and unsafe bounds", ()
   assert.throws(
     () =>
       readProviderWorkerConfiguration(
+        validEnvironment({ PACKSCOUT_WORKER_ID: `w${"x".repeat(128)}` }),
+        "worker:1",
+      ),
+    hasConfigurationCode("WORKER_ID_INVALID"),
+  );
+  assert.throws(
+    () =>
+      readProviderWorkerConfiguration(
         validEnvironment({ PACKSCOUT_WORKER_RETENTION_BATCH_SIZE: "1001" }),
         "worker:1",
       ),

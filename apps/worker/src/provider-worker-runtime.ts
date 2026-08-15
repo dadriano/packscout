@@ -9,6 +9,9 @@ import type {
 import type {
   CatalogPromotionWorkerRuntimePort,
 } from "./catalog-promotion-worker-runtime.ts";
+import type {
+  HeatPromotionWorkerRuntimePort,
+} from "./heat-promotion-worker-runtime.ts";
 
 const safeLogValuePattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const safeFailureCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
@@ -40,6 +43,7 @@ export interface ProviderWorkerEstimatedEvPort {
 export type ProviderWorkerLogEventName =
   | "provider_database_pool_failed"
   | "provider_catalog_promotion_runtime_failed"
+  | "provider_heat_promotion_runtime_failed"
   | "provider_import_contended"
   | "provider_import_failed"
   | "provider_import_finished"
@@ -100,6 +104,7 @@ export interface ProviderWorkerRuntimeDependencies {
   readonly imports: ProviderWorkerImportPort;
   readonly estimatedEv?: ProviderWorkerEstimatedEvPort;
   readonly catalogPromotion?: CatalogPromotionWorkerRuntimePort;
+  readonly heatPromotion?: HeatPromotionWorkerRuntimePort;
   readonly retention: ProviderWorkerRetentionPort;
   readonly logger: ProviderWorkerLogger;
   readonly workerId: string;
@@ -218,6 +223,16 @@ export class ProviderWorkerRuntime {
             failureCode: "CATALOG_PROMOTION_RUNTIME_ERROR",
           });
         });
+    const heatTask = this.dependencies.heatPromotion === undefined
+      ? null
+      : (async () => await this.dependencies.heatPromotion!.start())()
+        .catch(() => {
+          this.log({
+            level: "error",
+            event: "provider_heat_promotion_runtime_failed",
+            failureCode: "HEAT_PROMOTION_RUNTIME_ERROR",
+          });
+        });
     try {
       while (!this.#stopRequested) {
         await this.runCycle();
@@ -232,7 +247,8 @@ export class ProviderWorkerRuntime {
       }
     } finally {
       this.dependencies.catalogPromotion?.stop();
-      await catalogTask;
+      this.dependencies.heatPromotion?.stop();
+      await Promise.all([catalogTask, heatTask]);
       this.#sleepController = null;
       this.#running = false;
       this.log({ level: "info", event: "provider_worker_stopped" });
@@ -242,6 +258,7 @@ export class ProviderWorkerRuntime {
   stop(): void {
     this.#stopRequested = true;
     this.dependencies.catalogPromotion?.stop();
+    this.dependencies.heatPromotion?.stop();
     this.#sleepController?.abort();
   }
 

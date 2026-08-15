@@ -6,6 +6,8 @@ export * from "./admin-operation-read-model.ts";
 export * from "./admin-provider-operation-repository.ts";
 export * from "./database.ts";
 export * from "./estimated-ev-recomputation-repository.ts";
+export * from "./heat-promotion-release-repository.ts";
+export * from "./heat-promotion-repository.ts";
 export * from "./ingestion-repository.ts";
 export * from "./import-run-repository.ts";
 export * from "./normalized-heat-observation-repository.ts";

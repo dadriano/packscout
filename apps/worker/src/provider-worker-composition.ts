@@ -29,6 +29,9 @@ import { createProviderWorkerRetentionCoordinator } from "./provider-worker-rete
 import type {
   CatalogPromotionWorkerRuntimePort,
 } from "./catalog-promotion-worker-runtime.ts";
+import type {
+  HeatPromotionWorkerRuntimePort,
+} from "./heat-promotion-worker-runtime.ts";
 import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
 import {
   ProviderWorkerRuntime,
@@ -56,6 +59,7 @@ export interface ProviderWorkerCompositionInput {
   readonly logger: ProviderWorkerLogger;
   readonly observability: OperationalObservability;
   readonly catalogPromotion?: CatalogPromotionWorkerRuntimePort;
+  readonly heatPromotion?: HeatPromotionWorkerRuntimePort;
 }
 
 function createActorKeyer(key: Uint8Array): ProviderActorKeyer {
@@ -160,6 +164,7 @@ export function createProviderWorkerRuntime(
         input.configuration.estimatedEvVerifiedUsdStablecoins,
     }),
     catalogPromotion: input.catalogPromotion,
+    heatPromotion: input.heatPromotion,
     retention,
     logger: input.logger,
     workerId: input.configuration.workerId,

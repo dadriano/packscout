@@ -17,6 +17,13 @@ import {
   JsonConsoleCatalogPromotionWorkerLogger,
 } from "./catalog-promotion-worker-runtime.ts";
 import {
+  HeatPromotionWorkerConfigurationError,
+  readHeatPromotionWorkerConfiguration,
+} from "./heat-promotion-worker-config.ts";
+import {
+  JsonConsoleHeatPromotionWorkerLogger,
+} from "./heat-promotion-worker-runtime.ts";
+import {
   ProviderWorkerConfigurationError,
   readProviderWorkerConfiguration,
 } from "./runtime-config.ts";
@@ -43,8 +50,13 @@ async function runProviderWorker(): Promise<void> {
   const catalogConfiguration = readCatalogPromotionWorkerConfiguration(
     process.env,
   );
+  const heatConfiguration = readHeatPromotionWorkerConfiguration(
+    process.env,
+    catalogConfiguration,
+  );
   const logger = new JsonConsoleProviderWorkerLogger();
   const catalogLogger = new JsonConsoleCatalogPromotionWorkerLogger();
+  const heatLogger = new JsonConsoleHeatPromotionWorkerLogger();
   const databaseLifecycle = createPrismaClientLifecycle({
     databaseUrl: configuration.databaseUrl,
   });
@@ -56,9 +68,11 @@ async function runProviderWorker(): Promise<void> {
     const runtime = createProductionWorkerRuntime({
       provider: configuration,
       catalog: catalogConfiguration,
+      heat: heatConfiguration,
       database: databaseLifecycle.client,
       providerLogger: logger,
       catalogLogger,
+      heatLogger,
       observability,
     });
     const stop = () => runtime.stop();
@@ -80,6 +94,8 @@ runProviderWorker().catch((error: unknown) => {
     error instanceof ProviderWorkerConfigurationError
       ? error.code
       : error instanceof CatalogPromotionWorkerConfigurationError
+        ? error.code
+      : error instanceof HeatPromotionWorkerConfigurationError
         ? error.code
       : "PROVIDER_WORKER_FATAL";
   console.error(
