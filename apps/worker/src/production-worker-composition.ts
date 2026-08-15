@@ -49,6 +49,7 @@ import {
 import { createProviderWorkerRuntime } from "./provider-worker-composition.ts";
 import { createProviderWorkerPublicSettlementReader } from "./provider-worker-public-settlement.ts";
 import type { ProviderWorkerLogger } from "./provider-worker-runtime.ts";
+import { runPromotionObservabilityFanout } from "./promotion-observability-fanout.ts";
 import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
 
 export interface ProductionWorkerCompositionInput {
@@ -123,8 +124,10 @@ export function createProductionWorkerRuntime(
     ),
     alerts: {
       async notify(alert) {
-        await terminalLogger.notify(alert);
-        await readiness.notify(alert);
+        await runPromotionObservabilityFanout(
+          () => readiness.notify(alert),
+          () => terminalLogger.notify(alert),
+        );
       },
     },
     health: readiness,
@@ -187,8 +190,10 @@ export function createProductionWorkerRuntime(
     ),
     alerts: {
       async notify(alert) {
-        await heatTerminalLogger.notify(alert);
-        await heatReadiness.notify(alert);
+        await runPromotionObservabilityFanout(
+          () => heatReadiness.notify(alert),
+          () => heatTerminalLogger.notify(alert),
+        );
       },
     },
     health: heatReadiness,

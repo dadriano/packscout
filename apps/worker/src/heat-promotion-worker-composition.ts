@@ -17,6 +17,7 @@ import {
   type HeatPromotionWorkerLogger,
   type HeatPromotionWorkerSleeper,
 } from "./heat-promotion-worker-runtime.ts";
+import { runPromotionObservabilityFanout } from "./promotion-observability-fanout.ts";
 
 export interface HeatPromotionWorkerCompositionInput {
   readonly configuration: HeatPromotionWorkerConfiguration;
@@ -65,8 +66,10 @@ export function createHeatPromotionWorkerRuntime(
     alerts: input.alerts,
     health: {
       async report(health) {
-        healthLogger.report(health);
-        await input.health?.report(health);
+        await runPromotionObservabilityFanout(
+          () => input.health?.report(health),
+          () => healthLogger.report(health),
+        );
       },
     },
     random: input.random,

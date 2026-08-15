@@ -17,6 +17,7 @@ import {
   type CatalogPromotionWorkerLogger,
   type CatalogPromotionWorkerSleeper,
 } from "./catalog-promotion-worker-runtime.ts";
+import { runPromotionObservabilityFanout } from "./promotion-observability-fanout.ts";
 
 export interface CatalogPromotionWorkerCompositionInput {
   readonly configuration: CatalogPromotionWorkerConfiguration;
@@ -71,8 +72,10 @@ export function createCatalogPromotionWorkerRuntime(
     alerts: input.alerts,
     health: {
       async report(health) {
-        healthLogger.report(health);
-        await input.health?.report(health);
+        await runPromotionObservabilityFanout(
+          () => input.health?.report(health),
+          () => healthLogger.report(health),
+        );
       },
     },
   });
