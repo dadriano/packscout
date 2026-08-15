@@ -43,6 +43,7 @@ import type {
 
 export type CatalogPublicationClientFailureCode =
   | ProductionDataReleaseErrorCode
+  | "PUBLICATION_CANCELLED"
   | "PUBLICATION_NETWORK_ERROR"
   | "PUBLICATION_TIMEOUT"
   | "PUBLICATION_RESPONSE_INVALID"
@@ -99,6 +100,33 @@ function equalHex(left: string, right: string): boolean {
   return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
 }
 
+function ambiguousResponseError(
+  code: Extract<
+    CatalogPublicationClientFailureCode,
+    "PUBLICATION_RESPONSE_INVALID" | "PUBLICATION_RESPONSE_AUTH_INVALID"
+  >,
+  retryAfter: number | null = null,
+): CatalogPublicationClientError {
+  return new CatalogPublicationClientError(
+    code,
+    "retryable",
+    true,
+    retryAfter,
+  );
+}
+
+function cancelledRequestError(): CatalogPublicationClientError {
+  return new CatalogPublicationClientError(
+    "PUBLICATION_CANCELLED",
+    "retryable",
+    true,
+  );
+}
+
+function refuseIfCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw cancelledRequestError();
+}
+
 function retryAfterMilliseconds(response: Response, now: Date): number | null {
   const value = response.headers.get("retry-after");
   if (value === null) return null;
@@ -116,9 +144,7 @@ async function boundedResponseText(
 ): Promise<string> {
   const declared = response.headers.get("content-length");
   if (declared !== null && Number(declared) > maximumBytes) {
-    throw new CatalogPublicationClientError(
-      "PUBLICATION_RESPONSE_INVALID", "terminal", false,
-    );
+    throw ambiguousResponseError("PUBLICATION_RESPONSE_INVALID");
   }
   if (response.body === null) return "";
   const reader = response.body.getReader();
@@ -130,9 +156,7 @@ async function boundedResponseText(
     total += chunk.value.byteLength;
     if (total > maximumBytes) {
       await reader.cancel();
-      throw new CatalogPublicationClientError(
-        "PUBLICATION_RESPONSE_INVALID", "terminal", false,
-      );
+      throw ambiguousResponseError("PUBLICATION_RESPONSE_INVALID");
     }
     chunks.push(chunk.value);
   }
@@ -145,9 +169,7 @@ async function boundedResponseText(
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    throw new CatalogPublicationClientError(
-      "PUBLICATION_RESPONSE_INVALID", "terminal", false,
-    );
+    throw ambiguousResponseError("PUBLICATION_RESPONSE_INVALID");
   }
 }
 
@@ -193,7 +215,10 @@ export class SignedConvexCatalogPublicationClient
     );
   }
 
-  async send(operation: CatalogPromotionOperation): Promise<ProductionReceipt> {
+  async send(
+    operation: CatalogPromotionOperation,
+    signal?: AbortSignal,
+  ): Promise<ProductionReceipt> {
     try {
       validateCatalogPromotionOperation(operation);
     } catch {
@@ -204,24 +229,31 @@ export class SignedConvexCatalogPublicationClient
     const receipt = await this.request(
       operation.path,
       operation.bodyJson,
+      signal,
     );
-    return validateCatalogPromotionReceipt(receipt, {
-      operationId: operation.operationId,
-      publicationId: operation.publicationId,
-      requestDigest: operation.bodyDigest,
-      kind: operation.kind,
-      bodyJson: operation.bodyJson,
-    });
+    refuseIfCancelled(signal);
+    try {
+      return validateCatalogPromotionReceipt(receipt, {
+        operationId: operation.operationId,
+        publicationId: operation.publicationId,
+        requestDigest: operation.bodyDigest,
+        kind: operation.kind,
+        bodyJson: operation.bodyJson,
+      });
+    } catch {
+      throw ambiguousResponseError("PUBLICATION_RESPONSE_INVALID");
+    }
   }
 
-  async activeState(): Promise<CatalogPublicationActiveState> {
+  async activeState(signal?: AbortSignal): Promise<CatalogPublicationActiveState> {
     const bodyJson = canonicalJson({
       schemaVersion: DATA_RELEASE_SCHEMA_VERSION,
       operationId: "catalog-active-state",
     });
     const receipt = productionActiveStateReceiptSchema.parse(
-      await this.request(PRODUCTION_DATA_RELEASE_PATHS.activeState, bodyJson),
+      await this.request(PRODUCTION_DATA_RELEASE_PATHS.activeState, bodyJson, signal),
     );
+    refuseIfCancelled(signal);
     if (
       receipt.operationId !== "catalog-active-state" ||
       receipt.requestDigest !== sha256Utf8(bodyJson) ||
@@ -238,40 +270,52 @@ export class SignedConvexCatalogPublicationClient
     };
   }
 
-  async status(input: CatalogPublicationStatusInput): Promise<ProductionReceipt | null> {
+  async status(
+    input: CatalogPublicationStatusInput,
+    signal?: AbortSignal,
+  ): Promise<ProductionReceipt | null> {
     const bodyJson = canonicalJson({
       schemaVersion: DATA_RELEASE_SCHEMA_VERSION,
       operationId: input.operationId,
       publicationId: input.publicationId,
     });
-    const receipt = await this.request(PRODUCTION_DATA_RELEASE_PATHS.status, bodyJson);
+    const receipt = await this.request(
+      PRODUCTION_DATA_RELEASE_PATHS.status,
+      bodyJson,
+      signal,
+    );
+    refuseIfCancelled(signal);
     if (!("operationKind" in receipt)) {
       if (receipt.operationId !== input.operationId ||
           receipt.publicationId !== input.publicationId ||
           receipt.requestDigest !== sha256Utf8(bodyJson)) {
-        throw new CatalogPublicationClientError(
-          "PUBLICATION_RESPONSE_INVALID", "terminal", false,
-        );
+        throw ambiguousResponseError("PUBLICATION_RESPONSE_INVALID");
       }
       return null;
     }
-    return validateCatalogPromotionReceipt(receipt, {
-      operationId: input.operationId,
-      publicationId: input.publicationId,
-      requestDigest: input.expectedRequestDigest,
-      kind: input.expectedKind,
-    });
+    try {
+      return validateCatalogPromotionReceipt(receipt, {
+        operationId: input.operationId,
+        publicationId: input.publicationId,
+        requestDigest: input.expectedRequestDigest,
+        kind: input.expectedKind,
+      });
+    } catch {
+      throw ambiguousResponseError("PUBLICATION_RESPONSE_INVALID");
+    }
   }
 
   private async request(
     path: ProductionDataReleasePath,
     bodyJson: string,
+    signal?: AbortSignal,
   ): Promise<ProductionReceipt | ProductionStatusNotFoundReceipt> {
     if (Buffer.byteLength(bodyJson, "utf8") > MAX_PRODUCTION_HTTP_BODY_BYTES) {
       throw new CatalogPublicationClientError(
         "PUBLICATION_BODY_TOO_LARGE", "terminal", false,
       );
     }
+    refuseIfCancelled(signal);
     const now = this.#now();
     const timestamp = String(now.getTime());
     const nonce = this.#nonce();
@@ -289,7 +333,13 @@ export class SignedConvexCatalogPublicationClient
       }))
       .digest("hex");
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.#timeoutMilliseconds);
+    let timedOut = false;
+    const cancelRequest = () => controller.abort();
+    signal?.addEventListener("abort", cancelRequest, { once: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, this.#timeoutMilliseconds);
     let response: Response;
     let text: string;
     try {
@@ -310,39 +360,32 @@ export class SignedConvexCatalogPublicationClient
       });
       text = await boundedResponseText(response, this.#maximumResponseBytes);
     } catch (error) {
+      if (signal?.aborted === true) throw cancelledRequestError();
       if (error instanceof CatalogPublicationClientError) throw error;
-      const timeout = controller.signal.aborted;
       throw new CatalogPublicationClientError(
-        timeout ? "PUBLICATION_TIMEOUT" : "PUBLICATION_NETWORK_ERROR",
+        timedOut ? "PUBLICATION_TIMEOUT" : "PUBLICATION_NETWORK_ERROR",
         "retryable",
         true,
       );
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", cancelRequest);
     }
+    refuseIfCancelled(signal);
     let json: unknown;
     try {
       json = JSON.parse(text) as unknown;
     } catch {
-      if (response.status === 408 || response.status === 429 || response.status >= 500) {
-        throw new CatalogPublicationClientError(
-          "PUBLICATION_NETWORK_ERROR", "retryable", true,
-          retryAfterMilliseconds(response, now),
-        );
-      }
-      throw new CatalogPublicationClientError(
-        "PUBLICATION_RESPONSE_INVALID", "terminal", false,
+      throw ambiguousResponseError(
+        "PUBLICATION_RESPONSE_INVALID",
+        retryAfterMilliseconds(response, now),
       );
     }
     if (!response.ok) {
       const error = productionErrorEnvelopeSchema.safeParse(json);
       if (!error.success) {
-        const retryable = response.status === 408 || response.status === 429 ||
-          response.status >= 500;
-        throw new CatalogPublicationClientError(
+        throw ambiguousResponseError(
           "PUBLICATION_RESPONSE_INVALID",
-          retryable ? "retryable" : "terminal",
-          retryable,
           retryAfterMilliseconds(response, now),
         );
       }
@@ -358,30 +401,27 @@ export class SignedConvexCatalogPublicationClient
     }
     const envelope = productionSignedReceiptEnvelopeSchema.safeParse(json);
     if (!envelope.success || envelope.data.responseAuth.keyId !== this.#keyId) {
-      throw new CatalogPublicationClientError(
-        "PUBLICATION_RESPONSE_INVALID", "terminal", false,
-      );
+      throw ambiguousResponseError("PUBLICATION_RESPONSE_INVALID");
     }
     const outerDigest = await productionReceiptHash(envelope.data.receipt);
+    refuseIfCancelled(signal);
     const expectedSignature = createHmac("sha256", this.#secret)
       .update(productionPublicationReceiptSigningValue(outerDigest))
       .digest("hex");
     if (!equalHex(outerDigest, envelope.data.responseAuth.receiptDigest) ||
         !equalHex(expectedSignature, envelope.data.responseAuth.signature)) {
-      throw new CatalogPublicationClientError(
-        "PUBLICATION_RESPONSE_AUTH_INVALID", "terminal", false,
-      );
+      throw ambiguousResponseError("PUBLICATION_RESPONSE_AUTH_INVALID");
     }
     const receipt = envelope.data.receipt;
     if (receipt.receiptDigest !== null) {
       const { receiptDigest, ...withoutDigest } = receipt;
       const innerDigest = await productionReceiptHash(withoutDigest);
+      refuseIfCancelled(signal);
       if (!equalHex(innerDigest, receiptDigest)) {
-        throw new CatalogPublicationClientError(
-          "PUBLICATION_RESPONSE_AUTH_INVALID", "terminal", false,
-        );
+        throw ambiguousResponseError("PUBLICATION_RESPONSE_AUTH_INVALID");
       }
     }
+    refuseIfCancelled(signal);
     return receipt;
   }
 }

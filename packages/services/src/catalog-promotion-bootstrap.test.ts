@@ -10,11 +10,14 @@ const publicationId = "50000000-0000-4000-8000-000000000001";
 
 test("bootstrap verifies an empty deployment before the first claim", async () => {
   const verified: unknown[] = [];
+  const controller = new AbortController();
+  let observedSignal: AbortSignal | undefined;
   const coordinator = new CatalogPromotionBootstrapCoordinator({
     async loadBootstrapState() { return "unverified"; },
     async verifyBootstrap(input) { verified.push(input); },
   }, {
-    async activeState() {
+    async activeState(signal) {
+      observedSignal = signal;
       return {
         activePublicReleaseId: null,
         observationSequence: 0,
@@ -27,7 +30,9 @@ test("bootstrap verifies an empty deployment before the first claim", async () =
     deploymentKey: "production-us",
     lane: "catalog",
     verifiedAt,
+    signal: controller.signal,
   });
+  assert.equal(observedSignal, controller.signal);
   assert.deepEqual(verified, [{
     laneKey: "catalog",
     observedPublicationIdentity: null,

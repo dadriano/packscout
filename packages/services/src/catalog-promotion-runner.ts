@@ -33,7 +33,8 @@ export type CatalogPromotionCycleResult = Readonly<{
     | "published"
     | "unchanged"
     | "failed"
-    | "lease_lost";
+    | "lease_lost"
+    | "stopped";
   attemptId: string | null;
   requestedWatermark: bigint | null;
   operationsAcknowledged: number;
@@ -92,6 +93,10 @@ function result(
   };
 }
 
+function isCancelled(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
 export class CatalogPromotionRunner {
   readonly #initialRetryMilliseconds: number;
   readonly #leaseMilliseconds: number;
@@ -130,22 +135,26 @@ export class CatalogPromotionRunner {
     this.#random = options.random ?? { fraction: () => Math.random() };
   }
 
-  async runCycle(): Promise<CatalogPromotionCycleResult> {
+  async runCycle(signal?: AbortSignal): Promise<CatalogPromotionCycleResult> {
     if (this.#cycleInProgress) {
       throw new Error("Catalog promotion cycle is already running.");
     }
     this.#cycleInProgress = true;
     try {
-      const cycle = await this.executeCycle();
-      await this.reportHealth();
+      const cycle = await this.executeCycle(signal);
+      if (!isCancelled(signal)) await this.reportHealth();
       return cycle;
     } finally {
       this.#cycleInProgress = false;
     }
   }
 
-  private async executeCycle(): Promise<CatalogPromotionCycleResult> {
+  private async executeCycle(
+    signal: AbortSignal | undefined,
+  ): Promise<CatalogPromotionCycleResult> {
+    if (isCancelled(signal)) return result("stopped", null);
     const checkpoint = await this.options.settlement.getCheckpoint();
+    if (isCancelled(signal)) return result("stopped", null);
     if (checkpoint.settledSequence <= 0n || checkpoint.settledAt === null) {
       return result("idle", null);
     }
@@ -155,10 +164,18 @@ export class CatalogPromotionRunner {
       settledWatermark: checkpoint.settledSequence,
       requestedAt: now,
     });
-    await this.options.bootstrap?.ensureVerified({
-      ...this.#scope,
-      verifiedAt: now,
-    });
+    if (isCancelled(signal)) return result("stopped", null);
+    try {
+      await this.options.bootstrap?.ensureVerified({
+        ...this.#scope,
+        verifiedAt: now,
+        signal,
+      });
+    } catch (error) {
+      if (isCancelled(signal)) return result("stopped", null);
+      throw error;
+    }
+    if (isCancelled(signal)) return result("stopped", null);
     const claim = await this.options.ledger.claim({
       ...this.#scope,
       workerId: this.options.workerId,
@@ -166,7 +183,9 @@ export class CatalogPromotionRunner {
       leaseExpiresAt: this.leaseExpiresAt(now),
     });
     if (claim === null) return result("idle", null);
+    if (isCancelled(signal)) return result("stopped", claim);
     const baseline = await this.options.ledger.loadBaseline(this.#scope);
+    if (isCancelled(signal)) return result("stopped", claim);
     if (baseline !== null &&
         claim.requestedWatermark <= BigInt(baseline.observationSequence)) {
       return await this.failTerminal(claim, "CATALOG_WATERMARK_REGRESSED", null);
@@ -175,6 +194,7 @@ export class CatalogPromotionRunner {
       return await this.failTerminal(claim, "CATALOG_WATERMARK_UNSETTLED", null);
     }
     if (!(await this.heartbeat(claim))) return result("lease_lost", claim);
+    if (isCancelled(signal)) return result("stopped", claim);
 
     let prepared = claim.prepared;
     let operations = claim.operations;
@@ -187,8 +207,10 @@ export class CatalogPromotionRunner {
           trigger: baseline === null ? "full_rebuild" : "settled_change",
         });
       } catch {
+        if (isCancelled(signal)) return result("stopped", claim);
         return await this.retry(claim, "CATALOG_ASSEMBLY_UNAVAILABLE", null);
       }
+      if (isCancelled(signal)) return result("stopped", claim);
       if (plan.classification === "blocked") {
         return await this.failTerminal(
           claim,
@@ -218,19 +240,21 @@ export class CatalogPromotionRunner {
         preparedAt: this.options.clock.now(),
       });
       if (!persisted) return result("lease_lost", claim);
+      if (isCancelled(signal)) return result("stopped", claim);
     }
     if (!this.validOperations(claim, prepared, operations)) {
       return await this.failTerminal(
         claim, "CATALOG_LEDGER_INVALID", null, prepared,
       );
     }
-    return await this.executeOperations(claim, prepared, operations);
+    return await this.executeOperations(claim, prepared, operations, signal);
   }
 
   private async executeOperations(
     claim: CatalogPromotionClaim,
     prepared: CatalogPromotionPreparedSummary,
     operations: readonly CatalogPromotionOperation[],
+    signal: AbortSignal | undefined,
   ): Promise<CatalogPromotionCycleResult> {
     let acknowledged = 0;
     const receiptByOrdinal = new Map(
@@ -239,6 +263,9 @@ export class CatalogPromotionRunner {
     );
     for (const operation of operations) {
       if (operation.receipt !== null) continue;
+      if (isCancelled(signal)) {
+        return result("stopped", claim, acknowledged);
+      }
       if (acknowledged === this.#maximumOperationsPerCycle) {
         const continued = await this.options.ledger.scheduleRetry({
           attemptId: claim.attemptId,
@@ -255,6 +282,9 @@ export class CatalogPromotionRunner {
       if (!(await this.heartbeat(claim))) {
         return result("lease_lost", claim, acknowledged);
       }
+      if (isCancelled(signal)) {
+        return result("stopped", claim, acknowledged);
+      }
       try {
         let receipt: ProductionReceipt | null = null;
         if (operation.dispatchCount > 0) {
@@ -263,7 +293,10 @@ export class CatalogPromotionRunner {
             publicationId: operation.publicationId,
             expectedRequestDigest: operation.bodyDigest,
             expectedKind: operation.kind,
-          });
+          }, signal);
+          if (isCancelled(signal)) {
+            return result("stopped", claim, acknowledged);
+          }
           if (receipt !== null) {
             receipt = validateCatalogPromotionReceipt(receipt, {
               operationId: operation.operationId,
@@ -275,6 +308,9 @@ export class CatalogPromotionRunner {
           }
         }
         if (receipt === null) {
+          if (isCancelled(signal)) {
+            return result("stopped", claim, acknowledged);
+          }
           const dispatched = await this.options.ledger.markOperationDispatched({
             attemptId: claim.attemptId,
             claimToken: claim.claimToken,
@@ -282,8 +318,11 @@ export class CatalogPromotionRunner {
             dispatchedAt: this.options.clock.now(),
           });
           if (!dispatched) return result("lease_lost", claim, acknowledged);
+          if (isCancelled(signal)) {
+            return result("stopped", claim, acknowledged);
+          }
           receipt = validateCatalogPromotionReceipt(
-            await this.options.transport.send(operation),
+            await this.options.transport.send(operation, signal),
             {
               operationId: operation.operationId,
               publicationId: operation.publicationId,
@@ -292,6 +331,9 @@ export class CatalogPromotionRunner {
               bodyJson: operation.bodyJson,
             },
           );
+        }
+        if (isCancelled(signal)) {
+          return result("stopped", claim, acknowledged);
         }
         const accepted = await this.options.ledger.acknowledgeOperation({
           attemptId: claim.attemptId,
@@ -304,12 +346,15 @@ export class CatalogPromotionRunner {
         receiptByOrdinal.set(operation.ordinal, receipt);
         acknowledged += 1;
       } catch (error) {
+        if (isCancelled(signal)) {
+          return result("stopped", claim, acknowledged);
+        }
         if (error instanceof CatalogPublicationClientError &&
-            error.disposition === "terminal") {
+            error.disposition === "terminal" && !error.ambiguous) {
           return await this.failTerminal(claim, error.code, null, prepared);
         }
         if (error instanceof CatalogPromotionPreparationError) {
-          return await this.failTerminal(
+          return await this.retry(
             claim,
             "PUBLICATION_RESPONSE_INVALID",
             null,
@@ -324,6 +369,9 @@ export class CatalogPromotionRunner {
           : "PUBLICATION_NETWORK_ERROR";
         return await this.retry(claim, code, retryAfter, prepared);
       }
+    }
+    if (isCancelled(signal)) {
+      return result("stopped", claim, acknowledged);
     }
     const finalReceipt = receiptByOrdinal.get(operations.at(-1)!.ordinal) ?? null;
     if (finalReceipt === null) {

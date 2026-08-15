@@ -175,7 +175,7 @@ test("signed Convex client observes the deployment pointer for strict bootstrap"
   });
 });
 
-test("signed Convex client rejects outer signatures and inner digest drift", async () => {
+test("signed Convex client keeps outer signature and inner digest drift ambiguous", async () => {
   const operation = refreshOperation();
   for (const tampering of [{ tamperOuter: true }, { tamperInner: true }]) {
     const transport = client(async () => new Response(
@@ -186,7 +186,34 @@ test("signed Convex client rejects outer signatures and inner digest drift", asy
       transport.send(operation),
       (error: unknown) => error instanceof CatalogPublicationClientError &&
         error.code === "PUBLICATION_RESPONSE_AUTH_INVALID" &&
-        error.disposition === "terminal",
+        error.disposition === "retryable" && error.ambiguous,
+    );
+  }
+});
+
+test("corrupt, oversized, and malformed response bodies remain ambiguous", async () => {
+  const operation = refreshOperation();
+  const responses = [
+    () => new Response(new Uint8Array([0xff])),
+    () => new Response("{}", { headers: { "content-length": "1025" } }),
+    () => new Response("{not-json"),
+    () => new Response(JSON.stringify({ ok: true })),
+  ];
+  for (const response of responses) {
+    const transport = new SignedConvexCatalogPublicationClient({
+      baseUrl: "https://convex.example",
+      keyId,
+      secret,
+      fetch: async () => response(),
+      now: () => now,
+      nonce: () => "nonce0000000000000001",
+      maximumResponseBytes: 1_024,
+    });
+    await assert.rejects(
+      transport.send(operation),
+      (error: unknown) => error instanceof CatalogPublicationClientError &&
+        error.code === "PUBLICATION_RESPONSE_INVALID" &&
+        error.disposition === "retryable" && error.ambiguous,
     );
   }
 });
@@ -268,6 +295,37 @@ test("network, timeout, 408, 429, 5xx, and auth-stale failures are bounded retri
       error.code === "PUBLICATION_TIMEOUT" &&
       error.disposition === "retryable" && error.ambiguous,
   );
+});
+
+test("caller cancellation aborts an in-flight request as ambiguous", async () => {
+  const operation = refreshOperation();
+  const controller = new AbortController();
+  let requestStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    requestStarted = resolve;
+  });
+  const transport = new SignedConvexCatalogPublicationClient({
+    baseUrl: "https://convex.example",
+    keyId,
+    secret,
+    now: () => now,
+    nonce: () => "nonce0000000000000001",
+    timeoutMilliseconds: 30_000,
+    fetch: async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      requestStarted();
+      init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    }),
+  });
+  const request = transport.send(operation, controller.signal);
+  const rejected = assert.rejects(
+    request,
+    (error: unknown) => error instanceof CatalogPublicationClientError &&
+      error.code === "PUBLICATION_CANCELLED" &&
+      error.disposition === "retryable" && error.ambiguous,
+  );
+  await started;
+  controller.abort();
+  await rejected;
 });
 
 test("deterministic authentication refusals are terminal", async () => {

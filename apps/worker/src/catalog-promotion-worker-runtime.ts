@@ -6,7 +6,7 @@ import type {
 } from "@packscout/services";
 
 export interface CatalogPromotionCyclePort {
-  runCycle(): Promise<CatalogPromotionCycleResult>;
+  runCycle(signal?: AbortSignal): Promise<CatalogPromotionCycleResult>;
 }
 
 export interface CatalogPromotionWorkerSleeper {
@@ -169,6 +169,7 @@ export class CatalogPromotionWorkerRuntime
 {
   readonly #pollIntervalMilliseconds: number;
   readonly #sleeper: CatalogPromotionWorkerSleeper;
+  #cycleController: AbortController | null = null;
   #running = false;
   #sleepController: AbortController | null = null;
   #stopRequested = false;
@@ -197,7 +198,10 @@ export class CatalogPromotionWorkerRuntime
     this.log({ level: "info", event: "catalog_promotion_worker_started" });
     try {
       while (!this.#stopRequested) {
-        await this.runCycle();
+        const cycleController = new AbortController();
+        this.#cycleController = cycleController;
+        await this.runCycle(cycleController.signal);
+        this.#cycleController = null;
         if (this.#stopRequested) break;
         const controller = new AbortController();
         this.#sleepController = controller;
@@ -208,6 +212,8 @@ export class CatalogPromotionWorkerRuntime
         this.#sleepController = null;
       }
     } finally {
+      this.#cycleController?.abort();
+      this.#cycleController = null;
       this.#sleepController = null;
       this.#running = false;
       this.log({ level: "info", event: "catalog_promotion_worker_stopped" });
@@ -216,12 +222,15 @@ export class CatalogPromotionWorkerRuntime
 
   stop(): void {
     this.#stopRequested = true;
+    this.#cycleController?.abort();
     this.#sleepController?.abort();
   }
 
-  async runCycle(): Promise<CatalogPromotionCycleResult | null> {
+  async runCycle(
+    signal?: AbortSignal,
+  ): Promise<CatalogPromotionCycleResult | null> {
     try {
-      const cycle = await this.input.runner.runCycle();
+      const cycle = await this.input.runner.runCycle(signal);
       this.log({
         level: cycle.outcome === "failed" ? "error" : "info",
         event: "catalog_promotion_cycle_finished",
@@ -239,6 +248,7 @@ export class CatalogPromotionWorkerRuntime
       });
       return cycle;
     } catch {
+      if (signal?.aborted === true) return null;
       this.log({
         level: "error",
         event: "catalog_promotion_cycle_failed",

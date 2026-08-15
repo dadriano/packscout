@@ -210,8 +210,7 @@ export class ProviderWorkerRuntime {
     this.log({ level: "info", event: "provider_worker_started" });
     const catalogTask = this.dependencies.catalogPromotion === undefined
       ? null
-      : Promise.resolve()
-        .then(() => this.dependencies.catalogPromotion!.start())
+      : (async () => await this.dependencies.catalogPromotion!.start())()
         .catch(() => {
           this.log({
             level: "error",

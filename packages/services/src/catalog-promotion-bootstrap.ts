@@ -30,12 +30,15 @@ export class CatalogPromotionBootstrapCoordinator
   ) {}
 
   async ensureVerified(
-    input: CatalogPromotionScope & { verifiedAt: Date },
+    input: CatalogPromotionScope & {
+      verifiedAt: Date;
+      signal?: AbortSignal;
+    },
   ): Promise<void> {
     if (await this.ledger.loadBootstrapState(input.lane) !== "unverified") {
       return;
     }
-    const observed = await this.remote.activeState();
+    const observed = await this.remote.activeState(input.signal);
     await this.ledger.verifyBootstrap({
       laneKey: input.lane,
       observedPublicationIdentity: observed.activePublicReleaseId,

@@ -44,6 +44,61 @@ test("catalog promotion loop runs on its own sub-minute cadence", async () => {
   ]);
 });
 
+test("stop aborts an in-flight catalog cycle and prevents another dispatch", async () => {
+  const events: CatalogPromotionWorkerLogEvent[] = [];
+  let cycles = 0;
+  let observedAbort = false;
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const runtime = new CatalogPromotionWorkerRuntime({
+    runner: {
+      async runCycle(signal) {
+        cycles += 1;
+        markStarted();
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted === true) resolve();
+          else signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        observedAbort = signal?.aborted === true;
+        return {
+          outcome: "stopped",
+          attemptId: "attempt-1",
+          requestedWatermark: 20n,
+          operationsAcknowledged: 0,
+          failureCode: null,
+        };
+      },
+    },
+    logger: { write: (event) => void events.push(event) },
+    workerId: "worker-1",
+    pollIntervalMilliseconds: 5_000,
+  });
+  const completion = runtime.start();
+  await started;
+
+  runtime.stop();
+  let timeout!: NodeJS.Timeout;
+  await Promise.race([
+    completion,
+    new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error("catalog shutdown exceeded its bound")),
+        250,
+      );
+    }),
+  ]).finally(() => clearTimeout(timeout));
+
+  assert.equal(observedAbort, true);
+  assert.equal(cycles, 1);
+  assert.deepEqual(events.map(({ event }) => event), [
+    "catalog_promotion_worker_started",
+    "catalog_promotion_cycle_finished",
+    "catalog_promotion_worker_stopped",
+  ]);
+});
+
 test("catalog cycle failures log a bounded code without exception contents", async () => {
   const events: CatalogPromotionWorkerLogEvent[] = [];
   const runtime = new CatalogPromotionWorkerRuntime({

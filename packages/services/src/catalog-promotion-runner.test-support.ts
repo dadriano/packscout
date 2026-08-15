@@ -298,9 +298,14 @@ export class FakeCatalogPublicationTransport implements CatalogPublicationTransp
   readonly sentOperationIds: string[] = [];
   readonly statusOperations: string[] = [];
   loseAfterStore: CatalogPromotionOperation["kind"] | null = null;
+  failResponseAfterStore: Readonly<{
+    kind: CatalogPromotionOperation["kind"];
+    code: "PUBLICATION_RESPONSE_INVALID" | "PUBLICATION_RESPONSE_AUTH_INVALID";
+  }> | null = null;
   failBeforeStore: CatalogPromotionOperation["kind"] | null = null;
   failBeforeStoreCount = 1;
   private lost = false;
+  private responseFailed = false;
   private readonly receipts = new Map<string, ProductionReceipt>();
   private readonly starts = new Map<string, ReturnType<typeof productionStartRequestSchema.parse>>();
 
@@ -316,6 +321,15 @@ export class FakeCatalogPublicationTransport implements CatalogPublicationTransp
     }
     const receipt = await this.createReceipt(operation);
     this.receipts.set(operation.operationId, receipt);
+    if (this.failResponseAfterStore?.kind === operation.kind &&
+        !this.responseFailed) {
+      this.responseFailed = true;
+      throw new CatalogPublicationClientError(
+        this.failResponseAfterStore.code,
+        "retryable",
+        true,
+      );
+    }
     if (this.loseAfterStore === operation.kind && !this.lost) {
       this.lost = true;
       throw new CatalogPublicationClientError(

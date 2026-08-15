@@ -12,6 +12,11 @@ import {
   MutableTestClock,
 } from "./catalog-promotion-runner.test-support.ts";
 import type {
+  CatalogPromotionOperation,
+  CatalogPublicationStatusInput,
+  CatalogPublicationTransport,
+} from "./catalog-promotion-types.ts";
+import type {
   CatalogReleaseBaseline,
   CatalogReleasePlanV2,
 } from "./catalog-release-types.ts";
@@ -49,7 +54,7 @@ function baselineFor(plan: CatalogReleasePlanV2): CatalogReleaseBaseline {
 function runner(input: {
   clock: MutableTestClock;
   ledger: MemoryCatalogPromotionLedger;
-  transport: FakeCatalogPublicationTransport;
+  transport: CatalogPublicationTransport;
   plan: CatalogReleasePlanV2;
   checkpoint?: { settledSequence: bigint; settledAt: Date | null };
   maximumOperationsPerCycle?: number;
@@ -78,6 +83,33 @@ function runner(input: {
   });
 }
 
+async function planForOperationKind(
+  kind: CatalogPromotionOperation["kind"],
+  clock: MutableTestClock,
+): Promise<Readonly<{
+  ledger: MemoryCatalogPromotionLedger;
+  plan: CatalogReleasePlanV2;
+  checkpoint: { settledSequence: bigint; settledAt: Date | null };
+}>> {
+  const ledger = new MemoryCatalogPromotionLedger();
+  if (kind !== "refreshObservation") {
+    const plan = await assembledPlan();
+    return {
+      ledger,
+      plan,
+      checkpoint: { settledSequence: plan.requestedWatermark, settledAt: clock.now() },
+    };
+  }
+  const first = await assembledPlan(20n);
+  ledger.baseline = baselineFor(first);
+  const plan = await assembledPlan(21n, ledger.baseline);
+  return {
+    ledger,
+    plan,
+    checkpoint: { settledSequence: 21n, settledAt: clock.now() },
+  };
+}
+
 for (const lostKind of ["start", "applyBatch", "finalize"] as const) {
   test(`lost ${lostKind} acknowledgement is recovered from status after restart`, async () => {
     const clock = new MutableTestClock();
@@ -100,6 +132,48 @@ for (const lostKind of ["start", "applyBatch", "finalize"] as const) {
   });
 }
 
+const ambiguousResponseFailures = [
+  ["corrupt body", "PUBLICATION_RESPONSE_INVALID"],
+  ["oversized body", "PUBLICATION_RESPONSE_INVALID"],
+  ["malformed JSON", "PUBLICATION_RESPONSE_INVALID"],
+  ["tampered signature or digest", "PUBLICATION_RESPONSE_AUTH_INVALID"],
+] as const;
+
+for (const kind of [
+  "start",
+  "applyBatch",
+  "finalize",
+  "refreshObservation",
+] as const) {
+  for (const [failure, code] of ambiguousResponseFailures) {
+    test(`${kind} commit followed by ${failure} recovers through status`, async () => {
+      const clock = new MutableTestClock();
+      const { ledger, plan, checkpoint } = await planForOperationKind(kind, clock);
+      const transport = new FakeCatalogPublicationTransport();
+      transport.failResponseAfterStore = { kind, code };
+      const input = { clock, ledger, transport, plan, checkpoint };
+
+      const first = await runner(input).runCycle();
+      assert.equal(first.outcome, "retry_scheduled");
+      assert.deepEqual(ledger.terminal, []);
+      clock.advance(1_000);
+
+      const recovered = await runner(input).runCycle();
+      assert.equal(
+        recovered.outcome,
+        kind === "refreshObservation" ? "unchanged" : "published",
+      );
+      const operationId = transport.statusOperations.at(-1);
+      assert.ok(operationId);
+      assert.equal(
+        transport.sentOperationIds.filter((candidate) => candidate === operationId).length,
+        1,
+      );
+      assert.ok(transport.events.includes(`status:${kind}`));
+    });
+  }
+}
+
 test("status not-found replays the exact persisted body after an ambiguous send", async () => {
   const clock = new MutableTestClock();
   const ledger = new MemoryCatalogPromotionLedger();
@@ -120,6 +194,53 @@ test("status not-found replays the exact persisted body after an ambiguous send"
   assert.deepEqual(transport.events.slice(0, 3), [
     "send:start", "status:start", "send:start",
   ]);
+});
+
+test("cancelling a committed send leaves it for status-first restart recovery", async () => {
+  const clock = new MutableTestClock();
+  const ledger = new MemoryCatalogPromotionLedger();
+  const committed = new FakeCatalogPublicationTransport();
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const transport: CatalogPublicationTransport = {
+    async send(operation, signal) {
+      await committed.send(operation);
+      markStarted();
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted === true) resolve();
+        else signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw new Error("cancelled after commit");
+    },
+    status(input: CatalogPublicationStatusInput) {
+      return committed.status(input);
+    },
+  };
+  const plan = await assembledPlan();
+  const controller = new AbortController();
+  const cycle = runner({ clock, ledger, transport, plan }).runCycle(
+    controller.signal,
+  );
+
+  await started;
+  controller.abort();
+  const stopped = await cycle;
+  assert.equal(stopped.outcome, "stopped");
+  assert.equal(ledger.attempt?.operations[0]?.dispatchCount, 1);
+  assert.equal(ledger.attempt?.operations[0]?.receipt, null);
+  assert.deepEqual(ledger.terminal, []);
+
+  const recovered = await runner({ clock, ledger, transport: committed, plan })
+    .runCycle();
+  assert.equal(recovered.outcome, "published");
+  assert.deepEqual(committed.events.slice(0, 2), ["send:start", "status:start"]);
+  assert.equal(
+    committed.sentOperationIds.filter((operationId) =>
+      operationId === committed.statusOperations[0]).length,
+    1,
+  );
 });
 
 test("close settled changes coalesce only the highest watermark behind one active attempt", async () => {

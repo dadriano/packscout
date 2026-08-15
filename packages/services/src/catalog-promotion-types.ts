@@ -192,8 +192,14 @@ export interface CatalogPublicationStatusInput {
 }
 
 export interface CatalogPublicationTransport {
-  send(operation: CatalogPromotionOperation): Promise<ProductionReceipt>;
-  status(input: CatalogPublicationStatusInput): Promise<ProductionReceipt | null>;
+  send(
+    operation: CatalogPromotionOperation,
+    signal?: AbortSignal,
+  ): Promise<ProductionReceipt>;
+  status(
+    input: CatalogPublicationStatusInput,
+    signal?: AbortSignal,
+  ): Promise<ProductionReceipt | null>;
 }
 
 export interface CatalogPublicationActiveState {
@@ -203,12 +209,13 @@ export interface CatalogPublicationActiveState {
 }
 
 export interface CatalogPublicationActiveStateTransport {
-  activeState(): Promise<CatalogPublicationActiveState>;
+  activeState(signal?: AbortSignal): Promise<CatalogPublicationActiveState>;
 }
 
 export interface CatalogPromotionBootstrapPort {
   ensureVerified(input: CatalogPromotionScope & Readonly<{
     verifiedAt: Date;
+    signal?: AbortSignal;
   }>): Promise<void>;
 }
 
