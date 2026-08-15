@@ -6,6 +6,9 @@ import type {
   ProtectedPayloadRetentionCycleResult,
   EstimatedEvRecomputationCycleResult,
 } from "@packscout/services";
+import type {
+  CatalogPromotionWorkerRuntimePort,
+} from "./catalog-promotion-worker-runtime.ts";
 
 const safeLogValuePattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const safeFailureCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
@@ -36,6 +39,7 @@ export interface ProviderWorkerEstimatedEvPort {
 
 export type ProviderWorkerLogEventName =
   | "provider_database_pool_failed"
+  | "provider_catalog_promotion_runtime_failed"
   | "provider_import_contended"
   | "provider_import_failed"
   | "provider_import_finished"
@@ -95,6 +99,7 @@ export interface ProviderWorkerRuntimeDependencies {
   readonly scheduler: ProviderSchedulerPort;
   readonly imports: ProviderWorkerImportPort;
   readonly estimatedEv?: ProviderWorkerEstimatedEvPort;
+  readonly catalogPromotion?: CatalogPromotionWorkerRuntimePort;
   readonly retention: ProviderWorkerRetentionPort;
   readonly logger: ProviderWorkerLogger;
   readonly workerId: string;
@@ -203,6 +208,17 @@ export class ProviderWorkerRuntime {
     this.#running = true;
     this.#stopRequested = false;
     this.log({ level: "info", event: "provider_worker_started" });
+    const catalogTask = this.dependencies.catalogPromotion === undefined
+      ? null
+      : Promise.resolve()
+        .then(() => this.dependencies.catalogPromotion!.start())
+        .catch(() => {
+          this.log({
+            level: "error",
+            event: "provider_catalog_promotion_runtime_failed",
+            failureCode: "CATALOG_PROMOTION_RUNTIME_ERROR",
+          });
+        });
     try {
       while (!this.#stopRequested) {
         await this.runCycle();
@@ -216,6 +232,8 @@ export class ProviderWorkerRuntime {
         this.#sleepController = null;
       }
     } finally {
+      this.dependencies.catalogPromotion?.stop();
+      await catalogTask;
       this.#sleepController = null;
       this.#running = false;
       this.log({ level: "info", event: "provider_worker_stopped" });
@@ -224,6 +242,7 @@ export class ProviderWorkerRuntime {
 
   stop(): void {
     this.#stopRequested = true;
+    this.dependencies.catalogPromotion?.stop();
     this.#sleepController?.abort();
   }
 

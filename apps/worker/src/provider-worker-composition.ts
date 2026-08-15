@@ -26,6 +26,9 @@ import {
 import { createProviderWorkerOperationalRuntime } from "./provider-worker-operational-runtime.ts";
 import { createProviderWorkerEstimatedEvProcessor } from "./provider-worker-estimated-ev.ts";
 import { createProviderWorkerRetentionCoordinator } from "./provider-worker-retention.ts";
+import type {
+  CatalogPromotionWorkerRuntimePort,
+} from "./catalog-promotion-worker-runtime.ts";
 import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
 import {
   ProviderWorkerRuntime,
@@ -52,6 +55,7 @@ export interface ProviderWorkerCompositionInput {
   readonly database: PackscoutPrismaClient;
   readonly logger: ProviderWorkerLogger;
   readonly observability: OperationalObservability;
+  readonly catalogPromotion?: CatalogPromotionWorkerRuntimePort;
 }
 
 function createActorKeyer(key: Uint8Array): ProviderActorKeyer {
@@ -155,6 +159,7 @@ export function createProviderWorkerRuntime(
       verifiedUsdStablecoins:
         input.configuration.estimatedEvVerifiedUsdStablecoins,
     }),
+    catalogPromotion: input.catalogPromotion,
     retention,
     logger: input.logger,
     workerId: input.configuration.workerId,
