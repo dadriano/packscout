@@ -12,6 +12,8 @@ export * from "./estimated-ev-recomputation-processor.ts";
 export * from "./estimated-ev-service.ts";
 export * from "./event-projection-service.ts";
 export * from "./http-cursor-adapter.ts";
+export * from "./normalized-heat-observation-contracts.ts";
+export * from "./normalized-heat-observation-port.ts";
 export * from "./operational-alert-service.ts";
 export * from "./operational-events.ts";
 export * from "./operational-health-service.ts";
