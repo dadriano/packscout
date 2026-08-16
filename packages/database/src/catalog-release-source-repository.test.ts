@@ -7,6 +7,7 @@ import {
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
 import {
+  ApprovedPublicCatalogConfigurationPersistenceError,
   PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN,
   PrismaCatalogReleaseSourceRepository,
 } from "./catalog-release-source-repository.ts";
@@ -23,6 +24,18 @@ const organizationId = "81000000-0000-4000-8000-000000000001";
 const publicVendorId = "81111111-1111-5111-8111-111111111111";
 const publicCategoryId = "81222222-2222-5222-8222-222222222222";
 const publicRepackId = "81333333-3333-5333-8333-333333333333";
+
+async function registerVendor(
+  database: Awaited<ReturnType<typeof createMigratedTestDatabase>>["client"],
+): Promise<void> {
+  await database.provider_sources.create({
+    data: {
+      organization_id: organizationId,
+      platform_key: "vendor",
+      display_name: "Vendor",
+    },
+  });
+}
 
 function configuration(overrides: {
   revision?: number;
@@ -86,6 +99,7 @@ test("configuration approval, governed identities, and settlement commit atomica
     await harness.client.organizations.create({
       data: { id: organizationId, slug: "public-catalog", name: "Public Catalog" },
     });
+    await registerVendor(harness.client);
     const repository = new PrismaCatalogReleaseSourceRepository(
       harness.client,
       organizationId,
@@ -149,6 +163,114 @@ test("configuration approval, governed identities, and settlement commit atomica
   }
 });
 
+test("configuration approval rejects an unregistered or ninth platform before allocating a cause", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await harness.client.organizations.create({
+      data: {
+        id: organizationId,
+        slug: "configuration-platform-boundary",
+        name: "Configuration Platform Boundary",
+      },
+    });
+    await registerVendor(harness.client);
+    const repository = new PrismaCatalogReleaseSourceRepository(
+      harness.client,
+      organizationId,
+    );
+    const unregistered = structuredClone(configuration());
+    unregistered.platforms[0]!.platformKey = "unregistered";
+    unregistered.platforms[0]!.vendor.vendorKey = "unregistered";
+    unregistered.repacks[0]!.platformKey = "unregistered";
+    await assert.rejects(
+      repository.approveConfiguration(unregistered, materializer),
+      (error: unknown) =>
+        error instanceof ApprovedPublicCatalogConfigurationPersistenceError &&
+        error.code === "PUBLIC_CONFIGURATION_PLATFORM_UNREGISTERED",
+    );
+
+    const ninth = structuredClone(configuration());
+    ninth.platforms = Array.from({ length: 9 }, (_, index) => ({
+      ...structuredClone(ninth.platforms[0]!),
+      platformKey: `vendor-${index + 1}`,
+      vendor: {
+        ...structuredClone(ninth.platforms[0]!.vendor),
+        publicVendorId: `81111111-1111-5111-8111-11111111111${index + 1}`,
+        vendorKey: `vendor_${index + 1}`,
+      },
+    }));
+    await assert.rejects(
+      repository.approveConfiguration(ninth, materializer),
+      (error: unknown) =>
+        error instanceof ApprovedPublicCatalogConfigurationPersistenceError &&
+        error.code === "PUBLIC_CONFIGURATION_PLATFORM_LIMIT_EXCEEDED",
+    );
+    assert.equal(await harness.client.public_change_causes.count(), 0);
+    assert.equal(
+      await harness.client.approved_public_catalog_configurations.count(),
+      0,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("configuration approval compares registered platform keys in canonical byte order", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await harness.client.organizations.create({
+      data: {
+        id: organizationId,
+        slug: "configuration-platform-order",
+        name: "Configuration Platform Order",
+      },
+    });
+    const platformKeys = ["a-1", "a_1"] as const;
+    await harness.client.provider_sources.createMany({
+      data: platformKeys.map((platformKey) => ({
+        organization_id: organizationId,
+        platform_key: platformKey,
+        display_name: platformKey,
+      })),
+    });
+    const input = configuration();
+    input.publicAssetOrigins = platformKeys.map(
+      (platformKey) => `https://${platformKey}.example`,
+    );
+    input.platforms = platformKeys.map((platformKey, index) => ({
+      ...structuredClone(input.platforms[0]!),
+      platformKey,
+      vendor: {
+        ...structuredClone(input.platforms[0]!.vendor),
+        publicVendorId:
+          `82111111-1111-5111-8111-${String(index + 1).padStart(12, "0")}`,
+        vendorKey: platformKey,
+        displayName: platformKey,
+        websiteUrl: `https://${platformKey}.example`,
+        listingHosts: [`${platformKey}.example`],
+        imageOrigins: [`https://${platformKey}.example`],
+      },
+    }));
+    input.repacks[0]!.platformKey = platformKeys[0];
+
+    const approved = await new PrismaCatalogReleaseSourceRepository(
+      harness.client,
+      organizationId,
+    ).approveConfiguration(input, materializer);
+    const impact = await harness.client.public_change_catalog_impacts.findUniqueOrThrow({
+      where: {
+        organization_id_cause_sequence: {
+          organization_id: organizationId,
+          cause_sequence: approved.publicChangeSequence,
+        },
+      },
+    });
+    assert.deepEqual(impact.provider_platform_keys, platformKeys);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("readiness is tied to the active causal provider revision, not an old completed backfill", async () => {
   const harness = await createMigratedTestDatabase();
   try {
@@ -200,24 +322,32 @@ test("readiness is tied to the active causal provider revision, not an old compl
     });
     const repository = new PrismaCatalogReleaseSourceRepository(harness.client, organizationId);
     const approved = await repository.approveConfiguration(configuration(), materializer);
-    const [lifecycle] = await allocatePublicChangeCauses(harness.client, {
-      organizationId,
-      changes: [{
-        changeKind: "public_configuration",
-        entityKey: `provider:v1:${providerId}`,
-        sourceKey: "vendor",
-        sourceRevisionKey: activeRevisionId,
-        metadata: {
-          platformKey: "vendor",
-          state: "active",
-          configurationRevisionId: activeRevisionId,
-        },
-        occurredAt: new Date("2026-08-15T01:20:00.000Z"),
-      }],
-    });
-    await advanceSettledPublicWatermark(harness.client, {
-      organizationId,
-      settledAt: new Date("2026-08-15T01:20:00.000Z"),
+    const [lifecycle] = await harness.client.$transaction(async (transaction) => {
+      const causes = await allocatePublicChangeCauses(transaction, {
+        organizationId,
+        changes: [{
+          changeKind: "public_configuration",
+          entityKey: `provider:v1:${providerId}`,
+          sourceKey: "vendor",
+          sourceRevisionKey: activeRevisionId,
+          metadata: {
+            platformKey: "vendor",
+            state: "active",
+            configurationRevisionId: activeRevisionId,
+          },
+          occurredAt: new Date("2026-08-15T01:20:00.000Z"),
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: ["vendor"],
+            manifestLifecycle: { platformKey: "vendor", state: "active" },
+          },
+        }],
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId,
+        settledAt: new Date("2026-08-15T01:20:00.000Z"),
+      });
+      return causes;
     });
     const snapshot = await repository.loadSnapshot({
       throughSequence: lifecycle!.sequence,
@@ -255,6 +385,7 @@ test("one repeatable-read snapshot cannot mix a newer configuration mapping into
     await harness.client.organizations.create({
       data: { id: organizationId, slug: "snapshot-coherence", name: "Snapshot Coherence" },
     });
+    await registerVendor(harness.client);
     const repository = new PrismaCatalogReleaseSourceRepository(harness.client, organizationId);
     await repository.approveConfiguration(configuration(), materializer);
     const writer = await harness.createIndependentClient();
@@ -292,6 +423,15 @@ test("one repeatable-read snapshot cannot mix a newer configuration mapping into
           sourceRevisionKey: "catalog-r2",
           metadata: { configurationKey: "catalog-r2", revision: 2, configurationHash: hash },
           occurredAt: new Date("2026-08-15T02:00:00.000Z"),
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: ["vendor"],
+            sharedConfigurationEpoch: {
+              configurationKey: "catalog-r2",
+              revision: 2,
+              configurationHash: hash,
+            },
+          },
         }],
       });
       await transaction.approved_public_catalog_configurations.create({

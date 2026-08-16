@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import type {
-  PackscoutQueryClient,
-  PackscoutTransactionClient,
-} from "./database.ts";
+import type { PackscoutTransactionClient } from "./database.ts";
 import type {
   CanonicalProjectionInput,
   CommitPageInput,
@@ -12,8 +9,10 @@ import type {
 } from "./pipeline-types.ts";
 import {
   allocatePublicChangeCauses,
+  canonicalCatalogPlatformKeys,
   canonicalPublicEntityKey,
   relationshipPublicEntityKey,
+  type PublicCatalogImpact,
   type PublicChangeKind,
 } from "./public-change-settlement-repository.ts";
 import { persistNormalizedHeatObservationsForCanonicalWrites } from "./normalized-heat-observation-repository.ts";
@@ -24,6 +23,34 @@ import {
 } from "./security.ts";
 
 const maximumRowsPerWrite = 500;
+const catalogProjectionRecordKinds = new Set<CanonicalProjectionInput["recordKind"]>([
+  "platform",
+  "pack",
+  "catalog_asset",
+  "ev_input",
+  "estimated_ev",
+]);
+
+function canonicalProjectionCatalogImpact(
+  projection: CanonicalProjectionInput,
+): PublicCatalogImpact {
+  return catalogProjectionRecordKinds.has(projection.recordKind)
+    ? { kind: "catalog", providerPlatformKeys: [projection.platformKey] }
+    : { kind: "none" };
+}
+
+function relationshipCatalogImpact(
+  sourcePlatformKey: string,
+  targetPlatformKey: string,
+): PublicCatalogImpact {
+  return {
+    kind: "catalog",
+    providerPlatformKeys: canonicalCatalogPlatformKeys([
+      sourcePlatformKey,
+      targetPlatformKey,
+    ]),
+  };
+}
 
 function assertCanonicalWriteTransaction(
   database: PackscoutTransactionClient,
@@ -114,6 +141,7 @@ interface ProjectionLinkInsert {
 interface RelationshipInsert {
   readonly organizationId: string;
   readonly sourceEntityId: string;
+  readonly sourcePlatformKey: string;
   readonly relationshipKind: string;
   readonly targetPlatformKey: string;
   readonly targetRecordKind: CanonicalProjectionInput["recordKind"];
@@ -236,7 +264,7 @@ function relationshipIdentityKey(input: {
 }
 
 async function resolveSourceRecords(
-  database: PackscoutQueryClient,
+  database: PackscoutTransactionClient,
   input: CommitPageInput,
   prepared: readonly PreparedSourceRecord[],
   pageId: string,
@@ -337,7 +365,7 @@ async function resolveSourceRecords(
 }
 
 async function loadCanonicalEntities(
-  database: PackscoutQueryClient,
+  database: PackscoutTransactionClient,
   organizationId: string,
   identities: readonly CanonicalEntityIdentity[],
   acceptedAt: Date,
@@ -404,7 +432,7 @@ async function loadCanonicalEntities(
 }
 
 async function loadRelationshipTargets(
-  database: PackscoutQueryClient,
+  database: PackscoutTransactionClient,
   organizationId: string,
   identities: readonly CanonicalEntityIdentity[],
   knownEntities: ReadonlyMap<string, CanonicalEntityRecord>,
@@ -464,6 +492,54 @@ export async function writeCanonicalProjectionBatch(
     throw new Error(
       "Canonical projection batches cannot span tenant, provider, configuration, or commit scopes.",
     );
+  }
+  const providerRows = await database.$queryRaw<Array<{ platformKey: string }>>(
+    Prisma.sql`
+      select platform_key as "platformKey"
+      from public.provider_sources
+      where organization_id = ${uuid(scope.organizationId)}
+        and id = ${uuid(scope.providerId)}
+      for share
+    `,
+  );
+  const providerPlatformKey = providerRows[0]?.platformKey;
+  if (
+    !providerPlatformKey ||
+    inputs.some(
+      ({ projection }) => projection.platformKey !== providerPlatformKey,
+    )
+  ) {
+    throw new Error("Canonical projection provider scope is invalid.");
+  }
+  const relationshipPlatformKeys = [
+    ...new Set(
+      inputs.flatMap(({ projection }) =>
+        (projection.relationships ?? []).map(
+          ({ targetPlatformKey }) => targetPlatformKey,
+        ),
+      ),
+    ),
+  ].sort();
+  if (relationshipPlatformKeys.length > 0) {
+    const registeredTargets = await database.$queryRaw<
+      Array<{ platformKey: string }>
+    >(Prisma.sql`
+      select platform_key as "platformKey"
+      from public.provider_sources
+      where organization_id = ${uuid(scope.organizationId)}
+        and platform_key in (${Prisma.join(relationshipPlatformKeys)})
+      order by platform_key collate "C"
+      for share
+    `);
+    if (
+      registeredTargets.length !== relationshipPlatformKeys.length ||
+      registeredTargets.some(
+        ({ platformKey }, index) =>
+          platformKey !== relationshipPlatformKeys[index],
+      )
+    ) {
+      throw new Error("Canonical relationship provider scope is invalid.");
+    }
   }
   for (const input of inputs) {
     assertCanonicalActorDataSafe(input.projection.content);
@@ -583,6 +659,7 @@ export async function writeCanonicalProjectionBatch(
         sourceRevisionKey: projection.configRevisionId,
         metadata: { canonicalRevisionId: revision.id },
         occurredAt: projection.acceptedAt,
+        catalogImpact: canonicalProjectionCatalogImpact(projection.projection),
       };
     }),
   });
@@ -711,6 +788,7 @@ export async function writeCanonicalProjectionBatch(
       return {
         organizationId: projection.organizationId,
         sourceEntityId: sourceEntity.id,
+        sourcePlatformKey: sourceEntity.platformKey,
         relationshipKind: relationship.relationshipKind,
         targetPlatformKey: relationship.targetPlatformKey,
         targetRecordKind: relationship.targetRecordKind,
@@ -764,6 +842,10 @@ export async function writeCanonicalProjectionBatch(
       sourceRevisionKey: scope.configRevisionId,
       metadata: { relationshipState: relationship.targetEntityId ? "resolved" : "unresolved" },
       occurredAt: relationship.createdAt,
+      catalogImpact: relationshipCatalogImpact(
+        relationship.sourcePlatformKey,
+        relationship.targetPlatformKey,
+      ),
     })),
   });
   relationships.forEach((relationship, index) => {
@@ -816,6 +898,7 @@ export async function writeCanonicalProjectionBatch(
     const unresolved = await database.$queryRaw<Array<{
       id: string;
       sourceEntityId: string;
+      sourcePlatformKey: string;
       relationshipKind: string;
       targetPlatformKey: string;
       targetRecordKind: CanonicalProjectionInput["recordKind"];
@@ -824,12 +907,16 @@ export async function writeCanonicalProjectionBatch(
     }>>(Prisma.sql`
       select relationship.id,
              relationship.source_entity_id as "sourceEntityId",
+             source_entity.platform_key as "sourcePlatformKey",
              relationship.relationship_kind as "relationshipKind",
              relationship.target_platform_key as "targetPlatformKey",
              relationship.target_record_kind::text as "targetRecordKind",
              relationship.target_external_id as "targetExternalId",
              targets.entity_id as "targetEntityId"
       from public.canonical_relationships as relationship
+      join public.canonical_entities as source_entity
+        on source_entity.id = relationship.source_entity_id
+       and source_entity.organization_id = relationship.organization_id
       join (values ${Prisma.join(rows)})
         as targets(
           platform_key, record_kind, external_id, entity_id,
@@ -851,6 +938,10 @@ export async function writeCanonicalProjectionBatch(
         sourceRevisionKey: scope.configRevisionId,
         metadata: { relationshipState: "resolved" },
         occurredAt: scope.acceptedAt,
+        catalogImpact: relationshipCatalogImpact(
+          relationship.sourcePlatformKey,
+          relationship.targetPlatformKey,
+        ),
       })),
     });
     const resolutionRows = unresolved.map((relationship, index) => {

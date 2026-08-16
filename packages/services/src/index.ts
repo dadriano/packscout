@@ -34,6 +34,7 @@ export * from "./protected-payload-retention-service.ts";
 export * from "./provider-adapter-registry.ts";
 export * from "./provider-adapter.ts";
 export * from "./provider-configuration-service.ts";
+export * from "./provider-catalog-settlement-service.ts";
 export * from "./provider-credential-cipher.ts";
 export * from "./provider-endpoint-policy.ts";
 export * from "./provider-import-page-planner.ts";

@@ -398,6 +398,15 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           sourceKey: "catalog-release",
           sourceRevisionKey: "catalog-config-v1",
           occurredAt: configuredAt,
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: ["platform-a"],
+            sharedConfigurationEpoch: {
+              configurationKey: "catalog-config-v1",
+              revision: 1,
+              configurationHash: "1".padStart(64, "0"),
+            },
+          },
         }],
       });
       await transaction.approved_public_catalog_configurations.create({
@@ -405,7 +414,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           organization_id: ids.organization,
           configuration_key: "catalog-config-v1",
           revision: 1,
-          configuration_json: {},
+          configuration_json: { platforms: [{ platformKey: "platform-a" }] },
           configuration_hash: "1".padStart(64, "0"),
           approved_at: configuredAt,
           public_change_sequence: causes[0]!.sequence,
@@ -663,19 +672,21 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     );
 
     const settledAt = new Date(committedAt.getTime() + 1_000);
-    await harness.client.public_derivation_obligations.updateMany({
-      where: { organization_id: ids.organization },
-      data: {
-        state: "succeeded",
-        outcome_classification: "success",
-        acknowledged_claim_token: "55000000-0000-4000-8000-000000000099",
-        outcome_at: settledAt,
-        updated_at: settledAt,
-      },
-    });
-    const checkpoint = await advanceSettledPublicWatermark(harness.client, {
-      organizationId: ids.organization,
-      settledAt,
+    const checkpoint = await harness.client.$transaction(async (transaction) => {
+      await transaction.public_derivation_obligations.updateMany({
+        where: { organization_id: ids.organization },
+        data: {
+          state: "succeeded",
+          outcome_classification: "success",
+          acknowledged_claim_token: "55000000-0000-4000-8000-000000000099",
+          outcome_at: settledAt,
+          updated_at: settledAt,
+        },
+      });
+      return advanceSettledPublicWatermark(transaction, {
+        organizationId: ids.organization,
+        settledAt,
+      });
     });
     assert.equal(checkpoint.settledSequence, 6n);
 
@@ -795,6 +806,15 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           sourceKey: "catalog-release",
           sourceRevisionKey: "catalog-config-v2",
           occurredAt: new Date(settledAt.getTime() + 500),
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: ["platform-a"],
+            sharedConfigurationEpoch: {
+              configurationKey: "catalog-config-v2",
+              revision: 2,
+              configurationHash: "2".padStart(64, "0"),
+            },
+          },
         }],
       });
       const approvedAt = new Date(settledAt.getTime() + 500);
@@ -803,7 +823,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           organization_id: ids.organization,
           configuration_key: "catalog-config-v2",
           revision: 2,
-          configuration_json: {},
+          configuration_json: { platforms: [{ platformKey: "platform-a" }] },
           configuration_hash: "2".padStart(64, "0"),
           approved_at: approvedAt,
           public_change_sequence: causes[0]!.sequence,
@@ -934,6 +954,15 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           sourceKey: "catalog-release",
           sourceRevisionKey: "catalog-config-v3",
           occurredAt: new Date(sourceAt.getTime() + 3),
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: ["platform-a"],
+            sharedConfigurationEpoch: {
+              configurationKey: "catalog-config-v3",
+              revision: 3,
+              configurationHash: "3".padStart(64, "0"),
+            },
+          },
         }],
       });
       const approvedAt = new Date(sourceAt.getTime() + 3);
@@ -942,7 +971,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           organization_id: ids.organization,
           configuration_key: "catalog-config-v3",
           revision: 3,
-          configuration_json: {},
+          configuration_json: { platforms: [{ platformKey: "platform-a" }] },
           configuration_hash: "3".padStart(64, "0"),
           approved_at: approvedAt,
           public_change_sequence: causes[0]!.sequence,

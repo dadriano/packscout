@@ -12,9 +12,11 @@ import {
   publicVendorSchema,
   timestampSchema,
 } from "./data-release-v2.ts";
+import { providerPlatformKeySchema } from "./provider.ts";
 
 export const APPROVED_PUBLIC_CATALOG_CONFIGURATION_VERSION =
   "approved_public_catalog_v1" as const;
+export const MAX_APPROVED_PUBLIC_PLATFORMS = 8 as const;
 
 const sourceValueSchema = nonBlankTextSchema(240);
 
@@ -29,7 +31,7 @@ const collectibleTypeMappingSchema = z.object({
 }).strict();
 
 export const approvedPublicPlatformConfigurationSchema = z.object({
-  platformKey: z.string().regex(/^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/),
+  platformKey: providerPlatformKeySchema,
   vendor: publicVendorSchema,
   format: z.enum(["repack", "gacha"]),
   defaultPublicCategoryIds: canonicalArraySchema(publicCategoryIdSchema, 32),
@@ -47,7 +49,7 @@ export const approvedPublicPlatformConfigurationSchema = z.object({
 });
 
 export const approvedPublicCollectibleMappingSchema = z.object({
-  platformKey: z.string().min(1).max(100),
+  platformKey: providerPlatformKeySchema,
   externalId: nonBlankTextSchema(500),
   publicCollectibleId: publicCollectibleIdSchema,
   aliases: canonicalArraySchema(nonBlankTextSchema(240), 32),
@@ -70,7 +72,7 @@ export const approvedPublicCollectibleMappingSchema = z.object({
 }).strict();
 
 export const approvedPublicRepackIdentityMappingSchema = z.object({
-  platformKey: z.string().min(1).max(100),
+  platformKey: providerPlatformKeySchema,
   packExternalId: nonBlankTextSchema(500),
   publicRepackId: publicRepackIdSchema,
 }).strict();
@@ -97,7 +99,11 @@ export const approvedPublicCatalogConfigurationV1Schema = z.object({
   confidencePolicy: approvedPublicConfidencePolicySchema,
   publicAssetOrigins: canonicalArraySchema(publicHttpsOriginSchema, 64),
   categories: z.array(publicCategorySchema).max(4_096),
-  platforms: z.array(approvedPublicPlatformConfigurationSchema).min(1).max(128),
+  platforms: z.array(approvedPublicPlatformConfigurationSchema)
+    .min(1)
+    .max(MAX_APPROVED_PUBLIC_PLATFORMS, {
+      message: "public_config.platform_limit_exceeded",
+    }),
   repacks: z.array(approvedPublicRepackIdentityMappingSchema).max(8_000),
   collectibles: z.array(approvedPublicCollectibleMappingSchema).max(100_000),
 }).strict().superRefine((configuration, context) => {

@@ -22,6 +22,7 @@ export * from "./provider-stream-write-policy.ts";
 export * from "./promotion-readiness-repository.ts";
 export * from "./protected-payload-retention-repository.ts";
 export * from "./public-change-settlement-repository.ts";
+export * from "./public-change-settlement-repository.provider-read.ts";
 export * from "./public-repack-identity-mapping-repository.ts";
 export * from "./quarantine-repository.ts";
 export * from "./security.ts";

@@ -3,7 +3,23 @@ import { Prisma } from "@prisma/client";
 import type {
   PackscoutPrismaClient,
   PackscoutQueryClient,
+  PackscoutTransactionClient,
 } from "./database.ts";
+import {
+  advanceCatalogImpactCheckpoints,
+  assertCatalogSettlementTransaction,
+  assertCatalogObligationsAheadOfSettlement,
+  normalizePublicCatalogImpact,
+  persistPublicChangeCatalogImpacts,
+  type PublicCatalogImpact,
+} from "./public-change-settlement-repository.catalog-impact.ts";
+
+export type {
+  ManifestLifecycleImpactDeclaration,
+  PublicCatalogImpact,
+  SharedPublicConfigurationEpochDeclaration,
+} from "./public-change-settlement-repository.catalog-impact.ts";
+export { canonicalCatalogPlatformKeys } from "./public-change-settlement-repository.catalog-impact.ts";
 
 export const publicChangeKinds = [
   "provider_projection",
@@ -34,6 +50,10 @@ export interface PublicChangeCause {
   readonly metadata: Record<string, unknown>;
   readonly occurredAt: Date;
   readonly authoritativeTransactionId: string;
+}
+
+export interface AllocatedPublicChangeCause extends PublicChangeCause {
+  readonly catalogImpact: PublicCatalogImpact;
 }
 
 export interface PublicDerivationObligation {
@@ -79,6 +99,7 @@ export interface AllocatePublicChangeInput {
   readonly sourceRevisionKey?: string | null;
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly occurredAt: Date;
+  readonly catalogImpact: PublicCatalogImpact;
 }
 
 interface WatermarkRow {
@@ -139,17 +160,19 @@ export function relationshipPublicEntityKey(input: {
 }
 
 export async function allocatePublicChangeCauses(
-  database: PackscoutQueryClient,
+  database: PackscoutTransactionClient,
   input: {
     organizationId: string;
     changes: readonly AllocatePublicChangeInput[];
   },
-): Promise<readonly PublicChangeCause[]> {
+): Promise<readonly AllocatedPublicChangeCause[]> {
+  assertCatalogSettlementTransaction(database);
   if (input.changes.length === 0) return [];
   if (input.changes.length > 1_000) {
     throw new RangeError("Public change allocation exceeds its transaction bound.");
   }
   for (const change of input.changes) {
+    normalizePublicCatalogImpact(change.catalogImpact);
     requirePattern(change.entityKey, boundedKeyPattern, "Public entity key");
     if (change.sourceKey !== null && change.sourceKey !== undefined) {
       requirePattern(change.sourceKey, sourceKeyPattern, "Public source key");
@@ -202,6 +225,7 @@ export async function allocatePublicChangeCauses(
     metadata: { ...(change.metadata ?? {}) },
     occurredAt: change.occurredAt,
     authoritativeTransactionId: transactionId,
+    catalogImpact: normalizePublicCatalogImpact(change.catalogImpact),
   }));
   const rows = causes.map((cause) => Prisma.sql`(
     ${uuid(cause.organizationId)}, ${cause.sequence},
@@ -216,11 +240,12 @@ export async function allocatePublicChangeCauses(
       authoritative_transaction_id, created_at
     ) values ${Prisma.join(rows)}
   `);
+  await persistPublicChangeCatalogImpacts(database, causes);
   return causes;
 }
 
 export async function createPublicDerivationObligations(
-  database: PackscoutQueryClient,
+  database: PackscoutTransactionClient,
   input: {
     organizationId: string;
     causeSequences: readonly bigint[];
@@ -229,6 +254,7 @@ export async function createPublicDerivationObligations(
     createdAt: Date;
   },
 ): Promise<void> {
+  assertCatalogSettlementTransaction(database);
   if (input.causeSequences.length === 0) return;
   requirePattern(
     input.derivationKey,
@@ -253,6 +279,10 @@ export async function createPublicDerivationObligations(
   ) {
     throw new Error("A derivation obligation cannot be added behind settlement.");
   }
+  await assertCatalogObligationsAheadOfSettlement(database, {
+    organizationId: input.organizationId,
+    causeSequences: uniqueSequences,
+  });
   const rows = uniqueSequences.map((sequence) => Prisma.sql`(
     ${uuid(input.organizationId)}, ${sequence},
     cast(${input.derivationKind} as public.public_derivation_kind),
@@ -270,9 +300,10 @@ export async function createPublicDerivationObligations(
 }
 
 export async function advanceSettledPublicWatermark(
-  database: PackscoutQueryClient,
+  database: PackscoutTransactionClient,
   input: { organizationId: string; settledAt: Date },
 ): Promise<SettledPublicWatermark> {
+  assertCatalogSettlementTransaction(database);
   await database.$queryRaw(Prisma.sql`
     select organization_id
     from public.settled_public_watermarks
@@ -313,6 +344,7 @@ export async function advanceSettledPublicWatermark(
     from candidate
     where watermark.organization_id = candidate.organization_id
   `);
+  await advanceCatalogImpactCheckpoints(database, input);
   return loadSettledPublicWatermark(database, input.organizationId);
 }
 

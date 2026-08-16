@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/008
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including migration and concurrency verification
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -54,19 +54,25 @@ The existing organization-global `SettledPublicWatermark` remains the only settl
 
 ### Provider independence
 
-- [ ] A technical failure affecting platform B does not stop platform A's checkpoint from advancing through its own settled changes.
-- [ ] An unsettled obligation affecting platform A prevents A from skipping that cause even when later A changes are terminal.
-- [ ] A cross-platform cause blocks every platform in its recorded impact set and no platform outside that set.
-- [ ] Replayed causes, replacement work, stale claims, and repeated acknowledgements cannot duplicate impact or regress a checkpoint.
+- [x] A technical failure affecting platform B does not stop platform A's checkpoint from advancing through its own settled changes.
+- [x] An unsettled obligation affecting platform A prevents A from skipping that cause even when later A changes are terminal.
+- [x] A cross-platform cause blocks every platform in its recorded impact set and no platform outside that set.
+- [x] Replayed causes, replacement work, stale claims, and repeated acknowledgements cannot duplicate impact or regress a checkpoint.
 
 ### Epoch and lifecycle safety
 
-- [ ] A shared configuration change creates one new epoch and does not permit a mixed-epoch manifest.
-- [ ] Enabled-platform resolution is server-owned, causally settled, and tenant-isolated.
-- [ ] Approval of a ninth enabled public platform fails with a stable bounded-configuration error while eight enabled platforms remain valid.
-- [ ] A disable decision becomes manifest-eligible without requiring a new release for the removed platform.
-- [ ] The organization-global checkpoint and its Heat/audit behavior remain intact and directly tested.
+- [x] A shared configuration change creates one new epoch and does not permit a mixed-epoch manifest.
+- [x] Enabled-platform resolution is server-owned, causally settled, and tenant-isolated.
+- [x] Approval of a ninth enabled public platform fails with a stable bounded-configuration error while eight enabled platforms remain valid.
+- [x] A disable decision becomes manifest-eligible without requiring a new release for the removed platform.
+- [x] The organization-global checkpoint and its Heat/audit behavior remain intact and directly tested.
 
 ## Verification
 
 `npm run test:database && npm run test:services && npm run test:worker`
+
+## Spec Compliance
+
+- Related technical specs: none.
+- Related UX specs: none.
+- Implemented directly from this task PRD; no companion specs were present.

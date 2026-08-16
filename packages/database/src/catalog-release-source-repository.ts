@@ -19,8 +19,13 @@ export const PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN =
   "packscout.public-catalog.configuration.v1" as const;
 
 export class ApprovedPublicCatalogConfigurationPersistenceError extends Error {
-  readonly code = "PUBLIC_CONFIGURATION_INVALID" as const;
-  constructor() {
+  constructor(
+    readonly code:
+      | "PUBLIC_CONFIGURATION_INVALID"
+      | "PUBLIC_CONFIGURATION_PLATFORM_LIMIT_EXCEEDED"
+      | "PUBLIC_CONFIGURATION_PLATFORM_UNREGISTERED" =
+        "PUBLIC_CONFIGURATION_INVALID",
+  ) {
     super("Approved public catalog configuration is invalid.");
     this.name = "ApprovedPublicCatalogConfigurationPersistenceError";
   }
@@ -115,13 +120,50 @@ export class PrismaCatalogReleaseSourceRepository
     input: ApprovedPublicCatalogConfigurationV1,
     identityMaterializer: ApprovedPublicRepackIdentityMaterializer,
   ): Promise<ApprovedPublicCatalogConfigurationRecord> {
-    const configuration = approvedPublicCatalogConfigurationV1Schema.parse(input);
+    const parsed = approvedPublicCatalogConfigurationV1Schema.safeParse(input);
+    if (!parsed.success) {
+      const platformLimitExceeded = parsed.error.issues.some(
+        ({ message }) => message === "public_config.platform_limit_exceeded",
+      );
+      throw new ApprovedPublicCatalogConfigurationPersistenceError(
+        platformLimitExceeded
+          ? "PUBLIC_CONFIGURATION_PLATFORM_LIMIT_EXCEEDED"
+          : "PUBLIC_CONFIGURATION_INVALID",
+      );
+    }
+    const configuration = parsed.data;
     const configurationHash = await sha256CanonicalJson(
       PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN,
       configuration,
     );
     const approvedAt = new Date(configuration.approvedAt);
     return this.database.$transaction(async (transaction) => {
+      const registeredPlatforms = await transaction.$queryRaw<
+        Array<{ platformKey: string }>
+      >(Prisma.sql`
+        select platform_key as "platformKey"
+        from public.provider_sources
+        where organization_id = ${uuid(this.organizationId)}
+          and platform_key in (${Prisma.join(
+            configuration.platforms.map(({ platformKey }) => platformKey),
+          )})
+        order by platform_key collate "C"
+        for share
+      `);
+      const configuredPlatformKeys = configuration.platforms.map(
+        ({ platformKey }) => platformKey,
+      );
+      if (
+        registeredPlatforms.length !== configuredPlatformKeys.length ||
+        registeredPlatforms.some(
+          ({ platformKey }, index) =>
+            platformKey !== configuredPlatformKeys[index],
+        )
+      ) {
+        throw new ApprovedPublicCatalogConfigurationPersistenceError(
+          "PUBLIC_CONFIGURATION_PLATFORM_UNREGISTERED",
+        );
+      }
       const [cause] = await allocatePublicChangeCauses(transaction, {
         organizationId: this.organizationId,
         changes: [{
@@ -135,6 +177,15 @@ export class PrismaCatalogReleaseSourceRepository
             configurationHash,
           },
           occurredAt: approvedAt,
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: configuredPlatformKeys,
+            sharedConfigurationEpoch: {
+              configurationKey: configuration.configurationKey,
+              revision: configuration.revision,
+              configurationHash,
+            },
+          },
         }],
       });
       if (!cause) throw new Error("Public configuration cause was not allocated.");

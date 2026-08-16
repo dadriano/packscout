@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   type PackscoutPrismaClient,
-  type PackscoutQueryClient,
+  type PackscoutTransactionClient,
 } from "./database.ts";
 import { hashJson } from "./security.ts";
 import { advanceSettledPublicWatermark } from "./public-change-settlement-repository.ts";
@@ -103,7 +103,7 @@ function boundedInteger(
 }
 
 export async function completeEstimatedEvRecomputation(
-  database: PackscoutQueryClient,
+  database: PackscoutTransactionClient,
   input: {
     requestId: string;
     claimToken: string;

@@ -455,6 +455,27 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       { revisions: revisionCount, secrets: secretCount, tests: testCount },
       { revisions: 2, secrets: 2, tests: 4 },
     );
+    const lifecycleImpacts = await harness.database
+      .public_change_catalog_impacts.findMany({
+        where: {
+          organization_id: organizationId,
+          lifecycle_platform_key: "beezie",
+        },
+        orderBy: { cause_sequence: "asc" },
+        select: {
+          lifecycle_state: true,
+          provider_platform_keys: true,
+        },
+      });
+    assert.deepEqual(
+      lifecycleImpacts.map(({ lifecycle_state }) => lifecycle_state),
+      ["active", "active", "disabled", "archived"],
+    );
+    assert.deepEqual(
+      lifecycleImpacts.map(({ provider_platform_keys }) =>
+        provider_platform_keys),
+      [["beezie"], ["beezie"], [], []],
+    );
     const auditRecords = await harness.database.audit_events.findMany({
       where: { subject_id: providerId },
       select: { actor_key: true, metadata_json: true },

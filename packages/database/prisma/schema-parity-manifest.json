@@ -1,17 +1,17 @@
 {
-  "source": "durable promotion readiness with approved public catalog and normalized Heat contract",
+  "source": "provider-impact catalog settlement with shared configuration and lifecycle barriers",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260815050000_promotion_operational_readiness/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260816010000_provider_catalog_settlement/migration.sql"
   },
   "expectedCounts": {
-    "tables": 39,
+    "tables": 42,
     "enums": 22,
-    "columns": 477,
-    "indexes": 61,
+    "columns": 499,
+    "indexes": 62,
     "uniqueConstraints": 33,
-    "foreignKeys": 147,
-    "checkConstraints": 121
+    "foreignKeys": 153,
+    "checkConstraints": 133
   },
   "enums": {
     "admin_alert_state": [
@@ -584,6 +584,9 @@
         },
         "approved_public_catalog_configurations_key_bounded": {
           "value": "((configuration_key = btrim(configuration_key)) AND ((char_length(configuration_key) >= 1) AND (char_length(configuration_key) <= 128)) AND (configuration_key ~ '^[A-Za-z0-9][A-Za-z0-9._:-]*$'::text))"
+        },
+        "approved_public_catalog_configurations_platform_limit": {
+          "value": "((jsonb_typeof((configuration_json -> 'platforms'::text)) = 'array'::text) AND ((jsonb_array_length((configuration_json -> 'platforms'::text)) >= 1) AND (jsonb_array_length((configuration_json -> 'platforms'::text)) <= 8)))"
         },
         "approved_public_catalog_configurations_revision_positive": {
           "value": "(revision > 0)"
@@ -1288,6 +1291,78 @@
       "checkConstraints": {
         "canonical_revisions_revision_positive": {
           "value": "(revision_number > 0)"
+        }
+      }
+    },
+    "catalog_manifest_lifecycle_checkpoints": {
+      "columns": {
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "settled_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "settled_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "source_head_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_head_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "catalog_manifest_lifecycle_checkpoints_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "catalog_manifest_lifecycle_checkpoints_head_timestamp": {
+          "value": "(((source_head_sequence = 0) AND (source_head_at IS NULL)) OR ((source_head_sequence > 0) AND (source_head_at IS NOT NULL)))"
+        },
+        "catalog_manifest_lifecycle_checkpoints_sequence_bounds": {
+          "value": "((settled_sequence >= 0) AND (source_head_sequence >= 0) AND (settled_sequence <= source_head_sequence))"
+        },
+        "catalog_manifest_lifecycle_checkpoints_settled_timestamp": {
+          "value": "(((settled_sequence = 0) AND (settled_at IS NULL)) OR ((settled_sequence > 0) AND (settled_at IS NOT NULL)))"
         }
       }
     },
@@ -3942,6 +4017,101 @@
         }
       }
     },
+    "provider_catalog_checkpoints": {
+      "columns": {
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "settled_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "settled_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "source_head_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_head_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "provider_catalog_checkpoints_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "provider_catalog_checkpoints_provider_fk": {
+          "columns": [
+            "organization_id",
+            "platform_key"
+          ],
+          "referencedTable": "provider_sources",
+          "referencedColumns": [
+            "organization_id",
+            "platform_key"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "provider_catalog_checkpoints_head_timestamp": {
+          "value": "(((source_head_sequence = 0) AND (source_head_at IS NULL)) OR ((source_head_sequence > 0) AND (source_head_at IS NOT NULL)))"
+        },
+        "provider_catalog_checkpoints_platform_key_valid": {
+          "value": "((length(platform_key) <= 128) AND (platform_key ~ '^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$'::text))"
+        },
+        "provider_catalog_checkpoints_sequence_bounds": {
+          "value": "((settled_sequence >= 0) AND (source_head_sequence >= 0) AND (settled_sequence <= source_head_sequence))"
+        },
+        "provider_catalog_checkpoints_settled_timestamp": {
+          "value": "(((settled_sequence = 0) AND (settled_at IS NULL)) OR ((settled_sequence > 0) AND (settled_at IS NOT NULL)))"
+        }
+      }
+    },
     "provider_config_revisions": {
       "columns": {
         "adapter_key": {
@@ -4981,16 +5151,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "provider_sources_organization_platform_unique": {
-          "columns": [
-            "organization_id",
-            "platform_key"
-          ],
-          "unique": true,
-          "where": null
-        }
-      },
+      "indexes": {},
       "uniqueConstraints": {
         "provider_sources_id_organization_unique": {
           "columns": [
@@ -5027,6 +5188,147 @@
       "checkConstraints": {
         "provider_sources_platform_key_not_blank": {
           "value": "(length(TRIM(BOTH FROM platform_key)) > 0)"
+        },
+        "provider_sources_platform_key_valid": {
+          "value": "((length(platform_key) <= 128) AND (platform_key ~ '^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$'::text))"
+        }
+      }
+    },
+    "public_change_catalog_impacts": {
+      "columns": {
+        "cause_sequence": {
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "lifecycle_platform_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "lifecycle_state": {
+          "type": "provider_state",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_platform_keys": {
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "ARRAY[]::text[]"
+        },
+        "shared_configuration_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "shared_configuration_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "shared_configuration_revision": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "public_change_catalog_impacts_lifecycle_idx": {
+          "columns": [
+            "organization_id",
+            "lifecycle_platform_key",
+            "cause_sequence"
+          ],
+          "unique": false,
+          "where": "(lifecycle_platform_key IS NOT NULL)"
+        },
+        "public_change_catalog_impacts_shared_epoch_idx": {
+          "columns": [
+            "organization_id",
+            "shared_configuration_hash",
+            "cause_sequence"
+          ],
+          "unique": false,
+          "where": "(shared_configuration_hash IS NOT NULL)"
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "public_change_catalog_impacts_cause_fk": {
+          "columns": [
+            "organization_id",
+            "cause_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "public_change_catalog_impacts_lifecycle_provider_fk": {
+          "columns": [
+            "organization_id",
+            "lifecycle_platform_key"
+          ],
+          "referencedTable": "provider_sources",
+          "referencedColumns": [
+            "organization_id",
+            "platform_key"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "public_change_catalog_impacts_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "public_change_catalog_impacts_lifecycle_consistent": {
+          "value": "((num_nonnulls(lifecycle_platform_key, lifecycle_state) = 0) OR ((num_nonnulls(lifecycle_platform_key, lifecycle_state) = 2) AND (length(lifecycle_platform_key) <= 128) AND (lifecycle_platform_key ~ '^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$'::text) AND (lifecycle_state = ANY (ARRAY['active'::provider_state, 'disabled'::provider_state, 'archived'::provider_state])) AND (((lifecycle_state = 'active'::provider_state) AND (lifecycle_platform_key = ANY (provider_platform_keys))) OR ((lifecycle_state = ANY (ARRAY['disabled'::provider_state, 'archived'::provider_state])) AND (NOT (lifecycle_platform_key = ANY (provider_platform_keys)))))))"
+        },
+        "public_change_catalog_impacts_provider_keys_canonical": {
+          "value": "catalog_platform_keys_are_canonical(provider_platform_keys)"
+        },
+        "public_change_catalog_impacts_shared_epoch_consistent": {
+          "value": "((num_nonnulls(shared_configuration_key, shared_configuration_revision, shared_configuration_hash) = 0) OR ((num_nonnulls(shared_configuration_key, shared_configuration_revision, shared_configuration_hash) = 3) AND ((length(btrim(shared_configuration_key)) >= 1) AND (length(btrim(shared_configuration_key)) <= 128)) AND (shared_configuration_revision > 0) AND (shared_configuration_hash ~ '^[0-9a-f]{64}$'::text)))"
         }
       }
     },

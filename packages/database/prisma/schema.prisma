@@ -249,10 +249,60 @@ model public_change_causes {
   normalized_heat_observation_outcomes_source  normalized_heat_observation_outcomes[] @relation("normalized_heat_observation_outcome_source_change")
   normalized_heat_observation_outcomes_mapping normalized_heat_observation_outcomes[] @relation("normalized_heat_observation_outcome_mapping_change")
   approved_public_catalog_configurations approved_public_catalog_configurations[]
+  public_change_catalog_impacts public_change_catalog_impacts?
 
   @@id([organization_id, sequence], map: "public_change_causes_pkey")
   @@index([organization_id, occurred_at, sequence], map: "public_change_causes_organization_occurred_idx")
   @@index([organization_id, source_key, sequence], map: "public_change_causes_source_head_idx")
+}
+
+/// Immutable, explicit catalog impact attached one-to-one to every public cause.
+/// Canonical array, epoch, lifecycle, and immutability constraints live in the migration.
+model public_change_catalog_impacts {
+  organization_id              String          @db.Uuid
+  cause_sequence               BigInt
+  provider_platform_keys       String[]        @default([])
+  shared_configuration_key     String?
+  shared_configuration_revision Int?
+  shared_configuration_hash    String?
+  lifecycle_platform_key       String?
+  lifecycle_state              provider_state?
+  created_at                   DateTime        @default(now()) @db.Timestamptz(6)
+  organizations                organizations   @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_change_catalog_impacts_organization_fk")
+  public_change_causes          public_change_causes @relation(fields: [organization_id, cause_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "public_change_catalog_impacts_cause_fk")
+  lifecycle_provider            provider_sources? @relation("public_change_catalog_impacts_lifecycle_provider", fields: [organization_id, lifecycle_platform_key], references: [organization_id, platform_key], onUpdate: NoAction, map: "public_change_catalog_impacts_lifecycle_provider_fk")
+
+  @@id([organization_id, cause_sequence], map: "public_change_catalog_impacts_pkey")
+  @@index([organization_id, shared_configuration_hash, cause_sequence], map: "public_change_catalog_impacts_shared_epoch_idx")
+  @@index([organization_id, lifecycle_platform_key, cause_sequence], map: "public_change_catalog_impacts_lifecycle_idx")
+}
+
+/// Materialized provider-specific causal head. It never replaces the global Heat/audit watermark.
+/// Sequence and timestamp consistency constraints live in the migration.
+model provider_catalog_checkpoints {
+  organization_id      String           @db.Uuid
+  platform_key         String
+  settled_sequence     BigInt           @default(0)
+  source_head_sequence BigInt           @default(0)
+  settled_at           DateTime?        @db.Timestamptz(6)
+  source_head_at       DateTime?        @db.Timestamptz(6)
+  updated_at           DateTime         @default(now()) @db.Timestamptz(6)
+  organizations        organizations    @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "provider_catalog_checkpoints_organization_fk")
+  provider_sources     provider_sources @relation("provider_catalog_checkpoints_provider", fields: [organization_id, platform_key], references: [organization_id, platform_key], onUpdate: NoAction, map: "provider_catalog_checkpoints_provider_fk")
+
+  @@id([organization_id, platform_key], map: "provider_catalog_checkpoints_pkey")
+}
+
+/// Independent causal head for approved shared epochs and provider lifecycle decisions.
+/// This lane makes removal manifest-eligible without minting a removed-provider release.
+model catalog_manifest_lifecycle_checkpoints {
+  organization_id      String        @id @db.Uuid
+  settled_sequence     BigInt        @default(0)
+  source_head_sequence BigInt        @default(0)
+  settled_at           DateTime?     @db.Timestamptz(6)
+  source_head_at       DateTime?     @db.Timestamptz(6)
+  updated_at           DateTime      @default(now()) @db.Timestamptz(6)
+  organizations        organizations @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "catalog_manifest_lifecycle_checkpoints_organization_fk")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -490,6 +540,9 @@ model organizations {
   normalized_heat_window_checkpoints     normalized_heat_window_checkpoints?
   approved_public_catalog_configurations approved_public_catalog_configurations[]
   promotion_lanes                        promotion_lanes[]
+  public_change_catalog_impacts          public_change_catalog_impacts[]
+  provider_catalog_checkpoints           provider_catalog_checkpoints[]
+  catalog_manifest_lifecycle_checkpoints catalog_manifest_lifecycle_checkpoints?
 }
 
 /// Governed, immutable bridge from private canonical identity to stable public identity.
@@ -853,6 +906,8 @@ model provider_sources {
   quarantine_records_quarantine_records_provider_idToprovider_sources                                                   quarantine_records[]                  @relation("quarantine_records_provider_idToprovider_sources")
   quarantine_records_quarantine_records_provider_id_organization_idToprovider_sources                                   quarantine_records[]                  @relation("quarantine_records_provider_id_organization_idToprovider_sources")
   source_records                                                                                                        source_records[]
+  public_change_catalog_impacts                                                                                         public_change_catalog_impacts[] @relation("public_change_catalog_impacts_lifecycle_provider")
+  provider_catalog_checkpoints                                                                                          provider_catalog_checkpoints[] @relation("provider_catalog_checkpoints_provider")
 
   @@unique([id, organization_id], map: "provider_sources_id_organization_unique")
   @@unique([organization_id, platform_key], map: "provider_sources_organization_platform_unique")

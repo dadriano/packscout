@@ -90,38 +90,48 @@ test("promotion diagnostics and recovery isolate two deployments in one organiza
         { id: otherOrganizationId, slug: "promotion-other", name: "Promotion Other" },
       ],
     });
-    await harness.client.settled_public_watermarks.create({
-      data: {
-        organization_id: organizationId,
-        next_sequence: 3n,
-        settled_sequence: 1n,
-        source_head_sequence: 2n,
-        settled_at: new Date("2026-08-15T11:59:00.000Z"),
-        source_head_at: new Date("2026-08-15T11:59:30.000Z"),
-      },
-    });
-    await harness.client.public_change_causes.createMany({
-      data: [1n, 2n].map((sequence) => ({
-        organization_id: organizationId,
-        sequence,
-        change_kind: "provider_projection" as const,
-        entity_key: `canonical:v1:${sequence}`,
-        occurred_at: now,
-        authoritative_transaction_id: `test:${sequence}`,
-      })),
-    });
-    await harness.client.public_derivation_obligations.create({
-      data: {
-        organization_id: organizationId,
-        cause_sequence: 2n,
-        derivation_kind: "estimated_ev",
-        derivation_key: "ev:v1:blocked",
-        state: "technical_failure",
-        outcome_classification: "technical_failure",
-        outcome_reason_code: "CALCULATION_TIMEOUT",
-        acknowledged_claim_token: "53000000-0000-4000-8000-000000000004",
-        outcome_at: now,
-      },
+    await harness.client.$transaction(async (transaction) => {
+      await transaction.settled_public_watermarks.create({
+        data: {
+          organization_id: organizationId,
+          next_sequence: 3n,
+          settled_sequence: 1n,
+          source_head_sequence: 2n,
+          settled_at: new Date("2026-08-15T11:59:00.000Z"),
+          source_head_at: new Date("2026-08-15T11:59:30.000Z"),
+        },
+      });
+      await transaction.public_change_causes.createMany({
+        data: [1n, 2n].map((sequence) => ({
+          organization_id: organizationId,
+          sequence,
+          change_kind: "provider_projection" as const,
+          entity_key: `canonical:v1:${sequence}`,
+          occurred_at: now,
+          authoritative_transaction_id: `test:${sequence}`,
+        })),
+      });
+      await transaction.public_change_catalog_impacts.createMany({
+        data: [1n, 2n].map((sequence) => ({
+          organization_id: organizationId,
+          cause_sequence: sequence,
+          provider_platform_keys: [],
+          created_at: now,
+        })),
+      });
+      await transaction.public_derivation_obligations.create({
+        data: {
+          organization_id: organizationId,
+          cause_sequence: 2n,
+          derivation_kind: "estimated_ev",
+          derivation_key: "ev:v1:blocked",
+          state: "technical_failure",
+          outcome_classification: "technical_failure",
+          outcome_reason_code: "CALCULATION_TIMEOUT",
+          acknowledged_claim_token: "53000000-0000-4000-8000-000000000004",
+          outcome_at: now,
+        },
+      });
     });
     await harness.client.promotion_lanes.createMany({
       data: [

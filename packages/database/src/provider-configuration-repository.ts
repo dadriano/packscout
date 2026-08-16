@@ -517,6 +517,14 @@ export class PrismaProviderConfigurationRepository {
               configurationRevisionId: current.revision.id,
             },
             occurredAt: input.activatedAt,
+            catalogImpact: {
+              kind: "catalog",
+              providerPlatformKeys: [current.provider.platformKey],
+              manifestLifecycle: {
+                platformKey: current.provider.platformKey,
+                state: "active",
+              },
+            },
           }],
         });
         await advanceSettledPublicWatermark(transaction, {
@@ -600,6 +608,14 @@ export class PrismaProviderConfigurationRepository {
             configurationRevisionId: current.provider.activeRevisionId,
           },
           occurredAt: input.changedAt,
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: [],
+            manifestLifecycle: {
+              platformKey: current.provider.platformKey,
+              state: input.targetState,
+            },
+          },
         }],
       });
       await advanceSettledPublicWatermark(transaction, {

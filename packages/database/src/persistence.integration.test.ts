@@ -241,6 +241,29 @@ test("production page commits reject a worker without the active run lease", asy
   }
 });
 
+test("catalog impacts bind projections to the persisted provider platform", async () => {
+  const harness = await createPipelineHarness();
+  try {
+    const page = initialPage();
+    page.records = page.records.map((record) => ({
+      ...record,
+      projections: record.projections.map((projection) => ({
+        ...projection,
+        platformKey: "caller-selected-platform",
+      })),
+    }));
+    await assert.rejects(
+      harness.ingestion.commitPage(page),
+      /provider scope is invalid/,
+    );
+    assert.equal(await harness.database.import_pages.count(), 0);
+    assert.equal(await harness.database.public_change_causes.count(), 0);
+    assert.equal(await harness.database.public_change_catalog_impacts.count(), 0);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("unchanged replay is a no-op while changed content advances one current revision", async () => {
   const harness = await createPipelineHarness();
   try {
@@ -264,6 +287,24 @@ test("unchanged replay is a no-op while changed content advances one current rev
         },
       }),
       3,
+    );
+    const revisionImpacts = await harness.database
+      .public_change_catalog_impacts.findMany({
+        where: {
+          organization_id: ids.organization,
+          cause_sequence: {
+            in: firstCanonicalRevisions.map(
+              ({ public_change_sequence }) => public_change_sequence,
+            ),
+          },
+        },
+        select: { provider_platform_keys: true },
+      });
+    assert.deepEqual(
+      revisionImpacts
+        .map(({ provider_platform_keys }) => provider_platform_keys)
+        .sort((left, right) => left.length - right.length),
+      [[], ["beezie"], ["beezie"]],
     );
     await addRun(harness.setup, ids.secondRun);
     const replay = await harness.ingestion.commitPage(
@@ -696,6 +737,16 @@ test("a replay that adds a relationship after settlement receives a fresh causal
         },
       });
     assert.equal(relationshipCause.change_kind, "relationship_resolution");
+    const relationshipImpact = await harness.database
+      .public_change_catalog_impacts.findUniqueOrThrow({
+        where: {
+          organization_id_cause_sequence: {
+            organization_id: ids.organization,
+            cause_sequence: relationship.created_public_change_sequence,
+          },
+        },
+      });
+    assert.deepEqual(relationshipImpact.provider_platform_keys, ["beezie"]);
     const settledAfterReplay =
       await harness.database.settled_public_watermarks.findUniqueOrThrow({
         where: { organization_id: ids.organization },

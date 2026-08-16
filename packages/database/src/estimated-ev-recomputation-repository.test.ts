@@ -69,6 +69,10 @@ test("EV workers claim disjoint work, recover leases, and reject stale acknowled
           sourceRevisionKey: requestIdentity.packExternalId,
           metadata: {},
           occurredAt: availableAt,
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: [requestIdentity.platformKey],
+          },
         })),
       });
       await transaction.estimated_ev_recomputation_requests.createMany({

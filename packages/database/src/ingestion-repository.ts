@@ -3,6 +3,7 @@ import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   type PackscoutPrismaClient,
   type PackscoutQueryClient,
+  type PackscoutTransactionClient,
 } from "./database.ts";
 import {
   completeEstimatedEvRecomputation,
@@ -31,6 +32,7 @@ import { hashJson } from "./security.ts";
 import {
   advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
+  canonicalCatalogPlatformKeys,
   createPublicDerivationObligations,
   relationshipPublicEntityKey,
 } from "./public-change-settlement-repository.ts";
@@ -621,25 +623,30 @@ export class IngestionPersistenceRepository {
       const unresolved = await transaction.$queryRaw<Array<{
         id: string;
         sourceEntityId: string;
+        sourcePlatformKey: string;
         relationshipKind: string;
         targetPlatformKey: string;
         targetRecordKind: CanonicalIdentity["recordKind"];
         targetExternalId: string;
       }>>(Prisma.sql`
-        select id,
-               source_entity_id as "sourceEntityId",
-               relationship_kind as "relationshipKind",
-               target_platform_key as "targetPlatformKey",
-               target_record_kind::text as "targetRecordKind",
-               target_external_id as "targetExternalId"
-        from public.canonical_relationships
-        where organization_id = ${uuid(input.organizationId)}
-          and target_platform_key = ${input.target.platformKey}
-          and target_record_kind = cast(${input.target.recordKind} as public.canonical_record_kind)
-          and target_external_id = ${input.target.externalId}
-          and target_entity_id is null
-        order by id
-        for update
+        select relationship.id,
+               relationship.source_entity_id as "sourceEntityId",
+               source_entity.platform_key as "sourcePlatformKey",
+               relationship.relationship_kind as "relationshipKind",
+               relationship.target_platform_key as "targetPlatformKey",
+               relationship.target_record_kind::text as "targetRecordKind",
+               relationship.target_external_id as "targetExternalId"
+        from public.canonical_relationships as relationship
+        join public.canonical_entities as source_entity
+          on source_entity.id = relationship.source_entity_id
+         and source_entity.organization_id = relationship.organization_id
+        where relationship.organization_id = ${uuid(input.organizationId)}
+          and relationship.target_platform_key = ${input.target.platformKey}
+          and relationship.target_record_kind = cast(${input.target.recordKind} as public.canonical_record_kind)
+          and relationship.target_external_id = ${input.target.externalId}
+          and relationship.target_entity_id is null
+        order by relationship.id
+        for update of relationship
       `);
       const causes = await allocatePublicChangeCauses(transaction, {
         organizationId: input.organizationId,
@@ -649,6 +656,13 @@ export class IngestionPersistenceRepository {
           sourceKey: input.target.platformKey,
           metadata: { relationshipState: "resolved" },
           occurredAt: input.resolvedAt,
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: canonicalCatalogPlatformKeys([
+              relationship.sourcePlatformKey,
+              relationship.targetPlatformKey,
+            ]),
+          },
         })),
       });
       const rows = unresolved.map((relationship, index) => {
@@ -729,7 +743,7 @@ export class IngestionPersistenceRepository {
   }
 
   private async enqueueEstimatedEvRecomputations(
-    database: PackscoutQueryClient,
+    database: PackscoutTransactionClient,
     input: {
       organizationId: string;
       providerId: string;

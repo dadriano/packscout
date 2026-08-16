@@ -20,6 +20,7 @@ function changes(count: number, occurredAt: Date, prefix: string) {
     sourceRevisionKey: `${index}`,
     metadata: { index },
     occurredAt,
+    catalogImpact: { kind: "none" } as const,
   }));
 }
 
@@ -87,10 +88,11 @@ test("causes roll back with their authoritative write and settlement never skips
       1,
     );
 
-    const blocked = await advanceSettledPublicWatermark(harness.client, {
-      organizationId: firstOrganizationId,
-      settledAt: new Date("2026-08-15T01:01:01.000Z"),
-    });
+    const blocked = await harness.client.$transaction((transaction) =>
+      advanceSettledPublicWatermark(transaction, {
+        organizationId: firstOrganizationId,
+        settledAt: new Date("2026-08-15T01:01:01.000Z"),
+      }));
     assert.equal(blocked.settledSequence, 1n);
     assert.equal(blocked.sourceHeadSequence, 3n);
 
@@ -109,15 +111,17 @@ test("causes roll back with their authoritative write and settlement never skips
         updated_at: completedAt,
       },
     });
-    const settled = await advanceSettledPublicWatermark(harness.client, {
-      organizationId: firstOrganizationId,
-      settledAt: completedAt,
-    });
+    const settled = await harness.client.$transaction((transaction) =>
+      advanceSettledPublicWatermark(transaction, {
+        organizationId: firstOrganizationId,
+        settledAt: completedAt,
+      }));
     assert.equal(settled.settledSequence, 3n);
-    const stale = await advanceSettledPublicWatermark(harness.client, {
-      organizationId: firstOrganizationId,
-      settledAt: new Date("2026-08-15T01:00:00.000Z"),
-    });
+    const stale = await harness.client.$transaction((transaction) =>
+      advanceSettledPublicWatermark(transaction, {
+        organizationId: firstOrganizationId,
+        settledAt: new Date("2026-08-15T01:00:00.000Z"),
+      }));
     assert.equal(stale.settledSequence, 3n);
     assert.equal(stale.settledAt?.toISOString(), completedAt.toISOString());
 

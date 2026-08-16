@@ -4,7 +4,7 @@
 
 Open `postgres-convex-promotion/007` and define the provider-impact outcome for one platform-specific cause, one cross-platform cause, and one manifest-lifecycle cause before changing any release or publication contract.
 
-**Progress:** 6/14 tasks complete
+**Progress:** 7/14 tasks complete
 
 ## Context
 
@@ -95,7 +95,7 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
-| 007 | Establish provider-impact catalog settlement | large | 2–4 days | not started | 001 |
+| 007 | Establish provider-impact catalog settlement | large | 2–4 days | done | 001 |
 | 008 | Assemble deterministic provider releases | large | 2–4 days | not started | 007 |
 | 009 | Complete provider releases without public activation | large | 3–5 days | not started | 008 |
 | 010 | Compose and atomically activate catalog manifests | large | 3–5 days | not started | 009 |
@@ -155,4 +155,4 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 
 ## Next Action
 
-Open `007-establish-provider-impact-catalog-settlement.md` and write the first failing persistence scenario for two providers where one technical derivation failure does not block the other's catalog checkpoint.
+Open `008-assemble-deterministic-provider-releases.md` and define the provider-only immutable content identity plus same-epoch reuse proof before adding publication transport.
