@@ -4,7 +4,7 @@
 
 Open `postgres-convex-promotion/007` and define the provider-impact outcome for one platform-specific cause, one cross-platform cause, and one manifest-lifecycle cause before changing any release or publication contract.
 
-**Progress:** 8/14 tasks complete
+**Progress:** 9/14 tasks complete
 
 ## Context
 
@@ -97,7 +97,7 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 |---|---|---|---|---|---|
 | 007 | Establish provider-impact catalog settlement | large | 2–4 days | done | 001 |
 | 008 | Assemble deterministic provider releases | large | 2–4 days | done | 007 |
-| 009 | Complete provider releases without public activation | large | 3–5 days | not started | 008 |
+| 009 | Complete provider releases without public activation | large | 3–5 days | done | 008 |
 | 010 | Compose and atomically activate catalog manifests | large | 3–5 days | not started | 009 |
 
 ## Provider-Manifest Operations Tasks
@@ -155,4 +155,4 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 
 ## Next Action
 
-Open `009-complete-provider-releases-without-public-activation.md` and define the invisible provider-release completion protocol, exact receipt proof, and monotonic reuse confirmation before adding manifest activation.
+Open `010-compose-and-atomically-activate-catalog-manifests.md` and compose one same-epoch provider-release vector behind an atomic active-manifest compare-and-swap while preserving the public V2 contract.

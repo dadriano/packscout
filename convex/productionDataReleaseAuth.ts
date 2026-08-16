@@ -13,6 +13,8 @@ import {
   PRODUCTION_AUTH_TIMESTAMP_PATTERN,
   PRODUCTION_AUTH_WINDOW_MILLISECONDS,
   decodeProductionAuthSecretBase64,
+  providerReleaseErrorCodeSchema,
+  providerReleaseReceiptDigest,
   productionDataReleaseErrorCodeSchema,
   productionPublicationPathSchema,
   productionPublicationReceiptSigningValue,
@@ -23,6 +25,7 @@ import {
   env,
   internalMutation,
   type ActionCtx,
+  type MutationCtx,
 } from "./_generated/server";
 import { sha256CanonicalJson } from "./dataReleaseCanonicalHash";
 import {
@@ -31,14 +34,30 @@ import {
   type ProductionDataReleaseErrorCode,
 } from "./productionDataReleaseErrors";
 import {
+  refuseProviderRelease,
+  safeProviderReleaseMessage,
+  type ProviderReleaseErrorCode,
+} from "./providerReleaseErrors";
+import {
   MAX_PRODUCTION_HTTP_BODY_BYTES,
   productionReceiptHash,
 } from "./productionDataReleaseProtocol";
 
-type ExecutionReference = FunctionReference<
+type LegacyExecutionReference = FunctionReference<
   "mutation",
   "internal",
   { bodyJson: string; requestDigest: string },
+  unknown
+>;
+
+type ProviderExecutionReference = FunctionReference<
+  "mutation",
+  "internal",
+  {
+    bodyJson: string;
+    requestDigest: string;
+    authenticatedKeyId: string;
+  },
   unknown
 >;
 
@@ -51,11 +70,29 @@ type AuthenticatedRequest = Readonly<{
 
 class HttpRefusal extends Error {
   constructor(
-    readonly code: ProductionDataReleaseErrorCode,
+    readonly code: PublicationErrorCode,
     readonly status: number,
   ) {
     super(code);
   }
+}
+
+type PublicationErrorCode =
+  | ProductionDataReleaseErrorCode
+  | ProviderReleaseErrorCode;
+type PublicationSurface = "legacy" | "provider";
+
+function surfaceCode(
+  surface: PublicationSurface,
+  legacyCode: ProductionDataReleaseErrorCode,
+): PublicationErrorCode {
+  if (surface === "legacy") return legacyCode;
+  const providerCode = legacyCode.replace(
+    /^PUBLICATION_/u,
+    "PROVIDER_RELEASE_",
+  );
+  const parsed = providerReleaseErrorCodeSchema.safeParse(providerCode);
+  return parsed.success ? parsed.data : "PROVIDER_RELEASE_INTERNAL_ERROR";
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -97,6 +134,7 @@ function configuredKeySecret(keyId: string): Uint8Array | null {
     ) {
       return null;
     }
+    if (!Object.prototype.hasOwnProperty.call(parsed, keyId)) return null;
     const encoded = (parsed as Record<string, unknown>)[keyId];
     if (typeof encoded !== "string") return null;
     const secret = decodeProductionAuthSecretBase64(encoded);
@@ -122,6 +160,7 @@ async function hmacKey(secret: Uint8Array): Promise<CryptoKey> {
 async function authenticateRequest(
   ctx: ActionCtx,
   request: Request,
+  surface: PublicationSurface,
 ): Promise<AuthenticatedRequest> {
   const version = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.signatureVersion);
   const keyId = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.keyId);
@@ -137,22 +176,22 @@ async function authenticateRequest(
     declaredDigest === null ||
     signature === null
   ) {
-    throw new HttpRefusal("PUBLICATION_AUTH_MISSING", 401);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_MISSING"), 401);
   }
   const contentLength = request.headers.get("content-length");
   if (
     contentLength !== null &&
     Number.parseInt(contentLength, 10) > MAX_PRODUCTION_HTTP_BODY_BYTES
   ) {
-    throw new HttpRefusal("PUBLICATION_BODY_TOO_LARGE", 413);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_BODY_TOO_LARGE"), 413);
   }
   const bodyBytes = new Uint8Array(await request.arrayBuffer());
   if (bodyBytes.byteLength > MAX_PRODUCTION_HTTP_BODY_BYTES) {
-    throw new HttpRefusal("PUBLICATION_BODY_TOO_LARGE", 413);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_BODY_TOO_LARGE"), 413);
   }
   const secret = configuredKeySecret(keyId);
   if (secret === null) {
-    throw new HttpRefusal("PUBLICATION_AUTH_KEY_UNKNOWN", 401);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_KEY_UNKNOWN"), 401);
   }
   const timestampMilliseconds = Number(timestamp);
   if (
@@ -161,10 +200,10 @@ async function authenticateRequest(
     !Number.isSafeInteger(timestampMilliseconds) ||
     Math.abs(Date.now() - timestampMilliseconds) > PRODUCTION_AUTH_WINDOW_MILLISECONDS
   ) {
-    throw new HttpRefusal("PUBLICATION_AUTH_STALE", 401);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_STALE"), 401);
   }
   if (!PRODUCTION_AUTH_NONCE_PATTERN.test(nonce)) {
-    throw new HttpRefusal("PUBLICATION_AUTH_INVALID", 401);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_INVALID"), 401);
   }
   const bodyDigest = await sha256Bytes(bodyBytes);
   const signatureBytes = hexToBytes(signature);
@@ -172,14 +211,14 @@ async function authenticateRequest(
     bodyDigest !== declaredDigest ||
     signatureBytes === null
   ) {
-    throw new HttpRefusal("PUBLICATION_AUTH_INVALID", 401);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_INVALID"), 401);
   }
   const key = await hmacKey(secret);
   const path = productionPublicationPathSchema.safeParse(
     new URL(request.url).pathname,
   );
   if (request.method.toUpperCase() !== "POST" || !path.success) {
-    throw new HttpRefusal("PUBLICATION_AUTH_INVALID", 401);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_INVALID"), 401);
   }
   const signedValue = productionPublicationRequestSigningValue({
     method: "POST",
@@ -195,59 +234,97 @@ async function authenticateRequest(
     new TextEncoder().encode(signedValue),
   );
   if (!valid) {
-    throw new HttpRefusal("PUBLICATION_AUTH_INVALID", 401);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_INVALID"), 401);
   }
   const nonceHash = await sha256CanonicalJson(
     PRODUCTION_AUTH_NONCE_HASH_DOMAIN,
     { keyId, nonce },
   );
-  await ctx.runMutation(internal.productionDataReleaseAuth.consumeNonce, {
+  await ctx.runMutation(
+    surface === "provider"
+      ? internal.productionDataReleaseAuth.consumeProviderNonce
+      : internal.productionDataReleaseAuth.consumeNonce,
+    {
     keyId,
     nonceHash,
     requestDigest: bodyDigest,
     expiresAt: new Date(
       Date.now() + PRODUCTION_AUTH_NONCE_RETENTION_MILLISECONDS,
     ).toISOString(),
-  });
+    },
+  );
   let bodyJson: string;
   try {
     bodyJson = new TextDecoder("utf-8", { fatal: true }).decode(bodyBytes);
   } catch {
-    throw new HttpRefusal("PUBLICATION_REQUEST_INVALID", 400);
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_REQUEST_INVALID"), 400);
   }
   return { bodyJson, bodyDigest, keyId, key };
 }
 
-function errorStatus(code: ProductionDataReleaseErrorCode): number {
-  if (code === "PUBLICATION_INTERNAL_ERROR") return 500;
-  if (code === "PUBLICATION_BODY_TOO_LARGE") return 413;
-  if (code.startsWith("PUBLICATION_AUTH_")) return 401;
+function errorStatus(code: PublicationErrorCode): number {
+  if (code.endsWith("_INTERNAL_ERROR")) return 500;
+  if (code.endsWith("_BODY_TOO_LARGE")) return 413;
+  if (code.includes("_AUTH_")) return 401;
   if (
-    code === "PUBLICATION_REQUEST_INVALID" ||
-    code === "PUBLICATION_SCHEMA_UNSUPPORTED" ||
-    code === "PUBLICATION_PROTECTED_FIELD" ||
-    code === "PUBLICATION_ENTITY_INVALID" ||
-    code === "PUBLICATION_REFERENCE_INVALID"
+    code.endsWith("_REQUEST_INVALID") ||
+    code.endsWith("_SCHEMA_UNSUPPORTED") ||
+    code.endsWith("_PROTECTED_FIELD") ||
+    code.endsWith("_ENTITY_INVALID") ||
+    code.endsWith("_REFERENCE_INVALID")
   ) {
     return 400;
   }
   return 409;
 }
 
-function errorCode(error: unknown): ProductionDataReleaseErrorCode | null {
+function errorCode(error: unknown): PublicationErrorCode | null {
   if (error instanceof HttpRefusal) return error.code;
   if (!(error instanceof ConvexError)) return null;
   const data = error.data as { code?: unknown };
   const parsed = productionDataReleaseErrorCodeSchema.safeParse(data.code);
-  return parsed.success ? parsed.data : null;
+  if (parsed.success) return parsed.data;
+  const provider = providerReleaseErrorCodeSchema.safeParse(data.code);
+  return provider.success ? provider.data : null;
 }
 
 async function signReceipt(
   key: CryptoKey,
   keyId: string,
   receipt: unknown,
+  surface: PublicationSurface,
 ): Promise<Record<string, unknown>> {
-  const receiptDigest = await productionReceiptHash(receipt);
+  const providerDigestField = typeof receipt === "object" &&
+      receipt !== null &&
+      "receiptDigest" in receipt
+    ? receipt.receiptDigest
+    : undefined;
+  if (
+    surface === "provider" &&
+    (providerDigestField === undefined ||
+      (providerDigestField !== null &&
+        typeof providerDigestField !== "string"))
+  ) {
+    refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT");
+  }
+  const storedProviderDigest = typeof providerDigestField === "string"
+    ? providerDigestField
+    : null;
+  const computedProviderDigest = surface === "provider"
+    ? await providerReleaseReceiptDigest(receipt)
+    : null;
+  if (surface === "provider") {
+    if (
+      storedProviderDigest !== null &&
+      storedProviderDigest !== computedProviderDigest
+    ) {
+      refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT");
+    }
+  }
+  const receiptDigest = surface === "provider"
+    ? computedProviderDigest ??
+      refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT")
+    : await productionReceiptHash(receipt);
   const signature = bytesToHex(
     new Uint8Array(
       await crypto.subtle.sign(
@@ -281,30 +358,41 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-export async function handleAuthenticatedPublicationRequest(
+async function handleAuthenticatedRequest(
   ctx: ActionCtx,
   request: Request,
-  operation: ExecutionReference,
+  operation: LegacyExecutionReference | ProviderExecutionReference,
+  surface: PublicationSurface,
 ): Promise<Response> {
   try {
-    const authenticated = await authenticateRequest(ctx, request);
-    const receipt = await ctx.runMutation(operation, {
-      bodyJson: authenticated.bodyJson,
-      requestDigest: authenticated.bodyDigest,
-    });
+    const authenticated = await authenticateRequest(ctx, request, surface);
+    const receipt = surface === "provider"
+      ? await ctx.runMutation(operation as ProviderExecutionReference, {
+        bodyJson: authenticated.bodyJson,
+        requestDigest: authenticated.bodyDigest,
+        authenticatedKeyId: authenticated.keyId,
+      })
+      : await ctx.runMutation(operation as LegacyExecutionReference, {
+        bodyJson: authenticated.bodyJson,
+        requestDigest: authenticated.bodyDigest,
+      });
     return jsonResponse(
       await signReceipt(
         authenticated.key,
         authenticated.keyId,
         receipt,
+        surface,
       ),
       200,
     );
   } catch (error) {
     const code = errorCode(error);
     if (code === null) {
+      const internalCode = surface === "provider"
+        ? "PROVIDER_RELEASE_INTERNAL_ERROR"
+        : "PUBLICATION_INTERNAL_ERROR";
       return jsonResponse(
-        { error: "The publication request failed safely.", code: "PUBLICATION_INTERNAL_ERROR" },
+        { error: "The publication request failed safely.", code: internalCode },
         500,
       );
     }
@@ -312,46 +400,94 @@ export async function handleAuthenticatedPublicationRequest(
       ? error.status
       : errorStatus(code);
     return jsonResponse(
-      { error: safeProductionDataReleaseMessage(code), code },
+      {
+        error: providerReleaseErrorCodeSchema.safeParse(code).success
+          ? safeProviderReleaseMessage(code as ProviderReleaseErrorCode)
+          : safeProductionDataReleaseMessage(code as ProductionDataReleaseErrorCode),
+        code,
+      },
       status,
     );
   }
 }
 
-export const consumeNonce = internalMutation({
+export function handleAuthenticatedPublicationRequest(
+  ctx: ActionCtx,
+  request: Request,
+  operation: LegacyExecutionReference,
+): Promise<Response> {
+  return handleAuthenticatedRequest(ctx, request, operation, "legacy");
+}
+
+export function handleAuthenticatedProviderReleaseRequest(
+  ctx: ActionCtx,
+  request: Request,
+  operation: ProviderExecutionReference,
+): Promise<Response> {
+  return handleAuthenticatedRequest(ctx, request, operation, "provider");
+}
+
+const NONCE_ARGS = {
+  keyId: v.string(),
+  nonceHash: v.string(),
+  requestDigest: v.string(),
+  expiresAt: v.string(),
+} as const;
+
+async function consumeNonceForSurface(
+  ctx: MutationCtx,
   args: {
-    keyId: v.string(),
-    nonceHash: v.string(),
-    requestDigest: v.string(),
-    expiresAt: v.string(),
+    keyId: string;
+    nonceHash: string;
+    requestDigest: string;
+    expiresAt: string;
   },
+  surface: PublicationSurface,
+): Promise<null> {
+  const refuse = (code: ProductionDataReleaseErrorCode): never => {
+    if (surface === "provider") {
+      refuseProviderRelease(
+        surfaceCode(surface, code) as ProviderReleaseErrorCode,
+      );
+    }
+    return refuseProductionDataRelease(code);
+  };
+  if (
+    !PRODUCTION_AUTH_KEY_ID_PATTERN.test(args.keyId) ||
+    !PRODUCTION_AUTH_SHA256_PATTERN.test(args.nonceHash) ||
+    !PRODUCTION_AUTH_SHA256_PATTERN.test(args.requestDigest) ||
+    !Number.isFinite(Date.parse(args.expiresAt))
+  ) {
+    refuse("PUBLICATION_AUTH_INVALID");
+  }
+  const matches = await ctx.db
+    .query("dataReleaseAuthNonces")
+    .withIndex("by_key_id_and_nonce_hash", (index) =>
+      index.eq("keyId", args.keyId).eq("nonceHash", args.nonceHash),
+    )
+    .take(2);
+  if (matches.length !== 0) {
+    refuse("PUBLICATION_AUTH_REPLAYED");
+  }
+  const now = new Date().toISOString();
+  await ctx.db.insert("dataReleaseAuthNonces", {
+    keyId: args.keyId,
+    nonceHash: args.nonceHash,
+    requestDigest: args.requestDigest,
+    acceptedAt: now,
+    expiresAt: args.expiresAt,
+  });
+  return null;
+}
+
+export const consumeNonce = internalMutation({
+  args: NONCE_ARGS,
   returns: v.null(),
-  handler: async (ctx, args) => {
-    if (
-      !PRODUCTION_AUTH_KEY_ID_PATTERN.test(args.keyId) ||
-      !PRODUCTION_AUTH_SHA256_PATTERN.test(args.nonceHash) ||
-      !PRODUCTION_AUTH_SHA256_PATTERN.test(args.requestDigest) ||
-      !Number.isFinite(Date.parse(args.expiresAt))
-    ) {
-      refuseProductionDataRelease("PUBLICATION_AUTH_INVALID");
-    }
-    const matches = await ctx.db
-      .query("dataReleaseAuthNonces")
-      .withIndex("by_key_id_and_nonce_hash", (index) =>
-        index.eq("keyId", args.keyId).eq("nonceHash", args.nonceHash),
-      )
-      .take(2);
-    if (matches.length !== 0) {
-      refuseProductionDataRelease("PUBLICATION_AUTH_REPLAYED");
-    }
-    const now = new Date().toISOString();
-    await ctx.db.insert("dataReleaseAuthNonces", {
-      keyId: args.keyId,
-      nonceHash: args.nonceHash,
-      requestDigest: args.requestDigest,
-      acceptedAt: now,
-      expiresAt: args.expiresAt,
-    });
-    return null;
-  },
+  handler: (ctx, args) => consumeNonceForSurface(ctx, args, "legacy"),
+});
+
+export const consumeProviderNonce = internalMutation({
+  args: NONCE_ARGS,
+  returns: v.null(),
+  handler: (ctx, args) => consumeNonceForSurface(ctx, args, "provider"),
 });

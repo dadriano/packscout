@@ -48,6 +48,7 @@ into evidence, or commit their values.
 | `PACKSCOUT_HEAT_RETENTION_BATCH_SIZE` | Optional; default `500`, allowed `1` through `1000`. |
 | `PACKSCOUT_HEAT_RETENTION_MAX_BATCHES_PER_CYCLE` | Optional; default `4`, allowed `1` through `20`. |
 | `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` | Required in Convex. A strict JSON object mapping each versioned key ID to the same canonical-base64 secret configured on its worker. Unknown keys, malformed JSON, arrays, noncanonical base64, and decoded values outside 32 through 256 bytes fail closed. |
+| `PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS` | Required in Convex for provider-release publication. A strict JSON object maps each provider publisher key ID to exactly one canonical `platformKey`. The authenticated key ID must match the request platform; the map is server-side authority, contains no secrets, and is never returned. Legacy catalog and Heat keys need an entry only if they also publish provider releases. |
 | `PACKSCOUT_DATA_RELEASE_CLEAR_ENABLED` | Must be absent in normal operation. Set to `1` only for an approved emergency clear and remove immediately afterward. |
 
 The Heat scheduler runs at exact UTC minute boundaries and intentionally has no
@@ -177,7 +178,9 @@ Signing rotation uses an overlap; it never changes an existing operation body.
    secret manager.
 2. Add the new key ID and canonical-base64 value to the strict
    `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` JSON map while retaining the old
-   entry. Deploy Convex first.
+   entry. For a provider publisher, also add the new key ID with the same
+   platform binding to `PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS`; never change
+   a key ID's existing platform. Deploy Convex first.
 3. Verify the old worker can still authenticate, then switch
    `PACKSCOUT_CONVEX_PUBLICATION_KEY_ID` and
    `PACKSCOUT_CONVEX_PUBLICATION_SECRET_BASE64` together and restart safely.
@@ -185,7 +188,8 @@ Signing rotation uses an overlap; it never changes an existing operation body.
    the new key. Evidence records the key ID and result, never the map or secret.
 5. Keep both entries through all in-flight retries and at least the five-minute
    request window plus the ten-minute nonce-retention window. Remove the old
-   entry only after the ledger has no operation that can retry with it.
+   entry from both maps only after the ledger has no operation that can retry
+   with it.
 
 An unknown-key alert during overlap means deployment ordering is wrong. Restore
 the old worker key or re-add the old Convex map entry; do not disable signing.

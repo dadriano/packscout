@@ -1,11 +1,15 @@
 import { httpRouter } from "convex/server";
 import {
   PRODUCTION_DATA_RELEASE_PATHS,
+  PRODUCTION_PROVIDER_RELEASE_PATHS,
   PRODUCTION_REPACK_HEAT_PATHS,
 } from "@packscout/contracts";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
-import { handleAuthenticatedPublicationRequest } from "./productionDataReleaseAuth";
+import {
+  handleAuthenticatedProviderReleaseRequest,
+  handleAuthenticatedPublicationRequest,
+} from "./productionDataReleaseAuth";
 
 const http = httpRouter();
 
@@ -22,6 +26,102 @@ http.route({
 });
 
 http.route({
+  path: PRODUCTION_PROVIDER_RELEASE_PATHS.completedHead,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedProviderReleaseRequest(
+      ctx,
+      request,
+      internal.providerReleaseRead.completedHead,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PROVIDER_RELEASE_PATHS.start,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedProviderReleaseRequest(
+      ctx,
+      request,
+      internal.providerReleaseStart.start,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PROVIDER_RELEASE_PATHS.applyBatch,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedProviderReleaseRequest(
+      ctx,
+      request,
+      internal.providerReleaseBatch.applyBatch,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PROVIDER_RELEASE_PATHS.finalize,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedProviderReleaseRequest(
+      ctx,
+      request,
+      internal.providerReleaseFinalize.finalize,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PROVIDER_RELEASE_PATHS.status,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedProviderReleaseRequest(
+      ctx,
+      request,
+      internal.providerReleaseRead.status,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PROVIDER_RELEASE_PATHS.confirmReuse,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedProviderReleaseRequest(
+      ctx,
+      request,
+      internal.providerReleaseFinalize.confirmReuse,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PROVIDER_RELEASE_PATHS.block,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedProviderReleaseRequest(
+      ctx,
+      request,
+      internal.providerReleaseBlock.block,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PROVIDER_RELEASE_PATHS.cleanup,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedProviderReleaseRequest(
+      ctx,
+      request,
+      internal.providerReleaseCleanup.cleanup,
+    ),
+  ),
+});
+
+http.route({
   path: PRODUCTION_REPACK_HEAT_PATHS.activeState,
   method: "POST",
   handler: httpAction((ctx, request) =>
@@ -29,90 +129,6 @@ http.route({
       ctx,
       request,
       internal.productionHeatActiveState.activeState,
-    ),
-  ),
-});
-
-http.route({
-  path: PRODUCTION_DATA_RELEASE_PATHS.start,
-  method: "POST",
-  handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
-      ctx,
-      request,
-      internal.productionDataReleaseLifecycle.start,
-    ),
-  ),
-});
-
-http.route({
-  path: PRODUCTION_DATA_RELEASE_PATHS.applyBatch,
-  method: "POST",
-  handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
-      ctx,
-      request,
-      internal.productionDataReleaseBatch.applyBatch,
-    ),
-  ),
-});
-
-http.route({
-  path: PRODUCTION_DATA_RELEASE_PATHS.finalize,
-  method: "POST",
-  handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
-      ctx,
-      request,
-      internal.productionDataReleaseLifecycle.finalize,
-    ),
-  ),
-});
-
-http.route({
-  path: PRODUCTION_DATA_RELEASE_PATHS.status,
-  method: "POST",
-  handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
-      ctx,
-      request,
-      internal.productionDataReleaseLifecycle.status,
-    ),
-  ),
-});
-
-http.route({
-  path: PRODUCTION_DATA_RELEASE_PATHS.refreshObservation,
-  method: "POST",
-  handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
-      ctx,
-      request,
-      internal.productionDataReleaseLifecycle.refreshObservation,
-    ),
-  ),
-});
-
-http.route({
-  path: PRODUCTION_DATA_RELEASE_PATHS.rollback,
-  method: "POST",
-  handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
-      ctx,
-      request,
-      internal.productionDataReleaseRollback.rollback,
-    ),
-  ),
-});
-
-http.route({
-  path: PRODUCTION_DATA_RELEASE_PATHS.retain,
-  method: "POST",
-  handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
-      ctx,
-      request,
-      internal.productionDataReleaseRetention.retain,
     ),
   ),
 });

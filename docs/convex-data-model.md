@@ -320,6 +320,15 @@ adding the new key ID and base64 secret to the map, deploying workers with the
 new key ID, then removing the retired entry only after the authentication and
 nonce windows have elapsed.
 
+Provider-release publishing additionally requires
+`PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS`, a strict JSON object mapping each
+provider publisher key ID to exactly one canonical `platformKey`. Convex passes
+the authenticated key ID—not a caller-supplied authority field—to every
+provider-release mutation and rejects a request whose platform does not match
+that server-side binding. Multiple key IDs may temporarily map to the same
+platform during a key rotation. The binding map contains no secrets and is
+never returned in receipts or errors.
+
 ### Local simulation lifecycle
 
 The temporary simulator is deliberately outside Convex:

@@ -15,6 +15,7 @@ export default defineApp({
     PACKSCOUT_MOCK_HEAT_SIMULATION_ENABLED: v.optional(v.literal("1")),
     PACKSCOUT_PUBLIC_ORIGIN_SET_HASH: v.optional(v.string()),
     PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS: v.optional(v.string()),
+    PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS: v.optional(v.string()),
     PACKSCOUT_DATA_RELEASE_CLEAR_ENABLED: v.optional(v.literal("1")),
   },
 });
