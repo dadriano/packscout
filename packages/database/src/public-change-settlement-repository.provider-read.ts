@@ -31,7 +31,7 @@ export interface ProviderCatalogCheckpointRecord {
   readonly sharedConfigurationEpoch: SharedPublicConfigurationEpochRecord;
   readonly settledSequence: bigint;
   readonly sourceHeadSequence: bigint;
-  readonly settledAt: Date;
+  readonly settledAt: Date | null;
   readonly sourceHeadAt: Date;
   readonly blockedState: ProviderCatalogBlockedStateRecord;
 }
@@ -190,8 +190,8 @@ async function loadCheckpointRows(
     if (
       !row ||
       row.organizationId !== input.organizationId ||
-      row.settledAt === null ||
       row.sourceHeadAt === null ||
+      (row.settledSequence === 0n) !== (row.settledAt === null) ||
       row.sourceHeadSequence < input.epoch.publicChangeSequence
     ) {
       return null;

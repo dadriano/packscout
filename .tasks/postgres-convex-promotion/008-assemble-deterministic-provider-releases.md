@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/009, postgres-convex-promotion/011
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including deterministic rebuild and reuse verification
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -56,18 +56,24 @@ Shared reference projections may appear in more than one provider plan only when
 
 ### Determinism and isolation
 
-- [ ] Repeated assembly at one provider checkpoint produces byte-stable identity, hashes, counts, ordering, and batches.
-- [ ] Platform A assembly reads and emits no provider-owned row from platform B.
-- [ ] Full rebuild and change-triggered assembly at the same provider state produce identical public content.
-- [ ] Missing identity, unsettled derivation, incomplete backfill, invalid reference, unapproved origin/action, or protected field fails closed.
+- [x] Repeated assembly at one provider checkpoint produces byte-stable identity, hashes, counts, ordering, and batches.
+- [x] Platform A assembly reads and emits no provider-owned row from platform B.
+- [x] Full rebuild and change-triggered assembly at the same provider state produce identical public content.
+- [x] Missing identity, unsettled derivation, incomplete backfill, invalid reference, unapproved origin/action, or protected field fails closed.
 
 ### Reuse and compatibility
 
-- [ ] Same-epoch unchanged content returns `reuse` with the existing complete provider-release identity and no new immutable rows.
-- [ ] A shared configuration epoch change refuses reuse of a release from the prior epoch.
-- [ ] Provider-local batches stay within contract limits and reconcile to the exact provider release hash and counts.
-- [ ] Every emitted entity still validates against the existing public V2 entity contracts.
+- [x] Same-epoch unchanged content returns `reuse` with the existing complete provider-release identity and no new immutable rows.
+- [x] A shared configuration epoch change refuses reuse of a release from the prior epoch.
+- [x] Provider-local batches stay within contract limits and reconcile to the exact provider release hash and counts.
+- [x] Every emitted entity still validates against the existing public V2 entity contracts.
 
 ## Verification
 
 `npm run test:contracts && npm run test:database && npm run test:services`
+
+## Spec Compliance
+
+- Related technical specs: none.
+- Related UX specs: none.
+- Implemented directly from this task PRD; no companion specs were present.

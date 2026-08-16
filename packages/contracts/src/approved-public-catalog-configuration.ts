@@ -19,6 +19,7 @@ export const APPROVED_PUBLIC_CATALOG_CONFIGURATION_VERSION =
 export const MAX_APPROVED_PUBLIC_PLATFORMS = 8 as const;
 
 const sourceValueSchema = nonBlankTextSchema(240);
+const verifiedUsdStablecoinSchema = z.string().regex(/^[A-Z0-9]{2,12}$/);
 
 const categoryMappingSchema = z.object({
   sourceValue: sourceValueSchema,
@@ -98,6 +99,12 @@ export const approvedPublicCatalogConfigurationV1Schema = z.object({
   staleAfterSeconds: z.number().int().safe().min(60).max(31_536_000),
   confidencePolicy: approvedPublicConfidencePolicySchema,
   publicAssetOrigins: canonicalArraySchema(publicHttpsOriginSchema, 64),
+  verifiedUsdStablecoins: canonicalArraySchema(
+    verifiedUsdStablecoinSchema,
+    32,
+  ).refine((currencies) => !currencies.includes("USD"), {
+    message: "public_config.usd_stablecoin_policy_invalid",
+  }),
   categories: z.array(publicCategorySchema).max(4_096),
   platforms: z.array(approvedPublicPlatformConfigurationSchema)
     .min(1)

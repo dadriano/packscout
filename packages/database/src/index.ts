@@ -17,6 +17,7 @@ export * from "./operational-health-repository.ts";
 export * from "./persistence-error.ts";
 export * from "./pipeline-types.ts";
 export * from "./provider-configuration-repository.ts";
+export * from "./provider-catalog-release-source-repository.ts";
 export * from "./provider-scheduling-repository.ts";
 export * from "./provider-stream-write-policy.ts";
 export * from "./promotion-readiness-repository.ts";

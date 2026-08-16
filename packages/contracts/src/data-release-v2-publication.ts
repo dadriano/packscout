@@ -34,6 +34,10 @@ import {
   sha256Schema,
   timestampSchema,
 } from "./data-release-v2-values.ts";
+import {
+  containsNormalizedProtectedPublicationField,
+  normalizeProtectedPublicationFieldKey,
+} from "./protected-publication-fields.ts";
 
 export const MAX_PRODUCTION_BATCH_RECORDS = 100;
 export const MAX_PRODUCTION_BATCH_BYTES = 48 * 1_024;
@@ -293,16 +297,20 @@ export const productionRollbackRequestSchema = z.object({
 export const productionRetainRequestSchema = z.object(operationEnvelopeSchema).strict();
 
 const PROTECTED_PUBLICATION_FIELDS = new Set([
-  "actorId", "collectibleId", "credential", "credentials", "internalRunId",
-  "organizationId", "providerId", "providerPayload", "quarantine", "rawPayload",
-  "releaseId", "repackId", "secret", "tenantId", "vendorId",
-]);
+  "actorId", "apiKey", "apiKeys", "attemptId", "collectibleId", "credential",
+  "credentials", "importAttemptId", "importId", "internalId", "internalRunId",
+  "organizationId", "orgId", "password", "passwords", "pollAttemptId", "pollId",
+  "providerId", "providerPayload", "providerResponse", "quarantine",
+  "quarantineDetail", "rawPayload", "rawResponse", "releaseId", "repackId",
+  "secret", "secrets", "sourcePayload", "sourceResponse", "tenantId", "token",
+  "tokens", "vendorId",
+].map(normalizeProtectedPublicationFieldKey));
 
 export function containsProtectedPublicationField(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsProtectedPublicationField);
-  if (typeof value !== "object" || value === null) return false;
-  return Object.entries(value).some(([key, nested]) =>
-    PROTECTED_PUBLICATION_FIELDS.has(key) || containsProtectedPublicationField(nested));
+  return containsNormalizedProtectedPublicationField(
+    value,
+    PROTECTED_PUBLICATION_FIELDS,
+  );
 }
 
 export function productionManifestFingerprintBody(

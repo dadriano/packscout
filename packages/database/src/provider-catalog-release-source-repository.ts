@@ -1,0 +1,645 @@
+import {
+  approvedPublicCatalogConfigurationV1Schema,
+  containsProtectedPublicationField,
+  sha256CanonicalJson,
+  type ApprovedPublicCatalogConfigurationV1,
+  type ApprovedPublicCollectibleMapping,
+  type ApprovedPublicPlatformConfiguration,
+  type ApprovedPublicRepackIdentityMapping,
+  type PublicCategory,
+} from "@packscout/contracts";
+import { Prisma } from "@prisma/client";
+import { PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN } from "./catalog-release-source-repository.ts";
+import type { PackscoutPrismaClient, PackscoutTransactionClient } from "./database.ts";
+import type {
+  ProviderCatalogCheckpointRecord,
+  SharedPublicConfigurationEpochRecord,
+} from "./public-change-settlement-repository.provider-read.ts";
+import { assertCanonicalActorDataSafe } from "./security.ts";
+
+export type ProviderCatalogReleaseSourceErrorCode =
+  | "PROVIDER_RELEASE_SCOPE_MISMATCH"
+  | "PROVIDER_RELEASE_CHECKPOINT_UNSETTLED"
+  | "PROVIDER_RELEASE_CHECKPOINT_REGRESSED"
+  | "PROVIDER_RELEASE_EPOCH_MISMATCH"
+  | "PROVIDER_RELEASE_LIFECYCLE_INELIGIBLE"
+  | "PROVIDER_RELEASE_BACKFILL_INCOMPLETE"
+  | "PROVIDER_RELEASE_SOURCE_INVALID"
+  | "PROVIDER_RELEASE_PROTECTED_FIELD";
+
+export class ProviderCatalogReleaseSourcePersistenceError extends Error {
+  constructor(readonly code: ProviderCatalogReleaseSourceErrorCode) {
+    super("Provider catalog release source state is unavailable or invalid.");
+    this.name = "ProviderCatalogReleaseSourcePersistenceError";
+  }
+}
+
+export interface ProviderCatalogReleaseCheckpointSnapshot {
+  readonly platformKey: string;
+  readonly sharedConfigurationEpoch: SharedPublicConfigurationEpochRecord;
+  readonly settledSequence: bigint;
+  readonly sourceHeadSequence: bigint;
+  readonly settledAt: Date;
+  readonly sourceHeadAt: Date;
+}
+
+export interface ProviderCatalogReleaseConfigurationSnapshot {
+  readonly schemaVersion: ApprovedPublicCatalogConfigurationV1["schemaVersion"];
+  readonly configurationKey: string;
+  readonly revision: number;
+  readonly approvedAt: string;
+  readonly staleAfterSeconds: number;
+  readonly confidencePolicy: ApprovedPublicCatalogConfigurationV1["confidencePolicy"];
+  readonly publicAssetOrigins: readonly string[];
+  readonly verifiedUsdStablecoins: readonly string[];
+  readonly categories: readonly PublicCategory[];
+  readonly platform: ApprovedPublicPlatformConfiguration;
+  readonly repacks: readonly ApprovedPublicRepackIdentityMapping[];
+  readonly collectibles: readonly ApprovedPublicCollectibleMapping[];
+  readonly configurationHash: string;
+  readonly publicChangeSequence: bigint;
+}
+
+export interface ProviderCatalogReleaseReadinessSnapshot {
+  readonly lifecycleState: "active";
+  readonly lifecycleSequence: bigint;
+  readonly configurationRevisionId: string;
+  readonly completedBackfillAt: Date;
+}
+
+export type ProviderCatalogCanonicalRecordKind =
+  | "platform" | "pack" | "catalog_asset" | "ev_input" | "estimated_ev";
+
+export interface ProviderCatalogCanonicalRevisionSnapshot {
+  readonly entityId: string;
+  readonly revisionId: string;
+  readonly platformKey: string;
+  readonly recordKind: ProviderCatalogCanonicalRecordKind;
+  readonly externalId: string;
+  readonly content: unknown;
+  readonly sourceUpdatedAt: Date;
+  readonly sourceCollectedAt: Date;
+  readonly acceptedAt: Date;
+  readonly publicChangeSequence: bigint;
+}
+
+export interface ProviderCatalogGovernedRepackIdentitySnapshot {
+  readonly platformKey: string;
+  readonly packExternalId: string;
+  readonly publicRepackId: string;
+  readonly approvedConfigurationKey: string;
+  readonly publicChangeSequence: bigint;
+  readonly approvedAt: Date;
+}
+
+export interface ProviderCatalogReleaseSourceSnapshot {
+  readonly checkpoint: ProviderCatalogReleaseCheckpointSnapshot;
+  readonly configuration: ProviderCatalogReleaseConfigurationSnapshot;
+  readonly readiness: ProviderCatalogReleaseReadinessSnapshot;
+  readonly revisions: readonly ProviderCatalogCanonicalRevisionSnapshot[];
+  readonly repackIdentities: readonly ProviderCatalogGovernedRepackIdentitySnapshot[];
+  readonly observation: Readonly<{ lastSuccessfulObservationAt: Date }>;
+}
+
+export interface ProviderCatalogReleaseSourceRepository {
+  loadProviderSnapshot(input: Readonly<{
+    checkpoint: ProviderCatalogCheckpointRecord;
+  }>): Promise<ProviderCatalogReleaseSourceSnapshot>;
+}
+
+interface CheckpointRow {
+  platformKey: string;
+  settledSequence: bigint;
+  sourceHeadSequence: bigint;
+  settledAt: Date | null;
+  sourceHeadAt: Date | null;
+}
+
+interface ConfigurationRow {
+  configurationKey: string;
+  revision: number;
+  publicChangeSequence: bigint;
+  configurationHash: string;
+  configurationJson: unknown;
+}
+
+interface ReadinessRow {
+  lifecycleState: string;
+  lifecycleSequence: bigint;
+  causePlatformKey: string | null;
+  causeLifecycleState: string | null;
+  causeProviderId: string | null;
+  configurationRevisionId: string | null;
+  providerId: string;
+  revisionProviderId: string | null;
+  completedBackfillAt: Date | null;
+  lastSuccessfulObservationAt: Date | null;
+}
+
+interface RevisionRow extends ProviderCatalogCanonicalRevisionSnapshot {
+  catalogImpactMatches: boolean;
+}
+
+type ReadyProviderCatalogCheckpointRecord = ProviderCatalogCheckpointRecord &
+  Readonly<{ settledAt: Date }>;
+
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const platformKeyPattern = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/u;
+
+function uuid(value: string): Prisma.Sql {
+  return Prisma.sql`cast(${value} as uuid)`;
+}
+
+function refuse(code: ProviderCatalogReleaseSourceErrorCode): never {
+  throw new ProviderCatalogReleaseSourcePersistenceError(code);
+}
+
+function sameDate(left: Date | null, right: Date): boolean {
+  return left !== null && left.getTime() === right.getTime();
+}
+
+function sameEpoch(
+  row: ConfigurationRow,
+  epoch: SharedPublicConfigurationEpochRecord,
+): boolean {
+  return row.configurationKey === epoch.configurationKey &&
+    row.revision === epoch.revision &&
+    row.publicChangeSequence === epoch.publicChangeSequence &&
+    row.configurationHash === epoch.configurationHash;
+}
+
+function assertInputReady(
+  checkpoint: ProviderCatalogCheckpointRecord,
+  organizationId: string,
+  platformKey: string,
+): asserts checkpoint is ReadyProviderCatalogCheckpointRecord {
+  if (checkpoint.organizationId !== organizationId ||
+      checkpoint.platformKey !== platformKey) {
+    refuse("PROVIDER_RELEASE_SCOPE_MISMATCH");
+  }
+  if (checkpoint.blockedState.kind !== "ready" ||
+      checkpoint.settledSequence <= 0n ||
+      checkpoint.settledSequence !== checkpoint.sourceHeadSequence ||
+      checkpoint.sharedConfigurationEpoch.publicChangeSequence >
+        checkpoint.settledSequence) {
+    refuse("PROVIDER_RELEASE_CHECKPOINT_UNSETTLED");
+  }
+  if (checkpoint.settledAt === null ||
+      !Number.isFinite(checkpoint.settledAt.getTime()) ||
+      !Number.isFinite(checkpoint.sourceHeadAt.getTime())) {
+    refuse("PROVIDER_RELEASE_SOURCE_INVALID");
+  }
+}
+
+function configurationSlice(
+  configuration: ApprovedPublicCatalogConfigurationV1,
+  row: ConfigurationRow,
+  platformKey: string,
+): ProviderCatalogReleaseConfigurationSnapshot {
+  const platform = configuration.platforms.find(
+    (candidate) => candidate.platformKey === platformKey,
+  );
+  if (!platform) refuse("PROVIDER_RELEASE_SCOPE_MISMATCH");
+  return Object.freeze({
+    schemaVersion: configuration.schemaVersion,
+    configurationKey: configuration.configurationKey,
+    revision: configuration.revision,
+    approvedAt: configuration.approvedAt,
+    staleAfterSeconds: configuration.staleAfterSeconds,
+    confidencePolicy: Object.freeze({ ...configuration.confidencePolicy }),
+    publicAssetOrigins: Object.freeze([...configuration.publicAssetOrigins]),
+    verifiedUsdStablecoins: Object.freeze([
+      ...configuration.verifiedUsdStablecoins,
+    ]),
+    categories: Object.freeze(configuration.categories.map((value) =>
+      Object.freeze(structuredClone(value)))),
+    platform: Object.freeze(structuredClone(platform)),
+    repacks: Object.freeze(configuration.repacks
+      .filter((value) => value.platformKey === platformKey)
+      .map((value) => Object.freeze({ ...value }))),
+    collectibles: Object.freeze(configuration.collectibles
+      .filter((value) => value.platformKey === platformKey)
+      .map((value) => Object.freeze(structuredClone(value)))),
+    configurationHash: row.configurationHash,
+    publicChangeSequence: row.publicChangeSequence,
+  });
+}
+
+export class PrismaProviderCatalogReleaseSourceRepository
+  implements ProviderCatalogReleaseSourceRepository
+{
+  readonly #organizationId: string;
+  readonly #platformKey: string;
+
+  constructor(
+    private readonly database: PackscoutPrismaClient,
+    binding: Readonly<{ organizationId: string; platformKey: string }>,
+  ) {
+    if (!uuidPattern.test(binding.organizationId) ||
+        binding.platformKey.length > 128 ||
+        !platformKeyPattern.test(binding.platformKey)) {
+      throw new RangeError("Provider catalog release source binding is invalid.");
+    }
+    this.#organizationId = binding.organizationId.toLowerCase();
+    this.#platformKey = binding.platformKey;
+  }
+
+  async loadProviderSnapshot(input: Readonly<{
+    checkpoint: ProviderCatalogCheckpointRecord;
+  }>): Promise<ProviderCatalogReleaseSourceSnapshot> {
+    const checkpoint = input.checkpoint;
+    assertInputReady(checkpoint, this.#organizationId, this.#platformKey);
+    return this.database.$transaction(async (transaction) => {
+      await transaction.$executeRaw(Prisma.sql`set transaction read only`);
+      await this.assertPersistedCheckpoint(transaction, checkpoint);
+      const configuration = await this.loadConfiguration(
+        transaction,
+        checkpoint.sharedConfigurationEpoch,
+      );
+      const readiness = await this.loadReadiness(transaction, checkpoint);
+      const revisions = await this.loadRevisions(
+        transaction,
+        checkpoint.settledSequence,
+      );
+      const repackIdentities = await this.loadRepackIdentities(
+        transaction,
+        checkpoint.settledSequence,
+        configuration.repacks.map(({ packExternalId }) => packExternalId),
+      );
+      await this.assertCompleteSource(
+        transaction,
+        checkpoint.settledSequence,
+        configuration,
+        revisions,
+        repackIdentities,
+      );
+      return Object.freeze({
+        checkpoint: Object.freeze({
+          platformKey: this.#platformKey,
+          sharedConfigurationEpoch: Object.freeze({
+            ...checkpoint.sharedConfigurationEpoch,
+          }),
+          settledSequence: checkpoint.settledSequence,
+          sourceHeadSequence: checkpoint.sourceHeadSequence,
+          settledAt: new Date(checkpoint.settledAt.getTime()),
+          sourceHeadAt: new Date(checkpoint.sourceHeadAt.getTime()),
+        }),
+        configuration,
+        readiness: Object.freeze({
+          lifecycleState: "active",
+          lifecycleSequence: readiness.lifecycleSequence,
+          configurationRevisionId: readiness.configurationRevisionId!,
+          completedBackfillAt: new Date(readiness.completedBackfillAt!.getTime()),
+        }),
+        revisions: Object.freeze(revisions),
+        repackIdentities: Object.freeze(repackIdentities),
+        observation: Object.freeze({
+          lastSuccessfulObservationAt: new Date(
+            readiness.lastSuccessfulObservationAt!.getTime(),
+          ),
+        }),
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  private async assertPersistedCheckpoint(
+    database: PackscoutTransactionClient,
+    requested: ReadyProviderCatalogCheckpointRecord,
+  ): Promise<void> {
+    const rows = await database.$queryRaw<CheckpointRow[]>(Prisma.sql`
+      select platform_key as "platformKey", settled_sequence as "settledSequence",
+             source_head_sequence as "sourceHeadSequence",
+             settled_at as "settledAt", source_head_at as "sourceHeadAt"
+      from public.provider_catalog_checkpoints
+      where organization_id = ${uuid(this.#organizationId)}
+        and platform_key = ${this.#platformKey}
+    `);
+    const row = rows[0];
+    if (!row) refuse("PROVIDER_RELEASE_SCOPE_MISMATCH");
+    if (row.settledSequence > requested.settledSequence ||
+        row.sourceHeadSequence > requested.sourceHeadSequence) {
+      refuse("PROVIDER_RELEASE_CHECKPOINT_REGRESSED");
+    }
+    if (row.settledSequence !== requested.settledSequence ||
+        row.sourceHeadSequence !== requested.sourceHeadSequence ||
+        !sameDate(row.settledAt, requested.settledAt) ||
+        !sameDate(row.sourceHeadAt, requested.sourceHeadAt)) {
+      refuse("PROVIDER_RELEASE_CHECKPOINT_UNSETTLED");
+    }
+  }
+
+  private async loadConfiguration(
+    database: PackscoutTransactionClient,
+    epoch: SharedPublicConfigurationEpochRecord,
+  ): Promise<ProviderCatalogReleaseConfigurationSnapshot> {
+    const rows = await database.$queryRaw<ConfigurationRow[]>(Prisma.sql`
+      select approved.configuration_key as "configurationKey",
+             approved.revision,
+             approved.public_change_sequence as "publicChangeSequence",
+             approved.configuration_hash as "configurationHash",
+             approved.configuration_json as "configurationJson"
+      from public.catalog_manifest_lifecycle_checkpoints as lifecycle
+      join lateral (
+        select configuration.*
+        from public.public_change_catalog_impacts as impact
+        join public.approved_public_catalog_configurations as configuration
+          on configuration.organization_id = impact.organization_id
+         and configuration.public_change_sequence = impact.cause_sequence
+         and configuration.configuration_key = impact.shared_configuration_key
+         and configuration.revision = impact.shared_configuration_revision
+         and configuration.configuration_hash = impact.shared_configuration_hash
+        where impact.organization_id = lifecycle.organization_id
+          and impact.shared_configuration_hash is not null
+          and impact.cause_sequence <= lifecycle.settled_sequence
+        order by impact.cause_sequence desc
+        limit 1
+      ) as approved on true
+      where lifecycle.organization_id = ${uuid(this.#organizationId)}
+    `);
+    const row = rows[0];
+    if (!row || !sameEpoch(row, epoch)) {
+      refuse("PROVIDER_RELEASE_EPOCH_MISMATCH");
+    }
+    const parsed = approvedPublicCatalogConfigurationV1Schema.safeParse(
+      row.configurationJson,
+    );
+    if (!parsed.success ||
+        parsed.data.configurationKey !== row.configurationKey ||
+        parsed.data.revision !== row.revision ||
+        await sha256CanonicalJson(
+          PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN,
+          parsed.data,
+        ) !== row.configurationHash) {
+      refuse("PROVIDER_RELEASE_SOURCE_INVALID");
+    }
+    return configurationSlice(parsed.data, row, this.#platformKey);
+  }
+
+  private async loadReadiness(
+    database: PackscoutTransactionClient,
+    checkpoint: ReadyProviderCatalogCheckpointRecord,
+  ): Promise<ReadinessRow> {
+    const rows = await database.$queryRaw<ReadinessRow[]>(Prisma.sql`
+      with lifecycle as (
+        select impact.lifecycle_state::text as "lifecycleState",
+               impact.cause_sequence as "lifecycleSequence",
+               cause.metadata_json->>'platformKey' as "causePlatformKey",
+               cause.metadata_json->>'state' as "causeLifecycleState",
+               cause.metadata_json->>'providerId' as "causeProviderId",
+               cause.metadata_json->>'configurationRevisionId'
+                 as "configurationRevisionId"
+        from public.public_change_catalog_impacts as impact
+        join public.public_change_causes as cause
+          on cause.organization_id = impact.organization_id
+         and cause.sequence = impact.cause_sequence
+        where impact.organization_id = ${uuid(this.#organizationId)}
+          and impact.lifecycle_platform_key = ${this.#platformKey}
+          and impact.cause_sequence <= (
+            select manifest.settled_sequence
+            from public.catalog_manifest_lifecycle_checkpoints as manifest
+            where manifest.organization_id = ${uuid(this.#organizationId)}
+          )
+        order by impact.cause_sequence desc
+        limit 1
+      )
+      select lifecycle.*, provider.id::text as "providerId",
+             revision.provider_id::text as "revisionProviderId",
+             backfill."completedBackfillAt",
+             observation."lastSuccessfulObservationAt"
+      from lifecycle
+      join public.provider_sources as provider
+        on provider.organization_id = ${uuid(this.#organizationId)}
+       and provider.platform_key = ${this.#platformKey}
+      left join public.provider_config_revisions as revision
+        on revision.organization_id = provider.organization_id
+       and revision.provider_id = provider.id
+       and revision.id::text = lifecycle."configurationRevisionId"
+      left join lateral (
+        select min(run.finished_at) as "completedBackfillAt"
+        from public.import_runs as run
+        where run.organization_id = provider.organization_id
+          and run.provider_id = provider.id
+          and run.config_revision_id = revision.id
+          and run.state = 'succeeded'
+          and run.reached_provider_head = true
+          and run.finished_at <= ${checkpoint.settledAt}
+      ) as backfill on true
+      left join lateral (
+        select max(run.finished_at) as "lastSuccessfulObservationAt"
+        from public.import_runs as run
+        where run.organization_id = provider.organization_id
+          and run.provider_id = provider.id
+          and run.config_revision_id = revision.id
+          and run.state = 'succeeded'
+          and run.reached_provider_head = true
+      ) as observation on true
+    `);
+    const row = rows[0];
+    if (!row || row.lifecycleState !== "active" ||
+        row.causePlatformKey !== this.#platformKey ||
+        row.causeLifecycleState !== "active") {
+      refuse("PROVIDER_RELEASE_LIFECYCLE_INELIGIBLE");
+    }
+    if (!row.configurationRevisionId ||
+        !uuidPattern.test(row.configurationRevisionId) ||
+        row.causeProviderId !== row.providerId ||
+        row.revisionProviderId !== row.providerId) {
+      refuse("PROVIDER_RELEASE_SOURCE_INVALID");
+    }
+    if (!row.completedBackfillAt || !row.lastSuccessfulObservationAt) {
+      refuse("PROVIDER_RELEASE_BACKFILL_INCOMPLETE");
+    }
+    return row;
+  }
+
+  private async loadRevisions(
+    database: PackscoutTransactionClient,
+    throughSequence: bigint,
+  ): Promise<ProviderCatalogCanonicalRevisionSnapshot[]> {
+    const rows = await database.$queryRaw<RevisionRow[]>(Prisma.sql`
+      with latest as (
+        select distinct on (entity.id)
+               entity.id::text as "entityId",
+               revision.id::text as "revisionId",
+               entity.platform_key as "platformKey",
+               entity.record_kind::text as "recordKind",
+               entity.external_id as "externalId", revision.content_json as content,
+               revision.source_updated_at as "sourceUpdatedAt",
+               revision.source_collected_at as "sourceCollectedAt",
+               revision.accepted_at as "acceptedAt",
+               revision.public_change_sequence as "publicChangeSequence",
+               exists (
+                 select 1 from public.public_change_catalog_impacts as impact
+                 where impact.organization_id = revision.organization_id
+                   and impact.cause_sequence = revision.public_change_sequence
+                   and ${this.#platformKey} = any(impact.provider_platform_keys)
+               ) as "catalogImpactMatches"
+        from public.canonical_entities as entity
+        join public.canonical_revisions as revision
+          on revision.entity_id = entity.id
+         and revision.organization_id = entity.organization_id
+        where entity.organization_id = ${uuid(this.#organizationId)}
+          and entity.platform_key = ${this.#platformKey}
+          and revision.public_change_sequence <= ${throughSequence}
+          and entity.record_kind in (
+            'platform', 'pack', 'catalog_asset', 'ev_input', 'estimated_ev'
+          )
+        order by entity.id, revision.public_change_sequence desc,
+                 revision.revision_number desc
+      )
+      select * from latest
+      order by "recordKind" collate "C", "externalId" collate "C",
+               "entityId" collate "C"
+    `);
+    const identities = new Set<string>();
+    return rows.map((row) => {
+      const key = `${row.recordKind}\u0000${row.externalId}`;
+      if (identities.has(key) || !row.catalogImpactMatches) {
+        refuse("PROVIDER_RELEASE_SOURCE_INVALID");
+      }
+      identities.add(key);
+      if (containsProtectedPublicationField(row.content)) {
+        refuse("PROVIDER_RELEASE_PROTECTED_FIELD");
+      }
+      try {
+        assertCanonicalActorDataSafe(row.content);
+      } catch {
+        refuse("PROVIDER_RELEASE_PROTECTED_FIELD");
+      }
+      return Object.freeze({
+        entityId: row.entityId,
+        revisionId: row.revisionId,
+        platformKey: row.platformKey,
+        recordKind: row.recordKind,
+        externalId: row.externalId,
+        content: row.content,
+        sourceUpdatedAt: row.sourceUpdatedAt,
+        sourceCollectedAt: row.sourceCollectedAt,
+        acceptedAt: row.acceptedAt,
+        publicChangeSequence: row.publicChangeSequence,
+      });
+    });
+  }
+
+  private async loadRepackIdentities(
+    database: PackscoutTransactionClient,
+    throughSequence: bigint,
+    configuredPackExternalIds: readonly string[],
+  ): Promise<ProviderCatalogGovernedRepackIdentitySnapshot[]> {
+    if (configuredPackExternalIds.length === 0) return [];
+    return database.$queryRaw<ProviderCatalogGovernedRepackIdentitySnapshot[]>(
+      Prisma.sql`
+        select platform_key as "platformKey", pack_external_id as "packExternalId",
+               public_repack_id::text as "publicRepackId",
+               approved_configuration_key as "approvedConfigurationKey",
+               public_change_sequence as "publicChangeSequence",
+               approved_at as "approvedAt"
+        from public.public_repack_identity_mappings
+        where organization_id = ${uuid(this.#organizationId)}
+          and platform_key = ${this.#platformKey}
+          and public_change_sequence <= ${throughSequence}
+          and pack_external_id = any(${[...configuredPackExternalIds]}::text[])
+        order by pack_external_id collate "C", public_repack_id::text collate "C"
+      `,
+    );
+  }
+
+  private async assertCompleteSource(
+    database: PackscoutTransactionClient,
+    throughSequence: bigint,
+    configuration: ProviderCatalogReleaseConfigurationSnapshot,
+    revisions: readonly ProviderCatalogCanonicalRevisionSnapshot[],
+    identities: readonly ProviderCatalogGovernedRepackIdentitySnapshot[],
+  ): Promise<void> {
+    const configured = configuration.repacks.map(({ packExternalId, publicRepackId }) =>
+      `${packExternalId}\u0000${publicRepackId}`);
+    const governed = identities.map(({ platformKey, packExternalId, publicRepackId }) => {
+      if (platformKey !== this.#platformKey) refuse("PROVIDER_RELEASE_SCOPE_MISMATCH");
+      return `${packExternalId}\u0000${publicRepackId}`;
+    });
+    if (new Set(governed).size !== governed.length ||
+        configured.length !== governed.length ||
+        configured.some((value, index) => value !== governed[index])) {
+      refuse("PROVIDER_RELEASE_SOURCE_INVALID");
+    }
+    if (revisions.some(({ platformKey, publicChangeSequence }) =>
+      platformKey !== this.#platformKey || publicChangeSequence > throughSequence)) {
+      refuse("PROVIDER_RELEASE_SCOPE_MISMATCH");
+    }
+    const invalid = await database.$queryRaw<Array<{ invalid: boolean }>>(
+      Prisma.sql`
+        select exists (
+          select 1
+          from public.public_change_catalog_impacts as impact
+          join public.public_derivation_obligations as obligation
+            on obligation.organization_id = impact.organization_id
+           and obligation.cause_sequence = impact.cause_sequence
+          where impact.organization_id = ${uuid(this.#organizationId)}
+            and ${this.#platformKey} = any(impact.provider_platform_keys)
+            and impact.cause_sequence <= ${throughSequence}
+            and obligation.state not in ('succeeded', 'business_unavailable')
+        ) or exists (
+          select 1
+          from public.canonical_relationships as relationship
+          join public.canonical_entities as source
+            on source.id = relationship.source_entity_id
+           and source.organization_id = relationship.organization_id
+          left join public.canonical_entities as target
+            on target.id = relationship.target_entity_id
+           and target.organization_id = relationship.organization_id
+          where relationship.organization_id = ${uuid(this.#organizationId)}
+            and source.platform_key = ${this.#platformKey}
+            and source.record_kind in (
+              'platform', 'pack', 'catalog_asset', 'ev_input', 'estimated_ev'
+            )
+            and relationship.target_record_kind in (
+              'platform', 'pack', 'catalog_asset', 'ev_input', 'estimated_ev'
+            )
+            and relationship.created_public_change_sequence <= ${throughSequence}
+            and (
+              not exists (
+                select 1
+                from public.public_change_catalog_impacts as impact
+                where impact.organization_id = relationship.organization_id
+                  and impact.cause_sequence =
+                    relationship.created_public_change_sequence
+                  and ${this.#platformKey} = any(impact.provider_platform_keys)
+              )
+              or relationship.target_platform_key <> ${this.#platformKey}
+              or relationship.target_entity_id is null
+              or relationship.resolved_public_change_sequence is null
+              or relationship.resolved_public_change_sequence > ${throughSequence}
+              or not exists (
+                select 1
+                from public.public_change_catalog_impacts as resolved_impact
+                where resolved_impact.organization_id =
+                    relationship.organization_id
+                  and resolved_impact.cause_sequence =
+                    relationship.resolved_public_change_sequence
+                  and ${this.#platformKey} = any(
+                    resolved_impact.provider_platform_keys
+                  )
+              )
+              or target.id is null
+              or target.platform_key is distinct from
+                relationship.target_platform_key
+              or target.record_kind is distinct from
+                relationship.target_record_kind
+              or target.external_id is distinct from
+                relationship.target_external_id
+              or not exists (
+                select 1
+                from public.canonical_revisions as target_revision
+                where target_revision.organization_id =
+                    relationship.organization_id
+                  and target_revision.entity_id = target.id
+                  and target_revision.public_change_sequence <= ${throughSequence}
+              )
+            )
+        ) as invalid
+      `,
+    );
+    if (invalid[0]?.invalid) refuse("PROVIDER_RELEASE_SOURCE_INVALID");
+  }
+}

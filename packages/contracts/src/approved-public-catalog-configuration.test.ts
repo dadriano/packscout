@@ -21,6 +21,7 @@ function configuration() {
       limitationPenaltyBasisPoints: 500,
     },
     publicAssetOrigins: ["https://vendor.example"],
+    verifiedUsdStablecoins: [],
     categories: [{
       publicCategoryId: categoryId,
       parentPublicCategoryId: null,
@@ -67,6 +68,38 @@ test("approved public configuration requires canonical governed identities", () 
   const conflicting = configuration();
   conflicting.repacks.push({ ...conflicting.repacks[0]!, packExternalId: "pack-2" });
   assert.equal(approvedPublicCatalogConfigurationV1Schema.safeParse(conflicting).success, false);
+});
+
+test("approved public configuration requires a canonical stablecoin policy", () => {
+  const configured = {
+    ...configuration(),
+    verifiedUsdStablecoins: ["USDC"],
+  };
+  assert.deepEqual(
+    approvedPublicCatalogConfigurationV1Schema.parse(configured)
+      .verifiedUsdStablecoins,
+    ["USDC"],
+  );
+  for (const verifiedUsdStablecoins of [
+    ["USD"],
+    ["usdc"],
+    ["USDT", "USDC"],
+    ["USDC", "USDC"],
+  ]) {
+    assert.equal(
+      approvedPublicCatalogConfigurationV1Schema.safeParse({
+        ...configuration(),
+        verifiedUsdStablecoins,
+      }).success,
+      false,
+    );
+  }
+  const missing = configuration() as Record<string, unknown>;
+  delete missing.verifiedUsdStablecoins;
+  assert.equal(
+    approvedPublicCatalogConfigurationV1Schema.safeParse(missing).success,
+    false,
+  );
 });
 
 test("approved public configuration rejects a ninth launch platform with a stable error", () => {

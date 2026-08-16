@@ -15,6 +15,7 @@ import {
   publicConfidenceSchema,
   publicMoneySchema,
   publicPriceSchema,
+  publicRepackDetailSchema,
   publicRepackSummaryFromDetail,
   publicRepackSummarySchema,
   safeParseDataReleaseManifestV2,
@@ -52,6 +53,29 @@ test("V2 publishes aggregate vendors, hierarchy, mixed repacks, EV sources, and 
   assert.equal("description" in summary, false);
 });
 
+test("aggregate V2 records may be fresher than the oldest provider data-as-of", () => {
+  const release = structuredClone(buildSyntheticDataReleaseV2());
+  const fresherProviderTime = "2026-08-11T08:30:03.000Z";
+  release.collectibles[0]!.dataAsOf = fresherProviderTime;
+  release.repacks[0]!.sourceUpdatedAt = fresherProviderTime;
+  release.repackChases[0]!.observedAt = fresherProviderTime;
+  assert.ok(release.repacks[0]!.topChase);
+  release.repacks[0]!.topChase.observedAt = fresherProviderTime;
+  release.repacks[0]!.evEstimates.vendorReported.observedAt =
+    fresherProviderTime;
+  const packScout = release.repacks[0]!.evEstimates.packScout;
+  assert.equal(packScout.status, "available");
+  if (packScout.status === "available") {
+    packScout.dataAsOf = fresherProviderTime;
+    packScout.calculatedAt = "2026-08-11T08:31:01.000Z";
+  }
+
+  assert.ok(
+    Date.parse(fresherProviderTime) > Date.parse(release.metadata.dataAsOf),
+  );
+  assert.equal(safeParseDataReleaseManifestV2(release).success, true);
+});
+
 test("V2 enforces comparable EV arithmetic and confidence bands", () => {
   const badMath = structuredClone(buildSyntheticDataReleaseV2());
   const packScout = badMath.repacks[0]!.evEstimates.packScout;
@@ -84,6 +108,38 @@ test("V2 enforces comparable EV arithmetic and confidence bands", () => {
       limitationCodes: ["model_feature_weights"],
     }).success,
     false,
+  );
+
+  const exactBoundary = structuredClone(buildSyntheticDataReleaseV2());
+  const repack = exactBoundary.repacks[0]!;
+  const grossMinor = Number.MAX_SAFE_INTEGER;
+  const priceMinor = 10_000;
+  const grossReturnBasisPoints = Number.MAX_SAFE_INTEGER;
+  repack.price = {
+    displayMoney: { minorUnits: priceMinor, currency: "USD" },
+    usdComparison: {
+      status: "available",
+      value: { minorUnits: priceMinor, currency: "USD" },
+    },
+  };
+  const exactEstimate = repack.evEstimates.vendorReported;
+  assert.equal(exactEstimate.status, "available");
+  if (exactEstimate.status === "available") {
+    exactEstimate.displayMoney.minorUnits = grossMinor;
+    exactEstimate.metrics = {
+      grossEv: { minorUnits: grossMinor, currency: "USD" },
+      grossReturnBasisPoints,
+      evDollars: {
+        minorUnits: grossMinor - priceMinor,
+        currency: "USD",
+      },
+      evPercentBasisPoints: grossReturnBasisPoints - 10_000,
+    };
+  }
+  assert.equal(
+    publicRepackDetailSchema.safeParse(repack).success,
+    true,
+    "safe-integer EV arithmetic must not lose precision during validation",
   );
 });
 
@@ -502,14 +558,14 @@ test("PackScout EV policy and calculation times are bound to their release", () 
   );
 });
 
-test("vendor-reported EV observations are bound to the release window", () => {
-  const afterObservationWindow = structuredClone(buildSyntheticDataReleaseV2());
-  const lateEstimate = afterObservationWindow.repacks[0]!.evEstimates
+test("vendor-reported EV observations are bound to provider and completion windows", () => {
+  const afterCompletion = structuredClone(buildSyntheticDataReleaseV2());
+  const lateEstimate = afterCompletion.repacks[0]!.evEstimates
     .vendorReported;
   assert.equal(lateEstimate.status, "available");
-  lateEstimate.observedAt = "2026-08-11T08:31:00Z";
+  lateEstimate.observedAt = "2026-08-11T08:33:00Z";
   assert.ok(
-    rejectionMessages(afterObservationWindow).includes(
+    rejectionMessages(afterCompletion).includes(
       "data_release.vendor_ev_timing_invalid",
     ),
   );

@@ -66,6 +66,23 @@ function blockedCheckpoint(
   };
 }
 
+function firstCauseBlockedCheckpoint(platformKey: string) {
+  return {
+    organizationId,
+    platformKey,
+    sharedConfigurationEpoch: epoch({ sequence: 1n }),
+    settledSequence: 0n,
+    sourceHeadSequence: 1n,
+    settledAt: null,
+    sourceHeadAt,
+    blockedState: {
+      kind: "blocked" as const,
+      reason: "pending_derivation" as const,
+      causeSequence: 1n,
+    },
+  };
+}
+
 async function assertCode(
   action: () => Promise<unknown>,
   code: ProviderCatalogSettlementError["code"],
@@ -138,6 +155,15 @@ test("provider checkpoint exposes only a bounded causal blocked state", async ()
     epochBlockedCheckpoint.sharedConfigurationEpoch.publicChangeSequence,
     epochBlockedCheckpoint.sourceHeadSequence,
   );
+
+  const firstCauseService = new ProviderCatalogSettlementService({
+    async loadProviderCatalogCheckpoint() {
+      return firstCauseBlockedCheckpoint("beta");
+    },
+  }, { organizationId, platformKey: "beta" });
+  const firstCause = await firstCauseService.getCheckpoint();
+  assert.equal(firstCause.settledSequence, 0n);
+  assert.equal(firstCause.settledAt, null);
 });
 
 test("provider checkpoint rejects missing, cross-scope, protected, and inconsistent results", async () => {
@@ -147,6 +173,8 @@ test("provider checkpoint rejects missing, cross-scope, protected, and inconsist
     { ...readyCheckpoint("beta") },
     { ...readyCheckpoint("alpha"), providerId: "90000000-0000-4000-8000-000000000001" },
     { ...readyCheckpoint("alpha"), sourceHeadSequence: 11n },
+    { ...readyCheckpoint("alpha"), settledAt: null },
+    { ...firstCauseBlockedCheckpoint("alpha"), settledAt },
     {
       ...blockedCheckpoint("alpha", "technical_failure"),
       blockedState: {

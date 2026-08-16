@@ -3,6 +3,11 @@ import type {
   CatalogCanonicalRevisionSnapshot,
   CatalogReleaseSourceSnapshot,
 } from "./catalog-release-types.ts";
+import { calculatePackScoutEstimatedEv } from "./estimated-ev-calculator.ts";
+import {
+  estimatedEvCalculationFingerprint,
+  type EstimatedEvInputManifest,
+} from "./estimated-ev-projection-contracts.ts";
 import type { PublicChangeCheckpoint } from "./public-change-settlement-service.ts";
 
 export const fixtureIds = {
@@ -50,6 +55,7 @@ export const fixtureConfiguration: ApprovedPublicCatalogConfigurationV1 = {
     limitationPenaltyBasisPoints: 500,
   },
   publicAssetOrigins: ["https://alpha.example", "https://beta.example"],
+  verifiedUsdStablecoins: [],
   categories: [
     {
       publicCategoryId: fixtureIds.rootCategory,
@@ -174,6 +180,42 @@ function platformRevisions(platform: "alpha" | "beta", sequence: bigint) {
   const soldOut = platform === "beta";
   const packExternalId = `${platform}-pack`;
   const assetExternalId = `${platform}-card`;
+  const inputManifest: EstimatedEvInputManifest = {
+    packRevisionId: `${platform}-pack-revision`,
+    evInputRevisionId: `${platform}-ev-input-revision`,
+    packPriceValueMinor: 1_000,
+    packPriceCurrency: "USD",
+    distributionCurrency: "USD",
+    unitBasis: "per_pack",
+    drawCount: 1,
+    declaredCoverage: 1,
+    evidenceCompleteness: "complete",
+    buckets: [{
+      bucketId: assetExternalId,
+      probability: 1,
+      lowerValueMinor: 1_200,
+      upperValueMinor: 1_200,
+      sourceRevisionId: `${platform}-ev-input-revision`,
+    }],
+    sourceAt: observed.toISOString(),
+    verifiedUsdStablecoins: [],
+  };
+  const estimatedEv = calculatePackScoutEstimatedEv({
+    packPrice: {
+      valueMinor: inputManifest.packPriceValueMinor,
+      currency: inputManifest.packPriceCurrency,
+      sourceRevisionId: inputManifest.packRevisionId!,
+    },
+    distributionCurrency: inputManifest.distributionCurrency,
+    unitBasis: inputManifest.unitBasis,
+    drawCount: inputManifest.drawCount,
+    declaredCoverage: inputManifest.declaredCoverage,
+    evidenceCompleteness: inputManifest.evidenceCompleteness,
+    buckets: inputManifest.buckets,
+    sourceAt: inputManifest.sourceAt,
+    calculatedAt: observed.toISOString(),
+    currencyPolicy: { verifiedUsdStablecoins: [] },
+  });
   return [
     revision({
       platformKey: platform,
@@ -239,7 +281,7 @@ function platformRevisions(platform: "alpha" | "beta", sequence: bigint) {
           calculatedCoverage: 1,
           tolerance: 0.000001,
           probabilityBucketCount: 1,
-          topChaseCount: 1,
+          topChaseCount: 0,
         },
         probabilityBuckets: [{
           bucketId: assetExternalId,
@@ -261,20 +303,10 @@ function platformRevisions(platform: "alpha" | "beta", sequence: bigint) {
       content: {
         schemaVersion: "packscout-estimated-ev-projection-v1",
         label: "PackScout Estimated EV",
-        calculationFingerprint: "f".repeat(64),
-        status: "estimated",
-        grossValueMinor: 1_200,
-        evPercent: 20,
-        currency: "USD",
-        method: "probability_bucket_midpoint",
-        methodVersion: "packscout-estimated-ev-v1",
-        coveragePercent: 100,
-        inputCount: 1,
-        sourceAt: observed.toISOString(),
-        calculatedAt: observed.toISOString(),
-        reasonCodes: [],
-        evidence: { limitations: [] },
-        inputManifest: {},
+        calculationFingerprint:
+          estimatedEvCalculationFingerprint(inputManifest),
+        ...estimatedEv,
+        inputManifest,
       },
     }),
   ];

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   canonicalJson,
   classifyProductionDataReleaseError,
+  containsProtectedPublicationField,
   decodeProductionAuthSecretBase64,
   productionAuthKeyIdSchema,
   productionPublicationReceiptSigningValue,
@@ -25,6 +26,33 @@ test("canonical hashes are recursively ordered and independently reproducible", 
   );
   assert.equal(serialized, '{"domain":"packscout.contract-test.v1","value":{"a":"value","z":[{"a":1,"b":true}]}}');
   assert.throws(() => canonicalJson({ invalid: Number.NaN }), /non-finite/);
+});
+
+test("publication protected fields normalize separators and casing", () => {
+  for (const key of [
+    "raw_payload",
+    "API_KEY",
+    "claim_token",
+    "access-token",
+    "password_hash",
+    "raw_provider_payload",
+    "createdByActorKey",
+    "source_actor_id",
+    "actor_identifier",
+  ]) {
+    assert.equal(
+      containsProtectedPublicationField({ nested: { [key]: "redacted" } }),
+      true,
+      key,
+    );
+  }
+  assert.equal(containsProtectedPublicationField({
+    publicReleaseId: "50000000-0000-4000-8000-000000000001",
+    publicProviderReleaseId: "50000000-0000-4000-8000-000000000002",
+    providerConfigurationHash: "a".repeat(64),
+    sourceWatermark: "public-change:1",
+    factorId: "public-factor",
+  }), false);
 });
 
 test("runtime-neutral publication schemas cover requests and signed terminal receipts", () => {

@@ -1,6 +1,7 @@
 export * from "./auth.ts";
 export * from "./data-release-v2.ts";
 export * from "./approved-public-catalog-configuration.ts";
+export * from "./provider-catalog-release-v1.ts";
 export * from "./provider-feed.ts";
 export * from "./provider-stream-contract-v2.ts";
 export * from "./public-repacks.ts";

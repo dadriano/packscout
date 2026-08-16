@@ -56,6 +56,7 @@ function configuration(overrides: {
       limitationPenaltyBasisPoints: 500,
     },
     publicAssetOrigins: ["https://vendor.example"],
+    verifiedUsdStablecoins: [],
     categories: [{
       publicCategoryId,
       parentPublicCategoryId: null,

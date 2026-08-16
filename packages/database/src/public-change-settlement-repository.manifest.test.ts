@@ -23,6 +23,7 @@ const barrierOrganizationId = "54000000-0000-4000-8000-000000000002";
 const otherOrganizationId = "54000000-0000-4000-8000-000000000003";
 const tamperOrganizationId = "54000000-0000-4000-8000-000000000004";
 const orderingOrganizationId = "54000000-0000-4000-8000-000000000005";
+const zeroSettledOrganizationId = "54000000-0000-4000-8000-000000000006";
 const publicCategoryId = "54222222-2222-5222-8222-222222222222";
 
 function configuration(input: {
@@ -46,6 +47,7 @@ function configuration(input: {
     publicAssetOrigins: input.platformKeys.map(
       (platformKey) => `https://${platformKey}.example`,
     ),
+    verifiedUsdStablecoins: [],
     categories: [{
       publicCategoryId,
       parentPublicCategoryId: null,
@@ -628,6 +630,97 @@ test("manifest eligibility returns provider keys in canonical byte order", async
       snapshot?.checkpoints.map(({ platformKey }) => platformKey),
       platformKeys,
     );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("provider checkpoint reads preserve a truthful null timestamp at zero settlement", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const providers = await seedOrganization(
+      harness.client,
+      zeroSettledOrganizationId,
+      ["alpha"],
+    );
+    const approvedAt = new Date("2026-08-16T07:00:00.000Z");
+    await harness.client.$transaction(async (transaction) => {
+      await approveConfiguration(transaction, {
+        organizationId: zeroSettledOrganizationId,
+        configuration: configuration({
+          platformKeys: ["alpha"],
+          revision: 1,
+          approvedAt: approvedAt.toISOString(),
+        }),
+      });
+      await recordLifecycle(transaction, {
+        organizationId: zeroSettledOrganizationId,
+        providerId: providers.get("alpha")!,
+        platformKey: "alpha",
+        state: "active",
+        changedAt: approvedAt,
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: zeroSettledOrganizationId,
+        settledAt: approvedAt,
+      });
+    });
+
+    const blockedAt = new Date("2026-08-16T07:01:00.000Z");
+    let blockedSequence = 0n;
+    await harness.client.$transaction(async (transaction) => {
+      const [cause] = await allocatePublicChangeCauses(transaction, {
+        organizationId: zeroSettledOrganizationId,
+        changes: [{
+          changeKind: "provider_projection",
+          entityKey: "canonical:v1:alpha:first-blocked",
+          sourceKey: "alpha",
+          occurredAt: blockedAt,
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: ["alpha"],
+          },
+        }],
+      });
+      blockedSequence = cause!.sequence;
+      await createPublicDerivationObligations(transaction, {
+        organizationId: zeroSettledOrganizationId,
+        causeSequences: [blockedSequence],
+        derivationKind: "estimated_ev",
+        derivationKey: "zero-settled-reader",
+        createdAt: blockedAt,
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: zeroSettledOrganizationId,
+        settledAt: blockedAt,
+      });
+    });
+    await harness.client.provider_catalog_checkpoints.update({
+      where: {
+        organization_id_platform_key: {
+          organization_id: zeroSettledOrganizationId,
+          platform_key: "alpha",
+        },
+      },
+      data: { settled_sequence: 0n, settled_at: null },
+    });
+
+    const checkpoint = await new PrismaProviderCatalogSettlementRepository(
+      harness.client,
+    ).loadProviderCatalogCheckpoint({
+      organizationId: zeroSettledOrganizationId,
+      platformKey: "alpha",
+    });
+    assert.ok(checkpoint);
+    assert.equal(checkpoint.settledSequence, 0n);
+    assert.equal(checkpoint.settledAt, null);
+    assert.equal(checkpoint.sourceHeadSequence, blockedSequence);
+    assert.equal(checkpoint.sourceHeadAt.toISOString(), blockedAt.toISOString());
+    assert.deepEqual(checkpoint.blockedState, {
+      kind: "blocked",
+      reason: "pending_derivation",
+      causeSequence: blockedSequence,
+    });
   } finally {
     await harness.close();
   }

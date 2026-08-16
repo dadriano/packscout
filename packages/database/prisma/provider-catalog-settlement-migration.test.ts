@@ -101,6 +101,7 @@ const approvedConfiguration = {
     limitationPenaltyBasisPoints: 500,
   },
   publicAssetOrigins: ["https://alpha.example", "https://beta.example"],
+  verifiedUsdStablecoins: [],
   categories: [],
   platforms: ["alpha", "beta"].map((platformKey, index) => ({
     platformKey,

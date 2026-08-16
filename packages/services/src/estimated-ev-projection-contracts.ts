@@ -1,3 +1,9 @@
+import { createHash } from "node:crypto";
+import { canonicalJson } from "@packscout/contracts";
+import {
+  PACKSCOUT_ESTIMATED_EV_METHOD,
+  PACKSCOUT_ESTIMATED_EV_METHOD_VERSION,
+} from "./estimated-ev-calculator.ts";
 import type {
   PackScoutEstimatedEvCurrencyTreatment,
   PackScoutEstimatedEvEvidence,
@@ -30,6 +36,18 @@ export interface EstimatedEvInputManifest {
   readonly buckets: readonly EstimatedEvInputManifestBucket[];
   readonly sourceAt: string | null;
   readonly verifiedUsdStablecoins: readonly string[];
+}
+
+export function estimatedEvCalculationFingerprint(
+  manifest: EstimatedEvInputManifest,
+): string {
+  return createHash("sha256")
+    .update(canonicalJson({
+      method: PACKSCOUT_ESTIMATED_EV_METHOD,
+      methodVersion: PACKSCOUT_ESTIMATED_EV_METHOD_VERSION,
+      manifest,
+    }))
+    .digest("hex");
 }
 
 export interface CanonicalEstimatedEvProjectionContent {

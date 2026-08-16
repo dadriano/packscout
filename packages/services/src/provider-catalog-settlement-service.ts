@@ -31,7 +31,7 @@ export interface ProviderCatalogCheckpoint {
   readonly sharedConfigurationEpoch: SharedPublicConfigurationEpoch;
   readonly settledSequence: bigint;
   readonly sourceHeadSequence: bigint;
-  readonly settledAt: Date;
+  readonly settledAt: Date | null;
   readonly sourceHeadAt: Date;
   readonly blockedState: ProviderCatalogBlockedState;
 }
@@ -137,6 +137,18 @@ function finiteDate(
   return new Date(value.getTime());
 }
 
+function settledDate(
+  value: unknown,
+  settledSequence: bigint,
+  code: ProviderCatalogSettlementErrorCode,
+): Date | null {
+  if (settledSequence === 0n) {
+    if (value !== null) refuse(code);
+    return null;
+  }
+  return finiteDate(value, code);
+}
+
 function epoch(
   value: unknown,
   code: ProviderCatalogSettlementErrorCode,
@@ -225,7 +237,7 @@ function checkpoint(
     sharedConfigurationEpoch,
     settledSequence,
     sourceHeadSequence,
-    settledAt: finiteDate(value.settledAt, code),
+    settledAt: settledDate(value.settledAt, settledSequence, code),
     sourceHeadAt: finiteDate(value.sourceHeadAt, code),
     blockedState: blockedState(value.blockedState, {
       settledSequence,
