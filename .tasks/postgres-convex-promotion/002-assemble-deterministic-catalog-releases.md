@@ -7,6 +7,10 @@
 **Estimated effort:** 2–4 days for one builder, including export fixtures and rebuild equivalence
 **Status:** done
 
+## Architecture Continuation
+
+This task records the completed single-release assembler. The approved provider-release architecture supersedes that catalog assembly boundary in `postgres-convex-promotion/008`; the historical evidence below remains valid only as a regression baseline for deterministic projection and public-contract safety.
+
 ## Start Here
 
 Assemble one two-vendor release fixture at a fixed settled watermark and prove that repeated assembly produces the same manifest and ordered batch content.

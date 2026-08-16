@@ -7,6 +7,10 @@
 **Estimated effort:** 2–4 days for one builder, including authenticated replay and retention tests
 **Status:** done
 
+## Architecture Continuation
+
+This task records the completed single-release Convex lifecycle. Tasks `postgres-convex-promotion/009` and `postgres-convex-promotion/010` replace it with invisible provider-release completion followed by a separate atomic manifest activation. Do not extend the single global release pointer or add a compatibility path to it.
+
 ## Start Here
 
 Drive one authenticated publication through start, two replay-safe batches, reconciliation, and finalize while continuously asserting that public queries resolve only the previous active release until finalize commits.

@@ -2,10 +2,14 @@
 
 **ID:** postgres-convex-promotion/004
 **Depends on:** postgres-convex-promotion/002, postgres-convex-promotion/003
-**Blocks:** postgres-convex-promotion/006, postgres-convex-promotion/007
+**Blocks:** postgres-convex-promotion/006
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including retry and lost-acknowledgement verification
 **Status:** done
+
+## Architecture Continuation
+
+This task records the completed organization-global catalog runner. Task `postgres-convex-promotion/011` replaces it with independent provider lanes and one serialized manifest lane while preserving the replay, lease, and exact-receipt guarantees proven here.
 
 ## Start Here
 

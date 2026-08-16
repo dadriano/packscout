@@ -2,10 +2,14 @@
 
 **ID:** postgres-convex-promotion/006
 **Depends on:** postgres-convex-promotion/004, postgres-convex-promotion/005
-**Blocks:** postgres-convex-promotion/007
+**Blocks:** postgres-convex-promotion/012
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including alignment and expiry verification
 **Status:** done
+
+## Architecture Continuation
+
+This task records the completed Heat lane bound to one global catalog release. Task `postgres-convex-promotion/012` replaces only that alignment boundary so Heat proves the active manifest and its exact provider-release set; its settlement, expiry, privacy, and independent-failure guarantees remain required.
 
 ## Start Here
 

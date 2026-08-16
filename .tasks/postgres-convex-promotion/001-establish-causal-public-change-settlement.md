@@ -2,10 +2,14 @@
 
 **ID:** postgres-convex-promotion/001
 **Depends on:** none
-**Blocks:** postgres-convex-promotion/002, postgres-convex-promotion/005
+**Blocks:** postgres-convex-promotion/002, postgres-convex-promotion/005, postgres-convex-promotion/007
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including migration and concurrency verification
 **Status:** done
+
+## Architecture Continuation
+
+This task is the completed historical foundation. Its organization-global contiguous checkpoint remains authoritative for Heat and audit ordering. Task `postgres-convex-promotion/007` adds provider-impact checkpoints for catalog cadence; builders must not use the organization-global checkpoint as the gate for every provider release.
 
 ## Start Here
 
