@@ -69,7 +69,8 @@ describe("authenticated saved items", () => {
           type: "customJwt",
           applicationID: "cm1234567890_packscout",
           issuer: "privy.io",
-          jwks: "https://api.privy.io/v1/apps/cm1234567890_packscout/jwks.json",
+          jwks:
+            "https://auth.privy.io/api/v1/apps/cm1234567890_packscout/jwks.json",
           algorithm: "ES256",
         },
       ],

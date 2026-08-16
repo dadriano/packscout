@@ -25,7 +25,7 @@ export function buildPrivyAuthConfig(
               type: "customJwt",
               applicationID: privyAppId,
               issuer: "privy.io",
-              jwks: `https://api.privy.io/v1/apps/${encodeURIComponent(privyAppId)}/jwks.json`,
+              jwks: `https://auth.privy.io/api/v1/apps/${encodeURIComponent(privyAppId)}/jwks.json`,
               algorithm: "ES256",
             },
           ],
