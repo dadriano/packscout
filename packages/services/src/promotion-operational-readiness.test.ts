@@ -11,6 +11,17 @@ const organizationId = "52000000-0000-4000-8000-000000000001";
 const deploymentScopeDigest = "d".repeat(64);
 const now = new Date("2026-08-15T12:01:00.000Z");
 
+test("provider and manifest CAS losses classify as reconciliation failures", () => {
+  for (const code of [
+    "PROVIDER_RELEASE_PREDECESSOR_CONFLICT",
+    "PROVIDER_RELEASE_STATE_CONFLICT",
+    "PROVIDER_RELEASE_RECONCILIATION_FAILED",
+    "CATALOG_MANIFEST_PREDECESSOR_CONFLICT",
+    "CATALOG_MANIFEST_STATE_CONFLICT",
+  ]) assert.equal(isPromotionReconciliationFailureCode(code), true);
+  assert.equal(isPromotionReconciliationFailureCode("PUBLICATION_TIMEOUT"), false);
+});
+
 function healthyDiagnostic(
   overrides: Partial<PromotionReadinessDiagnostic> = {},
 ): PromotionReadinessDiagnostic {
@@ -75,7 +86,8 @@ function harness(
     {
       organizationId,
       deploymentScopeDigest,
-      lane: "catalog",
+      lane: "provider",
+      platformKey: "alpha",
       targetSource: "canonical_settlement",
     },
   );
@@ -154,7 +166,8 @@ test("terminal failures retain only bounded identifiers and recover after confir
   assert.deepEqual(state.calls[0]?.input, {
     organizationId,
     deploymentScopeDigest,
-    lane: "catalog",
+    lane: "provider",
+    platformKey: "alpha",
     attemptId: "52000000-0000-4000-8000-000000000002",
     targetWatermark: 10n,
     confirmedWatermark: 8n,
@@ -255,7 +268,8 @@ test("production scope and the one-minute activation target fail closed", () => 
       {
         organizationId,
         deploymentScopeDigest: "production-us",
-        lane: "catalog",
+        lane: "provider",
+        platformKey: "alpha",
         targetSource: "canonical_settlement",
       },
     ),
@@ -269,7 +283,8 @@ test("production scope and the one-minute activation target fail closed", () => 
       {
         organizationId,
         deploymentScopeDigest,
-        lane: "catalog",
+        lane: "provider",
+        platformKey: "alpha",
         targetSource: "canonical_settlement",
         activationAlertAfterMilliseconds: 59_999,
       },

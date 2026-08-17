@@ -41,6 +41,9 @@ function readyCheckpoint(platformKey: string, input: {
     sourceHeadSequence: sequence,
     settledAt,
     sourceHeadAt,
+    lastSuccessfulObservationAt: sourceHeadAt,
+    staleAt: new Date(sourceHeadAt.getTime() + 900_000),
+    freshness: "fresh" as const,
     blockedState: { kind: "ready" as const },
   };
 }
@@ -58,6 +61,9 @@ function blockedCheckpoint(
     sourceHeadSequence: 12n,
     settledAt,
     sourceHeadAt,
+    lastSuccessfulObservationAt: settledAt,
+    staleAt: new Date(settledAt.getTime() + 900_000),
+    freshness: "delayed" as const,
     blockedState: {
       kind: "blocked" as const,
       reason,
@@ -75,12 +81,35 @@ function firstCauseBlockedCheckpoint(platformKey: string) {
     sourceHeadSequence: 1n,
     settledAt: null,
     sourceHeadAt,
+    lastSuccessfulObservationAt: settledAt,
+    staleAt: new Date(settledAt.getTime() + 900_000),
+    freshness: "delayed" as const,
     blockedState: {
       kind: "blocked" as const,
       reason: "pending_derivation" as const,
       causeSequence: 1n,
     },
   };
+}
+
+function eligibilityCheckpoint<Checkpoint extends Readonly<{
+  lastSuccessfulObservationAt: Date;
+  staleAt: Date;
+  freshness: "fresh" | "delayed";
+}>>(checkpoint: Checkpoint): Omit<
+  Checkpoint,
+  "lastSuccessfulObservationAt" | "staleAt" | "freshness"
+> {
+  const {
+    lastSuccessfulObservationAt,
+    staleAt,
+    freshness,
+    ...base
+  } = checkpoint;
+  void lastSuccessfulObservationAt;
+  void staleAt;
+  void freshness;
+  return base;
 }
 
 async function assertCode(
@@ -101,7 +130,7 @@ async function assertCode(
 test("provider checkpoint lookup is bound to one server-owned organization and platform", async () => {
   const calls: unknown[] = [];
   const repository: ProviderCatalogCheckpointReadPort = {
-    async loadProviderCatalogCheckpoint(input) {
+    async loadProviderPromotionCheckpoint(input) {
       calls.push(input);
       return readyCheckpoint("alpha");
     },
@@ -126,7 +155,7 @@ test("provider checkpoint lookup is bound to one server-owned organization and p
 test("provider checkpoint exposes only a bounded causal blocked state", async () => {
   for (const reason of ["pending_derivation", "technical_failure"] as const) {
     const service = new ProviderCatalogSettlementService({
-      async loadProviderCatalogCheckpoint() {
+      async loadProviderPromotionCheckpoint() {
         return blockedCheckpoint("beta", reason);
       },
     }, { organizationId, platformKey: "beta" });
@@ -142,7 +171,7 @@ test("provider checkpoint exposes only a bounded causal blocked state", async ()
   }
 
   const epochBlockedService = new ProviderCatalogSettlementService({
-    async loadProviderCatalogCheckpoint() {
+      async loadProviderPromotionCheckpoint() {
       return {
         ...blockedCheckpoint("beta", "pending_derivation"),
         sharedConfigurationEpoch: epoch({ sequence: 12n }),
@@ -157,7 +186,7 @@ test("provider checkpoint exposes only a bounded causal blocked state", async ()
   );
 
   const firstCauseService = new ProviderCatalogSettlementService({
-    async loadProviderCatalogCheckpoint() {
+      async loadProviderPromotionCheckpoint() {
       return firstCauseBlockedCheckpoint("beta");
     },
   }, { organizationId, platformKey: "beta" });
@@ -190,7 +219,7 @@ test("provider checkpoint rejects missing, cross-scope, protected, and inconsist
   ];
   for (const candidate of invalid) {
     const service = new ProviderCatalogSettlementService({
-      async loadProviderCatalogCheckpoint() { return candidate; },
+      async loadProviderPromotionCheckpoint() { return candidate; },
     }, { organizationId, platformKey: "alpha" });
     await assertCode(
       () => service.getCheckpoint(),
@@ -204,7 +233,7 @@ test("provider checkpoint rejects missing, cross-scope, protected, and inconsist
 test("provider binding rejects caller-shaped tenant and platform values before repository access", async () => {
   let calls = 0;
   const repository: ProviderCatalogCheckpointReadPort = {
-    async loadProviderCatalogCheckpoint() {
+    async loadProviderPromotionCheckpoint() {
       calls += 1;
       return readyCheckpoint("alpha");
     },
@@ -233,11 +262,16 @@ test("manifest eligibility returns one atomic same-epoch enabled-platform snapsh
       return {
         organizationId,
         sharedConfigurationEpoch: currentEpoch,
+        confidencePolicyVersion: "confidence-v1",
+        staleAfterSeconds: 900,
+        configuredPlatformKeys: ["alpha", "beta"],
         enabledPlatformKeys: ["alpha", "beta"],
         lifecycleDecisionSequence: 99n,
         checkpoints: [
-          readyCheckpoint("alpha"),
-          blockedCheckpoint("beta", "technical_failure"),
+          eligibilityCheckpoint(readyCheckpoint("alpha")),
+          eligibilityCheckpoint(
+            blockedCheckpoint("beta", "technical_failure"),
+          ),
         ],
       };
     },
@@ -249,6 +283,9 @@ test("manifest eligibility returns one atomic same-epoch enabled-platform snapsh
   const snapshot = await service.getSnapshot();
 
   assert.deepEqual(calls, [{ organizationId }]);
+  assert.equal(snapshot.confidencePolicyVersion, "confidence-v1");
+  assert.equal(snapshot.staleAfterSeconds, 900);
+  assert.deepEqual(snapshot.configuredPlatformKeys, ["alpha", "beta"]);
   assert.deepEqual(snapshot.enabledPlatformKeys, ["alpha", "beta"]);
   assert.equal(snapshot.lifecycleDecisionSequence, 99n);
   assert.ok(
@@ -259,6 +296,9 @@ test("manifest eligibility returns one atomic same-epoch enabled-platform snapsh
     snapshot.checkpoints.map(({ platformKey }) => platformKey),
     snapshot.enabledPlatformKeys,
   );
+  assert.equal("lastSuccessfulObservationAt" in snapshot.checkpoints[1]!, false);
+  assert.equal("staleAt" in snapshot.checkpoints[1]!, false);
+  assert.equal("freshness" in snapshot.checkpoints[1]!, false);
   assert.equal(
     sameSharedPublicConfigurationEpoch(
       snapshot.sharedConfigurationEpoch,
@@ -288,10 +328,13 @@ test("manifest eligibility accepts eight enabled platforms and rejects a ninth w
       return {
         organizationId,
         sharedConfigurationEpoch: epoch(),
+        confidencePolicyVersion: "confidence-v1",
+        staleAfterSeconds: 900,
+        configuredPlatformKeys: platformKeys,
         enabledPlatformKeys: platformKeys,
         lifecycleDecisionSequence: 9n,
         checkpoints: platformKeys.map((platformKey) =>
-          readyCheckpoint(platformKey)),
+          eligibilityCheckpoint(readyCheckpoint(platformKey))),
       };
     },
   });
@@ -314,15 +357,30 @@ test("manifest eligibility rejects missing, unsorted, mismatched, and protected 
   const base = {
     organizationId,
     sharedConfigurationEpoch: epoch(),
+    confidencePolicyVersion: "confidence-v1",
+    staleAfterSeconds: 900,
+    configuredPlatformKeys: ["alpha", "beta"],
     enabledPlatformKeys: ["alpha", "beta"],
     lifecycleDecisionSequence: 8n,
-    checkpoints: [readyCheckpoint("alpha"), readyCheckpoint("beta")],
+    checkpoints: [
+      eligibilityCheckpoint(readyCheckpoint("alpha")),
+      eligibilityCheckpoint(readyCheckpoint("beta")),
+    ],
   };
   const invalid = [
     null,
     { ...base, enabledPlatformKeys: ["beta", "alpha"] },
-    { ...base, checkpoints: [readyCheckpoint("beta"), readyCheckpoint("alpha")] },
+    {
+      ...base,
+      checkpoints: [
+        eligibilityCheckpoint(readyCheckpoint("beta")),
+        eligibilityCheckpoint(readyCheckpoint("alpha")),
+      ],
+    },
     { ...base, enabledPlatformKeys: ["alpha"] },
+    { ...base, configuredPlatformKeys: ["alpha"] },
+    { ...base, confidencePolicyVersion: " confidence-v1" },
+    { ...base, staleAfterSeconds: 59 },
     { ...base, providerId: "90000000-0000-4000-8000-000000000001" },
     { ...base, lifecycleDecisionSequence: -1n },
     { ...base, lifecycleDecisionSequence: 4n },
@@ -346,17 +404,22 @@ test("manifest eligibility rejects checkpoints from a mixed configuration epoch"
       return {
         organizationId,
         sharedConfigurationEpoch: epoch(),
+        confidencePolicyVersion: "confidence-v1",
+        staleAfterSeconds: 900,
+        configuredPlatformKeys: ["alpha", "beta"],
         enabledPlatformKeys: ["alpha", "beta"],
         lifecycleDecisionSequence: 8n,
         checkpoints: [
-          readyCheckpoint("alpha"),
-          readyCheckpoint("beta", {
-            configurationEpoch: epoch({
-              revision: 2,
-              sequence: 2n,
-              hashCharacter: "b",
+          eligibilityCheckpoint(readyCheckpoint("alpha")),
+          eligibilityCheckpoint(
+            readyCheckpoint("beta", {
+              configurationEpoch: epoch({
+                revision: 2,
+                sequence: 2n,
+                hashCharacter: "b",
+              }),
             }),
-          }),
+          ),
         ],
       };
     },

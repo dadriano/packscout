@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { providerPlatformKeySchema } from "./provider.ts";
 
 export const operationalEventKindSchema = z.enum([
   "run_failed",
@@ -19,7 +20,7 @@ export const operationalSeveritySchema = z.enum(["info", "warning", "critical"])
 export const operationalStableCodeSchema = z
   .string()
   .regex(/^[A-Z][A-Z0-9_]{0,127}$/);
-export const promotionLaneSchema = z.enum(["catalog", "heat"]);
+export const promotionLaneSchema = z.enum(["provider", "manifest", "heat"]);
 export const promotionOperationalConditionSchema = z.enum([
   "activation_lag",
   "settlement_blocked",
@@ -69,6 +70,7 @@ export const operationalNotificationSchema = z
         count: z.number().int().nonnegative().optional(),
         durationMs: z.number().int().nonnegative().optional(),
         lane: promotionLaneSchema.optional(),
+        platformKey: providerPlatformKeySchema.optional(),
         condition: promotionOperationalConditionSchema.optional(),
         targetWatermark: promotionWatermarkSchema.optional(),
         confirmedWatermark: promotionWatermarkSchema.optional(),
@@ -85,6 +87,7 @@ export const operationalNotificationSchema = z
       event.evidence.targetWatermark,
       event.evidence.confirmedWatermark,
       event.evidence.attemptId,
+      event.evidence.platformKey,
     ];
     if (!event.kind.startsWith("promotion_")) {
       if (promotionEvidence.some((value) => value !== undefined)) {
@@ -113,14 +116,26 @@ export const operationalNotificationSchema = z
       return;
     }
     const condition = event.evidence.condition;
+    if ((event.evidence.lane === "provider") !==
+      (event.evidence.platformKey !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        message: "Provider promotion evidence requires one platform key.",
+        path: ["evidence", "platformKey"],
+      });
+      return;
+    }
+    const laneKeys = event.evidence.lane === "provider"
+      ? ["lane", "platformKey"]
+      : ["lane"];
     const allowedEvidenceKeys = new Set<string>(
       event.kind === "promotion_activation_delayed"
-        ? ["lane", "condition", "targetWatermark", "confirmedWatermark", "durationMs"]
+        ? [...laneKeys, "condition", "targetWatermark", "confirmedWatermark", "durationMs"]
         : event.kind === "promotion_settlement_blocked"
-          ? ["lane", "condition", "targetWatermark", "confirmedWatermark", "count"]
+          ? [...laneKeys, "condition", "targetWatermark", "confirmedWatermark", "count"]
           : event.kind === "promotion_failed"
             ? [
-                "lane",
+                ...laneKeys,
                 "condition",
                 "targetWatermark",
                 "confirmedWatermark",
@@ -128,7 +143,7 @@ export const operationalNotificationSchema = z
                 "failureCode",
               ]
             : [
-                "lane",
+                ...laneKeys,
                 "condition",
                 "targetWatermark",
                 "confirmedWatermark",

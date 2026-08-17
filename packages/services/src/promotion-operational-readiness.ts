@@ -33,6 +33,7 @@ export interface PromotionOperationalReadinessConfiguration {
   readonly organizationId: string;
   readonly deploymentScopeDigest: string;
   readonly lane: PromotionLane;
+  readonly platformKey?: string;
   readonly targetSource: "canonical_settlement" | "promotion_lane";
   readonly monitorTechnicalSettlement?: boolean;
   readonly activationAlertAfterMilliseconds?: number;
@@ -43,6 +44,13 @@ const organizationIdPattern =
 const deploymentScopeDigestPattern = /^[0-9a-f]{64}$/u;
 const reconciliationFailurePattern =
   /(?:BASELINE_CONFLICT|LEDGER|RECEIPT|RESPONSE|RETRY_EXHAUSTED|STATUS|WATERMARK)/u;
+const exactReconciliationFailureCodes: ReadonlySet<string> = new Set([
+  "PROVIDER_RELEASE_PREDECESSOR_CONFLICT",
+  "PROVIDER_RELEASE_STATE_CONFLICT",
+  "PROVIDER_RELEASE_RECONCILIATION_FAILED",
+  "CATALOG_MANIFEST_PREDECESSOR_CONFLICT",
+  "CATALOG_MANIFEST_STATE_CONFLICT",
+] as const);
 
 function nonNegativeWatermark(value: bigint): bigint {
   return value < 0n ? 0n : value;
@@ -59,7 +67,8 @@ function assertNotificationPublished(result: NotificationPublishResult): void {
 }
 
 export function isPromotionReconciliationFailureCode(code: string): boolean {
-  return reconciliationFailurePattern.test(code);
+  return exactReconciliationFailureCodes.has(code) ||
+    reconciliationFailurePattern.test(code);
 }
 
 /**
@@ -93,7 +102,9 @@ export class PromotionOperationalReadinessService {
   ) {
     if (
       !organizationIdPattern.test(configuration.organizationId) ||
-      !deploymentScopeDigestPattern.test(configuration.deploymentScopeDigest)
+      !deploymentScopeDigestPattern.test(configuration.deploymentScopeDigest) ||
+      (configuration.lane === "provider") !==
+        (configuration.platformKey !== undefined)
     ) {
       throw new RangeError("Promotion readiness scope is invalid.");
     }
@@ -108,7 +119,7 @@ export class PromotionOperationalReadinessService {
       organizationId: configuration.organizationId.toLowerCase(),
       monitorTechnicalSettlement:
         configuration.monitorTechnicalSettlement ??
-        configuration.lane === "catalog",
+        configuration.lane === "provider",
     });
   }
 
@@ -177,6 +188,9 @@ export class PromotionOperationalReadinessService {
         organizationId: this.#configuration.organizationId,
         deploymentScopeDigest: this.#configuration.deploymentScopeDigest,
         lane: this.#configuration.lane,
+        ...(this.#configuration.platformKey === undefined ? {} : {
+          platformKey: this.#configuration.platformKey,
+        }),
         sourceHeadWatermark: nonNegativeWatermark(
           diagnostic.canonicalSourceHeadWatermark,
         ),
@@ -192,6 +206,9 @@ export class PromotionOperationalReadinessService {
         organizationId: this.#configuration.organizationId,
         deploymentScopeDigest: this.#configuration.deploymentScopeDigest,
         lane: this.#configuration.lane,
+        ...(this.#configuration.platformKey === undefined ? {} : {
+          platformKey: this.#configuration.platformKey,
+        }),
         targetWatermark: target.watermark,
         confirmedWatermark,
         durationMs: ageMilliseconds,
@@ -216,6 +233,9 @@ export class PromotionOperationalReadinessService {
         organizationId: this.#configuration.organizationId,
         deploymentScopeDigest: this.#configuration.deploymentScopeDigest,
         lane: this.#configuration.lane,
+        ...(this.#configuration.platformKey === undefined ? {} : {
+          platformKey: this.#configuration.platformKey,
+        }),
         targetWatermark: target.watermark,
         confirmedWatermark,
       });
@@ -253,6 +273,9 @@ export class PromotionOperationalReadinessService {
       organizationId: this.#configuration.organizationId,
       deploymentScopeDigest: this.#configuration.deploymentScopeDigest,
       lane: this.#configuration.lane,
+      ...(this.#configuration.platformKey === undefined ? {} : {
+        platformKey: this.#configuration.platformKey,
+      }),
       attemptId: input.attemptId,
       targetWatermark: nonNegativeWatermark(input.targetWatermark),
       confirmedWatermark: nonNegativeWatermark(input.confirmedWatermark),

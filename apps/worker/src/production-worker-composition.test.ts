@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { ProviderWorkerRuntime } from "./provider-worker-runtime.ts";
 import { createProductionWorkerRuntime } from "./production-worker-composition.ts";
 
-test("production composition wires the catalog lane into the provider worker", async () => {
+test("production composition wires provider and manifest lanes without legacy catalog", async () => {
   const harness = await createMigratedTestDatabase();
   try {
     const runtime = createProductionWorkerRuntime({
@@ -24,13 +25,24 @@ test("production composition wires the catalog lane into the provider worker", a
         retentionOrganizationDiscoveryLimit: 10,
         workerId: "production-composition-worker",
       },
-      catalog: {
+      promotion: {
         convexBaseUrl: "https://convex.example",
         deploymentKey: "production-us",
-        keyId: "catalog-publisher.v1",
+        providerCredentials: [{
+          platformKey: "alpha",
+          keyId: "provider.alpha.v1",
+          secret: new Uint8Array(32).fill(3),
+        }],
+        manifestPublishCredential: {
+          keyId: "manifest.publish.v1",
+          secret: new Uint8Array(32).fill(4),
+        },
+        manifestClearCredential: {
+          keyId: "manifest.clear.v1",
+          secret: new Uint8Array(32).fill(5),
+        },
         pollIntervalMilliseconds: 5_000,
         requestTimeoutMilliseconds: 10_000,
-        secret: new Uint8Array(32).fill(3),
       },
       heat: {
         convexBaseUrl: "https://convex.example",
@@ -43,7 +55,7 @@ test("production composition wires the catalog lane into the provider worker", a
       },
       database: harness.client,
       providerLogger: { write() {} },
-      catalogLogger: { write() {} },
+      promotionLogger: { write() {} },
       heatLogger: { write() {} },
       observability: { metric() {}, log() {} },
       fetch: async () => new Response(),
@@ -52,4 +64,17 @@ test("production composition wires the catalog lane into the provider worker", a
   } finally {
     await harness.close();
   }
+});
+
+test("production composition has no legacy global catalog publication path", async () => {
+  const source = await readFile(
+    new URL("./production-worker-composition.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /createPromotionV2WorkerRuntime/);
+  assert.doesNotMatch(source, /createCatalogPromotionWorkerRuntime/);
+  assert.doesNotMatch(source, /SignedConvexCatalogPublicationClient/);
+  assert.doesNotMatch(source, /PrismaCatalogPromotionRepository/);
+  assert.doesNotMatch(source, /CatalogReleaseAssembler/);
 });

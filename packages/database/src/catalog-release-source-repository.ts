@@ -23,7 +23,8 @@ export class ApprovedPublicCatalogConfigurationPersistenceError extends Error {
     readonly code:
       | "PUBLIC_CONFIGURATION_INVALID"
       | "PUBLIC_CONFIGURATION_PLATFORM_LIMIT_EXCEEDED"
-      | "PUBLIC_CONFIGURATION_PLATFORM_UNREGISTERED" =
+      | "PUBLIC_CONFIGURATION_PLATFORM_UNREGISTERED"
+      | "PUBLIC_CONFIGURATION_PROMOTION_RECOVERY_REQUIRED" =
         "PUBLIC_CONFIGURATION_INVALID",
   ) {
     super("Approved public catalog configuration is invalid.");
@@ -138,6 +139,20 @@ export class PrismaCatalogReleaseSourceRepository
     );
     const approvedAt = new Date(configuration.approvedAt);
     return this.database.$transaction(async (transaction) => {
+      const promotionGuard = await transaction.$queryRaw<
+        Array<{ result: "allowed" | "promotion_recovery_required" }>
+      >(Prisma.sql`
+        select public.prepare_catalog_configuration_provider_set_change(
+          ${uuid(this.organizationId)},
+          cast(${JSON.stringify(configuration)} as jsonb),
+          ${approvedAt}
+        ) as result
+      `);
+      if (promotionGuard[0]?.result !== "allowed") {
+        throw new ApprovedPublicCatalogConfigurationPersistenceError(
+          "PUBLIC_CONFIGURATION_PROMOTION_RECOVERY_REQUIRED",
+        );
+      }
       const registeredPlatforms = await transaction.$queryRaw<
         Array<{ platformKey: string }>
       >(Prisma.sql`

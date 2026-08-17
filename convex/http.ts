@@ -1,6 +1,7 @@
 import { httpRouter } from "convex/server";
 import {
   PRODUCTION_CATALOG_MANIFEST_PATHS,
+  PRODUCTION_CATALOG_RETENTION_PATHS,
   PRODUCTION_PROVIDER_RELEASE_PATHS,
   PRODUCTION_REPACK_HEAT_PATHS,
 } from "@packscout/contracts";
@@ -8,11 +9,48 @@ import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import {
   handleAuthenticatedCatalogManifestRequest,
+  handleAuthenticatedCatalogRetentionRequest,
   handleAuthenticatedProviderReleaseRequest,
   handleAuthenticatedPublicationRequest,
 } from "./productionDataReleaseAuth";
 
 const http = httpRouter();
+
+http.route({
+  path: PRODUCTION_CATALOG_RETENTION_PATHS.retainManifests,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedCatalogRetentionRequest(
+      ctx,
+      request,
+      internal.catalogRetention.retainManifests,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_CATALOG_RETENTION_PATHS.retainProviderReleases,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedCatalogRetentionRequest(
+      ctx,
+      request,
+      internal.catalogRetention.retainProviderReleases,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_CATALOG_RETENTION_PATHS.status,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedCatalogRetentionRequest(
+      ctx,
+      request,
+      internal.catalogRetentionRead.status,
+    ),
+  ),
+});
 
 http.route({
   path: PRODUCTION_CATALOG_MANIFEST_PATHS.activeState,

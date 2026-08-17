@@ -126,15 +126,22 @@ test("normalized Heat cleanup is bounded and reports remaining work", async () =
   assert.equal(calls, 3);
 });
 
-test("provider, catalog, and Heat loops fail and stop independently", async () => {
+test("unproven promotion bootstrap fails parent startup and stops Heat", async () => {
   const events: HeatPromotionWorkerLogEvent[] = [];
   let heatStarted = 0;
   let heatStopped = 0;
   let finishHeat!: () => void;
   const heatCompletion = new Promise<void>((resolve) => { finishHeat = resolve; });
   const providerEvents: Array<{ event: string }> = [];
+  const bootstrapFailure = Object.assign(new Error("safe bootstrap refusal"), {
+    code: "PROMOTION_V2_BOOTSTRAP_UNPROVEN",
+  });
+  let schedulerCalls = 0;
   const runtime = new ProviderWorkerRuntime({
-    scheduler: { async runOnce() { return { kind: "idle" }; } },
+    scheduler: { async runOnce() {
+      schedulerCalls += 1;
+      return { kind: "idle" };
+    } },
     imports: {
       async executeImport(): Promise<never> { throw new Error("not called"); },
       async executeNextImport() { return { kind: "idle" }; },
@@ -154,8 +161,8 @@ test("provider, catalog, and Heat loops fail and stop independently", async () =
         };
       },
     },
-    catalogPromotion: {
-      async start() { throw new Error("catalog lane failed"); },
+    promotion: {
+      async start() { throw bootstrapFailure; },
       stop() {},
     },
     heatPromotion: {
@@ -172,10 +179,131 @@ test("provider, catalog, and Heat loops fail and stop independently", async () =
     workerId: "worker-1",
     sleeper: { async sleep() { runtime.stop(); } },
   });
-  await runtime.start();
+  await assert.rejects(runtime.start(), (error) => error === bootstrapFailure);
   assert.equal(heatStarted, 1);
   assert.ok(heatStopped >= 1);
+  assert.ok(schedulerCalls <= 1);
   assert.ok(providerEvents.some(({ event }) =>
-    event === "provider_catalog_promotion_runtime_failed"));
+    event === "provider_promotion_v2_runtime_failed"));
   assert.equal(events.length, 0);
+});
+
+test("fatal promotion refusal is not masked by a never-resolving import scheduler", async () => {
+  const bootstrapFailure = Object.assign(new Error("safe bootstrap refusal"), {
+    code: "PROMOTION_V2_BOOTSTRAP_UNPROVEN",
+  });
+  let schedulerCalls = 0;
+  let promotionStops = 0;
+  let finishHeat!: () => void;
+  const heatCompletion = new Promise<void>((resolve) => {
+    finishHeat = resolve;
+  });
+  const runtime = new ProviderWorkerRuntime({
+    scheduler: {
+      runOnce() {
+        schedulerCalls += 1;
+        return new Promise<never>(() => undefined);
+      },
+    },
+    imports: {
+      async executeImport(): Promise<never> { throw new Error("not called"); },
+      async executeNextImport() { return { kind: "idle" }; },
+    },
+    retention: {
+      async runCycle() {
+        return {
+          cutoffAt: "2026-08-15T12:00:00.000Z",
+          discoveredOrganizations: 0,
+          attemptedOrganizations: 0,
+          batchesRun: 0,
+          expired: 0,
+          failed: 0,
+          knownRemaining: 0,
+          deferredOrganizations: 0,
+          capReached: false,
+        };
+      },
+    },
+    promotion: {
+      async start() { throw bootstrapFailure; },
+      stop() { promotionStops += 1; },
+    },
+    heatPromotion: {
+      start() { return heatCompletion; },
+      stop() { finishHeat(); },
+    },
+    logger: { write() {} },
+    workerId: "worker-1",
+  });
+
+  const completion = await Promise.race([
+    runtime.start().then(
+      () => ({ kind: "resolved" as const }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    ),
+    new Promise<{ kind: "timeout" }>((resolve) => {
+      setTimeout(() => resolve({ kind: "timeout" }), 100);
+    }),
+  ]);
+
+  assert.notEqual(completion.kind, "timeout");
+  assert.equal(completion.kind, "rejected");
+  if (completion.kind === "rejected") {
+    assert.equal(completion.error, bootstrapFailure);
+  }
+  assert.equal(schedulerCalls, 1);
+  assert.ok(promotionStops >= 1);
+});
+
+test("fatal promotion refusal is not masked by abort-ignoring Heat", async () => {
+  const bootstrapFailure = Object.assign(new Error("safe bootstrap refusal"), {
+    code: "PROMOTION_V2_BOOTSTRAP_UNPROVEN",
+  });
+  const runtime = new ProviderWorkerRuntime({
+    scheduler: { runOnce: async () => ({ kind: "idle" }) },
+    imports: {
+      async executeImport(): Promise<never> { throw new Error("not called"); },
+      async executeNextImport() { return { kind: "idle" }; },
+    },
+    retention: {
+      async runCycle() {
+        return {
+          cutoffAt: "2026-08-15T12:00:00.000Z",
+          discoveredOrganizations: 0,
+          attemptedOrganizations: 0,
+          batchesRun: 0,
+          expired: 0,
+          failed: 0,
+          knownRemaining: 0,
+          deferredOrganizations: 0,
+          capReached: false,
+        };
+      },
+    },
+    promotion: {
+      async start() { throw bootstrapFailure; },
+      stop() {},
+    },
+    heatPromotion: {
+      start() { return new Promise<never>(() => undefined); },
+      stop() {},
+    },
+    logger: { write() {} },
+    workerId: "worker-1",
+  });
+
+  const completion = await Promise.race([
+    runtime.start().then(
+      () => ({ kind: "resolved" as const }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    ),
+    new Promise<{ kind: "timeout" }>((resolve) => {
+      setTimeout(() => resolve({ kind: "timeout" }), 100);
+    }),
+  ]);
+
+  assert.equal(completion.kind, "rejected");
+  if (completion.kind === "rejected") {
+    assert.equal(completion.error, bootstrapFailure);
+  }
 });

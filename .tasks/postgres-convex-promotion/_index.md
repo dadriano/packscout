@@ -4,7 +4,7 @@
 
 Open `postgres-convex-promotion/007` and define the provider-impact outcome for one platform-specific cause, one cross-platform cause, and one manifest-lifecycle cause before changing any release or publication contract.
 
-**Progress:** 10/14 tasks complete
+**Progress:** 11/14 tasks complete
 
 ## Context
 
@@ -104,9 +104,9 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
-| 011 | Promote providers and reconcile manifests | large | 3–5 days | not started | 007, 008, 009, 010 |
+| 011 | Promote providers and reconcile manifests | large | 3–5 days | done | 007, 008, 009, 010 |
 | 012 | Align Heat to the active catalog manifest | large | 2–4 days | not started | 006, 010, 011 |
-| 013 | Retain manifests and provider releases safely | medium | 1–3 days | not started | 009, 010 |
+| 013 | Retain manifests and provider releases safely | medium | 1–3 days | in progress | 009, 010 |
 | 014 | Certify provider-manifest cutover and readiness | large | 3–5 days | not started | 007–013 |
 
 ## Build Order
@@ -155,4 +155,4 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 
 ## Next Action
 
-Open `011-promote-providers-and-reconcile-manifests.md` and run independent provider completion lanes behind one serialized, exact-replay manifest activation lane.
+Open `012-align-heat-to-active-catalog-manifest.md` and bind Heat frames to the active manifest and its exact provider-release set while `013` completes bounded retention in parallel.

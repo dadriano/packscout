@@ -638,6 +638,342 @@ model normalized_heat_window_checkpoints {
   organizations            organizations @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "normalized_heat_window_checkpoints_organization_fk")
 }
 
+/// One server-bound provider publication lane. Task 011 check constraints and
+/// monotonic triggers are defined by its migration.
+model provider_promotion_lanes {
+  organization_id                       String    @db.Uuid
+  deployment_key                        String
+  platform_key                          String
+  next_evaluation_sequence              BigInt    @default(0)
+  requested_evaluation_sequence         BigInt    @default(0)
+  requested_at                          DateTime? @db.Timestamptz(6)
+  latest_checkpoint_body                String?
+  latest_checkpoint_sha256              String?
+  settled_checkpoint                    BigInt    @default(0)
+  settled_at                            DateTime? @db.Timestamptz(6)
+  source_head_checkpoint                BigInt    @default(0)
+  source_head_at                        DateTime? @db.Timestamptz(6)
+  confirmed_evaluation_sequence         BigInt    @default(0)
+  completed_checkpoint                  BigInt    @default(0)
+  completed_at                          DateTime? @db.Timestamptz(6)
+  completed_public_provider_release_id  String?   @db.Uuid
+  completed_provider_release_fingerprint String?
+  completed_head_body                   String?
+  completed_head_sha256                 String?
+  completed_terminal_operation_kind     String?
+  completed_terminal_operation_id       String?
+  completed_terminal_receipt_sha256     String?
+  completed_attempt_id                  String?   @db.Uuid
+  next_retry_at                         DateTime? @db.Timestamptz(6)
+  created_at                            DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                            DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, platform_key], map: "provider_promotion_lanes_pkey")
+}
+
+/// Immutable, deduplicated canonical provider checkpoint evaluation.
+model provider_promotion_evaluations {
+  organization_id     String   @db.Uuid
+  deployment_key      String
+  platform_key        String
+  evaluation_sequence BigInt
+  checkpoint_body     String
+  checkpoint_sha256   String
+  settled_checkpoint  BigInt
+  source_head_checkpoint BigInt
+  requested_at        DateTime @db.Timestamptz(6)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, platform_key, evaluation_sequence], map: "provider_promotion_evaluations_pkey")
+  @@index([organization_id, deployment_key, platform_key, checkpoint_sha256, evaluation_sequence(sort: Desc)], map: "provider_promotion_evaluations_digest_idx")
+}
+
+/// Lease-safe publication attempt for one provider evaluation.
+model provider_promotion_attempts {
+  id                              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                 String    @db.Uuid
+  deployment_key                  String
+  platform_key                    String
+  evaluation_sequence             BigInt
+  bootstrap_proof_revision        BigInt
+  bootstrap_provider_set_sha256   String
+  target_checkpoint               BigInt
+  state                           String    @default("assembling")
+  prepared_classification         String?
+  prepared_summary_body           String?
+  prepared_summary_sha256         String?
+  public_provider_release_id      String?   @db.Uuid
+  provider_release_fingerprint    String?
+  expected_completed_head_sha256  String?
+  prepared_at                     DateTime? @db.Timestamptz(6)
+  claim_owner                     String?
+  claim_token                     String?   @db.Uuid
+  claim_expires_at                DateTime? @db.Timestamptz(6)
+  last_heartbeat_at               DateTime? @db.Timestamptz(6)
+  claim_count                     Int       @default(0)
+  retry_count                     Int       @default(0)
+  retry_at                        DateTime? @db.Timestamptz(6)
+  failure_class                   String?
+  failure_code                    String?
+  cas_error_body                  String?
+  cas_error_sha256                String?
+  terminal_at                     DateTime? @db.Timestamptz(6)
+  created_at                      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, organization_id, deployment_key, platform_key], map: "provider_promotion_attempts_tenant_unique")
+  @@unique([organization_id, deployment_key, platform_key, evaluation_sequence], map: "provider_promotion_attempts_evaluation_unique")
+  @@index([organization_id, deployment_key, platform_key, retry_at, claim_expires_at], map: "provider_promotion_attempts_claimable_idx")
+}
+
+/// Exact provider publication request and verified receipt evidence.
+model provider_promotion_operations {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attempt_id               String    @db.Uuid
+  organization_id          String    @db.Uuid
+  deployment_key           String
+  platform_key             String
+  operation_index          Int
+  operation_id             String
+  operation_kind           String
+  request_path             String
+  canonical_request_body   String
+  request_sha256           String
+  state                    String    @default("pending")
+  send_count               Int       @default(0)
+  last_sent_at             DateTime? @db.Timestamptz(6)
+  acknowledged_at          DateTime? @db.Timestamptz(6)
+  canonical_receipt_body   String?
+  receipt_sha256           String?
+  exact_response_body      String?
+  response_sha256          String?
+  created_at               DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([attempt_id, operation_index], map: "provider_promotion_operations_attempt_index_unique")
+  @@unique([attempt_id, operation_id], map: "provider_promotion_operations_attempt_operation_unique")
+  @@unique([organization_id, deployment_key, platform_key, operation_id], map: "provider_promotion_operations_lane_operation_unique")
+  @@index([attempt_id, operation_index], map: "provider_promotion_operations_resume_idx")
+}
+
+/// Immutable release proof pointing to the original publish operations. Entity
+/// batches are intentionally not duplicated here.
+model provider_release_artifacts {
+  organization_id                    String   @db.Uuid
+  deployment_key                     String
+  platform_key                       String
+  public_provider_release_id         String   @db.Uuid
+  provider_release_fingerprint       String
+  immutable_proof_body               String
+  immutable_proof_sha256             String
+  publish_attempt_id                 String   @db.Uuid
+  completed_at                       DateTime @db.Timestamptz(6)
+  created_at                         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, platform_key, public_provider_release_id], map: "provider_release_artifacts_pkey")
+  @@unique([organization_id, deployment_key, platform_key, provider_release_fingerprint], map: "provider_release_artifacts_fingerprint_unique")
+  @@unique([publish_attempt_id, organization_id, deployment_key, platform_key], map: "provider_release_artifacts_publish_attempt_unique")
+  @@unique([publish_attempt_id, organization_id, deployment_key, platform_key, public_provider_release_id, provider_release_fingerprint], map: "provider_release_artifacts_exact_identity_unique")
+}
+
+/// Serialized manifest evaluation lane. Convex generation is stored separately
+/// from PostgreSQL evaluation sequencing.
+model manifest_promotion_lanes {
+  organization_id                    String    @db.Uuid
+  deployment_key                     String
+  bootstrap_state                    String    @default("unverified")
+  bootstrap_verified_at              DateTime? @db.Timestamptz(6)
+  bootstrap_provider_set_body        String?
+  bootstrap_provider_set_sha256      String?
+  current_bootstrap_proof_revision   BigInt?
+  next_evaluation_sequence           BigInt    @default(0)
+  requested_evaluation_sequence      BigInt    @default(0)
+  requested_at                       DateTime? @db.Timestamptz(6)
+  confirmed_evaluation_sequence      BigInt    @default(0)
+  active_generation                  BigInt    @default(0)
+  active_state_body                  String?
+  active_state_sha256                String?
+  active_state_receipt_body          String?
+  active_state_receipt_sha256        String?
+  active_state_response_body         String?
+  active_state_response_sha256       String?
+  active_public_release_id           String?   @db.Uuid
+  active_manifest_fingerprint        String?
+  active_provider_reference_set_hash String?
+  active_configuration_epoch_sequence BigInt?
+  active_terminal_receipt_sha256     String?
+  delayed_provider_count             Int       @default(0)
+  last_activated_at                  DateTime? @db.Timestamptz(6)
+  last_reconciled_at                 DateTime? @db.Timestamptz(6)
+  next_retry_at                      DateTime? @db.Timestamptz(6)
+  created_at                         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                         DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key], map: "manifest_promotion_lanes_pkey")
+}
+
+/// Idempotent source event assigned a database-monotonic manifest sequence.
+model manifest_promotion_evaluations {
+  organization_id     String   @db.Uuid
+  deployment_key      String
+  evaluation_sequence BigInt
+  cause               String
+  cause_identity      String
+  cause_sha256        String
+  requested_at        DateTime @db.Timestamptz(6)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, evaluation_sequence], map: "manifest_promotion_evaluations_pkey")
+  @@unique([organization_id, deployment_key, cause_sha256], map: "manifest_promotion_evaluations_cause_unique")
+}
+
+/// One serialized manifest selection/CAS attempt.
+model manifest_promotion_attempts {
+  id                           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id              String    @db.Uuid
+  deployment_key               String
+  evaluation_sequence          BigInt
+  bootstrap_proof_revision     BigInt
+  bootstrap_provider_set_sha256 String
+  state                        String    @default("assembling")
+  prepared_operation_kind      String?
+  prepared_summary_body        String?
+  prepared_summary_sha256      String?
+  evaluation_snapshot_body     String?
+  evaluation_snapshot_sha256   String?
+  expected_active_state_sha256 String?
+  public_release_id            String?   @db.Uuid
+  manifest_fingerprint         String?
+  prepared_at                  DateTime? @db.Timestamptz(6)
+  claim_owner                  String?
+  claim_token                  String?   @db.Uuid
+  claim_expires_at             DateTime? @db.Timestamptz(6)
+  last_heartbeat_at            DateTime? @db.Timestamptz(6)
+  claim_count                  Int       @default(0)
+  retry_count                  Int       @default(0)
+  retry_at                     DateTime? @db.Timestamptz(6)
+  failure_class                String?
+  failure_code                 String?
+  cas_error_body               String?
+  cas_error_sha256             String?
+  terminal_at                  DateTime? @db.Timestamptz(6)
+  created_at                   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, organization_id, deployment_key], map: "manifest_promotion_attempts_tenant_unique")
+  @@unique([organization_id, deployment_key, evaluation_sequence], map: "manifest_promotion_attempts_evaluation_unique")
+}
+
+/// At most one exact Task 010 mutation per manifest attempt.
+model manifest_promotion_operations {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attempt_id               String    @db.Uuid
+  organization_id          String    @db.Uuid
+  deployment_key           String
+  operation_index          Int       @default(0)
+  operation_id             String
+  operation_kind           String
+  request_path             String
+  canonical_request_body   String
+  request_sha256           String
+  state                    String    @default("pending")
+  send_count               Int       @default(0)
+  last_sent_at             DateTime? @db.Timestamptz(6)
+  acknowledged_at          DateTime? @db.Timestamptz(6)
+  canonical_receipt_body   String?
+  receipt_sha256           String?
+  exact_response_body      String?
+  response_sha256          String?
+  created_at               DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([attempt_id], map: "manifest_promotion_operations_attempt_unique")
+  @@unique([organization_id, deployment_key, operation_id], map: "manifest_promotion_operations_operation_unique")
+}
+
+/// Exact provider selection set derived from the confirmed active manifest.
+model manifest_active_provider_selections {
+  organization_id                    String   @db.Uuid
+  deployment_key                     String
+  platform_key                       String
+  active_generation                  BigInt
+  manifest_public_release_id         String   @db.Uuid
+  provider_public_release_id         String   @db.Uuid
+  provider_release_fingerprint       String
+  selected_checkpoint                BigInt
+  selection_body                     String
+  selection_sha256                   String
+  provider_terminal_operation_id     String
+  provider_terminal_receipt_sha256   String
+  publish_artifact_attempt_id        String   @db.Uuid
+  activated_at                       DateTime @db.Timestamptz(6)
+  created_at                         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, platform_key], map: "manifest_active_provider_selections_pkey")
+}
+
+/// Durable startup proof for exact empty or exact active remote state.
+model catalog_promotion_bootstrap_proofs {
+  organization_id                String   @db.Uuid
+  deployment_key                 String
+  proof_revision                BigInt
+  proof_kind                     String
+  active_state_request_body      String
+  active_state_request_sha256    String
+  active_state_receipt_body      String
+  active_state_receipt_sha256    String
+  active_state_response_body     String?
+  active_state_response_sha256   String?
+  manifest_definition_request_body String?
+  manifest_definition_request_sha256 String?
+  manifest_terminal_request_body String?
+  manifest_terminal_request_sha256 String?
+  manifest_receipt_body          String?
+  manifest_receipt_sha256        String?
+  manifest_response_body         String?
+  manifest_response_sha256       String?
+  active_state_body              String
+  active_state_sha256            String
+  verified_at                    DateTime @db.Timestamptz(6)
+  created_at                     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, proof_revision], map: "catalog_promotion_bootstrap_proofs_pkey")
+}
+
+/// Ordered provider receipt/artifact graph for an active bootstrap proof.
+model catalog_promotion_bootstrap_provider_proofs {
+  organization_id                    String   @db.Uuid
+  deployment_key                     String
+  proof_revision                     BigInt
+  platform_key                       String
+  ordinal                            Int
+  public_provider_release_id         String?  @db.Uuid
+  provider_release_fingerprint       String?
+  provider_terminal_operation_id     String?
+  provider_terminal_receipt_body     String?
+  provider_terminal_receipt_sha256   String?
+  provider_terminal_response_body    String?
+  provider_terminal_response_sha256  String?
+  publish_artifact_attempt_id        String?  @db.Uuid
+  completed_head_request_body        String
+  completed_head_request_sha256      String
+  completed_head_receipt_body        String
+  completed_head_receipt_sha256      String
+  completed_head_response_body       String?
+  completed_head_response_sha256     String?
+  remote_completed_head_body         String
+  remote_completed_head_sha256       String
+  local_completed_attempt_id         String?  @db.Uuid
+  local_completed_public_provider_release_id String? @db.Uuid
+  local_completed_provider_release_fingerprint String?
+  local_completed_terminal_receipt_sha256 String?
+  created_at                         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, proof_revision, platform_key], map: "catalog_promotion_bootstrap_provider_proofs_pkey")
+  @@unique([organization_id, deployment_key, proof_revision, ordinal], map: "catalog_promotion_bootstrap_provider_proofs_ordinal_unique")
+}
+
 /// Server-bound, monotonic scheduling and safe health state for one promotion lane.
 /// This table contains bootstrap and watermark check constraints defined in its migration.
 model promotion_lanes {

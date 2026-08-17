@@ -39,13 +39,33 @@ export interface ProviderCatalogCheckpointRecord {
 export interface ManifestEligibilitySnapshotRecord {
   readonly organizationId: string;
   readonly sharedConfigurationEpoch: SharedPublicConfigurationEpochRecord;
+  readonly confidencePolicyVersion: string;
+  readonly staleAfterSeconds: number;
+  readonly configuredPlatformKeys: readonly string[];
   readonly enabledPlatformKeys: readonly string[];
   readonly lifecycleDecisionSequence: bigint;
   readonly checkpoints: readonly ProviderCatalogCheckpointRecord[];
 }
 
+export interface ProviderPromotionCheckpointProjectionRecord
+  extends ProviderCatalogCheckpointRecord {
+  readonly lastSuccessfulObservationAt: Date;
+  readonly staleAt: Date;
+  readonly freshness: "fresh" | "delayed";
+}
+
+export interface ProviderCausalReadinessRecord {
+  readonly platformKey: string;
+  readonly lifecycleSequence: bigint;
+  readonly configurationRevisionId: string;
+  readonly completedBackfillAt: Date | null;
+  readonly lastSuccessfulObservationAt: Date | null;
+}
+
 interface EpochContext {
   readonly epoch: SharedPublicConfigurationEpochRecord;
+  readonly confidencePolicyVersion: string;
+  readonly staleAfterSeconds: number;
   readonly configuredPlatformKeys: readonly string[];
   readonly lifecycleDecisionSequence: bigint;
 }
@@ -68,6 +88,20 @@ interface CheckpointRow {
   sourceHeadAt: Date | null;
   blockedCauseSequence: bigint | null;
   technicalFailure: boolean | null;
+}
+
+interface CausalReadinessRow {
+  platformKey: string;
+  lifecycleState: "active" | "disabled" | "archived";
+  lifecycleSequence: bigint;
+  causePlatformKey: string | null;
+  causeLifecycleState: string | null;
+  causeProviderId: string | null;
+  configurationRevisionId: string | null;
+  providerId: string | null;
+  revisionProviderId: string | null;
+  completedBackfillAt: Date | null;
+  lastSuccessfulObservationAt: Date | null;
 }
 
 function uuid(value: string): Prisma.Sql {
@@ -129,6 +163,8 @@ async function loadEpochContext(
       publicChangeSequence: row.publicChangeSequence,
       configurationHash: row.configurationHash,
     },
+    confidencePolicyVersion: parsed.data.confidencePolicy.version,
+    staleAfterSeconds: parsed.data.staleAfterSeconds,
     configuredPlatformKeys: parsed.data.platforms.map(
       ({ platformKey }) => platformKey,
     ),
@@ -180,7 +216,7 @@ async function loadCheckpointRows(
     ) as blocker on true
     where checkpoint.organization_id = ${uuid(input.organizationId)}
       and checkpoint.platform_key = any(${[...input.platformKeys]}::text[])
-    order by checkpoint.platform_key
+    order by checkpoint.platform_key collate "C"
   `);
   if (rows.length !== input.platformKeys.length) return null;
   const byPlatform = new Map(rows.map((row) => [row.platformKey, row]));
@@ -236,7 +272,7 @@ async function loadEnabledPlatformKeys(
     platformKey: string;
     state: "active" | "disabled" | "archived";
   }>>(Prisma.sql`
-    select distinct on (impact.lifecycle_platform_key)
+    select distinct on (impact.lifecycle_platform_key collate "C")
            impact.lifecycle_platform_key as "platformKey",
            impact.lifecycle_state::text as state
     from public.public_change_catalog_impacts as impact
@@ -245,7 +281,8 @@ async function loadEnabledPlatformKeys(
         ${[...input.configuredPlatformKeys]}::text[]
       )
       and impact.cause_sequence <= ${input.throughSequence}
-    order by impact.lifecycle_platform_key, impact.cause_sequence desc
+    order by impact.lifecycle_platform_key collate "C",
+             impact.cause_sequence desc
   `);
   return canonicalCatalogPlatformKeys(
     rows
@@ -284,26 +321,168 @@ export class PrismaProviderCatalogSettlementRepository {
   }): Promise<ManifestEligibilitySnapshotRecord | null> {
     return this.database.$transaction(async (transaction) => {
       await transaction.$executeRaw(Prisma.sql`set transaction read only`);
+      return loadManifestEligibilitySnapshotInTransaction(transaction, input);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async loadProviderPromotionCheckpoint(input: {
+    organizationId: string;
+    platformKey: string;
+  }): Promise<ProviderPromotionCheckpointProjectionRecord | null> {
+    return this.database.$transaction(async (transaction) => {
+      await transaction.$executeRaw(Prisma.sql`set transaction read only`);
       const context = await loadEpochContext(transaction, input.organizationId);
-      if (!context) return null;
-      const enabledPlatformKeys = await loadEnabledPlatformKeys(transaction, {
-        organizationId: input.organizationId,
-        configuredPlatformKeys: context.configuredPlatformKeys,
-        throughSequence: context.lifecycleDecisionSequence,
-      });
+      if (!context || !context.configuredPlatformKeys.includes(input.platformKey)) {
+        return null;
+      }
       const checkpoints = await loadCheckpointRows(transaction, {
         organizationId: input.organizationId,
-        platformKeys: enabledPlatformKeys,
+        platformKeys: [input.platformKey],
         epoch: context.epoch,
       });
-      if (checkpoints === null) return null;
+      const checkpoint = checkpoints?.[0];
+      if (!checkpoint) return null;
+      const readiness = (await loadProviderCausalReadinessInTransaction(
+        transaction,
+        { organizationId: input.organizationId, checkpoints: [checkpoint] },
+      ))[0];
+      if (!readiness?.completedBackfillAt ||
+        !readiness.lastSuccessfulObservationAt) return null;
+      const staleAt = new Date(
+        readiness.lastSuccessfulObservationAt.getTime() +
+          context.staleAfterSeconds * 1_000,
+      );
+      if (!Number.isFinite(staleAt.getTime())) {
+        throw new Error("Provider promotion observation is invalid.");
+      }
       return {
-        organizationId: input.organizationId,
-        sharedConfigurationEpoch: context.epoch,
-        enabledPlatformKeys,
-        lifecycleDecisionSequence: context.lifecycleDecisionSequence,
-        checkpoints,
+        ...checkpoint,
+        lastSuccessfulObservationAt: readiness.lastSuccessfulObservationAt,
+        staleAt,
+        freshness: readiness.lastSuccessfulObservationAt >= checkpoint.sourceHeadAt
+          ? "fresh" : "delayed",
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
+}
+
+/** Exact Task 007 lifecycle/config-revision readiness, transaction-bound. */
+export async function loadProviderCausalReadinessInTransaction(
+  transaction: PackscoutTransactionClient,
+  input: Readonly<{
+    organizationId: string;
+    checkpoints: readonly ProviderCatalogCheckpointRecord[];
+  }>,
+): Promise<readonly ProviderCausalReadinessRecord[]> {
+  if (input.checkpoints.length === 0) return [];
+  const platformKeys = input.checkpoints.map(({ platformKey }) => platformKey);
+  const rows = await transaction.$queryRaw<CausalReadinessRow[]>(Prisma.sql`
+    with latest_lifecycle as (
+      select distinct on (impact.lifecycle_platform_key collate "C")
+             impact.lifecycle_platform_key as "platformKey",
+             impact.lifecycle_state::text as "lifecycleState",
+             impact.cause_sequence as "lifecycleSequence",
+             cause.metadata_json->>'platformKey' as "causePlatformKey",
+             cause.metadata_json->>'state' as "causeLifecycleState",
+             cause.metadata_json->>'providerId' as "causeProviderId",
+             cause.metadata_json->>'configurationRevisionId'
+               as "configurationRevisionId"
+      from public.public_change_catalog_impacts as impact
+      join public.public_change_causes as cause
+        on cause.organization_id = impact.organization_id
+       and cause.sequence = impact.cause_sequence
+      where impact.organization_id = ${uuid(input.organizationId)}
+        and impact.lifecycle_platform_key = any(${platformKeys}::text[])
+        and impact.cause_sequence <= (
+          select settled_sequence
+          from public.catalog_manifest_lifecycle_checkpoints
+          where organization_id = ${uuid(input.organizationId)}
+        )
+      order by impact.lifecycle_platform_key collate "C",
+               impact.cause_sequence desc
+    )
+    select lifecycle.*, provider.id::text as "providerId",
+           revision.provider_id::text as "revisionProviderId",
+           backfill."completedBackfillAt",
+           observation."lastSuccessfulObservationAt"
+    from latest_lifecycle as lifecycle
+    left join public.provider_sources as provider
+      on provider.organization_id = ${uuid(input.organizationId)}
+     and provider.platform_key = lifecycle."platformKey"
+    left join public.provider_config_revisions as revision
+      on revision.organization_id = provider.organization_id
+     and revision.provider_id = provider.id
+     and revision.id::text = lifecycle."configurationRevisionId"
+    left join public.provider_catalog_checkpoints as checkpoint
+      on checkpoint.organization_id = provider.organization_id
+     and checkpoint.platform_key = lifecycle."platformKey"
+    left join lateral (
+      select min(run.finished_at) as "completedBackfillAt"
+      from public.import_runs as run
+      where run.organization_id = provider.organization_id
+        and run.provider_id = provider.id
+        and run.config_revision_id = revision.id
+        and run.state = 'succeeded' and run.reached_provider_head = true
+        and checkpoint.settled_at is not null
+        and run.finished_at <= checkpoint.settled_at
+    ) as backfill on true
+    left join lateral (
+      select max(run.finished_at) as "lastSuccessfulObservationAt"
+      from public.import_runs as run
+      where run.organization_id = provider.organization_id
+        and run.provider_id = provider.id
+        and run.config_revision_id = revision.id
+        and run.state = 'succeeded' and run.reached_provider_head = true
+    ) as observation on true
+    order by lifecycle."platformKey" collate "C"
+  `);
+  const byPlatform = new Map(rows.map((row) => [row.platformKey, row]));
+  return input.checkpoints.map(({ platformKey }) => {
+    const row = byPlatform.get(platformKey);
+    if (!row || row.lifecycleState !== "active" ||
+      row.causePlatformKey !== platformKey ||
+      row.causeLifecycleState !== "active" ||
+      row.configurationRevisionId === null ||
+      row.causeProviderId !== row.providerId ||
+      row.revisionProviderId !== row.providerId) {
+      throw new Error("Provider causal readiness is invalid.");
+    }
+    return {
+      platformKey,
+      lifecycleSequence: row.lifecycleSequence,
+      configurationRevisionId: row.configurationRevisionId,
+      completedBackfillAt: row.completedBackfillAt,
+      lastSuccessfulObservationAt: row.lastSuccessfulObservationAt,
+    };
+  });
+}
+
+/** Task 011 atomic projection hook; callers must already own the transaction. */
+export async function loadManifestEligibilitySnapshotInTransaction(
+  transaction: PackscoutTransactionClient,
+  input: { organizationId: string },
+): Promise<ManifestEligibilitySnapshotRecord | null> {
+  const context = await loadEpochContext(transaction, input.organizationId);
+  if (!context) return null;
+  const enabledPlatformKeys = await loadEnabledPlatformKeys(transaction, {
+    organizationId: input.organizationId,
+    configuredPlatformKeys: context.configuredPlatformKeys,
+    throughSequence: context.lifecycleDecisionSequence,
+  });
+  const checkpoints = await loadCheckpointRows(transaction, {
+    organizationId: input.organizationId,
+    platformKeys: enabledPlatformKeys,
+    epoch: context.epoch,
+  });
+  if (checkpoints === null) return null;
+  return {
+    organizationId: input.organizationId,
+    sharedConfigurationEpoch: context.epoch,
+    confidencePolicyVersion: context.confidencePolicyVersion,
+    staleAfterSeconds: context.staleAfterSeconds,
+    configuredPlatformKeys: context.configuredPlatformKeys,
+    enabledPlatformKeys,
+    lifecycleDecisionSequence: context.lifecycleDecisionSequence,
+    checkpoints,
+  };
 }

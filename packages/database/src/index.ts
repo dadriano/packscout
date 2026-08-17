@@ -1,6 +1,7 @@
 export * from "./auth-repository.ts";
 export * from "./catalog-release-source-repository.ts";
 export * from "./catalog-promotion-repository.ts";
+export * from "./catalog-promotion-bootstrap-proof-repository.ts";
 export * from "./admin-import-run-repository.ts";
 export * from "./admin-operation-read-model.ts";
 export * from "./admin-provider-operation-repository.ts";
@@ -21,6 +22,9 @@ export * from "./provider-catalog-release-source-repository.ts";
 export * from "./provider-scheduling-repository.ts";
 export * from "./provider-stream-write-policy.ts";
 export * from "./promotion-readiness-repository.ts";
+export * from "./promotion-v2-types.ts";
+export * from "./provider-promotion-repository.ts";
+export * from "./manifest-promotion-repository.ts";
 export * from "./protected-payload-retention-repository.ts";
 export * from "./public-change-settlement-repository.ts";
 export * from "./public-change-settlement-repository.provider-read.ts";

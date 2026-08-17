@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/012, postgres-convex-promotion/014
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including crash, concurrency, and bootstrap proof
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -61,20 +61,22 @@ An unaffected provider's settled catalog can become public while another provide
 
 ### Phase behavior
 
-- [ ] Platforms A and B can assemble and complete concurrently without sharing a claim or blocking one another's completed head.
-- [ ] Provider completion never changes public state; one serialized manifest compare-and-swap is the only activation step.
-- [ ] A delayed provider with an active same-epoch release is reused, while a first-time or newly enabled provider without an eligible release blocks activation.
-- [ ] A new configuration epoch cannot activate until all enabled providers have complete releases in that epoch.
-- [ ] A settled disable remains invisible until a new manifest omits that provider and activates.
+- [x] Platforms A and B can assemble and complete concurrently without sharing a claim or blocking one another's completed head.
+- [x] Provider completion never changes public state; one serialized manifest compare-and-swap is the only activation step.
+- [x] A delayed provider with an active same-epoch release is reused, while a first-time or newly enabled provider without an eligible release blocks activation.
+- [x] A new configuration epoch cannot activate until all enabled providers have complete releases in that epoch.
+- [x] A settled disable remains invisible until a new manifest omits that provider and activates.
 
 ### Recovery and proof
 
-- [ ] Restart, stale claim, exact replay, lost response, retryable transport failure, deterministic rejection, and compare-and-swap loss reach one reconcilable outcome without duplicate artifacts.
-- [ ] Bootstrap accepts proven empty or exact matching active state and rejects partial, mismatched, mixed-epoch, or receipt-incomplete state.
-- [ ] Health reports separate settled, completed, and active provider heads plus manifest lag without secrets, tenant selectors, or protected source detail.
-- [ ] Healthy representative-volume tests meet the one-minute provider-to-manifest target while a delayed unrelated provider remains on its active release.
-- [ ] No provider-specific generic branch, per-row Convex write, dual publication path, or compatibility shim exists.
+- [x] Restart, stale claim, exact replay, lost response, retryable transport failure, deterministic rejection, and compare-and-swap loss reach one reconcilable outcome without duplicate artifacts.
+- [x] Bootstrap accepts proven empty or exact matching active state and rejects partial, mismatched, mixed-epoch, or receipt-incomplete state.
+- [x] Health reports separate settled, completed, and active provider heads plus manifest lag without secrets, tenant selectors, or protected source detail.
+- [x] Healthy representative-volume tests meet the one-minute provider-to-manifest target while a delayed unrelated provider remains on its active release.
+- [x] No provider-specific generic branch, per-row Convex write, dual publication path, or compatibility shim exists.
 
 ## Verification
 
 `npm run test:database && npm run test:services && npm run test:worker && npm run test:convex`
+
+Completed with database `105/105`, services `350/350`, worker `65/65`, and Convex `74/74` tests passing. The real provider and manifest runners published an 8,000-collectible provider plan, selected a delayed provider's active fallback, and completed one manifest activation in about 7.3 seconds locally. An independent fresh-context audit found no residual P0, P1, or P2 issue. `npm run verify:framework` completed successfully.

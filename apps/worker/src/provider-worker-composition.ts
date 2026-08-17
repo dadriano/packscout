@@ -26,9 +26,8 @@ import {
 import { createProviderWorkerOperationalRuntime } from "./provider-worker-operational-runtime.ts";
 import { createProviderWorkerEstimatedEvProcessor } from "./provider-worker-estimated-ev.ts";
 import { createProviderWorkerRetentionCoordinator } from "./provider-worker-retention.ts";
-import type {
-  CatalogPromotionWorkerRuntimePort,
-} from "./catalog-promotion-worker-runtime.ts";
+import type { PromotionV2WorkerRuntimePort } from
+  "./promotion-v2-worker-runtime.ts";
 import type {
   HeatPromotionWorkerRuntimePort,
 } from "./heat-promotion-worker-runtime.ts";
@@ -58,7 +57,7 @@ export interface ProviderWorkerCompositionInput {
   readonly database: PackscoutPrismaClient;
   readonly logger: ProviderWorkerLogger;
   readonly observability: OperationalObservability;
-  readonly catalogPromotion?: CatalogPromotionWorkerRuntimePort;
+  readonly promotion?: PromotionV2WorkerRuntimePort;
   readonly heatPromotion?: HeatPromotionWorkerRuntimePort;
 }
 
@@ -163,7 +162,7 @@ export function createProviderWorkerRuntime(
       verifiedUsdStablecoins:
         input.configuration.estimatedEvVerifiedUsdStablecoins,
     }),
-    catalogPromotion: input.catalogPromotion,
+    promotion: input.promotion,
     heatPromotion: input.heatPromotion,
     retention,
     logger: input.logger,

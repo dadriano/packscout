@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/014
 **Estimated scope:** medium
 **Estimated effort:** 1–3 days for one builder, including reference-graph and bounded-deletion verification
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 

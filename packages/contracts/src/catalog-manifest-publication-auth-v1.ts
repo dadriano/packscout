@@ -4,9 +4,10 @@ import { productionAuthKeyIdSchema } from "./data-release-v2-publication-auth.ts
 
 export const MAX_CATALOG_MANIFEST_AUTH_KEY_IDS = 16;
 export const CATALOG_MANIFEST_AUTH_ROLES = [
-  "publish",
-  "rollback",
   "clear",
+  "publish",
+  "retain",
+  "rollback",
 ] as const;
 
 export const catalogManifestAuthRoleSchema = z.enum(

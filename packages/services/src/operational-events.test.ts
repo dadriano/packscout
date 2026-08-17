@@ -115,7 +115,8 @@ test("promotion events expose only bounded reusable lane evidence", async () => 
   await service.promotionActivationDelayed({
     organizationId,
     deploymentScopeDigest,
-    lane: "catalog",
+    lane: "provider",
+    platformKey: "alpha",
     targetWatermark: 42n,
     confirmedWatermark: 41n,
     durationMs: 60_001,
@@ -123,7 +124,8 @@ test("promotion events expose only bounded reusable lane evidence", async () => 
   await service.promotionSettlementBlocked({
     organizationId,
     deploymentScopeDigest,
-    lane: "catalog",
+    lane: "provider",
+    platformKey: "alpha",
     sourceHeadWatermark: 44n,
     settledWatermark: 42n,
     technicalFailureCount: 2,
@@ -141,7 +143,8 @@ test("promotion events expose only bounded reusable lane evidence", async () => 
   await service.promotionRecovered({
     organizationId,
     deploymentScopeDigest,
-    lane: "catalog",
+    lane: "provider",
+    platformKey: "alpha",
     targetWatermark: 44n,
     confirmedWatermark: 44n,
   });
@@ -153,7 +156,8 @@ test("promotion events expose only bounded reusable lane evidence", async () => 
     "promotion_recovered",
   ]);
   assert.deepEqual(sink.events[0]?.evidence, {
-    lane: "catalog",
+    lane: "provider",
+    platformKey: "alpha",
     condition: "activation_lag",
     targetWatermark: "42",
     confirmedWatermark: "41",
@@ -179,7 +183,8 @@ test("promotion events expose only bounded reusable lane evidence", async () => 
     await service.promotionActivationDelayed({
       organizationId,
       deploymentScopeDigest: "production-us",
-      lane: "catalog",
+    lane: "provider",
+    platformKey: "alpha",
       targetWatermark: 45n,
       confirmedWatermark: 44n,
       durationMs: 60_000,

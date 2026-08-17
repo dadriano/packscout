@@ -1,17 +1,17 @@
 {
-  "source": "provider-impact catalog settlement with shared configuration and lifecycle barriers",
+  "source": "provider and manifest promotion durable ledgers",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260816010000_provider_catalog_settlement/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260816020000_provider_manifest_promotion/migration.sql"
   },
   "expectedCounts": {
-    "tables": 42,
+    "tables": 54,
     "enums": 22,
-    "columns": 499,
-    "indexes": 62,
-    "uniqueConstraints": 33,
-    "foreignKeys": 153,
-    "checkConstraints": 133
+    "columns": 747,
+    "indexes": 67,
+    "uniqueConstraints": 47,
+    "foreignKeys": 173,
+    "checkConstraints": 173
   },
   "enums": {
     "admin_alert_state": [
@@ -1366,6 +1366,450 @@
         }
       }
     },
+    "catalog_promotion_bootstrap_proofs": {
+      "columns": {
+        "active_state_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "active_state_receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "active_state_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "active_state_request_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "active_state_request_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "active_state_response_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_state_response_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_state_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "manifest_definition_request_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "manifest_definition_request_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "manifest_receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "manifest_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "manifest_response_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "manifest_response_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "manifest_terminal_request_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "manifest_terminal_request_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "proof_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "proof_revision": {
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "verified_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "catalog_promotion_bootstrap_proofs_lane_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key"
+          ],
+          "referencedTable": "manifest_promotion_lanes",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "catalog_promotion_bootstrap_proofs_body_check": {
+          "value": "(((octet_length(active_state_request_body) >= 2) AND (octet_length(active_state_request_body) <= 131072)) AND promotion_v2_sha256_valid(active_state_request_sha256) AND ((octet_length(active_state_receipt_body) >= 2) AND (octet_length(active_state_receipt_body) <= 262144)) AND promotion_v2_sha256_valid(active_state_receipt_sha256) AND ((octet_length(active_state_body) >= 2) AND (octet_length(active_state_body) <= 262144)) AND promotion_v2_sha256_valid(active_state_sha256) AND ((active_state_response_body IS NULL) = (active_state_response_sha256 IS NULL)) AND ((active_state_response_body IS NULL) OR (((octet_length(active_state_response_body) >= 2) AND (octet_length(active_state_response_body) <= 524288)) AND promotion_v2_sha256_valid(active_state_response_sha256))))"
+        },
+        "catalog_promotion_bootstrap_proofs_kind_check": {
+          "value": "((proof_revision > 0) AND (proof_kind = ANY (ARRAY['empty'::text, 'cleared'::text, 'active'::text])))"
+        },
+        "catalog_promotion_bootstrap_proofs_manifest_shape_check": {
+          "value": "(((proof_kind = 'empty'::text) AND (manifest_definition_request_body IS NULL) AND (manifest_definition_request_sha256 IS NULL) AND (manifest_terminal_request_body IS NULL) AND (manifest_terminal_request_sha256 IS NULL) AND (manifest_receipt_body IS NULL) AND (manifest_receipt_sha256 IS NULL) AND (manifest_response_body IS NULL) AND (manifest_response_sha256 IS NULL)) OR ((proof_kind = 'cleared'::text) AND (manifest_definition_request_body IS NULL) AND (manifest_definition_request_sha256 IS NULL) AND ((octet_length(manifest_terminal_request_body) >= 2) AND (octet_length(manifest_terminal_request_body) <= 131072)) AND promotion_v2_sha256_valid(manifest_terminal_request_sha256) AND ((octet_length(manifest_receipt_body) >= 2) AND (octet_length(manifest_receipt_body) <= 262144)) AND promotion_v2_sha256_valid(manifest_receipt_sha256) AND ((manifest_response_body IS NULL) = (manifest_response_sha256 IS NULL)) AND ((manifest_response_body IS NULL) OR (((octet_length(manifest_response_body) >= 2) AND (octet_length(manifest_response_body) <= 524288)) AND promotion_v2_sha256_valid(manifest_response_sha256)))) OR ((proof_kind = 'active'::text) AND ((octet_length(manifest_definition_request_body) >= 2) AND (octet_length(manifest_definition_request_body) <= 131072)) AND promotion_v2_sha256_valid(manifest_definition_request_sha256) AND ((octet_length(manifest_terminal_request_body) >= 2) AND (octet_length(manifest_terminal_request_body) <= 131072)) AND promotion_v2_sha256_valid(manifest_terminal_request_sha256) AND ((octet_length(manifest_receipt_body) >= 2) AND (octet_length(manifest_receipt_body) <= 262144)) AND promotion_v2_sha256_valid(manifest_receipt_sha256) AND ((manifest_response_body IS NULL) = (manifest_response_sha256 IS NULL)) AND ((manifest_response_body IS NULL) OR (((octet_length(manifest_response_body) >= 2) AND (octet_length(manifest_response_body) <= 524288)) AND promotion_v2_sha256_valid(manifest_response_sha256)))))"
+        }
+      }
+    },
+    "catalog_promotion_bootstrap_provider_proofs": {
+      "columns": {
+        "completed_head_receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "completed_head_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "completed_head_request_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "completed_head_request_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "completed_head_response_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_head_response_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "local_completed_attempt_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "local_completed_provider_release_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "local_completed_public_provider_release_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "local_completed_terminal_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "ordinal": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "proof_revision": {
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_release_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_terminal_operation_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_terminal_receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_terminal_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_terminal_response_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_terminal_response_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "public_provider_release_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "publish_artifact_attempt_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "remote_completed_head_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "remote_completed_head_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {
+        "catalog_promotion_bootstrap_provider_proofs_ordinal_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "proof_revision",
+            "ordinal"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "catalog_promotion_bootstrap_provider_proofs_artifact_fk": {
+          "columns": [
+            "publish_artifact_attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "public_provider_release_id",
+            "provider_release_fingerprint"
+          ],
+          "referencedTable": "provider_release_artifacts",
+          "referencedColumns": [
+            "publish_attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "public_provider_release_id",
+            "provider_release_fingerprint"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "catalog_promotion_bootstrap_provider_proofs_local_attempt_fk": {
+          "columns": [
+            "local_completed_attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "referencedTable": "provider_promotion_attempts",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "catalog_promotion_bootstrap_provider_proofs_parent_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "proof_revision"
+          ],
+          "referencedTable": "catalog_promotion_bootstrap_proofs",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key",
+            "proof_revision"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "catalog_promotion_bootstrap_provider_proofs_value_check": {
+          "value": "((proof_revision > 0) AND ((ordinal >= 0) AND (ordinal <= 127)) AND promotion_v2_platform_key_valid(platform_key) AND ((octet_length(completed_head_request_body) >= 2) AND (octet_length(completed_head_request_body) <= 131072)) AND promotion_v2_sha256_valid(completed_head_request_sha256) AND ((octet_length(completed_head_receipt_body) >= 2) AND (octet_length(completed_head_receipt_body) <= 393216)) AND promotion_v2_sha256_valid(completed_head_receipt_sha256) AND ((completed_head_response_body IS NULL) = (completed_head_response_sha256 IS NULL)) AND ((completed_head_response_body IS NULL) OR (((octet_length(completed_head_response_body) >= 2) AND (octet_length(completed_head_response_body) <= 524288)) AND promotion_v2_sha256_valid(completed_head_response_sha256))) AND ((octet_length(remote_completed_head_body) >= 2) AND (octet_length(remote_completed_head_body) <= 131072)) AND promotion_v2_sha256_valid(remote_completed_head_sha256) AND (((public_provider_release_id IS NULL) AND (provider_release_fingerprint IS NULL) AND (provider_terminal_operation_id IS NULL) AND (provider_terminal_receipt_body IS NULL) AND (provider_terminal_receipt_sha256 IS NULL) AND (provider_terminal_response_body IS NULL) AND (provider_terminal_response_sha256 IS NULL) AND (publish_artifact_attempt_id IS NULL)) OR ((public_provider_release_id IS NOT NULL) AND promotion_v2_sha256_valid(provider_release_fingerprint) AND (provider_terminal_operation_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text) AND ((octet_length(provider_terminal_receipt_body) >= 2) AND (octet_length(provider_terminal_receipt_body) <= 393216)) AND promotion_v2_sha256_valid(provider_terminal_receipt_sha256) AND ((provider_terminal_response_body IS NULL) = (provider_terminal_response_sha256 IS NULL)) AND ((provider_terminal_response_body IS NULL) OR (((octet_length(provider_terminal_response_body) >= 2) AND (octet_length(provider_terminal_response_body) <= 524288)) AND promotion_v2_sha256_valid(provider_terminal_response_sha256))) AND (publish_artifact_attempt_id IS NOT NULL))) AND (((local_completed_attempt_id IS NULL) AND (local_completed_public_provider_release_id IS NULL) AND (local_completed_provider_release_fingerprint IS NULL) AND (local_completed_terminal_receipt_sha256 IS NULL)) OR ((local_completed_attempt_id IS NOT NULL) AND (local_completed_public_provider_release_id IS NOT NULL) AND promotion_v2_sha256_valid(local_completed_provider_release_fingerprint) AND promotion_v2_sha256_valid(local_completed_terminal_receipt_sha256))) AND ((provider_terminal_response_body IS NULL) = (provider_terminal_response_sha256 IS NULL)) AND ((provider_terminal_response_body IS NULL) OR (((octet_length(provider_terminal_response_body) >= 2) AND (octet_length(provider_terminal_response_body) <= 524288)) AND promotion_v2_sha256_valid(provider_terminal_response_sha256))))"
+        }
+      }
+    },
     "estimated_ev_recomputation_requests": {
       "columns": {
         "attempt_count": {
@@ -2206,6 +2650,1011 @@
         },
         "import_runs_requested_cursor_bounded": {
           "value": "((requested_cursor IS NULL) OR (length(requested_cursor) <= 2048))"
+        }
+      }
+    },
+    "manifest_active_provider_selections": {
+      "columns": {
+        "activated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "active_generation": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "manifest_public_release_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_public_release_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_release_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_terminal_operation_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_terminal_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "publish_artifact_attempt_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "selected_checkpoint": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "selection_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "selection_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "manifest_active_provider_selections_artifact_fk": {
+          "columns": [
+            "publish_artifact_attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "provider_public_release_id",
+            "provider_release_fingerprint"
+          ],
+          "referencedTable": "provider_release_artifacts",
+          "referencedColumns": [
+            "publish_attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "public_provider_release_id",
+            "provider_release_fingerprint"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "manifest_active_provider_selections_lane_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key"
+          ],
+          "referencedTable": "manifest_promotion_lanes",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "manifest_active_provider_selections_provider_lane_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "referencedTable": "provider_promotion_lanes",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "manifest_active_provider_selections_value_check": {
+          "value": "(promotion_v2_platform_key_valid(platform_key) AND (active_generation > 0) AND (selected_checkpoint > 0) AND promotion_v2_sha256_valid(provider_release_fingerprint) AND ((octet_length(selection_body) >= 2) AND (octet_length(selection_body) <= 65536)) AND promotion_v2_sha256_valid(selection_sha256) AND (provider_terminal_operation_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text) AND promotion_v2_sha256_valid(provider_terminal_receipt_sha256))"
+        }
+      }
+    },
+    "manifest_promotion_attempts": {
+      "columns": {
+        "bootstrap_proof_revision": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "bootstrap_provider_set_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "cas_error_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cas_error_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "claim_expires_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_owner": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_token": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "evaluation_snapshot_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "evaluation_snapshot_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "expected_active_state_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "failure_class": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "failure_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "last_heartbeat_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "manifest_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "prepared_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "prepared_operation_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "prepared_summary_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "prepared_summary_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "public_release_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "retry_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "retry_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'assembling'::text"
+        },
+        "terminal_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "manifest_promotion_attempts_one_active_lane": {
+          "columns": [
+            "organization_id",
+            "deployment_key"
+          ],
+          "unique": true,
+          "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
+        }
+      },
+      "uniqueConstraints": {
+        "manifest_promotion_attempts_evaluation_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "evaluation_sequence"
+          ],
+          "nullsNotDistinct": false
+        },
+        "manifest_promotion_attempts_tenant_unique": {
+          "columns": [
+            "id",
+            "organization_id",
+            "deployment_key"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "manifest_promotion_attempts_bootstrap_proof_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "bootstrap_proof_revision"
+          ],
+          "referencedTable": "catalog_promotion_bootstrap_proofs",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key",
+            "proof_revision"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "manifest_promotion_attempts_evaluation_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "evaluation_sequence"
+          ],
+          "referencedTable": "manifest_promotion_evaluations",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key",
+            "evaluation_sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "manifest_promotion_attempts_cas_check": {
+          "value": "(((state <> 'cas_lost'::text) OR (cas_error_body IS NOT NULL)) AND ((cas_error_body IS NULL) OR (state = ANY (ARRAY['in_progress'::text, 'retry_wait'::text, 'cas_lost'::text]))) AND ((cas_error_body IS NULL) = (cas_error_sha256 IS NULL)) AND ((cas_error_body IS NULL) OR (((octet_length(cas_error_body) >= 2) AND (octet_length(cas_error_body) <= 65536)) AND promotion_v2_sha256_valid(cas_error_sha256))))"
+        },
+        "manifest_promotion_attempts_claim_check": {
+          "value": "((claim_count >= 0) AND (retry_count >= 0) AND (((claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL)) OR ((claim_owner = btrim(claim_owner)) AND ((char_length(claim_owner) >= 1) AND (char_length(claim_owner) <= 128)) AND (claim_token IS NOT NULL) AND (claim_expires_at IS NOT NULL) AND (last_heartbeat_at IS NOT NULL) AND (claim_count > 0))))"
+        },
+        "manifest_promotion_attempts_failure_check": {
+          "value": "(((failure_class IS NULL) AND (failure_code IS NULL)) OR ((failure_class = ANY (ARRAY['technical'::text, 'deterministic'::text, 'reconciliation'::text, 'bootstrap'::text])) AND (failure_code ~ '^[A-Z0-9_]{1,128}$'::text)))"
+        },
+        "manifest_promotion_attempts_prepared_check": {
+          "value": "(((prepared_operation_kind IS NULL) AND (prepared_summary_body IS NULL) AND (prepared_summary_sha256 IS NULL) AND (expected_active_state_sha256 IS NULL) AND (public_release_id IS NULL) AND (manifest_fingerprint IS NULL) AND (prepared_at IS NULL)) OR ((prepared_operation_kind = ANY (ARRAY['activateManifest'::text, 'refreshActiveState'::text, 'rollback'::text, 'block'::text, 'no_change'::text])) AND ((octet_length(prepared_summary_body) >= 2) AND (octet_length(prepared_summary_body) <= 65536)) AND promotion_v2_sha256_valid(prepared_summary_sha256) AND promotion_v2_sha256_valid(expected_active_state_sha256) AND ((manifest_fingerprint IS NULL) OR promotion_v2_sha256_valid(manifest_fingerprint)) AND (prepared_at IS NOT NULL)))"
+        },
+        "manifest_promotion_attempts_retry_check": {
+          "value": "((state = 'retry_wait'::text) = (retry_at IS NOT NULL))"
+        },
+        "manifest_promotion_attempts_snapshot_check": {
+          "value": "(((evaluation_snapshot_body IS NULL) = (evaluation_snapshot_sha256 IS NULL)) AND ((evaluation_snapshot_body IS NULL) OR (((octet_length(evaluation_snapshot_body) >= 2) AND (octet_length(evaluation_snapshot_body) <= 262144)) AND promotion_v2_sha256_valid(evaluation_snapshot_sha256))) AND ((prepared_summary_body IS NULL) OR (evaluation_snapshot_body IS NOT NULL)))"
+        },
+        "manifest_promotion_attempts_state_check": {
+          "value": "((state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text, 'activated'::text, 'refreshed'::text, 'rolled_back'::text, 'cleared'::text, 'blocked'::text, 'no_change'::text, 'superseded'::text, 'cas_lost'::text, 'failed'::text])) AND (bootstrap_proof_revision > 0) AND promotion_v2_sha256_valid(bootstrap_provider_set_sha256))"
+        },
+        "manifest_promotion_attempts_terminal_check": {
+          "value": "(((state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text])) AND (terminal_at IS NULL)) OR ((state = ANY (ARRAY['activated'::text, 'refreshed'::text, 'rolled_back'::text, 'cleared'::text, 'blocked'::text, 'no_change'::text])) AND (terminal_at IS NOT NULL) AND (failure_class IS NULL) AND (failure_code IS NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)) OR ((state = 'superseded'::text) AND (terminal_at IS NOT NULL) AND (failure_class IS NULL) AND (failure_code IS NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)) OR ((state = 'cas_lost'::text) AND (terminal_at IS NOT NULL) AND (failure_class = 'reconciliation'::text) AND (failure_code IS NOT NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)) OR ((state = 'failed'::text) AND (terminal_at IS NOT NULL) AND (failure_class IS NOT NULL) AND (failure_code IS NOT NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)))"
+        }
+      }
+    },
+    "manifest_promotion_evaluations": {
+      "columns": {
+        "cause": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "cause_identity": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "cause_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "requested_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {
+        "manifest_promotion_evaluations_cause_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "cause_sha256"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "manifest_promotion_evaluations_lane_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key"
+          ],
+          "referencedTable": "manifest_promotion_lanes",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "manifest_promotion_evaluations_value_check": {
+          "value": "((evaluation_sequence > 0) AND (cause = ANY (ARRAY['provider_completed'::text, 'provider_reused'::text, 'lifecycle_settled'::text, 'configuration_settled'::text, 'observation_succeeded'::text, 'cas_lost'::text, 'retry_exhausted'::text, 'bootstrap_reconcile'::text])) AND (cause_identity = btrim(cause_identity)) AND ((char_length(cause_identity) >= 1) AND (char_length(cause_identity) <= 256)) AND promotion_v2_sha256_valid(cause_sha256))"
+        }
+      }
+    },
+    "manifest_promotion_lanes": {
+      "columns": {
+        "active_configuration_epoch_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_generation": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "active_manifest_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_provider_reference_set_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_public_release_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_state_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_state_receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_state_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_state_response_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_state_response_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_state_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "active_terminal_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "bootstrap_provider_set_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "bootstrap_provider_set_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "bootstrap_state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'unverified'::text"
+        },
+        "bootstrap_verified_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "confirmed_evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "current_bootstrap_proof_revision": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "delayed_provider_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "last_activated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "last_reconciled_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "next_evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "next_retry_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "requested_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "requested_evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "manifest_promotion_lanes_current_bootstrap_proof_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "current_bootstrap_proof_revision"
+          ],
+          "referencedTable": "catalog_promotion_bootstrap_proofs",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key",
+            "proof_revision"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "manifest_promotion_lanes_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "manifest_promotion_lanes_active_shape_check": {
+          "value": "(((bootstrap_state = 'unverified'::text) AND (active_generation = 0) AND (active_state_body IS NULL) AND (active_state_sha256 IS NULL) AND (active_state_receipt_body IS NULL) AND (active_state_receipt_sha256 IS NULL) AND (active_state_response_body IS NULL) AND (active_state_response_sha256 IS NULL) AND (active_public_release_id IS NULL) AND (active_manifest_fingerprint IS NULL) AND (active_provider_reference_set_hash IS NULL) AND (active_configuration_epoch_sequence IS NULL) AND (active_terminal_receipt_sha256 IS NULL) AND (delayed_provider_count = 0) AND (last_activated_at IS NULL) AND (last_reconciled_at IS NULL)) OR ((bootstrap_state = 'verified_empty'::text) AND (active_generation = 0) AND ((octet_length(active_state_body) >= 2) AND (octet_length(active_state_body) <= 262144)) AND promotion_v2_sha256_valid(active_state_sha256) AND ((octet_length(active_state_receipt_body) >= 2) AND (octet_length(active_state_receipt_body) <= 262144)) AND promotion_v2_sha256_valid(active_state_receipt_sha256) AND ((active_state_response_body IS NULL) = (active_state_response_sha256 IS NULL)) AND ((active_state_response_body IS NULL) OR (((octet_length(active_state_response_body) >= 2) AND (octet_length(active_state_response_body) <= 524288)) AND promotion_v2_sha256_valid(active_state_response_sha256))) AND (active_public_release_id IS NULL) AND (active_manifest_fingerprint IS NULL) AND (active_provider_reference_set_hash IS NULL) AND (active_configuration_epoch_sequence IS NULL) AND (active_terminal_receipt_sha256 IS NULL) AND (delayed_provider_count = 0) AND (last_activated_at IS NULL) AND (last_reconciled_at IS NOT NULL)) OR ((bootstrap_state = 'verified_cleared'::text) AND (active_generation > 0) AND ((octet_length(active_state_body) >= 2) AND (octet_length(active_state_body) <= 262144)) AND promotion_v2_sha256_valid(active_state_sha256) AND ((octet_length(active_state_receipt_body) >= 2) AND (octet_length(active_state_receipt_body) <= 262144)) AND promotion_v2_sha256_valid(active_state_receipt_sha256) AND ((active_state_response_body IS NULL) = (active_state_response_sha256 IS NULL)) AND ((active_state_response_body IS NULL) OR (((octet_length(active_state_response_body) >= 2) AND (octet_length(active_state_response_body) <= 524288)) AND promotion_v2_sha256_valid(active_state_response_sha256))) AND promotion_v2_sha256_valid(active_terminal_receipt_sha256) AND (active_public_release_id IS NULL) AND (active_manifest_fingerprint IS NULL) AND (active_provider_reference_set_hash IS NULL) AND (active_configuration_epoch_sequence IS NULL) AND (delayed_provider_count = 0) AND (last_reconciled_at IS NOT NULL)) OR ((bootstrap_state = 'verified_active'::text) AND (active_generation > 0) AND ((octet_length(active_state_body) >= 2) AND (octet_length(active_state_body) <= 262144)) AND promotion_v2_sha256_valid(active_state_sha256) AND ((octet_length(active_state_receipt_body) >= 2) AND (octet_length(active_state_receipt_body) <= 262144)) AND promotion_v2_sha256_valid(active_state_receipt_sha256) AND ((active_state_response_body IS NULL) = (active_state_response_sha256 IS NULL)) AND ((active_state_response_body IS NULL) OR (((octet_length(active_state_response_body) >= 2) AND (octet_length(active_state_response_body) <= 524288)) AND promotion_v2_sha256_valid(active_state_response_sha256))) AND promotion_v2_sha256_valid(active_terminal_receipt_sha256) AND (active_public_release_id IS NOT NULL) AND promotion_v2_sha256_valid(active_manifest_fingerprint) AND promotion_v2_sha256_valid(active_provider_reference_set_hash) AND (active_configuration_epoch_sequence > 0) AND ((delayed_provider_count >= 0) AND (delayed_provider_count <= 8)) AND (last_activated_at IS NOT NULL) AND (last_reconciled_at IS NOT NULL)))"
+        },
+        "manifest_promotion_lanes_bootstrap_check": {
+          "value": "((bootstrap_state = ANY (ARRAY['unverified'::text, 'verified_empty'::text, 'verified_cleared'::text, 'verified_active'::text])) AND ((bootstrap_state = 'unverified'::text) = (bootstrap_verified_at IS NULL)) AND ((bootstrap_provider_set_body IS NULL) = (bootstrap_provider_set_sha256 IS NULL)) AND (((bootstrap_state = 'unverified'::text) AND (bootstrap_provider_set_body IS NULL)) OR ((bootstrap_state <> 'unverified'::text) AND ((octet_length(bootstrap_provider_set_body) >= 2) AND (octet_length(bootstrap_provider_set_body) <= 32768)) AND promotion_v2_sha256_valid(bootstrap_provider_set_sha256))) AND (((bootstrap_state = 'unverified'::text) AND (current_bootstrap_proof_revision IS NULL)) OR ((bootstrap_state <> 'unverified'::text) AND (current_bootstrap_proof_revision IS NOT NULL) AND (current_bootstrap_proof_revision > 0))))"
+        },
+        "manifest_promotion_lanes_key_check": {
+          "value": "promotion_v2_deployment_key_valid(deployment_key)"
+        },
+        "manifest_promotion_lanes_sequence_check": {
+          "value": "((next_evaluation_sequence >= 0) AND ((requested_evaluation_sequence >= 0) AND (requested_evaluation_sequence <= next_evaluation_sequence)) AND ((confirmed_evaluation_sequence >= 0) AND (confirmed_evaluation_sequence <= requested_evaluation_sequence)) AND (active_generation >= 0) AND ((active_configuration_epoch_sequence IS NULL) OR (active_configuration_epoch_sequence > 0)))"
+        }
+      }
+    },
+    "manifest_promotion_operations": {
+      "columns": {
+        "acknowledged_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "attempt_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "canonical_receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "canonical_request_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "exact_response_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "last_sent_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "operation_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "operation_index": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "operation_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "request_path": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "request_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "response_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "send_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'pending'::text"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {
+        "manifest_promotion_operations_attempt_unique": {
+          "columns": [
+            "attempt_id"
+          ],
+          "nullsNotDistinct": false
+        },
+        "manifest_promotion_operations_operation_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "operation_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "manifest_promotion_operations_attempt_fk": {
+          "columns": [
+            "attempt_id",
+            "organization_id",
+            "deployment_key"
+          ],
+          "referencedTable": "manifest_promotion_attempts",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "deployment_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "manifest_promotion_operations_delivery_check": {
+          "value": "((send_count >= 0) AND (((state = 'pending'::text) AND (send_count = 0) AND (last_sent_at IS NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL)) OR ((state = 'sent'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL)) OR ((state = 'acknowledged'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NOT NULL) AND ((octet_length(canonical_receipt_body) >= 2) AND (octet_length(canonical_receipt_body) <= 262144)) AND promotion_v2_sha256_valid(receipt_sha256) AND ((exact_response_body IS NULL) = (response_sha256 IS NULL)) AND ((exact_response_body IS NULL) OR (((octet_length(exact_response_body) >= 2) AND (octet_length(exact_response_body) <= 524288)) AND promotion_v2_sha256_valid(response_sha256))))))"
+        },
+        "manifest_promotion_operations_identity_check": {
+          "value": "((operation_index = 0) AND (operation_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text) AND (operation_kind = ANY (ARRAY['activateManifest'::text, 'refreshActiveState'::text, 'rollback'::text, 'block'::text])) AND ((char_length(request_path) >= 2) AND (char_length(request_path) <= 512)) AND (request_path ~ '^/[A-Za-z0-9._~!$&''()*+,;=:@%/-]+$'::text) AND ((octet_length(canonical_request_body) >= 2) AND (octet_length(canonical_request_body) <= 131072)) AND promotion_v2_sha256_valid(request_sha256))"
+        },
+        "manifest_promotion_operations_state_check": {
+          "value": "(state = ANY (ARRAY['pending'::text, 'sent'::text, 'acknowledged'::text]))"
         }
       }
     },
@@ -4740,6 +6189,1016 @@
         },
         "provider_health_states_mapping_severity_known": {
           "value": "((mapping_warning_severity IS NULL) OR (mapping_warning_severity = ANY (ARRAY['warning'::text, 'degraded'::text])))"
+        }
+      }
+    },
+    "provider_promotion_attempts": {
+      "columns": {
+        "bootstrap_proof_revision": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "bootstrap_provider_set_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "cas_error_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cas_error_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "claim_expires_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_owner": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_token": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "expected_completed_head_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "failure_class": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "failure_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "last_heartbeat_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "prepared_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "prepared_classification": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "prepared_summary_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "prepared_summary_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_release_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "public_provider_release_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "retry_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "retry_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'assembling'::text"
+        },
+        "target_checkpoint": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "terminal_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "provider_promotion_attempts_claimable_idx": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "retry_at",
+            "claim_expires_at"
+          ],
+          "unique": false,
+          "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
+        },
+        "provider_promotion_attempts_one_active_lane": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "unique": true,
+          "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
+        }
+      },
+      "uniqueConstraints": {
+        "provider_promotion_attempts_evaluation_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "evaluation_sequence"
+          ],
+          "nullsNotDistinct": false
+        },
+        "provider_promotion_attempts_tenant_unique": {
+          "columns": [
+            "id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "provider_promotion_attempts_bootstrap_proof_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "bootstrap_proof_revision"
+          ],
+          "referencedTable": "catalog_promotion_bootstrap_proofs",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key",
+            "proof_revision"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "provider_promotion_attempts_evaluation_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "evaluation_sequence"
+          ],
+          "referencedTable": "provider_promotion_evaluations",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "evaluation_sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "provider_promotion_attempts_cas_check": {
+          "value": "(((state = 'cas_lost'::text) = (cas_error_body IS NOT NULL)) AND ((cas_error_body IS NULL) = (cas_error_sha256 IS NULL)) AND ((cas_error_body IS NULL) OR (((octet_length(cas_error_body) >= 2) AND (octet_length(cas_error_body) <= 65536)) AND promotion_v2_sha256_valid(cas_error_sha256))))"
+        },
+        "provider_promotion_attempts_claim_check": {
+          "value": "((claim_count >= 0) AND (retry_count >= 0) AND (((claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL)) OR ((claim_owner = btrim(claim_owner)) AND ((char_length(claim_owner) >= 1) AND (char_length(claim_owner) <= 128)) AND (claim_token IS NOT NULL) AND (claim_expires_at IS NOT NULL) AND (last_heartbeat_at IS NOT NULL) AND (claim_count > 0))))"
+        },
+        "provider_promotion_attempts_failure_check": {
+          "value": "(((failure_class IS NULL) AND (failure_code IS NULL)) OR ((failure_class = ANY (ARRAY['technical'::text, 'deterministic'::text, 'reconciliation'::text, 'bootstrap'::text])) AND (failure_code ~ '^[A-Z0-9_]{1,128}$'::text)))"
+        },
+        "provider_promotion_attempts_prepared_check": {
+          "value": "(((prepared_classification IS NULL) AND (prepared_summary_body IS NULL) AND (prepared_summary_sha256 IS NULL) AND (public_provider_release_id IS NULL) AND (provider_release_fingerprint IS NULL) AND (expected_completed_head_sha256 IS NULL) AND (prepared_at IS NULL)) OR ((prepared_classification = ANY (ARRAY['publish'::text, 'reuse'::text])) AND ((octet_length(prepared_summary_body) >= 2) AND (octet_length(prepared_summary_body) <= 65536)) AND promotion_v2_sha256_valid(prepared_summary_sha256) AND (public_provider_release_id IS NOT NULL) AND promotion_v2_sha256_valid(provider_release_fingerprint) AND promotion_v2_sha256_valid(expected_completed_head_sha256) AND (prepared_at IS NOT NULL)))"
+        },
+        "provider_promotion_attempts_retry_check": {
+          "value": "((state = 'retry_wait'::text) = (retry_at IS NOT NULL))"
+        },
+        "provider_promotion_attempts_state_check": {
+          "value": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text, 'published'::text, 'reused'::text, 'superseded'::text, 'cas_lost'::text, 'failed'::text]))"
+        },
+        "provider_promotion_attempts_target_check": {
+          "value": "((target_checkpoint >= 0) AND (bootstrap_proof_revision > 0) AND promotion_v2_sha256_valid(bootstrap_provider_set_sha256))"
+        },
+        "provider_promotion_attempts_terminal_check": {
+          "value": "(((state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text])) AND (terminal_at IS NULL)) OR ((state = ANY (ARRAY['published'::text, 'reused'::text])) AND (terminal_at IS NOT NULL) AND (prepared_classification IS NOT NULL) AND (failure_class IS NULL) AND (failure_code IS NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)) OR ((state = 'superseded'::text) AND (terminal_at IS NOT NULL) AND (failure_class IS NULL) AND (failure_code IS NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)) OR ((state = 'cas_lost'::text) AND (terminal_at IS NOT NULL) AND (failure_class = 'reconciliation'::text) AND (failure_code IS NOT NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)) OR ((state = 'failed'::text) AND (terminal_at IS NOT NULL) AND (failure_class IS NOT NULL) AND (failure_code IS NOT NULL) AND (claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL) AND (last_heartbeat_at IS NULL) AND (retry_at IS NULL)))"
+        }
+      }
+    },
+    "provider_promotion_evaluations": {
+      "columns": {
+        "checkpoint_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "checkpoint_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "requested_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "settled_checkpoint": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_head_checkpoint": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "provider_promotion_evaluations_digest_idx": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "checkpoint_sha256",
+            "evaluation_sequence"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "provider_promotion_evaluations_lane_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "referencedTable": "provider_promotion_lanes",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "provider_promotion_evaluations_value_check": {
+          "value": "((evaluation_sequence > 0) AND (settled_checkpoint >= 0) AND (source_head_checkpoint >= settled_checkpoint) AND ((octet_length(checkpoint_body) >= 2) AND (octet_length(checkpoint_body) <= 65536)) AND promotion_v2_sha256_valid(checkpoint_sha256))"
+        }
+      }
+    },
+    "provider_promotion_lanes": {
+      "columns": {
+        "completed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_attempt_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_checkpoint": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "completed_head_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_head_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_provider_release_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_public_provider_release_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_terminal_operation_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_terminal_operation_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_terminal_receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "confirmed_evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "latest_checkpoint_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "latest_checkpoint_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "next_evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "next_retry_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "requested_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "requested_evaluation_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "settled_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "settled_checkpoint": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "source_head_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_head_checkpoint": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "provider_promotion_lanes_completed_attempt_fk": {
+          "columns": [
+            "completed_attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "referencedTable": "provider_promotion_attempts",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "provider_promotion_lanes_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "provider_promotion_lanes_completed_shape_check": {
+          "value": "(((completed_checkpoint = 0) AND (completed_at IS NULL) AND (completed_public_provider_release_id IS NULL) AND (completed_provider_release_fingerprint IS NULL) AND (completed_head_body IS NULL) AND (completed_head_sha256 IS NULL) AND (completed_terminal_operation_kind IS NULL) AND (completed_terminal_operation_id IS NULL) AND (completed_terminal_receipt_sha256 IS NULL) AND (completed_attempt_id IS NULL)) OR ((completed_checkpoint > 0) AND (completed_at IS NOT NULL) AND (completed_public_provider_release_id IS NOT NULL) AND promotion_v2_sha256_valid(completed_provider_release_fingerprint) AND ((octet_length(completed_head_body) >= 2) AND (octet_length(completed_head_body) <= 65536)) AND promotion_v2_sha256_valid(completed_head_sha256) AND (completed_terminal_operation_kind = ANY (ARRAY['finalize'::text, 'confirmReuse'::text])) AND (completed_terminal_operation_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text) AND promotion_v2_sha256_valid(completed_terminal_receipt_sha256) AND (completed_attempt_id IS NOT NULL)))"
+        },
+        "provider_promotion_lanes_key_check": {
+          "value": "(promotion_v2_deployment_key_valid(deployment_key) AND promotion_v2_platform_key_valid(platform_key))"
+        },
+        "provider_promotion_lanes_requested_shape_check": {
+          "value": "(((requested_evaluation_sequence = 0) = (requested_at IS NULL)) AND ((requested_evaluation_sequence = 0) = (latest_checkpoint_body IS NULL)) AND ((latest_checkpoint_body IS NULL) = (latest_checkpoint_sha256 IS NULL)) AND ((latest_checkpoint_sha256 IS NULL) OR promotion_v2_sha256_valid(latest_checkpoint_sha256)) AND ((latest_checkpoint_body IS NULL) OR ((octet_length(latest_checkpoint_body) >= 2) AND (octet_length(latest_checkpoint_body) <= 65536))))"
+        },
+        "provider_promotion_lanes_sequence_check": {
+          "value": "((next_evaluation_sequence >= 0) AND ((requested_evaluation_sequence >= 0) AND (requested_evaluation_sequence <= next_evaluation_sequence)) AND ((confirmed_evaluation_sequence >= 0) AND (confirmed_evaluation_sequence <= requested_evaluation_sequence)) AND (settled_checkpoint >= 0) AND (source_head_checkpoint >= settled_checkpoint) AND (completed_checkpoint >= 0) AND (completed_checkpoint <= settled_checkpoint))"
+        },
+        "provider_promotion_lanes_settlement_shape_check": {
+          "value": "(((settled_checkpoint = 0) = (settled_at IS NULL)) AND ((source_head_checkpoint = 0) = (source_head_at IS NULL)))"
+        }
+      }
+    },
+    "provider_promotion_operations": {
+      "columns": {
+        "acknowledged_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "attempt_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "canonical_receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "canonical_request_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "exact_response_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "last_sent_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "operation_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "operation_index": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "operation_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "request_path": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "request_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "response_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "send_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'pending'::text"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "provider_promotion_operations_resume_idx": {
+          "columns": [
+            "attempt_id",
+            "operation_index"
+          ],
+          "unique": false,
+          "where": "(state <> 'acknowledged'::text)"
+        }
+      },
+      "uniqueConstraints": {
+        "provider_promotion_operations_attempt_index_unique": {
+          "columns": [
+            "attempt_id",
+            "operation_index"
+          ],
+          "nullsNotDistinct": false
+        },
+        "provider_promotion_operations_attempt_operation_unique": {
+          "columns": [
+            "attempt_id",
+            "operation_id"
+          ],
+          "nullsNotDistinct": false
+        },
+        "provider_promotion_operations_lane_operation_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "operation_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "provider_promotion_operations_attempt_fk": {
+          "columns": [
+            "attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "referencedTable": "provider_promotion_attempts",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "provider_promotion_operations_delivery_check": {
+          "value": "((send_count >= 0) AND (((state = 'pending'::text) AND (send_count = 0) AND (last_sent_at IS NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL)) OR ((state = 'sent'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL)) OR ((state = 'acknowledged'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NOT NULL) AND ((octet_length(canonical_receipt_body) >= 2) AND (octet_length(canonical_receipt_body) <= 393216)) AND promotion_v2_sha256_valid(receipt_sha256) AND ((exact_response_body IS NULL) = (response_sha256 IS NULL)) AND ((exact_response_body IS NULL) OR (((octet_length(exact_response_body) >= 2) AND (octet_length(exact_response_body) <= 524288)) AND promotion_v2_sha256_valid(response_sha256))))))"
+        },
+        "provider_promotion_operations_identity_check": {
+          "value": "((operation_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text) AND (operation_kind = ANY (ARRAY['start'::text, 'applyBatch'::text, 'finalize'::text, 'confirmReuse'::text, 'block'::text])) AND ((char_length(request_path) >= 2) AND (char_length(request_path) <= 512)) AND (request_path ~ '^/[A-Za-z0-9._~!$&''()*+,;=:@%/-]+$'::text) AND ((octet_length(canonical_request_body) >= 2) AND (octet_length(canonical_request_body) <= 131072)) AND promotion_v2_sha256_valid(request_sha256))"
+        },
+        "provider_promotion_operations_index_check": {
+          "value": "((operation_index >= 0) AND (operation_index <= 4097))"
+        },
+        "provider_promotion_operations_state_check": {
+          "value": "(state = ANY (ARRAY['pending'::text, 'sent'::text, 'acknowledged'::text]))"
+        }
+      }
+    },
+    "provider_release_artifacts": {
+      "columns": {
+        "completed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "immutable_proof_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "immutable_proof_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_release_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "public_provider_release_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "publish_attempt_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {
+        "provider_release_artifacts_exact_identity_unique": {
+          "columns": [
+            "publish_attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "public_provider_release_id",
+            "provider_release_fingerprint"
+          ],
+          "nullsNotDistinct": false
+        },
+        "provider_release_artifacts_fingerprint_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "platform_key",
+            "provider_release_fingerprint"
+          ],
+          "nullsNotDistinct": false
+        },
+        "provider_release_artifacts_publish_attempt_unique": {
+          "columns": [
+            "publish_attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "provider_release_artifacts_publish_attempt_fk": {
+          "columns": [
+            "publish_attempt_id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "referencedTable": "provider_promotion_attempts",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "deployment_key",
+            "platform_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "provider_release_artifacts_proof_check": {
+          "value": "(promotion_v2_sha256_valid(provider_release_fingerprint) AND ((octet_length(immutable_proof_body) >= 2) AND (octet_length(immutable_proof_body) <= 131072)) AND promotion_v2_sha256_valid(immutable_proof_sha256))"
         }
       }
     },

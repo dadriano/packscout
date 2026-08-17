@@ -30,6 +30,10 @@ import {
   loadCatalogManifestByPublicReleaseId,
   writeActiveCatalogManifestState,
 } from "./catalogManifestState";
+import {
+  assertExactCatalogManifestProviderReferences,
+  insertCatalogManifestProviderReferences,
+} from "./catalogManifestRetentionReferences";
 
 const COMPLETE_RETENTION_MILLISECONDS = 7 * 24 * 60 * 60 * 1_000;
 
@@ -82,6 +86,7 @@ export async function ensureImmutableCatalogManifest(
     ) {
       refuseCatalogManifest("CATALOG_MANIFEST_IDENTITY_MISMATCH");
     }
+    await assertExactCatalogManifestProviderReferences(ctx, existing);
     return existing;
   }
   const fingerprintMatches = await ctx.db
@@ -109,6 +114,8 @@ export async function ensureImmutableCatalogManifest(
   if (inserted === null) {
     refuseCatalogManifest("CATALOG_MANIFEST_STATE_CONFLICT");
   }
+  await insertCatalogManifestProviderReferences(ctx, inserted);
+  await assertExactCatalogManifestProviderReferences(ctx, inserted);
   return inserted;
 }
 

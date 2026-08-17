@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
   PrismaAdminNotificationPublisher,
-  PrismaCatalogPromotionRepository,
-  PrismaCatalogReleaseSourceRepository,
   PrismaHeatPromotionReleaseRepository,
   PrismaHeatPromotionRepository,
   PrismaNormalizedHeatObservationRepository,
@@ -11,21 +9,11 @@ import {
   type PackscoutPrismaClient,
 } from "@packscout/database";
 import {
-  CatalogReleaseAssembler,
   NormalizedHeatObservationService,
   OperationalEventService,
   PromotionOperationalReadinessService,
   type OperationalObservability,
 } from "@packscout/services";
-import {
-  createCatalogPromotionWorkerRuntime,
-} from "./catalog-promotion-worker-composition.ts";
-import {
-  CatalogPromotionOperationalReadinessSink,
-} from "./catalog-promotion-operational-readiness.ts";
-import type {
-  CatalogPromotionWorkerConfiguration,
-} from "./catalog-promotion-worker-config.ts";
 import {
   createHeatPromotionWorkerRuntime,
 } from "./heat-promotion-worker-composition.ts";
@@ -42,39 +30,40 @@ import {
   HeatPromotionWorkerTerminalAlertLogger,
   type HeatPromotionWorkerLogger,
 } from "./heat-promotion-worker-runtime.ts";
-import {
-  CatalogPromotionWorkerTerminalAlertLogger,
-  type CatalogPromotionWorkerLogger,
-} from "./catalog-promotion-worker-runtime.ts";
 import { createProviderWorkerRuntime } from "./provider-worker-composition.ts";
 import { createProviderWorkerPublicSettlementReader } from "./provider-worker-public-settlement.ts";
 import type { ProviderWorkerLogger } from "./provider-worker-runtime.ts";
 import { runPromotionObservabilityFanout } from "./promotion-observability-fanout.ts";
 import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
+import {
+  assertPromotionV2CredentialRoleIsolation,
+  type PromotionV2WorkerConfiguration,
+} from "./promotion-v2-worker-config.ts";
+import { createPromotionV2WorkerRuntime } from
+  "./promotion-v2-worker-composition.ts";
+import type { PromotionV2WorkerLogger } from
+  "./promotion-v2-worker-runtime.ts";
 
 export interface ProductionWorkerCompositionInput {
   readonly provider: ProviderWorkerConfiguration;
-  readonly catalog: CatalogPromotionWorkerConfiguration;
+  readonly promotion: PromotionV2WorkerConfiguration;
   readonly heat: HeatPromotionWorkerConfiguration;
   readonly database: PackscoutPrismaClient;
   readonly providerLogger: ProviderWorkerLogger;
-  readonly catalogLogger: CatalogPromotionWorkerLogger;
+  readonly promotionLogger: PromotionV2WorkerLogger;
   readonly heatLogger: HeatPromotionWorkerLogger;
   readonly observability: OperationalObservability;
   readonly fetch?: typeof fetch;
 }
 
-/** Wires the approved tenant to both independent worker loops server-side. */
+/** Wires provider+manifest promotion and Heat as independent worker loops. */
 export function createProductionWorkerRuntime(
   input: ProductionWorkerCompositionInput,
 ) {
+  assertPromotionV2CredentialRoleIsolation(input.promotion, [input.heat.keyId]);
   const settlement = createProviderWorkerPublicSettlementReader({
     database: input.database,
     publicOrganizationId: input.provider.publicOrganizationId,
-  });
-  const ledger = new PrismaCatalogPromotionRepository(input.database, {
-    organizationId: input.provider.publicOrganizationId,
-    deploymentKey: input.catalog.deploymentKey,
   });
   const clock = { now: () => new Date() };
   const operationalEvents = new OperationalEventService(
@@ -82,56 +71,13 @@ export function createProductionWorkerRuntime(
     { id: randomUUID },
     clock,
   );
-  const readinessRepository = new PrismaPromotionReadinessRepository(
-    input.database,
-    {
-      organizationId: input.provider.publicOrganizationId,
-      deploymentKey: input.catalog.deploymentKey,
-      lane: "catalog",
-    },
-  );
-  const readiness = new CatalogPromotionOperationalReadinessSink(
-    new PromotionOperationalReadinessService(
-      operationalEvents,
-      readinessRepository,
-      clock,
-      {
-        organizationId: input.provider.publicOrganizationId,
-        deploymentScopeDigest: readinessRepository.deploymentScopeDigest,
-        lane: "catalog",
-        targetSource: "canonical_settlement",
-        monitorTechnicalSettlement: true,
-      },
-    ),
-  );
-  const terminalLogger = new CatalogPromotionWorkerTerminalAlertLogger(
-    input.catalogLogger,
-    input.provider.workerId,
-  );
-  const catalogPromotion = createCatalogPromotionWorkerRuntime({
-    configuration: input.catalog,
+  const promotion = createPromotionV2WorkerRuntime({
+    configuration: input.promotion,
     organizationId: input.provider.publicOrganizationId,
     workerId: input.provider.workerId,
-    ledger,
-    bootstrapLedger: ledger,
-    settlement,
-    assembler: new CatalogReleaseAssembler(
-      settlement,
-      new PrismaCatalogReleaseSourceRepository(
-        input.database,
-        input.provider.publicOrganizationId,
-      ),
-    ),
-    alerts: {
-      async notify(alert) {
-        await runPromotionObservabilityFanout(
-          () => readiness.notify(alert),
-          () => terminalLogger.notify(alert),
-        );
-      },
-    },
-    health: readiness,
-    logger: input.catalogLogger,
+    database: input.database,
+    logger: input.promotionLogger,
+    operationalEvents,
     fetch: input.fetch,
   });
   const heatProofs = new PrismaHeatPromotionReleaseRepository(input.database, {
@@ -205,7 +151,7 @@ export function createProductionWorkerRuntime(
     database: input.database,
     logger: input.providerLogger,
     observability: input.observability,
-    catalogPromotion,
+    promotion,
     heatPromotion,
   });
 }

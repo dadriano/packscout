@@ -10,6 +10,7 @@ import { env } from "./_generated/server";
 export const CATALOG_MANIFEST_KEY_ROLES = [
   "clear",
   "publish",
+  "retain",
   "rollback",
 ] as const;
 

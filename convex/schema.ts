@@ -761,6 +761,15 @@ export default defineSchema({
       "lifecycle",
       "retentionEligibleAt",
     ])
+    .index(
+      "by_platform_key_and_lifecycle_and_retention_eligible_at_and_public_id",
+      [
+        "platformKey",
+        "lifecycle",
+        "retentionEligibleAt",
+        "publicProviderReleaseId",
+      ],
+    )
     .index("by_lifecycle_and_retention_eligible_at", [
       "lifecycle",
       "retentionEligibleAt",
@@ -1005,7 +1014,11 @@ export default defineSchema({
     providerReferenceSetHash: sha256Validator,
     manifest: globalCatalogManifestValidator,
     providerReleaseIds: v.array(v.id("providerCatalogReleases")),
-    lifecycle: v.literal("complete"),
+    lifecycle: v.union(
+      v.literal("staging"),
+      v.literal("complete"),
+      v.literal("failed"),
+    ),
     createdAt: timestampValidator,
     retentionEligibleAt: timestampValidator,
   })
@@ -1014,6 +1027,27 @@ export default defineSchema({
     .index("by_lifecycle_and_retention_eligible_at", [
       "lifecycle",
       "retentionEligibleAt",
+    ])
+    .index("by_lifecycle_and_retention_eligible_at_and_public_release_id", [
+      "lifecycle",
+      "retentionEligibleAt",
+      "publicReleaseId",
+    ]),
+
+  catalogManifestProviderReferences: defineTable({
+    manifestId: v.id("globalCatalogManifests"),
+    manifestPublicReleaseId: v.string(),
+    manifestFingerprint: sha256Validator,
+    releaseId: v.id("providerCatalogReleases"),
+    platformKey: v.string(),
+    publicProviderReleaseId: v.string(),
+    providerReleaseFingerprint: sha256Validator,
+  })
+    .index("by_manifest_id_and_platform_key", ["manifestId", "platformKey"])
+    .index("by_release_id_and_manifest_id", ["releaseId", "manifestId"])
+    .index("by_platform_key_and_public_provider_release_id", [
+      "platformKey",
+      "publicProviderReleaseId",
     ]),
 
   activeCatalogManifestState: defineTable({
@@ -1091,7 +1125,38 @@ export default defineSchema({
     .index("by_lifecycle_and_retention_eligible_at", [
       "lifecycle",
       "retentionEligibleAt",
-    ]),
+  ]),
+
+  catalogRetentionState: defineTable({
+    key: v.literal("singleton"),
+    generation: v.number(),
+    updatedAt: timestampValidator,
+  }).index("by_key", ["key"]),
+
+  catalogRetentionOperations: defineTable({
+    operationId: v.string(),
+    kind: v.union(
+      v.literal("retainManifests"),
+      v.literal("retainProviderReleases"),
+    ),
+    idempotencyKey: v.string(),
+    phase: v.union(v.literal("manifests"), v.literal("provider_releases")),
+    platformKey: nullableTextValidator,
+    bodyHash: sha256Validator,
+    expectedGeneration: v.number(),
+    resultGeneration: v.number(),
+    status: v.literal("completed"),
+    result: v.literal("retained"),
+    receiptDigest: sha256Validator,
+    terminalReceiptSha256: sha256Validator,
+    completedAt: timestampValidator,
+    expiresAt: timestampValidator,
+    receiptJson: v.string(),
+  })
+    .index("by_operation_id", ["operationId"])
+    .index("by_kind_and_idempotency_key", ["kind", "idempotencyKey"])
+    .index("by_completed_at", ["completedAt"])
+    .index("by_expires_at", ["expiresAt"]),
 
   dataReleasePublications: defineTable({
     publicationId: v.string(),

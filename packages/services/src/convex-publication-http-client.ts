@@ -5,6 +5,9 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import {
+  canonicalJson,
+  type CatalogManifestErrorCode,
+  type CatalogRetentionErrorCode,
   MAX_PRODUCTION_AUTH_SECRET_BYTES,
   MAX_PRODUCTION_HTTP_BODY_BYTES,
   MIN_PRODUCTION_AUTH_SECRET_BYTES,
@@ -18,12 +21,19 @@ import {
   productionPublicationReceiptSigningValue,
   productionPublicationRequestSigningValue,
   productionReceiptHash,
+  type ProviderReleaseErrorCode,
   type ProductionDataReleaseErrorCode,
   type ProductionPublicationPath,
 } from "@packscout/contracts";
 
-export type PublicationClientFailureCode =
+export type PublicationServerErrorCode =
   | ProductionDataReleaseErrorCode
+  | ProviderReleaseErrorCode
+  | CatalogManifestErrorCode
+  | CatalogRetentionErrorCode;
+
+export type PublicationClientFailureCode =
+  | PublicationServerErrorCode
   | "PUBLICATION_CANCELLED"
   | "PUBLICATION_NETWORK_ERROR"
   | "PUBLICATION_TIMEOUT"
@@ -36,11 +46,30 @@ export class PublicationClientError extends Error {
     readonly disposition: "retryable" | "terminal",
     readonly ambiguous: boolean,
     readonly retryAfterMilliseconds: number | null = null,
+    readonly canonicalErrorResponseBody: string | null = null,
+    readonly errorResponseSha256: string | null = null,
   ) {
     super("Convex publication request failed safely.");
     // Preserve the established public error identity used by the catalog lane.
     this.name = "CatalogPublicationClientError";
   }
+}
+
+export interface PublicationErrorResponseBoundary {
+  readonly parse: (
+    value: unknown,
+  ) => Readonly<{ error: string; code: PublicationServerErrorCode }> | null;
+  readonly classify: (
+    code: PublicationServerErrorCode,
+  ) => "bounded_retry" | "authentication" | "terminal";
+}
+
+export interface SignedPublicationResult<T> {
+  readonly receipt: T;
+  readonly canonicalReceiptBody: string;
+  readonly receiptSha256: string;
+  readonly exactResponseBody: string;
+  readonly exactResponseSha256: string;
 }
 
 export interface SignedConvexPublicationHttpClientOptions {
@@ -51,10 +80,26 @@ export interface SignedConvexPublicationHttpClientOptions {
   readonly now?: () => Date;
   readonly nonce?: () => string;
   readonly timeoutMilliseconds?: number;
+  readonly maximumRequestBytes?: number;
   readonly maximumResponseBytes?: number;
+  readonly errorResponseBoundary?: PublicationErrorResponseBoundary;
 }
 
 type ReceiptHash = (value: unknown) => Promise<string>;
+
+const MAX_SIGNED_PUBLICATION_RESPONSE_BYTES = 512 * 1_024;
+
+const legacyErrorResponseBoundary: PublicationErrorResponseBoundary = {
+  parse(value) {
+    const parsed = productionErrorEnvelopeSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  },
+  classify(code) {
+    return classifyProductionDataReleaseError(
+      code as ProductionDataReleaseErrorCode,
+    );
+  },
+};
 
 function boundedInteger(
   value: number | undefined,
@@ -158,8 +203,10 @@ async function boundedResponseText(
 }
 
 function signedEnvelope(value: unknown): Readonly<{
+  ok: true;
   receipt: Readonly<Record<string, unknown>>;
   responseAuth: Readonly<{
+    signatureVersion: typeof PRODUCTION_AUTH_SIGNATURE_VERSION;
     keyId: string;
     receiptDigest: string;
     signature: string;
@@ -171,8 +218,11 @@ function signedEnvelope(value: unknown): Readonly<{
   const auth = envelope.responseAuth;
   if (
     envelope.ok !== true ||
+    Object.keys(envelope).sort().join(",") !== "ok,receipt,responseAuth" ||
     typeof receipt !== "object" || receipt === null || Array.isArray(receipt) ||
-    typeof auth !== "object" || auth === null || Array.isArray(auth)
+    typeof auth !== "object" || auth === null || Array.isArray(auth) ||
+    Object.keys(auth).sort().join(",") !==
+      "keyId,receiptDigest,signature,signatureVersion"
   ) return null;
   const responseAuth = auth as Record<string, unknown>;
   if (
@@ -182,8 +232,10 @@ function signedEnvelope(value: unknown): Readonly<{
     typeof responseAuth.signature !== "string"
   ) return null;
   return {
+    ok: true,
     receipt: receipt as Readonly<Record<string, unknown>>,
     responseAuth: {
+      signatureVersion: PRODUCTION_AUTH_SIGNATURE_VERSION,
       keyId: responseAuth.keyId,
       receiptDigest: responseAuth.receiptDigest,
       signature: responseAuth.signature,
@@ -194,8 +246,10 @@ function signedEnvelope(value: unknown): Readonly<{
 /** Shared byte, timeout, cancellation, request-HMAC, and response-HMAC boundary. */
 export class SignedConvexPublicationHttpClient {
   readonly #baseUrl: URL;
+  readonly #errorResponseBoundary: PublicationErrorResponseBoundary;
   readonly #fetch: typeof fetch;
   readonly #keyId: string;
+  readonly #maximumRequestBytes: number;
   readonly #maximumResponseBytes: number;
   readonly #nonce: () => string;
   readonly #now: () => Date;
@@ -216,6 +270,8 @@ export class SignedConvexPublicationHttpClient {
       throw new RangeError("Convex publication secret is invalid.");
     }
     this.#baseUrl = baseUrl;
+    this.#errorResponseBoundary = options.errorResponseBoundary ??
+      legacyErrorResponseBoundary;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#keyId = options.keyId;
     this.#secret = Buffer.from(options.secret);
@@ -224,11 +280,17 @@ export class SignedConvexPublicationHttpClient {
     this.#timeoutMilliseconds = boundedInteger(
       options.timeoutMilliseconds, 10_000, 100, 30_000,
     );
+    this.#maximumRequestBytes = boundedInteger(
+      options.maximumRequestBytes,
+      MAX_PRODUCTION_HTTP_BODY_BYTES,
+      1_024,
+      MAX_SIGNED_PUBLICATION_RESPONSE_BYTES,
+    );
     this.#maximumResponseBytes = boundedInteger(
       options.maximumResponseBytes,
       MAX_PRODUCTION_HTTP_BODY_BYTES,
       1_024,
-      MAX_PRODUCTION_HTTP_BODY_BYTES,
+      MAX_SIGNED_PUBLICATION_RESPONSE_BYTES,
     );
   }
 
@@ -238,7 +300,22 @@ export class SignedConvexPublicationHttpClient {
     innerReceiptHash: ReceiptHash,
     signal?: AbortSignal,
   ): Promise<unknown> {
-    if (Buffer.byteLength(bodyJson, "utf8") > MAX_PRODUCTION_HTTP_BODY_BYTES) {
+    return (await this.requestSigned(
+      path,
+      bodyJson,
+      innerReceiptHash,
+      signal,
+    )).receipt;
+  }
+
+  async requestSigned(
+    path: ProductionPublicationPath,
+    bodyJson: string,
+    innerReceiptHash: ReceiptHash,
+    signal?: AbortSignal,
+    responseReceiptHash: ReceiptHash = productionReceiptHash,
+  ): Promise<SignedPublicationResult<unknown>> {
+    if (Buffer.byteLength(bodyJson, "utf8") > this.#maximumRequestBytes) {
       throw new PublicationClientError(
         "PUBLICATION_BODY_TOO_LARGE", "terminal", false,
       );
@@ -310,28 +387,31 @@ export class SignedConvexPublicationHttpClient {
       );
     }
     if (!response.ok) {
-      const error = productionErrorEnvelopeSchema.safeParse(json);
-      if (!error.success) {
+      const error = this.#errorResponseBoundary.parse(json);
+      if (error === null) {
         throw ambiguousPublicationResponse(
           "PUBLICATION_RESPONSE_INVALID",
           retryAfterMilliseconds(response, now),
         );
       }
+      const canonicalErrorResponseBody = canonicalJson(error);
       const retryable = response.status === 408 || response.status === 429 ||
         response.status >= 500 ||
-        classifyProductionDataReleaseError(error.data.code) === "bounded_retry";
+        this.#errorResponseBoundary.classify(error.code) === "bounded_retry";
       throw new PublicationClientError(
-        error.data.code,
+        error.code,
         retryable ? "retryable" : "terminal",
         retryable,
         retryAfterMilliseconds(response, now),
+        canonicalErrorResponseBody,
+        sha256(canonicalErrorResponseBody),
       );
     }
     const envelope = signedEnvelope(json);
     if (envelope === null || envelope.responseAuth.keyId !== this.#keyId) {
       throw ambiguousPublicationResponse("PUBLICATION_RESPONSE_INVALID");
     }
-    const outerDigest = await productionReceiptHash(envelope.receipt);
+    const outerDigest = await responseReceiptHash(envelope.receipt);
     refuseIfCancelled(signal);
     const expectedSignature = createHmac("sha256", this.#secret)
       .update(productionPublicationReceiptSigningValue(outerDigest))
@@ -354,6 +434,13 @@ export class SignedConvexPublicationHttpClient {
       }
     }
     refuseIfCancelled(signal);
-    return envelope.receipt;
+    const canonicalReceiptBody = canonicalJson(envelope.receipt);
+    return {
+      receipt: envelope.receipt,
+      canonicalReceiptBody,
+      receiptSha256: sha256(canonicalReceiptBody),
+      exactResponseBody: text,
+      exactResponseSha256: sha256(text),
+    };
   }
 }

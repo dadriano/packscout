@@ -19,12 +19,14 @@ const organizationId = "70000000-0000-4000-8000-000000000001";
 
 export function providerFixtureApprovedConfiguration(
   options: Readonly<{
+    platformKey?: "alpha" | "beta";
     configurationKey?: string;
     revision?: number;
     categories?: ApprovedPublicCatalogConfigurationV1["categories"];
     verifiedUsdStablecoins?: readonly string[];
   }> = {},
 ): ApprovedPublicCatalogConfigurationV1 {
+  const platformKey = options.platformKey ?? "alpha";
   return {
     ...fixtureConfiguration,
     configurationKey: options.configurationKey ?? fixtureConfiguration.configurationKey,
@@ -35,19 +37,20 @@ export function providerFixtureApprovedConfiguration(
         fixtureConfiguration.verifiedUsdStablecoins),
     ],
     platforms: fixtureConfiguration.platforms.filter(
-      ({ platformKey }) => platformKey === "alpha",
+      (platform) => platform.platformKey === platformKey,
     ),
     repacks: fixtureConfiguration.repacks.filter(
-      ({ platformKey }) => platformKey === "alpha",
+      (repack) => repack.platformKey === platformKey,
     ),
     collectibles: fixtureConfiguration.collectibles.filter(
-      ({ platformKey }) => platformKey === "alpha",
+      (collectible) => collectible.platformKey === platformKey,
     ),
   };
 }
 
 export function providerFixtureCheckpoint(
   options: Readonly<{
+    platformKey?: "alpha" | "beta";
     configurationKey?: string;
     revision?: number;
     configurationHash?: string;
@@ -56,14 +59,20 @@ export function providerFixtureCheckpoint(
     sourceHeadSequence?: bigint;
     settledAt?: Date | null;
     sourceHeadAt?: Date;
+    lastSuccessfulObservationAt?: Date;
+    staleAt?: Date;
+    freshness?: "fresh" | "delayed";
     blockedState?: ProviderCatalogCheckpoint["blockedState"];
   }> = {},
 ): ProviderCatalogCheckpoint {
   const settledSequence = options.settledSequence ?? 20n;
   const sourceHeadSequence = options.sourceHeadSequence ?? settledSequence;
+  const sourceHeadAt = options.sourceHeadAt ?? settled;
+  const lastSuccessfulObservationAt =
+    options.lastSuccessfulObservationAt ?? settled;
   return {
     organizationId,
-    platformKey: "alpha",
+    platformKey: options.platformKey ?? "alpha",
     sharedConfigurationEpoch: {
       configurationKey: options.configurationKey ?? "catalog-v1",
       revision: options.revision ?? 1,
@@ -75,7 +84,13 @@ export function providerFixtureCheckpoint(
     settledAt: options.settledAt === undefined
       ? (settledSequence === 0n ? null : settled)
       : options.settledAt,
-    sourceHeadAt: options.sourceHeadAt ?? settled,
+    sourceHeadAt,
+    lastSuccessfulObservationAt,
+    staleAt: options.staleAt ?? new Date(
+      lastSuccessfulObservationAt.getTime() + 900_000,
+    ),
+    freshness: options.freshness ??
+      (lastSuccessfulObservationAt >= sourceHeadAt ? "fresh" : "delayed"),
     blockedState: options.blockedState ?? { kind: "ready" },
   };
 }
@@ -120,13 +135,14 @@ export function providerFixtureSnapshot(
     throw new RangeError("A provider release snapshot requires a settled checkpoint.");
   }
   const configuration = options.configuration ?? providerFixtureApprovedConfiguration({
+    platformKey: checkpoint.platformKey as "alpha" | "beta",
     configurationKey: checkpoint.sharedConfigurationEpoch.configurationKey,
     revision: checkpoint.sharedConfigurationEpoch.revision,
   });
   const source = fixtureSnapshot({ alphaName: options.alphaName });
   let revisions: ProviderCatalogCanonicalRevisionSnapshot[] = source.revisions
     .filter(({ platformKey }) =>
-      platformKey === "alpha" || options.includeForeignRows === true)
+      platformKey === checkpoint.platformKey || options.includeForeignRows === true)
     .map((revision) => ({
       ...revision,
       revisionId: revision.recordKind === "pack"
@@ -136,17 +152,17 @@ export function providerFixtureSnapshot(
           : `${revision.platformKey}-${revision.recordKind}-revision`,
     }));
   revisions = revisions.map((revision) =>
-    revision.platformKey === "alpha" && revision.recordKind === "pack"
+    revision.platformKey === checkpoint.platformKey && revision.recordKind === "pack"
       ? {
           ...revision,
           content: {
             ...(revision.content as Record<string, unknown>),
-            imageUrls: ["https://alpha.example/pack.png"],
+            imageUrls: [`https://${checkpoint.platformKey}.example/pack.png`],
           },
         }
       : revision);
   let repackIdentities = source.repackIdentities.filter(({ platformKey }) =>
-    platformKey === "alpha" || options.includeForeignRows === true);
+    platformKey === checkpoint.platformKey || options.includeForeignRows === true);
   if (options.reverseRows === true) {
     revisions = [...revisions].reverse();
     repackIdentities = [...repackIdentities].reverse();

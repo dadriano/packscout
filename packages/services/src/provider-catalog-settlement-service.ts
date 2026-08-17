@@ -25,7 +25,7 @@ export type ProviderCatalogBlockedState =
       causeSequence: bigint;
     }>;
 
-export interface ProviderCatalogCheckpoint {
+export interface ManifestEligibilityCheckpoint {
   readonly organizationId: string;
   readonly platformKey: string;
   readonly sharedConfigurationEpoch: SharedPublicConfigurationEpoch;
@@ -36,16 +36,26 @@ export interface ProviderCatalogCheckpoint {
   readonly blockedState: ProviderCatalogBlockedState;
 }
 
+export interface ProviderCatalogCheckpoint
+  extends ManifestEligibilityCheckpoint {
+  readonly lastSuccessfulObservationAt: Date;
+  readonly staleAt: Date;
+  readonly freshness: "fresh" | "delayed";
+}
+
 export interface ManifestEligibilitySnapshot {
   readonly organizationId: string;
   readonly sharedConfigurationEpoch: SharedPublicConfigurationEpoch;
+  readonly confidencePolicyVersion: string;
+  readonly staleAfterSeconds: number;
+  readonly configuredPlatformKeys: readonly string[];
   readonly enabledPlatformKeys: readonly string[];
   readonly lifecycleDecisionSequence: bigint;
-  readonly checkpoints: readonly ProviderCatalogCheckpoint[];
+  readonly checkpoints: readonly ManifestEligibilityCheckpoint[];
 }
 
 export interface ProviderCatalogCheckpointReadPort {
-  loadProviderCatalogCheckpoint(input: Readonly<{
+  loadProviderPromotionCheckpoint(input: Readonly<{
     organizationId: string;
     platformKey: string;
   }>): Promise<unknown | null>;
@@ -205,6 +215,38 @@ function blockedState(
   });
 }
 
+function checkpointCore(
+  value: Record<string, unknown>,
+  expectedOrganizationId: string,
+  code: ProviderCatalogSettlementErrorCode,
+): ManifestEligibilityCheckpoint {
+  if (value.organizationId !== expectedOrganizationId) refuse(code);
+  const settledSequence = nonNegativeSequence(value.settledSequence, code);
+  const sourceHeadSequence = nonNegativeSequence(value.sourceHeadSequence, code);
+  const sharedConfigurationEpoch = epoch(
+    value.sharedConfigurationEpoch,
+    code,
+  );
+  if (
+    settledSequence > sourceHeadSequence ||
+    sharedConfigurationEpoch.publicChangeSequence > sourceHeadSequence
+  ) refuse(code);
+  const sourceHeadAt = finiteDate(value.sourceHeadAt, code);
+  return Object.freeze({
+    organizationId: expectedOrganizationId,
+    platformKey: canonicalPlatformKey(value.platformKey, code),
+    sharedConfigurationEpoch,
+    settledSequence,
+    sourceHeadSequence,
+    settledAt: settledDate(value.settledAt, settledSequence, code),
+    sourceHeadAt,
+    blockedState: blockedState(value.blockedState, {
+      settledSequence,
+      sourceHeadSequence,
+    }, code),
+  });
+}
+
 function checkpoint(
   value: unknown,
   expectedOrganizationId: string,
@@ -218,37 +260,58 @@ function checkpoint(
     "sourceHeadSequence",
     "settledAt",
     "sourceHeadAt",
+    "lastSuccessfulObservationAt",
+    "staleAt",
+    "freshness",
     "blockedState",
   ])) refuse(code);
-  if (value.organizationId !== expectedOrganizationId) refuse(code);
-  const settledSequence = nonNegativeSequence(value.settledSequence, code);
-  const sourceHeadSequence = nonNegativeSequence(value.sourceHeadSequence, code);
-  const sharedConfigurationEpoch = epoch(
-    value.sharedConfigurationEpoch,
+  const core = checkpointCore(value, expectedOrganizationId, code);
+  if (value.freshness !== "fresh" && value.freshness !== "delayed") refuse(code);
+  const lastSuccessfulObservationAt = finiteDate(
+    value.lastSuccessfulObservationAt,
     code,
   );
+  const staleAt = finiteDate(value.staleAt, code);
   if (
-    settledSequence > sourceHeadSequence ||
-    sharedConfigurationEpoch.publicChangeSequence > sourceHeadSequence
+    staleAt <= lastSuccessfulObservationAt ||
+    value.freshness !==
+      (lastSuccessfulObservationAt >= core.sourceHeadAt ? "fresh" : "delayed")
   ) refuse(code);
   return Object.freeze({
-    organizationId: expectedOrganizationId,
-    platformKey: canonicalPlatformKey(value.platformKey, code),
-    sharedConfigurationEpoch,
-    settledSequence,
-    sourceHeadSequence,
-    settledAt: settledDate(value.settledAt, settledSequence, code),
-    sourceHeadAt: finiteDate(value.sourceHeadAt, code),
-    blockedState: blockedState(value.blockedState, {
-      settledSequence,
-      sourceHeadSequence,
-    }, code),
+    ...core,
+    lastSuccessfulObservationAt,
+    staleAt,
+    freshness: value.freshness,
   });
 }
 
-function enabledPlatformKeys(value: unknown): readonly string[] {
+function eligibilityCheckpoint(
+  value: unknown,
+  expectedOrganizationId: string,
+  code: ProviderCatalogSettlementErrorCode,
+): ManifestEligibilityCheckpoint {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    "organizationId",
+    "platformKey",
+    "sharedConfigurationEpoch",
+    "settledSequence",
+    "sourceHeadSequence",
+    "settledAt",
+    "sourceHeadAt",
+    "blockedState",
+  ])) refuse(code);
+  return checkpointCore(value, expectedOrganizationId, code);
+}
+
+function platformKeys(
+  value: unknown,
+  options: Readonly<{ requireNonempty: boolean }>,
+): readonly string[] {
   if (!Array.isArray(value)) refuse("MANIFEST_ELIGIBILITY_INVALID");
-  if (value.length > MAX_APPROVED_PUBLIC_PLATFORMS) {
+  if (
+    value.length > MAX_APPROVED_PUBLIC_PLATFORMS ||
+    (options.requireNonempty && value.length === 0)
+  ) {
     refuse("MANIFEST_ENABLED_PLATFORM_LIMIT_EXCEEDED");
   }
   const keys = value.map((candidate) =>
@@ -257,6 +320,22 @@ function enabledPlatformKeys(value: unknown): readonly string[] {
     refuse("MANIFEST_ELIGIBILITY_INVALID");
   }
   return Object.freeze(keys);
+}
+
+function confidencePolicyVersion(value: unknown): string {
+  if (
+    typeof value !== "string" || value.length < 1 || value.length > 128 ||
+    value.trim() !== value
+  ) refuse("MANIFEST_ELIGIBILITY_INVALID");
+  return value;
+}
+
+function staleAfterSeconds(value: unknown): number {
+  if (
+    !Number.isSafeInteger(value) || (value as number) < 60 ||
+    (value as number) > 31_536_000
+  ) refuse("MANIFEST_ELIGIBILITY_INVALID");
+  return value as number;
 }
 
 export function sameSharedPublicConfigurationEpoch(
@@ -277,6 +356,9 @@ function manifestSnapshot(
   if (!isRecord(value) || !hasExactKeys(value, [
     "organizationId",
     "sharedConfigurationEpoch",
+    "confidencePolicyVersion",
+    "staleAfterSeconds",
+    "configuredPlatformKeys",
     "enabledPlatformKeys",
     "lifecycleDecisionSequence",
     "checkpoints",
@@ -284,12 +366,20 @@ function manifestSnapshot(
   if (value.organizationId !== expectedOrganizationId ||
       !Array.isArray(value.checkpoints)) refuse(code);
   const sharedConfigurationEpoch = epoch(value.sharedConfigurationEpoch, code);
-  const platformKeys = enabledPlatformKeys(value.enabledPlatformKeys);
-  if (value.checkpoints.length !== platformKeys.length) refuse(code);
+  const configuredKeys = platformKeys(value.configuredPlatformKeys, {
+    requireNonempty: true,
+  });
+  const enabledKeys = platformKeys(value.enabledPlatformKeys, {
+    requireNonempty: false,
+  });
+  if (
+    !enabledKeys.every((key) => configuredKeys.includes(key)) ||
+    value.checkpoints.length !== enabledKeys.length
+  ) refuse(code);
   const checkpoints = value.checkpoints.map((candidate) =>
-    checkpoint(candidate, expectedOrganizationId, code));
+    eligibilityCheckpoint(candidate, expectedOrganizationId, code));
   if (checkpoints.some((candidate, index) =>
-    candidate.platformKey !== platformKeys[index] ||
+    candidate.platformKey !== enabledKeys[index] ||
     !sameSharedPublicConfigurationEpoch(
       candidate.sharedConfigurationEpoch,
       sharedConfigurationEpoch,
@@ -304,7 +394,11 @@ function manifestSnapshot(
   return Object.freeze({
     organizationId: expectedOrganizationId,
     sharedConfigurationEpoch,
-    enabledPlatformKeys: platformKeys,
+    confidencePolicyVersion:
+      confidencePolicyVersion(value.confidencePolicyVersion),
+    staleAfterSeconds: staleAfterSeconds(value.staleAfterSeconds),
+    configuredPlatformKeys: configuredKeys,
+    enabledPlatformKeys: enabledKeys,
     lifecycleDecisionSequence,
     checkpoints: Object.freeze(checkpoints),
   });
@@ -344,7 +438,7 @@ export class ProviderCatalogSettlementService {
   }
 
   async getCheckpoint(): Promise<ProviderCatalogCheckpoint> {
-    const candidate = await this.repository.loadProviderCatalogCheckpoint({
+    const candidate = await this.repository.loadProviderPromotionCheckpoint({
       organizationId: this.#organizationId,
       platformKey: this.#platformKey,
     });

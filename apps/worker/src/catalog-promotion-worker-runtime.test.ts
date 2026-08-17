@@ -188,7 +188,7 @@ test("provider and catalog loops start concurrently and stop together", async ()
         };
       },
     },
-    catalogPromotion: {
+    promotion: {
       start() {
         catalogStarted += 1;
         return catalogCompletion;

@@ -71,17 +71,23 @@ function safeWatermark(value: bigint): string {
     : "0";
 }
 
-function laneLabel(lane: PromotionLane): "Catalog" | "Heat" {
-  return lane === "catalog" ? "Catalog" : "Heat";
+function laneLabel(lane: PromotionLane): "Provider" | "Manifest" | "Heat" {
+  return lane === "provider"
+    ? "Provider" : lane === "manifest" ? "Manifest" : "Heat";
 }
 
 function promotionAlertScope(
   deploymentScopeDigest: string,
   lane: PromotionLane,
+  platformKey?: string,
 ): string | null {
-  return /^[0-9a-f]{64}$/u.test(deploymentScopeDigest)
-    ? `promotion:${deploymentScopeDigest}:${lane}`
-    : null;
+  if (!/^[0-9a-f]{64}$/u.test(deploymentScopeDigest) ||
+      (lane === "provider") !== (platformKey !== undefined) ||
+      platformKey !== undefined &&
+        !/^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/u.test(platformKey)) return null;
+  return `promotion:${deploymentScopeDigest}:${lane}${
+    platformKey === undefined ? "" : `:${platformKey}`
+  }`;
 }
 
 function failedNotification(): NotificationPublishResult {
@@ -297,6 +303,7 @@ export class OperationalEventService {
     organizationId: string;
     deploymentScopeDigest: string;
     lane: PromotionLane;
+    platformKey?: string;
     targetWatermark: bigint;
     confirmedWatermark: bigint;
     durationMs: number;
@@ -304,6 +311,7 @@ export class OperationalEventService {
     const alertScope = promotionAlertScope(
       input.deploymentScopeDigest,
       input.lane,
+      input.platformKey,
     );
     if (alertScope === null) return Promise.resolve(failedNotification());
     return this.emit({
@@ -319,6 +327,9 @@ export class OperationalEventService {
       summary: "A ready public watermark has not been confirmed within its activation target.",
       evidence: {
         lane: input.lane,
+        ...(input.platformKey === undefined ? {} : {
+          platformKey: input.platformKey,
+        }),
         condition: "activation_lag",
         targetWatermark: safeWatermark(input.targetWatermark),
         confirmedWatermark: safeWatermark(input.confirmedWatermark),
@@ -331,6 +342,7 @@ export class OperationalEventService {
     organizationId: string;
     deploymentScopeDigest: string;
     lane: PromotionLane;
+    platformKey?: string;
     sourceHeadWatermark: bigint;
     settledWatermark: bigint;
     technicalFailureCount: number;
@@ -338,6 +350,7 @@ export class OperationalEventService {
     const alertScope = promotionAlertScope(
       input.deploymentScopeDigest,
       input.lane,
+      input.platformKey,
     );
     if (alertScope === null) return Promise.resolve(failedNotification());
     return this.emit({
@@ -353,6 +366,9 @@ export class OperationalEventService {
       summary: "A technical derivation outcome is preventing the public watermark from settling.",
       evidence: {
         lane: input.lane,
+        ...(input.platformKey === undefined ? {} : {
+          platformKey: input.platformKey,
+        }),
         condition: "settlement_blocked",
         targetWatermark: safeWatermark(input.sourceHeadWatermark),
         confirmedWatermark: safeWatermark(input.settledWatermark),
@@ -365,6 +381,7 @@ export class OperationalEventService {
     organizationId: string;
     deploymentScopeDigest: string;
     lane: PromotionLane;
+    platformKey?: string;
     attemptId: string;
     targetWatermark: bigint;
     confirmedWatermark: bigint;
@@ -374,6 +391,7 @@ export class OperationalEventService {
     const alertScope = promotionAlertScope(
       input.deploymentScopeDigest,
       input.lane,
+      input.platformKey,
     );
     if (alertScope === null) return Promise.resolve(failedNotification());
     return this.emit({
@@ -391,6 +409,9 @@ export class OperationalEventService {
         : "Publication reached a safe terminal failure before confirmation.",
       evidence: {
         lane: input.lane,
+        ...(input.platformKey === undefined ? {} : {
+          platformKey: input.platformKey,
+        }),
         condition: input.reconciliation
           ? "reconciliation_failure"
           : "terminal_failure",
@@ -409,12 +430,14 @@ export class OperationalEventService {
     organizationId: string;
     deploymentScopeDigest: string;
     lane: PromotionLane;
+    platformKey?: string;
     targetWatermark: bigint;
     confirmedWatermark: bigint;
   }): Promise<NotificationPublishResult> {
     const alertScope = promotionAlertScope(
       input.deploymentScopeDigest,
       input.lane,
+      input.platformKey,
     );
     if (alertScope === null) return Promise.resolve(failedNotification());
     return this.emit({
@@ -430,6 +453,9 @@ export class OperationalEventService {
       summary: "The public lane is fully confirmed and has no technical settlement block.",
       evidence: {
         lane: input.lane,
+        ...(input.platformKey === undefined ? {} : {
+          platformKey: input.platformKey,
+        }),
         condition: "recovered",
         targetWatermark: safeWatermark(input.targetWatermark),
         confirmedWatermark: safeWatermark(input.confirmedWatermark),

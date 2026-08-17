@@ -14,8 +14,11 @@ import {
   readCatalogPromotionWorkerConfiguration,
 } from "./catalog-promotion-worker-config.ts";
 import {
-  JsonConsoleCatalogPromotionWorkerLogger,
-} from "./catalog-promotion-worker-runtime.ts";
+  PromotionV2WorkerConfigurationError,
+  readPromotionV2WorkerConfiguration,
+} from "./promotion-v2-worker-config.ts";
+import { JsonConsolePromotionV2WorkerLogger } from
+  "./promotion-v2-worker-runtime.ts";
 import {
   HeatPromotionWorkerConfigurationError,
   readHeatPromotionWorkerConfiguration,
@@ -47,15 +50,16 @@ async function runProviderWorker(): Promise<void> {
     process.env,
     fallbackWorkerId(),
   );
-  const catalogConfiguration = readCatalogPromotionWorkerConfiguration(
+  const heatPublicationConfiguration = readCatalogPromotionWorkerConfiguration(
     process.env,
   );
+  const promotionConfiguration = readPromotionV2WorkerConfiguration(process.env);
   const heatConfiguration = readHeatPromotionWorkerConfiguration(
     process.env,
-    catalogConfiguration,
+    heatPublicationConfiguration,
   );
   const logger = new JsonConsoleProviderWorkerLogger();
-  const catalogLogger = new JsonConsoleCatalogPromotionWorkerLogger();
+  const promotionLogger = new JsonConsolePromotionV2WorkerLogger();
   const heatLogger = new JsonConsoleHeatPromotionWorkerLogger();
   const databaseLifecycle = createPrismaClientLifecycle({
     databaseUrl: configuration.databaseUrl,
@@ -67,11 +71,11 @@ async function runProviderWorker(): Promise<void> {
     );
     const runtime = createProductionWorkerRuntime({
       provider: configuration,
-      catalog: catalogConfiguration,
+      promotion: promotionConfiguration,
       heat: heatConfiguration,
       database: databaseLifecycle.client,
       providerLogger: logger,
-      catalogLogger,
+      promotionLogger,
       heatLogger,
       observability,
     });
@@ -94,6 +98,8 @@ runProviderWorker().catch((error: unknown) => {
     error instanceof ProviderWorkerConfigurationError
       ? error.code
       : error instanceof CatalogPromotionWorkerConfigurationError
+        ? error.code
+      : error instanceof PromotionV2WorkerConfigurationError
         ? error.code
       : error instanceof HeatPromotionWorkerConfigurationError
         ? error.code

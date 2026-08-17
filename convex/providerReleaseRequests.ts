@@ -1,5 +1,6 @@
 import {
   MAX_PROVIDER_RELEASE_PUBLICATION_BODY_BYTES,
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
   PRODUCTION_AUTH_KEY_ID_PATTERN,
   PROVIDER_RELEASE_PUBLICATION_SCHEMA_VERSION,
   canonicalJson,
@@ -41,6 +42,15 @@ export function assertProviderRequestDigest(requestDigest: string): void {
 
 function providerPlatformForKey(keyId: string): string | null {
   if (!PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId)) return null;
+  const value = configuredProviderReleasePlatformMap();
+  if (value === null || !Object.prototype.hasOwnProperty.call(value, keyId)) {
+    return null;
+  }
+  return value[keyId] ?? null;
+}
+
+function configuredProviderReleasePlatformMap():
+  Readonly<Record<string, string>> | null {
   const raw = env.PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS;
   if (raw === undefined) return null;
   try {
@@ -60,12 +70,20 @@ function providerPlatformForKey(keyId: string): string | null {
     )) {
       return null;
     }
-    if (!Object.prototype.hasOwnProperty.call(value, keyId)) return null;
-    const platformKey = (value as Record<string, unknown>)[keyId];
-    return typeof platformKey === "string" ? platformKey : null;
+    return value as Record<string, string>;
   } catch {
     return null;
   }
+}
+
+export function configuredProviderReleasePlatforms(): readonly string[] | null {
+  const value = configuredProviderReleasePlatformMap();
+  if (value === null) return null;
+  const platforms = [...new Set(Object.values(value))].sort();
+  return platforms.length > 0 &&
+      platforms.length <= MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES
+    ? platforms
+    : null;
 }
 
 export function assertProviderPlatformAuthority(
