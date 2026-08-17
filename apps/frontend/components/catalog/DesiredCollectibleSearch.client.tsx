@@ -7,6 +7,7 @@ import {
   formatCollectibleDescriptor,
   formatCollectibleIdentity,
 } from "@/lib/collectible-identity";
+import { shouldApplyDesiredCollectibleSearchResults } from "@/lib/desired-collectible-search-ui";
 import styles from "./DesiredCollectibleSearch.module.css";
 
 type CollectibleOption = Pick<
@@ -91,6 +92,8 @@ export function DesiredCollectibleSearch({
   const listboxId = `${id}-listbox`;
   const statusId = `${id}-status`;
   const rootRef = useRef<HTMLDivElement>(null);
+  const searchControllerRef = useRef<AbortController | null>(null);
+  const dismissedRef = useRef(false);
   const [search, setSearch] = useState(selected?.name ?? "");
   const [options, setOptions] = useState<readonly CollectibleOption[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -108,8 +111,18 @@ export function DesiredCollectibleSearch({
 
   useEffect(() => {
     if (!searchable) return;
+    dismissedRef.current = false;
     const controller = new AbortController();
+    searchControllerRef.current = controller;
     const timeout = window.setTimeout(() => {
+      if (
+        !shouldApplyDesiredCollectibleSearchResults({
+          aborted: controller.signal.aborted,
+          dismissed: dismissedRef.current,
+        })
+      ) {
+        return;
+      }
       setStatus("loading");
       void fetch(`/api/collectibles/search?q=${encodeURIComponent(normalized)}`, {
         method: "GET",
@@ -124,7 +137,14 @@ export function DesiredCollectibleSearch({
           return readOptions(await response.json());
         })
         .then((matches) => {
-          if (controller.signal.aborted) return;
+          if (
+            !shouldApplyDesiredCollectibleSearchResults({
+              aborted: controller.signal.aborted,
+              dismissed: dismissedRef.current,
+            })
+          ) {
+            return;
+          }
           if (matches === null) {
             setOptions([]);
             setStatus("failed");
@@ -135,17 +155,35 @@ export function DesiredCollectibleSearch({
           setStatus("ready");
         })
         .catch(() => {
-          if (!controller.signal.aborted) {
-            setOptions([]);
-            setStatus("failed");
+          if (
+            !shouldApplyDesiredCollectibleSearchResults({
+              aborted: controller.signal.aborted,
+              dismissed: dismissedRef.current,
+            })
+          ) {
+            return;
           }
+          setOptions([]);
+          setStatus("failed");
         });
     }, 220);
     return () => {
       window.clearTimeout(timeout);
       controller.abort();
+      if (searchControllerRef.current === controller) {
+        searchControllerRef.current = null;
+      }
     };
   }, [normalized, searchable]);
+
+  function closeOptions() {
+    dismissedRef.current = true;
+    searchControllerRef.current?.abort();
+    searchControllerRef.current = null;
+    setOptions([]);
+    setActiveIndex(-1);
+    setStatus("idle");
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -157,18 +195,15 @@ export function DesiredCollectibleSearch({
       ) {
         return;
       }
-      setOptions([]);
-      setActiveIndex(-1);
+      closeOptions();
     }
     document.addEventListener("pointerdown", closeOnOutsidePress);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
   }, [open]);
 
   function choose(option: CollectibleOption) {
+    closeOptions();
     setSearch(option.name);
-    setOptions([]);
-    setActiveIndex(-1);
-    setStatus("idle");
     onSelect(option.publicCollectibleId);
   }
 
@@ -219,8 +254,7 @@ export function DesiredCollectibleSearch({
               event.preventDefault();
               choose(visibleOptions[activeIndex]!);
             } else if (event.key === "Escape") {
-              setOptions([]);
-              setActiveIndex(-1);
+              closeOptions();
             }
           }}
           placeholder="Search a card, watch, coin, or collectible"
@@ -234,9 +268,7 @@ export function DesiredCollectibleSearch({
             disabled={pending}
             onClick={() => {
               setSearch("");
-              setOptions([]);
-              setActiveIndex(-1);
-              setStatus("idle");
+              closeOptions();
               onSelect(null);
             }}
             type="button"

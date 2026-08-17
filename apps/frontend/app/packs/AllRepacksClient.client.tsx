@@ -31,6 +31,7 @@ import {
 import { NoMatches } from "@/components/catalog-state";
 import {
   DEFAULT_CATALOG_QUERY,
+  catalogSheetInspectorInitiallyOpen,
   nextCatalogPage,
   previousCatalogPage,
   resetCatalogPagination,
@@ -112,8 +113,8 @@ export function AllRepacksClient({
     string | null
   >(page.selectedRepack?.publicRepackId ?? null);
   const [actionFeedback, setActionFeedback] = useState("");
-  const [inspectorOpen, setInspectorOpen] = useState(
-    () => page.selectedRepack?.publicRepackId !== undefined,
+  const [inspectorOpen, setInspectorOpen] = useState(() =>
+    catalogSheetInspectorInitiallyOpen(query.selectedPublicRepackId),
   );
   const selectionTriggerRef = useRef<HTMLElement | null>(null);
   const detailById = useMemo(
