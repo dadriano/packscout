@@ -4,7 +4,7 @@ import {
   type ProviderReleaseExpectedCompletedHeadV1,
 } from "@packscout/contracts";
 import type { Doc } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { refuseProviderRelease } from "./providerReleaseErrors";
 import { loadProviderOperationById } from "./providerReleaseOperations";
 import {
@@ -13,7 +13,7 @@ import {
 } from "./providerReleaseProof";
 
 export async function oneProviderCompletedHead(
-  ctx: MutationCtx,
+  ctx: MutationCtx | QueryCtx,
   platformKey: string,
 ): Promise<Doc<"providerCatalogCompletedHeads"> | null> {
   const heads = await ctx.db
@@ -29,7 +29,7 @@ export async function oneProviderCompletedHead(
 }
 
 export async function oneProviderRelease(
-  ctx: MutationCtx,
+  ctx: MutationCtx | QueryCtx,
   platformKey: string,
   publicProviderReleaseId: string,
 ): Promise<Doc<"providerCatalogReleases"> | null> {
@@ -112,7 +112,7 @@ export async function expectedHeadMatchesStored(
 }
 
 export async function providerCompletedHeadState(
-  ctx: MutationCtx,
+  ctx: MutationCtx | QueryCtx,
   platformKey: string,
 ): Promise<ProviderReleaseCompletedHeadStateV1> {
   const head = await oneProviderCompletedHead(ctx, platformKey);

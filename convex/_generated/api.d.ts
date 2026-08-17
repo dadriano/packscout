@@ -9,28 +9,32 @@
  */
 
 import type * as dataReleaseCanonicalHash from "../dataReleaseCanonicalHash.js";
+import type * as catalogManifestActivate from "../catalogManifestActivate.js";
+import type * as catalogManifestBlock from "../catalogManifestBlock.js";
+import type * as catalogManifestErrors from "../catalogManifestErrors.js";
+import type * as catalogManifestOperations from "../catalogManifestOperations.js";
+import type * as catalogManifestProviderProof from "../catalogManifestProviderProof.js";
+import type * as catalogManifestRead from "../catalogManifestRead.js";
+import type * as catalogManifestRefresh from "../catalogManifestRefresh.js";
+import type * as catalogManifestRequests from "../catalogManifestRequests.js";
+import type * as catalogManifestRollback from "../catalogManifestRollback.js";
+import type * as catalogManifestState from "../catalogManifestState.js";
+import type * as mockCatalogManifestSeed from "../mockCatalogManifestSeed.js";
 import type * as mockDataReleaseFixture from "../mockDataReleaseFixture.js";
 import type * as mockDataReleaseSearch from "../mockDataReleaseSearch.js";
 import type * as mockDataReleaseSeed from "../mockDataReleaseSeed.js";
 import type * as mockHeatSimulationFixture from "../mockHeatSimulationFixture.js";
 import type * as mockHeatSimulationPublisher from "../mockHeatSimulationPublisher.js";
+import type * as mockProviderCatalogFixture from "../mockProviderCatalogFixture.js";
 import type * as productionDataReleaseAuth from "../productionDataReleaseAuth.js";
-import type * as productionDataReleaseActiveState from "../productionDataReleaseActiveState.js";
-import type * as productionDataReleaseBatch from "../productionDataReleaseBatch.js";
-import type * as productionDataReleaseCatalogWrites from "../productionDataReleaseCatalogWrites.js";
-import type * as productionDataReleaseDependentWrites from "../productionDataReleaseDependentWrites.js";
 import type * as productionDataReleaseErrors from "../productionDataReleaseErrors.js";
-import type * as productionDataReleaseLifecycle from "../productionDataReleaseLifecycle.js";
-import type * as productionDataReleaseOperations from "../productionDataReleaseOperations.js";
-import type * as productionDataReleaseProtocol from "../productionDataReleaseProtocol.js";
-import type * as productionDataReleaseRollback from "../productionDataReleaseRollback.js";
-import type * as productionDataReleaseRetention from "../productionDataReleaseRetention.js";
 import type * as productionHeatActiveState from "../productionHeatActiveState.js";
 import type * as productionHeatBatch from "../productionHeatBatch.js";
 import type * as productionHeatLifecycle from "../productionHeatLifecycle.js";
 import type * as productionHeatOperations from "../productionHeatOperations.js";
 import type * as productionHeatProtocol from "../productionHeatProtocol.js";
 import type * as productionHeatRetention from "../productionHeatRetention.js";
+import type * as productionPublicationKeyConfig from "../productionPublicationKeyConfig.js";
 import type * as providerCatalogDependentWrites from "../providerCatalogDependentWrites.js";
 import type * as providerCatalogEntityWrites from "../providerCatalogEntityWrites.js";
 import type * as providerReleaseBatch from "../providerReleaseBatch.js";
@@ -45,10 +49,14 @@ import type * as providerReleaseRequests from "../providerReleaseRequests.js";
 import type * as providerReleaseStart from "../providerReleaseStart.js";
 import type * as providerReleaseState from "../providerReleaseState.js";
 import type * as publicRepackAggregates from "../publicRepackAggregates.js";
-import type * as publicRepackReadModel from "../publicRepackReadModel.js";
+import type * as publicCatalogHeatReadModel from "../publicCatalogHeatReadModel.js";
+import type * as publicCatalogManifestReadModel from "../publicCatalogManifestReadModel.js";
+import type * as publicCatalogPagination from "../publicCatalogPagination.js";
+import type * as publicProviderCatalogReadModel from "../publicProviderCatalogReadModel.js";
 import type * as publicRepackValidation from "../publicRepackValidation.js";
 import type * as publicRepacks from "../publicRepacks.js";
 import type * as repackHeatReadModel from "../repackHeatReadModel.js";
+import type * as repackHeatTestCatalog from "../repackHeatTestCatalog.js";
 
 import type {
   ApiFromModules,
@@ -57,29 +65,33 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  catalogManifestActivate: typeof catalogManifestActivate;
+  catalogManifestBlock: typeof catalogManifestBlock;
+  catalogManifestErrors: typeof catalogManifestErrors;
+  catalogManifestOperations: typeof catalogManifestOperations;
+  catalogManifestProviderProof: typeof catalogManifestProviderProof;
+  catalogManifestRead: typeof catalogManifestRead;
+  catalogManifestRefresh: typeof catalogManifestRefresh;
+  catalogManifestRequests: typeof catalogManifestRequests;
+  catalogManifestRollback: typeof catalogManifestRollback;
+  catalogManifestState: typeof catalogManifestState;
   dataReleaseCanonicalHash: typeof dataReleaseCanonicalHash;
+  mockCatalogManifestSeed: typeof mockCatalogManifestSeed;
   mockDataReleaseFixture: typeof mockDataReleaseFixture;
   mockDataReleaseSearch: typeof mockDataReleaseSearch;
   mockDataReleaseSeed: typeof mockDataReleaseSeed;
   mockHeatSimulationFixture: typeof mockHeatSimulationFixture;
   mockHeatSimulationPublisher: typeof mockHeatSimulationPublisher;
+  mockProviderCatalogFixture: typeof mockProviderCatalogFixture;
   productionDataReleaseAuth: typeof productionDataReleaseAuth;
-  productionDataReleaseActiveState: typeof productionDataReleaseActiveState;
-  productionDataReleaseBatch: typeof productionDataReleaseBatch;
-  productionDataReleaseCatalogWrites: typeof productionDataReleaseCatalogWrites;
-  productionDataReleaseDependentWrites: typeof productionDataReleaseDependentWrites;
   productionDataReleaseErrors: typeof productionDataReleaseErrors;
-  productionDataReleaseLifecycle: typeof productionDataReleaseLifecycle;
-  productionDataReleaseOperations: typeof productionDataReleaseOperations;
-  productionDataReleaseProtocol: typeof productionDataReleaseProtocol;
-  productionDataReleaseRollback: typeof productionDataReleaseRollback;
-  productionDataReleaseRetention: typeof productionDataReleaseRetention;
   productionHeatActiveState: typeof productionHeatActiveState;
   productionHeatBatch: typeof productionHeatBatch;
   productionHeatLifecycle: typeof productionHeatLifecycle;
   productionHeatOperations: typeof productionHeatOperations;
   productionHeatProtocol: typeof productionHeatProtocol;
   productionHeatRetention: typeof productionHeatRetention;
+  productionPublicationKeyConfig: typeof productionPublicationKeyConfig;
   providerCatalogDependentWrites: typeof providerCatalogDependentWrites;
   providerCatalogEntityWrites: typeof providerCatalogEntityWrites;
   providerReleaseBatch: typeof providerReleaseBatch;
@@ -93,11 +105,15 @@ declare const fullApi: ApiFromModules<{
   providerReleaseRequests: typeof providerReleaseRequests;
   providerReleaseStart: typeof providerReleaseStart;
   providerReleaseState: typeof providerReleaseState;
+  publicCatalogHeatReadModel: typeof publicCatalogHeatReadModel;
+  publicCatalogManifestReadModel: typeof publicCatalogManifestReadModel;
+  publicCatalogPagination: typeof publicCatalogPagination;
+  publicProviderCatalogReadModel: typeof publicProviderCatalogReadModel;
   publicRepackAggregates: typeof publicRepackAggregates;
-  publicRepackReadModel: typeof publicRepackReadModel;
   publicRepackValidation: typeof publicRepackValidation;
   publicRepacks: typeof publicRepacks;
   repackHeatReadModel: typeof repackHeatReadModel;
+  repackHeatTestCatalog: typeof repackHeatTestCatalog;
 }>;
 
 /**

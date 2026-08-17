@@ -20,6 +20,7 @@ import {
   buildMockHeatFrame,
   type MockHeatFrame,
 } from "./mockHeatSimulationFixture";
+import { seedLegacyHeatCatalogForTest } from "./repackHeatTestCatalog";
 
 const modules = import.meta.glob("./**/*.ts");
 type HeatTest = TestConvex<typeof schema>;
@@ -53,7 +54,9 @@ function mutationFrame(frame: MockHeatFrame) {
 }
 
 async function seed(t: HeatTest) {
-  await t.mutation(internal.mockDataReleaseSeed.seed, {});
+  const manifest = await t.mutation(internal.mockDataReleaseSeed.seed, {});
+  await t.run((ctx) => seedLegacyHeatCatalogForTest(ctx, "mock"));
+  return manifest;
 }
 
 async function heatCounts(t: HeatTest) {
@@ -64,14 +67,15 @@ async function heatCounts(t: HeatTest) {
   }));
 }
 
-function expectHeatStatus(
-  details: readonly { readonly heat: { readonly status: string } }[],
-  status: string,
+function expectManifestMismatch(
+  details: readonly {
+    readonly heat: { readonly status: string; readonly reason?: string };
+  }[],
 ) {
   expect(details.length).toBeGreaterThan(0);
-  expect(details.map((detail) => detail.heat.status)).toEqual(
-    details.map(() => status),
-  );
+  expect(details.every(({ heat }) =>
+    heat.status === "unavailable" && heat.reason === "RELEASE_MISMATCH"
+  )).toBe(true);
 }
 
 async function queryEveryHeatSurface(t: HeatTest) {
@@ -82,7 +86,9 @@ async function queryEveryHeatSurface(t: HeatTest) {
   const list = await t.query(api.publicRepacks.listPublicRepacks, {});
   const detail = await t.query(api.publicRepacks.getPublicRepack, {
     publicRepackId: repack.publicRepackId,
-    publicReleaseId: MOCK_DATA_RELEASE_PUBLIC_ID,
+    publicReleaseId: list.ok
+      ? list.data.metadata.publicReleaseId
+      : MOCK_DATA_RELEASE_PUBLIC_ID,
   });
   const desired = await t.query(
     api.publicRepacks.findRepacksByDesiredCollectible,
@@ -317,12 +323,12 @@ describe("mock heat aggregate publisher", () => {
     expect(state?.freshness).toBe("expired");
   });
 
-  test("all public surfaces degrade heat independently from the catalog", async () => {
+  test("keeps public heat bounded at manifest mismatch while private frames advance", async () => {
     enable();
     const t = createTest();
     await seed(t);
     for (const details of Object.values(await queryEveryHeatSurface(t))) {
-      expectHeatStatus(details, "unavailable");
+      expectManifestMismatch(details);
     }
 
     const frame = await buildMockHeatFrame(controls(0));
@@ -331,7 +337,7 @@ describe("mock heat aggregate publisher", () => {
       mutationFrame(frame),
     );
     for (const details of Object.values(await queryEveryHeatSurface(t))) {
-      expectHeatStatus(details, "current");
+      expectManifestMismatch(details);
     }
 
     const mismatch = await t.run(async (ctx) => {
@@ -359,7 +365,7 @@ describe("mock heat aggregate publisher", () => {
       };
     });
     for (const details of Object.values(await queryEveryHeatSurface(t))) {
-      expectHeatStatus(details, "unavailable");
+      expectManifestMismatch(details);
     }
     await t.run(async (ctx) => {
       await ctx.db.patch("repackHeatSnapshots", mismatch.snapshotId, {
@@ -402,7 +408,7 @@ describe("mock heat aggregate publisher", () => {
       });
     });
     for (const details of Object.values(await queryEveryHeatSurface(t))) {
-      expectHeatStatus(details, "unavailable");
+      expectManifestMismatch(details);
     }
 
     await t.run(async (ctx) => {
@@ -425,7 +431,7 @@ describe("mock heat aggregate publisher", () => {
       expectedExpiresAt: frame.expiresAt,
     });
     for (const details of Object.values(await queryEveryHeatSurface(t))) {
-      expectHeatStatus(details, "expired");
+      expectManifestMismatch(details);
     }
   });
 });

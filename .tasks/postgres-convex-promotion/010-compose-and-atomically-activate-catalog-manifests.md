@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/011, postgres-convex-promotion/012, postgres-convex-promotion/013
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including public-read and pointer-safety verification
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -24,6 +24,7 @@ Provider completion must not be publicly visible. A manifest is the only catalog
 ### Manifest eligibility
 
 - Store a bounded immutable manifest whose canonical sorted references contain exactly one complete provider release for every platform enabled by the settled PostgreSQL eligibility snapshot, with no disabled or duplicate platform.
+- Treat the authenticated PostgreSQL manifest composer built in task `011` as the authority for the settled enabled-platform set and exhaustive cross-provider composition. Convex must verify the bounded signed manifest, provider completion proofs, configuration epoch, counts, hashes, ownership commitments, and compare-and-swap state without mirroring PostgreSQL eligibility or performing an unbounded activation-time entity scan.
 - Require every reference to match its `platformKey`, shared configuration epoch, content proof, and completed state; reject mixed epochs, blocked releases, missing releases, and aggregate contract-limit overflow.
 - Refuse the first active manifest until every enabled platform has complete backfill, settled affected derivations, and an eligible complete provider release.
 - For a later ordinary provider delay, reuse only that platform's release from the current active manifest and mark it delayed; if an enabled platform has no active fallback, block activation.
@@ -35,7 +36,7 @@ Provider completion must not be publicly visible. A manifest is the only catalog
 - Expose the current `DataReleaseMetadata`, public result/error schemas, repack/detail/search/facet behavior, opaque-cursor rules, and Heat attachment points without adding provider-release fields to public DTOs.
 - Use the manifest's public content identity as the existing `publicReleaseId`; keep it stable when the referenced provider-release set and governing configuration are unchanged so metadata-only freshness refreshes do not expire cursors.
 - Merge provider-local search data deterministically and fail the whole public read closed when any referenced release, count, hash, shared reference, or provider ownership proof is invalid.
-- For collectible full-text search, issue one provider-release-filtered indexed query for each of the at most eight selected platforms, merge and rank the bounded candidates deterministically, and reject an over-limit manifest. Never query historical releases without a release filter and then post-filter, because historical matches can hide active results.
+- For collectible full-text search without type filters, issue one provider-release-filtered indexed query for each of the at most eight selected platforms. For the public multi-type OR filter, issue one release-and-type-filtered query per selected platform/type pair (at most eight platforms by the six supported types), then merge and rank the bounded candidates deterministically. Never query historical releases without a release filter or query an unfiltered type superset and then post-filter, because historical or excluded-type matches can hide active results. Task `014` must certify the bounded fan-out's hosted p95.
 - Preserve the existing public limits and fail-closed `RELEASE_UNAVAILABLE`, not-found, invalid-query, and cursor-expired behavior.
 
 ### Activation and freshness
@@ -62,19 +63,19 @@ Manifest publication exposes authenticated `activateManifest`, `status`, `refres
 
 ### Manifest and pointer safety
 
-- [ ] Initial activation fails until every enabled platform has one eligible complete same-epoch provider release.
-- [ ] Later activation can select a new release for A, reuse delayed B's active release, and omit settled-disabled C in one atomic pointer change.
-- [ ] Missing, duplicate, disabled, wrong-platform, blocked, incomplete, mixed-epoch, or conflicting shared references fail without changing the active pointer.
-- [ ] Activation replay is idempotent, a stale expected-active manifest loses the compare-and-swap, and a lost response reconciles to one exact terminal result.
+- [x] Initial activation fails until every enabled platform has one eligible complete same-epoch provider release.
+- [x] Later activation can select a new release for A, reuse delayed B's active release, and omit settled-disabled C in one atomic pointer change.
+- [x] Missing, duplicate, disabled, wrong-platform, blocked, incomplete, mixed-epoch, or conflicting shared references fail without changing the active pointer.
+- [x] Activation replay is idempotent, a stale expected-active manifest loses the compare-and-swap, and a lost response reconciles to one exact terminal result.
 
 ### Public compatibility and freshness
 
-- [ ] Existing public contract and frontend adapter tests pass without DTO, error, route, or query-input changes.
-- [ ] Cross-provider listing, sorting, search, facets, detail, desired-collectible matching, and cursor reset behave as one deterministic release.
-- [ ] Full-text search returns the correct global order at the eight-platform launch bound, rejects a ninth entry, and cannot be starved by otherwise better-ranked historical-release matches.
-- [ ] An unchanged provider-reference set refreshes freshness without changing immutable rows, manifest identity, public release identity, or valid cursors.
-- [ ] Delayed count and aggregate timestamps reflect the oldest selected provider facts and recover monotonically after that provider catches up.
-- [ ] Rollback and authorized clear preserve manifest-reference integrity and never mutate provider completed heads.
+- [x] Existing public contract and frontend adapter tests pass without DTO, error, route, or query-input changes.
+- [x] Cross-provider listing, sorting, search, facets, detail, desired-collectible matching, and cursor reset behave as one deterministic release.
+- [x] Full-text search returns the correct global order at the eight-platform launch bound, rejects a ninth entry, and cannot be starved by otherwise better-ranked historical-release or excluded-type matches.
+- [x] An unchanged provider-reference set refreshes freshness without changing immutable rows, manifest identity, public release identity, or valid cursors.
+- [x] Delayed count and aggregate timestamps reflect the oldest selected provider facts and recover monotonically after that provider catches up.
+- [x] Rollback and authorized clear preserve manifest-reference integrity and never mutate provider completed heads.
 
 ## Verification
 

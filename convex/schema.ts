@@ -596,6 +596,113 @@ export const providerCatalogCompletedHeadProofValidator = v.object({
   terminalReceiptSha256: sha256Validator,
 });
 
+export const globalCatalogManifestGoverningHashesValidator = v.object({
+  providerConfigurationsHash: sha256Validator,
+  sharedCategoriesHash: sha256Validator,
+  identityMappingsHash: sha256Validator,
+  originSetHash: sha256Validator,
+  confidencePolicyHash: sha256Validator,
+});
+
+export const globalCatalogCompositionProofValidator = v.object({
+  sharedCategoryIdentityBytesHash: sha256Validator,
+  sharedCollectibleIdentityBytesHash: sha256Validator,
+  uniqueVendorOwnershipHash: sha256Validator,
+  uniqueRepackOwnershipHash: sha256Validator,
+  crossReferenceGraphHash: sha256Validator,
+});
+
+export const globalCatalogManifestCountsValidator = v.object({
+  vendors: v.number(),
+  categories: v.number(),
+  collectibles: v.number(),
+  repacks: v.number(),
+  repackChases: v.number(),
+  searchShards: v.number(),
+});
+
+export const globalCatalogProviderReferenceValidator = v.object({
+  platformKey: v.string(),
+  publicProviderReleaseId: v.string(),
+  sharedConfigurationEpoch: providerCatalogSharedConfigurationEpochValidator,
+  providerReleaseFingerprint: sha256Validator,
+  contentHash: sha256Validator,
+  publicAssetOrigins: v.array(v.string()),
+  governingHashes: providerCatalogGoverningHashesValidator,
+  entityHashes: providerCatalogEntityHashesValidator,
+  counts: providerCatalogCountsValidator,
+  searchAlgorithmVersion: v.literal("repack_search_v2"),
+  providerSearchIndexHash: sha256Validator,
+  batchCount: v.number(),
+  batchChainHash: sha256Validator,
+  dataAsOf: timestampValidator,
+});
+
+export const globalCatalogManifestValidator = v.object({
+  schemaVersion: v.literal("global_catalog_manifest_v1"),
+  dataSource: v.union(v.literal("canonical"), v.literal("mock")),
+  publicReleaseId: v.string(),
+  manifestFingerprint: sha256Validator,
+  sharedConfigurationEpoch: providerCatalogSharedConfigurationEpochValidator,
+  enabledPlatformKeys: v.array(v.string()),
+  providerReferenceSetHash: sha256Validator,
+  providerReferences: v.array(globalCatalogProviderReferenceValidator),
+  governingHashes: globalCatalogManifestGoverningHashesValidator,
+  compositionProof: globalCatalogCompositionProofValidator,
+  entityHashes: providerCatalogEntityHashesValidator,
+  counts: globalCatalogManifestCountsValidator,
+  contentHash: sha256Validator,
+  publicAssetOrigins: v.array(v.string()),
+  searchAlgorithmVersion: v.literal("repack_search_v2"),
+  repackSearchIndexHash: sha256Validator,
+  confidencePolicyVersion: v.string(),
+});
+
+export const globalCatalogManifestPointerValidator = v.object({
+  publicReleaseId: v.string(),
+  manifestFingerprint: sha256Validator,
+  sharedConfigurationEpoch: providerCatalogSharedConfigurationEpochValidator,
+  providerReferenceSetHash: sha256Validator,
+  createdAt: timestampValidator,
+  completedAt: timestampValidator,
+});
+
+export const globalCatalogProviderActiveObservationValidator = v.object({
+  platformKey: v.string(),
+  publicProviderReleaseId: v.string(),
+  terminalOperationKind: v.union(
+    v.literal("finalize"),
+    v.literal("confirmReuse"),
+  ),
+  terminalOperationId: v.string(),
+  terminalReceiptSha256: sha256Validator,
+  selectedProviderCheckpoint: providerCatalogCheckpointValidator,
+  selectedDataAsOf: timestampValidator,
+  latestAffectedSettledSequence: v.string(),
+  latestAffectedSourceHeadSequence: v.string(),
+  initialBackfillComplete: v.boolean(),
+  affectedDerivationsSettled: v.boolean(),
+  settledSourceFreshness: v.union(
+    v.literal("fresh"),
+    v.literal("delayed"),
+  ),
+  lastSuccessfulObservationAt: timestampValidator,
+  staleAt: timestampValidator,
+});
+
+export const globalCatalogAggregateObservationValidator = v.object({
+  observationSequence: v.number(),
+  publicReleaseId: v.string(),
+  providerReferenceSetHash: sha256Validator,
+  sourceWatermark: v.string(),
+  providerSelections: v.array(globalCatalogProviderActiveObservationValidator),
+  dataAsOf: timestampValidator,
+  lastSuccessfulObservationAt: timestampValidator,
+  staleAt: timestampValidator,
+  freshness: v.union(v.literal("fresh"), v.literal("delayed")),
+  delayedProviderCount: v.number(),
+});
+
 export default defineSchema({
   providerCatalogCompletedHeads: defineTable({
     platformKey: v.string(),
@@ -891,6 +998,69 @@ export default defineSchema({
     "platformKey",
     "providerReleaseFingerprint",
   ]),
+
+  globalCatalogManifests: defineTable({
+    publicReleaseId: v.string(),
+    manifestFingerprint: sha256Validator,
+    providerReferenceSetHash: sha256Validator,
+    manifest: globalCatalogManifestValidator,
+    providerReleaseIds: v.array(v.id("providerCatalogReleases")),
+    lifecycle: v.literal("complete"),
+    createdAt: timestampValidator,
+    retentionEligibleAt: timestampValidator,
+  })
+    .index("by_public_release_id", ["publicReleaseId"])
+    .index("by_manifest_fingerprint", ["manifestFingerprint"])
+    .index("by_lifecycle_and_retention_eligible_at", [
+      "lifecycle",
+      "retentionEligibleAt",
+    ]),
+
+  activeCatalogManifestState: defineTable({
+    key: v.literal("singleton"),
+    generation: v.number(),
+    activeManifestId: v.union(v.id("globalCatalogManifests"), v.null()),
+    previousManifestId: v.union(v.id("globalCatalogManifests"), v.null()),
+    activeManifest: v.union(globalCatalogManifestPointerValidator, v.null()),
+    previousManifest: v.union(globalCatalogManifestPointerValidator, v.null()),
+    observation: v.union(globalCatalogAggregateObservationValidator, v.null()),
+    terminalOperationId: v.union(v.string(), v.null()),
+    terminalReceiptSha256: v.union(sha256Validator, v.null()),
+    updatedAt: timestampValidator,
+  }).index("by_key", ["key"]),
+
+  catalogManifestOperations: defineTable({
+    operationId: v.string(),
+    kind: v.string(),
+    idempotencyKey: v.string(),
+    bodyHash: sha256Validator,
+    publicReleaseId: nullableTextValidator,
+    manifestFingerprint: v.union(sha256Validator, v.null()),
+    rollbackKind: nullableTextValidator,
+    status: v.literal("completed"),
+    result: v.string(),
+    confirmationReceiptHash: sha256Validator,
+    terminalReceiptSha256: sha256Validator,
+    acceptedAt: timestampValidator,
+    completedAt: timestampValidator,
+    receiptJson: v.string(),
+  })
+    .index("by_operation_id", ["operationId"])
+    .index("by_kind_and_idempotency_key", ["kind", "idempotencyKey"])
+    .index("by_public_release_id_and_kind", ["publicReleaseId", "kind"])
+    .index("by_completed_at", ["completedAt"]),
+
+  catalogManifestBlocks: defineTable({
+    publicReleaseId: v.string(),
+    manifestFingerprint: sha256Validator,
+    blockSequence: v.int64(),
+    reason: v.string(),
+    originatingOperationId: v.string(),
+    blockedAt: timestampValidator,
+    terminalReceiptSha256: sha256Validator,
+  })
+    .index("by_manifest_fingerprint", ["manifestFingerprint"])
+    .index("by_public_release_id", ["publicReleaseId"]),
 
   dataReleaseState: defineTable({
     key: v.literal("singleton"),

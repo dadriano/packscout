@@ -1,12 +1,13 @@
 import { httpRouter } from "convex/server";
 import {
-  PRODUCTION_DATA_RELEASE_PATHS,
+  PRODUCTION_CATALOG_MANIFEST_PATHS,
   PRODUCTION_PROVIDER_RELEASE_PATHS,
   PRODUCTION_REPACK_HEAT_PATHS,
 } from "@packscout/contracts";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import {
+  handleAuthenticatedCatalogManifestRequest,
   handleAuthenticatedProviderReleaseRequest,
   handleAuthenticatedPublicationRequest,
 } from "./productionDataReleaseAuth";
@@ -14,13 +15,73 @@ import {
 const http = httpRouter();
 
 http.route({
-  path: PRODUCTION_DATA_RELEASE_PATHS.activeState,
+  path: PRODUCTION_CATALOG_MANIFEST_PATHS.activeState,
   method: "POST",
   handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
+    handleAuthenticatedCatalogManifestRequest(
       ctx,
       request,
-      internal.productionDataReleaseActiveState.activeState,
+      internal.catalogManifestRead.activeState,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_CATALOG_MANIFEST_PATHS.activateManifest,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedCatalogManifestRequest(
+      ctx,
+      request,
+      internal.catalogManifestActivate.activateManifest,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_CATALOG_MANIFEST_PATHS.status,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedCatalogManifestRequest(
+      ctx,
+      request,
+      internal.catalogManifestRead.status,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_CATALOG_MANIFEST_PATHS.refreshActiveState,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedCatalogManifestRequest(
+      ctx,
+      request,
+      internal.catalogManifestRefresh.refreshActiveState,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_CATALOG_MANIFEST_PATHS.rollback,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedCatalogManifestRequest(
+      ctx,
+      request,
+      internal.catalogManifestRollback.rollback,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_CATALOG_MANIFEST_PATHS.block,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedCatalogManifestRequest(
+      ctx,
+      request,
+      internal.catalogManifestBlock.block,
     ),
   ),
 });

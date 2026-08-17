@@ -4,7 +4,7 @@
 
 Open `postgres-convex-promotion/007` and define the provider-impact outcome for one platform-specific cause, one cross-platform cause, and one manifest-lifecycle cause before changing any release or publication contract.
 
-**Progress:** 9/14 tasks complete
+**Progress:** 10/14 tasks complete
 
 ## Context
 
@@ -44,7 +44,7 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 
 - The manifest's public content identity is exposed through the existing `publicReleaseId`; it changes only when provider references or governing public content change.
 - When the reference set is unchanged, a monotonic active-state refresh updates freshness without minting a manifest, rewriting immutable rows, or expiring valid cursors.
-- Launch manifests contain at most the eight registered public platforms. Full-text collectible search runs one release-filtered indexed search per selected platform and merges the bounded results deterministically; it never searches historical releases and post-filters them. Raising the active-platform cap requires a versioned contract change plus hosted correctness and latency evidence.
+- Launch manifests contain at most the eight registered public platforms. Full-text collectible search runs one release-filtered indexed search per selected platform when untyped, or one release-and-type-filtered query per platform/type pair for the public multi-type OR filter (at most eight by the six supported types), then merges bounded results deterministically. It never searches historical releases or an unfiltered type superset and post-filters them. Raising either bound requires a versioned contract change plus hosted correctness and latency evidence.
 - `delayedVendorCount` counts enabled platforms whose selected release checkpoint trails that platform's latest affected settled/source head or whose settled source state is delayed; `freshness` is delayed when that count is nonzero.
 - Aggregate `dataAsOf`, `lastSuccessfulObservationAt`, and `staleAt` use the oldest applicable selected-provider value so the existing global freshness DTO never overstates a delayed provider.
 - Existing public query inputs, DTOs, errors, search/facet/detail behavior, Heat DTOs, and release-change cursor reset remain unchanged.
@@ -98,7 +98,7 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 | 007 | Establish provider-impact catalog settlement | large | 2–4 days | done | 001 |
 | 008 | Assemble deterministic provider releases | large | 2–4 days | done | 007 |
 | 009 | Complete provider releases without public activation | large | 3–5 days | done | 008 |
-| 010 | Compose and atomically activate catalog manifests | large | 3–5 days | not started | 009 |
+| 010 | Compose and atomically activate catalog manifests | large | 3–5 days | done | 009 |
 
 ## Provider-Manifest Operations Tasks
 
@@ -155,4 +155,4 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 
 ## Next Action
 
-Open `010-compose-and-atomically-activate-catalog-manifests.md` and compose one same-epoch provider-release vector behind an atomic active-manifest compare-and-swap while preserving the public V2 contract.
+Open `011-promote-providers-and-reconcile-manifests.md` and run independent provider completion lanes behind one serialized, exact-replay manifest activation lane.

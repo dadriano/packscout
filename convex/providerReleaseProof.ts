@@ -8,7 +8,7 @@ import {
   type ProviderCatalogCompletedReleaseProofV1,
 } from "@packscout/contracts";
 import type { Doc } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { refuseProviderRelease } from "./providerReleaseErrors";
 import { loadProviderOperationById } from "./providerReleaseOperations";
 
@@ -68,7 +68,7 @@ export async function providerReleaseProofIsValid(
 }
 
 export async function assertStoredProviderReleaseCompletion(
-  ctx: MutationCtx,
+  ctx: MutationCtx | QueryCtx,
   release: Doc<"providerCatalogReleases">,
 ): Promise<void> {
   if (

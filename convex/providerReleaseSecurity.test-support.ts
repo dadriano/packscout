@@ -175,11 +175,13 @@ export async function buildProviderPublishPlan(
     publicChangeSequence?: string;
     settledAt?: string;
     vendorDisplayName?: string;
+    publicVendorId?: string;
   }> = {},
 ): Promise<ProviderCatalogReleasePublishPlanV1> {
   const fixture = buildMockDataReleaseV2();
   const vendor = {
     ...fixture.vendors[0]!,
+    publicVendorId: input.publicVendorId ?? fixture.vendors[0]!.publicVendorId,
     displayName: input.vendorDisplayName ?? fixture.vendors[0]!.displayName,
   };
   const records = [vendor];

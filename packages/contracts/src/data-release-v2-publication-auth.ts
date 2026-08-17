@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PRODUCTION_DATA_RELEASE_PATHS } from "./data-release-v2-publication.ts";
 import { PRODUCTION_REPACK_HEAT_PATHS } from "./repack-heat-publication.ts";
 import { PRODUCTION_PROVIDER_RELEASE_PATHS } from "./provider-release-publication-v1.ts";
+import { PRODUCTION_CATALOG_MANIFEST_PATHS } from "./catalog-manifest-publication-v1.ts";
 
 export const PRODUCTION_AUTH_SIGNATURE_VERSION = "v1" as const;
 export const PRODUCTION_AUTH_WINDOW_MILLISECONDS = 5 * 60 * 1_000;
@@ -111,10 +112,20 @@ export const productionProviderReleasePathSchema = z.enum([
   PRODUCTION_PROVIDER_RELEASE_PATHS.cleanup,
 ]);
 
+export const productionCatalogManifestPathSchema = z.enum([
+  PRODUCTION_CATALOG_MANIFEST_PATHS.activeState,
+  PRODUCTION_CATALOG_MANIFEST_PATHS.activateManifest,
+  PRODUCTION_CATALOG_MANIFEST_PATHS.status,
+  PRODUCTION_CATALOG_MANIFEST_PATHS.refreshActiveState,
+  PRODUCTION_CATALOG_MANIFEST_PATHS.rollback,
+  PRODUCTION_CATALOG_MANIFEST_PATHS.block,
+]);
+
 export const productionPublicationPathSchema = z.union([
   productionDataReleasePathSchema,
   productionRepackHeatPathSchema,
   productionProviderReleasePathSchema,
+  productionCatalogManifestPathSchema,
 ]);
 
 export type ProductionDataReleasePath = z.infer<
@@ -125,6 +136,9 @@ export type ProductionRepackHeatPath = z.infer<
 >;
 export type ProductionProviderReleasePath = z.infer<
   typeof productionProviderReleasePathSchema
+>;
+export type ProductionCatalogManifestPath = z.infer<
+  typeof productionCatalogManifestPathSchema
 >;
 export type ProductionPublicationPath = z.infer<
   typeof productionPublicationPathSchema

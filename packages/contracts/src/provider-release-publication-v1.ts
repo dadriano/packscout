@@ -46,6 +46,9 @@ const idempotencyKeySchema = z.string()
   .regex(/^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,255})$/u);
 const positiveSafeIntegerSchema = z.number().int().safe().positive();
 
+export const providerReleaseOperationIdSchema = operationIdSchema;
+export const providerReleaseIdempotencyKeySchema = idempotencyKeySchema;
+
 export const providerReleaseImmutableProofV1Schema =
   providerCatalogCompletedReleaseProofV1Schema.omit({ state: true });
 

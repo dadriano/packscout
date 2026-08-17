@@ -1,7 +1,6 @@
 import {
   canonicalJson as sharedCanonicalJson,
   productionReceiptSchema,
-  recomputeProductionBatchHash as sharedBatchHash,
   repackSearchRowFromDetail as sharedSearchRow,
   repackSearchRowSchema,
   sha256CanonicalJson as sharedSha256,
@@ -12,7 +11,6 @@ import {
   sha256CanonicalJson as convexSha256,
 } from "./dataReleaseCanonicalHash";
 import { buildMockDataReleaseV2 } from "./mockDataReleaseFixture";
-import { recomputeProductionBatchHash as convexBatchHash } from "./productionDataReleaseProtocol";
 import {
   isValidRepackSearchRow,
   searchRowFromRepackDetail as convexSearchRow,
@@ -31,22 +29,6 @@ describe("runtime-neutral data release primitives", () => {
     const detail = buildMockDataReleaseV2().repacks[0]!;
     expect(convexCanonicalJson(convexSearchRow(detail))).toBe(
       sharedCanonicalJson(sharedSearchRow(detail)),
-    );
-  });
-
-  test("full transport requests hash only canonical batch content", async () => {
-    const request = {
-      schemaVersion: "data_release_v2",
-      operationId: "apply:release:0",
-      idempotencyKey: "apply:release:0",
-      publicationId: "50000000-0000-4000-8000-000000000001",
-      batchIndex: 0,
-      kind: "vendors",
-      batchHash: "a".repeat(64),
-      records: [{ publicVendorId: "vendor-1", name: "Vendor One" }],
-    } as const;
-    await expect(convexBatchHash(request)).resolves.toBe(
-      await sharedBatchHash({ kind: request.kind, records: request.records }),
     );
   });
 

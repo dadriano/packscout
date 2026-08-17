@@ -9,7 +9,7 @@ import {
   type ProviderReleaseStatusTarget,
 } from "@packscout/contracts";
 import type { Doc } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { refuseProviderRelease } from "./providerReleaseErrors";
 
 export function providerReleaseReceiptJsonFitsStorageLimit(
@@ -55,7 +55,7 @@ async function parseStoredProviderReceipt(
 }
 
 export async function loadProviderOperationById(
-  ctx: MutationCtx,
+  ctx: MutationCtx | QueryCtx,
   operationId: string,
 ): Promise<{
   operation: Doc<"providerCatalogOperations">;

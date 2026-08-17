@@ -49,7 +49,7 @@ into evidence, or commit their values.
 | `PACKSCOUT_HEAT_RETENTION_MAX_BATCHES_PER_CYCLE` | Optional; default `4`, allowed `1` through `20`. |
 | `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` | Required in Convex. A strict JSON object mapping each versioned key ID to the same canonical-base64 secret configured on its worker. Unknown keys, malformed JSON, arrays, noncanonical base64, and decoded values outside 32 through 256 bytes fail closed. |
 | `PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS` | Required in Convex for provider-release publication. A strict JSON object maps each provider publisher key ID to exactly one canonical `platformKey`. The authenticated key ID must match the request platform; the map is server-side authority, contains no secrets, and is never returned. Legacy catalog and Heat keys need an entry only if they also publish provider releases. |
-| `PACKSCOUT_DATA_RELEASE_CLEAR_ENABLED` | Must be absent in normal operation. Set to `1` only for an approved emergency clear and remove immediately afterward. |
+| `PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES` | Required in Convex for manifest operations. Canonical JSON maps at most 16 configured publication key IDs to a sorted unique nonempty subset of `clear`, `publish`, and `rollback`. Activation, status, refresh, and block require `publish`; rollback and clear are separate capabilities. Unknown keys, malformed or noncanonical JSON, and unsorted/duplicate roles fail closed. Rotate by temporarily granting the same least-privilege role set to old and new configured key IDs, then remove the old entry after in-flight reconciliation. The map is never returned or logged. |
 
 The Heat scheduler runs at exact UTC minute boundaries and intentionally has no
 poll-interval setting. Catalog activation alerting is fixed at 60,000 ms after
@@ -108,6 +108,30 @@ The first catalog is allowed only when all of these gates pass:
 not retry bypasses. After the first complete activation, a delayed provider may
 retain its last settled public values. The release must then report a nonzero
 `delayedVendorCount`; it must not mix unsettled rows into the release.
+
+## Manifest composition trust and read bounds
+
+- The separately authorized PostgreSQL manifest composer is the authority for
+  the repeatable-read settled eligibility snapshot and composition proof. Before
+  it persists or signs an activation request, it must reject an omitted enabled
+  platform, an included disabled platform, duplicate ownership, conflicting
+  shared category or collectible bytes, unresolved cross-references, and
+  aggregate count/hash drift. Task 011 owns those pre-dispatch tests.
+- Convex intentionally does not mirror PostgreSQL eligibility state or rescan
+  provider entity tables during activation. Its bounded transaction validates
+  the signed manifest, at most eight exact complete provider-release and
+  historical terminal proofs, selection policy, and expected active pointer
+  before the one compare-and-swap commit. Public reads independently fail closed
+  if stored composition has drifted.
+- The sum of every referenced provider's physical category-copy count is capped
+  at 4,096, even when the global deduplicated category union is smaller. This
+  keeps exhaustive shared-category validation within Convex transaction limits.
+- An untyped collectible search uses one release-filtered full-text query per
+  selected provider. A typed search uses one such query per provider and each
+  canonical selected type because the index cannot express the required OR
+  filter without historical-result starvation. The six-value type vocabulary
+  and eight-provider limit cap this reviewed deviation at 48 queries; Task 014
+  owns launch p95 certification.
 
 ## Normal health and alert evidence
 
@@ -201,10 +225,11 @@ the old worker key or re-add the old Convex map entry; do not disable signing.
   becomes available only when a frame aligned to the resulting active catalog
   exists.
 - Clearing the catalog is destructive emergency authority. It requires incident
-  commander approval, an empty rollback target, the explicit
-  `clear_catalog_v1` authorization in the signed request, and temporary
-  `PACKSCOUT_DATA_RELEASE_CLEAR_ENABLED=1`. Remove the flag and verify the empty
-  pointer immediately after the receipt.
+  commander approval, a signing key assigned the explicit `clear` role in
+  `PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES`, and the
+  `clear_catalog_manifest_v1` authorization in the signed request. Verify the
+  empty pointer immediately after the terminal receipt; no global clear flag
+  can grant or widen this authority.
 - Only the owning derivation processor/data operator may retry or record a new
   terminal business outcome for a technical derivation. A release operator must
   not advance `settled_public_watermarks` or rewrite an obligation.

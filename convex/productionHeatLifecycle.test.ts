@@ -29,6 +29,7 @@ import {
   buildMockDataReleaseV2,
 } from "./mockDataReleaseFixture";
 import { buildMockHeatFrame } from "./mockHeatSimulationFixture";
+import { seedLegacyHeatCatalogForTest } from "./repackHeatTestCatalog";
 
 const modules = import.meta.glob("./**/*.ts");
 type HeatTest = TestConvex<typeof schema>;
@@ -122,23 +123,7 @@ async function signedFetch(t: HeatTest, path: string, body: unknown) {
 
 async function seedCanonicalCatalog(t: HeatTest) {
   await t.mutation(internal.mockDataReleaseSeed.seed, {});
-  await t.run(async (ctx) => {
-    const release = await ctx.db
-      .query("dataReleases")
-      .withIndex("by_public_release_id", (index) =>
-        index.eq("publicReleaseId", MOCK_DATA_RELEASE_PUBLIC_ID),
-      )
-      .unique();
-    if (release === null) throw new Error("Expected the seeded catalog.");
-    await ctx.db.patch("dataReleases", release._id, {
-      metadata: {
-        ...release.metadata,
-        dataSource: "canonical",
-        sourceWatermark: "1",
-      },
-    });
-    return release._id;
-  });
+  await t.run((ctx) => seedLegacyHeatCatalogForTest(ctx, "canonical"));
 }
 
 async function activateEquivalentCatalog(
@@ -1012,8 +997,9 @@ describe("production Heat publication", () => {
     const expired = await t.query(api.publicRepacks.listPublicRepacks, {});
     expect(expired.ok).toBe(true);
     if (!expired.ok) throw new Error("Expected readable catalog data.");
-    expect(expired.data.details.every(({ heat }) => heat.status === "expired"))
-      .toBe(true);
+    expect(expired.data.details.every(({ heat }) =>
+      heat.status === "unavailable" && heat.reason === "RELEASE_MISMATCH"
+    )).toBe(true);
   });
 
   test("cleans an expired abandoned staging publication within bounded retention", async () => {
@@ -1051,8 +1037,9 @@ describe("production Heat publication", () => {
     const before = await t.query(api.publicRepacks.listPublicRepacks, {});
     expect(before.ok).toBe(true);
     if (!before.ok) throw new Error("Expected readable catalog data.");
-    expect(before.data.details.every(({ heat }) => heat.status === "current"))
-      .toBe(true);
+    expect(before.data.details.every(({ heat }) =>
+      heat.status === "unavailable" && heat.reason === "RELEASE_MISMATCH"
+    )).toBe(true);
 
     vi.setSystemTime("2026-08-15T12:15:00.000Z");
     await expect(t.mutation(internal.productionHeatLifecycle.expireActiveFrame, {
@@ -1062,8 +1049,9 @@ describe("production Heat publication", () => {
     const expired = await t.query(api.publicRepacks.listPublicRepacks, {});
     expect(expired.ok).toBe(true);
     if (!expired.ok) throw new Error("Expected readable catalog data.");
-    expect(expired.data.details.every(({ heat }) => heat.status === "expired"))
-      .toBe(true);
+    expect(expired.data.details.every(({ heat }) =>
+      heat.status === "unavailable" && heat.reason === "RELEASE_MISMATCH"
+    )).toBe(true);
     await t.run(async (ctx) => {
       const release = await ctx.db.query("dataReleases").unique();
       const repack = await ctx.db.query("repacks").first();

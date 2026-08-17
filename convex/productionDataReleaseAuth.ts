@@ -1,8 +1,8 @@
 import type { FunctionReference } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import {
-  MAX_PRODUCTION_AUTH_SECRET_BYTES,
-  MIN_PRODUCTION_AUTH_SECRET_BYTES,
+  MAX_PRODUCTION_HTTP_BODY_BYTES,
+  MAX_CATALOG_MANIFEST_PUBLICATION_BODY_BYTES,
   PRODUCTION_AUTH_HEADER_NAMES,
   PRODUCTION_AUTH_KEY_ID_PATTERN,
   PRODUCTION_AUTH_NONCE_HASH_DOMAIN,
@@ -12,17 +12,18 @@ import {
   PRODUCTION_AUTH_SIGNATURE_VERSION,
   PRODUCTION_AUTH_TIMESTAMP_PATTERN,
   PRODUCTION_AUTH_WINDOW_MILLISECONDS,
-  decodeProductionAuthSecretBase64,
+  catalogManifestErrorCodeSchema,
+  catalogManifestReceiptDigest,
   providerReleaseErrorCodeSchema,
   providerReleaseReceiptDigest,
   productionDataReleaseErrorCodeSchema,
   productionPublicationPathSchema,
   productionPublicationReceiptSigningValue,
   productionPublicationRequestSigningValue,
+  productionReceiptHash,
 } from "@packscout/contracts";
 import { internal } from "./_generated/api";
 import {
-  env,
   internalMutation,
   type ActionCtx,
   type MutationCtx,
@@ -38,10 +39,11 @@ import {
   safeProviderReleaseMessage,
   type ProviderReleaseErrorCode,
 } from "./providerReleaseErrors";
+import { configuredPublicationKeySecret } from "./productionPublicationKeyConfig";
 import {
-  MAX_PRODUCTION_HTTP_BODY_BYTES,
-  productionReceiptHash,
-} from "./productionDataReleaseProtocol";
+  safeCatalogManifestMessage,
+  type CatalogManifestErrorCode,
+} from "./catalogManifestErrors";
 
 type LegacyExecutionReference = FunctionReference<
   "mutation",
@@ -61,6 +63,8 @@ type ProviderExecutionReference = FunctionReference<
   unknown
 >;
 
+type ManifestExecutionReference = ProviderExecutionReference;
+
 type AuthenticatedRequest = Readonly<{
   bodyJson: string;
   bodyDigest: string;
@@ -79,20 +83,33 @@ class HttpRefusal extends Error {
 
 type PublicationErrorCode =
   | ProductionDataReleaseErrorCode
-  | ProviderReleaseErrorCode;
-type PublicationSurface = "legacy" | "provider";
+  | ProviderReleaseErrorCode
+  | CatalogManifestErrorCode;
+type PublicationSurface = "legacy" | "provider" | "manifest";
 
 function surfaceCode(
   surface: PublicationSurface,
   legacyCode: ProductionDataReleaseErrorCode,
 ): PublicationErrorCode {
   if (surface === "legacy") return legacyCode;
-  const providerCode = legacyCode.replace(
-    /^PUBLICATION_/u,
-    "PROVIDER_RELEASE_",
-  );
-  const parsed = providerReleaseErrorCodeSchema.safeParse(providerCode);
-  return parsed.success ? parsed.data : "PROVIDER_RELEASE_INTERNAL_ERROR";
+  const prefix = surface === "provider"
+    ? "PROVIDER_RELEASE_"
+    : "CATALOG_MANIFEST_";
+  const mappedCode = legacyCode.replace(/^PUBLICATION_/u, prefix);
+  const parsed = surface === "provider"
+    ? providerReleaseErrorCodeSchema.safeParse(mappedCode)
+    : catalogManifestErrorCodeSchema.safeParse(mappedCode);
+  return parsed.success
+    ? parsed.data
+    : surface === "provider"
+    ? "PROVIDER_RELEASE_INTERNAL_ERROR"
+    : "CATALOG_MANIFEST_INTERNAL_ERROR";
+}
+
+function maximumBodyBytes(surface: PublicationSurface): number {
+  return surface === "manifest"
+    ? MAX_CATALOG_MANIFEST_PUBLICATION_BODY_BYTES
+    : MAX_PRODUCTION_HTTP_BODY_BYTES;
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -118,33 +135,6 @@ async function sha256Bytes(bytes: Uint8Array): Promise<string> {
   return bytesToHex(
     new Uint8Array(await crypto.subtle.digest("SHA-256", toArrayBuffer(bytes))),
   );
-}
-
-function configuredKeySecret(keyId: string): Uint8Array | null {
-  if (!PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId)) return null;
-  const raw = env.PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS;
-  if (raw === undefined) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      Array.isArray(parsed) ||
-      Object.getPrototypeOf(parsed) !== Object.prototype
-    ) {
-      return null;
-    }
-    if (!Object.prototype.hasOwnProperty.call(parsed, keyId)) return null;
-    const encoded = (parsed as Record<string, unknown>)[keyId];
-    if (typeof encoded !== "string") return null;
-    const secret = decodeProductionAuthSecretBase64(encoded);
-    return secret !== null &&
-        secret.byteLength >= MIN_PRODUCTION_AUTH_SECRET_BYTES &&
-        secret.byteLength <= MAX_PRODUCTION_AUTH_SECRET_BYTES
-      ? secret : null;
-  } catch {
-    return null;
-  }
 }
 
 async function hmacKey(secret: Uint8Array): Promise<CryptoKey> {
@@ -181,15 +171,15 @@ async function authenticateRequest(
   const contentLength = request.headers.get("content-length");
   if (
     contentLength !== null &&
-    Number.parseInt(contentLength, 10) > MAX_PRODUCTION_HTTP_BODY_BYTES
+    Number.parseInt(contentLength, 10) > maximumBodyBytes(surface)
   ) {
     throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_BODY_TOO_LARGE"), 413);
   }
   const bodyBytes = new Uint8Array(await request.arrayBuffer());
-  if (bodyBytes.byteLength > MAX_PRODUCTION_HTTP_BODY_BYTES) {
+  if (bodyBytes.byteLength > maximumBodyBytes(surface)) {
     throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_BODY_TOO_LARGE"), 413);
   }
-  const secret = configuredKeySecret(keyId);
+  const secret = configuredPublicationKeySecret(keyId);
   if (secret === null) {
     throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_KEY_UNKNOWN"), 401);
   }
@@ -243,6 +233,8 @@ async function authenticateRequest(
   await ctx.runMutation(
     surface === "provider"
       ? internal.productionDataReleaseAuth.consumeProviderNonce
+      : surface === "manifest"
+      ? internal.productionDataReleaseAuth.consumeCatalogManifestNonce
       : internal.productionDataReleaseAuth.consumeNonce,
     {
     keyId,
@@ -265,6 +257,7 @@ async function authenticateRequest(
 function errorStatus(code: PublicationErrorCode): number {
   if (code.endsWith("_INTERNAL_ERROR")) return 500;
   if (code.endsWith("_BODY_TOO_LARGE")) return 413;
+  if (code.endsWith("_AUTH_FORBIDDEN")) return 403;
   if (code.includes("_AUTH_")) return 401;
   if (
     code.endsWith("_REQUEST_INVALID") ||
@@ -285,7 +278,9 @@ function errorCode(error: unknown): PublicationErrorCode | null {
   const parsed = productionDataReleaseErrorCodeSchema.safeParse(data.code);
   if (parsed.success) return parsed.data;
   const provider = providerReleaseErrorCodeSchema.safeParse(data.code);
-  return provider.success ? provider.data : null;
+  if (provider.success) return provider.data;
+  const manifest = catalogManifestErrorCodeSchema.safeParse(data.code);
+  return manifest.success ? manifest.data : null;
 }
 
 async function signReceipt(
@@ -294,36 +289,48 @@ async function signReceipt(
   receipt: unknown,
   surface: PublicationSurface,
 ): Promise<Record<string, unknown>> {
-  const providerDigestField = typeof receipt === "object" &&
+  const exactDigestField = typeof receipt === "object" &&
       receipt !== null &&
       "receiptDigest" in receipt
     ? receipt.receiptDigest
     : undefined;
   if (
-    surface === "provider" &&
-    (providerDigestField === undefined ||
-      (providerDigestField !== null &&
-        typeof providerDigestField !== "string"))
+    surface !== "legacy" &&
+    (exactDigestField === undefined ||
+      (exactDigestField !== null &&
+        typeof exactDigestField !== "string"))
   ) {
-    refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT");
-  }
-  const storedProviderDigest = typeof providerDigestField === "string"
-    ? providerDigestField
-    : null;
-  const computedProviderDigest = surface === "provider"
-    ? await providerReleaseReceiptDigest(receipt)
-    : null;
-  if (surface === "provider") {
-    if (
-      storedProviderDigest !== null &&
-      storedProviderDigest !== computedProviderDigest
-    ) {
+    if (surface === "provider") {
       refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT");
     }
+    throw new HttpRefusal("CATALOG_MANIFEST_STATE_CONFLICT", 409);
   }
-  const receiptDigest = surface === "provider"
-    ? computedProviderDigest ??
-      refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT")
+  const storedExactDigest = typeof exactDigestField === "string"
+    ? exactDigestField
+    : null;
+  const computedExactDigest = surface === "provider"
+    ? await providerReleaseReceiptDigest(receipt)
+    : surface === "manifest"
+    ? await catalogManifestReceiptDigest(receipt)
+    : null;
+  if (surface !== "legacy") {
+    if (
+      storedExactDigest !== null &&
+      storedExactDigest !== computedExactDigest
+    ) {
+      if (surface === "provider") {
+        refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT");
+      }
+      throw new HttpRefusal("CATALOG_MANIFEST_STATE_CONFLICT", 409);
+    }
+  }
+  const receiptDigest = surface !== "legacy"
+    ? computedExactDigest ??
+      (surface === "provider"
+        ? refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT")
+        : (() => {
+            throw new HttpRefusal("CATALOG_MANIFEST_STATE_CONFLICT", 409);
+          })())
     : await productionReceiptHash(receipt);
   const signature = bytesToHex(
     new Uint8Array(
@@ -366,7 +373,7 @@ async function handleAuthenticatedRequest(
 ): Promise<Response> {
   try {
     const authenticated = await authenticateRequest(ctx, request, surface);
-    const receipt = surface === "provider"
+    const receipt = surface !== "legacy"
       ? await ctx.runMutation(operation as ProviderExecutionReference, {
         bodyJson: authenticated.bodyJson,
         requestDigest: authenticated.bodyDigest,
@@ -390,6 +397,8 @@ async function handleAuthenticatedRequest(
     if (code === null) {
       const internalCode = surface === "provider"
         ? "PROVIDER_RELEASE_INTERNAL_ERROR"
+        : surface === "manifest"
+        ? "CATALOG_MANIFEST_INTERNAL_ERROR"
         : "PUBLICATION_INTERNAL_ERROR";
       return jsonResponse(
         { error: "The publication request failed safely.", code: internalCode },
@@ -403,6 +412,8 @@ async function handleAuthenticatedRequest(
       {
         error: providerReleaseErrorCodeSchema.safeParse(code).success
           ? safeProviderReleaseMessage(code as ProviderReleaseErrorCode)
+          : catalogManifestErrorCodeSchema.safeParse(code).success
+          ? safeCatalogManifestMessage(code as CatalogManifestErrorCode)
           : safeProductionDataReleaseMessage(code as ProductionDataReleaseErrorCode),
         code,
       },
@@ -427,6 +438,14 @@ export function handleAuthenticatedProviderReleaseRequest(
   return handleAuthenticatedRequest(ctx, request, operation, "provider");
 }
 
+export function handleAuthenticatedCatalogManifestRequest(
+  ctx: ActionCtx,
+  request: Request,
+  operation: ManifestExecutionReference,
+): Promise<Response> {
+  return handleAuthenticatedRequest(ctx, request, operation, "manifest");
+}
+
 const NONCE_ARGS = {
   keyId: v.string(),
   nonceHash: v.string(),
@@ -449,6 +468,11 @@ async function consumeNonceForSurface(
       refuseProviderRelease(
         surfaceCode(surface, code) as ProviderReleaseErrorCode,
       );
+    }
+    if (surface === "manifest") {
+      throw new ConvexError({
+        code: surfaceCode(surface, code) as CatalogManifestErrorCode,
+      });
     }
     return refuseProductionDataRelease(code);
   };
@@ -490,4 +514,10 @@ export const consumeProviderNonce = internalMutation({
   args: NONCE_ARGS,
   returns: v.null(),
   handler: (ctx, args) => consumeNonceForSurface(ctx, args, "provider"),
+});
+
+export const consumeCatalogManifestNonce = internalMutation({
+  args: NONCE_ARGS,
+  returns: v.null(),
+  handler: (ctx, args) => consumeNonceForSurface(ctx, args, "manifest"),
 });

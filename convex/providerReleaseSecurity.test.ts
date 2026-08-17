@@ -16,10 +16,7 @@ import {
 import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
-import {
-  MOCK_DATA_RELEASE_ORIGIN_SET_HASH,
-  MOCK_DATA_RELEASE_PUBLIC_ID,
-} from "./mockDataReleaseFixture";
+import { MOCK_DATA_RELEASE_ORIGIN_SET_HASH } from "./mockDataReleaseFixture";
 import {
   PROVIDER_BETA_TEST_KEY_ID,
   PROVIDER_BETA_TEST_KEY_SECRET,
@@ -98,18 +95,19 @@ function configureProvider(originSetHash: string): void {
   vi.stubEnv("PACKSCOUT_PUBLIC_ORIGIN_SET_HASH", originSetHash);
 }
 
-async function seedLegacyRelease(
+async function seedPublicCatalogManifest(
   t: ProviderTest,
   providerOriginSetHash: string,
-): Promise<void> {
+): Promise<string> {
   vi.stubEnv("PACKSCOUT_RUNTIME_ENVIRONMENT", "local");
   vi.stubEnv("PACKSCOUT_MOCK_DATA_RELEASE_SEED_ENABLED", "1");
   vi.stubEnv(
     "PACKSCOUT_PUBLIC_ORIGIN_SET_HASH",
     MOCK_DATA_RELEASE_ORIGIN_SET_HASH,
   );
-  await t.mutation(internal.mockDataReleaseSeed.seed, {});
+  const seeded = await t.mutation(internal.mockDataReleaseSeed.seed, {});
   configureProvider(providerOriginSetHash);
+  return seeded.publicReleaseId;
 }
 
 async function publicVisibility(t: ProviderTest) {
@@ -376,9 +374,10 @@ describe("provider release HTTP security", () => {
     }))).toEqual({ releases: 1, operations: 1 });
   });
 
-  test("leaves every legacy single-release write route unregistered", async () => {
+  test("leaves every legacy single-release route unregistered", async () => {
     const t = createTest();
-    const legacyWritePaths = [
+    const legacyPaths = [
+      PRODUCTION_DATA_RELEASE_PATHS.activeState,
       PRODUCTION_DATA_RELEASE_PATHS.start,
       PRODUCTION_DATA_RELEASE_PATHS.applyBatch,
       PRODUCTION_DATA_RELEASE_PATHS.finalize,
@@ -387,13 +386,9 @@ describe("provider release HTTP security", () => {
       PRODUCTION_DATA_RELEASE_PATHS.rollback,
       PRODUCTION_DATA_RELEASE_PATHS.retain,
     ];
-    for (const path of legacyWritePaths) {
+    for (const path of legacyPaths) {
       expect((await t.fetch(path, { method: "POST" })).status, path).toBe(404);
     }
-    expect((await t.fetch(
-      PRODUCTION_DATA_RELEASE_PATHS.activeState,
-      { method: "POST" },
-    )).status).not.toBe(404);
   });
 
   test("binds provider authority to the authenticated key platform", async () => {
@@ -499,11 +494,14 @@ describe("provider release HTTP security", () => {
     vi.setSystemTime("2026-08-15T12:00:00.000Z");
     const plan = await buildProviderPublishPlan();
     const t = createTest();
-    await seedLegacyRelease(t, plan.governingHashes.originSetHash);
+    const baselinePublicReleaseId = await seedPublicCatalogManifest(
+      t,
+      plan.governingHashes.originSetHash,
+    );
     const baseline = await publicVisibility(t);
     expect(baseline.shell).toMatchObject({
       ok: true,
-      data: { metadata: { publicReleaseId: MOCK_DATA_RELEASE_PUBLIC_ID } },
+      data: { metadata: { publicReleaseId: baselinePublicReleaseId } },
     });
 
     const emptyHead = await observedHead(
@@ -635,15 +633,41 @@ describe("provider release HTTP security", () => {
         },
       },
     });
-    expect(await t.run(async (ctx) => ({
-      heads:
-        (await ctx.db.query("providerCatalogCompletedHeads").take(2)).length,
-      releases:
-        (await ctx.db.query("providerCatalogReleases").take(2)).length,
-      batches: (await ctx.db.query("providerCatalogBatches").take(2)).length,
-      operations:
-        (await ctx.db.query("providerCatalogOperations").take(5)).length,
-    }))).toEqual({ heads: 1, releases: 1, batches: 1, operations: 3 });
+    expect(await t.run(async (ctx) => {
+      const releases = await ctx.db
+        .query("providerCatalogReleases")
+        .withIndex("by_platform_key_and_public_provider_release_id", (index) =>
+          index
+            .eq("platformKey", plan.platformKey)
+            .eq("publicProviderReleaseId", plan.publicProviderReleaseId),
+        )
+        .take(2);
+      const release = releases[0];
+      if (releases.length !== 1 || release === undefined) {
+        throw new Error("Expected the target provider release.");
+      }
+      return {
+        heads: (await ctx.db
+          .query("providerCatalogCompletedHeads")
+          .withIndex("by_platform_key", (index) =>
+            index.eq("platformKey", plan.platformKey),
+          )
+          .take(2)).length,
+        releases: releases.length,
+        batches: (await ctx.db
+          .query("providerCatalogBatches")
+          .withIndex("by_release_id_and_batch_index", (index) =>
+            index.eq("releaseId", release._id),
+          )
+          .take(2)).length,
+        operations: (await ctx.db
+          .query("providerCatalogOperations")
+          .filter((query) =>
+            query.eq(query.field("platformKey"), plan.platformKey)
+          )
+          .take(4)).length,
+      };
+    })).toEqual({ heads: 1, releases: 1, batches: 1, operations: 3 });
     expect(await publicVisibility(t)).toEqual(baseline);
   });
 
@@ -652,7 +676,7 @@ describe("provider release HTTP security", () => {
     vi.setSystemTime("2026-08-15T12:00:00.000Z");
     const plan = await buildProviderPublishPlan();
     const t = createTest();
-    await seedLegacyRelease(t, plan.governingHashes.originSetHash);
+    await seedPublicCatalogManifest(t, plan.governingHashes.originSetHash);
     const baseline = await publicVisibility(t);
     await completePlan(t, plan, emptyProviderHead(plan.platformKey));
     let expected = expectedHeadFromObserved(await observedHead(
@@ -696,15 +720,41 @@ describe("provider release HTTP security", () => {
       reuse,
     ))).toEqual(reused);
     expect(await publicVisibility(t)).toEqual(baseline);
-    expect(await t.run(async (ctx) => ({
-      releases:
-        (await ctx.db.query("providerCatalogReleases").take(3)).length,
-      publications:
-        (await ctx.db.query("providerCatalogPublications").take(3)).length,
-      vendors:
-        (await ctx.db.query("providerCatalogVendors").take(3)).length,
-      batches: (await ctx.db.query("providerCatalogBatches").take(3)).length,
-    }))).toEqual({ releases: 1, publications: 1, vendors: 1, batches: 1 });
+    expect(await t.run(async (ctx) => {
+      const releases = await ctx.db
+        .query("providerCatalogReleases")
+        .withIndex("by_platform_key_and_public_provider_release_id", (index) =>
+          index
+            .eq("platformKey", plan.platformKey)
+            .eq("publicProviderReleaseId", plan.publicProviderReleaseId),
+        )
+        .take(2);
+      const release = releases[0];
+      if (releases.length !== 1 || release === undefined) {
+        throw new Error("Expected the target provider release.");
+      }
+      return {
+        releases: releases.length,
+        publications: (await ctx.db
+          .query("providerCatalogPublications")
+          .withIndex("by_release_id", (index) =>
+            index.eq("releaseId", release._id),
+          )
+          .take(2)).length,
+        vendors: (await ctx.db
+          .query("providerCatalogVendors")
+          .withIndex("by_release_id_and_public_vendor_id", (index) =>
+            index.eq("releaseId", release._id),
+          )
+          .take(2)).length,
+        batches: (await ctx.db
+          .query("providerCatalogBatches")
+          .withIndex("by_release_id_and_batch_index", (index) =>
+            index.eq("releaseId", release._id),
+          )
+          .take(2)).length,
+      };
+    })).toEqual({ releases: 1, publications: 1, vendors: 1, batches: 1 });
 
     expected = expectedHeadFromObserved(await observedHead(
       t,
@@ -841,10 +891,33 @@ describe("provider release HTTP security", () => {
     ))).toEqual(reused);
 
     const stored = await t.run(async (ctx) => ({
-      releases: await ctx.db.query("providerCatalogReleases").take(5),
-      heads: await ctx.db.query("providerCatalogCompletedHeads").take(5),
-      blocked:
-        await ctx.db.query("providerCatalogReleaseBlocks").take(5),
+      releases: await ctx.db
+        .query("providerCatalogReleases")
+        .withIndex("by_platform_key_and_public_provider_release_id", (index) =>
+          index
+            .eq("platformKey", plan.platformKey)
+            .eq("publicProviderReleaseId", plan.publicProviderReleaseId),
+        )
+        .take(2),
+      heads: await ctx.db
+        .query("providerCatalogCompletedHeads")
+        .withIndex("by_platform_key", (index) =>
+          index.eq("platformKey", plan.platformKey),
+        )
+        .take(2),
+      blocked: await ctx.db
+        .query("providerCatalogReleaseBlocks")
+        .withIndex(
+          "by_platform_key_and_provider_release_fingerprint",
+          (index) =>
+            index
+              .eq("platformKey", plan.platformKey)
+              .eq(
+                "providerReleaseFingerprint",
+                plan.providerReleaseFingerprint,
+              ),
+        )
+        .take(2),
     }));
     expect(stored.releases).toHaveLength(1);
     expect(stored.releases[0]).toMatchObject({
