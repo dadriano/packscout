@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState } from "react";
 import type { PublicCollectible } from "@packscout/contracts";
+import { SavedCollectibleButton } from "@/components/auth/SavedItemButton.client";
 import {
   formatCollectibleDescriptor,
   formatCollectibleIdentity,
@@ -229,6 +230,13 @@ export function DesiredCollectibleSearch({
       <p aria-live="polite" className={styles.status} id={statusId} role="status">
         {statusCopy}
       </p>
+      {selected ? (
+        <div className={styles.saveAction}>
+          <SavedCollectibleButton
+            publicCollectibleId={selected.publicCollectibleId}
+          />
+        </div>
+      ) : null}
       {open ? (
         <ul className={styles.listbox} id={listboxId} role="listbox">
           {visibleOptions.map((option, index) => (

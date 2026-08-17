@@ -69,29 +69,34 @@ test("fails closed instead of constructing unbounded bucket events", () => {
   );
 });
 
-test("uses sendBeacon first and sends only the strict JSON blob", async () => {
-  const calls: Array<{ url: string; body: Blob }> = [];
+test("sends strict product JSON with an explicitly credential-free request", async () => {
+  const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   const event = createDashboardViewEvent({
     publicReleaseId: "20000000-0000-4000-8000-000000000002",
     surface: "overview",
   });
   queueProductTelemetry(event, {
-    sendBeacon(url, body) {
-      calls.push({ url, body });
-      return true;
-    },
-    fetch: async () => {
-      throw new Error("fetch should not run after beacon acceptance");
-    },
+    fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init });
+      return new Response(null, { status: 202 });
+    }) as typeof fetch,
   });
+  await Promise.resolve();
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.url, "/api/telemetry");
-  assert.equal(calls[0]?.body.type, "application/json");
-  assert.deepEqual(JSON.parse(await calls[0]!.body.text()), event);
+  assert.equal(calls[0]?.input, "/api/telemetry");
+  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), event);
+  assert.deepEqual(calls[0]?.init?.headers, {
+    "Content-Type": "application/json",
+  });
+  assert.equal(calls[0]?.init?.keepalive, true);
+  assert.equal(calls[0]?.init?.credentials, "omit");
+  assert.equal(calls[0]?.init?.cache, "no-store");
+  assert.equal(calls[0]?.init?.redirect, "error");
+  assert.equal(calls[0]?.init?.referrerPolicy, "no-referrer");
 });
 
-test("falls back to nonblocking credential-free keepalive fetch", async () => {
+test("sends public-read failures with a credential-free keepalive request", async () => {
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   const event = createPublicReadFailureBeacon({
     queryName: "listPublicRepacks",
@@ -102,7 +107,6 @@ test("falls back to nonblocking credential-free keepalive fetch", async () => {
   });
 
   queuePublicReadFailure(event, {
-    sendBeacon: () => false,
     fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({ input, init });
       return new Response(null, { status: 202 });
@@ -125,9 +129,6 @@ test("swallows transport failures without changing the caller outcome", () => {
   });
   assert.doesNotThrow(() =>
     queueProductTelemetry(event, {
-      sendBeacon() {
-        throw new Error("blocked");
-      },
       fetch() {
         throw new Error("offline");
       },

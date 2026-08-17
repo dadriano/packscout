@@ -1,0 +1,134 @@
+.root {
+  grid-area: auth;
+  justify-self: end;
+  min-width: 0;
+  position: relative;
+}
+
+.trigger {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-control);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  list-style: none;
+  padding: 0.45rem 0.7rem;
+  white-space: nowrap;
+}
+
+.trigger::-webkit-details-marker {
+  display: none;
+}
+
+button.trigger:hover:not(:disabled),
+summary.trigger:hover {
+  border-color: color-mix(in srgb, var(--color-action) 48%, var(--color-border));
+  color: var(--color-action-strong);
+}
+
+button.trigger:disabled {
+  background: var(--color-surface-subtle);
+  color: var(--color-status-neutral);
+  cursor: not-allowed;
+}
+
+.details[open] .trigger {
+  border-color: color-mix(in srgb, var(--color-action) 58%, var(--color-border));
+  color: var(--color-action-strong);
+}
+
+.chevron {
+  font-size: 0.72rem;
+  line-height: 1;
+  transition: transform 140ms ease;
+}
+
+.details[open] .chevron {
+  transform: rotate(180deg);
+}
+
+.panel {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  display: grid;
+  width: min(18.5rem, calc(100vw - 1.8rem));
+  gap: 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.7rem;
+  background: var(--color-surface-raised);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 18%);
+  padding: 0.85rem;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--color-action-strong);
+  font-family: var(--font-mono);
+  font-size: 0.61rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.description {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.signOut {
+  width: 100%;
+  min-height: 2.2rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 0.48rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.signOut:hover:not(:disabled) {
+  border-color: var(--color-action);
+  color: var(--color-action-strong);
+}
+
+.signOut:disabled {
+  color: var(--color-status-neutral);
+  cursor: wait;
+}
+
+.status {
+  min-height: 0.78rem;
+  margin: 0;
+  color: var(--color-negative);
+  font-size: 0.62rem;
+}
+
+@media (max-width: 620px) {
+  .trigger {
+    min-height: 32px;
+    padding-inline: 0.58rem;
+  }
+
+  .trigger > span:not(.chevron) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}

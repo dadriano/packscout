@@ -1,0 +1,199 @@
+"use client";
+
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
+import {
+  ConvexProviderWithAuth,
+  ConvexReactClient,
+  useConvexAuth,
+} from "convex/react";
+import { AuthenticatedSavedItemsProvider } from "./AuthenticatedSavedItemsProvider.client";
+import {
+  PackScoutAuthContext,
+  type PackScoutAuthValue,
+} from "./AuthContext.client";
+import {
+  browserAuthSessionHintStorage,
+  logoutAndClearReturningSessionHint,
+  shouldInvokeLogin,
+  syncReturningSessionHint,
+} from "./auth-boot";
+import { createPrivyClientConfig } from "./auth-config";
+import type { InitializedAuthProviderProps } from "./auth-provider-contract";
+import {
+  convexAuthSessionKey,
+  fetchPrivyAccessTokenForConvex,
+} from "./convex-auth-adapter";
+
+function usePrivyAuthForConvex() {
+  const { authenticated, getAccessToken, ready, user } = usePrivy();
+  const sessionKey = convexAuthSessionKey({
+    ready,
+    authenticated,
+    userId: user?.id,
+  });
+  const fetchAccessToken = useCallback(
+    (request: Readonly<{ forceRefreshToken: boolean }>) => {
+      // Capturing the generation resets Convex if Privy swaps identities
+      // without passing through a signed-out render.
+      void sessionKey;
+      return fetchPrivyAccessTokenForConvex(
+        { ready, authenticated, getAccessToken },
+        request,
+      );
+    },
+    [authenticated, getAccessToken, ready, sessionKey],
+  );
+
+  return {
+    isLoading: !ready,
+    isAuthenticated: ready && authenticated,
+    fetchAccessToken,
+  };
+}
+
+function PackScoutAuthBridge({
+  children,
+  loginRequested,
+  onLoginIntentConsumed,
+  requestLogin,
+}: Readonly<{
+  children: ReactNode;
+  loginRequested: boolean;
+  onLoginIntentConsumed: () => void;
+  requestLogin: () => void;
+}>) {
+  const {
+    authenticated,
+    error,
+    login: privyLogin,
+    logout: privyLogout,
+    ready,
+    user,
+  } = usePrivy();
+  const convex = useConvexAuth();
+  const loginInvoked = useRef(false);
+
+  useEffect(() => {
+    syncReturningSessionHint(
+      { ready, authenticated },
+      browserAuthSessionHintStorage(),
+    );
+  }, [authenticated, ready]);
+
+  useEffect(() => {
+    if (!loginRequested) {
+      loginInvoked.current = false;
+      return;
+    }
+    if (ready && authenticated) {
+      onLoginIntentConsumed();
+      return;
+    }
+    if (
+      !shouldInvokeLogin({
+        requested: loginRequested,
+        ready,
+        authenticated,
+        alreadyInvoked: loginInvoked.current,
+      })
+    ) {
+      return;
+    }
+    loginInvoked.current = true;
+    try {
+      privyLogin();
+    } catch {
+      // A synchronous provider failure must not take down public browsing.
+      // Consuming this intent leaves the next click free to retry.
+      loginInvoked.current = false;
+    } finally {
+      onLoginIntentConsumed();
+    }
+  }, [
+    authenticated,
+    loginRequested,
+    onLoginIntentConsumed,
+    privyLogin,
+    ready,
+  ]);
+
+  const logout = useCallback(
+    () =>
+      logoutAndClearReturningSessionHint(
+        privyLogout,
+        browserAuthSessionHintStorage(),
+      ),
+    [privyLogout],
+  );
+  const status: PackScoutAuthValue["status"] = error
+    ? "error"
+    : !ready
+      ? "loading"
+      : !authenticated
+        ? "signed_out"
+        : convex.isLoading || convex.isRefreshing
+          ? "loading"
+          : convex.isAuthenticated
+            ? "signed_in"
+            : "error";
+  const value = useMemo<PackScoutAuthValue>(
+    () => ({ status, login: requestLogin, logout }),
+    [logout, requestLogin, status],
+  );
+
+  return (
+    <PackScoutAuthContext.Provider value={value}>
+      <AuthenticatedSavedItemsProvider
+        key={authenticated ? user?.id : "signed-out"}
+      >
+        {children}
+      </AuthenticatedSavedItemsProvider>
+    </PackScoutAuthContext.Provider>
+  );
+}
+
+export function InitializedPackScoutAuthProvider({
+  children,
+  configuration,
+  loginRequested,
+  nonce,
+  onLoginIntentConsumed,
+  requestLogin,
+}: InitializedAuthProviderProps) {
+  const [convexClient] = useState(
+    () => new ConvexReactClient(configuration.convexUrl),
+  );
+  const privyConfig = useMemo(() => createPrivyClientConfig(nonce), [nonce]);
+
+  useEffect(
+    () => () => {
+      void convexClient.close();
+    },
+    [convexClient],
+  );
+
+  return (
+    <PrivyProvider appId={configuration.privyAppId} config={privyConfig}>
+      <ConvexProviderWithAuth
+        client={convexClient}
+        useAuth={usePrivyAuthForConvex}
+      >
+        <PackScoutAuthBridge
+          loginRequested={loginRequested}
+          onLoginIntentConsumed={onLoginIntentConsumed}
+          requestLogin={requestLogin}
+        >
+          {children}
+        </PackScoutAuthBridge>
+      </ConvexProviderWithAuth>
+    </PrivyProvider>
+  );
+}

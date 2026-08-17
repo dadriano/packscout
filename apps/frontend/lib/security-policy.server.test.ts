@@ -138,8 +138,96 @@ test("keeps an unconfigured local or production-mode build self-only", () => {
     assert.equal(configuration.convexHttpOrigin, null);
     assert.equal(configuration.convexWebSocketOrigin, null);
     assert.deepEqual(configuration.imageOrigins, []);
+    assert.equal(configuration.privyAuthenticationEnabled, false);
     assert.deepEqual(directiveSources(policy, "connect-src"), ["'self'"]);
     assert.deepEqual(directiveSources(policy, "img-src"), ["'self'", "data:"]);
+    assert.equal(policy.includes("auth.privy.io"), false);
+    assert.equal(policy.includes("challenges.cloudflare.com"), false);
+    assert.equal(policy.includes("child-src"), false);
+    assert.equal(policy.includes("frame-src"), false);
+  }
+});
+
+test("keeps the unconfigured CSP byte-for-byte compatible", () => {
+  const nonce = "abcdefghijklmnopqrstuvwx";
+  const developmentPolicy = buildContentSecurityPolicy({
+    nonce,
+    configuration: readPublicSecurityConfiguration({ NODE_ENV: "test" }),
+  });
+  const productionPolicy = buildContentSecurityPolicy({
+    nonce,
+    configuration: readPublicSecurityConfiguration({ NODE_ENV: "production" }),
+  });
+
+  assert.equal(
+    developmentPolicy,
+    "default-src 'self'; script-src 'self' 'nonce-abcdefghijklmnopqrstuvwx' 'strict-dynamic' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+  );
+  assert.equal(
+    productionPolicy,
+    "default-src 'self'; script-src 'self' 'nonce-abcdefghijklmnopqrstuvwx' 'strict-dynamic'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+  );
+});
+
+test("adds only exact Privy email, Google, and CAPTCHA sources when enabled", () => {
+  for (const nodeEnvironment of ["development", "production"] as const) {
+    const configuration = readPublicSecurityConfiguration({
+      NODE_ENV: nodeEnvironment,
+      NEXT_PUBLIC_PRIVY_APP_ID: "cm1234567890_packscout",
+    });
+    const policy = buildContentSecurityPolicy({
+      nonce: "abcdefghijklmnopqrstuvwx",
+      configuration,
+    });
+
+    assert.equal(configuration.privyAuthenticationEnabled, true);
+    assert.deepEqual(directiveSources(policy, "connect-src"), [
+      "'self'",
+      "https://auth.privy.io",
+    ]);
+    assert.deepEqual(directiveSources(policy, "child-src"), [
+      "'self'",
+      "https://auth.privy.io",
+    ]);
+    assert.deepEqual(directiveSources(policy, "frame-src"), [
+      "'self'",
+      "https://auth.privy.io",
+      "https://challenges.cloudflare.com",
+    ]);
+    assert.deepEqual(directiveSources(policy, "script-src"), [
+      "'self'",
+      "'nonce-abcdefghijklmnopqrstuvwx'",
+      "'strict-dynamic'",
+      ...(nodeEnvironment === "development" ? ["'unsafe-eval'"] : []),
+      "https://challenges.cloudflare.com",
+    ]);
+    assert.equal(policy.includes("walletconnect"), false);
+    assert.equal(policy.includes("walletlink"), false);
+    assert.equal(policy.includes("rpc.privy.systems"), false);
+    assert.equal(policy.includes("cm1234567890_packscout"), false);
+  }
+});
+
+test("fails closed for malformed or unbounded Privy app IDs", () => {
+  for (const value of [
+    "short",
+    "contains.dot",
+    "contains space",
+    " leading-value",
+    "trailing-value ",
+    "line-break\nvalue",
+    "privy-🔐-app",
+    "a".repeat(129),
+  ]) {
+    assert.throws(
+      () =>
+        readPublicSecurityConfiguration({
+          NODE_ENV: "production",
+          NEXT_PUBLIC_PRIVY_APP_ID: value,
+        }),
+      /outer whitespace|Privy app ID/,
+      value,
+    );
   }
 });
 

@@ -39,6 +39,9 @@ DATA_RELEASES ───────────────▶ DATA_RELEASE_OPER
 DATA_RELEASES ──────────────▶ REPACK_HEAT_SNAPSHOTS
 REPACK_HEAT_STATE ──────────▶ active + previous REPACK_HEAT_SNAPSHOTS
 REPACK_HEAT_SNAPSHOTS ──────▶ REPACK_HEAT_SIGNALS ─────▶ REPACKS
+
+PRIVY IDENTITY ─────────────▶ SAVED_REPACKS ────────────▷ REPACKS
+PRIVY IDENTITY ─────────────▶ SAVED_COLLECTIBLES ───────▷ COLLECTIBLES
 ```
 
 Every public entity belongs to exactly one immutable data release. Public
@@ -152,12 +155,26 @@ repackHeatSignals
   repackId              -> repacks._id
   publicRepackId
   detail                (bounded public heat aggregate and evidence components)
+
+savedRepacks
+  _id
+  ownerTokenIdentifier  (verified Convex auth identity; never client supplied)
+  publicRepackId         -> repacks.publicRepackId (stable logical reference)
+
+savedCollectibles
+  _id
+  ownerTokenIdentifier  (verified Convex auth identity; never client supplied)
+  publicCollectibleId    -> collectibles.publicCollectibleId (stable logical reference)
 ```
 
 Convex document IDs provide table-aware references, not SQL foreign keys or
 cascades. Release finalization code is responsible for uniqueness, same-release
 ownership, complete references, and count/hash reconciliation before changing
 the active pointer.
+
+Saved-item references deliberately use stable public IDs instead of release-
+scoped Convex document IDs. They can survive an immutable release swap and
+resolve again when the same public entity appears in a later release.
 
 ## Product entities
 
@@ -210,6 +227,32 @@ role, public evidence classification, optional probability and valuation, and
 chase-match confidence. A collectible can therefore match multiple repacks,
 and a repack can expose multiple known or inferred chases without embedding an
 unbounded array.
+
+## Authenticated saved items
+
+`savedRepacks` and `savedCollectibles` are the first durable, user-owned Convex
+tables. They are outside the immutable release graph and must never be deleted,
+reseeded, or replaced by catalog publication and local mock-release utilities.
+The catalog remains publicly readable without authentication.
+
+Ownership comes only from `ctx.auth.getUserIdentity().tokenIdentifier` after
+Convex verifies a Privy access token. Public mutations do not accept an owner or
+user ID from the browser. Each owner can save at most 250 repacks and 250 exact
+collectibles. Saving requires the public ID to resolve exactly once in the
+active complete release; removing a save remains possible even if that entity
+is no longer in the active release. Repeated save and remove requests are
+idempotent. When a kind is already at capacity, saving a new active entity
+removes only the owner's oldest unavailable save of that same kind, with public
+ID as the deterministic tie-break, and tells the browser that capacity recovery
+occurred. If every saved entity remains active, the mutation refuses the new
+save instead. No capacity path crosses owners or collectible/repack kinds.
+
+These tables change the operational meaning of the Convex deployment: catalog
+data is rebuildable, but account saves are not. Backup, export, account deletion,
+privacy requests, environment separation, and destructive local/live tooling
+must treat saved-item rows as durable user data. The Privy app ID is public
+configuration; no Privy app secret or access token belongs in a document, log,
+telemetry event, or client-provided ownership field.
 
 ## EV estimates
 

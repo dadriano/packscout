@@ -14,7 +14,6 @@ type EventNamed<TName extends AnonymousProductEvent["name"]> = Extract<
 >;
 
 export type TelemetryTransport = Readonly<{
-  sendBeacon?: (url: string, data: Blob) => boolean;
   fetch?: typeof fetch;
 }>;
 
@@ -147,10 +146,6 @@ export function createPublicReadFailureBeacon(
 
 function defaultTransport(): TelemetryTransport {
   return {
-    sendBeacon:
-      typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function"
-        ? navigator.sendBeacon.bind(navigator)
-        : undefined,
     fetch: typeof fetch === "function" ? fetch : undefined,
   };
 }
@@ -172,23 +167,10 @@ function queue(
     return;
   }
 
-  if (transport.sendBeacon) {
-    try {
-      if (
-        transport.sendBeacon(
-          endpoint,
-          new Blob([body], { type: "application/json" }),
-        )
-      ) {
-        return;
-      }
-    } catch {
-      // Fall through to nonblocking fetch without surfacing transport failure.
-    }
-  }
-
   if (!transport.fetch) return;
   try {
+    // sendBeacon has no credential mode and can attach ambient auth cookies.
+    // This anonymous channel always uses an explicitly credential-free request.
     void transport
       .fetch(endpoint, {
         method: "POST",
