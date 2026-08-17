@@ -37,7 +37,6 @@ import {
   serializeCatalogQueryState,
 } from "@/lib/catalog-query-state.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
-import { useNarrowCatalogInspector } from "@/lib/catalog-viewport.client";
 import {
   createRepackSearchEvent,
   createDashboardViewEvent,
@@ -113,9 +112,10 @@ export function AllRepacksClient({
     string | null
   >(page.selectedRepack?.publicRepackId ?? null);
   const [actionFeedback, setActionFeedback] = useState("");
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(
+    () => page.selectedRepack?.publicRepackId !== undefined,
+  );
   const selectionTriggerRef = useRef<HTMLElement | null>(null);
-  const narrowInspector = useNarrowCatalogInspector();
   const detailById = useMemo(
     () => new Map(details.map((detail) => [detail.publicRepackId, detail])),
     [details],
@@ -204,7 +204,7 @@ export function AllRepacksClient({
 
   async function copyPromo(publicRepackId: string) {
     setSelectedPublicRepackId(publicRepackId);
-    if (narrowInspector) setSheetOpen(true);
+    setInspectorOpen(true);
     const detail = detailById.get(publicRepackId);
     const promo = detail?.actions.promo;
     if (!promo) {
@@ -240,7 +240,7 @@ export function AllRepacksClient({
 
   function openRepack(publicRepackId: string) {
     setSelectedPublicRepackId(publicRepackId);
-    if (narrowInspector) setSheetOpen(true);
+    setInspectorOpen(true);
     const detail = detailById.get(publicRepackId);
     const outbound = detail
       ? buildPublishedRepackHref(
@@ -346,7 +346,7 @@ export function AllRepacksClient({
             onSelect={(publicRepackId, trigger) => {
               selectionTriggerRef.current = trigger;
               setSelectedPublicRepackId(publicRepackId);
-              if (narrowInspector) setSheetOpen(true);
+              setInspectorOpen(true);
             }}
             onSort={sortCatalog}
             page={page}
@@ -373,25 +373,23 @@ export function AllRepacksClient({
         {actionFeedback}
       </p>
 
-      {selectedRepack && (!narrowInspector || sheetOpen) ? (
-        <div className={styles.preview}>
-          <RepackInspector
-            highlightedChase={
-              page.desiredCollectible
-                ? page.desiredChaseMatches.find(
-                    ({ publicRepackId }) =>
-                      publicRepackId === selectedRepack.publicRepackId,
-                  )?.chase ?? null
-                : undefined
-            }
-            metadata={page.metadata}
-            onActionOutcome={reportAction}
-            onClose={() => setSheetOpen(false)}
-            placement={narrowInspector ? "sheet" : "preview"}
-            repack={selectedRepack}
-            returnFocusRef={selectionTriggerRef}
-          />
-        </div>
+      {selectedRepack && inspectorOpen ? (
+        <RepackInspector
+          highlightedChase={
+            page.desiredCollectible
+              ? page.desiredChaseMatches.find(
+                  ({ publicRepackId }) =>
+                    publicRepackId === selectedRepack.publicRepackId,
+                )?.chase ?? null
+              : undefined
+          }
+          metadata={page.metadata}
+          onActionOutcome={reportAction}
+          onClose={() => setInspectorOpen(false)}
+          placement="sheet"
+          repack={selectedRepack}
+          returnFocusRef={selectionTriggerRef}
+        />
       ) : null}
     </div>
   );

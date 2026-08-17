@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { PublicCollectible } from "@packscout/contracts";
 import { SavedCollectibleButton } from "@/components/auth/SavedItemButton.client";
 import {
@@ -90,6 +90,7 @@ export function DesiredCollectibleSearch({
   const id = useId();
   const listboxId = `${id}-listbox`;
   const statusId = `${id}-status`;
+  const rootRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState(selected?.name ?? "");
   const [options, setOptions] = useState<readonly CollectibleOption[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -146,6 +147,23 @@ export function DesiredCollectibleSearch({
     };
   }, [normalized, searchable]);
 
+  useEffect(() => {
+    if (!open) return;
+    function closeOnOutsidePress(event: PointerEvent) {
+      const root = rootRef.current;
+      if (
+        event.target instanceof Node &&
+        root?.contains(event.target)
+      ) {
+        return;
+      }
+      setOptions([]);
+      setActiveIndex(-1);
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
+  }, [open]);
+
   function choose(option: CollectibleOption) {
     setSearch(option.name);
     setOptions([]);
@@ -169,7 +187,7 @@ export function DesiredCollectibleSearch({
           : "Choose an exact collectible from the results.";
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} ref={rootRef}>
       <label className={styles.label} htmlFor={`${id}-input`}>
         Desired chase collectible
       </label>

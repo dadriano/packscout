@@ -20,6 +20,7 @@ import {
   MOCK_DATA_RELEASE_PUBLIC_ID,
   MOCK_REPACK_SEARCH_SHARD_HASH,
   MOCK_REPACK_SEARCH_INDEX_HASH,
+  MOCK_PUBLIC_ASSET_ORIGINS,
   buildMockDataReleaseV2,
 } from "./mockDataReleaseFixture";
 import {
@@ -217,7 +218,7 @@ describe("mock V2 data release", () => {
       if (release === null) throw new Error("Expected the seeded data release.");
       return {
         metadata: release.metadata,
-        publicAssetOrigins: [],
+        publicAssetOrigins: [...MOCK_PUBLIC_ASSET_ORIGINS],
         vendors: (await ctx.db.query("vendors").collect()).map(
           ({ detail }) => detail,
         ),

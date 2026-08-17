@@ -54,24 +54,18 @@ export function ThemeControl() {
     window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
   }
 
-  const resultingTheme = theme === "dark" ? "light" : "dark";
+  const currentTheme = theme ?? "light";
+  const resultingTheme = currentTheme === "dark" ? "light" : "dark";
 
   return (
     <div className="theme-control">
       <button
         aria-label={`Switch to ${resultingTheme} theme`}
-        aria-pressed={theme === "dark"}
-        className="theme-toggle"
+        className="theme-icon-button"
         onClick={toggleTheme}
         type="button"
       >
-        <span aria-hidden="true" className="theme-toggle__thumb" />
-        <span className="theme-toggle__icon">
-          <SunIcon />
-        </span>
-        <span className="theme-toggle__icon">
-          <MoonIcon />
-        </span>
+        {currentTheme === "dark" ? <SunIcon /> : <MoonIcon />}
       </button>
     </div>
   );

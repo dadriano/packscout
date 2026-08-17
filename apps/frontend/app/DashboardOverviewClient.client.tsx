@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type {
@@ -12,8 +11,6 @@ import { CatalogFilters } from "@/components/catalog/CatalogFilters.client";
 import { OverviewDashboard } from "@/components/catalog/OverviewDashboard.client";
 import type { InspectorActionOutcome } from "@/components/catalog/PackInspector.client";
 import {
-  DEFAULT_CATALOG_QUERY,
-  serializeCatalogQueryState,
   serializeDashboardFilters,
 } from "@/lib/catalog-query-state.client";
 import { useNarrowCatalogInspector } from "@/lib/catalog-viewport.client";
@@ -60,6 +57,7 @@ export function DashboardOverviewClient({
   );
   const [feedback, setFeedback] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [sideInspectorDismissed, setSideInspectorDismissed] = useState(false);
   const narrowInspector = useNarrowCatalogInspector();
   const selectionTriggerRef = useRef<HTMLElement | null>(null);
   const detailById = useMemo(
@@ -80,11 +78,6 @@ export function DashboardOverviewClient({
   function navigate(filters: PublicRepackFilters) {
     startTransition(() => router.push(serializeDashboardFilters(filters)));
   }
-
-  const allRepacksHref = serializeCatalogQueryState({
-    ...DEFAULT_CATALOG_QUERY,
-    filters: bundle.activeFilters,
-  });
 
   useEffect(() => {
     queueProductTelemetry(
@@ -137,28 +130,27 @@ export function DashboardOverviewClient({
       <OverviewDashboard
         bundle={selectedBundle}
         controls={
-          <div className={styles.controls}>
-            <CatalogFilters
-              accepted={bundle.activeFilters}
-              facets={bundle.facets}
-              onApply={navigate}
-              onReset={() => startTransition(() => router.push("/"))}
-              pending={pending}
-            />
-            <Link className={styles.viewAll} href={allRepacksHref}>
-              View all repacks <span aria-hidden="true">→</span>
-            </Link>
-          </div>
+          <CatalogFilters
+            accepted={bundle.activeFilters}
+            facets={bundle.facets}
+            onApply={navigate}
+            onReset={() => startTransition(() => router.push("/"))}
+            pending={pending}
+          />
         }
-        inspectorOpen={!narrowInspector || sheetOpen}
+        inspectorOpen={narrowInspector ? sheetOpen : !sideInspectorDismissed}
         inspectorPlacement={narrowInspector ? "sheet" : "side"}
         inspectorReturnFocusRef={selectionTriggerRef}
-        onCloseInspector={() => setSheetOpen(false)}
+        onCloseInspector={() => {
+          if (narrowInspector) setSheetOpen(false);
+          else setSideInspectorDismissed(true);
+        }}
         onInspectorAction={reportInspectorAction}
         onSelectOpportunity={(publicRepackId, trigger) => {
           selectionTriggerRef.current = trigger;
           setSelectedPublicRepackId(publicRepackId);
           if (narrowInspector) setSheetOpen(true);
+          else setSideInspectorDismissed(false);
         }}
         selectedPublicRepackId={selectedPublicRepackId}
       />

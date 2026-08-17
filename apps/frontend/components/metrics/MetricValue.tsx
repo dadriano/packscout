@@ -7,6 +7,7 @@ type MetricValueProps = Readonly<{
   compact?: boolean;
   glossaryAlign?: "start" | "end";
   showGlossary?: boolean;
+  showLabel?: boolean;
   showReason?: boolean;
   showSemanticState?: boolean;
 }>;
@@ -16,12 +17,14 @@ export function MetricValue({
   compact = false,
   glossaryAlign = "start",
   showGlossary = true,
+  showLabel = true,
   showReason = true,
   showSemanticState = true,
 }: MetricValueProps) {
   const hasSignedState =
     metric.semanticState !== undefined &&
     metric.semanticState !== "unavailable";
+  const showLabelRow = showLabel || showGlossary;
 
   return (
     <div
@@ -29,12 +32,14 @@ export function MetricValue({
       data-density={compact ? "compact" : "default"}
       data-state={metric.semanticState ?? "plain"}
     >
-      <div className={styles.labelRow}>
-        <span className={styles.label}>{metric.label}</span>
-        {showGlossary ? (
-          <GlossaryHint align={glossaryAlign} field={metric.glossaryKey} />
-        ) : null}
-      </div>
+      {showLabelRow ? (
+        <div className={styles.labelRow}>
+          {showLabel ? <span className={styles.label}>{metric.label}</span> : null}
+          {showGlossary ? (
+            <GlossaryHint align={glossaryAlign} field={metric.glossaryKey} />
+          ) : null}
+        </div>
+      ) : null}
 
       <div className={styles.valueRow}>
         <span aria-hidden="true" className={styles.value}>

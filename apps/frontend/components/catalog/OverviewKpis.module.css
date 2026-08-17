@@ -7,6 +7,26 @@
   list-style: none;
 }
 
+.cardLink {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.cardLink:hover .card,
+.cardLink:focus-visible .card {
+  border-color: color-mix(in srgb, var(--color-action) 42%, var(--color-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-action) 14%, transparent);
+}
+
+.cardLink:focus-visible {
+  outline: 0;
+}
+
+.cardLink:focus-visible .card {
+  outline: 0;
+}
+
 .card {
   position: relative;
   display: grid;

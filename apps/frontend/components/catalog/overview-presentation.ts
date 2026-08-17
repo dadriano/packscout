@@ -127,8 +127,8 @@ export function presentDashboardKpis(
       id: "repacks",
       label: "Repacks",
       value: countLabel(kpis.totalRepacks),
-      helper: "Active public repacks matching the applied filters",
-      accessibleLabel: `${countLabel(kpis.totalRepacks)} active public repacks matching the applied filters.`,
+      helper: "",
+      accessibleLabel: `View all repacks: ${countLabel(kpis.totalRepacks)} active public repacks matching the applied filters.`,
       state: "plain",
     },
     {

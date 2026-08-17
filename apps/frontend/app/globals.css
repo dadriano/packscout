@@ -383,85 +383,35 @@ a {
   justify-self: end;
 }
 
-.theme-toggle {
-  position: relative;
+.theme-icon-button {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  align-items: center;
-  width: 62px;
-  height: 34px;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
   border: 1px solid var(--color-border);
   border-radius: 999px;
   background: var(--color-surface);
   box-shadow: var(--shadow-control);
   color: var(--color-text-muted);
   cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
 }
 
-.theme-toggle__thumb {
-  position: absolute;
-  z-index: 0;
-  top: 4px;
-  left: 4px;
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  background: linear-gradient(145deg, #744dff, #4b1ee7);
-  box-shadow: 0 3px 8px rgba(82, 44, 238, 0.3);
-  transition: transform 160ms ease;
+.theme-icon-button:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
 }
 
-.theme-toggle__icon {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-}
-
-.theme-toggle__icon:first-of-type {
-  color: white;
-}
-
-.theme-toggle__icon:last-of-type {
-  color: var(--color-text-muted);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .theme-toggle__thumb {
-    transform: translateX(28px);
-  }
-
-  :root:not([data-theme]) .theme-toggle__icon:first-of-type {
-    color: var(--color-text-muted);
-  }
-
-  :root:not([data-theme]) .theme-toggle__icon:last-of-type {
-    color: white;
-  }
-}
-
-:root[data-theme="dark"] .theme-toggle__thumb {
-  transform: translateX(28px);
-}
-
-:root[data-theme="dark"] .theme-toggle__icon:first-of-type {
-  color: var(--color-text-muted);
-}
-
-:root[data-theme="dark"] .theme-toggle__icon:last-of-type {
-  color: white;
-}
-
-:root[data-theme="light"] .theme-toggle__thumb {
-  transform: translateX(0);
-}
-
-:root[data-theme="light"] .theme-toggle__icon:first-of-type {
-  color: white;
-}
-
-:root[data-theme="light"] .theme-toggle__icon:last-of-type {
-  color: var(--color-text-muted);
+.theme-icon-button:focus-visible {
+  border-color: var(--color-focus);
+  color: var(--color-text);
+  outline: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-focus) 18%, transparent);
 }
 
 .app-content {

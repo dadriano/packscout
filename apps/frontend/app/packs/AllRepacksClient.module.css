@@ -63,11 +63,6 @@
   display: none;
 }
 
-.preview {
-  width: min(100%, 760px);
-  margin-inline: auto;
-}
-
 @media (max-width: 560px) {
   .search {
     max-width: none;
