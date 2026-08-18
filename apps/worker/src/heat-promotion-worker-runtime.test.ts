@@ -4,6 +4,7 @@ import {
   HeatPromotionRetentionCoordinator,
 } from "./heat-promotion-retention.ts";
 import {
+  HeatPromotionWorkerHealthLogger,
   HeatPromotionWorkerRuntime,
   type HeatPromotionWorkerLogEvent,
 } from "./heat-promotion-worker-runtime.ts";
@@ -19,6 +20,55 @@ function idleResult() {
     failureCode: null,
   };
 }
+
+test("Heat health exposes only bounded alignment, age, and expiry evidence", () => {
+  const events: HeatPromotionWorkerLogEvent[] = [];
+  const logger = new HeatPromotionWorkerHealthLogger(
+    { write: (event) => events.push(event) },
+    "heat-worker-1",
+    { now: () => new Date("2026-08-15T12:16:00.000Z") },
+  );
+  logger.report({
+    settledWatermark: 100n,
+    requestedWatermark: 100n,
+    confirmedWatermark: 99n,
+    confirmedPublicationIdentity: "55000000-0000-5000-8000-000000000001",
+    activeAttemptId: null,
+    activeAttemptState: null,
+    retryAt: null,
+    lastActivatedAt: new Date("2026-08-15T12:00:01.000Z"),
+    lastUnchangedObservedAt: null,
+    manifestAlignment: {
+      publicReleaseId: "75000000-0000-5000-8000-000000000001",
+      manifestFingerprint: "a".repeat(64),
+      sharedConfigurationEpoch: {
+        configurationKey: "catalog-v1",
+        revision: 1,
+        publicChangeSequence: "1",
+        configurationHash: "b".repeat(64),
+      },
+      providerReferenceSetHash: "c".repeat(64),
+    },
+    alignmentMatchesActiveManifest: false,
+    frameCalculatedAt: new Date("2026-08-15T12:00:00.000Z"),
+    frameExpiresAt: new Date("2026-08-15T12:15:00.000Z"),
+  });
+  assert.deepEqual(events, [{
+    level: "info",
+    event: "heat_promotion_health",
+    workerId: "heat-worker-1",
+    confirmedFrameSequence: "99",
+    manifestPublicReleaseId: "75000000-0000-5000-8000-000000000001",
+    providerReferenceSetHash: "c".repeat(64),
+    heatAlignmentCurrent: false,
+    confirmedFrameCalculatedAt: "2026-08-15T12:00:00.000Z",
+    confirmedFrameAgeSeconds: 960,
+    confirmedFrameExpiresAt: "2026-08-15T12:15:00.000Z",
+    confirmedFrameExpired: true,
+  }]);
+  assert.equal(JSON.stringify(events).includes("configurationKey"), false);
+  assert.equal(JSON.stringify(events).includes("manifestFingerprint"), false);
+});
 
 test("Heat runs once at each exact closed-minute boundary", async () => {
   let now = new Date("2026-08-15T12:00:30.000Z");

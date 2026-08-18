@@ -25,6 +25,7 @@ test("provider and manifest CAS losses classify as reconciliation failures", () 
 function healthyDiagnostic(
   overrides: Partial<PromotionReadinessDiagnostic> = {},
 ): PromotionReadinessDiagnostic {
+  const confirmedWatermark = overrides.confirmedWatermark ?? 10n;
   return {
     activeAlertCount: 0,
     activeFailureAlertCount: 0,
@@ -32,7 +33,9 @@ function healthyDiagnostic(
     canonicalSettledWatermark: 10n,
     canonicalSettledAt: new Date("2026-08-15T12:00:30.000Z"),
     canonicalSourceHeadWatermark: 10n,
-    confirmedWatermark: 10n,
+    activationConfirmedWatermark:
+      overrides.activationConfirmedWatermark ?? confirmedWatermark,
+    confirmedWatermark,
     laneTargetWatermark: 10n,
     laneTargetAt: new Date("2026-08-15T12:00:30.000Z"),
     latestFailedAttemptId: null,
@@ -186,6 +189,42 @@ test("terminal failures retain only bounded identifiers and recover after confir
   ]);
   assert.equal(isPromotionReconciliationFailureCode("CATALOG_PLAN_BLOCKED"), false);
   assert.equal(isPromotionReconciliationFailureCode("CATALOG_LEDGER_INVALID"), true);
+});
+
+test("provider completion recovers terminal work while active lag remains distinct", async () => {
+  const state = harness(healthyDiagnostic({
+    activeAlertCount: 1,
+    activationConfirmedWatermark: 8n,
+    canonicalSettledAt: new Date("2026-08-15T12:00:00.000Z"),
+    confirmedWatermark: 10n,
+    latestFailedAttemptId: "52000000-0000-4000-8000-000000000007",
+    latestFailedWatermark: 10n,
+    latestFailureCode: "CATALOG_RETRY_EXHAUSTED",
+  }));
+  await state.readiness.assess();
+  assert.deepEqual(state.calls, [{
+    name: "activation",
+    input: {
+      organizationId,
+      deploymentScopeDigest,
+      lane: "provider",
+      platformKey: "alpha",
+      targetWatermark: 10n,
+      confirmedWatermark: 8n,
+      durationMs: 60_000,
+    },
+  }]);
+
+  state.setDiagnostic(healthyDiagnostic({
+    activeAlertCount: 2,
+    activationConfirmedWatermark: 10n,
+    confirmedWatermark: 10n,
+  }));
+  await state.readiness.assess();
+  assert.deepEqual(state.calls.map(({ name }) => name), [
+    "activation",
+    "recovered",
+  ]);
 });
 
 test("a terminal ledger row restores an alert lost after the terminal commit", async () => {

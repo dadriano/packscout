@@ -107,7 +107,7 @@ Tasks `001`–`006` remain completed historical foundations. Their causal ledger
 | 011 | Promote providers and reconcile manifests | large | 3–5 days | done | 007, 008, 009, 010 |
 | 012 | Align Heat to the active catalog manifest | large | 2–4 days | done | 006, 010, 011 |
 | 013 | Retain manifests and provider releases safely | medium | 1–3 days | done | 009, 010 |
-| 014 | Certify provider-manifest cutover and readiness | large | 3–5 days | not started | 007–013 |
+| 014 | Certify provider-manifest cutover and readiness | large | 3–5 days | in progress | 007–013 |
 
 ## Build Order
 

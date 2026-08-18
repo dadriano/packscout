@@ -37,6 +37,7 @@ export type PromotionV2WorkerLogEvent = Readonly<{
     | "promotion_v2_manifest_health";
   workerId: string;
   platformKey?: string;
+  lifecycleState?: string;
   attemptId?: string;
   enabledProviderCount?: number;
   failureCode?: string;
@@ -45,6 +46,8 @@ export type PromotionV2WorkerLogEvent = Readonly<{
   completedCheckpoint?: string;
   activeCheckpoint?: string;
   checkpointLag?: string;
+  completedLag?: string;
+  activeLag?: string;
   requestedEvaluationSequence?: string;
   confirmedEvaluationSequence?: string;
   activeGeneration?: string;

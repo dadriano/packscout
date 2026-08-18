@@ -5,7 +5,7 @@
 **Blocks:** none
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder after target-environment access is available, including cutover rehearsal and failure injection
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 
@@ -111,3 +111,30 @@ The runbook names protected operator actions and stable outcomes only. It contai
 - The prior runbook documented configuration, recovery, retention, rollback, clear, rotation, shutdown, evidence redaction, and launch gates.
 
 These results are historical regression inputs, not certification of the provider-manifest architecture.
+
+## Local Certification Checkpoint — 2026-08-18
+
+The repository-side cutover and evidence boundary is implemented without claiming a target-environment launch:
+
+- `scripts/preproduction/reset-postgres-convex-promotion-cutover.mjs` provides a preproduction-only, dry-run-first, exact-target-confirmed reset. It backs up and hashes the closed Convex allowlist before mutation, deletes only obsolete publication state, preserves authentication nonces, deletes only scoped PostgreSQL promotion operations/attempts/lanes in dependency order, and verifies protected canonical-state digests before commit.
+- `scripts/preproduction/certify-provider-manifest-readiness.mjs` validates a strict, versioned, redacted offline evidence package. It requires hosted samples, at least twenty zero-error observations per timed lane, p95 below sixty seconds, exact publication bounds, exact manifest/Heat count alignment, monitor fire/resolve evidence, key overlap and retirement, rollback, retention, reset preservation, and the exact commit and commands.
+- Public certification now exercises all eight launch providers across dashboard, facets, sorting, details, desired-collectible matching, search, and cursor reset without changing public DTOs.
+- Durable provider readiness distinguishes settled, completed, and active lag; intentional disabled/recovery-only lanes do not raise false activation delay. Heat health reports exact manifest/provider-set alignment, age, and expiry using only allowlisted operational fields.
+- The runbook records the exact preproduction reset order, stop and recovery conditions, evidence redaction, all six authority rotations, hosted timing package, external monitors, rollback/retention rehearsal, and the reset-before-migration requirement.
+
+Local focused and package verification is green for contracts, database, worker, Convex, frontend, root scripts, reset/certifier tooling, eight-provider public behavior, readiness projections, and the real provider-to-manifest maximum-volume diagnostic. The task intentionally remains in progress until the target evidence below exists.
+
+The final local `npm run verify:framework` rerun was intentionally stopped at user direction after framework checks, Prisma checks, the zero-finding standards ratchet, lint, typecheck, and all package/root tests passed and the build stage began. This checkpoint does not claim a completed canonical verifier run; that exact command remains part of the final launch-commit evidence below.
+
+## External Certification Blockers
+
+The following evidence cannot be manufactured locally and remains required before checking the launch acceptance criteria or marking this task done:
+
+- an authorized target backup, dry run, reset, schema deployment, and before/after preservation proof;
+- representative hosted provider-checkpoint-to-manifest and Heat timing samples with zero errors and p95 below one minute;
+- external worker-down and no-advancing-Heat monitors that fire before expiry and resolve after recovery;
+- target secret-manager overlap, receipt-under-new-key, old-key retirement, and rollback for every configured authority;
+- target manifest rollback, retention, failure-injection, restart, and public/Heat reconciliation evidence; and
+- `npm run verify:framework` on the exact final launch commit after the hosted evidence package is attached.
+
+No compatibility path, dual read/write, hosted result, secret-manager action, monitor result, or target mutation is claimed by this checkpoint.

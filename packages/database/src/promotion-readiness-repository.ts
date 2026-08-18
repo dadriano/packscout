@@ -10,6 +10,7 @@ export interface PersistedPromotionReadinessDiagnostic {
   readonly canonicalSettledWatermark: bigint;
   readonly canonicalSettledAt: Date | null;
   readonly canonicalSourceHeadWatermark: bigint;
+  readonly activationConfirmedWatermark: bigint;
   readonly confirmedWatermark: bigint;
   readonly laneTargetWatermark: bigint;
   readonly laneTargetAt: Date | null;
@@ -26,6 +27,7 @@ interface ReadinessRow {
   canonicalSettledWatermark: bigint;
   canonicalSettledAt: Date | null;
   canonicalSourceHeadWatermark: bigint;
+  activationConfirmedWatermark: bigint;
   confirmedWatermark: bigint;
   laneTargetWatermark: bigint;
   laneTargetAt: Date | null;
@@ -178,7 +180,20 @@ export class PrismaPromotionReadinessRepository {
           else canonical."canonicalSourceHeadWatermark"
         end::bigint as "canonicalSourceHeadWatermark",
         case ${this.lane}
-          when 'provider' then coalesce(provider.completed_checkpoint, 0)
+          when 'provider' then case
+            when coalesce(lifecycle."isActive", false)
+              then coalesce(active.selected_checkpoint, 0)
+            else coalesce(provider.settled_checkpoint, 0)
+          end
+          when 'manifest' then coalesce(manifest.confirmed_evaluation_sequence, 0)
+          else coalesce(heat.confirmed_watermark, 0)
+        end::bigint as "activationConfirmedWatermark",
+        case ${this.lane}
+          when 'provider' then case
+            when coalesce(lifecycle."isActive", false)
+              then coalesce(provider.completed_checkpoint, 0)
+            else coalesce(provider.settled_checkpoint, 0)
+          end
           when 'manifest' then coalesce(manifest.confirmed_evaluation_sequence, 0)
           else coalesce(heat.confirmed_watermark, 0)
         end::bigint as "confirmedWatermark",
@@ -204,6 +219,24 @@ export class PrismaPromotionReadinessRepository {
        and provider.organization_id = cast(${this.#organizationId} as uuid)
        and provider.deployment_key = ${this.#deploymentKey}
        and provider.platform_key = ${this.platformKey ?? ""}
+      left join public.manifest_active_provider_selections active
+        on ${this.lane === "provider"}
+       and active.organization_id = provider.organization_id
+       and active.deployment_key = provider.deployment_key
+       and active.platform_key = provider.platform_key
+      left join lateral (
+        select impact.lifecycle_state = 'active'::public.provider_state
+          as "isActive"
+        from public.public_change_catalog_impacts as impact
+        join public.catalog_manifest_lifecycle_checkpoints as checkpoint
+          on checkpoint.organization_id = impact.organization_id
+         and impact.cause_sequence <= checkpoint.settled_sequence
+        where ${this.lane === "provider"}
+          and impact.organization_id = cast(${this.#organizationId} as uuid)
+          and impact.lifecycle_platform_key = ${this.platformKey ?? ""}
+        order by impact.cause_sequence desc
+        limit 1
+      ) as lifecycle on true
       left join public.manifest_promotion_lanes manifest
         on ${this.lane === "manifest"}
        and manifest.organization_id = cast(${this.#organizationId} as uuid)
@@ -254,6 +287,7 @@ export class PrismaPromotionReadinessRepository {
       canonicalSettledWatermark: 0n,
       canonicalSettledAt: null,
       canonicalSourceHeadWatermark: 0n,
+      activationConfirmedWatermark: 0n,
       confirmedWatermark: 0n,
       laneTargetWatermark: 0n,
       laneTargetAt: null,

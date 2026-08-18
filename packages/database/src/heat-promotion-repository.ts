@@ -23,6 +23,9 @@ import {
   type PromotionOperationRecord,
   type PromotionTerminalState,
 } from "./catalog-promotion-repository.ts";
+import {
+  PrismaHeatPromotionManifestRepository,
+} from "./heat-promotion-manifest-repository.ts";
 
 export type HeatPromotionOperationKind =
   | "start" | "applyBatch" | "finalize" | "refreshFrame";
@@ -38,6 +41,13 @@ export interface HeatPromotionAttemptClaim extends Omit<
   "manifestSourceProofBody" | "manifestSourceProofSha256"
 > {
   readonly manifestSourceProof: ActiveCatalogHeatManifest | null;
+}
+
+export interface HeatPromotionHealthSnapshot extends PromotionHealthSnapshot {
+  readonly manifestAlignment: ActiveCatalogHeatManifest["manifestAlignment"] | null;
+  readonly alignmentMatchesActiveManifest: boolean;
+  readonly frameCalculatedAt: Date | null;
+  readonly frameExpiresAt: Date | null;
 }
 
 const pathByKind = Object.freeze({
@@ -67,12 +77,17 @@ function heatOperation(
 /** Heat-specific type adapter over the shared promotion ledger implementation. */
 export class PrismaHeatPromotionRepository {
   readonly #shared: PrismaCatalogPromotionRepository;
+  readonly #manifestProofs: PrismaHeatPromotionManifestRepository;
 
   constructor(
     database: PackscoutPrismaClient,
     binding: Readonly<{ organizationId: string; deploymentKey: string }>,
   ) {
     this.#shared = new PrismaCatalogPromotionRepository(database, binding);
+    this.#manifestProofs = new PrismaHeatPromotionManifestRepository(
+      database,
+      binding,
+    );
   }
 
   loadBootstrapState(laneKey: "heat"): Promise<PromotionBootstrapState> {
@@ -272,10 +287,36 @@ export class PrismaHeatPromotionRepository {
     return this.#shared.completeAttempt(input);
   }
 
-  loadHealthSnapshot(input: {
+  async loadHealthSnapshot(input: {
     laneKey: "heat";
     now: Date;
-  }): Promise<PromotionHealthSnapshot | null> {
-    return this.#shared.loadHealthSnapshot(input);
+  }): Promise<HeatPromotionHealthSnapshot | null> {
+    const health = await this.#shared.loadHealthSnapshot(input);
+    if (health === null) return null;
+    if (health.confirmedWatermark === 0n) {
+      return {
+        ...health,
+        manifestAlignment: null,
+        alignmentMatchesActiveManifest: true,
+        frameCalculatedAt: null,
+        frameExpiresAt: null,
+      };
+    }
+    const [frame, activeManifest] = await Promise.all([
+      this.#manifestProofs.loadActiveHeatFrame(),
+      this.#manifestProofs.loadActiveCatalogManifest(),
+    ]);
+    if (frame === null) {
+      throw new PromotionLedgerError("PROMOTION_ATTEMPT_CONFLICT");
+    }
+    return {
+      ...health,
+      manifestAlignment: frame.manifestAlignment,
+      alignmentMatchesActiveManifest: activeManifest !== null &&
+        canonicalJson(frame.manifestAlignment) ===
+          canonicalJson(activeManifest.manifestAlignment),
+      frameCalculatedAt: frame.calculatedAt,
+      frameExpiresAt: frame.expiresAt,
+    };
   }
 }

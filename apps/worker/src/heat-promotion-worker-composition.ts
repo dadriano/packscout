@@ -53,6 +53,7 @@ export function createHeatPromotionWorkerRuntime(
   const healthLogger = new HeatPromotionWorkerHealthLogger(
     input.logger,
     input.workerId,
+    clock,
   );
   const runner = new HeatPromotionRunner({
     workerId: input.workerId,

@@ -64,6 +64,7 @@ implements ProviderPromotionAlertSink, ProviderPromotionHealthSink {
   ) {}
 
   report(health: ProviderPromotionHealth): Promise<void> {
+    const lifecycleState = health.lifecycleState ?? "unknown";
     return runPromotionObservabilityFanout(
       () => this.readiness.assess(),
       () => this.logger.write({
@@ -72,6 +73,7 @@ implements ProviderPromotionAlertSink, ProviderPromotionHealthSink {
         workerId: safeIdentifier.test(this.workerId) ? this.workerId : "invalid",
         platformKey: safeIdentifier.test(health.platformKey)
           ? health.platformKey : "invalid",
+        lifecycleState,
         settledCheckpoint: sequence(health.settledCheckpoint),
         sourceHeadCheckpoint: sequence(health.sourceHeadCheckpoint),
         completedCheckpoint: sequence(health.completedCheckpoint),
@@ -81,6 +83,15 @@ implements ProviderPromotionAlertSink, ProviderPromotionHealthSink {
         checkpointLag: sequence(
           health.settledCheckpoint > health.completedCheckpoint
             ? health.settledCheckpoint - health.completedCheckpoint : 0n,
+        ),
+        completedLag: sequence(
+          health.settledCheckpoint > health.completedCheckpoint
+            ? health.settledCheckpoint - health.completedCheckpoint : 0n,
+        ),
+        activeLag: sequence(
+          lifecycleState === "active" &&
+            health.settledCheckpoint > (health.activeCheckpoint ?? 0n)
+            ? health.settledCheckpoint - (health.activeCheckpoint ?? 0n) : 0n,
         ),
         requestedEvaluationSequence: sequence(
           health.requestedEvaluationSequence,

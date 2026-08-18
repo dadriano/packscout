@@ -16,6 +16,7 @@ export interface PromotionReadinessDiagnostic {
   readonly canonicalSettledWatermark: bigint;
   readonly canonicalSettledAt: Date | null;
   readonly canonicalSourceHeadWatermark: bigint;
+  readonly activationConfirmedWatermark: bigint;
   readonly confirmedWatermark: bigint;
   readonly laneTargetWatermark: bigint;
   readonly laneTargetAt: Date | null;
@@ -139,6 +140,9 @@ export class PromotionOperationalReadinessService {
     const confirmedWatermark = nonNegativeWatermark(
       diagnostic.confirmedWatermark,
     );
+    const activationConfirmedWatermark = nonNegativeWatermark(
+      diagnostic.activationConfirmedWatermark,
+    );
     const technicalFailureCount = nonNegativeCount(
       diagnostic.technicalFailureCount,
     );
@@ -152,7 +156,7 @@ export class PromotionOperationalReadinessService {
       : Math.max(0, this.clock.now().getTime() - target.at.getTime());
     const activationDelayed =
       target.at !== null &&
-      target.watermark > confirmedWatermark &&
+      target.watermark > activationConfirmedWatermark &&
       ageMilliseconds >= this.#activationAlertAfterMilliseconds;
     const unrecoveredFailure =
       diagnostic.latestFailedAttemptId !== null &&
@@ -210,7 +214,7 @@ export class PromotionOperationalReadinessService {
           platformKey: this.#configuration.platformKey,
         }),
         targetWatermark: target.watermark,
-        confirmedWatermark,
+        confirmedWatermark: activationConfirmedWatermark,
         durationMs: ageMilliseconds,
       });
       assertNotificationPublished(result);
@@ -221,7 +225,8 @@ export class PromotionOperationalReadinessService {
     const healthy =
       !settlementBlocked &&
       !unrecoveredFailure &&
-      target.watermark <= confirmedWatermark;
+      target.watermark <= confirmedWatermark &&
+      target.watermark <= activationConfirmedWatermark;
     const durableRecoveryPending =
       nonNegativeCount(diagnostic.activeAlertCount) > 0;
     if (
@@ -237,7 +242,9 @@ export class PromotionOperationalReadinessService {
           platformKey: this.#configuration.platformKey,
         }),
         targetWatermark: target.watermark,
-        confirmedWatermark,
+        confirmedWatermark: confirmedWatermark < activationConfirmedWatermark
+          ? confirmedWatermark
+          : activationConfirmedWatermark,
       });
       assertNotificationPublished(result);
       this.#unhealthyObserved = false;

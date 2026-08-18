@@ -206,6 +206,7 @@ export interface ProviderPromotionReleaseArtifact {
 
 export interface ProviderPromotionHealth {
   readonly platformKey: string;
+  readonly lifecycleState: "active" | "disabled" | "archived" | null;
   readonly settledCheckpoint: bigint;
   readonly sourceHeadCheckpoint: bigint;
   readonly requestedEvaluationSequence: bigint;

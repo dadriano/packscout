@@ -74,6 +74,10 @@ export interface HeatPromotionHealth {
   readonly retryAt: Date | null;
   readonly lastActivatedAt: Date | null;
   readonly lastUnchangedObservedAt: Date | null;
+  readonly manifestAlignment: ProductionHeatManifestAlignment | null;
+  readonly alignmentMatchesActiveManifest: boolean;
+  readonly frameCalculatedAt: Date | null;
+  readonly frameExpiresAt: Date | null;
 }
 
 export interface HeatPromotionLedgerPort {

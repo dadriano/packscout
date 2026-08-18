@@ -19,11 +19,13 @@ request, provider payload, or Convex mutation may select an organization.
   ambiguous sends by operation status. Provider completion never changes public
   state; only the serialized manifest compare-and-swap changes the active
   pointer after authoritative composition proves the full count/hash graph.
-- A failed staged publication never replaces the prior complete release.
-  Unchanged content advances observation freshness without duplicating release
-  rows.
+- A failed provider release or manifest publication never replaces the prior
+  complete active manifest. Unchanged provider content reuses its complete
+  provider release, and an unchanged manifest reference set advances
+  observation freshness without minting a new manifest.
 - Heat is a separate minute-boundary lane. Catalog activation never waits for
-  Heat, and Heat must match the active catalog release or fail closed.
+  Heat, and Heat must match the active manifest fingerprint and exact provider
+  reference-set hash or fail closed.
 - Durable alerts contain only a lane, bounded condition/code/count/duration,
   public watermark strings, and a PostgreSQL attempt UUID. The server derives a
   domain-separated SHA-256 deployment-scope digest for dedupe and recovery keys;
@@ -43,12 +45,12 @@ into evidence, or commit their values.
 | `PACKSCOUT_PUBLIC_ORGANIZATION_ID` | Required UUID for the single approved public organization. It is resolved at process startup and never accepted from a request. |
 | `PACKSCOUT_CATALOG_DEPLOYMENT_KEY` | Required server-side deployment key matching `^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$`. The same value scopes all provider lanes and the singleton manifest lane in PostgreSQL. |
 | `PACKSCOUT_CONVEX_PUBLICATION_BASE_URL` | Required HTTPS origin only: no credentials, path, query, or fragment. |
-| `PACKSCOUT_CONVEX_PUBLICATION_KEY_ID` | Heat-only versioned publication key retained until the Heat cutover. Provider and manifest promotion must not fall back to it. |
-| `PACKSCOUT_CONVEX_PUBLICATION_SECRET_BASE64` | Heat-only canonical-base64 secret, decoding to 32 through 256 bytes. It is not provider or manifest authority. |
+| `PACKSCOUT_CONVEX_PUBLICATION_KEY_ID` | Required Heat-only versioned publication key. Provider and manifest promotion must not fall back to it. |
+| `PACKSCOUT_CONVEX_PUBLICATION_SECRET_BASE64` | Required Heat-only canonical-base64 secret, decoding to 32 through 256 bytes. It is not provider or manifest authority. |
 | `PACKSCOUT_CATALOG_PROVIDER_CREDENTIALS` | Required canonical JSON object mapping every configured `platformKey` to exact `{keyId,secretBase64}` own properties, at most eight entries. Keys are C-sorted, key IDs are unique, every secret decodes to 32 through 256 bytes, and decoded signing bytes are unique across all publication roles. Startup requires exact parity with the atomic configured-platform snapshot, including disabled lanes that may need reconciliation. Values are never logged. |
-| `PACKSCOUT_CATALOG_MANIFEST_PUBLISH_KEY_ID` / `PACKSCOUT_CATALOG_MANIFEST_PUBLISH_SECRET_BASE64` | Required manifest publish/status credential. Its key ID and decoded secret bytes must be disjoint from every provider, clear, retain, and Heat credential. |
-| `PACKSCOUT_CATALOG_MANIFEST_CLEAR_KEY_ID` / `PACKSCOUT_CATALOG_MANIFEST_CLEAR_SECRET_BASE64` | Required least-privilege clear credential. Its key ID and decoded secret bytes must be disjoint from every provider, publish, retain, and Heat credential so another leaked role cannot clear the catalog. |
-| `PACKSCOUT_CATALOG_RETENTION_KEY_ID` / `PACKSCOUT_CATALOG_RETENTION_SECRET_BASE64` | Required least-privilege retain credential. Its key ID and decoded secret bytes must be distinct from provider, publish, clear, and Heat roles. Grant only `retain` in `PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES`. |
+| `PACKSCOUT_CATALOG_MANIFEST_PUBLISH_KEY_ID` / `PACKSCOUT_CATALOG_MANIFEST_PUBLISH_SECRET_BASE64` | Required manifest publish/status credential. Its key ID and decoded secret bytes must be disjoint from every provider, clear, rollback, retain, and Heat credential. |
+| `PACKSCOUT_CATALOG_MANIFEST_CLEAR_KEY_ID` / `PACKSCOUT_CATALOG_MANIFEST_CLEAR_SECRET_BASE64` | Required least-privilege clear credential. Its key ID and decoded secret bytes must be disjoint from every provider, publish, rollback, retain, and Heat credential so another leaked role cannot clear the catalog. |
+| `PACKSCOUT_CATALOG_RETENTION_KEY_ID` / `PACKSCOUT_CATALOG_RETENTION_SECRET_BASE64` | Required least-privilege retain credential. Its key ID and decoded secret bytes must be distinct from provider, publish, clear, rollback, and Heat roles. Grant only `retain` in `PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES`. |
 | `PACKSCOUT_CATALOG_RETENTION_INTERVAL_MS` | Optional completed-barrier cadence; default `3600000`, allowed `60000` through `86400000`. |
 | `PACKSCOUT_CATALOG_RETENTION_CONTINUATION_INTERVAL_MS` | Optional active-barrier continuation/retry cadence; default `1000`, allowed `100` through `60000` and no greater than the completed-barrier cadence. |
 | `PACKSCOUT_CATALOG_RETENTION_MAXIMUM_DOCUMENTS` | Optional Convex artifact-document bound per mutation; default `90`, allowed `9` through `90`. The protocol separately caps total deletion at 100 including journal rows. |
@@ -137,8 +139,9 @@ The first catalog is allowed only when all of these gates pass:
 `INITIAL_BACKFILL_INCOMPLETE`, `INITIAL_PROVIDER_DELAYED`,
 `PUBLIC_CONFIGURATION_UNAPPROVED`, and technical settlement alerts are blockers,
 not retry bypasses. After the first complete activation, a delayed provider may
-retain its last settled public values. The release must then report a nonzero
-`delayedProviderCount`; it must not mix unsettled rows into the release.
+retain its last settled public values. The active manifest observation must then
+report a nonzero `delayedProviderCount`; the provider release must not mix
+unsettled rows into its content.
 
 Removing a provider configuration is a separate, ordered operation from
 disabling it. First settle the lifecycle disable while the provider remains in
@@ -205,15 +208,20 @@ cover process-alive publication and reconciliation failures. Record both monitor
 checks as production evidence. No application health endpoint is required by
 this runbook.
 
-Catalog health logs may include the bounded public platform key, separate
-settled/completed/active checkpoints, requested/confirmed evaluation sequences,
-active attempt state/start/age, retry time, activation/reconciliation times,
-failure code, and delayed-provider count. Heat health may include its frame,
-requested, and confirmed sequences; active attempt state/age; retry and last
-activation/unchanged times; signal-set reuse; acknowledged operation count;
-failure code; and normalized-retention batch/deletion/cap state. They must not
-include an organization, deployment key, internal provider identity, raw observation,
-credential, signing material, actor, run, or quarantine detail.
+Provider health logs may include the bounded public platform key; separate
+settled, completed, and active checkpoints; completed and active lag; requested
+and confirmed evaluation sequences; active attempt state/start/age; retry time;
+activation/reconciliation times; failure code; and delayed-provider count.
+Manifest health may include its requested/confirmed sequence, active generation,
+age, retry/CAS result, and reconciliation state. Heat health may include its
+frame, requested, and confirmed sequences; active attempt state/age; retry and
+last activation/unchanged times; signal-set reuse; acknowledged operation count;
+the public manifest release ID and provider-reference-set hash needed to prove
+alignment; an alignment-current flag; frame calculation time, bounded age,
+expiry time, and expired flag; failure code; and normalized-retention
+batch/deletion/cap state. They must not include an organization, deployment
+key, internal provider identity, raw observation, credential, signing material,
+actor, tenant, run, or quarantine detail.
 
 ## Retry, reconciliation, restart, and shutdown
 
@@ -245,23 +253,32 @@ hash/count mismatch by mutating staged Convex documents.
 Signing rotation uses an overlap; it never changes an existing operation body.
 
 1. Generate a new 32 through 256-byte secret and a new versioned key ID in the
-   secret manager. Select exactly one role: one provider platform, manifest
-   publish, manifest clear, or Heat. Never reuse a key ID across these roles.
+   target secret manager. Select exactly one authority: one provider platform,
+   manifest publish, manifest clear, manifest rollback, catalog retention, or
+   Heat. Never reuse a key ID or decoded secret bytes across authorities.
 2. Add the new key ID and canonical-base64 value to the strict
    `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` JSON map while retaining the old
    entry. For a provider publisher, also add the new key ID with the same
-   platform binding to `PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS`; never change
-   a key ID's existing platform. Deploy Convex first.
+   platform binding to `PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS`. For manifest
+   publish, clear, rollback, or retention, add only the same least-privilege
+   role to `PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES`. For Heat, add the key ID to
+   `PACKSCOUT_HEAT_PUBLICATION_KEY_IDS`. Never change an existing key ID's
+   platform or role. Deploy Convex first.
 3. Verify the old worker can still authenticate, then atomically replace the
-   matching provider-map entry, manifest publish pair, manifest clear pair, or
-   Heat pair and restart safely. Keep every disabled provider's credential until
-   its dispatched operation and retention proof are fully reconciled.
-4. Observe a signed status request and one terminal provider, manifest, or Heat receipt with
-   the new key. Evidence records the key ID and result, never the map or secret.
-5. Keep both entries through all in-flight retries and at least the five-minute
-   request window plus the ten-minute nonce-retention window. Remove the old
-   entry from both maps only after the ledger has no operation that can retry
-   with it.
+   matching provider, publish, clear, retention, or Heat credential and restart
+   safely. Rollback authority remains in the protected incident-operator path;
+   exercise it with a signed status/rollback rehearsal rather than adding it to
+   a steady worker. Keep every disabled provider credential until its dispatched
+   operations and retention proof are fully reconciled.
+4. Observe an authenticated status request and one terminal receipt under the
+   new authority: provider finalize/reuse, manifest publish, clear, rollback,
+   retention, or Heat as applicable. Evidence records only the role, terminal
+   receipt digest, and timestamps; never a key ID, authority map, or secret.
+5. Keep old and new authority entries through all in-flight retries and for at
+   least 15 minutes after the new-key terminal receipt. Remove the old entry
+   only after the durable ledger proves zero retryable operations for that
+   authority. Record the overlap proof, old-key retirement proof, and retirement
+   time without recording the credential or protected binding.
 
 An unknown-key alert during overlap means deployment ordering is wrong. Restore
 the old worker key or re-add the old Convex map entry; do not disable signing.
@@ -269,9 +286,9 @@ the old worker key or re-add the old Convex map entry; do not disable signing.
 ## Rollback, clear, and settlement unblock authority
 
 - A release operator may submit a signed rollback only to the retained previous
-  complete release and must provide the exact expected active release. Heat
-  becomes available only when a frame aligned to the resulting active catalog
-  exists.
+  complete manifest and must provide the exact expected active manifest. Heat
+  becomes available only when a frame aligned to the resulting manifest and
+  provider reference set exists.
 - Clearing the catalog is destructive emergency authority. It requires incident
   commander approval, a signing key assigned the explicit `clear` role in
   `PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES`, and the
@@ -375,29 +392,155 @@ Safe logs record only outcome, resumed-barrier flag, bounded step/request/count
 totals, and a stable failure code. They never contain organization/deployment
 binding, proof bodies, operation bytes, receipts, or credentials.
 
-## Legacy prelaunch Heat cutover
+## Clean preproduction cutover
 
-There is intentionally no dual read, optional-field compatibility path, or
-authenticated reset/purge endpoint. An environment that ran snapshot-owned
-legacy/mock Heat must complete a separately approved, environment-scoped cleanup
-or one-time migration before the new schema push:
+This is a one-time, prelaunch replacement of the obsolete single-release
+catalog and pre-manifest Heat publication state. There is no dual read, dual
+write, optional-field compatibility path, or authenticated runtime purge
+endpoint. Run the reset **before** PostgreSQL migration
+`20260816030000_heat_manifest_alignment` and before deploying the
+provider-release/manifest Convex schema. That migration deliberately refuses
+old Heat attempts whose content identity has no manifest-source proof.
 
-1. Prove the environment contains no observed production Heat rows. If it does,
-   stop and design a reviewed one-time migration instead of deleting data.
-2. Back up and account for legacy `repackHeatState`, `repackHeatSnapshots`, and
-   `repackHeatSignals` documents.
-3. Clear or migrate those three legacy tables with an explicitly environment-
-   scoped utility owned by the Convex operator. The new
-   `repackHeatSignalSets`, `repackHeatPublications`, `repackHeatBatches`, and
-   `repackHeatOperations` tables did not exist in the legacy deployment.
-4. Push the new schema, confirm the Heat pointer is empty, then let the production
-   Heat lane publish a full observed frame aligned to the active catalog.
-5. Read back the frame, signal count/hash, active release alignment, and expiry
-   before enabling public Heat.
+The reset command is preproduction-only and dry-run by default:
 
-No generic cleanup command is committed because the action is destructive and
-deployment-specific. The absence of an approved environment-scoped utility and
-backup is a launch blocker, not permission to use the local mock publisher.
+```bash
+npm run cutover:reset:preproduction -- --dry-run
+npm run cutover:reset:preproduction -- --execute
+```
+
+It accepts only `--dry-run` or `--execute`; the digest-print mode is documented
+below. It refuses production/live environment markers, cloud deploy-key
+variables, self-hosted Convex credentials, an unapproved database target, or a
+Convex selector that does not end in the exact `preproduction` segment.
+
+### Reset scope and preservation
+
+The Convex portion is **deployment-wide**, not organization-filtered. It first
+exports the selected deployment, verifies and syncs the backup, then replaces
+only this closed table allowlist with an empty import:
+
+- Obsolete catalog: `dataReleaseState`, `blockedDataReleaseManifests`,
+  `dataReleaseOperations`, `dataReleaseBatches`,
+  `dataReleaseCollectibleReconciliation`,
+  `dataReleaseRepackReconciliation`, `dataReleasePublications`,
+  `repackSearchShards`, `repackChases`, `collectibles`, `repacks`,
+  `categories`, `vendors`, and `dataReleases`.
+- Pre-manifest Heat publication state: `repackHeatState`,
+  `repackHeatOperations`, `repackHeatBatches`, `repackHeatPublications`,
+  `repackHeatSnapshots`, `repackHeatSignals`, and
+  `repackHeatSignalSets`.
+
+`dataReleaseAuthNonces` is intentionally preserved. Because the clear applies
+to every document in those allowlisted tables, stop if the selected Convex
+deployment is not dedicated to the single approved PackScout organization or
+contains any state outside the approved cutover scope.
+
+PostgreSQL deletion is narrower. In one serializable transaction, the utility
+deletes child-first from `promotion_operations`, `promotion_attempts`, and
+`promotion_lanes` only for the approved organization/deployment binding and the
+obsolete `catalog` and `heat` lanes. It locks and proves unchanged all of the
+following protected state before commit:
+
+- `canonical_entities`, `canonical_relationships`, and `canonical_revisions`;
+- `public_change_causes`, `public_change_catalog_impacts`,
+  `public_derivation_obligations`, and `settled_public_watermarks`;
+- `provider_catalog_checkpoints` and
+  `catalog_manifest_lifecycle_checkpoints`;
+- `approved_public_catalog_configurations` and
+  `public_repack_identity_mappings`; and
+- `normalized_heat_window_checkpoints`, `normalized_heat_observations`, and
+  `normalized_heat_observation_outcomes`.
+
+The utility records counts and domain-separated hashes, not protected rows. It
+does not create a PostgreSQL backup; obtain and verify an independent target
+recovery point before execution.
+
+### Required target-bound inputs
+
+Set these only in the protected operator environment. Never paste their values
+into a ticket, terminal transcript, portable evidence, or this runbook.
+
+```text
+PACKSCOUT_CUTOVER_ENVIRONMENT=preproduction
+PACKSCOUT_CUTOVER_DATABASE_ENVIRONMENT=preproduction
+PACKSCOUT_CUTOVER_ORGANIZATION_ID
+PACKSCOUT_CUTOVER_DEPLOYMENT_KEY
+PACKSCOUT_CUTOVER_CONVEX_DEPLOYMENT
+PACKSCOUT_CUTOVER_DATABASE_TARGET_SHA256
+PACKSCOUT_CUTOVER_APPROVAL_REFERENCE
+PACKSCOUT_CUTOVER_WORKERS_STOPPED=YES
+PACKSCOUT_CUTOVER_EVIDENCE_FILE
+PACKSCOUT_CUTOVER_BACKUP_DIRECTORY
+PACKSCOUT_DATABASE_URL
+```
+
+The evidence file and backup directory must be absolute paths in a private
+operator-controlled location. The approval reference is hashed before it is
+written. Use the authenticated Convex operator session for the explicit
+preproduction selector; do not supply a cloud deploy key to this command.
+
+Calculate the password-free database target digest, have it approved out of
+band, and then set the approved value:
+
+```bash
+npm run cutover:reset:preproduction -- --print-database-target-digest
+```
+
+The command hashes the normalized database target; it does not print the
+database URL. A successful dry-run proves the database identity/schema,
+organization binding, obsolete lane counts, absence of live or ambiguously sent
+work, and before-reset protected-state digest. It emits a target-scope digest
+and the exact target-bound confirmation phrase required for execution. Do not
+construct or reuse a confirmation from another run.
+
+### Execution order and stop conditions
+
+1. Freeze changes to the approved organization/deployment binding. Stop every
+   provider, manifest, retention, and Heat worker and independently verify no
+   process can reclaim a lane.
+2. Verify the independent PostgreSQL recovery point and private artifact paths.
+   Confirm the currently deployed Convex schema is still the obsolete
+   pre-manifest schema; do not run this utility after new publication begins.
+3. Generate and approve the database target digest. Run the explicit dry-run
+   and review its stable result plus append-only JSONL evidence.
+4. Stop on any binding/schema/digest mismatch, missing target lane, unexpired
+   active claim, `sent` operation, changed protected-state digest, or evidence
+   write failure. Resolve the source condition; never edit ledger rows to make
+   preflight pass.
+5. Set `PACKSCOUT_CUTOVER_CONFIRMATION` to the exact phrase from that dry-run,
+   retain the stopped-worker attestation, and run `--execute`. Execution repeats
+   preflight, creates and durably verifies a full Convex export, clears each
+   allowlisted Convex table in pointer-first order, then commits the scoped
+   PostgreSQL deletion. Keep the backup ZIP, its SHA-256, and JSONL evidence.
+6. Require the terminal reset stage `complete`, identical before/after protected
+   PostgreSQL digest, expected scoped deletion counts, and the full Convex clear
+   count. Do not infer success from an empty public response.
+7. Only now apply PostgreSQL migration
+   `20260816030000_heat_manifest_alignment` and subsequent migrations, then
+   deploy the provider-release, global-manifest, and manifest-aligned Heat
+   Convex contracts.
+8. Before enabling claims, prove the new provider, manifest, and Heat
+   publication state is empty and let authenticated bootstrap persist the exact
+   proven-empty anchor. Start provider completion, activate the first complete
+   same-epoch manifest, and publish/read back one exactly aligned Heat frame.
+
+The Convex clears and PostgreSQL transaction cannot be atomic with each other.
+A failure before the first clear is non-destructive. Once a clear starts, the
+utility returns `CUTOVER_RECOVERY_REQUIRED` and records the backup proof, last
+completed table count, failure code, and whether PostgreSQL reset began. Keep
+all workers stopped and do not rerun, migrate, or manually clear around that
+state. The incident commander and Convex/PostgreSQL owners must use the durable
+evidence to choose either authorized restoration or completion of the approved
+reset.
+
+Backup restoration is a cutover rollback only before the new schema has
+accepted any provider, manifest, retention, or Heat write. After new
+publication starts, never restore the obsolete schema or backup over live state;
+use the signed manifest rollback, emergency clear, block, and retention
+authorities described in this runbook. Any observed production data, second
+organization, unknown document ownership, or missing recovery point is a hard
+stop requiring a separately reviewed migration or recovery plan.
 
 ## Evidence levels and readiness matrix
 
@@ -426,16 +569,28 @@ npm run verify:framework
 The focused local volume gate is reproducible with:
 
 ```bash
-node --import tsx --test packages/services/src/catalog-release-volume.test.ts
+node --import tsx --test \
+  --test-name-pattern="8k provider completion activates one manifest with delayed fallback under one minute" \
+  packages/services/src/provider-promotion-runner.test.ts
 ```
 
-It constructs the protocol maximum of 8,000 repacks and 8,000 bounded chase
-relations, prepares the operation bodies that are signed at dispatch, asserts the 100-record,
-48-KiB, 128-KiB, and 4,096-batch limits, and requires local planning and
-preparation to finish within one minute. Its reported duration is local CPU
-evidence only. It excludes PostgreSQL snapshot loading, scheduling, HTTPS,
-hosted Convex execution, and confirmation, so it cannot prove settled-to-
-confirmed p95.
+It constructs a real provider publication plan containing 8,000 collectibles,
+drives every bounded provider operation through completion, composes the next
+global manifest with a delayed provider's active fallback, and requires the
+provider-plus-manifest cycle to finish locally within one minute. Its reported
+duration is in-memory planning/transport CPU evidence only. It excludes
+PostgreSQL snapshot loading, scheduling, HTTPS, hosted Convex execution, and
+remote confirmation, so it cannot prove settled-to-confirmed p95.
+
+The separate eight-platform public read bound is covered by:
+
+```bash
+npx vitest run convex/publicEightProviderCertification.test.ts
+```
+
+That local test exercises the unchanged dashboard, facets, sorting, details,
+desired-collectible matching, collectible search, pagination, and exact active
+manifest graph at eight providers under Convex transaction-limit simulation.
 
 The local mock flow is explicitly fake:
 
@@ -446,17 +601,79 @@ npm run dev:frontend:mock-heat:local
 Do not copy mock release IDs, simulated Heat, loopback timing, or local secrets
 into a live readiness claim.
 
+### Offline readiness certification
+
+The readiness certifier validates a supplied sanitized JSON file. It does not
+connect to PostgreSQL, Convex, a secret manager, a deployment supervisor, or a
+monitor, and it does not collect or manufacture hosted evidence:
+
+```bash
+npm run cutover:certify:preproduction -- \
+  /absolute/private/path/provider-manifest-readiness.json \
+  > /absolute/private/path/provider-manifest-readiness.certified.json
+```
+
+The input must use schema
+`packscout.provider-manifest-readiness.v1`, be at most 2 MiB, and declare
+`preproduction` or `production`; local evidence is explicitly rejected. The
+strict schema rejects unknown fields and protected field names or values,
+including identifiers, URLs, connection strings, credentials, key IDs,
+headers, nonces, payloads, actor/tenant fields, and raw or quarantine material.
+Supply only approved digests, bounded public platform keys, counts, watermarks,
+stable codes, and ISO timestamps.
+
+A certifiable hosted input includes all of the following:
+
+- reset proof with a verified backup digest, proven-empty new publication
+  state, obsolete document/row counts, and matching before/after digests for
+  canonical PostgreSQL state, causal settlement, approved configuration, and
+  normalized Heat;
+- one exact entry for every enabled platform with affected-settled, completed,
+  and active watermarks plus content, request, and terminal-receipt digests;
+- the active/previous manifest hashes, canonical provider-reference-set hash,
+  aggregate counts/hashes, pointer result, public DTO hash, and request/receipt
+  digests;
+- an exactly aligned Heat frame and provider-reference-set hash, signal/frame
+  counts and hashes, source watermark, receipt proof, and the observed
+  unavailable-after-15-minutes outcome;
+- retention and rollback proofs covering active/previous, completed heads,
+  shared and in-flight references, recovery targets, mutation bounds, and the
+  restored manifest pointer;
+- external `processDown` and `heatNotAdvancing` monitor events that each fire
+  before the 15-minute Heat expiry boundary and resolve after recovery;
+- at least 20 hosted provider-to-manifest samples and 20 hosted Heat samples,
+  using nearest-rank ceiling percentiles, with zero errors and p95 strictly
+  below 60,000 ms in both lanes; and
+- a full 40-character launch commit plus sorted, allowlisted zero-exit command
+  results, including `npm run verify:framework` on that exact commit.
+
+Rotation evidence contains one least-privilege role and its overlap, new-key
+terminal, zero-retryable-work retirement, and old-key-retirement proof. Rehearse
+and retain a separate certified envelope for each authority used at launch:
+provider, manifest publish, manifest clear, manifest rollback, retention, and
+Heat (the JSON role values are `provider`, `manifest_publish`,
+`manifest_clear`, `manifest_rollback`, `retention`, and `heat`). The final
+readiness package is incomplete if any authority is missing.
+
+On success, stdout is a canonical JSON envelope containing the artifact and its
+SHA-256; stderr is a redacted one-line summary with p95 values, maximum monitor
+fire latency, abbreviated commit, and artifact digest. A stable
+`EVIDENCE_*` code means the input was refused. Certification proves only the
+quality and consistency of the supplied hosted evidence; preserve the source
+monitor, secret-manager, reset, and timing records under their protected
+retention policy.
+
 | Launch scenario | Required sanitized evidence | Gate |
 |---|---|---|
 | Startup/configuration | Stable success or `*_INVALID` code for every required setting; exact migration readiness | Must pass in preproduction and production |
-| Initial activation | Backfill/config/mapping approval outcome, settled/requested/confirmed watermarks, content hash/counts, attempt UUID, terminal receipt digest | Must pass live before public enablement |
+| Initial activation | Backfill/config/mapping approval outcome, settled/requested/confirmed watermarks, content hash/counts, request digest, terminal receipt digest | Must pass live before public enablement |
 | Full versus incremental rebuild | Equal catalog public hash and counts at the same settled watermark | Must pass locally and in preproduction |
 | Restart, stale lease, replay, lost acknowledgement | One terminal outcome, no duplicate/regressed pointer, exact status-first receipt | Must pass locally and in preproduction |
 | Auth, contract, hash, count, and manifest failures | Prior pointer remains readable plus durable safe failure/recovery alerts | Must pass locally; auth also in preproduction |
 | Rollback and emergency clear | Approval reference, before/after pointer, signed receipt digest, protected retention proof | Rehearse rollback in preproduction; clear only under incident authority |
-| Key rotation | Overlap deployment, new-key status and terminal receipt, old-key retirement time | Must pass in preproduction before live rotation |
+| Key rotation | Per-authority overlap deployment, new-key status and terminal receipt, zero retryable operations, and old-key retirement proof for provider, publish, clear, rollback, retention, and Heat | Must pass in preproduction before live rotation |
 | Catalog retention | Active/previous/completed-head/in-flight/recovery targets preserved; shared references survive; every mutation stays at or below 100 documents; bounded continuation and exact status replay complete | Must pass locally and in preproduction |
-| Heat alignment and expiry | Frame catalog ID, sequence, aggregate hash/count, calculation/expiry times, unavailable result after 15 minutes | Must pass locally and in preproduction |
+| Heat alignment and expiry | Frame manifest hash/provider-reference-set hash, sequence, aggregate hash/count, calculation/expiry times, unavailable result after 15 minutes | Must pass locally and in preproduction |
 | Representative volume | Volume, batch counts/bytes, settled-to-confirmed samples, p50/p95/max, error count | Preproduction required; repeat in production |
 
 For the catalog one-minute goal, measure from `settled_at` to the matching
@@ -466,9 +683,10 @@ window, volume, p50, p95, maximum, and failures. Do not state that p95 is met
 until live or representative preproduction measurements prove it; local unit
 test duration is not publication latency.
 
-The portable evidence bundle may contain only fixture/version labels, lane,
-watermarks/sequences, public content and aggregate hashes/counts, attempt UUIDs,
-terminal receipt digests, pointer results, safe failure codes, timing samples,
-and commands. Remove database URLs, organization/deployment identifiers,
-provider names, raw payloads/observations, actors, run/quarantine IDs, headers,
-nonces, and all key material before review.
+The portable evidence bundle may contain only fixture/version labels, bounded
+public platform keys, watermarks/sequences, public content and aggregate
+hashes/counts, request and terminal-receipt digests, pointer results, safe
+failure codes, timing samples, and allowlisted commands. Remove database URLs,
+organization/deployment identifiers, provider display names or internal IDs,
+raw payloads/observations, actors, tenants, run/quarantine IDs, headers, nonces,
+and all key material before review.

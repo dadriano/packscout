@@ -41,6 +41,13 @@ export type HeatPromotionWorkerLogEvent = Readonly<{
   failureCode?: string;
   activeAttemptState?: string;
   confirmedFrameSequence?: string;
+  manifestPublicReleaseId?: string;
+  providerReferenceSetHash?: string;
+  heatAlignmentCurrent?: boolean;
+  confirmedFrameCalculatedAt?: string;
+  confirmedFrameAgeSeconds?: number;
+  confirmedFrameExpiresAt?: string;
+  confirmedFrameExpired?: boolean;
   retryAt?: string;
   retentionBatches?: number;
   retentionDeletedOutcomes?: number;
@@ -60,6 +67,7 @@ export interface HeatPromotionWorkerRuntimePort {
 
 const safeIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/u;
 const safeFailurePattern = /^[A-Z][A-Z0-9_]{0,127}$/u;
+const safeSha256Pattern = /^[0-9a-f]{64}$/u;
 
 const defaultSleeper: HeatPromotionWorkerSleeper = {
   sleep(milliseconds, signal) {
@@ -140,9 +148,18 @@ export class HeatPromotionWorkerHealthLogger
   constructor(
     private readonly logger: HeatPromotionWorkerLogger,
     private readonly workerId: string,
+    private readonly clock: Readonly<{ now(): Date }> = { now: () => new Date() },
   ) {}
 
   report(health: HeatPromotionHealth): void {
+    const now = this.clock.now();
+    const calculatedAt = health.frameCalculatedAt;
+    const expiresAt = health.frameExpiresAt;
+    const validNow = Number.isFinite(now.getTime());
+    const validCalculatedAt = calculatedAt !== null &&
+      Number.isFinite(calculatedAt.getTime()) && validNow;
+    const validExpiresAt = expiresAt !== null &&
+      Number.isFinite(expiresAt.getTime()) && validNow;
     this.logger.write({
       level: "info",
       event: "heat_promotion_health",
@@ -150,6 +167,32 @@ export class HeatPromotionWorkerHealthLogger
       ...(health.activeAttemptState === null
         ? {} : { activeAttemptState: health.activeAttemptState }),
       confirmedFrameSequence: String(health.confirmedWatermark),
+      ...(health.manifestAlignment === null ? {} : {
+        manifestPublicReleaseId: safeId(
+          health.manifestAlignment.publicReleaseId,
+        ),
+        providerReferenceSetHash:
+          safeSha256Pattern.test(
+            health.manifestAlignment.providerReferenceSetHash,
+          )
+            ? health.manifestAlignment.providerReferenceSetHash
+            : "0".repeat(64),
+        heatAlignmentCurrent: health.alignmentMatchesActiveManifest,
+      }),
+      ...(!validCalculatedAt ? {} : {
+        confirmedFrameCalculatedAt: calculatedAt.toISOString(),
+        confirmedFrameAgeSeconds: Math.min(
+          Math.max(
+            0,
+            Math.floor((now.getTime() - calculatedAt.getTime()) / 1_000),
+          ),
+          31_536_000,
+        ),
+      }),
+      ...(!validExpiresAt ? {} : {
+        confirmedFrameExpiresAt: expiresAt.toISOString(),
+        confirmedFrameExpired: now.getTime() >= expiresAt.getTime(),
+      }),
       ...(health.retryAt === null ? {} : { retryAt: health.retryAt.toISOString() }),
     });
   }

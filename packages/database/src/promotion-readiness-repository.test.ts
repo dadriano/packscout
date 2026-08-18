@@ -327,6 +327,7 @@ test("promotion diagnostics and recovery isolate two deployments in one organiza
       canonicalSettledWatermark: 1n,
       canonicalSettledAt: new Date("2026-08-15T11:59:00.000Z"),
       canonicalSourceHeadWatermark: 2n,
+      activationConfirmedWatermark: 1n,
       confirmedWatermark: 1n,
       laneTargetWatermark: 2n,
       laneTargetAt: now,
@@ -342,6 +343,7 @@ test("promotion diagnostics and recovery isolate two deployments in one organiza
       canonicalSettledWatermark: 1n,
       canonicalSettledAt: new Date("2026-08-15T11:59:00.000Z"),
       canonicalSourceHeadWatermark: 2n,
+      activationConfirmedWatermark: 6n,
       confirmedWatermark: 6n,
       laneTargetWatermark: 7n,
       laneTargetAt: now,
@@ -473,12 +475,21 @@ test("provider diagnostics isolate platform obligations, cas losses, and recover
           authoritative_transaction_id: `provider-test:${sequence}`,
         })),
       });
+      await transaction.provider_sources.create({
+        data: {
+          organization_id: organizationId,
+          platform_key: alphaPlatformKey,
+          display_name: "Alpha",
+        },
+      });
       await transaction.public_change_catalog_impacts.createMany({
         data: [
           {
             organization_id: organizationId,
             cause_sequence: 1n,
             provider_platform_keys: [alphaPlatformKey],
+            lifecycle_platform_key: alphaPlatformKey,
+            lifecycle_state: "active",
             created_at: now,
           },
           {
@@ -488,6 +499,16 @@ test("provider diagnostics isolate platform obligations, cas losses, and recover
             created_at: now,
           },
         ],
+      });
+      await transaction.catalog_manifest_lifecycle_checkpoints.create({
+        data: {
+          organization_id: organizationId,
+          settled_sequence: 1n,
+          source_head_sequence: 1n,
+          settled_at: now,
+          source_head_at: now,
+          updated_at: now,
+        },
       });
       await transaction.public_derivation_obligations.create({
         data: {
@@ -599,6 +620,7 @@ test("provider diagnostics isolate platform obligations, cas losses, and recover
       canonicalSettledWatermark: 1n,
       canonicalSettledAt: now,
       canonicalSourceHeadWatermark: 2n,
+      activationConfirmedWatermark: 0n,
       confirmedWatermark: 0n,
       laneTargetWatermark: 1n,
       laneTargetAt: now,
@@ -612,6 +634,8 @@ test("provider diagnostics isolate platform obligations, cas losses, and recover
     assert.equal(betaDiagnostic.activeFailureAlertCount, 0);
     assert.equal(betaDiagnostic.latestFailedAttemptId, null);
     assert.equal(betaDiagnostic.technicalFailureCount, 1);
+    assert.equal(betaDiagnostic.activationConfirmedWatermark, 1n);
+    assert.equal(betaDiagnostic.confirmedWatermark, 1n);
 
     assert.equal((await publisher.publish(providerEvent(
       "53000000-0000-4000-8000-000000000022",
@@ -621,6 +645,57 @@ test("provider diagnostics isolate platform obligations, cas losses, and recover
     ))).status, "resolved");
     assert.equal((await alpha.load()).activeAlertCount, 0);
     assert.equal((await beta.load()).activeAlertCount, 1);
+
+    await harness.client.$transaction(async (transaction) => {
+      await transaction.public_change_causes.create({
+        data: {
+          organization_id: organizationId,
+          sequence: 3n,
+          change_kind: "provider_lifecycle",
+          entity_key: "provider:lifecycle:alpha-disabled",
+          occurred_at: now,
+          authoritative_transaction_id: "provider-test:3",
+        },
+      });
+      await transaction.public_change_catalog_impacts.create({
+        data: {
+          organization_id: organizationId,
+          cause_sequence: 3n,
+          provider_platform_keys: [],
+          lifecycle_platform_key: alphaPlatformKey,
+          lifecycle_state: "disabled",
+          created_at: now,
+        },
+      });
+      await transaction.catalog_manifest_lifecycle_checkpoints.update({
+        where: { organization_id: organizationId },
+        data: {
+          settled_sequence: 3n,
+          source_head_sequence: 3n,
+          settled_at: now,
+          source_head_at: now,
+          updated_at: now,
+        },
+      });
+      await transaction.provider_promotion_lanes.update({
+        where: {
+          organization_id_deployment_key_platform_key: {
+            organization_id: organizationId,
+            deployment_key: deploymentKey,
+            platform_key: alphaPlatformKey,
+          },
+        },
+        data: {
+          settled_checkpoint: 3n,
+          source_head_checkpoint: 3n,
+          settled_at: now,
+          source_head_at: now,
+        },
+      });
+    });
+    const disabledDiagnostic = await alpha.load();
+    assert.equal(disabledDiagnostic.confirmedWatermark, 3n);
+    assert.equal(disabledDiagnostic.activationConfirmedWatermark, 3n);
   } finally {
     await harness.close();
   }

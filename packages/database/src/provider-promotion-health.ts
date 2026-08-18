@@ -24,6 +24,7 @@ export async function loadProviderPromotionHealth(
     "platformKey"
   >>>(Prisma.sql`
     select lane.settled_checkpoint as "settledCheckpoint",
+           lifecycle."lifecycleState",
            lane.source_head_checkpoint as "sourceHeadCheckpoint",
            lane.requested_evaluation_sequence as "requestedEvaluationSequence",
            lane.confirmed_evaluation_sequence as "confirmedEvaluationSequence",
@@ -45,6 +46,17 @@ export async function loadProviderPromotionHealth(
      and active.deployment_key = lane.deployment_key
      and active.platform_key = lane.platform_key
     left join lateral (
+      select impact.lifecycle_state::text as "lifecycleState"
+      from public.public_change_catalog_impacts as impact
+      join public.catalog_manifest_lifecycle_checkpoints as checkpoint
+        on checkpoint.organization_id = impact.organization_id
+       and impact.cause_sequence <= checkpoint.settled_sequence
+      where impact.organization_id = lane.organization_id
+        and impact.lifecycle_platform_key = lane.platform_key
+      order by impact.cause_sequence desc
+      limit 1
+    ) as lifecycle on true
+    left join lateral (
       select candidate.id, candidate.state, candidate.created_at,
              candidate.retry_at
       from public.provider_promotion_attempts as candidate
@@ -61,6 +73,7 @@ export async function loadProviderPromotionHealth(
   const row = rows[0];
   return {
     platformKey: binding.platformKey,
+    lifecycleState: row?.lifecycleState ?? null,
     settledCheckpoint: row?.settledCheckpoint ?? 0n,
     sourceHeadCheckpoint: row?.sourceHeadCheckpoint ?? 0n,
     requestedEvaluationSequence: row?.requestedEvaluationSequence ?? 0n,

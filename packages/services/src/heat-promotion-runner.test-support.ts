@@ -313,6 +313,11 @@ export class MemoryHeatPromotionLedger implements HeatPromotionLedgerPort {
       retryAt: this.attempt?.retryAt ?? null,
       lastActivatedAt: null,
       lastUnchangedObservedAt: null,
+      manifestAlignment: this.attempt?.manifestSourceProof?.manifestAlignment ??
+        null,
+      alignmentMatchesActiveManifest: true,
+      frameCalculatedAt: null,
+      frameExpiresAt: null,
     });
   }
 

@@ -16,6 +16,7 @@ test("provider readiness remains platform-scoped and uses checkpoint target", as
   });
   await sink.report({
     platformKey: "alpha",
+    lifecycleState: "active",
     settledCheckpoint: 30n,
     sourceHeadCheckpoint: 31n,
     requestedEvaluationSequence: 4n,
@@ -52,11 +53,14 @@ test("provider readiness remains platform-scoped and uses checkpoint target", as
     event: "promotion_v2_provider_health",
     workerId: "worker-1",
     platformKey: "alpha",
+    lifecycleState: "active",
     settledCheckpoint: "30",
     sourceHeadCheckpoint: "31",
     completedCheckpoint: "20",
     activeCheckpoint: "15",
     checkpointLag: "10",
+    completedLag: "10",
+    activeLag: "15",
     requestedEvaluationSequence: "4",
     confirmedEvaluationSequence: "3",
     activeAttemptState: "retry_wait",
@@ -64,6 +68,48 @@ test("provider readiness remains platform-scoped and uses checkpoint target", as
     activeAttemptAgeSeconds: 10,
     retryAt: "2026-08-16T12:00:01.000Z",
     completedAt: "2026-08-16T11:59:00.000Z",
+  }]);
+});
+
+test("disabled provider health does not report intentional omission as active lag", async () => {
+  const events: unknown[] = [];
+  const sink = new ProviderPromotionOperationalReadinessSink(
+    { assess: () => Promise.resolve(), publicationFailed: () => Promise.resolve() },
+    { write: (event) => events.push(event) },
+    "worker-1",
+  );
+  await sink.report({
+    platformKey: "alpha",
+    lifecycleState: "disabled",
+    settledCheckpoint: 30n,
+    sourceHeadCheckpoint: 30n,
+    requestedEvaluationSequence: 4n,
+    confirmedEvaluationSequence: 3n,
+    completedCheckpoint: 20n,
+    completedPublicProviderReleaseId: null,
+    activeCheckpoint: null,
+    activePublicProviderReleaseId: null,
+    activeManifestPublicReleaseId: null,
+    activeAttemptId: null,
+    activeAttemptState: null,
+    activeAttemptStartedAt: null,
+    retryAt: null,
+    completedAt: null,
+  });
+  assert.deepEqual(events, [{
+    level: "info",
+    event: "promotion_v2_provider_health",
+    workerId: "worker-1",
+    platformKey: "alpha",
+    lifecycleState: "disabled",
+    settledCheckpoint: "30",
+    sourceHeadCheckpoint: "30",
+    completedCheckpoint: "20",
+    checkpointLag: "10",
+    completedLag: "10",
+    activeLag: "0",
+    requestedEvaluationSequence: "4",
+    confirmedEvaluationSequence: "3",
   }]);
 });
 
@@ -133,6 +179,7 @@ test("health output clamps unsafe identities, counts, timestamps, and secrets", 
   );
   await sink.report({
     platformKey: "alpha\nsecret-token",
+    lifecycleState: null,
     settledCheckpoint: -1n,
     sourceHeadCheckpoint: -2n,
     requestedEvaluationSequence: -3n,
@@ -152,5 +199,7 @@ test("health output clamps unsafe identities, counts, timestamps, and secrets", 
   assert.equal(rendered.includes("secret-token"), false);
   assert.match(rendered, /"workerId":"invalid"/u);
   assert.match(rendered, /"platformKey":"invalid"/u);
+  assert.match(rendered, /"lifecycleState":"unknown"/u);
+  assert.match(rendered, /"activeLag":"0"/u);
   assert.match(rendered, /"completedCheckpoint":"0"/u);
 });

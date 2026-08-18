@@ -492,6 +492,7 @@ class MemoryProviderLane implements ProviderPromotionLanePort {
   loadHealth() {
     return Promise.resolve({
       platformKey: this.platformKey,
+      lifecycleState: "active" as const,
       settledCheckpoint: this.checkpoint?.settledSequence ?? 0n,
       sourceHeadCheckpoint: this.checkpoint?.sourceHeadSequence ?? 0n,
       requestedEvaluationSequence: this.checkpoint === null ? 0n : 1n,

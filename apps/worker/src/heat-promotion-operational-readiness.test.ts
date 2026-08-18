@@ -23,6 +23,20 @@ test("Heat readiness bridge forwards only generic health and terminal signals", 
     retryAt: null,
     lastActivatedAt: new Date("2026-08-15T12:00:00.000Z"),
     lastUnchangedObservedAt: null,
+    manifestAlignment: {
+      publicReleaseId: "75000000-0000-5000-8000-000000000001",
+      manifestFingerprint: "a".repeat(64),
+      sharedConfigurationEpoch: {
+        configurationKey: "catalog-v1",
+        revision: 1,
+        publicChangeSequence: "1",
+        configurationHash: "b".repeat(64),
+      },
+      providerReferenceSetHash: "c".repeat(64),
+    },
+    alignmentMatchesActiveManifest: true,
+    frameCalculatedAt: new Date("2026-08-15T12:00:00.000Z"),
+    frameExpiresAt: new Date("2026-08-15T12:15:00.000Z"),
   });
   await sink.notify({
     attemptId: "55000000-0000-4000-8000-000000000002",

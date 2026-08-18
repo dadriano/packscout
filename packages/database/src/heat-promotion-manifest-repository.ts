@@ -43,6 +43,8 @@ export interface ProvenActiveHeatFrame {
   readonly signalSetHash: string;
   readonly frameHash: string;
   readonly signalCount: number;
+  readonly calculatedAt: Date;
+  readonly expiresAt: Date;
   readonly terminalReceiptSha256: string;
 }
 
@@ -127,6 +129,8 @@ export class PrismaHeatPromotionManifestRepository {
       signalSetHash: proven.frame.signalSetHash,
       frameHash: proven.frame.frameHash,
       signalCount: proven.frame.signalCount,
+      calculatedAt: new Date(proven.frame.calculatedAt),
+      expiresAt: new Date(proven.frame.expiresAt),
       terminalReceiptSha256: lane.confirmedReceiptSha256,
     });
   }

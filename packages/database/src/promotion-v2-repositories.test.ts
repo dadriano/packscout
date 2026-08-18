@@ -179,8 +179,8 @@ test("provider and manifest lanes serialize claims, recover leases, and coalesce
     assert.ok(recovered);
     assert.equal(recovered.recovered, true);
     assert.notEqual(recovered.claimToken, firstProviderClaim.claimToken);
-    assert.ok((await provider.loadHealth({ now: requestedAt }))
-      .activeAttemptStartedAt instanceof Date);
+    const claimedProviderHealth = await provider.loadHealth({ now: requestedAt });
+    assert.ok(claimedProviderHealth.activeAttemptStartedAt instanceof Date);
 
     assert.deepEqual(await provider.enqueueEvaluation({
       checkpoint: checkpoint(),
@@ -534,6 +534,26 @@ test("provider publication persists exact ordered evidence, advances heads, and 
     assert.equal(completed.terminalOperationKind, "finalize");
     assert.equal(completed.terminalReceiptSha256, publication.terminalReceiptSha256);
     assert.equal(completed.exactResponseBody, publication.evidence.at(-1)!.exactResponseBody);
+    const providerReadiness = new PrismaPromotionReadinessRepository(
+      harness.client,
+      {
+        organizationId: scopeOrganizationId,
+        deploymentKey,
+        lane: "provider",
+        platformKey: "alpha",
+      },
+    );
+    const completedReadiness = await providerReadiness.load();
+    assert.equal(
+      completedReadiness.confirmedWatermark,
+      publication.checkpoint.settledSequence,
+      "provider completion reconciles its own terminal work",
+    );
+    assert.equal(
+      completedReadiness.activationConfirmedWatermark,
+      publication.checkpoint.settledSequence,
+      "an unproven lifecycle is recovery-only and does not report active lag",
+    );
     const artifact = await provider.loadReleaseArtifact({
       publicProviderReleaseId: publication.summary.publicProviderReleaseId,
     });
@@ -705,6 +725,16 @@ test("provider publication persists exact ordered evidence, advances heads, and 
     assert.equal(await harness.client.manifest_active_provider_selections.count({
       where: { organization_id: scopeOrganizationId },
     }), 1);
+    const activeReadiness = await providerReadiness.load();
+    assert.equal(
+      activeReadiness.confirmedWatermark,
+      publication.checkpoint.settledSequence,
+    );
+    assert.equal(
+      activeReadiness.activationConfirmedWatermark,
+      publication.checkpoint.settledSequence,
+      "provider activation readiness advances with its manifest selection",
+    );
     await assert.rejects(
       () => seedPromotionV2AuthoritativeConfiguration(
         harness,

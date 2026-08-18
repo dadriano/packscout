@@ -9,6 +9,7 @@ import {
   REPACK_SEARCH_SHARD_HASH_DOMAIN,
   REPACK_SEARCH_VERSION,
   canonicalJson,
+  canonicalJsonByteCount,
   containsProtectedPublicationField,
   dataReleaseManifestV2Schema,
   extendProductionBatchChain,
@@ -73,17 +74,22 @@ function partition<K extends ProductionBatchKind>(
 ): Array<readonly ProductionBatchRecordMap[K][]> {
   const result: Array<readonly ProductionBatchRecordMap[K][]> = [];
   let current: ProductionBatchRecordMap[K][] = [];
+  let currentByteCount = 2;
   for (const record of batchOrder(kind, records)) {
-    const candidate = [...current, record];
-    const candidateBytes = productionBatchByteCount(candidate);
+    const recordByteCount = canonicalJsonByteCount(record);
+    const candidateBytes = currentByteCount +
+      (current.length === 0 ? 0 : 1) + recordByteCount;
     if (current.length > 0 &&
-        (candidate.length > MAX_PRODUCTION_BATCH_RECORDS || candidateBytes > MAX_PRODUCTION_BATCH_BYTES)) {
+        (current.length + 1 > MAX_PRODUCTION_BATCH_RECORDS ||
+          candidateBytes > MAX_PRODUCTION_BATCH_BYTES)) {
       result.push(current);
       current = [record];
+      currentByteCount = 2 + recordByteCount;
     } else {
-      current = candidate;
+      current.push(record);
+      currentByteCount = candidateBytes;
     }
-    if (productionBatchByteCount(current) > MAX_PRODUCTION_BATCH_BYTES) {
+    if (currentByteCount > MAX_PRODUCTION_BATCH_BYTES) {
       throw new RangeError("PUBLICATION_BATCH_TOO_LARGE");
     }
   }
@@ -97,26 +103,30 @@ async function searchShards(
   const rows = repacks.map(repackSearchRowFromDetail);
   const shards: ProductionSearchShard[] = [];
   let shardRows: typeof rows = [];
+  let shardByteCount = 2;
   const appendShard = async () => {
-    const byteCount = productionBatchByteCount(shardRows);
     shards.push({
       shardNumber: shards.length,
       rowCount: shardRows.length,
-      byteCount,
+      byteCount: shardByteCount,
       contentHash: await sha256CanonicalJson(REPACK_SEARCH_SHARD_HASH_DOMAIN, shardRows),
       rows: shardRows,
     });
     shardRows = [];
+    shardByteCount = 2;
   };
   for (const row of rows) {
-    const candidate = [...shardRows, row];
+    const rowByteCount = canonicalJsonByteCount(row);
+    const candidateByteCount = shardByteCount +
+      (shardRows.length === 0 ? 0 : 1) + rowByteCount;
     if (shardRows.length > 0 &&
-        (candidate.length > MAX_ROWS_PER_REPACK_SEARCH_SHARD ||
-          productionBatchByteCount(candidate) > MAX_PRODUCTION_BATCH_BYTES)) {
+        (shardRows.length + 1 > MAX_ROWS_PER_REPACK_SEARCH_SHARD ||
+          candidateByteCount > MAX_PRODUCTION_BATCH_BYTES)) {
       await appendShard();
     }
+    shardByteCount += (shardRows.length === 0 ? 0 : 1) + rowByteCount;
     shardRows.push(row);
-    if (productionBatchByteCount(shardRows) > MAX_PRODUCTION_BATCH_BYTES) {
+    if (shardByteCount > MAX_PRODUCTION_BATCH_BYTES) {
       throw new RangeError("PUBLICATION_BATCH_TOO_LARGE");
     }
   }
