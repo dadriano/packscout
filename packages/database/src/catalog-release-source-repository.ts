@@ -10,6 +10,7 @@ import type {
   PackscoutQueryClient,
   PackscoutTransactionClient,
 } from "./database.ts";
+import { PACKSCOUT_TRANSACTION_OPTIONS } from "./database.ts";
 import {
   advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
@@ -233,7 +234,7 @@ export class PrismaCatalogReleaseSourceRepository
         configurationHash,
         publicChangeSequence: cause.sequence,
       };
-    });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async loadSnapshot(input: {

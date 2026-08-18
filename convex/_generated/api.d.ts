@@ -8,7 +8,6 @@
  * @module
  */
 
-import type * as dataReleaseCanonicalHash from "../dataReleaseCanonicalHash.js";
 import type * as catalogManifestActivate from "../catalogManifestActivate.js";
 import type * as catalogManifestBlock from "../catalogManifestBlock.js";
 import type * as catalogManifestErrors from "../catalogManifestErrors.js";
@@ -17,9 +16,9 @@ import type * as catalogManifestProviderProof from "../catalogManifestProviderPr
 import type * as catalogManifestRead from "../catalogManifestRead.js";
 import type * as catalogManifestRefresh from "../catalogManifestRefresh.js";
 import type * as catalogManifestRequests from "../catalogManifestRequests.js";
+import type * as catalogManifestRetentionReferences from "../catalogManifestRetentionReferences.js";
 import type * as catalogManifestRollback from "../catalogManifestRollback.js";
 import type * as catalogManifestState from "../catalogManifestState.js";
-import type * as catalogManifestRetentionReferences from "../catalogManifestRetentionReferences.js";
 import type * as catalogRetention from "../catalogRetention.js";
 import type * as catalogRetentionErrors from "../catalogRetentionErrors.js";
 import type * as catalogRetentionGraph from "../catalogRetentionGraph.js";
@@ -27,6 +26,9 @@ import type * as catalogRetentionOperations from "../catalogRetentionOperations.
 import type * as catalogRetentionRead from "../catalogRetentionRead.js";
 import type * as catalogRetentionRequests from "../catalogRetentionRequests.js";
 import type * as catalogRetentionState from "../catalogRetentionState.js";
+import type * as crons from "../crons.js";
+import type * as dataReleaseCanonicalHash from "../dataReleaseCanonicalHash.js";
+import type * as http from "../http.js";
 import type * as mockCatalogManifestSeed from "../mockCatalogManifestSeed.js";
 import type * as mockDataReleaseFixture from "../mockDataReleaseFixture.js";
 import type * as mockDataReleaseSearch from "../mockDataReleaseSearch.js";
@@ -57,11 +59,11 @@ import type * as providerReleaseRead from "../providerReleaseRead.js";
 import type * as providerReleaseRequests from "../providerReleaseRequests.js";
 import type * as providerReleaseStart from "../providerReleaseStart.js";
 import type * as providerReleaseState from "../providerReleaseState.js";
-import type * as publicRepackAggregates from "../publicRepackAggregates.js";
 import type * as publicCatalogHeatReadModel from "../publicCatalogHeatReadModel.js";
 import type * as publicCatalogManifestReadModel from "../publicCatalogManifestReadModel.js";
 import type * as publicCatalogPagination from "../publicCatalogPagination.js";
 import type * as publicProviderCatalogReadModel from "../publicProviderCatalogReadModel.js";
+import type * as publicRepackAggregates from "../publicRepackAggregates.js";
 import type * as publicRepackValidation from "../publicRepackValidation.js";
 import type * as publicRepacks from "../publicRepacks.js";
 import type * as repackHeatReadModel from "../repackHeatReadModel.js";
@@ -83,9 +85,9 @@ declare const fullApi: ApiFromModules<{
   catalogManifestRead: typeof catalogManifestRead;
   catalogManifestRefresh: typeof catalogManifestRefresh;
   catalogManifestRequests: typeof catalogManifestRequests;
+  catalogManifestRetentionReferences: typeof catalogManifestRetentionReferences;
   catalogManifestRollback: typeof catalogManifestRollback;
   catalogManifestState: typeof catalogManifestState;
-  catalogManifestRetentionReferences: typeof catalogManifestRetentionReferences;
   catalogRetention: typeof catalogRetention;
   catalogRetentionErrors: typeof catalogRetentionErrors;
   catalogRetentionGraph: typeof catalogRetentionGraph;
@@ -93,7 +95,9 @@ declare const fullApi: ApiFromModules<{
   catalogRetentionRead: typeof catalogRetentionRead;
   catalogRetentionRequests: typeof catalogRetentionRequests;
   catalogRetentionState: typeof catalogRetentionState;
+  crons: typeof crons;
   dataReleaseCanonicalHash: typeof dataReleaseCanonicalHash;
+  http: typeof http;
   mockCatalogManifestSeed: typeof mockCatalogManifestSeed;
   mockDataReleaseFixture: typeof mockDataReleaseFixture;
   mockDataReleaseSearch: typeof mockDataReleaseSearch;

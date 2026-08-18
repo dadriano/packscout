@@ -753,7 +753,7 @@ export default defineSchema({
       "retentionEligibleAt",
     ])
     .index(
-      "by_platform_key_and_lifecycle_and_retention_eligible_at_and_public_id",
+      "by_platform_lifecycle_retention_public_id",
       [
         "platformKey",
         "lifecycle",

@@ -10,7 +10,11 @@ import {
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
 import { PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN } from "./catalog-release-source-repository.ts";
-import type { PackscoutPrismaClient, PackscoutTransactionClient } from "./database.ts";
+import {
+  PACKSCOUT_TRANSACTION_OPTIONS,
+  type PackscoutPrismaClient,
+  type PackscoutTransactionClient,
+} from "./database.ts";
 import type {
   ProviderCatalogCheckpointRecord,
   SharedPublicConfigurationEpochRecord,
@@ -300,7 +304,10 @@ export class PrismaProviderCatalogReleaseSourceRepository
           ),
         }),
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    }, {
+      ...PACKSCOUT_TRANSACTION_OPTIONS,
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
   }
 
   private async assertPersistedCheckpoint(

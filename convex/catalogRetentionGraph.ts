@@ -830,7 +830,7 @@ async function buildProviderProtectionsForPlatform(
   const recentComplete = await ctx.db
     .query("providerCatalogReleases")
     .withIndex(
-      "by_platform_key_and_lifecycle_and_retention_eligible_at_and_public_id",
+      "by_platform_lifecycle_retention_public_id",
       (index) => index.eq("platformKey", platformKey)
         .eq("lifecycle", "complete")
         .gt("retentionEligibleAt", now),
@@ -859,7 +859,7 @@ async function buildProviderProtectionsForPlatform(
     const young = await ctx.db
       .query("providerCatalogReleases")
       .withIndex(
-        "by_platform_key_and_lifecycle_and_retention_eligible_at_and_public_id",
+        "by_platform_lifecycle_retention_public_id",
         (index) => index.eq("platformKey", platformKey)
           .eq("lifecycle", lifecycle)
           .gt("retentionEligibleAt", now),
@@ -900,7 +900,7 @@ export async function selectProviderRetentionCandidate(
   const retired = await ctx.db
     .query("providerCatalogReleases")
     .withIndex(
-      "by_platform_key_and_lifecycle_and_retention_eligible_at_and_public_id",
+      "by_platform_lifecycle_retention_public_id",
       (index) => index.eq("platformKey", platformKey)
         .eq("lifecycle", "retired"),
     )
@@ -911,7 +911,7 @@ export async function selectProviderRetentionCandidate(
     const aged = await ctx.db
       .query("providerCatalogReleases")
       .withIndex(
-        "by_platform_key_and_lifecycle_and_retention_eligible_at_and_public_id",
+        "by_platform_lifecycle_retention_public_id",
         (index) => index.eq("platformKey", platformKey)
           .eq("lifecycle", lifecycle)
           .lte("retentionEligibleAt", now),
@@ -926,7 +926,7 @@ export async function selectProviderRetentionCandidate(
   const complete = await ctx.db
     .query("providerCatalogReleases")
     .withIndex(
-      "by_platform_key_and_lifecycle_and_retention_eligible_at_and_public_id",
+      "by_platform_lifecycle_retention_public_id",
       (index) => index.eq("platformKey", platformKey)
         .eq("lifecycle", "complete"),
     )
