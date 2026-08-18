@@ -455,7 +455,7 @@ test("block sequence is lossless and reasons are from a fixed bounded vocabulary
   }).success, false);
 });
 
-test("cleanup has distinct safe scopes and a provider-native document bound", () => {
+test("cleanup keeps nonce retention independent while artifact cleanup belongs to Task 013", () => {
   const base = {
     schemaVersion: PROVIDER_RELEASE_PUBLICATION_SCHEMA_VERSION,
     operationId: "provider:cleanup:alpha",
@@ -467,7 +467,7 @@ test("cleanup has distinct safe scopes and a provider-native document bound", ()
   assert.equal(providerReleaseCleanupRequestSchema.safeParse({
     ...base,
     cleanupKind: "expired_provider_artifacts",
-  }).success, true);
+  }).success, false);
   assert.equal(providerReleaseCleanupRequestSchema.safeParse({
     ...base,
     cleanupKind: "expired_auth_nonces",

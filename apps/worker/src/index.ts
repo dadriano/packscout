@@ -10,10 +10,6 @@ import {
   JsonConsoleProviderWorkerLogger,
 } from "./provider-worker-runtime.ts";
 import {
-  CatalogPromotionWorkerConfigurationError,
-  readCatalogPromotionWorkerConfiguration,
-} from "./catalog-promotion-worker-config.ts";
-import {
   PromotionV2WorkerConfigurationError,
   readPromotionV2WorkerConfiguration,
 } from "./promotion-v2-worker-config.ts";
@@ -26,6 +22,13 @@ import {
 import {
   JsonConsoleHeatPromotionWorkerLogger,
 } from "./heat-promotion-worker-runtime.ts";
+import {
+  CatalogRetentionWorkerConfigurationError,
+  assertCatalogRetentionCredentialRoleIsolation,
+  readCatalogRetentionWorkerConfiguration,
+} from "./catalog-retention-worker-config.ts";
+import { JsonConsoleCatalogRetentionWorkerLogger } from
+  "./catalog-retention-worker-runtime.ts";
 import {
   ProviderWorkerConfigurationError,
   readProviderWorkerConfiguration,
@@ -50,17 +53,24 @@ async function runProviderWorker(): Promise<void> {
     process.env,
     fallbackWorkerId(),
   );
-  const heatPublicationConfiguration = readCatalogPromotionWorkerConfiguration(
-    process.env,
-  );
   const promotionConfiguration = readPromotionV2WorkerConfiguration(process.env);
   const heatConfiguration = readHeatPromotionWorkerConfiguration(
     process.env,
-    heatPublicationConfiguration,
+    promotionConfiguration,
   );
+  const retentionConfiguration = readCatalogRetentionWorkerConfiguration(
+    process.env,
+    promotionConfiguration,
+  );
+  assertCatalogRetentionCredentialRoleIsolation({
+    promotion: promotionConfiguration,
+    heat: heatConfiguration,
+    retention: retentionConfiguration,
+  });
   const logger = new JsonConsoleProviderWorkerLogger();
   const promotionLogger = new JsonConsolePromotionV2WorkerLogger();
   const heatLogger = new JsonConsoleHeatPromotionWorkerLogger();
+  const retentionLogger = new JsonConsoleCatalogRetentionWorkerLogger();
   const databaseLifecycle = createPrismaClientLifecycle({
     databaseUrl: configuration.databaseUrl,
   });
@@ -73,10 +83,12 @@ async function runProviderWorker(): Promise<void> {
       provider: configuration,
       promotion: promotionConfiguration,
       heat: heatConfiguration,
+      retention: retentionConfiguration,
       database: databaseLifecycle.client,
       providerLogger: logger,
       promotionLogger,
       heatLogger,
+      retentionLogger,
       observability,
     });
     const stop = () => runtime.stop();
@@ -97,11 +109,11 @@ runProviderWorker().catch((error: unknown) => {
   const failureCode =
     error instanceof ProviderWorkerConfigurationError
       ? error.code
-      : error instanceof CatalogPromotionWorkerConfigurationError
-        ? error.code
       : error instanceof PromotionV2WorkerConfigurationError
         ? error.code
       : error instanceof HeatPromotionWorkerConfigurationError
+        ? error.code
+      : error instanceof CatalogRetentionWorkerConfigurationError
         ? error.code
       : "PROVIDER_WORKER_FATAL";
   console.error(

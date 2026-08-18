@@ -2,16 +2,39 @@ import {
   REPACK_HEAT_MAXIMUM_FUTURE_SKEW_MILLISECONDS,
   REPACK_HEAT_MAXIMUM_PUBLISH_LAG_MILLISECONDS,
   REPACK_HEAT_PUBLICATION_SCHEMA_VERSION,
+  canonicalJson,
   containsProtectedPublicationField,
   parseRepackHeatTimestampMillis,
   productionHeatFrameEnvelopeSchema,
+  productionHeatManifestAlignmentSchema,
   recomputeProductionHeatFrameHash,
   type ProductionHeatFrameEnvelope,
+  type ProductionHeatManifestAlignment,
 } from "@packscout/contracts";
 import type { ZodType } from "zod";
 import type { Doc } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { assertExactCatalogManifestProviderReferences } from
+  "./catalogManifestRetentionReferences";
+import {
+  loadCatalogManifestByPublicReleaseId,
+  loadValidatedCatalogManifest,
+  type LoadedValidatedCatalogManifest,
+} from "./catalogManifestState";
 import { refuseProductionDataRelease } from "./productionDataReleaseErrors";
+
+type ReadCtx = MutationCtx | QueryCtx;
+
+export type ActiveCatalogHeatManifest = Readonly<
+  LoadedValidatedCatalogManifest & {
+    alignment: ProductionHeatManifestAlignment;
+  }
+>;
+
+export type OwnedHeatRepack = Readonly<{
+  release: Doc<"providerCatalogReleases">;
+  repack: Doc<"providerCatalogRepacks">;
+}>;
 
 export function parseProductionHeatRequest<T>(
   bodyJson: string,
@@ -40,41 +63,106 @@ export function parseProductionHeatRequest<T>(
     : refuseProductionDataRelease("PUBLICATION_REQUEST_INVALID");
 }
 
-export async function loadActiveCatalogRelease(
-  ctx: MutationCtx,
-  expectedPublicReleaseId: string,
-  heatSourceWatermark?: string,
-): Promise<Doc<"dataReleases">> {
-  const states = await ctx.db
-    .query("dataReleaseState")
-    .withIndex("by_key", (index) => index.eq("key", "singleton"))
-    .take(2);
-  if (states.length !== 1 || states[0]!.activeReleaseId === null) {
+export function heatManifestAlignment(
+  loaded: Pick<LoadedValidatedCatalogManifest, "manifest">,
+): ProductionHeatManifestAlignment {
+  return productionHeatManifestAlignmentSchema.parse({
+    publicReleaseId: loaded.manifest.publicReleaseId,
+    manifestFingerprint: loaded.manifest.manifestFingerprint,
+    sharedConfigurationEpoch: loaded.manifest.sharedConfigurationEpoch,
+    providerReferenceSetHash: loaded.manifest.providerReferenceSetHash,
+  });
+}
+
+export async function loadActiveCatalogHeatManifest(
+  ctx: ReadCtx,
+  expectedAlignment: ProductionHeatManifestAlignment,
+  expectedDataSource: "canonical" | "mock" = "canonical",
+): Promise<ActiveCatalogHeatManifest> {
+  let loaded: LoadedValidatedCatalogManifest | null;
+  try {
+    loaded = await loadValidatedCatalogManifest(ctx);
+  } catch {
+    return refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
+  }
+  if (loaded === null) {
     return refuseProductionDataRelease("PUBLICATION_PREDECESSOR_CONFLICT");
   }
-  const release = await ctx.db.get("dataReleases", states[0]!.activeReleaseId);
+  const alignment = heatManifestAlignment(loaded);
   if (
-    release === null ||
-    release.lifecycle !== "complete" ||
-    release.metadata.dataSource !== "canonical" ||
-    release.publicReleaseId !== expectedPublicReleaseId ||
-    release.metadata.publicReleaseId !== expectedPublicReleaseId
+    loaded.manifest.dataSource !== expectedDataSource ||
+    canonicalJson(alignment) !== canonicalJson(expectedAlignment)
   ) {
     return refuseProductionDataRelease("PUBLICATION_PREDECESSOR_CONFLICT");
   }
-  if (
-    !Number.isSafeInteger(states[0]!.latestObservationSequence) ||
-    states[0]!.latestObservationSequence <= 0
-  ) {
+  return { ...loaded, alignment };
+}
+
+export async function assertStoredHeatManifest(
+  ctx: ReadCtx,
+  manifestId: Doc<"globalCatalogManifests">["_id"],
+  expectedAlignment: ProductionHeatManifestAlignment,
+): Promise<Doc<"globalCatalogManifests">> {
+  let document: Doc<"globalCatalogManifests"> | null;
+  try {
+    document = await loadCatalogManifestByPublicReleaseId(
+      ctx,
+      expectedAlignment.publicReleaseId,
+    );
+    if (document !== null) {
+      await assertExactCatalogManifestProviderReferences(ctx, document);
+    }
+  } catch {
     return refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
   }
   if (
-    heatSourceWatermark !== undefined &&
-    BigInt(heatSourceWatermark) < BigInt(states[0]!.latestObservationSequence)
+    document === null ||
+    document._id !== manifestId ||
+    canonicalJson({
+      publicReleaseId: document.publicReleaseId,
+      manifestFingerprint: document.manifestFingerprint,
+      sharedConfigurationEpoch: document.manifest.sharedConfigurationEpoch,
+      providerReferenceSetHash: document.providerReferenceSetHash,
+    }) !== canonicalJson(expectedAlignment)
   ) {
-    return refuseProductionDataRelease("PUBLICATION_PREDECESSOR_CONFLICT");
+    return refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
   }
-  return release;
+  return document;
+}
+
+export async function loadOwnedHeatRepacks(
+  ctx: ReadCtx,
+  manifest: ActiveCatalogHeatManifest,
+  publicRepackIds: readonly string[],
+): Promise<ReadonlyMap<string, OwnedHeatRepack>> {
+  const owned = new Map<string, OwnedHeatRepack>();
+  for (const publicRepackId of publicRepackIds) {
+    const candidates = await Promise.all(
+      manifest.providerReleases.map(async (release) => ({
+        release,
+        documents: await ctx.db
+          .query("providerCatalogRepacks")
+          .withIndex("by_release_id_and_public_repack_id", (index) =>
+            index
+              .eq("releaseId", release._id)
+              .eq("publicRepackId", publicRepackId),
+          )
+          .take(2),
+      })),
+    );
+    const matches = candidates.flatMap(({ release, documents }) =>
+      documents.map((repack) => ({ release, repack }))
+    );
+    if (
+      matches.length !== 1 ||
+      matches[0]!.repack.releaseId !== matches[0]!.release._id ||
+      matches[0]!.repack.publicRepackId !== publicRepackId
+    ) {
+      return refuseProductionDataRelease("PUBLICATION_REFERENCE_INVALID");
+    }
+    owned.set(publicRepackId, matches[0]!);
+  }
+  return owned;
 }
 
 export async function assertProductionHeatFrame(
@@ -99,8 +187,31 @@ export async function assertProductionHeatFrame(
   return frame;
 }
 
+export function productionHeatFrameFromSnapshot(
+  snapshot: Doc<"repackHeatSnapshots">,
+  signalSet: Doc<"repackHeatSignalSets">,
+): ProductionHeatFrameEnvelope {
+  return productionHeatFrameEnvelopeSchema.parse({
+    publicHeatFrameId: snapshot.publicHeatSnapshotId,
+    manifestAlignment: snapshot.manifestAlignment,
+    frameSequence: snapshot.sequence,
+    sourceWatermark: snapshot.sourceWatermark,
+    signalSetHash: signalSet.signalSetHash,
+    frameHash: snapshot.contentHash,
+    signalCount: snapshot.signalCount,
+    aggregationVersion: snapshot.aggregationVersion,
+    heatPolicyVersion: snapshot.heatPolicyVersion,
+    baselineWindowStartedAt: snapshot.baselineWindowStartedAt,
+    baselineWindowEndedAt: snapshot.baselineWindowEndedAt,
+    currentWindowStartedAt: snapshot.currentWindowStartedAt,
+    currentWindowEndedAt: snapshot.currentWindowEndedAt,
+    calculatedAt: snapshot.calculatedAt,
+    expiresAt: snapshot.expiresAt,
+  });
+}
+
 export async function loadHeatState(
-  ctx: MutationCtx,
+  ctx: ReadCtx,
 ): Promise<Doc<"repackHeatState"> | null> {
   const states = await ctx.db
     .query("repackHeatState")
@@ -113,7 +224,7 @@ export async function loadHeatState(
 }
 
 export async function loadActiveHeatFrame(
-  ctx: MutationCtx,
+  ctx: ReadCtx,
   state: Doc<"repackHeatState"> | null,
 ): Promise<Doc<"repackHeatSnapshots"> | null> {
   if (state === null || state.activeHeatSnapshotId === null) return null;
@@ -128,7 +239,10 @@ export async function loadActiveHeatFrame(
     active === null ||
     active.lifecycle !== "complete" ||
     active.sequence !== state.latestSequence ||
-    active.expiresAt !== state.expiresAt
+    active.expiresAt !== state.expiresAt ||
+    !productionHeatManifestAlignmentSchema.safeParse(
+      active.manifestAlignment,
+    ).success
   ) {
     return refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
   }

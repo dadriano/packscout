@@ -16,6 +16,10 @@ import {
   MAX_PRODUCTION_BATCH_RECORDS,
 } from "./data-release-v2-publication.ts";
 import {
+  globalCatalogManifestIdentityV1Schema,
+  type GlobalCatalogManifestIdentityV1,
+} from "./catalog-manifest-publication-v1.ts";
+import {
   REPACK_HEAT_AGGREGATION_VERSION,
   REPACK_HEAT_MAXIMUM_CALCULATION_LAG_MILLISECONDS,
   REPACK_HEAT_POLICY_VERSION,
@@ -53,6 +57,10 @@ export const PRODUCTION_HEAT_FRAME_HASH_DOMAIN =
   "packscout.repack-heat.frame.v1" as const;
 export const PRODUCTION_HEAT_RECEIPT_HASH_DOMAIN =
   "packscout.repack-heat.receipt.v1" as const;
+export const PRODUCTION_HEAT_CONTENT_IDENTITY_DOMAIN =
+  "packscout.heat-release-signal-set.v1" as const;
+export const PRODUCTION_HEAT_FRAME_ID_DOMAIN =
+  "packscout.heat-frame.v1" as const;
 
 const operationIdSchema = z.string()
   .regex(/^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$/u);
@@ -73,6 +81,12 @@ const operationEnvelopeShape = {
   idempotencyKey: idempotencyKeySchema,
 } as const;
 
+export const productionHeatManifestAlignmentSchema =
+  globalCatalogManifestIdentityV1Schema;
+
+export type ProductionHeatManifestAlignment =
+  GlobalCatalogManifestIdentityV1;
+
 export const productionHeatActiveStateRequestSchema = z.object({
   schemaVersion: z.literal(REPACK_HEAT_PUBLICATION_SCHEMA_VERSION),
   operationId: operationIdSchema,
@@ -80,7 +94,7 @@ export const productionHeatActiveStateRequestSchema = z.object({
 
 export const productionHeatFrameEnvelopeSchema = z.object({
   publicHeatFrameId: publicIdSchema,
-  catalogPublicReleaseId: publicIdSchema,
+  manifestAlignment: productionHeatManifestAlignmentSchema,
   frameSequence: z.number().int().safe().positive(),
   sourceWatermark: sourceWatermarkSchema,
   signalSetHash: sha256Schema,
@@ -164,7 +178,7 @@ export const productionHeatFinalizeRequestSchema = z.object({
   ...operationEnvelopeShape,
   publicationId: publicIdSchema,
   expectedActivePublicHeatFrameId: publicIdSchema.nullable(),
-  expectedCatalogPublicReleaseId: publicIdSchema,
+  expectedManifestAlignment: productionHeatManifestAlignmentSchema,
   expectedSignalSetHash: sha256Schema,
   expectedFrameHash: sha256Schema,
   expectedSignalCount: nonNegativeSafeIntegerSchema.max(
@@ -235,6 +249,75 @@ export type RepackHeatSignalTimeline = Readonly<{
   calculatedAt: string;
   expiresAt: string;
 }>;
+
+const productionHeatContentIdentityInputSchema = z.object({
+  manifestAlignment: productionHeatManifestAlignmentSchema,
+  signalSetHash: sha256Schema,
+}).strict();
+
+const productionHeatFrameIdInputSchema = z.object({
+  manifestAlignment: productionHeatManifestAlignmentSchema,
+  frameSequence: z.number().int().safe().positive(),
+  sourceWatermark: sourceWatermarkSchema,
+}).strict();
+
+export function productionHeatContentIdentityBody(input: Readonly<{
+  manifestAlignment: ProductionHeatManifestAlignment;
+  signalSetHash: string;
+}>): unknown {
+  const parsed = productionHeatContentIdentityInputSchema.parse(input);
+  return [
+    PRODUCTION_HEAT_CONTENT_IDENTITY_DOMAIN,
+    parsed.manifestAlignment,
+    parsed.signalSetHash,
+  ];
+}
+
+export function productionHeatFrameIdBody(input: Readonly<{
+  manifestAlignment: ProductionHeatManifestAlignment;
+  frameSequence: number;
+  sourceWatermark: string;
+}>): unknown {
+  const parsed = productionHeatFrameIdInputSchema.parse(input);
+  return [
+    PRODUCTION_HEAT_FRAME_ID_DOMAIN,
+    parsed.manifestAlignment,
+    parsed.frameSequence,
+    parsed.sourceWatermark,
+  ];
+}
+
+async function sha256CanonicalValue(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(value)),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export function productionHeatContentIdentity(input: Readonly<{
+  manifestAlignment: ProductionHeatManifestAlignment;
+  signalSetHash: string;
+}>): Promise<string> {
+  return sha256CanonicalValue(productionHeatContentIdentityBody(input));
+}
+
+export async function deriveProductionHeatFrameId(input: Readonly<{
+  manifestAlignment: ProductionHeatManifestAlignment;
+  frameSequence: number;
+  sourceWatermark: string;
+}>): Promise<string> {
+  const hex = await sha256CanonicalValue(productionHeatFrameIdBody(input));
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `5${hex.slice(13, 16)}`,
+    `8${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join("-");
+}
 
 export function repackHeatSignalCore(
   signal: PublicRepackHeatSignal,
@@ -332,11 +415,5 @@ export function productionHeatReceiptHash(value: unknown): Promise<string> {
 export async function productionHeatTerminalReceiptSha256(
   receipt: unknown,
 ): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(canonicalJson(receipt)),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256CanonicalValue(receipt);
 }

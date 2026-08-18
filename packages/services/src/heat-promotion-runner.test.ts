@@ -7,7 +7,10 @@ import {
   productionHeatReceiptHash,
   productionHeatReceiptSchema,
 } from "@packscout/contracts";
-import { HeatPromotionBootstrapCoordinator } from "./heat-promotion-bootstrap.ts";
+import {
+  HeatPromotionBootstrapCoordinator,
+  HeatPromotionBootstrapError,
+} from "./heat-promotion-bootstrap.ts";
 import { prepareHeatPromotion } from "./heat-promotion-operations.ts";
 import { HeatPromotionRunner } from "./heat-promotion-runner.ts";
 import {
@@ -16,7 +19,7 @@ import {
   MutableHeatTestClock,
 } from "./heat-promotion-runner.test-support.ts";
 import type {
-  ActiveCatalogHeatRelease,
+  ActiveCatalogHeatManifest,
   ActiveHeatFrameBaseline,
   HeatPromotionBootstrapPort,
   HeatPromotionHealthSink,
@@ -24,17 +27,37 @@ import type {
   HeatPublicationTransport,
 } from "./heat-promotion-types.ts";
 
-const releaseId = "82000000-0000-4000-8000-000000000001";
+const releaseId = "82000000-0000-5000-8000-000000000001";
 const repackIds = [
   "83000000-0000-5000-8000-000000000001",
   "83000000-0000-5000-8000-000000000002",
 ] as const;
 const initialBoundary = new Date("2026-08-15T12:00:00.000Z");
 
-const catalog: ActiveCatalogHeatRelease = Object.freeze({
+const manifestAlignment = Object.freeze({
   publicReleaseId: releaseId,
+  manifestFingerprint: "1".repeat(64),
+  sharedConfigurationEpoch: Object.freeze({
+    configurationKey: "catalog-v1",
+    revision: 1,
+    publicChangeSequence: "20",
+    configurationHash: "2".repeat(64),
+  }),
+  providerReferenceSetHash: "3".repeat(64),
+});
+
+const catalog: ActiveCatalogHeatManifest = Object.freeze({
+  manifestAlignment,
+  providerReferences: [],
+  publicRepackOwnership: repackIds.map((publicRepackId) => ({
+    publicRepackId,
+    platformKey: "alpha",
+    publicProviderReleaseId:
+      "84000000-0000-5000-8000-000000000001",
+    providerReleaseFingerprint: "4".repeat(64),
+  })),
   publicRepackIds: repackIds,
-  confirmedWatermark: 40n,
+  confirmedManifestWatermark: 40n,
   terminalReceiptSha256: "a".repeat(64),
 });
 
@@ -61,7 +84,7 @@ function createRunner(input: Readonly<{
   alerts?: string[];
   maximumRetries?: number;
   health?: HeatPromotionHealthSink;
-  catalog?: ActiveCatalogHeatRelease;
+  catalog?: ActiveCatalogHeatManifest;
   workerId?: string;
 }>): HeatPromotionRunner {
   const checkpoint = input.checkpoint ?? {
@@ -72,8 +95,8 @@ function createRunner(input: Readonly<{
     workerId: input.workerId ?? "heat-worker-1",
     ledger: input.ledger,
     settlement: { async getCheckpoint() { return checkpoint; } },
-    releases: {
-      async loadActiveCatalogRelease() { return input.catalog ?? catalog; },
+    manifests: {
+      async loadActiveCatalogManifest() { return input.catalog ?? catalog; },
       async loadActiveHeatFrame() { return input.baseline ?? null; },
       async hasReusableHeatSignalSet() { return false; },
     },
@@ -121,7 +144,7 @@ async function priorBaseline(): Promise<ActiveHeatFrameBaseline> {
   });
   return {
     publicHeatFrameId: plan.publicHeatFrameId,
-    catalogPublicReleaseId: plan.catalogPublicReleaseId,
+    manifestAlignment: plan.manifestAlignment,
     frameSequence: Number(plan.targetFrameSequence),
     sourceWatermark: plan.sourceWatermark,
     signalSetHash: plan.signalSetHash,
@@ -167,12 +190,22 @@ test("maximum release volume activates in one minute cycle", async (t) => {
   const clock = new MutableHeatTestClock();
   const ledger = new MemoryHeatPromotionLedger();
   const transport = new FakeHeatPublicationTransport();
-  const maximumCatalog: ActiveCatalogHeatRelease = {
+  const maximumPublicRepackIds = Array.from(
+    { length: MAX_PUBLIC_REPACKS_PER_RELEASE },
+    (_value, index) =>
+      `83000000-0000-5000-8000-${String(index + 1).padStart(12, "0")}`,
+  );
+  const maximumCatalog: ActiveCatalogHeatManifest = {
     ...catalog,
-    publicRepackIds: Array.from(
-      { length: MAX_PUBLIC_REPACKS_PER_RELEASE },
-      (_value, index) =>
-        `83000000-0000-5000-8000-${String(index + 1).padStart(12, "0")}`,
+    publicRepackIds: maximumPublicRepackIds,
+    publicRepackOwnership: maximumPublicRepackIds.map(
+    (publicRepackId) => ({
+      publicRepackId,
+      platformKey: "alpha",
+      publicProviderReleaseId:
+        "84000000-0000-5000-8000-000000000001",
+      providerReleaseFingerprint: "4".repeat(64),
+    }),
     ),
   };
   const startedAt = performance.now();
@@ -220,6 +253,11 @@ for (const lostKind of ["start", "applyBatch", "finalize"] as const) {
 
 test("unchanged cores activate a new frame without signal rewrites", async () => {
   const baseline = await priorBaseline();
+  const refreshedCatalog: ActiveCatalogHeatManifest = {
+    ...catalog,
+    confirmedManifestWatermark: catalog.confirmedManifestWatermark + 1n,
+    terminalReceiptSha256: "c".repeat(64),
+  };
   const boundary = new Date(initialBoundary.getTime() + 60_000);
   const clock = new MutableHeatTestClock(
     new Date(boundary.getTime() + 1_000),
@@ -229,8 +267,13 @@ test("unchanged cores activate a new frame without signal rewrites", async () =>
   ledger.confirmedPublicationIdentity = baseline.publicHeatFrameId;
   ledger.expectedPredecessorIdentity = baseline.publicHeatFrameId;
   const transport = new FakeHeatPublicationTransport();
-  const result = await createRunner({ ledger, transport, clock, baseline })
-    .runCycle(boundary);
+  const result = await createRunner({
+    ledger,
+    transport,
+    clock,
+    baseline,
+    catalog: refreshedCatalog,
+  }).runCycle(boundary);
   assert.equal(result.outcome, "published");
   assert.equal(result.reusedSignalSet, true);
   assert.deepEqual(transport.events, ["send:refreshFrame"]);
@@ -315,6 +358,25 @@ for (const corruption of ["body", "hash"] as const) {
       assert.equal(ledger.terminal[0]?.failureClass, "reconciliation");
     });
 }
+
+test("restart rejects a substituted Heat manifest source proof", async () => {
+  const clock = new MutableHeatTestClock();
+  const ledger = new MemoryHeatPromotionLedger();
+  const transport = new FakeHeatPublicationTransport();
+  await leaveAcknowledgedAttemptForRestart({ ledger, transport, clock });
+  assert.ok(ledger.attempt?.manifestSourceProof);
+  ledger.attempt.manifestSourceProof = {
+    ...ledger.attempt.manifestSourceProof,
+    publicRepackOwnership: ledger.attempt.manifestSourceProof
+      .publicRepackOwnership.slice(1),
+  };
+  const result = await createRunner({ ledger, transport, clock })
+    .runCycle(initialBoundary);
+  assert.equal(result.outcome, "failed");
+  assert.equal(result.failureCode, "HEAT_LEDGER_INVALID");
+  assert.equal(ledger.confirmedWatermark, 0n);
+  assert.equal(ledger.terminal[0]?.failureClass, "reconciliation");
+});
 
 test("restart rejects a substituted terminal Heat detail", async () => {
   const clock = new MutableHeatTestClock();
@@ -517,12 +579,14 @@ test("shutdown during active-state proof stops before verification or dispatch",
   let entered!: () => void;
   const activeStateStarted = new Promise<void>((resolve) => { entered = resolve; });
   const bootstrap = new HeatPromotionBootstrapCoordinator(ledger, {
+    async loadActiveHeatFrame() { return null; },
+  }, {
     activeState(signal) {
       entered();
       return new Promise((resolve) => {
         const finish = () => resolve({
           activePublicHeatFrameId: null,
-          catalogPublicReleaseId: null,
+          manifestAlignment: null,
           sourceWatermark: null,
           frameSequence: 0,
           terminalReceiptSha256: null,
@@ -541,6 +605,36 @@ test("shutdown during active-state proof stops before verification or dispatch",
   assert.equal(ledger.bootstrapState, "unverified");
   assert.equal(ledger.attempt?.claimCount, 0);
   assert.deepEqual(transport.events, []);
+});
+
+test("bootstrap rejects a remote frame aligned to another manifest proof", async () => {
+  const ledger = new MemoryHeatPromotionLedger();
+  ledger.bootstrapState = "unverified";
+  const baseline = await priorBaseline();
+  const bootstrap = new HeatPromotionBootstrapCoordinator(ledger, {
+    async loadActiveHeatFrame() { return baseline; },
+  }, {
+    async activeState() {
+      return {
+        activePublicHeatFrameId: baseline.publicHeatFrameId,
+        manifestAlignment: {
+          ...baseline.manifestAlignment,
+          providerReferenceSetHash: "f".repeat(64),
+        },
+        sourceWatermark: baseline.sourceWatermark,
+        frameSequence: baseline.frameSequence,
+        terminalReceiptSha256: baseline.terminalReceiptSha256,
+      };
+    },
+  });
+  await assert.rejects(
+    bootstrap.ensureVerified({
+      verifiedAt: new Date("2026-08-15T12:01:00.000Z"),
+    }),
+    (error: unknown) => error instanceof HeatPromotionBootstrapError &&
+      error.code === "HEAT_BOOTSTRAP_UNPROVEN",
+  );
+  assert.equal(ledger.bootstrapState, "unverified");
 });
 
 test("thrown cycles still publish a safe lane health snapshot", async () => {

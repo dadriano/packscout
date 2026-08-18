@@ -36,6 +36,7 @@ export const CATALOG_RETENTION_RECEIPT_HASH_DOMAIN =
   "packscout.catalog-retention.receipt.v1" as const;
 
 export const MAX_CATALOG_RETENTION_HTTP_BODY_BYTES = 256 * 1_024;
+export const MAX_CATALOG_RETENTION_POSTGRES_PROOF_BYTES = 240 * 1_024;
 export const MAX_CATALOG_RETENTION_ARTIFACT_DOCUMENTS = 90;
 export const MIN_CATALOG_RETENTION_MANIFEST_DOCUMENTS = 9;
 export const MAX_CATALOG_RETENTION_DOCUMENTS_PER_MUTATION = 100;
@@ -93,7 +94,7 @@ export const catalogRetentionManifestOperationProofSchema = z.object({
   operationId: catalogManifestOperationIdSchema,
   operationState: z.enum(["pending", "sent", "acknowledged"]),
   canonicalRequestBody: z.string().min(2)
-    .max(MAX_CATALOG_RETENTION_HTTP_BODY_BYTES),
+    .max(MAX_CATALOG_RETENTION_HTTP_BODY_BYTES).nullable(),
   requestDigest: sha256Schema,
   terminalReceiptSha256: sha256Schema.nullable(),
 }).strict().superRefine(validateOperationProofState);
@@ -109,7 +110,7 @@ export const catalogRetentionProviderOperationProofSchema = z.object({
   operationId: providerReleaseOperationIdSchema,
   operationState: z.enum(["pending", "sent", "acknowledged"]),
   canonicalRequestBody: z.string().min(2)
-    .max(MAX_CATALOG_RETENTION_HTTP_BODY_BYTES),
+    .max(MAX_CATALOG_RETENTION_HTTP_BODY_BYTES).nullable(),
   requestDigest: sha256Schema,
   terminalReceiptSha256: sha256Schema.nullable(),
 }).strict().superRefine(validateOperationProofState);
@@ -117,13 +118,16 @@ export const catalogRetentionProviderOperationProofSchema = z.object({
 function validateOperationProofState(
   proof: Readonly<{
     operationState: "pending" | "sent" | "acknowledged";
+    canonicalRequestBody: string | null;
     terminalReceiptSha256: string | null;
   }>,
   context: z.RefinementCtx,
 ): void {
   if (
     (proof.operationState === "acknowledged") !==
-      (proof.terminalReceiptSha256 !== null)
+      (proof.terminalReceiptSha256 !== null) ||
+    (proof.operationState === "acknowledged") !==
+      (proof.canonicalRequestBody === null)
   ) {
     context.addIssue({
       code: "custom",
@@ -288,7 +292,17 @@ const postgresProofSnapshotWithoutDigestSchema = z.object({
 export const catalogRetentionPostgresProofSnapshotSchema =
   postgresProofSnapshotWithoutDigestSchema.extend({
     snapshotDigest: sha256Schema,
-  }).strict();
+  }).strict().superRefine((snapshot, context) => {
+    if (
+      new TextEncoder().encode(canonicalJson(snapshot)).byteLength >
+        MAX_CATALOG_RETENTION_POSTGRES_PROOF_BYTES
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "catalog_retention.postgres_proof_too_large",
+      });
+    }
+  });
 
 const operationEnvelopeShape = {
   schemaVersion: z.literal(CATALOG_RETENTION_SCHEMA_VERSION),
@@ -324,6 +338,15 @@ function validateRetentionRequest(
   request: unknown,
   context: z.RefinementCtx,
 ): void {
+  if (
+    new TextEncoder().encode(canonicalJson(request)).byteLength >
+      MAX_CATALOG_RETENTION_HTTP_BODY_BYTES
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "catalog_retention.request_too_large",
+    });
+  }
   if (containsProtectedCatalogRetentionField(request)) {
     context.addIssue({
       code: "custom",
@@ -377,6 +400,7 @@ export const catalogRetentionManifestProtectionReasonSchema = z.enum([
   "previous_manifest",
   "complete_allowance",
   "abandoned_allowance",
+  "heat_reference",
   "in_flight_attempt",
   "rollback_recovery",
   "block_recovery",

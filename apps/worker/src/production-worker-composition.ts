@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   PrismaAdminNotificationPublisher,
-  PrismaHeatPromotionReleaseRepository,
+  PrismaHeatPromotionManifestRepository,
   PrismaHeatPromotionRepository,
   PrismaNormalizedHeatObservationRepository,
   PrismaNormalizedHeatRetentionRepository,
@@ -43,15 +43,25 @@ import { createPromotionV2WorkerRuntime } from
   "./promotion-v2-worker-composition.ts";
 import type { PromotionV2WorkerLogger } from
   "./promotion-v2-worker-runtime.ts";
+import { createCatalogRetentionWorkerRuntime } from
+  "./catalog-retention-worker-composition.ts";
+import {
+  assertCatalogRetentionCredentialRoleIsolation,
+  type CatalogRetentionWorkerConfiguration,
+} from "./catalog-retention-worker-config.ts";
+import type { CatalogRetentionWorkerLogger } from
+  "./catalog-retention-worker-runtime.ts";
 
 export interface ProductionWorkerCompositionInput {
   readonly provider: ProviderWorkerConfiguration;
   readonly promotion: PromotionV2WorkerConfiguration;
   readonly heat: HeatPromotionWorkerConfiguration;
+  readonly retention: CatalogRetentionWorkerConfiguration;
   readonly database: PackscoutPrismaClient;
   readonly providerLogger: ProviderWorkerLogger;
   readonly promotionLogger: PromotionV2WorkerLogger;
   readonly heatLogger: HeatPromotionWorkerLogger;
+  readonly retentionLogger: CatalogRetentionWorkerLogger;
   readonly observability: OperationalObservability;
   readonly fetch?: typeof fetch;
 }
@@ -60,7 +70,15 @@ export interface ProductionWorkerCompositionInput {
 export function createProductionWorkerRuntime(
   input: ProductionWorkerCompositionInput,
 ) {
-  assertPromotionV2CredentialRoleIsolation(input.promotion, [input.heat.keyId]);
+  assertPromotionV2CredentialRoleIsolation(input.promotion, [
+    input.heat.keyId,
+    input.retention.keyId,
+  ]);
+  assertCatalogRetentionCredentialRoleIsolation({
+    promotion: input.promotion,
+    heat: input.heat,
+    retention: input.retention,
+  });
   const settlement = createProviderWorkerPublicSettlementReader({
     database: input.database,
     publicOrganizationId: input.provider.publicOrganizationId,
@@ -80,7 +98,7 @@ export function createProductionWorkerRuntime(
     operationalEvents,
     fetch: input.fetch,
   });
-  const heatProofs = new PrismaHeatPromotionReleaseRepository(input.database, {
+  const heatProofs = new PrismaHeatPromotionManifestRepository(input.database, {
     organizationId: input.provider.publicOrganizationId,
     deploymentKey: input.heat.deploymentKey,
   });
@@ -120,7 +138,7 @@ export function createProductionWorkerRuntime(
     workerId: input.provider.workerId,
     ledger: heatLedger,
     settlement,
-    releases: heatProofs,
+    manifests: heatProofs,
     observations: new NormalizedHeatObservationService(
       new PrismaNormalizedHeatObservationRepository(input.database, {
         organizationId: input.provider.publicOrganizationId,
@@ -146,6 +164,14 @@ export function createProductionWorkerRuntime(
     logger: input.heatLogger,
     fetch: input.fetch,
   });
+  const catalogRetention = createCatalogRetentionWorkerRuntime({
+    configuration: input.retention,
+    organizationId: input.provider.publicOrganizationId,
+    workerId: input.provider.workerId,
+    database: input.database,
+    logger: input.retentionLogger,
+    fetch: input.fetch,
+  });
   return createProviderWorkerRuntime({
     configuration: input.provider,
     database: input.database,
@@ -153,5 +179,6 @@ export function createProductionWorkerRuntime(
     observability: input.observability,
     promotion,
     heatPromotion,
+    catalogRetention,
   });
 }

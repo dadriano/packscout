@@ -1,13 +1,19 @@
 /// <reference types="vite/client" />
 
 import {
+  CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
   EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
   REPACK_HEAT_AGGREGATION_VERSION,
   REPACK_HEAT_POLICY_VERSION,
+  buildGlobalCatalogAggregateObservationV1,
   canonicalJson,
+  catalogManifestPublicationRequestDigest,
+  catalogManifestRefreshActiveStateRequestSchema,
+  catalogManifestRollbackRequestSchema,
   deriveRepackHeatV1Policy,
   extendProductionHeatSignalSetHash,
   productionHeatCoreByteCount,
+  productionHeatManifestAlignmentSchema,
   publicRepackHeatSignalSchema,
   recomputeProductionHeatBatchHash,
   recomputeProductionHeatFrameHash,
@@ -15,6 +21,7 @@ import {
   type ProductionHeatApplyBatchRequest,
   type ProductionHeatFinalizeRequest,
   type ProductionHeatFrameEnvelope,
+  type ProductionHeatManifestAlignment,
   type ProductionHeatRefreshFrameRequest,
   type ProductionHeatStartRequest,
   type PublicRepackHeatSignal,
@@ -25,11 +32,12 @@ import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import {
   MOCK_DATA_RELEASE_ORIGIN_SET_HASH,
-  MOCK_DATA_RELEASE_PUBLIC_ID,
-  buildMockDataReleaseV2,
 } from "./mockDataReleaseFixture";
 import { buildMockHeatFrame } from "./mockHeatSimulationFixture";
-import { seedLegacyHeatCatalogForTest } from "./repackHeatTestCatalog";
+import { seedHeatCatalogManifestForTest } from "./repackHeatTestCatalog";
+import { refreshCatalogManifestRequest } from "./catalogManifestRefresh";
+import { rollbackCatalogManifestRequest } from "./catalogManifestRollback";
+import { loadActiveCatalogManifestState } from "./catalogManifestState";
 
 const modules = import.meta.glob("./**/*.ts");
 type HeatTest = TestConvex<typeof schema>;
@@ -45,6 +53,7 @@ const FIRST_FRAME_ID = "91000000-0000-4000-8000-000000000001";
 const SECOND_FRAME_ID = "91000000-0000-4000-8000-000000000002";
 const THIRD_FRAME_ID = "91000000-0000-4000-8000-000000000003";
 const START_AT = "2026-08-15T12:00:00.000Z";
+let activeManifestAlignment: ProductionHeatManifestAlignment;
 
 function createTest() {
   return convexTest({ schema, modules, transactionLimits: true });
@@ -64,6 +73,10 @@ function configure() {
     JSON.stringify({
       [KEY_ID]: btoa(String.fromCharCode(...KEY_SECRET)),
     }),
+  );
+  vi.stubEnv(
+    "PACKSCOUT_HEAT_PUBLICATION_KEY_IDS",
+    canonicalJson([KEY_ID]),
   );
 }
 
@@ -122,68 +135,72 @@ async function signedFetch(t: HeatTest, path: string, body: unknown) {
 }
 
 async function seedCanonicalCatalog(t: HeatTest) {
-  await t.mutation(internal.mockDataReleaseSeed.seed, {});
-  await t.run((ctx) => seedLegacyHeatCatalogForTest(ctx, "canonical"));
+  const seeded = await t.run((ctx) => seedHeatCatalogManifestForTest(ctx));
+  vi.stubEnv(
+    "PACKSCOUT_PUBLIC_ORIGIN_SET_HASH",
+    seeded.manifest.governingHashes.originSetHash,
+  );
+  activeManifestAlignment = productionHeatManifestAlignmentSchema.parse({
+    publicReleaseId: seeded.manifest.publicReleaseId,
+    manifestFingerprint: seeded.manifest.manifestFingerprint,
+    sharedConfigurationEpoch: seeded.manifest.sharedConfigurationEpoch,
+    providerReferenceSetHash: seeded.manifest.providerReferenceSetHash,
+  });
+  return seeded;
 }
 
 async function activateEquivalentCatalog(
   t: HeatTest,
-  publicReleaseId: string,
-): Promise<void> {
-  await t.run(async (ctx) => {
-    const state = await ctx.db.query("dataReleaseState").unique();
-    if (state?.activeReleaseId === null || state?.activeReleaseId === undefined) {
-      throw new Error("Expected an active catalog.");
-    }
-    const prior = await ctx.db.get("dataReleases", state.activeReleaseId);
-    if (prior === null) throw new Error("Expected an active release.");
-    const priorRepacks = await ctx.db
-      .query("repacks")
-      .withIndex("by_release_id_and_public_repack_id", (index) =>
-        index.eq("releaseId", prior._id),
-      )
-      .collect();
-    const priorSearchShards = await ctx.db
-      .query("repackSearchShards")
-      .withIndex("by_release_id_and_shard_number", (index) =>
-        index.eq("releaseId", prior._id),
-      )
-      .collect();
-    const nextId = await ctx.db.insert("dataReleases", {
-      publicReleaseId,
-      lifecycle: "complete",
-      metadata: {
-        ...prior.metadata,
-        publicReleaseId,
-        sourceWatermark: "2",
-      },
-      searchShardCount: prior.searchShardCount,
-    });
-    for (const priorRepack of priorRepacks) {
-      await ctx.db.insert("repacks", {
-        releaseId: nextId,
-        publicRepackId: priorRepack.publicRepackId,
-        vendorId: priorRepack.vendorId,
-        detail: priorRepack.detail,
-      });
-    }
-    for (const priorShard of priorSearchShards) {
-      await ctx.db.insert("repackSearchShards", {
-        releaseId: nextId,
-        shardNumber: priorShard.shardNumber,
-        rowCount: priorShard.rowCount,
-        byteCount: priorShard.byteCount,
-        contentHash: priorShard.contentHash,
-        rows: priorShard.rows,
-      });
-    }
-    await ctx.db.patch("dataReleaseState", state._id, {
-      activeReleaseId: nextId,
-      previousReleaseId: prior._id,
-      latestObservationSequence: 2,
-      updatedAt: "2026-08-15T12:01:00.000Z",
-    });
+): Promise<ProductionHeatManifestAlignment> {
+  const seeded = await t.run((ctx) =>
+    seedHeatCatalogManifestForTest(ctx, {
+      providerRevisions: { collector_crypt: 1 },
+      observationSequence: 2,
+      serverTime: "2026-08-15T12:01:00.000Z",
+    })
+  );
+  activeManifestAlignment = productionHeatManifestAlignmentSchema.parse({
+    publicReleaseId: seeded.manifest.publicReleaseId,
+    manifestFingerprint: seeded.manifest.manifestFingerprint,
+    sharedConfigurationEpoch: seeded.manifest.sharedConfigurationEpoch,
+    providerReferenceSetHash: seeded.manifest.providerReferenceSetHash,
   });
+  return activeManifestAlignment;
+}
+
+async function refreshCatalogObservation(t: HeatTest): Promise<void> {
+  const current = await t.run(async (ctx) =>
+    (await loadActiveCatalogManifestState(ctx)).state
+  );
+  if (current.activeManifest === null || current.observation === null) {
+    throw new Error("Expected an active catalog manifest observation.");
+  }
+  const observation = buildGlobalCatalogAggregateObservationV1({
+    observationSequence: current.observation.observationSequence + 1,
+    publicReleaseId: current.activeManifest.publicReleaseId,
+    providerReferenceSetHash:
+      current.activeManifest.providerReferenceSetHash,
+    providerSelections: current.observation.providerSelections,
+  });
+  const request = catalogManifestRefreshActiveStateRequestSchema.parse({
+    schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
+    operationId: "catalog:refresh:heat-metadata",
+    idempotencyKey: "catalog:refresh:heat-metadata",
+    manifest: {
+      publicReleaseId: current.activeManifest.publicReleaseId,
+      manifestFingerprint: current.activeManifest.manifestFingerprint,
+      sharedConfigurationEpoch:
+        current.activeManifest.sharedConfigurationEpoch,
+      providerReferenceSetHash:
+        current.activeManifest.providerReferenceSetHash,
+    },
+    observation,
+    expectedActiveState: current,
+  });
+  const requestDigest = await catalogManifestPublicationRequestDigest(request);
+  await t.run((ctx) =>
+    refreshCatalogManifestRequest(ctx, request, requestDigest)
+  );
 }
 
 function observedSignal(signal: PublicRepackHeatSignal) {
@@ -227,7 +244,7 @@ async function buildPlan(
   expectedBatchCount = 1,
   minuteOffset = 0,
   expectedActivePublicHeatFrameId: string | null = null,
-  catalogPublicReleaseId: string = MOCK_DATA_RELEASE_PUBLIC_ID,
+  manifestAlignment: ProductionHeatManifestAlignment = activeManifestAlignment,
   contentVariant: "default" | "partial" = "default",
 ): Promise<HeatPlan> {
   const mock = await buildMockHeatFrame({
@@ -252,7 +269,7 @@ async function buildPlan(
   });
   const candidate: ProductionHeatFrameEnvelope = {
     publicHeatFrameId,
-    catalogPublicReleaseId,
+    manifestAlignment,
     frameSequence: Date.parse(records[0]!.currentWindow.endedAt) / 60_000,
     sourceWatermark: String(100 + minuteOffset),
     signalSetHash,
@@ -294,7 +311,7 @@ async function buildPlan(
     idempotencyKey: `finalize:${publicHeatFrameId}`,
     publicationId: publicHeatFrameId,
     expectedActivePublicHeatFrameId,
-    expectedCatalogPublicReleaseId: catalogPublicReleaseId,
+    expectedManifestAlignment: manifestAlignment,
     expectedSignalSetHash: signalSetHash,
     expectedFrameHash: frame.frameHash,
     expectedSignalCount: records.length,
@@ -396,7 +413,7 @@ describe("production Heat publication", () => {
         publicationId: null,
         details: {
           activePublicHeatFrameId: null,
-          catalogPublicReleaseId: null,
+          manifestAlignment: null,
           sourceWatermark: null,
           frameSequence: 0,
           terminalReceiptSha256: null,
@@ -426,7 +443,10 @@ describe("production Heat publication", () => {
       frame: {
         ...plan.frame,
         publicHeatFrameId: "91000000-0000-4000-8000-000000000099",
-        catalogPublicReleaseId: "92000000-0000-4000-8000-000000000099",
+        manifestAlignment: {
+          ...plan.frame.manifestAlignment,
+          manifestFingerprint: "9".repeat(64),
+        },
       },
     };
     mismatched.frame.frameHash = await recomputeProductionHeatFrameHash(
@@ -435,21 +455,48 @@ describe("production Heat publication", () => {
     await expect(
       invoke(t, internal.productionHeatLifecycle.start, mismatched),
     ).rejects.toThrow("PUBLICATION_PREDECESSOR_CONFLICT");
-    await t.run(async (ctx) => {
-      const state = await ctx.db.query("dataReleaseState").unique();
-      if (state === null) throw new Error("Expected catalog state.");
-      await ctx.db.patch("dataReleaseState", state._id, {
-        latestObservationSequence: 101,
-      });
-    });
-    await expect(
-      invoke(t, internal.productionHeatLifecycle.start, plan.start),
-    ).rejects.toThrow("PUBLICATION_PREDECESSOR_CONFLICT");
     await expect(t.run(async (ctx) => ({
       publications: (await ctx.db.query("repackHeatPublications").collect()).length,
       frames: (await ctx.db.query("repackHeatSnapshots").collect()).length,
       signalSets: (await ctx.db.query("repackHeatSignalSets").collect()).length,
     }))).resolves.toEqual({ publications: 0, frames: 0, signalSets: 0 });
+  });
+
+  test("rejects duplicate provider ownership before accepting a Heat batch", async () => {
+    configure();
+    const t = createTest();
+    await seedCanonicalCatalog(t);
+    const plan = await buildPlan();
+    await invoke(t, internal.productionHeatLifecycle.start, plan.start);
+    await t.run(async (ctx) => {
+      const repack = await ctx.db.query("providerCatalogRepacks").first();
+      const releases = await ctx.db.query("providerCatalogReleases").collect();
+      const other = repack === null
+        ? null
+        : releases.find(({ _id }) => _id !== repack.releaseId) ?? null;
+      if (repack === null || other === null) {
+        throw new Error("Expected two selected provider releases.");
+      }
+      await ctx.db.insert("providerCatalogRepacks", {
+        releaseId: other._id,
+        publicRepackId: repack.publicRepackId,
+        vendorId: repack.vendorId,
+        detail: repack.detail,
+      });
+    });
+
+    await expect(
+      invoke(t, internal.productionHeatBatch.applyBatch, plan.batch),
+    ).rejects.toThrow("PUBLICATION_REFERENCE_INVALID");
+    await expect(t.run(async (ctx) => ({
+      signals: (await ctx.db.query("repackHeatSignals").collect()).length,
+      batches: (await ctx.db.query("repackHeatBatches").collect()).length,
+      publication: await ctx.db.query("repackHeatPublications").unique(),
+    }))).resolves.toMatchObject({
+      signals: 0,
+      batches: 0,
+      publication: { acceptedBatchCount: 0, acceptedSignalCount: 0 },
+    });
   });
 
   test("stages, reconciles, activates atomically, and replays exact receipts", async () => {
@@ -475,7 +522,7 @@ describe("production Heat publication", () => {
       2,
       1,
       FIRST_FRAME_ID,
-      MOCK_DATA_RELEASE_PUBLIC_ID,
+      activeManifestAlignment,
       "partial",
     );
     expect(incomplete.frame.signalSetHash).not.toBe(baseline.frame.signalSetHash);
@@ -622,7 +669,7 @@ describe("production Heat publication", () => {
         publicationId: FIRST_FRAME_ID,
         details: {
           activePublicHeatFrameId: FIRST_FRAME_ID,
-          catalogPublicReleaseId: MOCK_DATA_RELEASE_PUBLIC_ID,
+          manifestAlignment: activeManifestAlignment,
           sourceWatermark: plan.frame.sourceWatermark,
           frameSequence: plan.frame.frameSequence,
           terminalReceiptSha256:
@@ -715,6 +762,57 @@ describe("production Heat publication", () => {
     await expect(corruptState.json()).resolves.toMatchObject({
       code: "PUBLICATION_STATE_CONFLICT",
     });
+  });
+
+  test("keeps an aligned Heat frame readable across metadata-only catalog observation refresh", async () => {
+    configure();
+    const t = createTest();
+    await seedCanonicalCatalog(t);
+    const plan = await buildPlan();
+    await publish(t, plan);
+    const before = await t.run(async (ctx) => ({
+      catalog: (await loadActiveCatalogManifestState(ctx)).state,
+      heatState: await ctx.db.query("repackHeatState").unique(),
+      frameIds: (await ctx.db.query("repackHeatSnapshots").collect()).map(
+        ({ _id }) => _id,
+      ),
+      signalSetIds: (await ctx.db.query("repackHeatSignalSets").collect()).map(
+        ({ _id }) => _id,
+      ),
+      signalIds: (await ctx.db.query("repackHeatSignals").collect()).map(
+        ({ _id }) => _id,
+      ),
+    }));
+
+    await refreshCatalogObservation(t);
+
+    const after = await t.run(async (ctx) => ({
+      catalog: (await loadActiveCatalogManifestState(ctx)).state,
+      heatState: await ctx.db.query("repackHeatState").unique(),
+      frameIds: (await ctx.db.query("repackHeatSnapshots").collect()).map(
+        ({ _id }) => _id,
+      ),
+      signalSetIds: (await ctx.db.query("repackHeatSignalSets").collect()).map(
+        ({ _id }) => _id,
+      ),
+      signalIds: (await ctx.db.query("repackHeatSignals").collect()).map(
+        ({ _id }) => _id,
+      ),
+    }));
+    expect(after.catalog.generation).toBe(before.catalog.generation + 1);
+    expect(after.catalog.activeManifest).toEqual(before.catalog.activeManifest);
+    expect(after.catalog.observation?.observationSequence).toBe(
+      before.catalog.observation!.observationSequence + 1,
+    );
+    expect(after.heatState).toEqual(before.heatState);
+    expect(after.frameIds).toEqual(before.frameIds);
+    expect(after.signalSetIds).toEqual(before.signalSetIds);
+    expect(after.signalIds).toEqual(before.signalIds);
+    const publicResult = await t.query(api.publicRepacks.listPublicRepacks, {});
+    if (!publicResult.ok) throw new Error(JSON.stringify(publicResult));
+    expect(publicResult.data.details.every(({ heat }) =>
+      heat.status === "current"
+    )).toBe(true);
   });
 
   test("refreshes seventeen quiet minutes without rewriting signals and rejects watermark regression", async () => {
@@ -828,7 +926,7 @@ describe("production Heat publication", () => {
       1,
       1,
       FIRST_FRAME_ID,
-      MOCK_DATA_RELEASE_PUBLIC_ID,
+      activeManifestAlignment,
       "partial",
     );
     await publish(t, second);
@@ -874,8 +972,7 @@ describe("production Heat publication", () => {
     await seedCanonicalCatalog(t);
     const first = await buildPlan();
     await publish(t, first);
-    const nextReleaseId = "90000000-0000-4000-8000-000000000003";
-    await activateEquivalentCatalog(t, nextReleaseId);
+    const nextAlignment = await activateEquivalentCatalog(t);
     const misalignedPublic = await t.query(
       api.publicRepacks.listPublicRepacks,
       {},
@@ -893,9 +990,12 @@ describe("production Heat publication", () => {
         operationId: "heat-active-state-misaligned",
       },
     );
-    expect(misalignedState.status).toBe(409);
+    expect(misalignedState.status).toBe(200);
     await expect(misalignedState.json()).resolves.toMatchObject({
-      code: "PUBLICATION_STATE_CONFLICT",
+      ok: true,
+      receipt: {
+        details: { manifestAlignment: first.frame.manifestAlignment },
+      },
     });
 
     vi.setSystemTime("2026-08-15T12:01:00.000Z");
@@ -904,7 +1004,7 @@ describe("production Heat publication", () => {
       1,
       1,
       FIRST_FRAME_ID,
-      nextReleaseId,
+      nextAlignment,
     );
     expect(next.frame.signalSetHash).toBe(first.frame.signalSetHash);
     await publish(t, next);
@@ -917,12 +1017,168 @@ describe("production Heat publication", () => {
     expect(stored.sets).toHaveLength(2);
     expect(new Set(stored.sets.map(({ signalSetHash }) => signalSetHash)))
       .toEqual(new Set([first.frame.signalSetHash]));
-    expect(new Set(stored.sets.map(({ releaseId }) => releaseId)).size).toBe(2);
+    expect(new Set(stored.sets.map(({ manifestId }) => manifestId)).size).toBe(2);
     expect(stored.signals).toHaveLength(first.records.length * 2);
     const active = stored.frames.find(({ _id }) =>
       _id === stored.state?.activeHeatSnapshotId
     );
     expect(active?.publicHeatSnapshotId).toBe(SECOND_FRAME_ID);
+  });
+
+  test("reactivates a retained Heat set after the catalog rolls back M1 to M2 to M1", async () => {
+    configure();
+    const t = createTest();
+    const firstCatalog = await seedCanonicalCatalog(t);
+    const firstCatalogState = await t.run(async (ctx) =>
+      (await loadActiveCatalogManifestState(ctx)).state
+    );
+    const first = await buildPlan();
+    await publish(t, first);
+
+    vi.setSystemTime("2026-08-15T12:01:00.000Z");
+    const secondAlignment = await activateEquivalentCatalog(t);
+    const second = await buildPlan(
+      SECOND_FRAME_ID,
+      1,
+      1,
+      FIRST_FRAME_ID,
+      secondAlignment,
+    );
+    await publish(t, second);
+    const beforeRollback = await t.run(async (ctx) => ({
+      catalog: (await loadActiveCatalogManifestState(ctx)).state,
+      sets: await ctx.db.query("repackHeatSignalSets").collect(),
+      signals: await ctx.db.query("repackHeatSignals").collect(),
+    }));
+    expect(beforeRollback.sets).toHaveLength(2);
+    expect(beforeRollback.signals).toHaveLength(first.records.length * 2);
+
+    const latestByPlatform = new Map(
+      beforeRollback.catalog.observation?.providerSelections.map((selection) =>
+        [selection.platformKey, selection] as const
+      ) ?? [],
+    );
+    const rollbackSelections = firstCatalogState.observation?.providerSelections
+      .map((selection) => {
+        const latest = latestByPlatform.get(selection.platformKey);
+        if (latest === undefined) {
+          throw new Error("Expected latest provider selection for rollback.");
+        }
+        return {
+          ...selection,
+          latestAffectedSettledSequence:
+            latest.latestAffectedSettledSequence,
+          latestAffectedSourceHeadSequence:
+            latest.latestAffectedSourceHeadSequence,
+          settledSourceFreshness: latest.settledSourceFreshness,
+          lastSuccessfulObservationAt: latest.lastSuccessfulObservationAt,
+          staleAt: latest.staleAt,
+        };
+      });
+    if (
+      beforeRollback.catalog.observation === null ||
+      rollbackSelections === undefined
+    ) {
+      throw new Error("Expected active catalog observations for rollback.");
+    }
+    const rollbackObservation = buildGlobalCatalogAggregateObservationV1({
+      observationSequence:
+        beforeRollback.catalog.observation.observationSequence + 1,
+      publicReleaseId: firstCatalog.manifest.publicReleaseId,
+      providerReferenceSetHash:
+        firstCatalog.manifest.providerReferenceSetHash,
+      providerSelections: rollbackSelections,
+    });
+    const rollback = catalogManifestRollbackRequestSchema.parse({
+      schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
+      operationId: "catalog:rollback:heat:m1",
+      idempotencyKey: "catalog:rollback:heat:m1",
+      rollbackKind: "manifest",
+      targetManifest: {
+        publicReleaseId: firstCatalog.manifest.publicReleaseId,
+        manifestFingerprint: firstCatalog.manifest.manifestFingerprint,
+        sharedConfigurationEpoch:
+          firstCatalog.manifest.sharedConfigurationEpoch,
+        providerReferenceSetHash:
+          firstCatalog.manifest.providerReferenceSetHash,
+      },
+      observation: rollbackObservation,
+      expectedActiveState: beforeRollback.catalog,
+    });
+    await t.run(async (ctx) =>
+      rollbackCatalogManifestRequest(
+        ctx,
+        rollback,
+        await catalogManifestPublicationRequestDigest(rollback),
+      )
+    );
+    activeManifestAlignment = first.frame.manifestAlignment;
+
+    const mismatched = await t.query(api.publicRepacks.listPublicRepacks, {});
+    expect(mismatched.ok).toBe(true);
+    if (!mismatched.ok) throw new Error("Expected readable catalog data.");
+    expect(mismatched.data.details.every(({ heat }) =>
+      heat.status === "unavailable" && heat.reason === "RELEASE_MISMATCH"
+    )).toBe(true);
+
+    vi.setSystemTime("2026-08-15T12:02:00.000Z");
+    const third = await refreshedFrame(first.frame, THIRD_FRAME_ID, 2);
+    await invoke(
+      t,
+      internal.productionHeatLifecycle.refreshFrame,
+      refreshRequest(third, SECOND_FRAME_ID),
+    );
+    const afterRollbackReuse = await t.run(async (ctx) => ({
+      state: await ctx.db.query("repackHeatState").unique(),
+      frames: await ctx.db.query("repackHeatSnapshots").collect(),
+      sets: await ctx.db.query("repackHeatSignalSets").collect(),
+      signals: await ctx.db.query("repackHeatSignals").collect(),
+    }));
+    const active = afterRollbackReuse.frames.find(({ _id }) =>
+      _id === afterRollbackReuse.state?.activeHeatSnapshotId
+    );
+    const retainedM1Set = afterRollbackReuse.sets.find((set) =>
+      set.manifestAlignment.publicReleaseId ===
+        first.frame.manifestAlignment.publicReleaseId &&
+      set.signalSetHash === first.frame.signalSetHash
+    );
+    expect(active?.publicHeatSnapshotId).toBe(THIRD_FRAME_ID);
+    expect(active?.signalSetId).toBe(retainedM1Set?._id);
+    expect(afterRollbackReuse.sets.map(({ _id }) => _id)).toEqual(
+      beforeRollback.sets.map(({ _id }) => _id),
+    );
+    expect(afterRollbackReuse.signals.map(({ _id }) => _id)).toEqual(
+      beforeRollback.signals.map(({ _id }) => _id),
+    );
+    const readable = await t.query(api.publicRepacks.listPublicRepacks, {});
+    expect(readable.ok).toBe(true);
+    if (!readable.ok) throw new Error("Expected readable catalog data.");
+    expect(readable.data.details.every(({ heat }) =>
+      heat.status === "current"
+    )).toBe(true);
+  });
+
+  test("refuses finalize when the catalog pointer moves after staging", async () => {
+    configure();
+    const t = createTest();
+    await seedCanonicalCatalog(t);
+    const staged = await buildPlan();
+    await invoke(t, internal.productionHeatLifecycle.start, staged.start);
+    await invoke(t, internal.productionHeatBatch.applyBatch, staged.batch);
+    await activateEquivalentCatalog(t);
+
+    await expect(
+      invoke(t, internal.productionHeatLifecycle.finalize, staged.finalize),
+    ).rejects.toThrow("PUBLICATION_PREDECESSOR_CONFLICT");
+    await expect(t.run(async (ctx) => ({
+      state: await ctx.db.query("repackHeatState").unique(),
+      frames: (await ctx.db.query("repackHeatSnapshots").collect()).length,
+      publication: await ctx.db.query("repackHeatPublications").unique(),
+    }))).resolves.toMatchObject({
+      state: null,
+      frames: 0,
+      publication: { state: "staging", acceptedBatchCount: 1 },
+    });
   });
 
   test("refuses a stale changed-content finalize without altering the active pointer", async () => {
@@ -939,7 +1195,7 @@ describe("production Heat publication", () => {
       1,
       1,
       "91000000-0000-4000-8000-000000000098",
-      MOCK_DATA_RELEASE_PUBLIC_ID,
+      activeManifestAlignment,
       "partial",
     );
     await invoke(t, internal.productionHeatLifecycle.start, second.start);
@@ -995,10 +1251,9 @@ describe("production Heat publication", () => {
     expect((await t.run((ctx) => ctx.db.query("repackHeatState").unique()))?.freshness)
       .toBe("expired");
     const expired = await t.query(api.publicRepacks.listPublicRepacks, {});
-    expect(expired.ok).toBe(true);
-    if (!expired.ok) throw new Error("Expected readable catalog data.");
+    if (!expired.ok) throw new Error(JSON.stringify(expired));
     expect(expired.data.details.every(({ heat }) =>
-      heat.status === "unavailable" && heat.reason === "RELEASE_MISMATCH"
+      heat.status === "expired"
     )).toBe(true);
   });
 
@@ -1035,10 +1290,9 @@ describe("production Heat publication", () => {
     const plan = await buildPlan();
     await publish(t, plan);
     const before = await t.query(api.publicRepacks.listPublicRepacks, {});
-    expect(before.ok).toBe(true);
-    if (!before.ok) throw new Error("Expected readable catalog data.");
+    if (!before.ok) throw new Error(JSON.stringify(before));
     expect(before.data.details.every(({ heat }) =>
-      heat.status === "unavailable" && heat.reason === "RELEASE_MISMATCH"
+      heat.status === "current"
     )).toBe(true);
 
     vi.setSystemTime("2026-08-15T12:15:00.000Z");
@@ -1050,14 +1304,31 @@ describe("production Heat publication", () => {
     expect(expired.ok).toBe(true);
     if (!expired.ok) throw new Error("Expected readable catalog data.");
     expect(expired.data.details.every(({ heat }) =>
-      heat.status === "unavailable" && heat.reason === "RELEASE_MISMATCH"
+      heat.status === "expired"
     )).toBe(true);
     await t.run(async (ctx) => {
-      const release = await ctx.db.query("dataReleases").unique();
-      const repack = await ctx.db.query("repacks").first();
-      if (release === null || repack === null) throw new Error("Expected catalog rows.");
+      const catalogState = await ctx.db
+        .query("activeCatalogManifestState")
+        .unique();
+      const manifest = catalogState?.activeManifestId === null ||
+          catalogState === null
+        ? null
+        : await ctx.db.get(
+          "globalCatalogManifests",
+          catalogState.activeManifestId,
+        );
+      const repack = await ctx.db.query("providerCatalogRepacks").first();
+      if (manifest === null || repack === null) {
+        throw new Error("Expected catalog rows.");
+      }
       const orphanSetId = await ctx.db.insert("repackHeatSignalSets", {
-        releaseId: release._id,
+        manifestId: manifest._id,
+        manifestAlignment: productionHeatManifestAlignmentSchema.parse({
+          publicReleaseId: manifest.publicReleaseId,
+          manifestFingerprint: manifest.manifestFingerprint,
+          sharedConfigurationEpoch: manifest.manifest.sharedConfigurationEpoch,
+          providerReferenceSetHash: manifest.providerReferenceSetHash,
+        }),
         signalSetHash: "f".repeat(64),
         lifecycle: "retired",
         sourceKind: "observed",
@@ -1072,7 +1343,7 @@ describe("production Heat publication", () => {
       });
       await ctx.db.insert("repackHeatSignals", {
         signalSetId: orphanSetId,
-        releaseId: release._id,
+        providerReleaseId: repack.releaseId,
         repackId: repack._id,
         publicRepackId: repack.publicRepackId,
         detail: (await ctx.db.query("repackHeatSignals").first())!.detail,

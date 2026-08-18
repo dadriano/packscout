@@ -11,6 +11,8 @@ import type { PromotionV2WorkerRuntimePort } from
 import type {
   HeatPromotionWorkerRuntimePort,
 } from "./heat-promotion-worker-runtime.ts";
+import type { CatalogRetentionWorkerRuntimePort } from
+  "./catalog-retention-worker-runtime.ts";
 
 const safeLogValuePattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const safeFailureCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
@@ -43,6 +45,7 @@ export type ProviderWorkerLogEventName =
   | "provider_database_pool_failed"
   | "provider_promotion_v2_runtime_failed"
   | "provider_heat_promotion_runtime_failed"
+  | "provider_catalog_retention_runtime_failed"
   | "provider_import_contended"
   | "provider_import_failed"
   | "provider_import_finished"
@@ -104,6 +107,7 @@ export interface ProviderWorkerRuntimeDependencies {
   readonly estimatedEv?: ProviderWorkerEstimatedEvPort;
   readonly promotion?: PromotionV2WorkerRuntimePort;
   readonly heatPromotion?: HeatPromotionWorkerRuntimePort;
+  readonly catalogRetention?: CatalogRetentionWorkerRuntimePort;
   readonly retention: ProviderWorkerRetentionPort;
   readonly logger: ProviderWorkerLogger;
   readonly workerId: string;
@@ -245,6 +249,16 @@ export class ProviderWorkerRuntime {
             failureCode: "HEAT_PROMOTION_RUNTIME_ERROR",
           });
         });
+    const catalogRetentionTask = this.dependencies.catalogRetention === undefined
+      ? null
+      : (async () => await this.dependencies.catalogRetention!.start())()
+        .catch(() => {
+          this.log({
+            level: "error",
+            event: "provider_catalog_retention_runtime_failed",
+            failureCode: "CATALOG_RETENTION_RUNTIME_ERROR",
+          });
+        });
     try {
       while (!this.#stopRequested) {
         const cycle = this.runCycle();
@@ -275,14 +289,18 @@ export class ProviderWorkerRuntime {
     } finally {
       this.dependencies.promotion?.stop();
       this.dependencies.heatPromotion?.stop();
+      this.dependencies.catalogRetention?.stop();
       if (promotionFailed) {
         // A retained Heat adapter is expected to stop cooperatively, but it
         // cannot mask a fail-closed Task011 startup refusal. Keep a late
         // handler attached without joining an abort-ignoring sibling.
         if (heatTask !== null) void heatTask.then(() => undefined);
+        if (catalogRetentionTask !== null) {
+          void catalogRetentionTask.then(() => undefined);
+        }
         await promotionTask;
       } else {
-        await Promise.all([promotionTask, heatTask]);
+        await Promise.all([promotionTask, heatTask, catalogRetentionTask]);
       }
       this.#sleepController = null;
       this.#running = false;
@@ -295,6 +313,7 @@ export class ProviderWorkerRuntime {
     this.#stopRequested = true;
     this.dependencies.promotion?.stop();
     this.dependencies.heatPromotion?.stop();
+    this.dependencies.catalogRetention?.stop();
     this.#sleepController?.abort();
   }
 

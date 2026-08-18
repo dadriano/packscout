@@ -58,8 +58,14 @@ import {
 import {
   assertStoredProviderReleaseCompletion,
   providerReleaseProofMatches,
+  storeProviderReleaseCompletionProof,
+  storeProviderTerminalReceiptProof,
 } from "./providerReleaseProof";
-import { oneProviderCompletedHead, oneProviderRelease } from "./providerReleaseState";
+import {
+  expectedHeadFromStored,
+  oneProviderCompletedHead,
+  oneProviderRelease,
+} from "./providerReleaseState";
 
 const COMPLETE_RETENTION_MILLISECONDS = 7 * 24 * 60 * 60 * 1_000;
 
@@ -209,22 +215,20 @@ export async function seedProviderCatalogPublishPlanGraph(
     };
   }
 
-  const operationId = `mock.provider.finalize:${plan.platformKey}`;
-  const idempotencyKey = `mock.provider.finalize:${plan.platformKey}`;
+  const operationId =
+    `mock.provider.finalize:${plan.platformKey}:${plan.publicProviderReleaseId}`;
+  const idempotencyKey = operationId;
   const requestDigest = await providerReleasePublicationRequestDigest({
     kind: "mock_provider_finalize",
     release: proof,
     providerCheckpoint: plan.providerCheckpoint,
     observation: plan.observation,
   });
-  const expectedCompletedHead = {
-    platformKey: plan.platformKey,
-    publicProviderReleaseId: null,
-    sharedConfigurationEpoch: null,
-    providerCheckpoint: { settledSequence: "0", settledAt: null },
-    observation: null,
-    terminalReceiptSha256: null,
-  } as const;
+  const priorHead = await oneProviderCompletedHead(ctx, plan.platformKey);
+  const expectedCompletedHead = expectedHeadFromStored(
+    plan.platformKey,
+    priorHead,
+  );
   const completedHead = {
     platformKey: plan.platformKey,
     release: proof,
@@ -275,7 +279,25 @@ export async function seedProviderCatalogPublishPlanGraph(
   }
   await writeProviderEntities(ctx, release, plan);
   await storeProviderReleaseReceipt(ctx, receipt);
-  await ctx.db.insert("providerCatalogCompletedHeads", {
+  await storeProviderTerminalReceiptProof(ctx, {
+    releaseId,
+    releaseProof: proof,
+    operationId,
+    operationKind: "finalize",
+    requestDigest,
+    completedAt: serverTime,
+    terminalReceiptSha256,
+    receiptDigest: receipt.receiptDigest,
+  });
+  await storeProviderReleaseCompletionProof(ctx, {
+    releaseId,
+    releaseProof: proof,
+    operationId,
+    completedAt: serverTime,
+    terminalReceiptSha256,
+    receiptDigest: receipt.receiptDigest,
+  });
+  const completedHeadDocument = {
     platformKey: plan.platformKey,
     releaseId,
     publicProviderReleaseId: plan.publicProviderReleaseId,
@@ -286,7 +308,16 @@ export async function seedProviderCatalogPublishPlanGraph(
     terminalOperationId: operationId,
     terminalOperationKind: "finalize",
     updatedAt: serverTime,
-  });
+  } as const;
+  if (priorHead === null) {
+    await ctx.db.insert("providerCatalogCompletedHeads", completedHeadDocument);
+  } else {
+    await ctx.db.replace(
+      "providerCatalogCompletedHeads",
+      priorHead._id,
+      completedHeadDocument,
+    );
+  }
   return {
     release,
     selection: {
@@ -506,13 +537,14 @@ export async function buildCatalogManifestFromProviderPlans(
   });
 }
 
-export async function seedMockCatalogManifestGraph(
+export async function seedCatalogManifestGraph(
   ctx: MutationCtx,
   input: Readonly<{
     plans: readonly ProviderCatalogReleasePublishPlanV1[];
     confidencePolicyVersion: string;
     serverTime: string;
     observationSequence?: number;
+    dataSource: "canonical" | "mock";
   }>,
 ): Promise<SeedMockCatalogManifestGraphResult> {
   if (input.plans.length < 1 || input.plans.length > 8) {
@@ -547,29 +579,28 @@ export async function seedMockCatalogManifestGraph(
   const manifest = await buildCatalogManifestFromProviderPlans(
     plans,
     input.confidencePolicyVersion,
-    "mock",
+    input.dataSource,
   );
   const current = await loadActiveCatalogManifestState(ctx);
   if (current.state.activeManifest !== null) {
     if (
-      current.state.activeManifest.publicReleaseId !== manifest.publicReleaseId ||
-      current.state.activeManifest.manifestFingerprint !==
+      current.state.activeManifest.publicReleaseId === manifest.publicReleaseId &&
+      current.state.activeManifest.manifestFingerprint ===
         manifest.manifestFingerprint
     ) {
-      refuseCatalogManifest("CATALOG_MANIFEST_STATE_CONFLICT");
+      const active = await loadValidatedCatalogManifest(ctx);
+      if (active === null) {
+        refuseCatalogManifest("CATALOG_MANIFEST_STATE_CONFLICT");
+      }
+      return {
+        status: "unchanged",
+        publicReleaseId: manifest.publicReleaseId,
+        manifestId: active.manifestDocument._id,
+        stateId: active.stateDocument._id,
+        providerReleaseIds: active.providerReleases.map(({ _id }) => _id),
+        manifest,
+      };
     }
-    const active = await loadValidatedCatalogManifest(ctx);
-    if (active === null) {
-      refuseCatalogManifest("CATALOG_MANIFEST_STATE_CONFLICT");
-    }
-    return {
-      status: "unchanged",
-      publicReleaseId: manifest.publicReleaseId,
-      manifestId: active.manifestDocument._id,
-      stateId: active.stateDocument._id,
-      providerReleaseIds: active.providerReleases.map(({ _id }) => _id),
-      manifest,
-    };
   }
   const observation = buildGlobalCatalogAggregateObservationV1({
     observationSequence: input.observationSequence ??
@@ -593,7 +624,7 @@ export async function seedMockCatalogManifestGraph(
     ctx,
     request,
     requestDigest,
-    { allowMock: true },
+    { allowMock: input.dataSource === "mock" },
   );
   const active = await loadValidatedCatalogManifest(ctx);
   if (active === null) {
@@ -607,4 +638,19 @@ export async function seedMockCatalogManifestGraph(
     providerReleaseIds: active.providerReleases.map(({ _id }) => _id),
     manifest,
   };
+}
+
+export async function seedMockCatalogManifestGraph(
+  ctx: MutationCtx,
+  input: Readonly<{
+    plans: readonly ProviderCatalogReleasePublishPlanV1[];
+    confidencePolicyVersion: string;
+    serverTime: string;
+    observationSequence?: number;
+  }>,
+): Promise<SeedMockCatalogManifestGraphResult> {
+  return await seedCatalogManifestGraph(ctx, {
+    ...input,
+    dataSource: "mock",
+  });
 }

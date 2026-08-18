@@ -17,7 +17,18 @@ const keyId = "catalog-publisher.v1";
 const secret = Buffer.from("heat-publisher-test-secret-000000000000000000000");
 const now = new Date("2026-08-15T12:00:00.000Z");
 const frameId = "84000000-0000-4000-8000-000000000001";
-const releaseId = "82000000-0000-4000-8000-000000000001";
+const releaseId = "82000000-0000-5000-8000-000000000001";
+const manifestAlignment = Object.freeze({
+  publicReleaseId: releaseId,
+  manifestFingerprint: "1".repeat(64),
+  sharedConfigurationEpoch: Object.freeze({
+    configurationKey: "catalog-v1",
+    revision: 1,
+    publicChangeSequence: "20",
+    configurationHash: "2".repeat(64),
+  }),
+  providerReferenceSetHash: "3".repeat(64),
+});
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -35,7 +46,7 @@ async function activeStateEnvelope(bodyJson: string) {
     requestDigest: sha256(bodyJson),
     details: {
       activePublicHeatFrameId: frameId,
-      catalogPublicReleaseId: releaseId,
+      manifestAlignment,
       sourceWatermark: "44",
       frameSequence: 29_779_200,
       terminalReceiptSha256: "a".repeat(64),
@@ -104,7 +115,7 @@ test("Heat uses the shared signed HTTP byte and nonce boundary", async () => {
   });
   assert.deepEqual(await client.activeState(), {
     activePublicHeatFrameId: frameId,
-    catalogPublicReleaseId: releaseId,
+    manifestAlignment,
     sourceWatermark: 44n,
     frameSequence: 29_779_200,
     terminalReceiptSha256: "a".repeat(64),

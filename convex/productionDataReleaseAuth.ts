@@ -42,7 +42,12 @@ import {
   safeProviderReleaseMessage,
   type ProviderReleaseErrorCode,
 } from "./providerReleaseErrors";
-import { configuredPublicationKeySecret } from "./productionPublicationKeyConfig";
+import {
+  catalogRetentionKeyIsAuthorized,
+  configuredPublicationKeySecret,
+  heatPublicationKeyIsAuthorized,
+  publicationAuthorityConfigurationIsIsolated,
+} from "./productionPublicationKeyConfig";
 import {
   safeCatalogManifestMessage,
   type CatalogManifestErrorCode,
@@ -166,6 +171,7 @@ async function authenticateRequest(
   ctx: ActionCtx,
   request: Request,
   surface: PublicationSurface,
+  authorizeKeyId?: (keyId: string) => boolean,
 ): Promise<AuthenticatedRequest> {
   const version = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.signatureVersion);
   const keyId = request.headers.get(PRODUCTION_AUTH_HEADER_NAMES.keyId);
@@ -196,6 +202,9 @@ async function authenticateRequest(
   }
   const secret = configuredPublicationKeySecret(keyId);
   if (secret === null) {
+    throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_KEY_UNKNOWN"), 401);
+  }
+  if (authorizeKeyId !== undefined && !authorizeKeyId(keyId)) {
     throw new HttpRefusal(surfaceCode(surface, "PUBLICATION_AUTH_KEY_UNKNOWN"), 401);
   }
   const timestampMilliseconds = Number(timestamp);
@@ -406,9 +415,15 @@ async function handleAuthenticatedRequest(
   request: Request,
   operation: LegacyExecutionReference | ProviderExecutionReference,
   surface: PublicationSurface,
+  authorizeKeyId?: (keyId: string) => boolean,
 ): Promise<Response> {
   try {
-    const authenticated = await authenticateRequest(ctx, request, surface);
+    const authenticated = await authenticateRequest(
+      ctx,
+      request,
+      surface,
+      authorizeKeyId,
+    );
     const receipt = surface !== "legacy"
       ? await ctx.runMutation(operation as ProviderExecutionReference, {
         bodyJson: authenticated.bodyJson,
@@ -470,12 +485,32 @@ export function handleAuthenticatedPublicationRequest(
   return handleAuthenticatedRequest(ctx, request, operation, "legacy");
 }
 
+export function handleAuthenticatedHeatPublicationRequest(
+  ctx: ActionCtx,
+  request: Request,
+  operation: LegacyExecutionReference,
+): Promise<Response> {
+  return handleAuthenticatedRequest(
+    ctx,
+    request,
+    operation,
+    "legacy",
+    heatPublicationKeyIsAuthorized,
+  );
+}
+
 export function handleAuthenticatedProviderReleaseRequest(
   ctx: ActionCtx,
   request: Request,
   operation: ProviderExecutionReference,
 ): Promise<Response> {
-  return handleAuthenticatedRequest(ctx, request, operation, "provider");
+  return handleAuthenticatedRequest(
+    ctx,
+    request,
+    operation,
+    "provider",
+    publicationAuthorityConfigurationIsIsolated,
+  );
 }
 
 export function handleAuthenticatedCatalogManifestRequest(
@@ -483,7 +518,13 @@ export function handleAuthenticatedCatalogManifestRequest(
   request: Request,
   operation: ManifestExecutionReference,
 ): Promise<Response> {
-  return handleAuthenticatedRequest(ctx, request, operation, "manifest");
+  return handleAuthenticatedRequest(
+    ctx,
+    request,
+    operation,
+    "manifest",
+    publicationAuthorityConfigurationIsIsolated,
+  );
 }
 
 export function handleAuthenticatedCatalogRetentionRequest(
@@ -491,7 +532,13 @@ export function handleAuthenticatedCatalogRetentionRequest(
   request: Request,
   operation: RetentionExecutionReference,
 ): Promise<Response> {
-  return handleAuthenticatedRequest(ctx, request, operation, "retention");
+  return handleAuthenticatedRequest(
+    ctx,
+    request,
+    operation,
+    "retention",
+    catalogRetentionKeyIsAuthorized,
+  );
 }
 
 const NONCE_ARGS = {

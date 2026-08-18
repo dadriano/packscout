@@ -23,6 +23,8 @@ import {
 const modules = import.meta.glob("./**/*.ts");
 const RETENTION_KEY = "catalog-retain-http-v1";
 const PUBLISH_KEY = "catalog-publish-http-v1";
+const PUBLISH_SECRET = "packscout-catalog-publish-http-secret-0000000001";
+const RETENTION_SECRET = "packscout-catalog-retain-http-secret-0000000001";
 const SERVER_TIME = "2026-08-16T12:00:00.000Z";
 
 function createTest() {
@@ -33,8 +35,9 @@ function configureKeys(): void {
   vi.stubEnv(
     "PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS",
     canonicalJson({
-      [PUBLISH_KEY]: btoa(PROVIDER_TEST_KEY_SECRET),
-      [RETENTION_KEY]: btoa(PROVIDER_TEST_KEY_SECRET),
+      [PROVIDER_TEST_KEY_ID]: btoa(PROVIDER_TEST_KEY_SECRET),
+      [PUBLISH_KEY]: btoa(PUBLISH_SECRET),
+      [RETENTION_KEY]: btoa(RETENTION_SECRET),
     }),
   );
   vi.stubEnv(
@@ -119,15 +122,18 @@ describe("catalog retention HTTP security", () => {
         request,
         {
           keyId: PUBLISH_KEY,
-          secret: PROVIDER_TEST_KEY_SECRET,
+          secret: PUBLISH_SECRET,
           nonce: "retentionHttpForbidden01",
         },
       ),
     );
-    expect(forbidden.status).toBe(403);
+    expect(forbidden.status).toBe(401);
     await expect(forbidden.json()).resolves.toMatchObject({
-      code: "CATALOG_RETENTION_AUTH_FORBIDDEN",
+      code: "CATALOG_RETENTION_AUTH_KEY_UNKNOWN",
     });
+    expect(await t.run((ctx) =>
+      ctx.db.query("dataReleaseAuthNonces").collect()
+    )).toEqual([]);
   });
 
   test("returns signed exact replay/status and isolates nonce replay", async () => {
@@ -144,7 +150,7 @@ describe("catalog retention HTTP security", () => {
         request,
         {
           keyId: RETENTION_KEY,
-          secret: PROVIDER_TEST_KEY_SECRET,
+          secret: RETENTION_SECRET,
           nonce,
         },
       ),
@@ -161,7 +167,7 @@ describe("catalog retention HTTP security", () => {
     });
     expect(await verifyProviderResponseSignature(
       envelope,
-      PROVIDER_TEST_KEY_SECRET,
+      RETENTION_SECRET,
     )).toBe(true);
 
     const replayedNonce = await t.fetch(
@@ -171,7 +177,7 @@ describe("catalog retention HTTP security", () => {
         request,
         {
           keyId: RETENTION_KEY,
-          secret: PROVIDER_TEST_KEY_SECRET,
+          secret: RETENTION_SECRET,
           nonce,
         },
       ),
@@ -200,7 +206,7 @@ describe("catalog retention HTTP security", () => {
         statusRequest,
         {
           keyId: RETENTION_KEY,
-          secret: PROVIDER_TEST_KEY_SECRET,
+          secret: RETENTION_SECRET,
           nonce: "retentionHttpStatus00001",
         },
       ),

@@ -1,19 +1,16 @@
-import {
-  unavailableRepackHeat,
-  type PublicRepackDetail,
-  type PublicRepackViewDetail,
+import type {
+  PublicRepackDetail,
+  PublicRepackViewDetail,
 } from "@packscout/contracts";
+import type { QueryCtx } from "./_generated/server";
+import type { ActivePublicCatalogManifest } from
+  "./publicCatalogManifestReadModel";
+import { attachHeatToRepackDetails } from "./repackHeatReadModel";
 
-/**
- * Heat remains release-bound to the superseded single-release catalog until
- * the manifest-aware Heat publication cutover. Keep the public DTO stable and
- * fail the attachment closed instead of reading through the legacy pointer.
- */
-export function attachHeatToCatalogManifestDetails(
+export async function attachHeatToCatalogManifestDetails(
+  ctx: QueryCtx,
+  active: ActivePublicCatalogManifest,
   details: readonly PublicRepackDetail[],
-): PublicRepackViewDetail[] {
-  return details.map((detail) => ({
-    ...detail,
-    heat: unavailableRepackHeat("RELEASE_MISMATCH"),
-  }));
+): Promise<PublicRepackViewDetail[]> {
+  return await attachHeatToRepackDetails(ctx, active, details);
 }

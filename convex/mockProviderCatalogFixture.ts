@@ -28,7 +28,7 @@ import {
   MOCK_DATA_RELEASE_PUBLIC_CONFIG_HASH,
   buildMockDataReleaseV2,
 } from "./mockDataReleaseFixture";
-import { buildMockRepackSearchRows } from "./mockDataReleaseSearch";
+import { searchRowFromRepackDetail } from "./publicRepackValidation";
 
 export const MOCK_PROVIDER_PLATFORM_KEYS = [
   "collector_crypt",
@@ -92,18 +92,34 @@ async function batch(
 export async function buildMockProviderCatalogReleasePlans(input: {
   readonly observedAt?: string;
   readonly staleAt?: string;
+  readonly providerRevisions?: Readonly<
+    Partial<Record<(typeof MOCK_PROVIDER_PLATFORM_KEYS)[number], number>>
+  >;
 } = {}): Promise<readonly ProviderCatalogReleasePublishPlanV1[]> {
   const fixture = buildMockDataReleaseV2();
-  const allRows = buildMockRepackSearchRows(fixture);
   const observedAt = input.observedAt ?? fixture.metadata.lastSuccessfulObservationAt;
   const staleAt = input.staleAt ?? fixture.metadata.staleAt;
   const plans: ProviderCatalogReleasePublishPlanV1[] = [];
 
   for (const [providerIndex, platformKey] of MOCK_PROVIDER_PLATFORM_KEYS.entries()) {
-    const vendor = fixture.vendors.find(({ vendorKey }) => vendorKey === platformKey);
-    if (vendor === undefined) throw new Error("Mock provider vendor is missing.");
+    const sourceVendor = fixture.vendors.find(
+      ({ vendorKey }) => vendorKey === platformKey,
+    );
+    if (sourceVendor === undefined) {
+      throw new Error("Mock provider vendor is missing.");
+    }
+    const revision = input.providerRevisions?.[platformKey] ?? 0;
+    if (!Number.isSafeInteger(revision) || revision < 0 || revision > 1_000) {
+      throw new RangeError("Mock provider revision is invalid.");
+    }
+    const vendor = revision === 0
+      ? sourceVendor
+      : { ...sourceVendor, displayName: `${sourceVendor.displayName} R${revision}` };
     const repacks = fixture.repacks
       .filter(({ publicVendorId }) => publicVendorId === vendor.publicVendorId)
+      .map((repack) => revision === 0
+        ? repack
+        : { ...repack, vendorDisplayName: vendor.displayName })
       .sort((left, right) => compareText(left.publicRepackId, right.publicRepackId));
     const repackIds = new Set(repacks.map(({ publicRepackId }) => publicRepackId));
     const repackChases = fixture.repackChases
@@ -132,9 +148,7 @@ export async function buildMockProviderCatalogReleasePlans(input: {
       fixture.categories,
       referencedCategoryIds,
     );
-    const rows = allRows.filter(({ publicRepackId }) =>
-      repackIds.has(publicRepackId),
-    );
+    const rows = repacks.map(searchRowFromRepackDetail);
     const searchShard: ProviderCatalogReleaseSearchShardV1 = {
       shardNumber: 0,
       rowCount: rows.length,
@@ -240,7 +254,7 @@ export async function buildMockProviderCatalogReleasePlans(input: {
       await recomputeProviderCatalogReleaseFingerprintV1(immutable);
     const publicProviderReleaseId =
       await derivePublicProviderReleaseIdV1(immutable);
-    const settledSequence = String(providerIndex + 1);
+    const settledSequence = String(providerIndex + 1 + revision * 10);
     const plan: ProviderCatalogReleasePublishPlanV1 = {
       schemaVersion: "provider_catalog_release_v1",
       classification: "publish",

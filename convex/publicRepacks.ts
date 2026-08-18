@@ -21,7 +21,10 @@ import {
 import { v } from "convex/values";
 import { query, type QueryCtx } from "./_generated/server";
 import { resolvePublicCatalogPagination } from "./publicCatalogPagination";
-import { loadActivePublicCatalogManifest } from "./publicCatalogManifestReadModel";
+import {
+  loadActivePublicCatalogManifest,
+  type ActivePublicCatalogManifest,
+} from "./publicCatalogManifestReadModel";
 import { attachHeatToCatalogManifestDetails } from "./publicCatalogHeatReadModel";
 import {
   contextualFacets,
@@ -110,7 +113,11 @@ export const getDashboardBundle = query({
       opportunityRows,
     );
     if (baseDetails === null) return publicReadError("RELEASE_UNAVAILABLE");
-    const details = attachHeatToCatalogManifestDetails(baseDetails);
+    const details = await attachHeatToCatalogManifestDetails(
+      ctx,
+      active,
+      baseDetails,
+    );
     const selectedRepack =
       details.find(
         (detail) =>
@@ -219,7 +226,11 @@ export const listPublicRepacks = query({
       pageRows,
     );
     if (baseDetails === null) return publicReadError("RELEASE_UNAVAILABLE");
-    const details = attachHeatToCatalogManifestDetails(baseDetails);
+    const details = await attachHeatToCatalogManifestDetails(
+      ctx,
+      active,
+      baseDetails,
+    );
     const selectedRepack =
       details.find(
         (detail) =>
@@ -308,7 +319,11 @@ export const getPublicRepack = query({
       request.data.publicRepackId,
     );
     if (detail === null) return publicReadError("RELEASE_UNAVAILABLE");
-    const [view] = attachHeatToCatalogManifestDetails([detail]);
+    const [view] = await attachHeatToCatalogManifestDetails(
+      ctx,
+      active,
+      [detail],
+    );
     return success(view!);
   },
 });
@@ -392,7 +407,7 @@ function compareDesiredRows(
 async function desiredCollectibleMatches(
   ctx: QueryCtx,
   collectible: SharedCollectible,
-  catalog: PublicProviderCatalog,
+  active: ActivePublicCatalogManifest,
   rows: readonly RepackSearchRow[],
   input: FindRepacksByDesiredCollectibleInput,
 ): Promise<{
@@ -401,7 +416,7 @@ async function desiredCollectibleMatches(
 } | null> {
   const desiredChases = await loadProviderDesiredChases(
     ctx,
-    catalog,
+    active.catalog,
     collectible,
   );
   if (desiredChases === null) return null;
@@ -415,11 +430,15 @@ async function desiredCollectibleMatches(
   const visibleRows = matchingRows.slice(0, input.limit);
   const baseDetails = await loadProviderRepackDetails(
     ctx,
-    catalog,
+    active.catalog,
     visibleRows,
   );
   if (baseDetails === null) return null;
-  const details = attachHeatToCatalogManifestDetails(baseDetails);
+  const details = await attachHeatToCatalogManifestDetails(
+      ctx,
+      active,
+    baseDetails,
+  );
   return {
     matches: details.map((detail) => ({
       repack: publicRepackViewSummaryFromDetail(detail),
@@ -463,7 +482,7 @@ export const findRepacksByDesiredCollectible = query({
     const matchResult = await desiredCollectibleMatches(
       ctx,
       collectible,
-      active.catalog,
+      active,
       rows,
       request.data,
     );

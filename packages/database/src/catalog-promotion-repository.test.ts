@@ -543,8 +543,9 @@ test("unchanged and deterministic failures are terminal, health-safe, and tenant
       deploymentKey,
     });
     const startedAt = new Date("2026-08-15T15:00:00.000Z");
-    await readyLane(repository, 3n, startedAt, "heat");
-    const baseline = await claim(repository, startedAt, "heat");
+    const terminalLane = "terminal-health";
+    await readyLane(repository, 3n, startedAt, terminalLane);
+    const baseline = await claim(repository, startedAt, terminalLane);
     await repository.persistAssembledOperations({
       attemptId: baseline.attemptId,
       claimToken: baseline.claimToken,
@@ -576,7 +577,7 @@ test("unchanged and deterministic failures are terminal, health-safe, and tenant
       failureCode: null,
     });
     await repository.coalesceSettledWatermark({
-      laneKey: "heat",
+      laneKey: terminalLane,
       settledWatermark: 4n,
       settledAt: new Date("2026-08-15T15:00:04.000Z"),
       delayedVendorCount: 0,
@@ -584,7 +585,7 @@ test("unchanged and deterministic failures are terminal, health-safe, and tenant
     const unchanged = await claim(
       repository,
       new Date("2026-08-15T15:00:05.000Z"),
-      "heat",
+      terminalLane,
     );
     const refreshOperation: PromotionOperationInput = {
       operationIndex: 0,
@@ -624,24 +625,27 @@ test("unchanged and deterministic failures are terminal, health-safe, and tenant
       failureCode: null,
     });
     const unchangedHealth = await repository.loadHealthSnapshot({
-      laneKey: "heat",
+      laneKey: terminalLane,
       now: new Date("2026-08-15T15:00:09.000Z"),
     });
     assert.equal(unchangedHealth?.lastUnchangedWatermark, 4n);
     assert.equal(unchangedHealth?.activeAttemptId, null);
     await repository.verifyBootstrap({
-      laneKey: "heat",
+      laneKey: terminalLane,
       observedPublicationIdentity: publicationIdentity,
       observedWatermark: 3n,
       observedReceiptSha256: digest("{\"result\":\"activated\"}"),
       verifiedAt: new Date("2026-08-15T15:00:09.500Z"),
     });
     assert.equal((await repository.loadHealthSnapshot({
-      laneKey: "heat",
+      laneKey: terminalLane,
       now: new Date("2026-08-15T15:00:09.750Z"),
     }))?.confirmedWatermark, 4n);
     assert.equal(
-      await otherTenant.loadHealthSnapshot({ laneKey: "heat", now: startedAt }),
+      await otherTenant.loadHealthSnapshot({
+        laneKey: terminalLane,
+        now: startedAt,
+      }),
       null,
     );
     assert.equal(await otherTenant.heartbeat({
@@ -652,7 +656,7 @@ test("unchanged and deterministic failures are terminal, health-safe, and tenant
     }), false);
 
     await repository.coalesceSettledWatermark({
-      laneKey: "heat",
+      laneKey: terminalLane,
       settledWatermark: 5n,
       settledAt: new Date("2026-08-15T15:00:10.000Z"),
       delayedVendorCount: 0,
@@ -660,7 +664,7 @@ test("unchanged and deterministic failures are terminal, health-safe, and tenant
     const failed = await claim(
       repository,
       new Date("2026-08-15T15:00:11.000Z"),
-      "heat",
+      terminalLane,
     );
     assert.equal(await repository.completeAttempt({
       attemptId: failed.attemptId,
@@ -672,7 +676,7 @@ test("unchanged and deterministic failures are terminal, health-safe, and tenant
       failureCode: "PUBLIC_CONTRACT_INVALID",
     }), true);
     assert.equal(await repository.claimAttempt({
-      laneKey: "heat",
+      laneKey: terminalLane,
       claimOwner: "same-watermark",
       now: new Date("2026-08-15T15:00:13.000Z"),
       claimExpiresAt: new Date("2026-08-15T15:00:43.000Z"),
@@ -687,7 +691,8 @@ test("unchanged and deterministic failures are terminal, health-safe, and tenant
       await harness.client.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
         select count(*) as count from public.promotion_attempts
         where organization_id = cast(${organizationId} as uuid)
-          and deployment_key = ${deploymentKey} and lane_key = 'heat'
+          and deployment_key = ${deploymentKey}
+          and lane_key = ${terminalLane}
       `).then((rows) => rows[0]?.count),
       3n,
     );

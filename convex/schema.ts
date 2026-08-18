@@ -236,7 +236,17 @@ export const repackHeatSignalCoreValidator = publicRepackHeatSignalValidator
 
 export const productionHeatFrameEnvelopeValidator = v.object({
   publicHeatFrameId: v.string(),
-  catalogPublicReleaseId: v.string(),
+  manifestAlignment: v.object({
+    publicReleaseId: v.string(),
+    manifestFingerprint: sha256Validator,
+    sharedConfigurationEpoch: v.object({
+      configurationKey: v.string(),
+      revision: v.number(),
+      publicChangeSequence: v.string(),
+      configurationHash: sha256Validator,
+    }),
+    providerReferenceSetHash: sha256Validator,
+  }),
   frameSequence: v.number(),
   sourceWatermark: v.string(),
   signalSetHash: sha256Validator,
@@ -515,33 +525,6 @@ const publicRepackDetailValidator = v.object({
   }),
 });
 
-export const dataReleaseMetadataValidator = v.object({
-  schemaVersion: v.literal("data_release_v2"),
-  dataSource: v.union(v.literal("canonical"), v.literal("mock")),
-  publicReleaseId: v.string(),
-  sourceWatermark: v.string(),
-  manifestFingerprint: sha256Validator,
-  contentHash: sha256Validator,
-  publicConfigRevision: v.number(),
-  publicConfigHash: sha256Validator,
-  originSetHash: sha256Validator,
-  searchAlgorithmVersion: v.literal("repack_search_v2"),
-  repackSearchIndexHash: sha256Validator,
-  confidencePolicyVersion: v.string(),
-  createdAt: timestampValidator,
-  completedAt: v.union(timestampValidator, v.null()),
-  dataAsOf: timestampValidator,
-  lastSuccessfulObservationAt: timestampValidator,
-  staleAt: timestampValidator,
-  freshness: v.union(v.literal("fresh"), v.literal("delayed")),
-  delayedVendorCount: v.number(),
-  vendorCount: v.number(),
-  categoryCount: v.number(),
-  repackCount: v.number(),
-  collectibleCount: v.number(),
-  repackChaseCount: v.number(),
-});
-
 export const providerCatalogSharedConfigurationEpochValidator = v.object({
   configurationKey: v.string(),
   revision: v.number(),
@@ -667,6 +650,14 @@ export const globalCatalogManifestPointerValidator = v.object({
   completedAt: timestampValidator,
 });
 
+export const productionHeatManifestAlignmentValidator =
+  globalCatalogManifestPointerValidator.pick(
+    "publicReleaseId",
+    "manifestFingerprint",
+    "sharedConfigurationEpoch",
+    "providerReferenceSetHash",
+  );
+
 export const globalCatalogProviderActiveObservationValidator = v.object({
   platformKey: v.string(),
   publicProviderReleaseId: v.string(),
@@ -774,6 +765,41 @@ export default defineSchema({
       "lifecycle",
       "retentionEligibleAt",
     ]),
+
+  // A bounded, immutable receipt projection written atomically with finalize.
+  // Retention can prove hundreds of referenced releases without reading the
+  // potentially 384 KiB terminal receipt stored in providerCatalogOperations.
+  providerCatalogReleaseCompletionProofs: defineTable({
+    releaseId: v.id("providerCatalogReleases"),
+    operationId: v.string(),
+    platformKey: v.string(),
+    publicProviderReleaseId: v.string(),
+    providerReleaseFingerprint: sha256Validator,
+    completedAt: timestampValidator,
+    terminalReceiptSha256: sha256Validator,
+    receiptDigest: sha256Validator,
+    immutableProofSha256: sha256Validator,
+  })
+    .index("by_release_id", ["releaseId"])
+    .index("by_operation_id", ["operationId"]),
+
+  providerCatalogTerminalReceiptProofs: defineTable({
+    releaseId: v.id("providerCatalogReleases"),
+    operationId: v.string(),
+    operationKind: v.union(
+      v.literal("finalize"),
+      v.literal("confirmReuse"),
+    ),
+    requestDigest: sha256Validator,
+    platformKey: v.string(),
+    publicProviderReleaseId: v.string(),
+    providerReleaseFingerprint: sha256Validator,
+    completedAt: timestampValidator,
+    terminalReceiptSha256: sha256Validator,
+    receiptDigest: sha256Validator,
+  })
+    .index("by_release_id", ["releaseId"])
+    .index("by_operation_id", ["operationId"]),
 
   providerCatalogPublications: defineTable({
     platformKey: v.string(),
@@ -1044,7 +1070,12 @@ export default defineSchema({
     providerReleaseFingerprint: sha256Validator,
   })
     .index("by_manifest_id_and_platform_key", ["manifestId", "platformKey"])
+    .index("by_manifest_public_release_id_and_platform_key", [
+      "manifestPublicReleaseId",
+      "platformKey",
+    ])
     .index("by_release_id_and_manifest_id", ["releaseId", "manifestId"])
+    .index("by_platform_key_and_release_id", ["platformKey", "releaseId"])
     .index("by_platform_key_and_public_provider_release_id", [
       "platformKey",
       "publicProviderReleaseId",
@@ -1096,40 +1127,14 @@ export default defineSchema({
     .index("by_manifest_fingerprint", ["manifestFingerprint"])
     .index("by_public_release_id", ["publicReleaseId"]),
 
-  dataReleaseState: defineTable({
-    key: v.literal("singleton"),
-    activeReleaseId: v.union(v.id("dataReleases"), v.null()),
-    previousReleaseId: v.union(v.id("dataReleases"), v.null()),
-    latestObservationSequence: v.number(),
-    dataAsOf: timestampValidator,
-    lastSuccessfulObservationAt: timestampValidator,
-    staleAt: timestampValidator,
-    freshness: v.union(v.literal("fresh"), v.literal("delayed")),
-    delayedVendorCount: v.number(),
-    updatedAt: timestampValidator,
-  }).index("by_key", ["key"]),
-
-  dataReleases: defineTable({
-    publicReleaseId: v.string(),
-    lifecycle: v.union(
-      v.literal("staging"),
-      v.literal("complete"),
-      v.literal("failed"),
-      v.literal("retired"),
-    ),
-    metadata: dataReleaseMetadataValidator,
-    searchShardCount: v.number(),
-    retentionEligibleAt: v.optional(timestampValidator),
-  })
-    .index("by_public_release_id", ["publicReleaseId"])
-    .index("by_lifecycle_and_retention_eligible_at", [
-      "lifecycle",
-      "retentionEligibleAt",
-  ]),
-
   catalogRetentionState: defineTable({
     key: v.literal("singleton"),
     generation: v.number(),
+    referenceAuditSnapshotDigest: sha256Validator,
+    referenceAuditPhase: v.union(v.literal("manifests"), v.literal("edges")),
+    referenceAuditCursor: v.union(v.string(), v.null()),
+    referenceAuditComplete: v.boolean(),
+    manifestPhaseComplete: v.boolean(),
     updatedAt: timestampValidator,
   }).index("by_key", ["key"]),
 
@@ -1158,76 +1163,6 @@ export default defineSchema({
     .index("by_completed_at", ["completedAt"])
     .index("by_expires_at", ["expiresAt"]),
 
-  dataReleasePublications: defineTable({
-    publicationId: v.string(),
-    releaseId: v.id("dataReleases"),
-    expectedPredecessorPublicReleaseId: nullableTextValidator,
-    publicAssetOrigins: v.array(v.string()),
-    expectedBatchCount: v.number(),
-    expectedBatchChainHash: sha256Validator,
-    acceptedBatchCount: v.number(),
-    acceptedBatchChainHash: sha256Validator,
-    expectedCounts: v.object({
-      vendors: v.number(),
-      categories: v.number(),
-      collectibles: v.number(),
-      repacks: v.number(),
-      repackChases: v.number(),
-      searchShards: v.number(),
-    }),
-    acceptedCounts: v.object({
-      vendors: v.number(),
-      categories: v.number(),
-      collectibles: v.number(),
-      repacks: v.number(),
-      repackChases: v.number(),
-      searchShards: v.number(),
-    }),
-    observationSequence: v.number(),
-    lastBatchKind: nullableTextValidator,
-    lastRecordKey: nullableTextValidator,
-    lastSearchPublicRepackId: nullableTextValidator,
-    unresolvedRepackCount: v.number(),
-    latestEvidenceAt: nullableTimestampValidator,
-    state: v.union(
-      v.literal("staging"),
-      v.literal("complete"),
-      v.literal("failed"),
-    ),
-    createdAt: timestampValidator,
-    completedAt: nullableTimestampValidator,
-  })
-    .index("by_publication_id", ["publicationId"])
-    .index("by_release_id", ["releaseId"]),
-
-  dataReleaseRepackReconciliation: defineTable({
-    releaseId: v.id("dataReleases"),
-    repackId: v.id("repacks"),
-    publicRepackId: v.string(),
-    expectedChaseCount: v.number(),
-    acceptedChaseCount: v.number(),
-    expectedTopChaseJson: nullableTextValidator,
-    bestChaseJson: nullableTextValidator,
-    complete: v.boolean(),
-  })
-    .index("by_release_id_and_public_repack_id", [
-      "releaseId",
-      "publicRepackId",
-    ])
-    .index("by_release_id", ["releaseId"]),
-
-  dataReleaseCollectibleReconciliation: defineTable({
-    releaseId: v.id("dataReleases"),
-    collectibleId: v.id("collectibles"),
-    publicCollectibleId: v.string(),
-    chaseCount: v.number(),
-  })
-    .index("by_release_id_and_public_collectible_id", [
-      "releaseId",
-      "publicCollectibleId",
-    ])
-    .index("by_release_id", ["releaseId"]),
-
   dataReleaseAuthNonces: defineTable({
     keyId: v.string(),
     nonceHash: sha256Validator,
@@ -1253,7 +1188,8 @@ export default defineSchema({
   }).index("by_key", ["key"]),
 
   repackHeatSignalSets: defineTable({
-    releaseId: v.id("dataReleases"),
+    manifestId: v.id("globalCatalogManifests"),
+    manifestAlignment: productionHeatManifestAlignmentValidator,
     signalSetHash: sha256Validator,
     lifecycle: v.union(
       v.literal("staging"),
@@ -1271,9 +1207,9 @@ export default defineSchema({
     completedAt: nullableTimestampValidator,
     retentionEligibleAt: v.optional(timestampValidator),
   })
-    .index("by_signal_set_hash", ["signalSetHash"])
-    .index("by_release_id_and_signal_set_hash", [
-      "releaseId",
+    .index("by_manifest_id", ["manifestId"])
+    .index("by_manifest_id_and_signal_set_hash", [
+      "manifestId",
       "signalSetHash",
     ])
     .index("by_lifecycle_and_retention_eligible_at", [
@@ -1282,7 +1218,8 @@ export default defineSchema({
     ]),
 
   repackHeatSnapshots: defineTable({
-    releaseId: v.id("dataReleases"),
+    manifestId: v.id("globalCatalogManifests"),
+    manifestAlignment: productionHeatManifestAlignmentValidator,
     signalSetId: v.id("repackHeatSignalSets"),
     publicHeatSnapshotId: v.string(),
     publicationId: nullableTextValidator,
@@ -1310,7 +1247,7 @@ export default defineSchema({
     retentionEligibleAt: v.optional(timestampValidator),
   })
     .index("by_public_heat_snapshot_id", ["publicHeatSnapshotId"])
-    .index("by_release_id_and_sequence", ["releaseId", "sequence"])
+    .index("by_manifest_id_and_sequence", ["manifestId", "sequence"])
     .index("by_signal_set_id", ["signalSetId"])
     .index("by_lifecycle_and_expires_at", ["lifecycle", "expiresAt"])
     .index("by_simulation_run_id_and_sequence", [
@@ -1320,12 +1257,12 @@ export default defineSchema({
 
   repackHeatSignals: defineTable({
     signalSetId: v.id("repackHeatSignalSets"),
-    releaseId: v.id("dataReleases"),
-    repackId: v.id("repacks"),
+    providerReleaseId: v.id("providerCatalogReleases"),
+    repackId: v.id("providerCatalogRepacks"),
     publicRepackId: v.string(),
     detail: repackHeatSignalCoreValidator,
   })
-    .index("by_release_id", ["releaseId"])
+    .index("by_provider_release_id", ["providerReleaseId"])
     .index("by_signal_set_id_and_public_repack_id", [
       "signalSetId",
       "publicRepackId",
@@ -1337,7 +1274,7 @@ export default defineSchema({
 
   repackHeatPublications: defineTable({
     publicationId: v.string(),
-    releaseId: v.id("dataReleases"),
+    manifestId: v.id("globalCatalogManifests"),
     signalSetId: v.id("repackHeatSignalSets"),
     frame: productionHeatFrameEnvelopeValidator,
     expectedBatchCount: v.number(),
@@ -1355,7 +1292,7 @@ export default defineSchema({
     retentionEligibleAt: timestampValidator,
   })
     .index("by_publication_id", ["publicationId"])
-    .index("by_release_id", ["releaseId"])
+    .index("by_manifest_id", ["manifestId"])
     .index("by_signal_set_id", ["signalSetId"])
     .index("by_state_and_completed_at", ["state", "completedAt"])
     .index("by_state_and_retention_eligible_at", [
@@ -1365,7 +1302,7 @@ export default defineSchema({
 
   repackHeatBatches: defineTable({
     publicationId: v.string(),
-    releaseId: v.id("dataReleases"),
+    manifestId: v.id("globalCatalogManifests"),
     signalSetId: v.id("repackHeatSignalSets"),
     batchIndex: v.number(),
     idempotencyKey: v.string(),
@@ -1383,7 +1320,7 @@ export default defineSchema({
       "batchIndex",
     ])
     .index("by_idempotency_key", ["idempotencyKey"])
-    .index("by_release_id", ["releaseId"]),
+    .index("by_manifest_id", ["manifestId"]),
 
   repackHeatOperations: defineTable({
     operationId: v.string(),
@@ -1404,143 +1341,4 @@ export default defineSchema({
     .index("by_publication_id_and_kind", ["publicationId", "kind"])
     .index("by_completed_at", ["completedAt"]),
 
-  vendors: defineTable({
-    releaseId: v.id("dataReleases"),
-    publicVendorId: v.string(),
-    vendorKey: v.string(),
-    detail: publicVendorValidator,
-  })
-    .index("by_release_id_and_public_vendor_id", [
-      "releaseId",
-      "publicVendorId",
-    ])
-    .index("by_release_id_and_vendor_key", ["releaseId", "vendorKey"]),
-
-  categories: defineTable({
-    releaseId: v.id("dataReleases"),
-    publicCategoryId: v.string(),
-    categoryKey: v.string(),
-    parentCategoryId: v.union(v.id("categories"), v.null()),
-    detail: publicCategoryValidator,
-  })
-    .index("by_release_id_and_public_category_id", [
-      "releaseId",
-      "publicCategoryId",
-    ])
-    .index("by_release_id_and_category_key", ["releaseId", "categoryKey"])
-    .index("by_release_id_and_parent_category_id", [
-      "releaseId",
-      "parentCategoryId",
-    ]),
-
-  repacks: defineTable({
-    releaseId: v.id("dataReleases"),
-    publicRepackId: v.string(),
-    vendorId: v.id("vendors"),
-    detail: publicRepackDetailValidator,
-  })
-    .index("by_release_id_and_public_repack_id", [
-      "releaseId",
-      "publicRepackId",
-    ])
-    .index("by_release_id_and_vendor_id", ["releaseId", "vendorId"]),
-
-  collectibles: defineTable({
-    releaseId: v.id("dataReleases"),
-    publicCollectibleId: v.string(),
-    collectibleType: collectibleTypeValidator,
-    normalizedName: v.string(),
-    searchText: v.string(),
-    detail: publicCollectibleValidator,
-  })
-    .index("by_release_id_and_public_collectible_id", [
-      "releaseId",
-      "publicCollectibleId",
-    ])
-    .index("by_release_id_and_normalized_name", [
-      "releaseId",
-      "normalizedName",
-    ])
-    .searchIndex("search_search_text", {
-      searchField: "searchText",
-      filterFields: ["releaseId", "collectibleType"],
-    }),
-
-  repackChases: defineTable({
-    releaseId: v.id("dataReleases"),
-    repackId: v.id("repacks"),
-    collectibleId: v.id("collectibles"),
-    detail: publicRepackChaseValidator,
-  })
-    .index("by_release_id_and_repack_id", ["releaseId", "repackId"])
-    .index("by_release_id_and_collectible_id", [
-      "releaseId",
-      "collectibleId",
-    ])
-    .index("by_release_id_and_repack_id_and_collectible_id", [
-      "releaseId",
-      "repackId",
-      "collectibleId",
-    ]),
-
-  repackSearchShards: defineTable({
-    releaseId: v.id("dataReleases"),
-    shardNumber: v.number(),
-    rowCount: v.number(),
-    byteCount: v.number(),
-    contentHash: sha256Validator,
-    rows: v.array(repackSearchRowValidator),
-  }).index("by_release_id_and_shard_number", ["releaseId", "shardNumber"]),
-
-  dataReleaseBatches: defineTable({
-    releaseId: v.id("dataReleases"),
-    batchIndex: v.number(),
-    kind: v.union(
-      v.literal("vendors"),
-      v.literal("categories"),
-      v.literal("repacks"),
-      v.literal("collectibles"),
-      v.literal("repack_chases"),
-      v.literal("search_shards"),
-    ),
-    idempotencyKey: v.string(),
-    bodyHash: sha256Validator,
-    recordCount: v.number(),
-    byteCount: v.number(),
-    acceptedAt: timestampValidator,
-    operationId: v.optional(v.string()),
-    chainHash: v.optional(sha256Validator),
-  })
-    .index("by_release_id_and_batch_index", ["releaseId", "batchIndex"])
-    .index("by_idempotency_key", ["idempotencyKey"]),
-
-  dataReleaseOperations: defineTable({
-    operationId: v.string(),
-    kind: v.string(),
-    idempotencyKey: v.string(),
-    bodyHash: sha256Validator,
-    publicReleaseId: nullableTextValidator,
-    observationSequence: v.union(v.number(), v.null()),
-    status: v.string(),
-    result: v.string(),
-    convexReleaseVersion: nullableTextValidator,
-    confirmationReceiptHash: v.union(sha256Validator, v.null()),
-    acceptedAt: timestampValidator,
-    completedAt: nullableTimestampValidator,
-    receiptJson: v.optional(v.string()),
-  })
-    .index("by_kind_and_idempotency_key", ["kind", "idempotencyKey"])
-    .index("by_public_release_id_and_kind", ["publicReleaseId", "kind"])
-    .index("by_operation_id", ["operationId"]),
-
-  blockedDataReleaseManifests: defineTable({
-    fingerprint: sha256Validator,
-    active: v.boolean(),
-    blockSequence: v.number(),
-    originatingOperationId: v.string(),
-    sanitizedReason: v.string(),
-    blockedAt: timestampValidator,
-    releasedAt: nullableTimestampValidator,
-    releaseReceiptHash: v.union(sha256Validator, v.null()),
-  }).index("by_fingerprint_and_active", ["fingerprint", "active"]),
 });

@@ -23,6 +23,8 @@ import {
 import {
   assertStoredProviderReleaseCompletion,
   providerReleaseProofMatches,
+  storeProviderReleaseCompletionProof,
+  storeProviderTerminalReceiptProof,
 } from "./providerReleaseProof";
 import {
   assertExpectedProviderHead,
@@ -252,6 +254,24 @@ export const finalize = internalMutation({
       completedAt: serverTime,
     });
     await storeProviderReleaseReceipt(ctx, receipt);
+    await storeProviderTerminalReceiptProof(ctx, {
+      releaseId: release._id,
+      releaseProof: request.release,
+      operationId: request.operationId,
+      operationKind: "finalize",
+      requestDigest: args.requestDigest,
+      completedAt: serverTime,
+      terminalReceiptSha256,
+      receiptDigest: receipt.receiptDigest,
+    });
+    await storeProviderReleaseCompletionProof(ctx, {
+      releaseId: release._id,
+      releaseProof: request.release,
+      operationId: request.operationId,
+      completedAt: serverTime,
+      terminalReceiptSha256,
+      receiptDigest: receipt.receiptDigest,
+    });
     await writeCompletedHead(ctx, {
       previous,
       release,
@@ -345,6 +365,16 @@ export const confirmReuse = internalMutation({
     const terminalReceiptSha256 =
       await providerReleaseTerminalReceiptSha256(receipt);
     await storeProviderReleaseReceipt(ctx, receipt);
+    await storeProviderTerminalReceiptProof(ctx, {
+      releaseId: release._id,
+      releaseProof: request.release,
+      operationId: request.operationId,
+      operationKind: "confirmReuse",
+      requestDigest: args.requestDigest,
+      completedAt: serverTime,
+      terminalReceiptSha256,
+      receiptDigest: receipt.receiptDigest,
+    });
     await writeCompletedHead(ctx, {
       previous,
       release,

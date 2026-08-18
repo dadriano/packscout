@@ -1,26 +1,31 @@
 import {
   REPACK_HEAT_PUBLICATION_SCHEMA_VERSION,
+  canonicalJson,
   productionHeatActiveStateReceiptSchema,
   productionHeatActiveStateRequestSchema,
   productionHeatReceiptHash,
   productionHeatTerminalReceiptSha256,
+  recomputeProductionHeatFrameHash,
   type ProductionHeatActiveStateReceipt,
+  type ProductionHeatManifestAlignment,
 } from "@packscout/contracts";
 import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import { refuseProductionDataRelease } from "./productionDataReleaseErrors";
 import { loadHeatReceiptByOperationId } from "./productionHeatOperations";
 import {
+  assertStoredHeatManifest,
   loadActiveHeatFrame,
   loadHeatState,
   parseProductionHeatRequest,
+  productionHeatFrameFromSnapshot,
 } from "./productionHeatProtocol";
 
 async function activeStateReceipt(input: Readonly<{
   operationId: string;
   requestDigest: string;
   activePublicHeatFrameId: string | null;
-  catalogPublicReleaseId: string | null;
+  manifestAlignment: ProductionHeatManifestAlignment | null;
   sourceWatermark: string | null;
   frameSequence: number;
   terminalReceiptSha256: string | null;
@@ -36,7 +41,7 @@ async function activeStateReceipt(input: Readonly<{
     requestDigest: input.requestDigest,
     details: {
       activePublicHeatFrameId: input.activePublicHeatFrameId,
-      catalogPublicReleaseId: input.catalogPublicReleaseId,
+      manifestAlignment: input.manifestAlignment,
       sourceWatermark: input.sourceWatermark,
       frameSequence: input.frameSequence,
       terminalReceiptSha256: input.terminalReceiptSha256,
@@ -61,7 +66,7 @@ export const activeState = internalMutation({
         operationId: request.operationId,
         requestDigest,
         activePublicHeatFrameId: null,
-        catalogPublicReleaseId: null,
+        manifestAlignment: null,
         sourceWatermark: null,
         frameSequence: 0,
         terminalReceiptSha256: null,
@@ -79,47 +84,51 @@ export const activeState = internalMutation({
     ) {
       return refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
     }
-    const [
-      release,
-      signalSet,
-      previous,
-      catalogStates,
-      finalizeOperations,
-      refreshOperations,
-    ] =
+    const [signalSet, previous, finalizeOperations, refreshOperations] =
       await Promise.all([
-      ctx.db.get("dataReleases", active.releaseId),
-      ctx.db.get("repackHeatSignalSets", active.signalSetId),
-      state.previousHeatSnapshotId === null
-        ? Promise.resolve(null)
-        : ctx.db.get("repackHeatSnapshots", state.previousHeatSnapshotId),
-      ctx.db
-        .query("dataReleaseState")
-        .withIndex("by_key", (index) => index.eq("key", "singleton"))
-        .take(2),
-      ctx.db
-        .query("repackHeatOperations")
-        .withIndex("by_publication_id_and_kind", (index) =>
-          index
-            .eq("publicationId", active.publicHeatSnapshotId)
-            .eq("kind", "finalize"),
-        )
-        .take(2),
-      ctx.db
-        .query("repackHeatOperations")
-        .withIndex("by_publication_id_and_kind", (index) =>
-          index
-            .eq("publicationId", active.publicHeatSnapshotId)
-            .eq("kind", "refreshFrame"),
-        )
-        .take(2),
+        ctx.db.get("repackHeatSignalSets", active.signalSetId),
+        state.previousHeatSnapshotId === null
+          ? Promise.resolve(null)
+          : ctx.db.get("repackHeatSnapshots", state.previousHeatSnapshotId),
+        ctx.db
+          .query("repackHeatOperations")
+          .withIndex("by_publication_id_and_kind", (index) =>
+            index
+              .eq("publicationId", active.publicHeatSnapshotId)
+              .eq("kind", "finalize"),
+          )
+          .take(2),
+        ctx.db
+          .query("repackHeatOperations")
+          .withIndex("by_publication_id_and_kind", (index) =>
+            index
+              .eq("publicationId", active.publicHeatSnapshotId)
+              .eq("kind", "refreshFrame"),
+          )
+          .take(2),
       ]);
+    await assertStoredHeatManifest(
+      ctx,
+      active.manifestId,
+      active.manifestAlignment,
+    );
     const operations = [...finalizeOperations, ...refreshOperations];
+    let frame;
+    try {
+      frame = signalSet === null
+        ? null
+        : productionHeatFrameFromSnapshot(active, signalSet);
+    } catch {
+      return refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
+    }
     if (
-      release === null ||
       signalSet === null ||
+      frame === null ||
+      frame.frameHash !== await recomputeProductionHeatFrameHash(frame) ||
       signalSet.lifecycle !== "complete" ||
-      signalSet.releaseId !== active.releaseId ||
+      signalSet.manifestId !== active.manifestId ||
+      canonicalJson(signalSet.manifestAlignment) !==
+        canonicalJson(active.manifestAlignment) ||
       signalSet.sourceKind !== "observed" ||
       signalSet.scenarioVersion !== null ||
       signalSet.aggregationVersion !== active.aggregationVersion ||
@@ -130,15 +139,6 @@ export const activeState = internalMutation({
         previous._id === active._id ||
         previous.lifecycle !== "retired"
       )) ||
-      catalogStates.length !== 1 ||
-      catalogStates[0]!.activeReleaseId !== active.releaseId ||
-      !Number.isSafeInteger(catalogStates[0]!.latestObservationSequence) ||
-      catalogStates[0]!.latestObservationSequence <= 0 ||
-      BigInt(active.sourceWatermark) <
-        BigInt(catalogStates[0]!.latestObservationSequence) ||
-      release.lifecycle !== "complete" ||
-      release.metadata.dataSource !== "canonical" ||
-      release.publicReleaseId !== release.metadata.publicReleaseId ||
       operations.length !== 1 ||
       operations[0]!.receiptJson === undefined
     ) {
@@ -155,7 +155,8 @@ export const activeState = internalMutation({
       (receipt.operationKind !== "finalize" &&
         receipt.operationKind !== "refreshFrame") ||
       receipt.details.activePublicHeatFrameId !== active.publicHeatSnapshotId ||
-      receipt.details.catalogPublicReleaseId !== release.publicReleaseId ||
+      canonicalJson(receipt.details.manifestAlignment) !==
+        canonicalJson(active.manifestAlignment) ||
       receipt.details.sourceWatermark !== active.sourceWatermark ||
       receipt.details.frameSequence !== active.sequence ||
       receipt.details.frameHash !== active.contentHash ||
@@ -172,7 +173,7 @@ export const activeState = internalMutation({
       operationId: request.operationId,
       requestDigest,
       activePublicHeatFrameId: active.publicHeatSnapshotId,
-      catalogPublicReleaseId: release.publicReleaseId,
+      manifestAlignment: active.manifestAlignment,
       sourceWatermark: active.sourceWatermark,
       frameSequence: active.sequence,
       terminalReceiptSha256: await productionHeatTerminalReceiptSha256(

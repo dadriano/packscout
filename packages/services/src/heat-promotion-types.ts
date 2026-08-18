@@ -1,5 +1,7 @@
 import type {
+  GlobalCatalogProviderReferenceV1,
   ProductionHeatFrameEnvelope,
+  ProductionHeatManifestAlignment,
   ProductionHeatOperationKind,
   ProductionHeatReceipt,
   ProductionRepackHeatPath,
@@ -33,7 +35,7 @@ export interface HeatPromotionPreparedPlan {
   readonly classification: "publish" | "refresh_unchanged";
   readonly publicHeatFrameId: string;
   readonly targetFrameSequence: bigint;
-  readonly catalogPublicReleaseId: string;
+  readonly manifestAlignment: ProductionHeatManifestAlignment;
   readonly sourceWatermark: bigint;
   readonly signalSetHash: string;
   readonly contentIdentity: string;
@@ -54,6 +56,7 @@ export interface HeatPromotionClaim {
   readonly contentIdentity: string | null;
   readonly publicationIdentity: string | null;
   readonly expectedPredecessorIdentity: string | null;
+  readonly manifestSourceProof: ActiveCatalogHeatManifest | null;
   readonly claimToken: string;
   readonly claimExpiresAt: Date;
   readonly claimCount: number;
@@ -112,6 +115,7 @@ export interface HeatPromotionLedgerPort {
     contentIdentity: string;
     publicationIdentity: string;
     preparedClassification: "publish" | "refresh_unchanged";
+    manifestSourceProof: ActiveCatalogHeatManifest;
     operations: readonly Readonly<{
       operationIndex: number;
       operationId: string;
@@ -164,16 +168,23 @@ export interface HeatPromotionLedgerPort {
   }>): Promise<HeatPromotionHealth | null>;
 }
 
-export interface ActiveCatalogHeatRelease {
-  readonly publicReleaseId: string;
+export interface ActiveCatalogHeatManifest {
+  readonly manifestAlignment: ProductionHeatManifestAlignment;
+  readonly providerReferences: readonly GlobalCatalogProviderReferenceV1[];
+  readonly publicRepackOwnership: readonly Readonly<{
+    publicRepackId: string;
+    platformKey: string;
+    publicProviderReleaseId: string;
+    providerReleaseFingerprint: string;
+  }>[];
   readonly publicRepackIds: readonly string[];
-  readonly confirmedWatermark: bigint;
+  readonly confirmedManifestWatermark: bigint;
   readonly terminalReceiptSha256: string;
 }
 
 export interface ActiveHeatFrameBaseline {
   readonly publicHeatFrameId: string;
-  readonly catalogPublicReleaseId: string;
+  readonly manifestAlignment: ProductionHeatManifestAlignment;
   readonly frameSequence: number;
   readonly sourceWatermark: bigint;
   readonly signalSetHash: string;
@@ -182,11 +193,11 @@ export interface ActiveHeatFrameBaseline {
   readonly terminalReceiptSha256: string;
 }
 
-export interface HeatPromotionReleaseProofPort {
-  loadActiveCatalogRelease(): Promise<ActiveCatalogHeatRelease | null>;
+export interface HeatPromotionManifestProofPort {
+  loadActiveCatalogManifest(): Promise<ActiveCatalogHeatManifest | null>;
   loadActiveHeatFrame(): Promise<ActiveHeatFrameBaseline | null>;
   hasReusableHeatSignalSet(input: Readonly<{
-    catalogPublicReleaseId: string;
+    manifestAlignment: ProductionHeatManifestAlignment;
     signalSetHash: string;
     contentIdentity: string;
     signalCount: number;
@@ -230,7 +241,7 @@ export interface HeatPublicationTransport {
 
 export interface HeatPublicationActiveState {
   readonly activePublicHeatFrameId: string | null;
-  readonly catalogPublicReleaseId: string | null;
+  readonly manifestAlignment: ProductionHeatManifestAlignment | null;
   readonly sourceWatermark: bigint | null;
   readonly frameSequence: number;
   readonly terminalReceiptSha256: string | null;

@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/014
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including alignment, expiry, and receipt-proof verification
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -51,17 +51,17 @@ The production Heat frame envelope adds internal alignment proof for that manife
 
 ### Alignment
 
-- [ ] A frame activates only for the exact active manifest and ordered provider-release set used to calculate it.
-- [ ] A changed manifest or one changed provider reference makes the prior frame unavailable until a matching frame activates.
-- [ ] A metadata-only catalog freshness refresh leaves the aligned Heat frame readable and does not force duplicate signals.
-- [ ] Disabled-provider and delayed-provider manifests calculate Heat only for repacks in their exact active provider-release union.
+- [x] A frame activates only for the exact active manifest and ordered provider-release set used to calculate it.
+- [x] A changed manifest or one changed provider reference makes the prior frame unavailable until a matching frame activates.
+- [x] A metadata-only catalog freshness refresh leaves the aligned Heat frame readable and does not force duplicate signals.
+- [x] Disabled-provider and delayed-provider manifests calculate Heat only for repacks in their exact active provider-release union.
 
 ### Independence and recovery
 
-- [ ] Heat still reads only organization-globally settled normalized observations and publishes no raw activity or protected fields.
-- [ ] Heat failure does not block manifest activation; failed manifest activation preserves the prior aligned frame until expiry.
-- [ ] Exact replay, unchanged signal-set reuse, lost acknowledgement, restart, regressed frame, and stale expiry reconcile without duplicate active data.
-- [ ] Existing public Heat contract and frontend presentation tests pass without DTO changes.
+- [x] Heat still reads only organization-globally settled normalized observations and publishes no raw activity or protected fields.
+- [x] Heat failure does not block manifest activation; failed manifest activation preserves the prior aligned frame until expiry.
+- [x] Exact replay, unchanged signal-set reuse, lost acknowledgement, restart, regressed frame, and stale expiry reconcile without duplicate active data.
+- [x] Existing public Heat contract and frontend presentation tests pass without DTO changes.
 
 ## Verification
 

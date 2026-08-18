@@ -16,6 +16,9 @@
     "packages/services"
   ],
   "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.0"
+    },
     "postcss": "8.5.25",
     "sharp": "0.35.3"
   },

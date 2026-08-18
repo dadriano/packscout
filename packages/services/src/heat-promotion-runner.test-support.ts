@@ -15,6 +15,7 @@ import {
 } from "@packscout/contracts";
 import { CatalogPublicationClientError } from "./convex-catalog-publication-client.ts";
 import type {
+  ActiveCatalogHeatManifest,
   HeatPromotionClaim,
   HeatPromotionHealth,
   HeatPromotionLedgerPort,
@@ -43,6 +44,7 @@ interface MutableHeatAttempt {
   publicationIdentity: string | null;
   preparedClassification: "publish" | "refresh_unchanged" | null;
   expectedPredecessorIdentity: string | null;
+  manifestSourceProof: ActiveCatalogHeatManifest | null;
   claimToken: string;
   claimExpiresAt: Date;
   claimCount: number;
@@ -153,6 +155,7 @@ export class MemoryHeatPromotionLedger implements HeatPromotionLedgerPort {
     contentIdentity: string;
     publicationIdentity: string;
     preparedClassification: "publish" | "refresh_unchanged";
+    manifestSourceProof: ActiveCatalogHeatManifest;
     operations: readonly Readonly<{
       operationIndex: number;
       operationId: string;
@@ -168,6 +171,7 @@ export class MemoryHeatPromotionLedger implements HeatPromotionLedgerPort {
     attempt.contentIdentity = input.contentIdentity;
     attempt.publicationIdentity = input.publicationIdentity;
     attempt.preparedClassification = input.preparedClassification;
+    attempt.manifestSourceProof = structuredClone(input.manifestSourceProof);
     attempt.state = "ready";
     attempt.operations = input.operations.map((operation) => ({
       operationIndex: operation.operationIndex,
@@ -321,6 +325,8 @@ export class MemoryHeatPromotionLedger implements HeatPromotionLedgerPort {
       contentIdentity: attempt.contentIdentity,
       publicationIdentity: attempt.publicationIdentity,
       expectedPredecessorIdentity: attempt.expectedPredecessorIdentity,
+      manifestSourceProof: attempt.manifestSourceProof === null
+        ? null : structuredClone(attempt.manifestSourceProof),
       claimToken: attempt.claimToken,
       claimExpiresAt: new Date(attempt.claimExpiresAt),
       claimCount: attempt.claimCount,
@@ -338,6 +344,7 @@ export class MemoryHeatPromotionLedger implements HeatPromotionLedgerPort {
       publicationIdentity: null,
       preparedClassification: null,
       expectedPredecessorIdentity: this.expectedPredecessorIdentity,
+      manifestSourceProof: null,
       claimToken: "unclaimed",
       claimExpiresAt: createdAt,
       claimCount: 0,
@@ -464,7 +471,7 @@ export class FakeHeatPublicationTransport implements HeatPublicationTransport {
         terminalState: "staging",
         result: "created",
         details: {
-          catalogPublicReleaseId: request.frame.catalogPublicReleaseId,
+          manifestAlignment: request.frame.manifestAlignment,
           frameHash: request.frame.frameHash,
           signalSetHash: request.frame.signalSetHash,
           sourceWatermark: request.frame.sourceWatermark,
@@ -546,7 +553,7 @@ export class FakeHeatPublicationTransport implements HeatPublicationTransport {
       terminalState: "complete",
       result: activation.result,
       details: {
-        catalogPublicReleaseId: frame.catalogPublicReleaseId,
+        manifestAlignment: frame.manifestAlignment,
         activePublicHeatFrameId: frame.publicHeatFrameId,
         previousPublicHeatFrameId: activation.previousPublicHeatFrameId,
         frameHash: frame.frameHash,

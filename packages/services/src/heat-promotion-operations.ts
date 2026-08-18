@@ -12,12 +12,14 @@ import {
   REPACK_HEAT_PUBLICATION_SCHEMA_VERSION,
   canonicalJson,
   containsProtectedPublicationField,
+  deriveProductionHeatFrameId,
   extendProductionHeatSignalSetHash,
   productionHeatApplyBatchRequestSchema,
   productionHeatBatchByteCount,
   productionHeatCoreByteCount,
   productionHeatFinalizeRequestSchema,
   productionHeatFrameEnvelopeSchema,
+  productionHeatContentIdentity,
   productionHeatReceiptSchema,
   productionHeatRefreshFrameRequestSchema,
   productionHeatStartRequestSchema,
@@ -26,6 +28,7 @@ import {
   type ProductionHeatApplyBatchRequest,
   type ProductionHeatFinalizeRequest,
   type ProductionHeatFrameEnvelope,
+  type ProductionHeatManifestAlignment,
   type ProductionHeatReceipt,
   type ProductionHeatRefreshFrameRequest,
   type ProductionHeatStartRequest,
@@ -36,7 +39,7 @@ import {
 } from "./normalized-heat-observation-port.ts";
 import { calculateRepackHeat } from "./repack-heat-calculator.ts";
 import type {
-  ActiveCatalogHeatRelease,
+  ActiveCatalogHeatManifest,
   ActiveHeatFrameBaseline,
   HeatPromotionObservationPort,
   HeatPromotionOperation,
@@ -72,25 +75,17 @@ function sha256(value: string): string {
 }
 
 export function heatPromotionContentIdentity(input: Readonly<{
-  catalogPublicReleaseId: string;
+  manifestAlignment: ProductionHeatManifestAlignment;
   signalSetHash: string;
-}>): string {
-  return sha256(canonicalJson([
-    "packscout.heat-release-signal-set.v1",
-    input.catalogPublicReleaseId,
-    input.signalSetHash,
-  ]));
+}>): Promise<string> {
+  return productionHeatContentIdentity(input);
 }
 
-function deterministicUuid(parts: readonly (string | number)[]): string {
-  const hex = sha256(canonicalJson(["packscout.heat-frame.v1", ...parts]));
-  return [
-    hex.slice(0, 8),
-    hex.slice(8, 12),
-    `5${hex.slice(13, 16)}`,
-    `8${hex.slice(17, 20)}`,
-    hex.slice(20, 32),
-  ].join("-");
+function sameManifestAlignment(
+  left: ProductionHeatManifestAlignment,
+  right: ProductionHeatManifestAlignment,
+): boolean {
+  return canonicalJson(left) === canonicalJson(right);
 }
 
 function schemaFor(kind: HeatPromotionOperationKind) {
@@ -245,11 +240,11 @@ export async function prepareHeatPromotion(input: Readonly<{
   frameEndedAt: Date;
   calculatedAt: Date;
   sourceWatermark: bigint;
-  catalog: ActiveCatalogHeatRelease;
+  catalog: ActiveCatalogHeatManifest;
   baseline: ActiveHeatFrameBaseline | null;
   observations: HeatPromotionObservationPort;
   canReuseSignalSet(input: Readonly<{
-    catalogPublicReleaseId: string;
+    manifestAlignment: ProductionHeatManifestAlignment;
     signalSetHash: string;
     contentIdentity: string;
     signalCount: number;
@@ -262,7 +257,6 @@ export async function prepareHeatPromotion(input: Readonly<{
     input.targetFrameSequence !==
       BigInt(input.frameEndedAt.getTime() / 60_000) ||
     input.sourceWatermark <= 0n ||
-    input.sourceWatermark < input.catalog.confirmedWatermark ||
     input.sourceWatermark > 9_223_372_036_854_775_807n
   ) {
     throw new HeatPromotionPreparationError("HEAT_FRAME_SEQUENCE_INVALID");
@@ -314,18 +308,18 @@ export async function prepareHeatPromotion(input: Readonly<{
     throw new HeatPromotionPreparationError("HEAT_CALCULATION_INVALID");
   }
   const { batches, signalSetHash } = await buildBatches(signals);
-  const contentIdentity = heatPromotionContentIdentity({
-    catalogPublicReleaseId: input.catalog.publicReleaseId,
+  const contentIdentity = await heatPromotionContentIdentity({
+    manifestAlignment: input.catalog.manifestAlignment,
     signalSetHash,
   });
-  const publicHeatFrameId = deterministicUuid([
-    input.catalog.publicReleaseId,
+  const publicHeatFrameId = await deriveProductionHeatFrameId({
+    manifestAlignment: input.catalog.manifestAlignment,
     frameSequence,
-    input.sourceWatermark.toString(),
-  ]);
+    sourceWatermark: input.sourceWatermark.toString(),
+  });
   const frameWithoutHash: ProductionHeatFrameEnvelope = {
     publicHeatFrameId,
-    catalogPublicReleaseId: input.catalog.publicReleaseId,
+    manifestAlignment: input.catalog.manifestAlignment,
     frameSequence,
     sourceWatermark: input.sourceWatermark.toString(),
     signalSetHash,
@@ -345,11 +339,13 @@ export async function prepareHeatPromotion(input: Readonly<{
     frameHash: await recomputeProductionHeatFrameHash(frameWithoutHash),
   });
   const reusable = input.baseline !== null &&
-    input.baseline.catalogPublicReleaseId === input.catalog.publicReleaseId &&
-    ((input.baseline.signalSetHash === signalSetHash &&
+    ((sameManifestAlignment(
+      input.baseline.manifestAlignment,
+      input.catalog.manifestAlignment,
+    ) && input.baseline.signalSetHash === signalSetHash &&
       input.baseline.signalCount === signals.length) ||
       await input.canReuseSignalSet({
-        catalogPublicReleaseId: input.catalog.publicReleaseId,
+        manifestAlignment: input.catalog.manifestAlignment,
         signalSetHash,
         contentIdentity,
         signalCount: signals.length,
@@ -395,7 +391,7 @@ export async function prepareHeatPromotion(input: Readonly<{
       publicationId: publicHeatFrameId,
       expectedActivePublicHeatFrameId:
         input.baseline?.publicHeatFrameId ?? null,
-      expectedCatalogPublicReleaseId: input.catalog.publicReleaseId,
+      expectedManifestAlignment: input.catalog.manifestAlignment,
       expectedSignalSetHash: signalSetHash,
       expectedFrameHash: frame.frameHash,
       expectedSignalCount: signals.length,
@@ -407,7 +403,7 @@ export async function prepareHeatPromotion(input: Readonly<{
     classification: reusable ? "refresh_unchanged" : "publish",
     publicHeatFrameId,
     targetFrameSequence: input.targetFrameSequence,
-    catalogPublicReleaseId: input.catalog.publicReleaseId,
+    manifestAlignment: input.catalog.manifestAlignment,
     sourceWatermark: input.sourceWatermark,
     signalSetHash,
     contentIdentity,
@@ -444,7 +440,10 @@ export function validateHeatPromotionReceipt(
     const value = request as ProductionHeatStartRequest;
     if (
       receipt.operationKind !== "start" ||
-      receipt.details.catalogPublicReleaseId !== value.frame.catalogPublicReleaseId ||
+      !sameManifestAlignment(
+        receipt.details.manifestAlignment,
+        value.frame.manifestAlignment,
+      ) ||
       receipt.details.frameHash !== value.frame.frameHash ||
       receipt.details.signalSetHash !== value.frame.signalSetHash ||
       receipt.details.sourceWatermark !== value.frame.sourceWatermark ||
@@ -466,7 +465,10 @@ export function validateHeatPromotionReceipt(
     const value = request as ProductionHeatFinalizeRequest;
     if (
       receipt.operationKind !== "finalize" ||
-      receipt.details.catalogPublicReleaseId !== value.expectedCatalogPublicReleaseId ||
+      !sameManifestAlignment(
+        receipt.details.manifestAlignment,
+        value.expectedManifestAlignment,
+      ) ||
       receipt.details.activePublicHeatFrameId !== value.publicationId ||
       receipt.details.previousPublicHeatFrameId !==
         value.expectedActivePublicHeatFrameId ||
@@ -478,7 +480,10 @@ export function validateHeatPromotionReceipt(
     const value = request as ProductionHeatRefreshFrameRequest;
     if (
       receipt.operationKind !== "refreshFrame" ||
-      receipt.details.catalogPublicReleaseId !== value.frame.catalogPublicReleaseId ||
+      !sameManifestAlignment(
+        receipt.details.manifestAlignment,
+        value.frame.manifestAlignment,
+      ) ||
       receipt.details.activePublicHeatFrameId !== value.publicationId ||
       receipt.details.previousPublicHeatFrameId !==
         value.expectedActivePublicHeatFrameId ||
@@ -500,6 +505,7 @@ type HeatBatchProgress = Readonly<{
 type ValidatedHeatOperationSet = Readonly<{
   frame: ProductionHeatFrameEnvelope;
   expectedPreviousPublicHeatFrameId: string | null;
+  publicRepackIds: readonly string[] | null;
   progressByOperationId: ReadonlyMap<string, HeatBatchProgress>;
 }>;
 
@@ -531,6 +537,7 @@ async function buildValidatedHeatOperationSet(
       frame: refresh.frame,
       expectedPreviousPublicHeatFrameId:
         refresh.expectedActivePublicHeatFrameId,
+      publicRepackIds: null,
       progressByOperationId: new Map(),
     };
   }
@@ -547,8 +554,10 @@ async function buildValidatedHeatOperationSet(
   if (
     start.expectedBatchCount !== batchOperations.length ||
     finalize.expectedBatchCount !== batchOperations.length ||
-    finalize.expectedCatalogPublicReleaseId !==
-      start.frame.catalogPublicReleaseId ||
+    !sameManifestAlignment(
+      finalize.expectedManifestAlignment,
+      start.frame.manifestAlignment,
+    ) ||
     finalize.expectedFrameHash !== start.frame.frameHash ||
     finalize.expectedSignalSetHash !== start.frame.signalSetHash ||
     finalize.expectedSignalCount !== start.frame.signalCount ||
@@ -557,6 +566,7 @@ async function buildValidatedHeatOperationSet(
   let acceptedSignalCount = 0;
   let signalSetProgressHash = EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH;
   let previousPublicRepackId: string | null = null;
+  const publicRepackIds: string[] = [];
   const progressByOperationId = new Map<string, HeatBatchProgress>();
   for (const [batchIndex, operation] of batchOperations.entries()) {
     if (operation.operationKind !== "applyBatch") {
@@ -579,6 +589,7 @@ async function buildValidatedHeatOperationSet(
         publicRepackId <= previousPublicRepackId
       ) throw new HeatPromotionPreparationError("HEAT_OPERATION_INVALID");
       previousPublicRepackId = publicRepackId;
+      publicRepackIds.push(publicRepackId);
     }
     const coreByteCount = productionHeatCoreByteCount(request.records);
     acceptedSignalCount += request.records.length;
@@ -602,6 +613,7 @@ async function buildValidatedHeatOperationSet(
     frame: start.frame,
     expectedPreviousPublicHeatFrameId:
       finalize.expectedActivePublicHeatFrameId,
+    publicRepackIds: Object.freeze(publicRepackIds),
     progressByOperationId,
   };
 }
@@ -661,7 +673,7 @@ export function validateHeatTerminalReceipt(
     !["finalize", "refreshFrame"].includes(receipt.operationKind)
   ) throw new HeatPromotionPreparationError("HEAT_OPERATION_INVALID");
   const details = receipt.details as {
-    catalogPublicReleaseId: string;
+    manifestAlignment: ProductionHeatManifestAlignment;
     activePublicHeatFrameId: string;
     previousPublicHeatFrameId: string | null;
     frameHash: string;
@@ -681,7 +693,7 @@ export function validateHeatTerminalReceipt(
       ).expectedActivePublicHeatFrameId;
   const frame = frameRequest.frame;
   if (
-    details.catalogPublicReleaseId !== frame.catalogPublicReleaseId ||
+    !sameManifestAlignment(details.manifestAlignment, frame.manifestAlignment) ||
     details.activePublicHeatFrameId !== frame.publicHeatFrameId ||
     details.previousPublicHeatFrameId !== expectedPrevious ||
     details.frameHash !== frame.frameHash ||

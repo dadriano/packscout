@@ -16,6 +16,7 @@ import {
   validateHeatTerminalReceipt,
 } from "./heat-promotion-operations.ts";
 import type {
+  ActiveCatalogHeatManifest,
   HeatPromotionAlertSink,
   HeatPromotionBootstrapPort,
   HeatPromotionClaim,
@@ -23,8 +24,8 @@ import type {
   HeatPromotionHealthSink,
   HeatPromotionLedgerPort,
   HeatPromotionObservationPort,
+  HeatPromotionManifestProofPort,
   HeatPromotionOperation,
-  HeatPromotionReleaseProofPort,
   HeatPromotionSettlementPort,
   HeatPublicationTransport,
 } from "./heat-promotion-types.ts";
@@ -45,7 +46,7 @@ export interface HeatPromotionRunnerOptions {
   readonly workerId: string;
   readonly ledger: HeatPromotionLedgerPort;
   readonly settlement: HeatPromotionSettlementPort;
-  readonly releases: HeatPromotionReleaseProofPort;
+  readonly manifests: HeatPromotionManifestProofPort;
   readonly observations: HeatPromotionObservationPort;
   readonly transport: HeatPublicationTransport;
   readonly bootstrap: HeatPromotionBootstrapPort;
@@ -147,6 +148,40 @@ function reusedSignalSet(operations: readonly HeatPromotionOperation[]): boolean
   return operations.length === 1 && operations[0]?.operationKind === "refreshFrame";
 }
 
+function validManifestSourceProof(
+  proof: ActiveCatalogHeatManifest,
+  input: Readonly<{
+    manifestAlignment: ActiveCatalogHeatManifest["manifestAlignment"];
+    publicRepackIds: readonly string[] | null;
+    signalCount: number;
+  }>,
+): boolean {
+  if (
+    canonicalJson(proof.manifestAlignment) !==
+      canonicalJson(input.manifestAlignment) ||
+    proof.confirmedManifestWatermark < 0n ||
+    !/^[0-9a-f]{64}$/u.test(proof.terminalReceiptSha256) ||
+    proof.publicRepackIds.length !== input.signalCount ||
+    proof.publicRepackOwnership.length !== proof.publicRepackIds.length
+  ) return false;
+  let previousOwnershipKey: string | null = null;
+  const ownershipIds: string[] = [];
+  for (const ownership of proof.publicRepackOwnership) {
+    const ownershipKey = `${ownership.platformKey}\n${ownership.publicRepackId}`;
+    if (
+      previousOwnershipKey !== null && ownershipKey <= previousOwnershipKey
+    ) return false;
+    previousOwnershipKey = ownershipKey;
+    ownershipIds.push(ownership.publicRepackId);
+  }
+  ownershipIds.sort();
+  if (canonicalJson(ownershipIds) !== canonicalJson(proof.publicRepackIds)) {
+    return false;
+  }
+  return input.publicRepackIds === null ||
+    canonicalJson(proof.publicRepackIds) === canonicalJson(input.publicRepackIds);
+}
+
 async function validPersistedOperations(
   claim: HeatPromotionClaim,
   operations: readonly HeatPromotionOperation[],
@@ -154,6 +189,7 @@ async function validPersistedOperations(
   if (
     claim.contentIdentity === null ||
     claim.publicationIdentity === null ||
+    claim.manifestSourceProof === null ||
     operations.length === 0 ||
     !(
       reusedSignalSet(operations) ||
@@ -169,8 +205,13 @@ async function validPersistedOperations(
     if (
       claim.expectedPredecessorIdentity !==
         validatedSet.expectedPreviousPublicHeatFrameId ||
-      claim.contentIdentity !== heatPromotionContentIdentity({
-        catalogPublicReleaseId: validatedSet.frame.catalogPublicReleaseId,
+      !validManifestSourceProof(claim.manifestSourceProof, {
+        manifestAlignment: validatedSet.frame.manifestAlignment,
+        publicRepackIds: validatedSet.publicRepackIds,
+        signalCount: validatedSet.frame.signalCount,
+      }) ||
+      claim.contentIdentity !== await heatPromotionContentIdentity({
+        manifestAlignment: validatedSet.frame.manifestAlignment,
         signalSetHash: validatedSet.frame.signalSetHash,
       })
     ) return false;
@@ -306,11 +347,12 @@ export class HeatPromotionRunner {
     });
     let contentIdentity = claim.contentIdentity;
     let publicationIdentity = claim.publicationIdentity;
+    let manifestSourceProof = claim.manifestSourceProof;
     if (cancelled(signal)) return cycleResult("stopped", claim);
     if (claim.contentIdentity === null) {
       let catalog;
       try {
-        catalog = await this.options.releases.loadActiveCatalogRelease();
+        catalog = await this.options.manifests.loadActiveCatalogManifest();
       } catch {
         if (cancelled(signal)) return cycleResult("stopped", claim);
         return await this.retry(
@@ -323,7 +365,7 @@ export class HeatPromotionRunner {
       }
       let baseline;
       try {
-        baseline = await this.options.releases.loadActiveHeatFrame();
+        baseline = await this.options.manifests.loadActiveHeatFrame();
       } catch {
         if (cancelled(signal)) return cycleResult("stopped", claim);
         return await this.retry(
@@ -351,7 +393,7 @@ export class HeatPromotionRunner {
           baseline,
           observations: this.options.observations,
           canReuseSignalSet: (candidate) =>
-            this.options.releases.hasReusableHeatSignalSet(candidate),
+            this.options.manifests.hasReusableHeatSignalSet(candidate),
         });
       } catch (error) {
         if (cancelled(signal)) return cycleResult("stopped", claim);
@@ -369,11 +411,13 @@ export class HeatPromotionRunner {
         contentIdentity: prepared.contentIdentity,
         publicationIdentity: prepared.publicHeatFrameId,
         preparedClassification: prepared.classification,
+        manifestSourceProof: catalog,
         operations: prepared.operations,
       }) ?? [];
       if (operations.length === 0) return cycleResult("lease_lost", claim);
       contentIdentity = prepared.contentIdentity;
       publicationIdentity = prepared.publicHeatFrameId;
+      manifestSourceProof = catalog;
     }
     // A freshly persisted claim object does not yet carry its identities. Load
     // them from immutable bytes only for validation and terminal accounting.
@@ -382,6 +426,7 @@ export class HeatPromotionRunner {
       publicationIdentity: publicationIdentity ??
         (operations[0] ? operationPublicationId(operations[0]) : null),
       contentIdentity,
+      manifestSourceProof,
     };
     if (!(await validPersistedOperations(executableClaim, operations))) {
       return await this.failTerminal(

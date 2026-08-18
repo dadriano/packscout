@@ -87,6 +87,18 @@ export async function deleteProviderReleaseOwnedDocuments(
         index.eq("releaseId", releaseId),
       )
       .take(limit),
+    (limit) => ctx.db
+      .query("providerCatalogReleaseCompletionProofs")
+      .withIndex("by_release_id", (index) =>
+        index.eq("releaseId", releaseId),
+      )
+      .take(limit),
+    (limit) => ctx.db
+      .query("providerCatalogTerminalReceiptProofs")
+      .withIndex("by_release_id", (index) =>
+        index.eq("releaseId", releaseId),
+      )
+      .take(limit),
   ];
   let deletedDocumentCount = 0;
   for (const load of loaders) {

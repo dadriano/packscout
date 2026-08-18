@@ -8,7 +8,7 @@ import { createProductionWorkerRuntime } from "./production-worker-composition.t
 test("production composition wires provider and manifest lanes without legacy catalog", async () => {
   const harness = await createMigratedTestDatabase();
   try {
-    const runtime = createProductionWorkerRuntime({
+    const input: Parameters<typeof createProductionWorkerRuntime>[0] = {
       provider: {
         actorPseudonymKey: new Uint8Array(32).fill(1),
         credentialKey: new Uint8Array(32).fill(2),
@@ -51,16 +51,37 @@ test("production composition wires provider and manifest lanes without legacy ca
         requestTimeoutMilliseconds: 10_000,
         retentionBatchSize: 500,
         retentionMaximumBatchesPerCycle: 4,
-        secret: new Uint8Array(32).fill(3),
+        secret: new Uint8Array(32).fill(6),
+      },
+      retention: {
+        convexBaseUrl: "https://convex.example",
+        deploymentKey: "production-us",
+        keyId: "catalog.retention.v1",
+        secret: new Uint8Array(32).fill(7),
+        requestTimeoutMilliseconds: 10_000,
+        intervalMilliseconds: 3_600_000,
+        continuationIntervalMilliseconds: 1_000,
+        maximumDocuments: 90,
+        maximumPostgresRowsPerStep: 100,
+        maximumStepsPerCycle: 25,
       },
       database: harness.client,
       providerLogger: { write() {} },
       promotionLogger: { write() {} },
       heatLogger: { write() {} },
+      retentionLogger: { write() {} },
       observability: { metric() {}, log() {} },
       fetch: async () => new Response(),
-    });
+    };
+    const runtime = createProductionWorkerRuntime(input);
     assert.ok(runtime instanceof ProviderWorkerRuntime);
+    assert.throws(
+      () => createProductionWorkerRuntime({
+        ...input,
+        retention: { ...input.retention, secret: input.heat.secret },
+      }),
+      /configuration is invalid/u,
+    );
   } finally {
     await harness.close();
   }

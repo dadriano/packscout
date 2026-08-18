@@ -221,8 +221,16 @@ export function readPromotionV2WorkerConfiguration(
     manifestPublishCredential.keyId,
     manifestClearCredential.keyId,
   ];
-  if (new Set(keyIds).size !== keyIds.length) {
-    refuse("PROMOTION_V2_MANIFEST_CLEAR_CREDENTIAL_INVALID");
+  const roleCredentials = [
+    ...providers,
+    manifestPublishCredential,
+    manifestClearCredential,
+  ];
+  const secretIds = roleCredentials.map(({ secret }) =>
+    Buffer.from(secret).toString("base64"));
+  if (new Set(keyIds).size !== keyIds.length ||
+      new Set(secretIds).size !== secretIds.length) {
+    refuse("PROMOTION_V2_CREDENTIAL_ROLE_CONFLICT");
   }
   const configuration = Object.freeze({
     convexBaseUrl: baseUrl(environment.PACKSCOUT_CONVEX_PUBLICATION_BASE_URL),

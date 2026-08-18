@@ -1,5 +1,6 @@
 import {
   MAX_PRODUCTION_HEAT_BATCH_BYTES,
+  canonicalJson,
   extendProductionHeatSignalSetHash,
   productionHeatApplyBatchRequestSchema,
   productionHeatBatchByteCount,
@@ -16,7 +17,9 @@ import {
   storeProductionHeatReceipt,
 } from "./productionHeatOperations";
 import {
-  loadActiveCatalogRelease,
+  assertProductionHeatFrame,
+  loadActiveCatalogHeatManifest,
+  loadOwnedHeatRepacks,
   parseProductionHeatRequest,
 } from "./productionHeatProtocol";
 
@@ -72,10 +75,10 @@ export const applyBatch = internalMutation({
       "repackHeatSignalSets",
       publication.signalSetId,
     );
-    const release = await loadActiveCatalogRelease(
+    const frame = await assertProductionHeatFrame(publication.frame);
+    const catalog = await loadActiveCatalogHeatManifest(
       ctx,
-      publication.frame.catalogPublicReleaseId,
-      publication.frame.sourceWatermark,
+      frame.manifestAlignment,
     );
     const byteCount = productionHeatBatchByteCount(request.records);
     const coreByteCount = productionHeatCoreByteCount(request.records);
@@ -83,22 +86,24 @@ export const applyBatch = internalMutation({
     const ids = request.records.map(({ publicRepackId }) => publicRepackId);
     if (
       publication.state !== "staging" ||
-      publication.releaseId !== release._id ||
+      publication.manifestId !== catalog.manifestDocument._id ||
       signalSet === null ||
       signalSet.lifecycle !== "staging" ||
-      signalSet.releaseId !== release._id ||
+      signalSet.manifestId !== catalog.manifestDocument._id ||
+      canonicalJson(signalSet.manifestAlignment) !==
+        canonicalJson(catalog.alignment) ||
       request.batchIndex !== publication.acceptedBatchCount ||
       request.batchIndex >= publication.expectedBatchCount ||
       request.batchHash !== batchHash ||
       byteCount > MAX_PRODUCTION_HEAT_BATCH_BYTES ||
       coreByteCount > MAX_PRODUCTION_HEAT_BATCH_BYTES ||
       publication.acceptedSignalCount + request.records.length >
-        publication.frame.signalCount ||
+        frame.signalCount ||
       ids.some((id, index) =>
         (index > 0 && id <= ids[index - 1]!) ||
         (index === 0 && publication.lastPublicRepackId !== null &&
           id <= publication.lastPublicRepackId) ||
-        !signalMatchesFrame(request.records[index]!, publication.frame))
+        !signalMatchesFrame(request.records[index]!, frame))
     ) {
       refuseProductionDataRelease("PUBLICATION_BATCH_CONFLICT");
     }
@@ -113,22 +118,16 @@ export const applyBatch = internalMutation({
     if (existingBatches.length !== 0) {
       refuseProductionDataRelease("PUBLICATION_BATCH_CONFLICT");
     }
+    const ownedRepacks = await loadOwnedHeatRepacks(ctx, catalog, ids);
     for (const signal of request.records) {
-      const repacks = await ctx.db
-        .query("repacks")
-        .withIndex("by_release_id_and_public_repack_id", (index) =>
-          index
-            .eq("releaseId", release._id)
-            .eq("publicRepackId", signal.publicRepackId),
-        )
-        .take(2);
-      if (repacks.length !== 1) {
+      const owned = ownedRepacks.get(signal.publicRepackId);
+      if (owned === undefined) {
         refuseProductionDataRelease("PUBLICATION_REFERENCE_INVALID");
       }
       await ctx.db.insert("repackHeatSignals", {
         signalSetId: signalSet._id,
-        releaseId: release._id,
-        repackId: repacks[0]!._id,
+        providerReleaseId: owned.release._id,
+        repackId: owned.repack._id,
         publicRepackId: signal.publicRepackId,
         detail: repackHeatSignalCore(signal),
       });
@@ -143,7 +142,7 @@ export const applyBatch = internalMutation({
     const now = new Date().toISOString();
     await ctx.db.insert("repackHeatBatches", {
       publicationId: request.publicationId,
-      releaseId: release._id,
+      manifestId: catalog.manifestDocument._id,
       signalSetId: signalSet._id,
       batchIndex: request.batchIndex,
       idempotencyKey: request.idempotencyKey,

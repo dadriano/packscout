@@ -2,16 +2,16 @@
   "source": "provider and manifest promotion durable ledgers",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260816020000_provider_manifest_promotion/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260816040000_catalog_promotion_retention/migration.sql"
   },
   "expectedCounts": {
-    "tables": 54,
+    "tables": 56,
     "enums": 22,
-    "columns": 747,
-    "indexes": 67,
-    "uniqueConstraints": 47,
-    "foreignKeys": 173,
-    "checkConstraints": 173
+    "columns": 792,
+    "indexes": 68,
+    "uniqueConstraints": 50,
+    "foreignKeys": 175,
+    "checkConstraints": 181
   },
   "enums": {
     "admin_alert_state": [
@@ -1807,6 +1807,406 @@
       "checkConstraints": {
         "catalog_promotion_bootstrap_provider_proofs_value_check": {
           "value": "((proof_revision > 0) AND ((ordinal >= 0) AND (ordinal <= 127)) AND promotion_v2_platform_key_valid(platform_key) AND ((octet_length(completed_head_request_body) >= 2) AND (octet_length(completed_head_request_body) <= 131072)) AND promotion_v2_sha256_valid(completed_head_request_sha256) AND ((octet_length(completed_head_receipt_body) >= 2) AND (octet_length(completed_head_receipt_body) <= 393216)) AND promotion_v2_sha256_valid(completed_head_receipt_sha256) AND ((completed_head_response_body IS NULL) = (completed_head_response_sha256 IS NULL)) AND ((completed_head_response_body IS NULL) OR (((octet_length(completed_head_response_body) >= 2) AND (octet_length(completed_head_response_body) <= 524288)) AND promotion_v2_sha256_valid(completed_head_response_sha256))) AND ((octet_length(remote_completed_head_body) >= 2) AND (octet_length(remote_completed_head_body) <= 131072)) AND promotion_v2_sha256_valid(remote_completed_head_sha256) AND (((public_provider_release_id IS NULL) AND (provider_release_fingerprint IS NULL) AND (provider_terminal_operation_id IS NULL) AND (provider_terminal_receipt_body IS NULL) AND (provider_terminal_receipt_sha256 IS NULL) AND (provider_terminal_response_body IS NULL) AND (provider_terminal_response_sha256 IS NULL) AND (publish_artifact_attempt_id IS NULL)) OR ((public_provider_release_id IS NOT NULL) AND promotion_v2_sha256_valid(provider_release_fingerprint) AND (provider_terminal_operation_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text) AND ((octet_length(provider_terminal_receipt_body) >= 2) AND (octet_length(provider_terminal_receipt_body) <= 393216)) AND promotion_v2_sha256_valid(provider_terminal_receipt_sha256) AND ((provider_terminal_response_body IS NULL) = (provider_terminal_response_sha256 IS NULL)) AND ((provider_terminal_response_body IS NULL) OR (((octet_length(provider_terminal_response_body) >= 2) AND (octet_length(provider_terminal_response_body) <= 524288)) AND promotion_v2_sha256_valid(provider_terminal_response_sha256))) AND (publish_artifact_attempt_id IS NOT NULL))) AND (((local_completed_attempt_id IS NULL) AND (local_completed_public_provider_release_id IS NULL) AND (local_completed_provider_release_fingerprint IS NULL) AND (local_completed_terminal_receipt_sha256 IS NULL)) OR ((local_completed_attempt_id IS NOT NULL) AND (local_completed_public_provider_release_id IS NOT NULL) AND promotion_v2_sha256_valid(local_completed_provider_release_fingerprint) AND promotion_v2_sha256_valid(local_completed_terminal_receipt_sha256))) AND ((provider_terminal_response_body IS NULL) = (provider_terminal_response_sha256 IS NULL)) AND ((provider_terminal_response_body IS NULL) OR (((octet_length(provider_terminal_response_body) >= 2) AND (octet_length(provider_terminal_response_body) <= 524288)) AND promotion_v2_sha256_valid(provider_terminal_response_sha256))))"
+        }
+      }
+    },
+    "catalog_promotion_retention_barriers": {
+      "columns": {
+        "activated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "barrier_generation": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "barrier_token": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "completed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "manifest_phase_complete": {
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "false"
+        },
+        "next_operation_index": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "retention_generation": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "snapshot_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "snapshot_digest": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'inactive'::text"
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "catalog_promotion_retention_barriers_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "catalog_promotion_retention_barriers_key_check": {
+          "value": "promotion_v2_deployment_key_valid(deployment_key)"
+        },
+        "catalog_promotion_retention_barriers_sequence_check": {
+          "value": "((barrier_generation >= 0) AND ((retention_generation >= 0) AND (retention_generation <= '9007199254740991'::bigint)) AND ((next_operation_index >= 0) AND (next_operation_index <= 2147483647)))"
+        },
+        "catalog_promotion_retention_barriers_state_check": {
+          "value": "((state = ANY (ARRAY['inactive'::text, 'active'::text])) AND (((state = 'inactive'::text) AND (barrier_token IS NULL) AND (snapshot_body IS NULL) AND (snapshot_digest IS NULL)) OR ((state = 'active'::text) AND (barrier_generation > 0) AND (barrier_token IS NOT NULL) AND ((octet_length(snapshot_body) >= 2) AND (octet_length(snapshot_body) <= 262144)) AND promotion_v2_sha256_valid(snapshot_digest) AND (activated_at IS NOT NULL) AND (completed_at IS NULL))))"
+        }
+      }
+    },
+    "catalog_promotion_retention_operations": {
+      "columns": {
+        "acknowledged_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "barrier_generation": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "canonical_receipt_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "canonical_request_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "deployment_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "exact_response_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "expected_retention_generation": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "has_more": {
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "idempotency_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "last_sent_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "operation_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "operation_index": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "operation_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "phase": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "postgres_cleanup_complete": {
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "false"
+        },
+        "receipt_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "request_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "response_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "selected_platform_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "selected_provider_release_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "selected_public_provider_release_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "send_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'pending'::text"
+        },
+        "terminal_state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "catalog_promotion_retention_operations_resume_idx": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "barrier_generation",
+            "operation_index"
+          ],
+          "unique": false,
+          "where": "((state <> 'acknowledged'::text) OR (postgres_cleanup_complete = false))"
+        }
+      },
+      "uniqueConstraints": {
+        "catalog_promotion_retention_operations_generation_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "expected_retention_generation"
+          ],
+          "nullsNotDistinct": false
+        },
+        "catalog_promotion_retention_operations_index_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "barrier_generation",
+            "operation_index"
+          ],
+          "nullsNotDistinct": false
+        },
+        "catalog_promotion_retention_operations_scope_unique": {
+          "columns": [
+            "organization_id",
+            "deployment_key",
+            "operation_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "catalog_promotion_retention_operations_barrier_fk": {
+          "columns": [
+            "organization_id",
+            "deployment_key"
+          ],
+          "referencedTable": "catalog_promotion_retention_barriers",
+          "referencedColumns": [
+            "organization_id",
+            "deployment_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "catalog_promotion_retention_operations_identity_check": {
+          "value": "((barrier_generation > 0) AND ((operation_index >= 0) AND (operation_index <= 2147483647)) AND (operation_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'::text) AND (idempotency_key = operation_id) AND (operation_kind = ANY (ARRAY['retainManifests'::text, 'retainProviderReleases'::text])) AND (phase = ANY (ARRAY['manifests'::text, 'provider_releases'::text])) AND ((operation_kind = 'retainManifests'::text) = (phase = 'manifests'::text)) AND ((phase = 'manifests'::text) = (platform_key IS NULL)) AND ((platform_key IS NULL) OR promotion_v2_platform_key_valid(platform_key)) AND ((expected_retention_generation >= 0) AND (expected_retention_generation <= '9007199254740991'::bigint)) AND ((octet_length(canonical_request_body) >= 2) AND (octet_length(canonical_request_body) <= 262144)) AND promotion_v2_sha256_valid(request_sha256))"
+        },
+        "catalog_promotion_retention_operations_selection_check": {
+          "value": "(((selected_platform_key IS NULL) = (selected_public_provider_release_id IS NULL)) AND ((selected_platform_key IS NULL) = (selected_provider_release_fingerprint IS NULL)) AND ((selected_platform_key IS NULL) OR ((phase = 'provider_releases'::text) AND (selected_platform_key = platform_key) AND promotion_v2_platform_key_valid(selected_platform_key) AND promotion_v2_sha256_valid(selected_provider_release_fingerprint))) AND (((state <> 'acknowledged'::text) AND (postgres_cleanup_complete = false) AND (selected_platform_key IS NULL)) OR ((state = 'acknowledged'::text) AND (postgres_cleanup_complete OR (selected_platform_key IS NOT NULL)))))"
+        },
+        "catalog_promotion_retention_operations_state_check": {
+          "value": "((state = ANY (ARRAY['pending'::text, 'sent'::text, 'acknowledged'::text])) AND (send_count >= 0) AND (((state = 'pending'::text) AND (send_count = 0) AND (last_sent_at IS NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL) AND (terminal_state IS NULL) AND (has_more IS NULL) AND (selected_platform_key IS NULL) AND (selected_public_provider_release_id IS NULL) AND (selected_provider_release_fingerprint IS NULL) AND (postgres_cleanup_complete = false)) OR ((state = 'sent'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL) AND (terminal_state IS NULL) AND (has_more IS NULL) AND (selected_platform_key IS NULL) AND (selected_public_provider_release_id IS NULL) AND (selected_provider_release_fingerprint IS NULL) AND (postgres_cleanup_complete = false)) OR ((state = 'acknowledged'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NOT NULL) AND ((octet_length(canonical_receipt_body) >= 2) AND (octet_length(canonical_receipt_body) <= 393216)) AND promotion_v2_sha256_valid(receipt_sha256) AND ((octet_length(exact_response_body) >= 2) AND (octet_length(exact_response_body) <= 524288)) AND promotion_v2_sha256_valid(response_sha256) AND (terminal_state = ANY (ARRAY['complete'::text, 'continuation_required'::text])) AND (has_more = (terminal_state = 'continuation_required'::text)))))"
         }
       }
     },
@@ -4841,6 +5241,20 @@
           "identity": null,
           "default": null
         },
+        "manifest_source_proof_body": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "manifest_source_proof_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "observation_sequence": {
           "type": "integer",
           "primaryKey": false,
@@ -5036,8 +5450,14 @@
         "promotion_attempts_hashes_check": {
           "value": "(((content_identity IS NULL) OR (content_identity ~ '^[0-9a-f]{64}$'::text)) AND ((public_config_hash IS NULL) OR (public_config_hash ~ '^[0-9a-f]{64}$'::text)) AND ((repack_search_index_hash IS NULL) OR (repack_search_index_hash ~ '^[0-9a-f]{64}$'::text)) AND ((terminal_receipt_sha256 IS NULL) OR (terminal_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)))"
         },
+        "promotion_attempts_heat_prepared_source_proof_check": {
+          "value": "((lane_key <> 'heat'::text) OR (content_identity IS NULL) OR ((manifest_source_proof_body IS NOT NULL) AND (manifest_source_proof_sha256 IS NOT NULL)))"
+        },
         "promotion_attempts_identities_check": {
           "value": "(((publication_identity IS NULL) OR ((publication_identity = btrim(publication_identity)) AND ((char_length(publication_identity) >= 1) AND (char_length(publication_identity) <= 256)))) AND ((expected_predecessor_identity IS NULL) OR ((expected_predecessor_identity = btrim(expected_predecessor_identity)) AND ((char_length(expected_predecessor_identity) >= 1) AND (char_length(expected_predecessor_identity) <= 256)))))"
+        },
+        "promotion_attempts_manifest_source_proof_shape_check": {
+          "value": "(((manifest_source_proof_body IS NULL) AND (manifest_source_proof_sha256 IS NULL)) OR ((lane_key = 'heat'::text) AND (manifest_source_proof_body IS NOT NULL) AND (manifest_source_proof_sha256 IS NOT NULL) AND ((octet_length(manifest_source_proof_body) >= 2) AND (octet_length(manifest_source_proof_body) <= 4194304)) AND promotion_v2_sha256_valid(manifest_source_proof_sha256)))"
         },
         "promotion_attempts_prepared_check": {
           "value": "(((prepared_classification IS NULL) OR (prepared_classification = ANY (ARRAY['publish'::text, 'refresh_unchanged'::text]))) AND ((observation_sequence IS NULL) OR ((observation_sequence >= 1) AND (observation_sequence <= 2147483647))) AND promotion_public_vendor_keys_valid(public_vendor_keys))"

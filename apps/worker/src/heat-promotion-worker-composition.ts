@@ -6,7 +6,7 @@ import {
   type HeatPromotionHealthSink,
   type HeatPromotionLedgerPort,
   type HeatPromotionObservationPort,
-  type HeatPromotionReleaseProofPort,
+  type HeatPromotionManifestProofPort,
   type HeatPromotionSettlementPort,
 } from "@packscout/services";
 import type { HeatPromotionWorkerConfiguration } from "./heat-promotion-worker-config.ts";
@@ -24,7 +24,7 @@ export interface HeatPromotionWorkerCompositionInput {
   readonly workerId: string;
   readonly ledger: HeatPromotionLedgerPort;
   readonly settlement: HeatPromotionSettlementPort;
-  readonly releases: HeatPromotionReleaseProofPort;
+  readonly manifests: HeatPromotionManifestProofPort;
   readonly observations: HeatPromotionObservationPort;
   readonly retention: HeatPromotionRetentionPort;
   readonly alerts: HeatPromotionAlertSink;
@@ -58,10 +58,14 @@ export function createHeatPromotionWorkerRuntime(
     workerId: input.workerId,
     ledger: input.ledger,
     settlement: input.settlement,
-    releases: input.releases,
+    manifests: input.manifests,
     observations: input.observations,
     transport,
-    bootstrap: new HeatPromotionBootstrapCoordinator(input.ledger, transport),
+    bootstrap: new HeatPromotionBootstrapCoordinator(
+      input.ledger,
+      input.manifests,
+      transport,
+    ),
     clock,
     alerts: input.alerts,
     health: {

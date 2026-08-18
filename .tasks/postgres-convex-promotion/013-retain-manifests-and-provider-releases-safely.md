@@ -5,7 +5,7 @@
 **Blocks:** postgres-convex-promotion/014
 **Estimated scope:** medium
 **Estimated effort:** 1–3 days for one builder, including reference-graph and bounded-deletion verification
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -51,17 +51,17 @@ Manifest retention returns a bounded progress receipt before provider retention 
 
 ### Reference safety
 
-- [ ] Active, previous, retained-manifest, completed-head, active-head, in-flight, and authorized recovery dependencies are never selected or partially deleted.
-- [ ] One provider release referenced by several retained manifests is deleted only after the last protecting manifest leaves retention.
-- [ ] Missing or inconsistent manifest, head, attempt, or receipt proof stops cleanup without dangling references.
-- [ ] Rollback to every retained eligible manifest still resolves all provider content after cleanup.
+- [x] Active, previous, retained-manifest, completed-head, active-head, in-flight, and authorized recovery dependencies are never selected or partially deleted.
+- [x] One provider release referenced by several retained manifests is deleted only after the last protecting manifest leaves retention.
+- [x] Missing or inconsistent manifest, head, attempt, or receipt proof stops cleanup without dangling references.
+- [x] Rollback to every retained eligible manifest still resolves all provider content after cleanup.
 
 ### Bounds and progress
 
-- [ ] Complete manifests converge to active, previous, and at most three additional seven-day candidates.
-- [ ] Each platform independently converges to its protected releases and at most three additional seven-day complete candidates.
-- [ ] Staging and failed provider releases/manifests become eligible after 24 hours without affecting another owner.
-- [ ] Every mutation deletes at most 100 owned documents and repeated cleanup makes deterministic forward progress.
+- [x] Complete manifests converge to active, previous, and at most three additional seven-day candidates.
+- [x] Each platform independently converges to its protected releases and at most three additional seven-day complete candidates.
+- [x] Staging and failed provider releases/manifests become eligible after 24 hours without affecting another owner.
+- [x] Every mutation deletes at most 100 owned documents and repeated cleanup makes deterministic forward progress.
 
 ## Verification
 

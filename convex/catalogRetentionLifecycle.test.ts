@@ -5,9 +5,13 @@ import {
   CATALOG_RETENTION_SCHEMA_VERSION,
   MAX_CATALOG_RETENTION_DOCUMENTS_PER_MUTATION,
   MAX_CATALOG_RETENTION_OPERATION_RECEIPTS,
+  EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
+  REPACK_HEAT_AGGREGATION_VERSION,
+  REPACK_HEAT_POLICY_VERSION,
   buildGlobalCatalogAggregateObservationV1,
   canonicalJson,
   catalogManifestActivateRequestSchema,
+  catalogManifestBlockRequestSchema,
   catalogManifestPublicationRequestDigest,
   catalogRetentionManifestRequestSchema,
   catalogRetentionPostgresProofSnapshotDigest,
@@ -15,6 +19,8 @@ import {
   catalogRetentionProviderRequestSchema,
   catalogRetentionPublicationRequestDigest,
   catalogRetentionStatusRequestSchema,
+  productionHeatManifestAlignmentSchema,
+  recomputeProductionHeatFrameHash,
   type CatalogRetentionExternalManifestProtection,
   type CatalogRetentionExternalProviderProtection,
   type CatalogRetentionPostgresProofSnapshot,
@@ -27,6 +33,7 @@ import type { FunctionReference } from "convex/server";
 import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { ensureImmutableCatalogManifest } from "./catalogManifestActivate";
 import { loadActiveCatalogManifestState } from "./catalogManifestState";
 import {
@@ -327,6 +334,757 @@ afterEach(() => {
 });
 
 describe("catalog retention lifecycle", () => {
+  test("retains an old manifest until its staged Heat publication is gone", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const plan = await buildProviderPublishPlan();
+    configure(plan.governingHashes.originSetHash);
+    const t = createTest();
+    const completed = await t.run((ctx) =>
+      seedProviderCatalogPublishPlanGraph(ctx, plan, OLD_TIME)
+    );
+    await t.run(async (ctx) => {
+      const head = await ctx.db.query("providerCatalogCompletedHeads").unique();
+      if (head !== null) await ctx.db.delete("providerCatalogCompletedHeads", head._id);
+    });
+    const manifest = await buildCatalogManifestFromProviderPlans(
+      [plan],
+      "retention-heat-reference-v1",
+      "canonical",
+    );
+    const manifestDocument = await insertOldManifest(
+      t,
+      manifest,
+      completed.release._id,
+    );
+    const alignment = productionHeatManifestAlignmentSchema.parse(
+      manifestIdentity(manifest),
+    );
+    const frameCandidate = {
+      publicHeatFrameId: "91000000-0000-4000-8000-000000000091",
+      manifestAlignment: alignment,
+      frameSequence: 1,
+      sourceWatermark: "1",
+      signalSetHash: SHA_A,
+      frameHash: "0".repeat(64),
+      signalCount: manifest.counts.repacks,
+      aggregationVersion: REPACK_HEAT_AGGREGATION_VERSION,
+      heatPolicyVersion: REPACK_HEAT_POLICY_VERSION,
+      baselineWindowStartedAt: "2026-08-15T10:00:00.000Z",
+      baselineWindowEndedAt: "2026-08-15T11:00:00.000Z",
+      currentWindowStartedAt: "2026-08-15T11:00:00.000Z",
+      currentWindowEndedAt: "2026-08-15T11:55:00.000Z",
+      calculatedAt: "2026-08-15T12:00:00.000Z",
+      expiresAt: "2026-08-15T12:15:00.000Z",
+    };
+    const frame = {
+      ...frameCandidate,
+      frameHash: await recomputeProductionHeatFrameHash(frameCandidate),
+    };
+    await t.run(async (ctx) => {
+      const signalSetId = await ctx.db.insert("repackHeatSignalSets", {
+        manifestId: manifestDocument._id,
+        manifestAlignment: alignment,
+        signalSetHash: frame.signalSetHash,
+        lifecycle: "staging",
+        sourceKind: "observed",
+        scenarioVersion: null,
+        aggregationVersion: frame.aggregationVersion,
+        heatPolicyVersion: frame.heatPolicyVersion,
+        signalCount: frame.signalCount,
+        originatingPublicationId: frame.publicHeatFrameId,
+        createdAt: OLD_TIME,
+        completedAt: null,
+        retentionEligibleAt: frame.expiresAt,
+      });
+      await ctx.db.insert("repackHeatPublications", {
+        publicationId: frame.publicHeatFrameId,
+        manifestId: manifestDocument._id,
+        signalSetId,
+        frame,
+        expectedBatchCount: 1,
+        acceptedBatchCount: 0,
+        acceptedSignalCount: 0,
+        acceptedSignalSetHash: EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
+        lastPublicRepackId: null,
+        state: "staging",
+        createdAt: OLD_TIME,
+        completedAt: null,
+        retentionEligibleAt: frame.expiresAt,
+      });
+    });
+
+    const protectedReceipt = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:heat-reference:protected",
+        generation: 0,
+        sequence: 1,
+      }),
+    );
+    expect(protectedReceipt.details).toMatchObject({
+      selectedManifest: null,
+      deletedManifestCount: 0,
+    });
+    expect(protectedReceipt.details.protectionSet.manifests).toEqual([
+      expect.objectContaining({
+        publicReleaseId: manifest.publicReleaseId,
+        reasons: expect.arrayContaining(["heat_reference"]),
+      }),
+    ]);
+    expect(await t.run((ctx) =>
+      ctx.db.get("globalCatalogManifests", manifestDocument._id)
+    )).not.toBeNull();
+
+    const providerProtected = await execute(
+      t,
+      internal.catalogRetention.retainProviderReleases,
+      await providerRequest(t, {
+        operationId: "retention:heat-reference:provider-protected",
+        generation: 1,
+        sequence: 1,
+      }),
+    );
+    expect(providerProtected.details.selectedProviderRelease).toBeNull();
+    expect(providerProtected.details.protectionSet.providerReleasesByPlatform[0]
+      .releases[0].reasons).toContain("retained_manifest_reference");
+
+    await t.run(async (ctx) => {
+      const publication = await ctx.db.query("repackHeatPublications").unique();
+      const signalSet = await ctx.db.query("repackHeatSignalSets").unique();
+      if (publication === null || signalSet === null) {
+        throw new Error("Expected staged Heat references.");
+      }
+      await ctx.db.delete("repackHeatPublications", publication._id);
+      await ctx.db.delete("repackHeatSignalSets", signalSet._id);
+    });
+    const releasedReceipt = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:heat-reference:released",
+        generation: 2,
+        sequence: 2,
+      }),
+    );
+    expect(releasedReceipt.details).toMatchObject({
+      selectedManifest: {
+        publicReleaseId: manifest.publicReleaseId,
+        manifestFingerprint: manifest.manifestFingerprint,
+      },
+      deletedManifestCount: 1,
+    });
+  });
+
+  test("audits arbitrarily large reference backlogs before deleting", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const plan = await buildProviderPublishPlan();
+    configure(plan.governingHashes.originSetHash);
+    const t = createTest();
+    const completed = await t.run((ctx) =>
+      seedProviderCatalogPublishPlanGraph(ctx, plan, OLD_TIME)
+    );
+    const manifests = await Promise.all(
+      Array.from({ length: 42 }, (_, index) =>
+        buildCatalogManifestFromProviderPlans(
+          [plan],
+          `retention-backlog-${index.toString().padStart(2, "0")}`,
+          "canonical",
+        )),
+    );
+    await t.run(async (ctx) => {
+      for (const manifest of manifests) {
+        await ensureImmutableCatalogManifest(ctx, {
+          manifest,
+          providerReleaseIds: [completed.release._id],
+          serverTime: OLD_TIME,
+        });
+      }
+    });
+
+    const duplicate = await t.run(async (ctx) => {
+      const ordered = await ctx.db.query("globalCatalogManifests")
+        .withIndex("by_public_release_id")
+        .take(33);
+      const previous = ordered[31];
+      const boundary = ordered[32];
+      if (previous === undefined || boundary === undefined) {
+        throw new Error("Expected a full manifest audit page.");
+      }
+      await ctx.db.patch("globalCatalogManifests", boundary._id, {
+        publicReleaseId: previous.publicReleaseId,
+      });
+      return { id: boundary._id, publicReleaseId: boundary.publicReleaseId };
+    });
+    await expect(execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:backlog:duplicate-cursor",
+        generation: 0,
+        sequence: 1,
+      }),
+    )).rejects.toThrow("CATALOG_RETENTION_REFERENCE_INVALID");
+    await t.run((ctx) =>
+      ctx.db.patch("globalCatalogManifests", duplicate.id, {
+        publicReleaseId: duplicate.publicReleaseId,
+      })
+    );
+
+    const first = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:backlog:audit-page-1",
+        generation: 0,
+        sequence: 1,
+      }),
+    );
+    expect(first.details).toMatchObject({
+      deletedManifestCount: 0,
+      deletedManifestReferenceCount: 0,
+      hasMore: true,
+    });
+    expect(await t.run((ctx) =>
+      ctx.db.query("globalCatalogManifests").collect()
+    )).toHaveLength(42);
+
+    const corrupted = await t.run(async (ctx) => {
+      const state = await ctx.db.query("catalogRetentionState").unique();
+      if (state?.referenceAuditCursor === null || state === null) {
+        throw new Error("Expected a resumable reference-audit cursor.");
+      }
+      const remainingManifest = await ctx.db
+        .query("globalCatalogManifests")
+        .withIndex("by_public_release_id", (index) =>
+          index.gt("publicReleaseId", state.referenceAuditCursor!)
+        )
+        .first();
+      if (remainingManifest === null) {
+        throw new Error("Expected an unaudited manifest.");
+      }
+      const edge = await ctx.db.query("catalogManifestProviderReferences")
+        .withIndex("by_manifest_id_and_platform_key", (index) =>
+          index.eq("manifestId", remainingManifest._id)
+        )
+        .first();
+      if (edge === null) throw new Error("Expected an unaudited edge.");
+      await ctx.db.patch("catalogManifestProviderReferences", edge._id, {
+        platformKey: "rogue",
+      });
+      return { id: edge._id, platformKey: edge.platformKey };
+    });
+    await expect(execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:backlog:orphan-refusal",
+        generation: 1,
+        sequence: 1,
+      }),
+    )).rejects.toThrow("CATALOG_RETENTION_REFERENCE_INVALID");
+    expect(await t.run((ctx) =>
+      ctx.db.query("globalCatalogManifests").collect()
+    )).toHaveLength(42);
+
+    await t.run((ctx) =>
+      ctx.db.patch("catalogManifestProviderReferences", corrupted.id, {
+        platformKey: corrupted.platformKey,
+      })
+    );
+    const secondAudit = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:backlog:audit-page-2",
+        generation: 1,
+        sequence: 1,
+      }),
+    );
+    expect(secondAudit.details).toMatchObject({
+      deletedManifestCount: 0,
+      deletedManifestReferenceCount: 0,
+      hasMore: true,
+    });
+    expect(await t.run((ctx) =>
+      ctx.db.query("globalCatalogManifests").collect()
+    )).toHaveLength(42);
+
+    const deletion = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:backlog:edge-page-2",
+        generation: 2,
+        sequence: 1,
+      }),
+    );
+    expect(deletion.details).toMatchObject({
+      deletedManifestCount: 1,
+      deletedManifestReferenceCount: 1,
+      hasMore: true,
+    });
+    expect(await t.run((ctx) =>
+      ctx.db.query("globalCatalogManifests").collect()
+    )).toHaveLength(41);
+    expect(await t.run((ctx) =>
+      ctx.db.query("catalogRetentionState").unique()
+    )).toMatchObject({
+      generation: 3,
+      referenceAuditComplete: true,
+      manifestPhaseComplete: false,
+    });
+  }, 30_000);
+
+  test("does not charge Heat-referenced manifests against the complete allowance", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const plan = await buildProviderPublishPlan();
+    configure(plan.governingHashes.originSetHash);
+    const t = createTest();
+    const completed = await t.run((ctx) =>
+      seedProviderCatalogPublishPlanGraph(ctx, plan, SERVER_TIME)
+    );
+    const manifests = await Promise.all(
+      ["heat", "a", "b", "c"].map((suffix) =>
+        buildCatalogManifestFromProviderPlans(
+          [plan],
+          `retention-heat-allowance-${suffix}`,
+          "canonical",
+        )),
+    );
+    const documents = await t.run(async (ctx) => {
+      const stored = [];
+      for (const manifest of manifests) {
+        stored.push(await ensureImmutableCatalogManifest(ctx, {
+          manifest,
+          providerReleaseIds: [completed.release._id],
+          serverTime: SERVER_TIME,
+        }));
+      }
+      const retentionTimes = [
+        "2026-08-23T12:00:00.000Z",
+        "2026-08-22T12:00:00.000Z",
+        "2026-08-21T12:00:00.000Z",
+        "2026-08-20T12:00:00.000Z",
+      ];
+      for (const [index, document] of stored.entries()) {
+        await ctx.db.patch("globalCatalogManifests", document._id, {
+          retentionEligibleAt: retentionTimes[index]!,
+        });
+      }
+      await ctx.db.insert("repackHeatSignalSets", {
+        manifestId: stored[0]!._id,
+        manifestAlignment: productionHeatManifestAlignmentSchema.parse(
+          manifestIdentity(manifests[0]!),
+        ),
+        signalSetHash: SHA_A,
+        lifecycle: "complete",
+        sourceKind: "observed",
+        scenarioVersion: null,
+        aggregationVersion: REPACK_HEAT_AGGREGATION_VERSION,
+        heatPolicyVersion: REPACK_HEAT_POLICY_VERSION,
+        signalCount: 0,
+        originatingPublicationId: null,
+        createdAt: SERVER_TIME,
+        completedAt: SERVER_TIME,
+      });
+      return stored;
+    });
+
+    const receipt = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:heat-allowance",
+        generation: 0,
+        sequence: 1,
+      }),
+    );
+    expect(receipt.details).toMatchObject({
+      selectedManifest: null,
+      deletedManifestCount: 0,
+      hasMore: false,
+    });
+    expect(receipt.details.protectionSet.manifests).toHaveLength(4);
+    expect(receipt.details.protectionSet.manifests.find(
+      ({ publicReleaseId }: { publicReleaseId: string }) =>
+        publicReleaseId === manifests[0]!.publicReleaseId,
+    )?.reasons).toContain("heat_reference");
+    expect(await t.run((ctx) =>
+      Promise.all(documents.map(({ _id }) =>
+        ctx.db.get("globalCatalogManifests", _id)
+      ))
+    )).not.toContain(null);
+  });
+
+  test("keeps the maximum platform graph below Convex query limits", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const platformKeys = [
+      "alpha",
+      "beta",
+      "delta",
+      "epsilon",
+      "eta",
+      "gamma",
+      "theta",
+      "zeta",
+    ];
+    const plans = await Promise.all(platformKeys.map((platformKey, index) =>
+      buildProviderPublishPlan({
+        platformKey,
+        publicVendorId:
+          `10000000-0000-5000-8000-${(index + 1).toString().padStart(12, "0")}`,
+        vendorDisplayName: `Retention vendor ${platformKey}`,
+      })
+    ));
+    configure(plans[0]!.governingHashes.originSetHash);
+    vi.stubEnv(
+      "PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS",
+      canonicalJson(Object.fromEntries(platformKeys.map((platformKey) =>
+        [`provider-${platformKey}-v1`, platformKey]
+      ))),
+    );
+    const t = createTest();
+    const releaseIds: Id<"providerCatalogReleases">[] = [];
+    for (const plan of plans) {
+      const seeded = await t.run((ctx) =>
+        seedProviderCatalogPublishPlanGraph(ctx, plan, SERVER_TIME)
+      );
+      releaseIds.push(seeded.release._id);
+    }
+    const manifests = await Promise.all(
+      Array.from({ length: 21 }, (_, index) =>
+        buildCatalogManifestFromProviderPlans(
+          plans,
+          `retention-platform-scale-${index.toString().padStart(2, "0")}`,
+          "canonical",
+        )),
+    );
+    await t.run(async (ctx) => {
+      for (const manifest of manifests) {
+        const document = await ensureImmutableCatalogManifest(ctx, {
+          manifest,
+          providerReleaseIds: releaseIds,
+          serverTime: SERVER_TIME,
+        });
+        await ctx.db.insert("repackHeatSignalSets", {
+          manifestId: document._id,
+          manifestAlignment: productionHeatManifestAlignmentSchema.parse(
+            manifestIdentity(manifest),
+          ),
+          signalSetHash: SHA_A,
+          lifecycle: "complete",
+          sourceKind: "observed",
+          scenarioVersion: null,
+          aggregationVersion: REPACK_HEAT_AGGREGATION_VERSION,
+          heatPolicyVersion: REPACK_HEAT_POLICY_VERSION,
+          signalCount: 0,
+          originatingPublicationId: null,
+          createdAt: SERVER_TIME,
+          completedAt: SERVER_TIME,
+        });
+      }
+    });
+
+    let generation = 0;
+    let receipt: any = null;
+    for (let index = 0; index < 10; index += 1) {
+      receipt = await execute(
+        t,
+        internal.catalogRetention.retainManifests,
+        await manifestRequest(t, {
+          operationId: `retention:platform-scale:${index}`,
+          generation,
+          sequence: 1,
+        }),
+      );
+      generation = receipt.retentionGeneration;
+      if (!receipt.details.hasMore) break;
+    }
+    expect(receipt?.details).toMatchObject({
+      deletedManifestCount: 0,
+      hasMore: false,
+    });
+    expect(receipt.details.protectionSet.manifests).toHaveLength(21);
+    expect(receipt.details.protectionSet.providerReleasesByPlatform)
+      .toHaveLength(8);
+
+    const providerReceipt = await execute(
+      t,
+      internal.catalogRetention.retainProviderReleases,
+      await providerRequest(t, {
+        operationId: "retention:platform-scale:provider",
+        generation,
+        sequence: 1,
+      }),
+    );
+    expect(providerReceipt.details).toMatchObject({
+      selectedProviderRelease: null,
+      hasMore: false,
+    });
+    expect(providerReceipt.details.protectionSet.providerReleasesByPlatform)
+      .toHaveLength(1);
+  }, 30_000);
+
+  test("keeps near-bound immutable proofs below Convex read limits", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const publicAssetOrigins = Array.from({ length: 64 }, (_, index) =>
+      `https://${index.toString().padStart(2, "0")}.${"a".repeat(60)}.${
+        "b".repeat(60)
+      }.${"c".repeat(60)}.example`
+    );
+    const plans = await Promise.all(Array.from({ length: 21 }, (_, index) =>
+      buildProviderPublishPlan({
+        checkpointSequence: String(100 + index),
+        publicAssetOrigins,
+        publicVendorId:
+          `10000000-0000-5000-8000-${(100 + index).toString().padStart(12, "0")}`,
+        vendorDisplayName: `Large proof vendor ${index}`,
+      })
+    ));
+    configure(plans[0]!.governingHashes.originSetHash);
+    const t = createTest();
+    for (const [index, plan] of plans.entries()) {
+      const completed = await t.run((ctx) =>
+        seedProviderCatalogPublishPlanGraph(ctx, plan, SERVER_TIME)
+      );
+      const manifest = await buildCatalogManifestFromProviderPlans(
+        [plan],
+        `retention-large-proof-${index.toString().padStart(2, "0")}`,
+        "canonical",
+      );
+      await t.run(async (ctx) => {
+        const document = await ensureImmutableCatalogManifest(ctx, {
+          manifest,
+          providerReleaseIds: [completed.release._id],
+          serverTime: SERVER_TIME,
+        });
+        await ctx.db.insert("repackHeatSignalSets", {
+          manifestId: document._id,
+          manifestAlignment: productionHeatManifestAlignmentSchema.parse(
+            manifestIdentity(manifest),
+          ),
+          signalSetHash: SHA_A,
+          lifecycle: "complete",
+          sourceKind: "observed",
+          scenarioVersion: null,
+          aggregationVersion: REPACK_HEAT_AGGREGATION_VERSION,
+          heatPolicyVersion: REPACK_HEAT_POLICY_VERSION,
+          signalCount: 0,
+          originatingPublicationId: null,
+          createdAt: SERVER_TIME,
+          completedAt: SERVER_TIME,
+        });
+      });
+    }
+
+    let generation = 0;
+    let manifestReceipt: any = null;
+    for (let index = 0; index < 10; index += 1) {
+      manifestReceipt = await execute(
+        t,
+        internal.catalogRetention.retainManifests,
+        await manifestRequest(t, {
+          operationId: `retention:large-proof:${index}`,
+          generation,
+          sequence: 1,
+        }),
+      );
+      generation = manifestReceipt.retentionGeneration;
+      if (!manifestReceipt.details.hasMore) break;
+    }
+    expect(manifestReceipt?.details).toMatchObject({
+      selectedManifest: null,
+      hasMore: false,
+    });
+    const providerReceipt = await execute(
+      t,
+      internal.catalogRetention.retainProviderReleases,
+      await providerRequest(t, {
+        operationId: "retention:large-proof:provider",
+        generation,
+        sequence: 1,
+      }),
+    );
+    expect(providerReceipt.details).toMatchObject({
+      selectedProviderRelease: null,
+      hasMore: false,
+    });
+    expect(providerReceipt.details.protectionSet.providerReleasesByPlatform[0]
+      .releases).toHaveLength(21);
+  }, 60_000);
+
+  test("freezes age eligibility to the PostgreSQL proof time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-16T13:00:00.000Z");
+    const plan = await buildProviderPublishPlan();
+    configure(plan.governingHashes.originSetHash);
+    const t = createTest();
+    const completed = await t.run((ctx) =>
+      seedProviderCatalogPublishPlanGraph(ctx, plan, OLD_TIME)
+    );
+    const manifest = await buildCatalogManifestFromProviderPlans(
+      [plan],
+      "retention-frozen-eligibility",
+      "canonical",
+    );
+    const document = await insertOldManifest(
+      t,
+      manifest,
+      completed.release._id,
+    );
+    await t.run((ctx) =>
+      ctx.db.patch("globalCatalogManifests", document._id, {
+        lifecycle: "failed",
+        retentionEligibleAt: "2026-08-16T12:30:00.000Z",
+      })
+    );
+
+    const receipt = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:frozen-eligibility",
+        generation: 0,
+        sequence: 1,
+      }),
+    );
+    expect(receipt.serverTime).toBe("2026-08-16T13:00:00.000Z");
+    expect(receipt.details.protectionSet.authoritativeEvaluationTime).toBe(
+      SERVER_TIME,
+    );
+    expect(receipt.details).toMatchObject({
+      selectedManifest: null,
+      deletedManifestCount: 0,
+      hasMore: false,
+    });
+    expect(await t.run((ctx) =>
+      ctx.db.get("globalCatalogManifests", document._id)
+    )).not.toBeNull();
+  });
+
+  test("refuses deletion when a protected release lost its completion proof", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const [firstPlan, secondPlan] = await Promise.all([
+      buildProviderPublishPlan(),
+      buildProviderPublishPlan({
+        checkpointSequence: "30",
+        settledAt: "2026-08-15T13:00:00.000Z",
+        publicVendorId: "10000000-0000-5000-8000-000000000030",
+        vendorDisplayName: "Second retention vendor",
+      }),
+    ]);
+    configure(firstPlan.governingHashes.originSetHash);
+    const t = createTest();
+    const first = await t.run((ctx) =>
+      seedProviderCatalogPublishPlanGraph(ctx, firstPlan, OLD_TIME)
+    );
+    const second = await t.run((ctx) =>
+      seedProviderCatalogPublishPlanGraph(ctx, secondPlan, OLD_TIME)
+    );
+    const [protectedManifest, deletionCandidate] = await Promise.all([
+      buildCatalogManifestFromProviderPlans(
+        [firstPlan],
+        "retention-protected-proof",
+        "canonical",
+      ),
+      buildCatalogManifestFromProviderPlans(
+        [secondPlan],
+        "retention-unrelated-candidate",
+        "canonical",
+      ),
+    ]);
+    await t.run(async (ctx) => {
+      await ensureImmutableCatalogManifest(ctx, {
+        manifest: protectedManifest,
+        providerReleaseIds: [first.release._id],
+        serverTime: SERVER_TIME,
+      });
+    });
+    const candidateDocument = await insertOldManifest(
+      t,
+      deletionCandidate,
+      second.release._id,
+    );
+    await t.run(async (ctx) => {
+      const operation = await ctx.db
+        .query("providerCatalogReleaseCompletionProofs")
+        .withIndex("by_release_id", (index) =>
+          index.eq("releaseId", first.release._id)
+        )
+        .unique();
+      if (operation === null) throw new Error("Expected completion receipt.");
+      await ctx.db.delete(
+        "providerCatalogReleaseCompletionProofs",
+        operation._id,
+      );
+    });
+
+    await expect(execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:missing-protected-completion",
+        generation: 0,
+        sequence: 1,
+      }),
+    )).rejects.toThrow("CATALOG_RETENTION_REFERENCE_INVALID");
+    expect(await t.run((ctx) =>
+      ctx.db.get("globalCatalogManifests", candidateDocument._id)
+    )).not.toBeNull();
+  });
+
+  test("refuses a dangling manifest even when its compact proof remains", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const [firstPlan, laterPlan] = await Promise.all([
+      buildProviderPublishPlan(),
+      buildProviderPublishPlan({
+        checkpointSequence: "31",
+        settledAt: "2026-08-15T13:01:00.000Z",
+        publicVendorId: "10000000-0000-5000-8000-000000000031",
+        vendorDisplayName: "Later retention vendor",
+      }),
+    ]);
+    configure(firstPlan.governingHashes.originSetHash);
+    const t = createTest();
+    const first = await t.run((ctx) =>
+      seedProviderCatalogPublishPlanGraph(ctx, firstPlan, OLD_TIME)
+    );
+    await t.run((ctx) =>
+      seedProviderCatalogPublishPlanGraph(ctx, laterPlan, OLD_TIME)
+    );
+    const manifest = await buildCatalogManifestFromProviderPlans(
+      [firstPlan],
+      "retention-dangling-release",
+      "canonical",
+    );
+    await t.run(async (ctx) => {
+      await ensureImmutableCatalogManifest(ctx, {
+        manifest,
+        providerReleaseIds: [first.release._id],
+        serverTime: SERVER_TIME,
+      });
+      await ctx.db.delete("providerCatalogReleases", first.release._id);
+    });
+
+    await expect(execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:dangling-release",
+        generation: 0,
+        sequence: 1,
+      }),
+    )).rejects.toThrow("CATALOG_RETENTION_REFERENCE_INVALID");
+  });
+
   test("deletes a shared provider release only after its last manifest reference", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(SERVER_TIME);
@@ -816,6 +1574,85 @@ describe("catalog retention lifecycle", () => {
     expect(await t.run((ctx) =>
       ctx.db.query("catalogRetentionState").unique()
     )).toMatchObject({ generation: 2 });
+  });
+
+  test("binds compact manifest proofs and accepts a proven absent block target", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const plan = await buildProviderPublishPlan();
+    configure(plan.governingHashes.originSetHash);
+    const t = createTest();
+    const block = catalogManifestBlockRequestSchema.parse({
+      schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
+      operationId: "catalog:block:retention-absent",
+      idempotencyKey: "catalog:block:retention-absent",
+      publicReleaseId: "11111111-1111-5111-8111-111111111111",
+      manifestFingerprint: SHA_A,
+      blockSequence: "1",
+      reason: "MANIFEST_SECURITY_INVALID",
+    });
+    await executeManifest(t, internal.catalogManifestBlock.block, block);
+    const terminalReceiptSha256 = await t.run(async (ctx) => {
+      const operation = await ctx.db.query("catalogManifestOperations")
+        .withIndex("by_operation_id", (index) =>
+          index.eq("operationId", block.operationId)
+        )
+        .unique();
+      if (operation === null) throw new Error("Expected stored block receipt.");
+      return operation.terminalReceiptSha256;
+    });
+    const requestDigest = await catalogManifestPublicationRequestDigest(block);
+    const protection: CatalogRetentionExternalManifestProtection = {
+      manifest: {
+        publicReleaseId: block.publicReleaseId,
+        manifestFingerprint: block.manifestFingerprint,
+        sharedConfigurationEpoch: plan.sharedConfigurationEpoch,
+        providerReferenceSetHash: SHA_B,
+      },
+      reason: "block_recovery",
+      operationProof: {
+        operationKind: "block",
+        operationId: block.operationId,
+        operationState: "acknowledged",
+        canonicalRequestBody: null,
+        requestDigest,
+        terminalReceiptSha256,
+      },
+    };
+    await expect(execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:compact-block:wrong-target",
+        generation: 0,
+        sequence: 1,
+        manifestProtections: [{
+          ...protection,
+          manifest: {
+            ...protection.manifest,
+            publicReleaseId: "22222222-2222-5222-8222-222222222222",
+            manifestFingerprint: SHA_C,
+          },
+        }],
+      }),
+    )).rejects.toThrow("CATALOG_RETENTION_PROOF_INCOMPLETE");
+
+    const receipt = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:compact-block:exact-target",
+        generation: 0,
+        sequence: 2,
+        manifestProtections: [protection],
+      }),
+    );
+    expect(receipt.details).toMatchObject({
+      selectedManifest: null,
+      deletedManifestCount: 0,
+      hasMore: false,
+    });
+    expect(receipt.details.protectionSet.manifests).toEqual([]);
   });
 
   test("pruned operation replay cannot target a later unchanged catalog generation", async () => {

@@ -31,6 +31,8 @@ import type { PromotionV2WorkerRuntimePort } from
 import type {
   HeatPromotionWorkerRuntimePort,
 } from "./heat-promotion-worker-runtime.ts";
+import type { CatalogRetentionWorkerRuntimePort } from
+  "./catalog-retention-worker-runtime.ts";
 import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
 import {
   ProviderWorkerRuntime,
@@ -59,6 +61,7 @@ export interface ProviderWorkerCompositionInput {
   readonly observability: OperationalObservability;
   readonly promotion?: PromotionV2WorkerRuntimePort;
   readonly heatPromotion?: HeatPromotionWorkerRuntimePort;
+  readonly catalogRetention?: CatalogRetentionWorkerRuntimePort;
 }
 
 function createActorKeyer(key: Uint8Array): ProviderActorKeyer {
@@ -164,6 +167,7 @@ export function createProviderWorkerRuntime(
     }),
     promotion: input.promotion,
     heatPromotion: input.heatPromotion,
+    catalogRetention: input.catalogRetention,
     retention,
     logger: input.logger,
     workerId: input.configuration.workerId,

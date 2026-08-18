@@ -19,6 +19,8 @@ import {
 const modules = import.meta.glob("./**/*.ts");
 const PUBLISH_KEY = "catalog-http-publish-v1";
 const ROLLBACK_KEY = "catalog-http-rollback-v1";
+const ROLLBACK_KEY_SECRET =
+  "packscout-catalog-rollback-secret-000000000001";
 
 function createTest() {
   return convexTest({ schema, modules, transactionLimits: true });
@@ -29,7 +31,7 @@ function configureKeys(): void {
     "PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS",
     canonicalJson({
       [PUBLISH_KEY]: btoa(PROVIDER_TEST_KEY_SECRET),
-      [ROLLBACK_KEY]: btoa(PROVIDER_TEST_KEY_SECRET),
+      [ROLLBACK_KEY]: btoa(ROLLBACK_KEY_SECRET),
     }),
   );
   vi.stubEnv(
@@ -75,7 +77,7 @@ describe("catalog manifest HTTP security", () => {
         activeStateRequest("catalog:http:forbidden"),
         {
           keyId: ROLLBACK_KEY,
-          secret: PROVIDER_TEST_KEY_SECRET,
+          secret: ROLLBACK_KEY_SECRET,
           nonce: "catalogHttpForbidden0001",
         },
       ),

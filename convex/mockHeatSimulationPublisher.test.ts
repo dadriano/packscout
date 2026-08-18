@@ -10,17 +10,13 @@ import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
-import {
-  MOCK_DATA_RELEASE_PUBLIC_ID,
-  buildMockDataReleaseV2,
-} from "./mockDataReleaseFixture";
+import { buildMockDataReleaseV2 } from "./mockDataReleaseFixture";
 import {
   MOCK_HEAT_DEFAULT_FRAME_STEP_MILLISECONDS,
   MOCK_HEAT_DEFAULT_PUBLICATION_CADENCE_MILLISECONDS,
   buildMockHeatFrame,
   type MockHeatFrame,
 } from "./mockHeatSimulationFixture";
-import { seedLegacyHeatCatalogForTest } from "./repackHeatTestCatalog";
 
 const modules = import.meta.glob("./**/*.ts");
 type HeatTest = TestConvex<typeof schema>;
@@ -54,9 +50,7 @@ function mutationFrame(frame: MockHeatFrame) {
 }
 
 async function seed(t: HeatTest) {
-  const manifest = await t.mutation(internal.mockDataReleaseSeed.seed, {});
-  await t.run((ctx) => seedLegacyHeatCatalogForTest(ctx, "mock"));
-  return manifest;
+  return await t.mutation(internal.mockDataReleaseSeed.seed, {});
 }
 
 async function heatCounts(t: HeatTest) {
@@ -78,29 +72,43 @@ function expectManifestMismatch(
   )).toBe(true);
 }
 
+function expectHeatStatus(
+  details: readonly {
+    readonly heat: { readonly status: string; readonly reason?: string };
+  }[],
+  status: "current" | "expired" | "unavailable",
+  reason?: "NOT_PUBLISHED" | "RELEASE_MISMATCH",
+) {
+  expect(details.length).toBeGreaterThan(0);
+  expect(details.every(({ heat }) =>
+    heat.status === status && (reason === undefined || heat.reason === reason)
+  )).toBe(true);
+}
+
 async function queryEveryHeatSurface(t: HeatTest) {
   const fixture = buildMockDataReleaseV2();
   const repack = fixture.repacks[0]!;
   const collectible = fixture.collectibles[0]!;
   const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {});
   const list = await t.query(api.publicRepacks.listPublicRepacks, {});
+  expect(getDashboardBundleResultSchema.safeParse(dashboard).success).toBe(true);
+  expect(listPublicRepacksResultSchema.safeParse(list).success).toBe(true);
+  if (!dashboard.ok || !list.ok) {
+    throw new Error("Expected public catalog surfaces to remain readable.");
+  }
   const detail = await t.query(api.publicRepacks.getPublicRepack, {
     publicRepackId: repack.publicRepackId,
-    publicReleaseId: list.ok
-      ? list.data.metadata.publicReleaseId
-      : MOCK_DATA_RELEASE_PUBLIC_ID,
+    publicReleaseId: list.data.metadata.publicReleaseId,
   });
   const desired = await t.query(
     api.publicRepacks.findRepacksByDesiredCollectible,
     { publicCollectibleId: collectible.publicCollectibleId },
   );
-  expect(getDashboardBundleResultSchema.safeParse(dashboard).success).toBe(true);
-  expect(listPublicRepacksResultSchema.safeParse(list).success).toBe(true);
   expect(getPublicRepackResultSchema.safeParse(detail).success).toBe(true);
   expect(
     findRepacksByDesiredCollectibleResultSchema.safeParse(desired).success,
   ).toBe(true);
-  if (!dashboard.ok || !list.ok || !detail.ok || !desired.ok) {
+  if (!detail.ok || !desired.ok) {
     throw new Error("Expected public heat surfaces to remain readable.");
   }
   return {
@@ -323,12 +331,12 @@ describe("mock heat aggregate publisher", () => {
     expect(state?.freshness).toBe("expired");
   });
 
-  test("keeps public heat bounded at manifest mismatch while private frames advance", async () => {
+  test("publishes current heat and fails closed on manifest, signal, and expiry drift", async () => {
     enable();
     const t = createTest();
     await seed(t);
     for (const details of Object.values(await queryEveryHeatSurface(t))) {
-      expectManifestMismatch(details);
+      expectHeatStatus(details, "unavailable", "NOT_PUBLISHED");
     }
 
     const frame = await buildMockHeatFrame(controls(0));
@@ -337,31 +345,23 @@ describe("mock heat aggregate publisher", () => {
       mutationFrame(frame),
     );
     for (const details of Object.values(await queryEveryHeatSurface(t))) {
-      expectManifestMismatch(details);
+      expectHeatStatus(details, "current");
     }
 
     const mismatch = await t.run(async (ctx) => {
-      const release = await ctx.db.query("dataReleases").first();
       const snapshot = await ctx.db.query("repackHeatSnapshots").first();
-      if (release === null || snapshot === null) {
-        throw new Error("Expected release-aligned heat.");
+      if (snapshot === null) {
+        throw new Error("Expected manifest-aligned heat.");
       }
-      const mismatchedReleaseId = await ctx.db.insert("dataReleases", {
-        publicReleaseId: "90000000-0000-4000-8000-000000000099",
-        lifecycle: "complete",
-        metadata: {
-          ...release.metadata,
-          publicReleaseId: "90000000-0000-4000-8000-000000000099",
-        },
-        searchShardCount: 0,
-      });
       await ctx.db.patch("repackHeatSnapshots", snapshot._id, {
-        releaseId: mismatchedReleaseId,
+        manifestAlignment: {
+          ...snapshot.manifestAlignment,
+          manifestFingerprint: "0".repeat(64),
+        },
       });
       return {
         snapshotId: snapshot._id,
-        releaseId: release._id,
-        mismatchedReleaseId,
+        manifestAlignment: snapshot.manifestAlignment,
       };
     });
     for (const details of Object.values(await queryEveryHeatSurface(t))) {
@@ -369,9 +369,8 @@ describe("mock heat aggregate publisher", () => {
     }
     await t.run(async (ctx) => {
       await ctx.db.patch("repackHeatSnapshots", mismatch.snapshotId, {
-        releaseId: mismatch.releaseId,
+        manifestAlignment: mismatch.manifestAlignment,
       });
-      await ctx.db.delete("dataReleases", mismatch.mismatchedReleaseId);
     });
 
     await t.run(async (ctx) => {
@@ -431,7 +430,7 @@ describe("mock heat aggregate publisher", () => {
       expectedExpiresAt: frame.expiresAt,
     });
     for (const details of Object.values(await queryEveryHeatSurface(t))) {
-      expectManifestMismatch(details);
+      expectHeatStatus(details, "expired");
     }
   });
 });

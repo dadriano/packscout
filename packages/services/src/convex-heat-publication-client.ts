@@ -128,7 +128,7 @@ export class SignedConvexHeatPublicationClient
     ) throw ambiguousPublicationResponse("PUBLICATION_RESPONSE_INVALID");
     return {
       activePublicHeatFrameId: receipt.data.details.activePublicHeatFrameId,
-      catalogPublicReleaseId: receipt.data.details.catalogPublicReleaseId,
+      manifestAlignment: receipt.data.details.manifestAlignment,
       sourceWatermark: receipt.data.details.sourceWatermark === null
         ? null : BigInt(receipt.data.details.sourceWatermark),
       frameSequence: receipt.data.details.frameSequence,

@@ -10,8 +10,8 @@ import { httpAction } from "./_generated/server";
 import {
   handleAuthenticatedCatalogManifestRequest,
   handleAuthenticatedCatalogRetentionRequest,
+  handleAuthenticatedHeatPublicationRequest,
   handleAuthenticatedProviderReleaseRequest,
-  handleAuthenticatedPublicationRequest,
 } from "./productionDataReleaseAuth";
 
 const http = httpRouter();
@@ -224,7 +224,7 @@ http.route({
   path: PRODUCTION_REPACK_HEAT_PATHS.activeState,
   method: "POST",
   handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
+    handleAuthenticatedHeatPublicationRequest(
       ctx,
       request,
       internal.productionHeatActiveState.activeState,
@@ -236,7 +236,7 @@ http.route({
   path: PRODUCTION_REPACK_HEAT_PATHS.start,
   method: "POST",
   handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
+    handleAuthenticatedHeatPublicationRequest(
       ctx,
       request,
       internal.productionHeatLifecycle.start,
@@ -248,7 +248,7 @@ http.route({
   path: PRODUCTION_REPACK_HEAT_PATHS.applyBatch,
   method: "POST",
   handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
+    handleAuthenticatedHeatPublicationRequest(
       ctx,
       request,
       internal.productionHeatBatch.applyBatch,
@@ -260,7 +260,7 @@ http.route({
   path: PRODUCTION_REPACK_HEAT_PATHS.finalize,
   method: "POST",
   handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
+    handleAuthenticatedHeatPublicationRequest(
       ctx,
       request,
       internal.productionHeatLifecycle.finalize,
@@ -272,7 +272,7 @@ http.route({
   path: PRODUCTION_REPACK_HEAT_PATHS.status,
   method: "POST",
   handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
+    handleAuthenticatedHeatPublicationRequest(
       ctx,
       request,
       internal.productionHeatLifecycle.status,
@@ -284,7 +284,7 @@ http.route({
   path: PRODUCTION_REPACK_HEAT_PATHS.refreshFrame,
   method: "POST",
   handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
+    handleAuthenticatedHeatPublicationRequest(
       ctx,
       request,
       internal.productionHeatLifecycle.refreshFrame,
@@ -296,7 +296,7 @@ http.route({
   path: PRODUCTION_REPACK_HEAT_PATHS.retain,
   method: "POST",
   handler: httpAction((ctx, request) =>
-    handleAuthenticatedPublicationRequest(
+    handleAuthenticatedHeatPublicationRequest(
       ctx,
       request,
       internal.productionHeatRetention.retain,

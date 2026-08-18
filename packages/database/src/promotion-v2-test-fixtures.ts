@@ -27,6 +27,7 @@ import {
   type GlobalCatalogManifestV1,
   type ProviderReleaseExpectedCompletedHeadV1,
   type ProviderReleaseImmutableProofV1,
+  type ProviderCatalogReleasePublishPlanV1,
   type ProviderReleaseReceipt,
 } from "@packscout/contracts";
 import { PrismaCatalogReleaseSourceRepository } from
@@ -312,17 +313,42 @@ export async function providerPublicationFixture(input: Readonly<{
   predecessor?: ProviderReleaseExpectedCompletedHeadV1;
   publicProviderReleaseId?: string;
   immutableProof?: ProviderReleaseImmutableProofV1;
+  publishPlan?: ProviderCatalogReleasePublishPlanV1;
   operationTag?: string;
 }> = {}): Promise<ProviderPublicationFixture> {
-  const platformKey = input.platformKey ?? "alpha";
-  const sequence = input.sequence ?? 10n;
+  const platformKey = input.publishPlan?.platformKey ??
+    input.platformKey ?? "alpha";
+  if (platformKey !== "alpha" && platformKey !== "beta") {
+    throw new TypeError("Promotion fixture platform is unsupported.");
+  }
+  const sequence = input.publishPlan === undefined
+    ? input.sequence ?? 10n
+    : BigInt(input.publishPlan.providerCheckpoint.settledSequence);
   const classification = input.classification ?? "publish";
   const operationTag = input.operationTag ?? String(sequence);
-  const publicProviderReleaseId = input.immutableProof
+  const publicProviderReleaseId = input.publishPlan?.publicProviderReleaseId ??
+    input.immutableProof
     ?.publicProviderReleaseId ?? input.publicProviderReleaseId ??
       releaseIds[platformKey];
   const generatedProof = proof(platformKey, publicProviderReleaseId, sequence);
-  const release = input.immutableProof ?? {
+  const planRelease: ProviderReleaseImmutableProofV1 | undefined =
+    input.publishPlan === undefined ? undefined : {
+      platformKey: input.publishPlan.platformKey,
+      sharedConfigurationEpoch: input.publishPlan.sharedConfigurationEpoch,
+      dataAsOf: input.publishPlan.dataAsOf,
+      publicProviderReleaseId: input.publishPlan.publicProviderReleaseId,
+      providerReleaseFingerprint: input.publishPlan.providerReleaseFingerprint,
+      contentHash: input.publishPlan.contentHash,
+      publicAssetOrigins: input.publishPlan.publicAssetOrigins,
+      governingHashes: input.publishPlan.governingHashes,
+      entityHashes: input.publishPlan.entityHashes,
+      counts: input.publishPlan.counts,
+      searchAlgorithmVersion: input.publishPlan.searchAlgorithmVersion,
+      providerSearchIndexHash: input.publishPlan.providerSearchIndexHash,
+      batchCount: input.publishPlan.batchCount,
+      batchChainHash: input.publishPlan.batchChainHash,
+    };
+  const release = planRelease ?? input.immutableProof ?? {
     ...generatedProof,
     governingHashes: {
       ...generatedProof.governingHashes,
@@ -331,13 +357,15 @@ export async function providerPublicationFixture(input: Readonly<{
       ),
     },
   };
-  const settledAt = instant(sequence);
+  const settledAt = input.publishPlan === undefined
+    ? instant(sequence)
+    : new Date(input.publishPlan.providerCheckpoint.settledAt!);
   const observedAt = settledAt;
-  const providerCheckpoint = {
+  const providerCheckpoint = input.publishPlan?.providerCheckpoint ?? {
     settledSequence: String(sequence),
     settledAt: settledAt.toISOString(),
   };
-  const observation = {
+  const observation = input.publishPlan?.observation ?? {
     sourceHeadSequence: String(sequence),
     lastSuccessfulObservationAt: observedAt.toISOString(),
     staleAt: new Date(observedAt.getTime() + 900_000).toISOString(),
@@ -347,10 +375,11 @@ export async function providerPublicationFixture(input: Readonly<{
   const context = {
     release,
     providerCheckpoint,
-    sourceWatermark: buildProviderCatalogSourceWatermarkV1(
+    sourceWatermark: input.publishPlan?.sourceWatermark ??
+      buildProviderCatalogSourceWatermarkV1(
       platformKey,
       String(sequence),
-    ),
+      ),
     observation,
     expectedCompletedHead,
   };
@@ -368,9 +397,10 @@ export async function providerPublicationFixture(input: Readonly<{
     sourceHeadSequence: sequence,
     settledAt,
     sourceHeadAt: settledAt,
-    lastSuccessfulObservationAt: observedAt,
-    staleAt: new Date(observedAt.getTime() + 900_000),
-    freshness: "fresh",
+    lastSuccessfulObservationAt:
+      new Date(observation.lastSuccessfulObservationAt),
+    staleAt: new Date(observation.staleAt),
+    freshness: observation.freshness,
     blockedState: { kind: "ready" },
   };
   const operations: ExactPromotionOperationInput[] = [];
@@ -408,26 +438,31 @@ export async function providerPublicationFixture(input: Readonly<{
       byteCount: providerCatalogReleaseBatchByteCount([vendor]),
       records: [vendor],
     };
-    const definitions = [
-      {
+    const batches = input.publishPlan?.batches ?? [batch];
+    const definitions: Array<{
+      operationKind: "start" | "applyBatch" | "finalize";
+      requestPath: string;
+      operationId: string;
+      request: typeof context | (typeof context & {
+        batch: (typeof batches)[number];
+      });
+    }> = [{
         operationKind: "start",
         requestPath: PRODUCTION_PROVIDER_RELEASE_PATHS.start,
         operationId: `provider:start:${platformKey}:${operationTag}`,
         request: context,
-      },
-      {
+      }, ...batches.map((candidate) => ({
         operationKind: "applyBatch",
         requestPath: PRODUCTION_PROVIDER_RELEASE_PATHS.applyBatch,
-        operationId: `provider:batch:${platformKey}:${operationTag}:0`,
-        request: { ...context, batch },
-      },
-      {
+        operationId:
+          `provider:batch:${platformKey}:${operationTag}:${candidate.batchIndex}`,
+        request: { ...context, batch: candidate },
+      } as const)), {
         operationKind: "finalize",
         requestPath: PRODUCTION_PROVIDER_RELEASE_PATHS.finalize,
         operationId: `provider:finalize:${platformKey}:${operationTag}`,
         request: context,
-      },
-    ] as const;
+      }];
     definitions.forEach((definition, operationIndex) => {
       operations.push({
         operationIndex,
@@ -488,7 +523,9 @@ export async function providerPublicationFixture(input: Readonly<{
       };
     } else if (operation.operationKind === "applyBatch") {
       const request = JSON.parse(operation.canonicalRequestBody) as {
-        batch: { batchIndex: number; kind: "vendors"; batchHash: string;
+        batch: { batchIndex: number;
+          kind: ProviderCatalogReleasePublishPlanV1["batches"][number]["kind"];
+          batchHash: string;
           byteCount: number; records: readonly unknown[] };
       };
       body = {
@@ -503,7 +540,7 @@ export async function providerPublicationFixture(input: Readonly<{
           batchHash: request.batch.batchHash,
           recordCount: request.batch.records.length,
           byteCount: request.batch.byteCount,
-          acceptedBatchCount: 1,
+          acceptedBatchCount: request.batch.batchIndex + 1,
           acceptedCounts: release.counts,
           acceptedEntityHashes: release.entityHashes,
           acceptedBatchChainHash: release.batchChainHash,
@@ -549,6 +586,19 @@ export async function manifestActivationFixture(input: Readonly<{
   const release = input.publication.summary.immutableProof;
   const reference = { ...release };
   const references = [reference];
+  const repackOwnership = input.publication.operations.flatMap((operation) => {
+    if (operation.operationKind !== "applyBatch") return [];
+    const request = JSON.parse(operation.canonicalRequestBody) as {
+      batch: { kind: string; records: Array<{ publicRepackId?: string }> };
+    };
+    if (request.batch.kind !== "repacks") return [];
+    return request.batch.records.map(({ publicRepackId }) => {
+      if (publicRepackId === undefined) {
+        throw new TypeError("Promotion fixture repack identity is missing.");
+      }
+      return { platformKey: reference.platformKey, publicRepackId };
+    });
+  });
   const [
     providerReferenceSetHash,
     providerConfigurationsHash,
@@ -583,7 +633,7 @@ export async function manifestActivationFixture(input: Readonly<{
       canonicalProof: [`${reference.platformKey}:${reference.publicProviderReleaseId}`],
     }),
     recomputeGlobalCatalogCompositionProofHashV1({
-      kind: "unique_repack_ownership", canonicalProof: [],
+      kind: "unique_repack_ownership", canonicalProof: repackOwnership,
     }),
     recomputeGlobalCatalogCompositionProofHashV1({
       kind: "cross_reference_graph", canonicalProof: [],

@@ -447,19 +447,10 @@ const cleanupBaseShape = {
   ),
 } as const;
 
-export const providerReleaseCleanupRequestSchema = z.discriminatedUnion(
-  "cleanupKind",
-  [
-    z.object({
-      ...cleanupBaseShape,
-      cleanupKind: z.literal("expired_provider_artifacts"),
-    }).strict(),
-    z.object({
-      ...cleanupBaseShape,
-      cleanupKind: z.literal("expired_auth_nonces"),
-    }).strict(),
-  ],
-).superRefine((request, context) => {
+export const providerReleaseCleanupRequestSchema = z.object({
+  ...cleanupBaseShape,
+  cleanupKind: z.literal("expired_auth_nonces"),
+}).strict().superRefine((request, context) => {
   if (request.expectedCompletedHead.platformKey !== request.platformKey) {
     context.addIssue({
       code: "custom",

@@ -28,12 +28,18 @@ import type { MutationCtx } from "./_generated/server";
 import {
   assertExactCatalogManifestProviderReferences,
   assertProviderReferenceEdgesAreNotOrphaned,
+  loadManifestReferencesForPlatformAfterAudit,
 } from "./catalogManifestRetentionReferences";
 import { loadCatalogManifestOperationById } from "./catalogManifestOperations";
 import { loadActiveCatalogManifestState } from "./catalogManifestState";
 import { refuseCatalogRetention } from "./catalogRetentionErrors";
 import { configuredProviderReleasePlatforms } from "./providerReleaseRequests";
 import { loadProviderOperationById } from "./providerReleaseOperations";
+import {
+  assertCompactProviderReleaseCompletion,
+  loadProviderReleaseCompletionProof,
+  loadProviderTerminalReceiptProof,
+} from "./providerReleaseProof";
 import {
   expectedHeadFromStored,
   oneProviderCompletedHead,
@@ -45,8 +51,17 @@ type ManifestEntry = {
   reasons: Set<CatalogRetentionManifestProtectionReason>;
 };
 
+type ProtectedProviderRelease = Pick<
+  Doc<"providerCatalogReleases">,
+  | "_id"
+  | "platformKey"
+  | "publicProviderReleaseId"
+  | "providerReleaseFingerprint"
+  | "lifecycle"
+>;
+
 type ProviderEntry = {
-  document: Doc<"providerCatalogReleases">;
+  document: ProtectedProviderRelease;
   reasons: Set<CatalogRetentionProviderProtectionReason>;
 };
 
@@ -92,8 +107,12 @@ function parseCanonicalRequest<T>(
 }
 
 async function assertProofRequestDigest(
-  proof: Readonly<{ canonicalRequestBody: string; requestDigest: string }>,
+  proof: Readonly<{
+    canonicalRequestBody: string | null;
+    requestDigest: string;
+  }>,
 ): Promise<void> {
+  if (proof.canonicalRequestBody === null) return;
   if (await sha256Utf8(proof.canonicalRequestBody) !== proof.requestDigest) {
     refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
   }
@@ -208,7 +227,7 @@ function addManifestReason(
 
 function addProviderReason(
   entries: Map<Id<"providerCatalogReleases">, ProviderEntry>,
-  document: Doc<"providerCatalogReleases">,
+  document: ProtectedProviderRelease,
   reason: CatalogRetentionProviderProtectionReason,
 ): void {
   const entry = entries.get(document._id) ?? {
@@ -217,6 +236,22 @@ function addProviderReason(
   };
   entry.reasons.add(reason);
   entries.set(document._id, entry);
+}
+
+async function addProvenProviderReason(
+  ctx: MutationCtx,
+  entries: Map<Id<"providerCatalogReleases">, ProviderEntry>,
+  document: Doc<"providerCatalogReleases">,
+  reason: CatalogRetentionProviderProtectionReason,
+): Promise<void> {
+  if (document.lifecycle === "complete" && !entries.has(document._id)) {
+    try {
+      await assertCompactProviderReleaseCompletion(ctx, document);
+    } catch {
+      return refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
+    }
+  }
+  addProviderReason(entries, document, reason);
 }
 
 async function assertManifestOperationProof(
@@ -228,10 +263,14 @@ async function assertManifestOperationProof(
 }>> {
   const { operationProof } = protection;
   await assertProofRequestDigest(operationProof);
-  let requestIdentity;
+  let requestIdentity: typeof protection.manifest | null = null;
   let activateManifest: Awaited<ReturnType<typeof verifyGlobalCatalogManifestV1>>
     | null = null;
-  if (operationProof.operationKind === "activateManifest") {
+  if (operationProof.canonicalRequestBody === null) {
+    if (operationProof.operationState !== "acknowledged") {
+      refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
+    }
+  } else if (operationProof.operationKind === "activateManifest") {
     const request = parseCanonicalRequest(
       operationProof.canonicalRequestBody,
       (value) => catalogManifestActivateRequestSchema.parse(value),
@@ -279,7 +318,10 @@ async function assertManifestOperationProof(
         protection.manifest.providerReferenceSetHash,
     };
   }
-  if (canonicalJson(requestIdentity) !== canonicalJson(protection.manifest)) {
+  if (
+    requestIdentity !== null &&
+    canonicalJson(requestIdentity) !== canonicalJson(protection.manifest)
+  ) {
     refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
   }
   let loaded;
@@ -294,7 +336,11 @@ async function assertManifestOperationProof(
   if (
     loaded !== null &&
     (loaded.operation.kind !== operationProof.operationKind ||
-      loaded.operation.bodyHash !== operationProof.requestDigest)
+      loaded.operation.bodyHash !== operationProof.requestDigest ||
+      loaded.operation.publicReleaseId !==
+        protection.manifest.publicReleaseId ||
+      loaded.operation.manifestFingerprint !==
+        protection.manifest.manifestFingerprint)
   ) {
     refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
   }
@@ -310,6 +356,17 @@ async function assertManifestOperationProof(
   const document = await findExactManifest(ctx, protection.manifest);
   if (document !== null) {
     return { document, pendingProviderReferences: [] };
+  }
+  if (
+    loaded !== null &&
+    operationProof.operationState === "acknowledged" &&
+    operationProof.operationKind === "block" &&
+    protection.reason === "block_recovery"
+  ) {
+    // Blocking an identity before its manifest is materialized is a valid
+    // terminal operation. It has no Convex artifact or provider edge to
+    // protect, but its exact retained operation must not wedge the barrier.
+    return { document: null, pendingProviderReferences: [] };
   }
   if (
     loaded !== null || activateManifest === null ||
@@ -333,30 +390,34 @@ function providerRequestForProof(
   protection: CatalogRetentionExternalProviderProtection,
 ) {
   const { operationProof } = protection;
+  const body = operationProof.canonicalRequestBody;
+  if (body === null) {
+    return refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
+  }
   switch (operationProof.operationKind) {
     case "start":
       return parseCanonicalRequest(
-        operationProof.canonicalRequestBody,
+        body,
         (value) => providerReleaseStartRequestSchema.parse(value),
       );
     case "applyBatch":
       return parseCanonicalRequest(
-        operationProof.canonicalRequestBody,
+        body,
         (value) => providerReleaseApplyBatchRequestSchema.parse(value),
       );
     case "finalize":
       return parseCanonicalRequest(
-        operationProof.canonicalRequestBody,
+        body,
         (value) => providerReleaseFinalizeRequestSchema.parse(value),
       );
     case "confirmReuse":
       return parseCanonicalRequest(
-        operationProof.canonicalRequestBody,
+        body,
         (value) => providerReleaseConfirmReuseRequestSchema.parse(value),
       );
     case "block":
       return parseCanonicalRequest(
-        operationProof.canonicalRequestBody,
+        body,
         (value) => providerReleaseBlockRequestSchema.parse(value),
       );
   }
@@ -368,40 +429,59 @@ async function assertProviderOperationProof(
 ): Promise<Doc<"providerCatalogReleases">> {
   const { operationProof } = protection;
   await assertProofRequestDigest(operationProof);
-  const request = providerRequestForProof(protection);
+  const request = operationProof.canonicalRequestBody === null
+    ? null
+    : providerRequestForProof(protection);
   if (
-    request.operationId !== operationProof.operationId ||
-    request.release.platformKey !== protection.release.platformKey ||
-    request.release.publicProviderReleaseId !==
-      protection.release.publicProviderReleaseId ||
-    request.release.providerReleaseFingerprint !==
-      protection.release.providerReleaseFingerprint
+    (request === null && operationProof.operationState !== "acknowledged") ||
+    (request !== null &&
+      (request.operationId !== operationProof.operationId ||
+        request.release.platformKey !== protection.release.platformKey ||
+        request.release.publicProviderReleaseId !==
+          protection.release.publicProviderReleaseId ||
+        request.release.providerReleaseFingerprint !==
+          protection.release.providerReleaseFingerprint))
   ) {
     refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
   }
   const release = await loadExactProviderRelease(ctx, protection.release);
+  let terminalProof;
+  try {
+    terminalProof = await loadProviderTerminalReceiptProof(
+      ctx,
+      operationProof.operationId,
+    );
+  } catch {
+    return refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
+  }
+  if (terminalProof !== null) {
+    if (
+      operationProof.operationState !== "acknowledged" ||
+      terminalProof.operationKind !== operationProof.operationKind ||
+      terminalProof.requestDigest !== operationProof.requestDigest ||
+      terminalProof.releaseId !== release._id ||
+      terminalProof.platformKey !== protection.release.platformKey ||
+      terminalProof.publicProviderReleaseId !==
+        protection.release.publicProviderReleaseId ||
+      terminalProof.providerReleaseFingerprint !==
+        protection.release.providerReleaseFingerprint ||
+      terminalProof.terminalReceiptSha256 !==
+        operationProof.terminalReceiptSha256
+    ) {
+      refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
+    }
+    return release;
+  }
+  if (operationProof.operationState === "acknowledged") {
+    refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
+  }
   let loaded;
   try {
     loaded = await loadProviderOperationById(ctx, operationProof.operationId);
   } catch {
     return refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
   }
-  if (
-    loaded !== null &&
-    (loaded.operation.kind !== operationProof.operationKind ||
-      loaded.operation.bodyHash !== operationProof.requestDigest ||
-      loaded.operation.platformKey !== protection.release.platformKey ||
-      loaded.operation.publicProviderReleaseId !==
-        protection.release.publicProviderReleaseId)
-  ) {
-    refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
-  }
-  if (
-    (loaded === null && operationProof.operationState === "acknowledged") ||
-    (loaded !== null &&
-      (operationProof.operationState !== "acknowledged" ||
-        loaded.terminalReceiptSha256 !== operationProof.terminalReceiptSha256))
-  ) {
+  if (loaded !== null) {
     refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
   }
   return release;
@@ -459,7 +539,7 @@ async function assertSnapshotPredecessors(
     if (head !== null) {
       let terminal;
       try {
-        terminal = await loadProviderOperationById(
+        terminal = await loadProviderTerminalReceiptProof(
           ctx,
           head.terminalOperationId,
         );
@@ -468,6 +548,10 @@ async function assertSnapshotPredecessors(
       }
       if (
         terminal === null ||
+        terminal.operationKind !== head.terminalOperationKind ||
+        terminal.releaseId !== head.releaseId ||
+        terminal.platformKey !== head.platformKey ||
+        terminal.publicProviderReleaseId !== head.publicProviderReleaseId ||
         terminal.terminalReceiptSha256 !== head.terminalReceiptSha256
       ) {
         refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
@@ -536,6 +620,32 @@ async function buildManifestProtections(
       addManifestReason(entries, document, reason);
     }
   }
+  const protectHeatReferences = async (
+    documents: readonly Doc<"globalCatalogManifests">[],
+  ): Promise<void> => {
+    for (const document of documents) {
+      const heatReference = await ctx.db
+        .query("repackHeatSignalSets")
+        .withIndex("by_manifest_id", (index) =>
+          index.eq("manifestId", document._id)
+        )
+        .take(1);
+      if (heatReference.length === 0) continue;
+      await assertManifestDocument(ctx, document);
+      addManifestReason(entries, document, "heat_reference");
+    }
+  };
+  for (const lifecycle of ["staging", "failed", "complete"] as const) {
+    const oldest = await ctx.db
+      .query("globalCatalogManifests")
+      .withIndex(
+        "by_lifecycle_and_retention_eligible_at_and_public_release_id",
+        (index) => index.eq("lifecycle", lifecycle),
+      )
+      .order("asc")
+      .take(MANIFEST_SCAN_LIMIT);
+    await protectHeatReferences(oldest);
+  }
   const recentComplete = await ctx.db
     .query("globalCatalogManifests")
     .withIndex(
@@ -545,10 +655,14 @@ async function buildManifestProtections(
     )
     .order("desc")
     .take(MANIFEST_SCAN_LIMIT);
+  await protectHeatReferences(recentComplete);
   let additional = 0;
   for (const document of recentComplete) {
     if (entries.has(document._id)) continue;
-    if (additional === MAX_CATALOG_RETENTION_ADDITIONAL_COMPLETE) break;
+    if (
+      additional === MAX_CATALOG_RETENTION_ADDITIONAL_COMPLETE ||
+      entries.size === MAX_CATALOG_RETENTION_PROTECTED_MANIFESTS
+    ) break;
     await assertManifestDocument(ctx, document);
     addManifestReason(entries, document, "complete_allowance");
     additional += 1;
@@ -585,6 +699,11 @@ export async function selectCatalogManifestRetentionCandidate(
   >,
   now: string,
 ): Promise<Doc<"globalCatalogManifests"> | null> {
+  const firstUnprotected = (
+    documents: readonly Doc<"globalCatalogManifests">[],
+  ): Doc<"globalCatalogManifests"> | undefined => {
+    return documents.find((document) => !protectedManifests.has(document._id));
+  };
   const candidates: Doc<"globalCatalogManifests">[] = [];
   for (const lifecycle of ["staging", "failed", "complete"] as const) {
     const aged = await ctx.db
@@ -596,7 +715,7 @@ export async function selectCatalogManifestRetentionCandidate(
       )
       .order("asc")
       .take(MANIFEST_SCAN_LIMIT);
-    const candidate = aged.find(({ _id }) => !protectedManifests.has(_id));
+    const candidate = firstUnprotected(aged);
     if (candidate !== undefined) candidates.push(candidate);
   }
   const complete = await ctx.db
@@ -607,7 +726,7 @@ export async function selectCatalogManifestRetentionCandidate(
     )
     .order("asc")
     .take(MANIFEST_SCAN_LIMIT);
-  const overflow = complete.find(({ _id }) => !protectedManifests.has(_id));
+  const overflow = firstUnprotected(complete);
   if (overflow !== undefined) candidates.push(overflow);
   candidates.sort((left, right) =>
     compareCodeUnits(left.retentionEligibleAt, right.retentionEligibleAt) ||
@@ -622,23 +741,30 @@ async function buildProviderProtectionsForPlatform(
   ctx: MutationCtx,
   platformKey: string,
   proof: CatalogRetentionPostgresProofSnapshot,
-  manifests: ReadonlyMap<Id<"globalCatalogManifests">, ManifestEntry>,
   pendingManifestProviderReferences:
     readonly GlobalCatalogProviderReferenceV1[],
   head: Doc<"providerCatalogCompletedHeads"> | null,
   activeManifestId: Id<"globalCatalogManifests"> | null,
+  retainedManifestReferences:
+    readonly Doc<"catalogManifestProviderReferences">[],
+  allManifestReferences:
+    readonly Doc<"catalogManifestProviderReferences">[] | null,
+  includeProviderOperationProtections: boolean,
   now: string,
 ): Promise<Map<Id<"providerCatalogReleases">, ProviderEntry>> {
   const entries = new Map<Id<"providerCatalogReleases">, ProviderEntry>();
   const external = proof.providerProtectionsByPlatform.find(
     (group) => group.platformKey === platformKey,
   );
-  for (const protection of external?.releases ?? []) {
-    addProviderReason(
-      entries,
-      await assertProviderOperationProof(ctx, protection),
-      protection.reason,
-    );
+  if (includeProviderOperationProtections) {
+    for (const protection of external?.releases ?? []) {
+      await addProvenProviderReason(
+        ctx,
+        entries,
+        await assertProviderOperationProof(ctx, protection),
+        protection.reason,
+      );
+    }
   }
   for (const reference of pendingManifestProviderReferences) {
     if (reference.platformKey !== platformKey) continue;
@@ -646,31 +772,47 @@ async function buildProviderProtectionsForPlatform(
     if (release.lifecycle !== "complete") {
       refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
     }
-    addProviderReason(entries, release, "in_flight_attempt");
-  }
-  for (const { document: manifest } of manifests.values()) {
-    const references = await assertExactCatalogManifestProviderReferences(
+    await addProvenProviderReason(
       ctx,
-      manifest,
+      entries,
+      release,
+      "in_flight_attempt",
     );
-    const reference = references.find((candidate) =>
-      candidate.platformKey === platformKey
-    );
-    if (reference === undefined) continue;
-    const release = await ctx.db.get(
-      "providerCatalogReleases",
-      reference.releaseId,
-    );
+  }
+  const manifestReferences = allManifestReferences ??
+    retainedManifestReferences;
+  for (const reference of manifestReferences) {
+    let completion;
+    try {
+      completion = await loadProviderReleaseCompletionProof(
+        ctx,
+        reference.releaseId,
+      );
+    } catch {
+      return refuseCatalogRetention("CATALOG_RETENTION_REFERENCE_INVALID");
+    }
     if (
-      release === null || release.lifecycle !== "complete" ||
-      release.publicProviderReleaseId !== reference.publicProviderReleaseId ||
-      release.providerReleaseFingerprint !==
+      completion.platformKey !== platformKey ||
+      completion.publicProviderReleaseId !==
+        reference.publicProviderReleaseId ||
+      completion.providerReleaseFingerprint !==
         reference.providerReleaseFingerprint
     ) {
       refuseCatalogRetention("CATALOG_RETENTION_REFERENCE_INVALID");
     }
-    addProviderReason(entries, release, "retained_manifest_reference");
-    if (manifest._id === activeManifestId) {
+    const release: ProtectedProviderRelease = {
+      _id: completion.releaseId,
+      platformKey: completion.platformKey,
+      publicProviderReleaseId: completion.publicProviderReleaseId,
+      providerReleaseFingerprint: completion.providerReleaseFingerprint,
+      lifecycle: "complete",
+    };
+    addProviderReason(
+      entries,
+      release,
+      "retained_manifest_reference",
+    );
+    if (reference.manifestId === activeManifestId) {
       addProviderReason(entries, release, "active_head");
     }
   }
@@ -683,7 +825,7 @@ async function buildProviderProtectionsForPlatform(
     ) {
       refuseCatalogRetention("CATALOG_RETENTION_REFERENCE_INVALID");
     }
-    addProviderReason(entries, release, "completed_head");
+    await addProvenProviderReason(ctx, entries, release, "completed_head");
   }
   const recentComplete = await ctx.db
     .query("providerCatalogReleases")
@@ -700,8 +842,17 @@ async function buildProviderProtectionsForPlatform(
   let additional = 0;
   for (const release of recentComplete) {
     if (entries.has(release._id)) continue;
-    if (additional === MAX_CATALOG_RETENTION_ADDITIONAL_COMPLETE) break;
-    addProviderReason(entries, release, "complete_allowance");
+    if (
+      additional === MAX_CATALOG_RETENTION_ADDITIONAL_COMPLETE ||
+      entries.size ===
+        MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES_PER_PLATFORM
+    ) break;
+    await addProvenProviderReason(
+      ctx,
+      entries,
+      release,
+      "complete_allowance",
+    );
     additional += 1;
   }
   for (const lifecycle of ["staging", "failed"] as const) {
@@ -813,6 +964,13 @@ export async function selectProviderRetentionCandidate(
     if (references.length !== 0) {
       refuseCatalogRetention("CATALOG_RETENTION_RETENTION_UNSAFE");
     }
+    if (selected.lifecycle === "complete") {
+      try {
+        await assertCompactProviderReleaseCompletion(ctx, selected);
+      } catch {
+        return refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
+      }
+    }
   }
   return selected;
 }
@@ -868,6 +1026,8 @@ export async function buildCatalogRetentionGraph(
   ctx: MutationCtx,
   proof: CatalogRetentionPostgresProofSnapshot,
   now: string,
+  phase: "manifests" | "provider_releases",
+  targetPlatformKey: string | null = null,
 ): Promise<CatalogRetentionGraph> {
   const { configuredPlatforms, activeState, heads } =
     await assertSnapshotPredecessors(ctx, proof);
@@ -883,21 +1043,98 @@ export async function buildCatalogRetentionGraph(
     now,
   );
   const manifests = manifestProtections.entries;
+  const retainedReferencesByPlatform = new Map<
+    string,
+    Doc<"catalogManifestProviderReferences">[]
+  >(configuredPlatforms.map((platformKey) => [platformKey, []]));
+  for (const { document } of manifests.values()) {
+    let references;
+    try {
+      references = await assertExactCatalogManifestProviderReferences(
+        ctx,
+        document,
+      );
+    } catch {
+      return refuseCatalogRetention("CATALOG_RETENTION_REFERENCE_INVALID");
+    }
+    for (const reference of references) {
+      const platformReferences = retainedReferencesByPlatform.get(
+        reference.platformKey,
+      );
+      if (platformReferences === undefined) {
+        refuseCatalogRetention("CATALOG_RETENTION_REFERENCE_INVALID");
+      }
+      platformReferences.push(reference);
+    }
+  }
   const providers = new Map<
     string,
     Map<Id<"providerCatalogReleases">, ProviderEntry>
   >();
-  for (const platformKey of configuredPlatforms) {
+  const allReferencesByPlatform = new Map<
+    string,
+    readonly Doc<"catalogManifestProviderReferences">[]
+  >();
+  const providerPlatforms = phase === "provider_releases"
+    ? targetPlatformKey !== null && configuredPlatforms.includes(
+        targetPlatformKey,
+      )
+      ? [targetPlatformKey]
+      : refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE")
+    : configuredPlatforms;
+  if (phase === "provider_releases") {
+    try {
+      const loaded = await Promise.all(providerPlatforms.map(
+        async (platformKey) => [
+          platformKey,
+          await loadManifestReferencesForPlatformAfterAudit(ctx, platformKey),
+        ] as const,
+      ));
+      const manifestDocuments = new Map<
+        Id<"globalCatalogManifests">,
+        Doc<"globalCatalogManifests">
+      >();
+      for (const [, references] of loaded) {
+        for (const reference of references) {
+          let manifest = manifestDocuments.get(reference.manifestId);
+          if (manifest === undefined) {
+            manifest = await ctx.db.get(
+              "globalCatalogManifests",
+              reference.manifestId,
+            ) ?? undefined;
+            if (manifest === undefined) {
+              refuseCatalogRetention("CATALOG_RETENTION_REFERENCE_INVALID");
+            }
+            manifestDocuments.set(manifest._id, manifest);
+          }
+          if (
+            manifest.publicReleaseId !== reference.manifestPublicReleaseId ||
+            manifest.manifestFingerprint !== reference.manifestFingerprint
+          ) {
+            refuseCatalogRetention("CATALOG_RETENTION_REFERENCE_INVALID");
+          }
+        }
+      }
+      for (const [platformKey, references] of loaded) {
+        allReferencesByPlatform.set(platformKey, references);
+      }
+    } catch {
+      return refuseCatalogRetention("CATALOG_RETENTION_REFERENCE_INVALID");
+    }
+  }
+  for (const platformKey of providerPlatforms) {
     providers.set(
       platformKey,
       await buildProviderProtectionsForPlatform(
         ctx,
         platformKey,
         proof,
-        manifests,
         manifestProtections.pendingProviderReferences,
         heads.get(platformKey) ?? null,
         activeState.document?.activeManifestId ?? null,
+        retainedReferencesByPlatform.get(platformKey) ?? [],
+        allReferencesByPlatform.get(platformKey) ?? null,
+        phase === "provider_releases",
         now,
       ),
     );

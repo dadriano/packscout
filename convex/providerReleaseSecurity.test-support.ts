@@ -173,6 +173,7 @@ export async function buildProviderPublishPlan(
     dataAsOf?: string;
     platformKey?: string;
     publicChangeSequence?: string;
+    publicAssetOrigins?: readonly string[];
     settledAt?: string;
     vendorDisplayName?: string;
     publicVendorId?: string;
@@ -217,7 +218,7 @@ export async function buildProviderPublishPlan(
   const contentHash = await recomputeProviderCatalogReleaseContentHashV1({
     entityHashes,
   });
-  const publicAssetOrigins: string[] = [];
+  const publicAssetOrigins = [...(input.publicAssetOrigins ?? [])];
   const checkpointSequence = input.checkpointSequence ?? "20";
   const platformKey = input.platformKey ?? "alpha";
   const dataAsOf = input.dataAsOf ?? "2026-08-15T11:58:00.000Z";

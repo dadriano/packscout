@@ -114,11 +114,6 @@ async function publicVisibility(t: ProviderTest) {
   return {
     shell: await t.query(api.publicRepacks.getPublicShellStatus, {}),
     dashboard: await t.query(api.publicRepacks.getDashboardBundle, {}),
-    legacy: await t.run(async (ctx) => ({
-      state: await ctx.db.query("dataReleaseState").unique(),
-      releases: await ctx.db.query("dataReleases").take(10),
-      publications: await ctx.db.query("dataReleasePublications").take(10),
-    })),
   };
 }
 
@@ -465,7 +460,7 @@ describe("provider release HTTP security", () => {
       ...providerOperationEnvelope("provider:cleanup:beta:authority"),
       platformKey: plan.platformKey,
       expectedCompletedHead: expected,
-      cleanupKind: "expired_provider_artifacts" as const,
+      cleanupKind: "expired_auth_nonces" as const,
       maximumDocuments: 1,
     };
     await expectError(
@@ -837,35 +832,15 @@ describe("provider release HTTP security", () => {
       operationId: "provider:cleanup:alpha:artifacts:1",
       idempotencyKey: "provider:cleanup:alpha:artifacts:1",
     };
-    const firstCleanup = await receipt(await signedFetch(
-      t,
-      PRODUCTION_PROVIDER_RELEASE_PATHS.cleanup,
-      cleanupOne,
-    ));
-    expect(firstCleanup).toMatchObject({
-      terminalState: "continuation_required",
-      details: { deletedDocumentCount: 1, hasMore: true },
-    });
-    expect(await publicVisibility(t)).toEqual(baseline);
-    expect(await receipt(await signedFetch(
-      t,
-      PRODUCTION_PROVIDER_RELEASE_PATHS.cleanup,
-      cleanupOne,
-    ))).toEqual(firstCleanup);
-    expect(await publicVisibility(t)).toEqual(baseline);
-    const secondCleanup = await receipt(await signedFetch(
-      t,
-      PRODUCTION_PROVIDER_RELEASE_PATHS.cleanup,
-      {
-        ...cleanupBase,
-        operationId: "provider:cleanup:alpha:artifacts:2",
-        idempotencyKey: "provider:cleanup:alpha:artifacts:2",
-      },
-    ));
-    expect(secondCleanup).toMatchObject({
-      terminalState: "complete",
-      details: { deletedDocumentCount: 1, hasMore: false },
-    });
+    await expectError(
+      await signedFetch(
+        t,
+        PRODUCTION_PROVIDER_RELEASE_PATHS.cleanup,
+        cleanupOne,
+      ),
+      400,
+      "PROVIDER_RELEASE_REQUEST_INVALID",
+    );
     expect(await publicVisibility(t)).toEqual(baseline);
     const nonceCleanup = await receipt(await signedFetch(
       t,

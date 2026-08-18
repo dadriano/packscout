@@ -109,8 +109,6 @@ async function databaseCounts(t: DataReleaseTest) {
       (await ctx.db.query("providerCatalogOperations").take(3)).length,
     manifestOperations:
       (await ctx.db.query("catalogManifestOperations").take(3)).length,
-    legacyStates: (await ctx.db.query("dataReleaseState").take(3)).length,
-    legacyReleases: (await ctx.db.query("dataReleases").take(3)).length,
   }));
 }
 
@@ -341,8 +339,6 @@ describe("mock V2 data release", () => {
       shardProofs: 2,
       providerOperations: 2,
       manifestOperations: 1,
-      legacyStates: 0,
-      legacyReleases: 0,
     });
   });
 
@@ -365,8 +361,6 @@ describe("mock V2 data release", () => {
       shardProofs: 0,
       providerOperations: 0,
       manifestOperations: 0,
-      legacyStates: 0,
-      legacyReleases: 0,
     });
 
     enableSeed("production");
@@ -388,8 +382,6 @@ describe("mock V2 data release", () => {
       shardProofs: 0,
       providerOperations: 0,
       manifestOperations: 0,
-      legacyStates: 0,
-      legacyReleases: 0,
     });
   });
 
@@ -405,7 +397,7 @@ describe("mock V2 data release", () => {
     expect(dashboard.data.kpis.totalRepacks).toBe(5);
     expect(dashboard.data.selectedRepack).not.toBeNull();
     expect(dashboard.data.details.every(({ heat }) =>
-      heat.status === "unavailable" && heat.reason === "RELEASE_MISMATCH"
+      heat.status === "unavailable" && heat.reason === "NOT_PUBLISHED"
     )).toBe(true);
 
     const list = await t.query(api.publicRepacks.listPublicRepacks, {

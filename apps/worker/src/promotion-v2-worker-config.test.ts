@@ -9,6 +9,9 @@ import {
 } from "./promotion-v2-worker-config.ts";
 
 const secret = Buffer.alloc(32, 7).toString("base64");
+const secret2 = Buffer.alloc(32, 8).toString("base64");
+const secret3 = Buffer.alloc(32, 9).toString("base64");
+const secret4 = Buffer.alloc(32, 10).toString("base64");
 
 function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -16,12 +19,12 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     PACKSCOUT_CATALOG_DEPLOYMENT_KEY: "production-us",
     PACKSCOUT_CATALOG_PROVIDER_CREDENTIALS: canonicalJson({
       alpha: { keyId: "provider.alpha.v1", secretBase64: secret },
-      beta: { keyId: "provider.beta.v1", secretBase64: secret },
+      beta: { keyId: "provider.beta.v1", secretBase64: secret2 },
     }),
     PACKSCOUT_CATALOG_MANIFEST_PUBLISH_KEY_ID: "manifest.publish.v1",
-    PACKSCOUT_CATALOG_MANIFEST_PUBLISH_SECRET_BASE64: secret,
+    PACKSCOUT_CATALOG_MANIFEST_PUBLISH_SECRET_BASE64: secret3,
     PACKSCOUT_CATALOG_MANIFEST_CLEAR_KEY_ID: "manifest.clear.v1",
-    PACKSCOUT_CATALOG_MANIFEST_CLEAR_SECRET_BASE64: secret,
+    PACKSCOUT_CATALOG_MANIFEST_CLEAR_SECRET_BASE64: secret4,
     ...overrides,
   };
 }
@@ -44,11 +47,11 @@ test("reads canonical bounded provider and distinct manifest credentials", () =>
 
 test("refuses noncanonical, duplicate, malformed, or oversized provider maps", () => {
   const invalid = [
-    JSON.stringify({ beta: { keyId: "provider.beta.v1", secretBase64: secret },
+    JSON.stringify({ beta: { keyId: "provider.beta.v1", secretBase64: secret2 },
       alpha: { keyId: "provider.alpha.v1", secretBase64: secret } }),
     canonicalJson({
       alpha: { keyId: "provider.shared.v1", secretBase64: secret },
-      beta: { keyId: "provider.shared.v1", secretBase64: secret },
+      beta: { keyId: "provider.shared.v1", secretBase64: secret2 },
     }),
     canonicalJson({
       alpha: { keyId: "provider.alpha.v1", secretBase64: secret, leak: true },
@@ -77,7 +80,7 @@ test("retains exact credentials for disabled lanes until configuration removal",
   ));
   const betaOnly = readPromotionV2WorkerConfiguration(environment({
     PACKSCOUT_CATALOG_PROVIDER_CREDENTIALS: canonicalJson({
-      beta: { keyId: "provider.beta.v1", secretBase64: secret },
+      beta: { keyId: "provider.beta.v1", secretBase64: secret2 },
     }),
   }));
   assert.throws(
@@ -136,6 +139,25 @@ test("requires disjoint provider, manifest publish, and manifest clear key IDs",
     assert.throws(
       () => readPromotionV2WorkerConfiguration(environment(overrides)),
       PromotionV2WorkerConfigurationError,
+    );
+  }
+});
+
+test("requires disjoint provider and manifest signing secret bytes", () => {
+  for (const overrides of [
+    { PACKSCOUT_CATALOG_MANIFEST_CLEAR_SECRET_BASE64: secret3 },
+    { PACKSCOUT_CATALOG_MANIFEST_PUBLISH_SECRET_BASE64: secret },
+    {
+      PACKSCOUT_CATALOG_PROVIDER_CREDENTIALS: canonicalJson({
+        alpha: { keyId: "provider.alpha.v1", secretBase64: secret },
+        beta: { keyId: "provider.beta.v1", secretBase64: secret },
+      }),
+    },
+  ]) {
+    assert.throws(
+      () => readPromotionV2WorkerConfiguration(environment(overrides)),
+      (error: unknown) => error instanceof PromotionV2WorkerConfigurationError &&
+        error.code === "PROMOTION_V2_CREDENTIAL_ROLE_CONFLICT",
     );
   }
 });

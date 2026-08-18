@@ -110,7 +110,33 @@ test("startup fails closed when the expected Prisma migration is not ready", asy
   try {
     await harness.client.$executeRaw`
       delete from public."_prisma_migrations"
-      where migration_name = '20260816020000_provider_manifest_promotion'
+      where migration_name = '20260816040000_catalog_promotion_retention'
+    `;
+    const lifecycle = harness.createClientLifecycle();
+    try {
+      await assert.rejects(
+        lifecycle.start(),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(error.message, "PackScout database schema is not ready.");
+          return true;
+        },
+      );
+    } finally {
+      await lifecycle.close();
+    }
+  } finally {
+    await harness.close();
+  }
+});
+
+test("startup fails closed when the expected migration checksum is inconsistent", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await harness.client.$executeRaw`
+      update public."_prisma_migrations"
+      set checksum = ${"0".repeat(64)}
+      where migration_name = '20260816040000_catalog_promotion_retention'
     `;
     const lifecycle = harness.createClientLifecycle();
     try {

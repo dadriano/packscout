@@ -4,8 +4,13 @@ import { canonicalJson } from "./data-release-v2-canonical.ts";
 import {
   CATALOG_RETENTION_SCHEMA_VERSION,
   MAX_CATALOG_RETENTION_ARTIFACT_DOCUMENTS,
+  MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  MAX_CATALOG_RETENTION_POSTGRES_PROOF_BYTES,
+  catalogRetentionManifestOperationProofSchema,
   catalogRetentionManifestReceiptSchema,
   catalogRetentionManifestRequestSchema,
+  catalogRetentionPostgresProofSnapshotSchema,
+  catalogRetentionProviderOperationProofSchema,
   catalogRetentionPostgresProofSnapshotDigest,
   catalogRetentionProviderRequestSchema,
   catalogRetentionReceiptDigest,
@@ -19,6 +24,18 @@ import {
 const SHA_A = "a".repeat(64);
 const SHA_B = "b".repeat(64);
 const SHA_C = "c".repeat(64);
+
+const MANIFEST_IDENTITY = {
+  publicReleaseId: "00000000-0000-5000-8000-000000000001",
+  manifestFingerprint: SHA_A,
+  sharedConfigurationEpoch: {
+    configurationKey: "catalog",
+    revision: 1,
+    publicChangeSequence: "1",
+    configurationHash: SHA_B,
+  },
+  providerReferenceSetHash: SHA_C,
+} as const;
 
 async function postgresProof(
   overrides: Partial<CatalogRetentionPostgresProofSnapshot> = {},
@@ -98,17 +115,7 @@ test("retention requests accept only canonical proof snapshots and no candidate 
 });
 
 test("external protections are bounded, ordered, and exact-operation bound", async () => {
-  const manifest = {
-    publicReleaseId: "00000000-0000-5000-8000-000000000001",
-    manifestFingerprint: SHA_A,
-    sharedConfigurationEpoch: {
-      configurationKey: "catalog",
-      revision: 1,
-      publicChangeSequence: "1",
-      configurationHash: SHA_B,
-    },
-    providerReferenceSetHash: SHA_C,
-  };
+  const manifest = MANIFEST_IDENTITY;
   const valid = await postgresProof({
     manifestProtections: [{
       manifest,
@@ -117,7 +124,7 @@ test("external protections are bounded, ordered, and exact-operation bound", asy
         operationKind: "activateManifest",
         operationId: "manifest:activate:1",
         operationState: "acknowledged",
-        canonicalRequestBody: "{}",
+        canonicalRequestBody: null,
         requestDigest: SHA_A,
         terminalReceiptSha256: SHA_B,
       },
@@ -143,7 +150,7 @@ test("external protections are bounded, ordered, and exact-operation bound", asy
         operationKind: "rollback",
         operationId: "manifest:rollback:1",
         operationState: "acknowledged",
-        canonicalRequestBody: "{}",
+        canonicalRequestBody: null,
         requestDigest: SHA_A,
         terminalReceiptSha256: SHA_B,
       },
@@ -158,6 +165,164 @@ test("external protections are bounded, ordered, and exact-operation bound", asy
     postgresProof: invalidKind,
     phase: "manifests",
   }).success, false);
+});
+
+test("operation proofs omit acknowledged bodies and retain pending or sent bodies", () => {
+  const cases = [
+    {
+      schema: catalogRetentionManifestOperationProofSchema,
+      operationKind: "activateManifest" as const,
+      operationId: "manifest:activate:compact-proof",
+    },
+    {
+      schema: catalogRetentionProviderOperationProofSchema,
+      operationKind: "finalize" as const,
+      operationId: "provider:finalize:compact-proof",
+    },
+  ];
+  for (const { schema, operationKind, operationId } of cases) {
+    const base = { operationKind, operationId, requestDigest: SHA_A };
+    assert.equal(schema.safeParse({
+      ...base,
+      operationState: "acknowledged",
+      canonicalRequestBody: null,
+      terminalReceiptSha256: SHA_B,
+    }).success, true);
+    assert.equal(schema.safeParse({
+      ...base,
+      operationState: "acknowledged",
+      canonicalRequestBody: canonicalJson({ operationId }),
+      terminalReceiptSha256: SHA_B,
+    }).success, false);
+    assert.equal(schema.safeParse({
+      ...base,
+      operationState: "acknowledged",
+      canonicalRequestBody: null,
+      terminalReceiptSha256: null,
+    }).success, false);
+    for (const operationState of ["pending", "sent"] as const) {
+      assert.equal(schema.safeParse({
+        ...base,
+        operationState,
+        canonicalRequestBody: canonicalJson({ operationId }),
+        terminalReceiptSha256: null,
+      }).success, true);
+      assert.equal(schema.safeParse({
+        ...base,
+        operationState,
+        canonicalRequestBody: null,
+        terminalReceiptSha256: null,
+      }).success, false);
+      assert.equal(schema.safeParse({
+        ...base,
+        operationState,
+        canonicalRequestBody: canonicalJson({ operationId }),
+        terminalReceiptSha256: SHA_B,
+      }).success, false);
+    }
+  }
+});
+
+test("oversized canonical proofs and publication requests fail closed", async () => {
+  const canonicalProofOperationBody = canonicalJson({
+    padding: "x".repeat(MAX_CATALOG_RETENTION_POSTGRES_PROOF_BYTES),
+  });
+  assert.ok(
+    new TextEncoder().encode(canonicalProofOperationBody).byteLength <=
+      MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  );
+  const oversizedProof = await postgresProof({
+    manifestProtections: [{
+      manifest: MANIFEST_IDENTITY,
+      reason: "in_flight_attempt",
+      operationProof: {
+        operationKind: "activateManifest",
+        operationId: "manifest:activate:oversized-proof",
+        operationState: "pending",
+        canonicalRequestBody: canonicalProofOperationBody,
+        requestDigest: SHA_A,
+        terminalReceiptSha256: null,
+      },
+    }],
+  });
+  const canonicalProofBody = canonicalJson(oversizedProof);
+  assert.ok(
+    new TextEncoder().encode(canonicalProofBody).byteLength >
+      MAX_CATALOG_RETENTION_POSTGRES_PROOF_BYTES,
+  );
+  assert.ok(
+    new TextEncoder().encode(canonicalProofBody).byteLength <
+      MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  );
+  assert.equal(
+    catalogRetentionPostgresProofSnapshotSchema.safeParse(oversizedProof)
+      .success,
+    false,
+  );
+  const proofBoundRequest = {
+    schemaVersion: CATALOG_RETENTION_SCHEMA_VERSION,
+    operationId: "retention:manifest:oversized-proof",
+    idempotencyKey: "retention:manifest:oversized-proof",
+    expectedRetentionGeneration: 0,
+    maximumDocuments: MAX_CATALOG_RETENTION_ARTIFACT_DOCUMENTS,
+    postgresProof: oversizedProof,
+    phase: "manifests" as const,
+  };
+  const canonicalProofBoundRequest = canonicalJson(proofBoundRequest);
+  assert.ok(
+    new TextEncoder().encode(canonicalProofBoundRequest).byteLength <
+      MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  );
+  assert.equal(
+    catalogRetentionManifestRequestSchema.safeParse(proofBoundRequest).success,
+    false,
+  );
+  assert.equal(
+    parseCatalogRetentionPublicationJson(
+      canonicalProofBoundRequest,
+      catalogRetentionManifestRequestSchema,
+    ),
+    null,
+  );
+
+  const maximumOperationBody = canonicalJson(
+    "x".repeat(MAX_CATALOG_RETENTION_HTTP_BODY_BYTES - 2),
+  );
+  assert.equal(
+    new TextEncoder().encode(maximumOperationBody).byteLength,
+    MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  );
+  const transportOversizedProof = await postgresProof({
+    manifestProtections: [{
+      manifest: MANIFEST_IDENTITY,
+      reason: "in_flight_attempt",
+      operationProof: {
+        operationKind: "activateManifest",
+        operationId: "manifest:activate:oversized-request",
+        operationState: "sent",
+        canonicalRequestBody: maximumOperationBody,
+        requestDigest: SHA_A,
+        terminalReceiptSha256: null,
+      },
+    }],
+  });
+  const transportOversizedBody = canonicalJson({
+    ...proofBoundRequest,
+    operationId: "retention:manifest:oversized-request",
+    idempotencyKey: "retention:manifest:oversized-request",
+    postgresProof: transportOversizedProof,
+  });
+  assert.ok(
+    new TextEncoder().encode(transportOversizedBody).byteLength >
+      MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  );
+  assert.equal(
+    parseCatalogRetentionPublicationJson(
+      transportOversizedBody,
+      catalogRetentionManifestRequestSchema,
+    ),
+    null,
+  );
 });
 
 test("sent but unacknowledged finalize and activate proofs remain representable", async () => {

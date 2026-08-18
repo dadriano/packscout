@@ -1,6 +1,8 @@
 import {
   REPACK_HEAT_SCENARIO_VERSION,
   parseRepackHeatTimestampMillis,
+  productionHeatManifestAlignmentSchema,
+  type ProductionHeatManifestAlignment,
   type PublicRepackHeatSignal,
 } from "@packscout/contracts";
 import {
@@ -11,9 +13,13 @@ import {
 } from "@packscout/services/repack-heat-calculator";
 import { sha256CanonicalJson } from "./dataReleaseCanonicalHash";
 import {
-  MOCK_DATA_RELEASE_PUBLIC_ID,
+  MOCK_DATA_RELEASE_CONFIDENCE_POLICY_VERSION,
   buildMockDataReleaseV2,
 } from "./mockDataReleaseFixture";
+import { buildCatalogManifestFromProviderPlans } from
+  "./mockCatalogManifestSeed";
+import { buildMockProviderCatalogReleasePlans } from
+  "./mockProviderCatalogFixture";
 
 export const MOCK_HEAT_SCENARIO_VERSION = REPACK_HEAT_SCENARIO_VERSION;
 export const MOCK_HEAT_AGGREGATION_VERSION =
@@ -38,7 +44,7 @@ export interface MockHeatSimulationControls {
 }
 
 export interface MockHeatFrame {
-  readonly publicReleaseId: typeof MOCK_DATA_RELEASE_PUBLIC_ID;
+  readonly manifestAlignment: ProductionHeatManifestAlignment;
   readonly publicHeatSnapshotId: string;
   readonly simulationRunId: string;
   readonly sequence: number;
@@ -260,7 +266,7 @@ export function mockHeatFrameBody(
   frame: Omit<MockHeatFrame, "contentHash" | "publicHeatSnapshotId">,
 ) {
   return {
-    publicReleaseId: frame.publicReleaseId,
+    manifestAlignment: frame.manifestAlignment,
     simulationRunId: frame.simulationRunId,
     sequence: frame.sequence,
     sourceKind: frame.sourceKind,
@@ -286,6 +292,17 @@ export async function buildMockHeatFrame(
   const publicRepackIds = buildMockDataReleaseV2().repacks
     .map(({ publicRepackId }) => publicRepackId)
     .sort();
+  const manifest = await buildCatalogManifestFromProviderPlans(
+    await buildMockProviderCatalogReleasePlans(),
+    MOCK_DATA_RELEASE_CONFIDENCE_POLICY_VERSION,
+    "mock",
+  );
+  const manifestAlignment = productionHeatManifestAlignmentSchema.parse({
+    publicReleaseId: manifest.publicReleaseId,
+    manifestFingerprint: manifest.manifestFingerprint,
+    sharedConfigurationEpoch: manifest.sharedConfigurationEpoch,
+    providerReferenceSetHash: manifest.providerReferenceSetHash,
+  });
   const simulationRunId = await sha256CanonicalJson(MOCK_HEAT_RUN_HASH_DOMAIN, {
     seed: controls.seed,
     startAt: controls.startAt,
@@ -316,7 +333,7 @@ export async function buildMockHeatFrame(
     expiresAt: iso(currentEnd + MOCK_HEAT_EXPIRY_MILLISECONDS),
   });
   const withoutIdentity = {
-    publicReleaseId: MOCK_DATA_RELEASE_PUBLIC_ID,
+    manifestAlignment,
     simulationRunId,
     sequence: controls.frameIndex,
     sourceKind: "simulated" as const,

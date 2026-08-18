@@ -28,6 +28,7 @@ import {
   parseCatalogRetentionRequest,
 } from "./catalogRetentionRequests";
 import {
+  advanceCatalogRetentionReferenceAudit,
   advanceCatalogRetentionGeneration,
   assertCatalogRetentionGeneration,
 } from "./catalogRetentionState";
@@ -138,16 +139,25 @@ async function retainManifestsRequest(
     request.expectedRetentionGeneration,
   );
   const serverTime = new Date().toISOString();
+  const eligibilityTime = request.postgresProof.evaluatedAt;
+  let referenceAudit = await advanceCatalogRetentionReferenceAudit(
+    ctx,
+    retentionState,
+    request.postgresProof.snapshotDigest,
+  );
   const before = await buildCatalogRetentionGraph(
     ctx,
     request.postgresProof,
-    serverTime,
+    eligibilityTime,
+    "manifests",
   );
-  const selected = await selectCatalogManifestRetentionCandidate(
-    ctx,
-    before.manifests,
-    serverTime,
-  );
+  const selected = referenceAudit.complete
+    ? await selectCatalogManifestRetentionCandidate(
+      ctx,
+      before.manifests,
+      eligibilityTime,
+    )
+    : null;
   let deletedManifestCount = 0;
   let deletedManifestReferenceCount = 0;
   if (selected !== null) {
@@ -174,22 +184,24 @@ async function retainManifestsRequest(
     deletedManifestReferenceCount = references.length;
   }
   const pruned = await pruneCatalogRetentionOperations(ctx, serverTime);
+  const next = referenceAudit.complete
+    ? await selectCatalogManifestRetentionCandidate(
+      ctx,
+      before.manifests,
+      eligibilityTime,
+    )
+    : null;
+  referenceAudit = {
+    ...referenceAudit,
+    manifestPhaseComplete: referenceAudit.complete && next === null,
+  };
   const retentionGeneration = await advanceCatalogRetentionGeneration(
     ctx,
     retentionState,
     serverTime,
+    referenceAudit,
   );
-  const after = await buildCatalogRetentionGraph(
-    ctx,
-    request.postgresProof,
-    serverTime,
-  );
-  const next = await selectCatalogManifestRetentionCandidate(
-    ctx,
-    after.manifests,
-    serverTime,
-  );
-  const hasMore = next !== null || pruned.hasMore;
+  const hasMore = !referenceAudit.complete || next !== null || pruned.hasMore;
   const receipt = await buildCatalogRetentionReceipt(
     (value) => catalogRetentionManifestReceiptSchema.parse(value),
     {
@@ -211,7 +223,7 @@ async function retainManifestsRequest(
           deletedManifestReferenceCount + pruned.deletedCount,
         deletedRetentionOperationCount: pruned.deletedCount,
         hasMore,
-        protectionSet: after.protectionSet,
+        protectionSet: before.protectionSet,
         selectedManifest: selected === null
           ? null
           : {
@@ -249,22 +261,41 @@ async function retainProviderRequest(
     request.expectedRetentionGeneration,
   );
   const serverTime = new Date().toISOString();
+  const eligibilityTime = request.postgresProof.evaluatedAt;
+  let referenceAudit = await advanceCatalogRetentionReferenceAudit(
+    ctx,
+    retentionState,
+    request.postgresProof.snapshotDigest,
+  );
+  if (!referenceAudit.complete) {
+    refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
+  }
+  if (!referenceAudit.manifestPhaseComplete) {
+    const manifestGraph = await buildCatalogRetentionGraph(
+      ctx,
+      request.postgresProof,
+      eligibilityTime,
+      "manifests",
+    );
+    const manifestCandidate = await selectCatalogManifestRetentionCandidate(
+      ctx,
+      manifestGraph.manifests,
+      eligibilityTime,
+    );
+    if (manifestCandidate !== null) {
+      refuseCatalogRetention("CATALOG_RETENTION_RETENTION_UNSAFE");
+    }
+    referenceAudit = { ...referenceAudit, manifestPhaseComplete: true };
+  }
   const before = await buildCatalogRetentionGraph(
     ctx,
     request.postgresProof,
-    serverTime,
+    eligibilityTime,
+    "provider_releases",
+    request.platformKey,
   );
   if (!before.configuredPlatforms.includes(request.platformKey)) {
     refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
-  }
-  if (
-    await selectCatalogManifestRetentionCandidate(
-      ctx,
-      before.manifests,
-      serverTime,
-    ) !== null
-  ) {
-    refuseCatalogRetention("CATALOG_RETENTION_RETENTION_UNSAFE");
   }
   const protectedReleases = before.providerReleasesByPlatform.get(
     request.platformKey,
@@ -276,7 +307,7 @@ async function retainProviderRequest(
     ctx,
     request.platformKey,
     protectedReleases,
-    serverTime,
+    eligibilityTime,
   );
   let deletedProviderOwnedDocumentCount = 0;
   let deletedProviderReleaseCount = 0;
@@ -299,23 +330,13 @@ async function retainProviderRequest(
     ctx,
     retentionState,
     serverTime,
+    referenceAudit,
   );
-  const after = await buildCatalogRetentionGraph(
-    ctx,
-    request.postgresProof,
-    serverTime,
-  );
-  const afterProtected = after.providerReleasesByPlatform.get(
-    request.platformKey,
-  );
-  if (afterProtected === undefined) {
-    refuseCatalogRetention("CATALOG_RETENTION_PROOF_INCOMPLETE");
-  }
   const next = await selectProviderRetentionCandidate(
     ctx,
     request.platformKey,
-    afterProtected,
-    serverTime,
+    protectedReleases,
+    eligibilityTime,
   );
   const hasMore = partial || next !== null || pruned.hasMore;
   const receipt = await buildCatalogRetentionReceipt(
@@ -339,7 +360,7 @@ async function retainProviderRequest(
           pruned.deletedCount,
         deletedRetentionOperationCount: pruned.deletedCount,
         hasMore,
-        protectionSet: after.protectionSet,
+        protectionSet: before.protectionSet,
         manifestPhaseComplete: true,
         selectedProviderRelease: selectedForReceipt === null
           ? null

@@ -57,6 +57,8 @@ export interface PromotionAttemptClaim {
   readonly contentIdentity: string | null;
   readonly publicationIdentity: string | null;
   readonly expectedPredecessorIdentity: string | null;
+  readonly manifestSourceProofBody: string | null;
+  readonly manifestSourceProofSha256: string | null;
   readonly claimToken: string;
   readonly claimExpiresAt: Date;
   readonly claimCount: number;
@@ -210,6 +212,8 @@ export interface PromotionAttemptRow {
   repackSearchIndexHash: string | null;
   publicVendorKeys: string[];
   preparedAt: Date | null;
+  manifestSourceProofBody: string | null;
+  manifestSourceProofSha256: string | null;
   claimToken: string | null;
   claimExpiresAt: Date | null;
   lastHeartbeatAt: Date | null;
@@ -246,6 +250,7 @@ export const failureCodePattern = /^[A-Z0-9_]{1,128}$/u;
 export const maximumOperationCount = 4_098;
 export const maximumRequestBytes = 131_072;
 export const maximumReceiptBytes = 262_144;
+export const maximumManifestSourceProofBytes = 4 * 1_024 * 1_024;
 export const pathByKind = Object.freeze({
   start: PRODUCTION_DATA_RELEASE_PATHS.start,
   applyBatch: PRODUCTION_DATA_RELEASE_PATHS.applyBatch,

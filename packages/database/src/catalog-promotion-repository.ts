@@ -23,6 +23,7 @@ import {
   failureCodePattern,
   mapPromotionOperation as mapOperation,
   maximumOperationCount,
+  maximumManifestSourceProofBytes,
   maximumReceiptBytes,
   maximumRequestBytes,
   operationIdPattern,
@@ -142,6 +143,8 @@ export class PrismaCatalogPromotionRepository {
              public_config_hash as "publicConfigHash",
              repack_search_index_hash as "repackSearchIndexHash",
              public_vendor_keys as "publicVendorKeys", prepared_at as "preparedAt",
+             manifest_source_proof_body as "manifestSourceProofBody",
+             manifest_source_proof_sha256 as "manifestSourceProofSha256",
              claim_token as "claimToken", claim_expires_at as "claimExpiresAt",
              last_heartbeat_at as "lastHeartbeatAt",
              claim_count as "claimCount", retry_count as "retryCount",
@@ -410,6 +413,8 @@ export class PrismaCatalogPromotionRepository {
                     public_config_hash as "publicConfigHash",
                     repack_search_index_hash as "repackSearchIndexHash",
                     public_vendor_keys as "publicVendorKeys", prepared_at as "preparedAt",
+                    manifest_source_proof_body as "manifestSourceProofBody",
+                    manifest_source_proof_sha256 as "manifestSourceProofSha256",
                     lane_key as "laneKey", claim_token as "claimToken",
                     claim_expires_at as "claimExpiresAt",
                     last_heartbeat_at as "lastHeartbeatAt",
@@ -453,6 +458,8 @@ export class PrismaCatalogPromotionRepository {
                   public_config_hash as "publicConfigHash",
                   repack_search_index_hash as "repackSearchIndexHash",
                   public_vendor_keys as "publicVendorKeys", prepared_at as "preparedAt",
+                  manifest_source_proof_body as "manifestSourceProofBody",
+                  manifest_source_proof_sha256 as "manifestSourceProofSha256",
                   lane_key as "laneKey", claim_token as "claimToken",
                   claim_expires_at as "claimExpiresAt",
                   last_heartbeat_at as "lastHeartbeatAt",
@@ -514,6 +521,10 @@ export class PrismaCatalogPromotionRepository {
     operations: readonly PromotionOperationInput[];
     catalogPrepared?: CatalogPromotionPreparedSummary;
     preparedClassification?: CatalogPromotionPreparedSummary["classification"];
+    manifestSourceProof?: Readonly<{
+      canonicalBody: string;
+      sha256: string;
+    }>;
   }): Promise<readonly PromotionOperationRecord[] | null> {
     if (!sha256Pattern.test(input.contentIdentity)) {
       throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
@@ -530,6 +541,17 @@ export class PrismaCatalogPromotionRepository {
       input.preparedClassification !== undefined &&
       input.catalogPrepared.classification !== input.preparedClassification
     ) throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
+    if (input.manifestSourceProof !== undefined) {
+      requireJsonText(
+        input.manifestSourceProof.canonicalBody,
+        maximumManifestSourceProofBytes,
+      );
+      if (
+        !sha256Pattern.test(input.manifestSourceProof.sha256) ||
+        sha256(input.manifestSourceProof.canonicalBody) !==
+          input.manifestSourceProof.sha256
+      ) throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
+    }
     this.requireOperations(input.operations);
     return this.database.$transaction(async (transaction) => {
       const attempt = await this.lockClaimedAttempt(transaction, input, input.now);
@@ -542,6 +564,16 @@ export class PrismaCatalogPromotionRepository {
         || (input.preparedClassification !== undefined &&
           attempt.preparedClassification !== null &&
           attempt.preparedClassification !== input.preparedClassification)
+        || (input.manifestSourceProof !== undefined &&
+          attempt.laneKey !== "heat")
+        || (attempt.laneKey === "heat" &&
+          input.manifestSourceProof === undefined)
+        || (attempt.manifestSourceProofBody !== null && (
+          input.manifestSourceProof === undefined ||
+          attempt.manifestSourceProofBody !==
+            input.manifestSourceProof.canonicalBody ||
+          attempt.manifestSourceProofSha256 !== input.manifestSourceProof.sha256
+        ))
         || (input.catalogPrepared !== undefined && (
           attempt.targetWatermark !== input.catalogPrepared.requestedWatermark
           || attempt.expectedPredecessorIdentity !==
@@ -604,6 +636,10 @@ export class PrismaCatalogPromotionRepository {
               ?? attempt.repackSearchIndexHash},
             public_vendor_keys = ${input.catalogPrepared?.publicVendorKeys
               ?? attempt.publicVendorKeys},
+            manifest_source_proof_body = ${input.manifestSourceProof
+              ?.canonicalBody ?? attempt.manifestSourceProofBody},
+            manifest_source_proof_sha256 = ${input.manifestSourceProof
+              ?.sha256 ?? attempt.manifestSourceProofSha256},
             prepared_at = ${input.catalogPrepared === undefined &&
                 input.preparedClassification === undefined
               ? attempt.preparedAt : input.now},
@@ -1028,6 +1064,8 @@ export class PrismaCatalogPromotionRepository {
       contentIdentity: row.contentIdentity,
       publicationIdentity: row.publicationIdentity,
       expectedPredecessorIdentity: row.expectedPredecessorIdentity,
+      manifestSourceProofBody: row.manifestSourceProofBody,
+      manifestSourceProofSha256: row.manifestSourceProofSha256,
       claimToken: row.claimToken,
       claimExpiresAt: row.claimExpiresAt,
       claimCount: row.claimCount,
@@ -1165,6 +1203,8 @@ export class PrismaCatalogPromotionRepository {
              public_config_hash as "publicConfigHash",
              repack_search_index_hash as "repackSearchIndexHash",
              public_vendor_keys as "publicVendorKeys", prepared_at as "preparedAt",
+             manifest_source_proof_body as "manifestSourceProofBody",
+             manifest_source_proof_sha256 as "manifestSourceProofSha256",
              claim_token as "claimToken", claim_expires_at as "claimExpiresAt",
              last_heartbeat_at as "lastHeartbeatAt",
              claim_count as "claimCount", retry_count as "retryCount",
@@ -1296,6 +1336,8 @@ export class PrismaCatalogPromotionRepository {
              public_config_hash as "publicConfigHash",
              repack_search_index_hash as "repackSearchIndexHash",
              public_vendor_keys as "publicVendorKeys", prepared_at as "preparedAt",
+             manifest_source_proof_body as "manifestSourceProofBody",
+             manifest_source_proof_sha256 as "manifestSourceProofSha256",
              claim_token as "claimToken", claim_expires_at as "claimExpiresAt",
              last_heartbeat_at as "lastHeartbeatAt",
              claim_count as "claimCount", retry_count as "retryCount", retry_at as "retryAt",
@@ -1326,6 +1368,8 @@ export class PrismaCatalogPromotionRepository {
              public_config_hash as "publicConfigHash",
              repack_search_index_hash as "repackSearchIndexHash",
              public_vendor_keys as "publicVendorKeys", prepared_at as "preparedAt",
+             manifest_source_proof_body as "manifestSourceProofBody",
+             manifest_source_proof_sha256 as "manifestSourceProofSha256",
              claim_token as "claimToken", claim_expires_at as "claimExpiresAt",
              last_heartbeat_at as "lastHeartbeatAt",
              claim_count as "claimCount", retry_count as "retryCount", retry_at as "retryAt",

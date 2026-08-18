@@ -4,7 +4,10 @@ import {
   productionAuthKeyIdSchema,
 } from "./data-release-v2-publication-auth.ts";
 import { sha256Schema, timestampSchema } from "./data-release-v2-values.ts";
-import { REPACK_HEAT_PUBLICATION_SCHEMA_VERSION } from "./repack-heat-publication.ts";
+import {
+  REPACK_HEAT_PUBLICATION_SCHEMA_VERSION,
+  productionHeatManifestAlignmentSchema,
+} from "./repack-heat-publication.ts";
 
 const operationIdSchema = z.string()
   .regex(/^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$/u);
@@ -33,7 +36,7 @@ export const productionHeatActiveStateReceiptSchema = z.union([
     result: z.literal("active_state"),
     details: z.object({
       activePublicHeatFrameId: z.null(),
-      catalogPublicReleaseId: z.null(),
+      manifestAlignment: z.null(),
       sourceWatermark: z.null(),
       frameSequence: z.literal(0),
       terminalReceiptSha256: z.null(),
@@ -47,12 +50,19 @@ export const productionHeatActiveStateReceiptSchema = z.union([
     result: z.literal("active_state"),
     details: z.object({
       activePublicHeatFrameId: publicIdSchema,
-      catalogPublicReleaseId: publicIdSchema,
+      manifestAlignment: productionHeatManifestAlignmentSchema,
       sourceWatermark: sourceWatermarkSchema,
       frameSequence: z.number().int().safe().positive(),
       terminalReceiptSha256: sha256Schema,
     }).strict(),
-  }).strict(),
+  }).strict().refine(
+    ({ publicationId, details }) =>
+      publicationId === details.activePublicHeatFrameId,
+    {
+      path: ["publicationId"],
+      message: "repack_heat_publication.identity_mismatch",
+    },
+  ),
 ]);
 
 export const productionHeatStartReceiptSchema = z.object({
@@ -62,7 +72,7 @@ export const productionHeatStartReceiptSchema = z.object({
   terminalState: z.literal("staging"),
   result: z.literal("created"),
   details: z.object({
-    catalogPublicReleaseId: publicIdSchema,
+    manifestAlignment: productionHeatManifestAlignmentSchema,
     frameHash: sha256Schema,
     signalSetHash: sha256Schema,
     sourceWatermark: sourceWatermarkSchema,
@@ -90,7 +100,7 @@ export const productionHeatBatchReceiptSchema = z.object({
 }).strict();
 
 const activatedDetailsSchema = z.object({
-  catalogPublicReleaseId: publicIdSchema,
+  manifestAlignment: productionHeatManifestAlignmentSchema,
   activePublicHeatFrameId: publicIdSchema,
   previousPublicHeatFrameId: publicIdSchema.nullable(),
   frameHash: sha256Schema,
@@ -109,7 +119,14 @@ export const productionHeatFinalizeReceiptSchema = z.object({
   terminalState: z.literal("complete"),
   result: z.literal("activated"),
   details: activatedDetailsSchema,
-}).strict();
+}).strict().refine(
+  ({ publicationId, details }) =>
+    publicationId === details.activePublicHeatFrameId,
+  {
+    path: ["publicationId"],
+    message: "repack_heat_publication.identity_mismatch",
+  },
+);
 
 export const productionHeatRefreshFrameReceiptSchema = z.object({
   ...receiptBaseShape,
@@ -118,7 +135,14 @@ export const productionHeatRefreshFrameReceiptSchema = z.object({
   terminalState: z.literal("complete"),
   result: z.literal("refreshed"),
   details: activatedDetailsSchema,
-}).strict();
+}).strict().refine(
+  ({ publicationId, details }) =>
+    publicationId === details.activePublicHeatFrameId,
+  {
+    path: ["publicationId"],
+    message: "repack_heat_publication.identity_mismatch",
+  },
+);
 
 export const productionHeatRetainReceiptSchema = z.object({
   ...receiptBaseShape,

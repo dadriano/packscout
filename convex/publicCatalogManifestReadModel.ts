@@ -1,7 +1,11 @@
 import {
   dataReleaseMetadataFromGlobalCatalogManifestV1,
+  productionHeatManifestAlignmentSchema,
   type DataReleaseMetadata,
+  type GlobalCatalogManifestV1,
+  type ProductionHeatManifestAlignment,
 } from "@packscout/contracts";
+import type { Doc } from "./_generated/dataModel";
 import { env, type QueryCtx } from "./_generated/server";
 import {
   assertCatalogManifestNotBlocked,
@@ -16,6 +20,9 @@ import {
 
 export type ActivePublicCatalogManifest = Readonly<{
   metadata: DataReleaseMetadata;
+  alignment: ProductionHeatManifestAlignment;
+  manifest: GlobalCatalogManifestV1;
+  manifestDocument: Doc<"globalCatalogManifests">;
   catalog: PublicProviderCatalog;
 }>;
 
@@ -55,7 +62,21 @@ export async function loadActivePublicCatalogManifest(
       categoryCount: loaded.manifest.counts.categories,
       repackCount: loaded.manifest.counts.repacks,
     });
-    return catalog === null ? null : { metadata, catalog };
+    const alignment = productionHeatManifestAlignmentSchema.parse({
+      publicReleaseId: loaded.manifest.publicReleaseId,
+      manifestFingerprint: loaded.manifest.manifestFingerprint,
+      sharedConfigurationEpoch: loaded.manifest.sharedConfigurationEpoch,
+      providerReferenceSetHash: loaded.manifest.providerReferenceSetHash,
+    });
+    return catalog === null
+      ? null
+      : {
+          metadata,
+          alignment,
+          manifest: loaded.manifest,
+          manifestDocument: loaded.manifestDocument,
+          catalog,
+        };
   } catch {
     return null;
   }

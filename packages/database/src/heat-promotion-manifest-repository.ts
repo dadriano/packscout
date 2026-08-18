@@ -1,33 +1,33 @@
 import { createHash } from "node:crypto";
 import {
-  EMPTY_BATCH_CHAIN_HASH,
-  MAX_PUBLIC_REPACKS_PER_RELEASE,
-  MAX_PRODUCTION_BATCH_BYTES,
   EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
+  MAX_PUBLIC_REPACKS_PER_RELEASE,
   PRODUCTION_HEAT_RETENTION_MILLISECONDS,
   canonicalJson,
-  extendProductionBatchChain,
-  productionApplyBatchRequestSchema,
-  productionBatchByteCount,
-  productionFinalizeRequestSchema,
-  productionHeatFinalizeRequestSchema,
+  extendProductionHeatSignalSetHash,
   productionHeatApplyBatchRequestSchema,
+  productionHeatBatchByteCount,
   productionHeatCoreByteCount,
+  productionHeatFinalizeRequestSchema,
   productionHeatReceiptHash,
   productionHeatReceiptSchema,
   productionHeatRefreshFrameRequestSchema,
   productionHeatStartRequestSchema,
-  productionReceiptHash,
-  productionReceiptSchema,
-  productionRefreshRequestSchema,
-  productionStartRequestSchema,
-  type ProductionHeatFrameEnvelope,
-  extendProductionHeatSignalSetHash,
+  productionHeatContentIdentity,
+  productionHeatManifestAlignmentSchema,
+  deriveProductionHeatFrameId,
+  recomputeProductionHeatFrameHash,
   recomputeProductionHeatBatchHash,
-  recomputeProductionBatchHash,
-  recomputeProductionManifestFingerprint,
+  type ProductionHeatFrameEnvelope,
+  type ProductionHeatManifestAlignment,
+  type ProductionHeatReceipt,
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
+import {
+  loadActiveCatalogHeatManifest,
+  parseHeatManifestSourceProof,
+  type ActiveCatalogHeatManifest,
+} from "./active-catalog-heat-manifest.ts";
 import type { PackscoutQueryClient } from "./database.ts";
 
 const uuidPattern =
@@ -35,16 +35,9 @@ const uuidPattern =
 const deploymentKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 
-export interface ProvenActiveCatalogHeatRelease {
-  readonly publicReleaseId: string;
-  readonly publicRepackIds: readonly string[];
-  readonly confirmedWatermark: bigint;
-  readonly terminalReceiptSha256: string;
-}
-
 export interface ProvenActiveHeatFrame {
   readonly publicHeatFrameId: string;
-  readonly catalogPublicReleaseId: string;
+  readonly manifestAlignment: ProductionHeatManifestAlignment;
   readonly frameSequence: number;
   readonly sourceWatermark: bigint;
   readonly signalSetHash: string;
@@ -62,15 +55,23 @@ interface LaneProofRow {
 interface AttemptProofRow {
   id: string;
   targetWatermark: bigint;
+  contentIdentity: string;
   publicationIdentity: string;
   terminalReceiptBody: string;
   terminalReceiptSha256: string;
+  manifestSourceProofBody: string;
+  manifestSourceProofSha256: string;
 }
 
 interface OperationProofRow {
   operationIndex: number;
+  operationId: string;
   operationKind: string;
   canonicalRequestBody: string;
+  requestSha256: string;
+  state: string;
+  receiptBody: string | null;
+  receiptSha256: string | null;
 }
 
 function uuid(value: string): Prisma.Sql {
@@ -82,10 +83,10 @@ function sha256(value: string): string {
 }
 
 function invalidProof(): never {
-  throw new Error("Promotion release proof is invalid.");
+  throw new Error("Heat promotion manifest proof is invalid.");
 }
 
-export class PrismaHeatPromotionReleaseRepository {
+export class PrismaHeatPromotionManifestRepository {
   readonly #deploymentKey: string;
   readonly #organizationId: string;
 
@@ -96,239 +97,15 @@ export class PrismaHeatPromotionReleaseRepository {
     if (
       !uuidPattern.test(binding.organizationId) ||
       !deploymentKeyPattern.test(binding.deploymentKey)
-    ) throw new RangeError("Heat promotion release binding is invalid.");
+    ) throw new RangeError("Heat promotion manifest binding is invalid.");
     this.#organizationId = binding.organizationId.toLowerCase();
     this.#deploymentKey = binding.deploymentKey;
   }
 
-  async loadActiveCatalogRelease(): Promise<ProvenActiveCatalogHeatRelease | null> {
-    const lane = await this.loadLaneProof("catalog");
-    if (lane === null) return null;
-    const active = await this.loadConfirmedAttempt("catalog", lane);
-    const activeReceipt = productionReceiptSchema.safeParse(
-      JSON.parse(active.terminalReceiptBody) as unknown,
-    );
-    if (
-      !activeReceipt.success ||
-      canonicalJson(activeReceipt.data) !== active.terminalReceiptBody ||
-      activeReceipt.data.publicationId !== lane.confirmedPublicationIdentity ||
-      !["finalize", "refreshObservation"].includes(
-        activeReceipt.data.operationKind,
-      )
-    ) invalidProof();
-    const {
-      receiptDigest: activeReceiptDigest,
-      ...activeReceiptWithoutDigest
-    } = activeReceipt.data;
-    if (
-      await productionReceiptHash(activeReceiptWithoutDigest) !==
-        activeReceiptDigest
-    ) invalidProof();
-    let activeRefreshContentHash: string | null = null;
-    if (activeReceipt.data.operationKind === "refreshObservation") {
-      const activeOperations = await this.loadOperations(active.id);
-      const activeOperation = activeOperations[0];
-      if (
-        activeOperations.length !== 1 ||
-        activeOperation?.operationKind !== "refreshObservation"
-      ) invalidProof();
-      const refresh = productionRefreshRequestSchema.safeParse(
-        JSON.parse(activeOperation.canonicalRequestBody) as unknown,
-      );
-      if (
-        !refresh.success ||
-        canonicalJson(refresh.data) !== activeOperation.canonicalRequestBody ||
-        refresh.data.operationId !== activeReceipt.data.operationId ||
-        refresh.data.publicReleaseId !== lane.confirmedPublicationIdentity ||
-        activeReceipt.data.requestDigest !==
-          sha256(activeOperation.canonicalRequestBody) ||
-        BigInt(refresh.data.observationSequence) !== lane.confirmedWatermark ||
-        activeReceipt.data.details.contentHash !== refresh.data.contentHash ||
-        activeReceipt.data.details.observationSequence !==
-          refresh.data.observationSequence ||
-        activeReceipt.data.details.dataAsOf !== refresh.data.dataAsOf ||
-        activeReceipt.data.details.lastSuccessfulObservationAt !==
-          refresh.data.lastSuccessfulObservationAt ||
-        activeReceipt.data.details.staleAt !== refresh.data.staleAt ||
-        activeReceipt.data.details.freshness !== refresh.data.freshness ||
-        activeReceipt.data.details.delayedVendorCount !==
-          refresh.data.delayedVendorCount
-      ) invalidProof();
-      activeRefreshContentHash = refresh.data.contentHash;
-    }
-
-    const publishedRows = await this.database.$queryRaw<AttemptProofRow[]>(Prisma.sql`
-      select id, target_watermark as "targetWatermark",
-             publication_identity as "publicationIdentity",
-             terminal_receipt_body as "terminalReceiptBody",
-             terminal_receipt_sha256 as "terminalReceiptSha256"
-      from public.promotion_attempts
-      where organization_id = ${uuid(this.#organizationId)}
-        and deployment_key = ${this.#deploymentKey}
-        and lane_key = 'catalog'
-        and state = 'published'
-        and publication_identity = ${lane.confirmedPublicationIdentity}
-        and terminal_receipt_body is not null
-        and terminal_receipt_sha256 is not null
-      order by target_watermark desc, terminal_at desc
-      limit 1
-    `);
-    const published = publishedRows[0];
-    if (
-      !published ||
-      sha256(published.terminalReceiptBody) !==
-        published.terminalReceiptSha256
-    ) invalidProof();
-    if (
-      activeReceipt.data.operationKind === "finalize" &&
-      active.id !== published.id
-    ) invalidProof();
-    const operations = await this.loadOperations(published.id);
-    const start = operations[0];
-    const finalize = operations.at(-1);
-    if (
-      !start || !finalize ||
-      operations.some(({ operationIndex }, index) => operationIndex !== index) ||
-      start.operationKind !== "start" ||
-      finalize.operationKind !== "finalize"
-    ) invalidProof();
-    const startRequest = productionStartRequestSchema.safeParse(
-      JSON.parse(start.canonicalRequestBody) as unknown,
-    );
-    const finalizeRequest = productionFinalizeRequestSchema.safeParse(
-      JSON.parse(finalize.canonicalRequestBody) as unknown,
-    );
-    if (
-      !startRequest.success ||
-      !finalizeRequest.success ||
-      canonicalJson(startRequest.data) !== start.canonicalRequestBody ||
-      canonicalJson(finalizeRequest.data) !== finalize.canonicalRequestBody ||
-      startRequest.data.publicationId !== lane.confirmedPublicationIdentity ||
-      finalizeRequest.data.publicationId !== lane.confirmedPublicationIdentity
-    ) invalidProof();
-    const publishedReceipt = productionReceiptSchema.safeParse(
-      JSON.parse(published.terminalReceiptBody) as unknown,
-    );
-    if (
-      !publishedReceipt.success ||
-      publishedReceipt.data.operationKind !== "finalize" ||
-      canonicalJson(publishedReceipt.data) !== published.terminalReceiptBody ||
-      publishedReceipt.data.publicationId !== lane.confirmedPublicationIdentity ||
-      publishedReceipt.data.operationId !== finalizeRequest.data.operationId ||
-      publishedReceipt.data.requestDigest !== sha256(finalize.canonicalRequestBody)
-    ) invalidProof();
-    const {
-      receiptDigest: publishedReceiptDigest,
-      ...publishedReceiptWithoutDigest
-    } = publishedReceipt.data;
-    if (
-      await productionReceiptHash(publishedReceiptWithoutDigest) !==
-        publishedReceiptDigest
-    ) invalidProof();
-    const computedCounts = {
-      vendors: 0,
-      categories: 0,
-      collectibles: 0,
-      repacks: 0,
-      repackChases: 0,
-      searchShards: 0,
-    };
-    let computedBatchChainHash = EMPTY_BATCH_CHAIN_HASH;
-    const publicRepackIds: string[] = [];
-    let previousPublicRepackId: string | null = null;
-    for (const [batchIndex, operation] of
-      operations.slice(1, -1).entries()) {
-      if (operation.operationKind !== "applyBatch") invalidProof();
-      const batch = productionApplyBatchRequestSchema.safeParse(
-        JSON.parse(operation.canonicalRequestBody) as unknown,
-      );
-      const byteCount = batch.success
-        ? productionBatchByteCount(batch.data.records)
-        : 0;
-      if (
-        !batch.success ||
-        canonicalJson(batch.data) !== operation.canonicalRequestBody ||
-        batch.data.publicationId !== lane.confirmedPublicationIdentity ||
-        batch.data.batchIndex !== batchIndex ||
-        byteCount > MAX_PRODUCTION_BATCH_BYTES ||
-        batch.data.batchHash !== await recomputeProductionBatchHash({
-          kind: batch.data.kind,
-          records: batch.data.records,
-        })
-      ) {
-        invalidProof();
-      }
-      computedBatchChainHash = await extendProductionBatchChain({
-        previousHash: computedBatchChainHash,
-        batchIndex,
-        kind: batch.data.kind,
-        batchHash: batch.data.batchHash,
-        recordCount: batch.data.records.length,
-        byteCount,
-      });
-      if (batch.data.kind === "repack_chases") {
-        computedCounts.repackChases += batch.data.records.length;
-      } else if (batch.data.kind === "search_shards") {
-        computedCounts.searchShards += batch.data.records.length;
-      } else {
-        computedCounts[batch.data.kind] += batch.data.records.length;
-      }
-      if (batch.data.kind === "repacks") {
-        for (const { publicRepackId } of batch.data.records) {
-          if (
-            previousPublicRepackId !== null &&
-            publicRepackId <= previousPublicRepackId
-          ) invalidProof();
-          publicRepackIds.push(publicRepackId);
-          previousPublicRepackId = publicRepackId;
-        }
-      }
-    }
-    const computedBatchCount = operations.length - 2;
-    const sameCounts = (value: unknown): boolean =>
-      canonicalJson(value) === canonicalJson(computedCounts);
-    if (
-      startRequest.data.manifest.publicReleaseId !==
-        lane.confirmedPublicationIdentity ||
-      BigInt(startRequest.data.manifest.observationSequence) !==
-        published.targetWatermark ||
-      (activeRefreshContentHash !== null &&
-        activeRefreshContentHash !== startRequest.data.manifest.contentHash) ||
-      startRequest.data.manifest.batchCount !== computedBatchCount ||
-      startRequest.data.manifest.batchChainHash !== computedBatchChainHash ||
-      startRequest.data.manifest.manifestFingerprint !==
-        await recomputeProductionManifestFingerprint(
-          startRequest.data.manifest,
-        ) ||
-      !sameCounts(startRequest.data.manifest.counts) ||
-      finalizeRequest.data.expectedPredecessorPublicReleaseId !==
-        startRequest.data.expectedPredecessorPublicReleaseId ||
-      finalizeRequest.data.expectedBatchCount !== computedBatchCount ||
-      finalizeRequest.data.expectedBatchChainHash !== computedBatchChainHash ||
-      !sameCounts(finalizeRequest.data.expectedCounts) ||
-      publishedReceipt.data.details.manifestFingerprint !==
-        startRequest.data.manifest.manifestFingerprint ||
-      publishedReceipt.data.details.contentHash !==
-        startRequest.data.manifest.contentHash ||
-      publishedReceipt.data.details.sourceWatermark !==
-        startRequest.data.manifest.sourceWatermark ||
-      publishedReceipt.data.details.activePublicReleaseId !==
-        lane.confirmedPublicationIdentity ||
-      publishedReceipt.data.details.previousPublicReleaseId !==
-        startRequest.data.expectedPredecessorPublicReleaseId ||
-      publishedReceipt.data.details.batchCount !== computedBatchCount ||
-      publishedReceipt.data.details.batchChainHash !== computedBatchChainHash ||
-      !sameCounts(publishedReceipt.data.details.counts)
-    ) invalidProof();
-    if (
-      publicRepackIds.length === 0 ||
-      publicRepackIds.length !== finalizeRequest.data.expectedCounts.repacks
-    ) invalidProof();
-    return Object.freeze({
-      publicReleaseId: lane.confirmedPublicationIdentity,
-      publicRepackIds: Object.freeze(publicRepackIds),
-      confirmedWatermark: lane.confirmedWatermark,
-      terminalReceiptSha256: lane.confirmedReceiptSha256,
+  loadActiveCatalogManifest(): Promise<ActiveCatalogHeatManifest | null> {
+    return loadActiveCatalogHeatManifest(this.database, {
+      organizationId: this.#organizationId,
+      deploymentKey: this.#deploymentKey,
     });
   }
 
@@ -344,7 +121,7 @@ export class PrismaHeatPromotionReleaseRepository {
     ) invalidProof();
     return Object.freeze({
       publicHeatFrameId: proven.frame.publicHeatFrameId,
-      catalogPublicReleaseId: proven.frame.catalogPublicReleaseId,
+      manifestAlignment: proven.frame.manifestAlignment,
       frameSequence: proven.frame.frameSequence,
       sourceWatermark: BigInt(proven.frame.sourceWatermark),
       signalSetHash: proven.frame.signalSetHash,
@@ -355,15 +132,16 @@ export class PrismaHeatPromotionReleaseRepository {
   }
 
   async hasReusableHeatSignalSet(input: Readonly<{
-    catalogPublicReleaseId: string;
+    manifestAlignment: ProductionHeatManifestAlignment;
     signalSetHash: string;
     contentIdentity: string;
     signalCount: number;
     reusableAt: Date;
   }>): Promise<boolean> {
     if (
-      !uuidPattern.test(input.catalogPublicReleaseId) ||
-      !sha256Pattern.test(input.signalSetHash) ||
+      !productionHeatManifestAlignmentSchema.safeParse(
+        input.manifestAlignment,
+      ).success || !sha256Pattern.test(input.signalSetHash) ||
       !sha256Pattern.test(input.contentIdentity) ||
       !Number.isFinite(input.reusableAt.getTime()) ||
       !Number.isSafeInteger(input.signalCount) ||
@@ -372,9 +150,12 @@ export class PrismaHeatPromotionReleaseRepository {
     ) throw new RangeError("Reusable Heat signal set identity is invalid.");
     const candidates = await this.database.$queryRaw<AttemptProofRow[]>(Prisma.sql`
       select id, target_watermark as "targetWatermark",
+             content_identity as "contentIdentity",
              publication_identity as "publicationIdentity",
              terminal_receipt_body as "terminalReceiptBody",
-             terminal_receipt_sha256 as "terminalReceiptSha256"
+             terminal_receipt_sha256 as "terminalReceiptSha256",
+             manifest_source_proof_body as "manifestSourceProofBody",
+             manifest_source_proof_sha256 as "manifestSourceProofSha256"
       from public.promotion_attempts
       where organization_id = ${uuid(this.#organizationId)}
         and deployment_key = ${this.#deploymentKey}
@@ -383,18 +164,20 @@ export class PrismaHeatPromotionReleaseRepository {
         and content_identity = ${input.contentIdentity}
         and terminal_receipt_body is not null
         and terminal_receipt_sha256 is not null
+        and manifest_source_proof_body is not null
+        and manifest_source_proof_sha256 is not null
       order by target_watermark desc
       limit 8
     `);
     for (const candidate of candidates) {
       const proven = await this.loadProvenHeatAttempt(candidate);
       if (
-        proven.frame.catalogPublicReleaseId ===
-          input.catalogPublicReleaseId &&
+        canonicalJson(proven.frame.manifestAlignment) ===
+          canonicalJson(input.manifestAlignment) &&
         proven.frame.signalSetHash === input.signalSetHash &&
         proven.frame.signalCount === input.signalCount &&
-        proven.receiptDetails.catalogPublicReleaseId ===
-          input.catalogPublicReleaseId &&
+        canonicalJson(proven.receiptDetails.manifestAlignment) ===
+          canonicalJson(input.manifestAlignment) &&
         proven.receiptDetails.signalSetHash === input.signalSetHash &&
         proven.receiptDetails.signalCount === input.signalCount
       ) {
@@ -410,8 +193,9 @@ export class PrismaHeatPromotionReleaseRepository {
     attempt: AttemptProofRow,
   ): Promise<Readonly<{
     frame: ProductionHeatFrameEnvelope;
+    manifestSourceProof: ActiveCatalogHeatManifest;
     receiptDetails: Readonly<{
-      catalogPublicReleaseId: string;
+      manifestAlignment: ProductionHeatManifestAlignment;
       activePublicHeatFrameId: string;
       previousPublicHeatFrameId: string | null;
       frameHash: string;
@@ -425,18 +209,32 @@ export class PrismaHeatPromotionReleaseRepository {
   }>> {
     if (
       sha256(attempt.terminalReceiptBody) !== attempt.terminalReceiptSha256 ||
+      !sha256Pattern.test(attempt.contentIdentity) ||
       !uuidPattern.test(attempt.publicationIdentity)
     ) invalidProof();
-    const parsedReceipt = productionHeatReceiptSchema.safeParse(
-      JSON.parse(attempt.terminalReceiptBody) as unknown,
-    );
+    let manifestSourceProof;
+    try {
+      manifestSourceProof = await parseHeatManifestSourceProof(
+        attempt.manifestSourceProofBody,
+        attempt.manifestSourceProofSha256,
+      );
+    } catch {
+      invalidProof();
+    }
+    let parsedReceipt;
+    try {
+      parsedReceipt = productionHeatReceiptSchema.parse(
+        JSON.parse(attempt.terminalReceiptBody) as unknown,
+      );
+    } catch {
+      invalidProof();
+    }
     if (
-      !parsedReceipt.success ||
-      canonicalJson(parsedReceipt.data) !== attempt.terminalReceiptBody ||
-      (parsedReceipt.data.operationKind !== "finalize" &&
-        parsedReceipt.data.operationKind !== "refreshFrame")
+      canonicalJson(parsedReceipt) !== attempt.terminalReceiptBody ||
+      (parsedReceipt.operationKind !== "finalize" &&
+        parsedReceipt.operationKind !== "refreshFrame")
     ) invalidProof();
-    const receipt = parsedReceipt.data;
+    const receipt = parsedReceipt;
     const {
       receiptDigest: heatReceiptDigest,
       ...heatReceiptWithoutDigest
@@ -450,8 +248,44 @@ export class PrismaHeatPromotionReleaseRepository {
       operations.length === 0 ||
       operations.some(({ operationIndex }, index) => operationIndex !== index)
     ) invalidProof();
+    const operationReceipts: ProductionHeatReceipt[] = [];
+    for (const operation of operations) {
+      if (
+        operation.state !== "acknowledged" ||
+        operation.receiptBody === null ||
+        operation.receiptSha256 === null
+      ) invalidProof();
+      let operationReceipt;
+      try {
+        operationReceipt = productionHeatReceiptSchema.parse(
+          JSON.parse(operation.receiptBody) as unknown,
+        );
+      } catch {
+        invalidProof();
+      }
+      const {
+        receiptDigest: operationReceiptDigest,
+        ...operationReceiptWithoutDigest
+      } = operationReceipt;
+      if (
+        sha256(operation.canonicalRequestBody) !== operation.requestSha256 ||
+        sha256(operation.receiptBody) !== operation.receiptSha256 ||
+        canonicalJson(operationReceipt) !== operation.receiptBody ||
+        operationReceipt.operationId !== operation.operationId ||
+        operationReceipt.operationKind !== operation.operationKind ||
+        operationReceipt.publicationId !== attempt.publicationIdentity ||
+        operationReceipt.requestDigest !== operation.requestSha256 ||
+        await productionHeatReceiptHash(operationReceiptWithoutDigest) !==
+          operationReceiptDigest
+      ) invalidProof();
+      operationReceipts.push(operationReceipt);
+    }
     const first = operations[0]!;
     const terminal = operations.at(-1)!;
+    if (
+      terminal.receiptBody !== attempt.terminalReceiptBody ||
+      terminal.receiptSha256 !== attempt.terminalReceiptSha256
+    ) invalidProof();
     let frame: ProductionHeatFrameEnvelope;
     let terminalOperationId: string;
     let expectedPreviousPublicHeatFrameId: string | null;
@@ -475,15 +309,28 @@ export class PrismaHeatPromotionReleaseRepository {
         canonicalJson(finalize.data) !== terminal.canonicalRequestBody ||
         start.data.expectedBatchCount !== operations.length - 2 ||
         finalize.data.expectedBatchCount !== operations.length - 2 ||
-        finalize.data.expectedCatalogPublicReleaseId !==
-          start.data.frame.catalogPublicReleaseId ||
+        canonicalJson(finalize.data.expectedManifestAlignment) !==
+          canonicalJson(start.data.frame.manifestAlignment) ||
         finalize.data.expectedFrameHash !== start.data.frame.frameHash ||
         finalize.data.expectedSignalSetHash !== start.data.frame.signalSetHash ||
         finalize.data.expectedSignalCount !== start.data.frame.signalCount
       ) invalidProof();
+      const startReceipt = operationReceipts[0]!;
+      if (
+        startReceipt.operationKind !== "start" ||
+        canonicalJson(startReceipt.details.manifestAlignment) !==
+          canonicalJson(start.data.frame.manifestAlignment) ||
+        startReceipt.details.frameHash !== start.data.frame.frameHash ||
+        startReceipt.details.signalSetHash !== start.data.frame.signalSetHash ||
+        startReceipt.details.sourceWatermark !== start.data.frame.sourceWatermark ||
+        startReceipt.details.frameSequence !== start.data.frame.frameSequence ||
+        startReceipt.details.expectedSignalCount !== start.data.frame.signalCount ||
+        startReceipt.details.expectedBatchCount !== start.data.expectedBatchCount
+      ) invalidProof();
       let acceptedSignalCount = 0;
       let expectedSignalSetHash = EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH;
       let previousPublicRepackId: string | null = null;
+      const publicRepackIds: string[] = [];
       for (const [batchIndex, operation] of operations.slice(1, -1).entries()) {
         const batch = productionHeatApplyBatchRequestSchema.safeParse(
           JSON.parse(operation.canonicalRequestBody) as unknown,
@@ -502,6 +349,7 @@ export class PrismaHeatPromotionReleaseRepository {
             publicRepackId <= previousPublicRepackId
           ) invalidProof();
           previousPublicRepackId = publicRepackId;
+          publicRepackIds.push(publicRepackId);
         }
         acceptedSignalCount += batch.data.records.length;
         expectedSignalSetHash = await extendProductionHeatSignalSetHash({
@@ -511,10 +359,27 @@ export class PrismaHeatPromotionReleaseRepository {
           recordCount: batch.data.records.length,
           coreByteCount: productionHeatCoreByteCount(batch.data.records),
         });
+        const batchReceipt = operationReceipts[batchIndex + 1]!;
+        if (
+          batchReceipt.operationKind !== "applyBatch" ||
+          batchReceipt.details.batchIndex !== batchIndex ||
+          batchReceipt.details.batchHash !== batch.data.batchHash ||
+          batchReceipt.details.recordCount !== batch.data.records.length ||
+          batchReceipt.details.byteCount !==
+            productionHeatBatchByteCount(batch.data.records) ||
+          batchReceipt.details.coreByteCount !==
+            productionHeatCoreByteCount(batch.data.records) ||
+          batchReceipt.details.acceptedSignalCount !== acceptedSignalCount ||
+          batchReceipt.details.signalSetProgressHash !== expectedSignalSetHash
+        ) invalidProof();
       }
       if (
         acceptedSignalCount !== start.data.frame.signalCount ||
-        expectedSignalSetHash !== start.data.frame.signalSetHash
+        expectedSignalSetHash !== start.data.frame.signalSetHash ||
+        canonicalJson(publicRepackIds) !==
+          canonicalJson(manifestSourceProof.publicRepackIds) ||
+        canonicalJson(finalize.data.expectedManifestAlignment) !==
+          canonicalJson(start.data.frame.manifestAlignment)
       ) invalidProof();
       frame = start.data.frame;
       terminalOperationId = finalize.data.operationId;
@@ -543,7 +408,10 @@ export class PrismaHeatPromotionReleaseRepository {
       receipt.requestDigest !== sha256(terminal.canonicalRequestBody) ||
       frame.publicHeatFrameId !== attempt.publicationIdentity ||
       BigInt(frame.frameSequence) !== attempt.targetWatermark ||
-      details.catalogPublicReleaseId !== frame.catalogPublicReleaseId ||
+      canonicalJson(frame.manifestAlignment) !==
+        canonicalJson(manifestSourceProof.manifestAlignment) ||
+      canonicalJson(details.manifestAlignment) !==
+        canonicalJson(frame.manifestAlignment) ||
       details.activePublicHeatFrameId !== frame.publicHeatFrameId ||
       details.previousPublicHeatFrameId !== expectedPreviousPublicHeatFrameId ||
       details.frameHash !== frame.frameHash ||
@@ -552,12 +420,23 @@ export class PrismaHeatPromotionReleaseRepository {
       details.frameSequence !== frame.frameSequence ||
       details.signalCount !== frame.signalCount ||
       details.calculatedAt !== frame.calculatedAt ||
-      details.expiresAt !== frame.expiresAt
+      details.expiresAt !== frame.expiresAt ||
+      frame.signalCount !== manifestSourceProof.publicRepackIds.length ||
+      frame.frameHash !== await recomputeProductionHeatFrameHash(frame) ||
+      frame.publicHeatFrameId !== await deriveProductionHeatFrameId({
+        manifestAlignment: frame.manifestAlignment,
+        frameSequence: frame.frameSequence,
+        sourceWatermark: frame.sourceWatermark,
+      }) ||
+      attempt.contentIdentity !== await productionHeatContentIdentity({
+        manifestAlignment: frame.manifestAlignment,
+        signalSetHash: frame.signalSetHash,
+      })
     ) invalidProof();
-    return { frame, receiptDetails: details };
+    return { frame, manifestSourceProof, receiptDetails: details };
   }
 
-  private async loadLaneProof(laneKey: "catalog" | "heat"):
+  private async loadLaneProof(laneKey: "heat"):
   Promise<LaneProofRow | null> {
     const rows = await this.database.$queryRaw<LaneProofRow[]>(Prisma.sql`
       select confirmed_watermark as "confirmedWatermark",
@@ -582,14 +461,17 @@ export class PrismaHeatPromotionReleaseRepository {
   }
 
   private async loadConfirmedAttempt(
-    laneKey: "catalog" | "heat",
+    laneKey: "heat",
     lane: LaneProofRow,
   ): Promise<AttemptProofRow> {
     const rows = await this.database.$queryRaw<AttemptProofRow[]>(Prisma.sql`
       select id, target_watermark as "targetWatermark",
+             content_identity as "contentIdentity",
              publication_identity as "publicationIdentity",
              terminal_receipt_body as "terminalReceiptBody",
-             terminal_receipt_sha256 as "terminalReceiptSha256"
+             terminal_receipt_sha256 as "terminalReceiptSha256",
+             manifest_source_proof_body as "manifestSourceProofBody",
+             manifest_source_proof_sha256 as "manifestSourceProofSha256"
       from public.promotion_attempts
       where organization_id = ${uuid(this.#organizationId)}
         and deployment_key = ${this.#deploymentKey}
@@ -599,6 +481,8 @@ export class PrismaHeatPromotionReleaseRepository {
         and publication_identity = ${lane.confirmedPublicationIdentity}
         and terminal_receipt_body is not null
         and terminal_receipt_sha256 is not null
+        and manifest_source_proof_body is not null
+        and manifest_source_proof_sha256 is not null
       limit 1
     `);
     const row = rows[0];
@@ -613,13 +497,17 @@ export class PrismaHeatPromotionReleaseRepository {
   private loadOperations(attemptId: string): Promise<OperationProofRow[]> {
     return this.database.$queryRaw<OperationProofRow[]>(Prisma.sql`
       select operation_index as "operationIndex",
+             operation_id as "operationId",
              operation_kind as "operationKind",
-             canonical_request_body as "canonicalRequestBody"
+             canonical_request_body as "canonicalRequestBody",
+             request_sha256 as "requestSha256",
+             state,
+             receipt_body as "receiptBody",
+             receipt_sha256 as "receiptSha256"
       from public.promotion_operations
       where attempt_id = ${uuid(attemptId)}
         and organization_id = ${uuid(this.#organizationId)}
         and deployment_key = ${this.#deploymentKey}
-        and state = 'acknowledged'
       order by operation_index
     `);
   }

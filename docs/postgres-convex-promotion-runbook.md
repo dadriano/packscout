@@ -45,15 +45,22 @@ into evidence, or commit their values.
 | `PACKSCOUT_CONVEX_PUBLICATION_BASE_URL` | Required HTTPS origin only: no credentials, path, query, or fragment. |
 | `PACKSCOUT_CONVEX_PUBLICATION_KEY_ID` | Heat-only versioned publication key retained until the Heat cutover. Provider and manifest promotion must not fall back to it. |
 | `PACKSCOUT_CONVEX_PUBLICATION_SECRET_BASE64` | Heat-only canonical-base64 secret, decoding to 32 through 256 bytes. It is not provider or manifest authority. |
-| `PACKSCOUT_CATALOG_PROVIDER_CREDENTIALS` | Required canonical JSON object mapping every configured `platformKey` to exact `{keyId,secretBase64}` own properties, at most eight entries. Keys are C-sorted, key IDs are unique, and every secret decodes to 32 through 256 bytes. Startup requires exact parity with the atomic configured-platform snapshot, including disabled lanes that may need reconciliation. Values are never logged. |
-| `PACKSCOUT_CATALOG_MANIFEST_PUBLISH_KEY_ID` / `PACKSCOUT_CATALOG_MANIFEST_PUBLISH_SECRET_BASE64` | Required manifest publish/status credential. Its key ID must be disjoint from every provider key and the clear key. |
-| `PACKSCOUT_CATALOG_MANIFEST_CLEAR_KEY_ID` / `PACKSCOUT_CATALOG_MANIFEST_CLEAR_SECRET_BASE64` | Required least-privilege clear credential. Its key ID must be disjoint from every provider and publish key so another leaked role cannot clear the catalog. |
+| `PACKSCOUT_CATALOG_PROVIDER_CREDENTIALS` | Required canonical JSON object mapping every configured `platformKey` to exact `{keyId,secretBase64}` own properties, at most eight entries. Keys are C-sorted, key IDs are unique, every secret decodes to 32 through 256 bytes, and decoded signing bytes are unique across all publication roles. Startup requires exact parity with the atomic configured-platform snapshot, including disabled lanes that may need reconciliation. Values are never logged. |
+| `PACKSCOUT_CATALOG_MANIFEST_PUBLISH_KEY_ID` / `PACKSCOUT_CATALOG_MANIFEST_PUBLISH_SECRET_BASE64` | Required manifest publish/status credential. Its key ID and decoded secret bytes must be disjoint from every provider, clear, retain, and Heat credential. |
+| `PACKSCOUT_CATALOG_MANIFEST_CLEAR_KEY_ID` / `PACKSCOUT_CATALOG_MANIFEST_CLEAR_SECRET_BASE64` | Required least-privilege clear credential. Its key ID and decoded secret bytes must be disjoint from every provider, publish, retain, and Heat credential so another leaked role cannot clear the catalog. |
+| `PACKSCOUT_CATALOG_RETENTION_KEY_ID` / `PACKSCOUT_CATALOG_RETENTION_SECRET_BASE64` | Required least-privilege retain credential. Its key ID and decoded secret bytes must be distinct from provider, publish, clear, and Heat roles. Grant only `retain` in `PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES`. |
+| `PACKSCOUT_CATALOG_RETENTION_INTERVAL_MS` | Optional completed-barrier cadence; default `3600000`, allowed `60000` through `86400000`. |
+| `PACKSCOUT_CATALOG_RETENTION_CONTINUATION_INTERVAL_MS` | Optional active-barrier continuation/retry cadence; default `1000`, allowed `100` through `60000` and no greater than the completed-barrier cadence. |
+| `PACKSCOUT_CATALOG_RETENTION_MAXIMUM_DOCUMENTS` | Optional Convex artifact-document bound per mutation; default `90`, allowed `9` through `90`. The protocol separately caps total deletion at 100 including journal rows. |
+| `PACKSCOUT_CATALOG_RETENTION_MAXIMUM_POSTGRES_ROWS` | Optional PostgreSQL cleanup chunk; default `100`, allowed `10` through `100`. |
+| `PACKSCOUT_CATALOG_RETENTION_MAXIMUM_STEPS_PER_CYCLE` | Optional coordinator work cap; default `25`, allowed `1` through `100`. Hitting the cap preserves the active barrier and continues at the continuation cadence. |
 | `PACKSCOUT_CATALOG_PROMOTION_POLL_MS` | Optional; default `5000`, allowed `100` through `5000`. Provider/manifest eligibility and trigger facts are polled at least every five seconds. |
-| `PACKSCOUT_CONVEX_PUBLICATION_TIMEOUT_MS` | Optional; default `10000`, allowed `100` through `30000`. Shared by provider, manifest, and Heat publication. |
+| `PACKSCOUT_CONVEX_PUBLICATION_TIMEOUT_MS` | Optional; default `10000`, allowed `100` through `30000`. Shared by provider, manifest, retention, and Heat publication. |
 | `PACKSCOUT_HEAT_RETENTION_BATCH_SIZE` | Optional; default `500`, allowed `1` through `1000`. |
 | `PACKSCOUT_HEAT_RETENTION_MAX_BATCHES_PER_CYCLE` | Optional; default `4`, allowed `1` through `20`. |
-| `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` | Required in Convex. A strict JSON object mapping each versioned key ID to the same canonical-base64 secret configured on its worker. Unknown keys, malformed JSON, arrays, noncanonical base64, and decoded values outside 32 through 256 bytes fail closed. |
-| `PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS` | Required in Convex for provider-release publication. A strict JSON object maps each provider publisher key ID to exactly one canonical `platformKey`. The authenticated key ID must match the request platform; the map is server-side authority, contains no secrets, and is never returned. Legacy catalog and Heat keys need an entry only if they also publish provider releases. |
+| `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` | Required in Convex. A strict JSON object mapping each versioned key ID to the same canonical-base64 secret configured on its worker. Decoded secret bytes must be pairwise unique across every configured entry, including unbound, rotation, or orphan IDs, because the key ID is not signed. Invalid key IDs, malformed JSON, arrays, noncanonical base64, decoded values outside 32 through 256 bytes, or any duplicate decoded secret make all provider, manifest, retention, and Heat HTTP routes fail closed before nonce writes. |
+| `PACKSCOUT_HEAT_PUBLICATION_KEY_IDS` | Required in Convex. Canonical JSON contains one through four sorted, unique Heat-only publication key IDs for bounded overlap rotation. Every ID must resolve in `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` and must be absent from provider and manifest authority maps; missing, malformed, noncanonical, duplicate, unsorted, unknown, or cross-role entries make every Heat route fail closed before nonce or state writes. |
+| `PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS` | Required in Convex for provider-release publication. A strict JSON object maps each provider publisher key ID to exactly one canonical `platformKey`. The authenticated key ID must match the request platform; the map is server-side authority, contains no secrets, and is never returned. Heat key IDs must not appear in this map. |
 | `PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES` | Required in Convex for manifest and retention operations. Canonical JSON maps at most 16 configured publication key IDs to a sorted unique nonempty subset of `clear`, `publish`, `retain`, and `rollback`. Activation, status, refresh, and block require `publish`; catalog retention requires `retain`; rollback and clear are separate capabilities. Unknown keys, malformed or noncanonical JSON, and unsorted/duplicate roles fail closed. Rotate by temporarily granting the same least-privilege role set to old and new configured key IDs, then remove the old entry after in-flight reconciliation. The map is never returned or logged. |
 
 The Heat scheduler runs at exact UTC minute boundaries and intentionally has no
@@ -75,7 +82,8 @@ Changing these limits is a reviewed contract/code change, not an operator
 override.
 
 The combined provider worker also validates its provider credential map,
-manifest role credentials,
+manifest, retain, and Heat role credentials (including pairwise decoded-secret
+uniqueness, because a key ID alone is not part of the request signature),
 pseudonymization, scheduling, retention, and database-pool settings before
 starting either promotion lane. A stable `*_INVALID` startup code is safe to
 record; the rejected value and exception text are not.
@@ -283,9 +291,11 @@ or source data in the portable evidence bundle.
 
 ## Retention
 
-Catalog retention is an authenticated, generation-CAS two-phase operation. Run
-`retain-manifests` to completion before running `retain-provider-releases` once
-per configured platform. A request selects only its phase, optional platform,
+Catalog retention is an authenticated, generation-CAS two-phase operation run
+automatically by the production worker. The coordinator drives
+`retain-manifests` to terminal completion before it drives
+`retain-provider-releases` to terminal completion for each canonical platform
+in the frozen PostgreSQL proof. A request selects only its phase, optional platform,
 document limit, expected retention generation, and one complete canonical
 PostgreSQL proof snapshot. It never supplies candidate or protection allow-lists;
 Convex resolves and cross-validates every target from exact stored state.
@@ -312,20 +322,25 @@ advances the dedicated retention generation even when public pointers and
 completed heads are unchanged; replay after a receipt is pruned therefore
 conflicts instead of selecting a later candidate.
 
-PostgreSQL cleanup follows successful Convex cleanup. First refuse every live
-promotion claim, then acquire the deployment retention barrier; never hold a
-database transaction across the Convex request. Under the barrier, revalidate
+PostgreSQL cleanup follows successful Convex cleanup. The coordinator acquires
+or resumes the deployment retention barrier, whose database transaction first
+refuses every live promotion claim; it never holds a database transaction across
+the Convex request. Under the barrier, revalidate
 the same exact protection snapshot and delete only the bounded, unreferenced
 provider operation/attempt/evaluation/artifact graph through the retention-only
 database API. Task-specific trigger authorization must be transaction-local and
 server-set. Do not disable the immutable-artifact trigger or expose a general
 delete bypass. A crash between Convex and PostgreSQL cleanup leaves harmless
-extra PostgreSQL proof for the next cycle.
+extra PostgreSQL proof. The next cycle loads the acknowledged operation requiring
+cleanup and continues its exact selected graph before preparing newer work.
 
-Drive continuation using the signed receipt's `retentionGeneration`. On an
-ambiguous send, query retention status with the exact operation identity and
-request digest before issuing a new operation. Persist the canonical inner
-receipt and its SHA separately from the exact received signed-envelope bytes.
+Drive continuation using the signed receipt's `retentionGeneration`. Before any
+network send, persist the exact canonical request as `sent`. On restart or an
+ambiguous send, query signed retention status with the exact operation identity
+and request digest. A terminal status receipt is acknowledged directly; only a
+signed `not_found` status permits resending the same persisted request bytes.
+Persist the canonical inner receipt and its SHA separately from the exact
+received signed-envelope bytes.
 Keep bootstrap, active/head, retained recovery, and status proof receipts; only
 unreferenced bounded promotion artifacts are eligible for PostgreSQL cleanup.
 
@@ -349,6 +364,16 @@ missing or inconsistent, catalog retention must fail closed with a stable
 `CATALOG_RETENTION_*` error. Stop both phases, preserve the PostgreSQL barrier
 state, and repair or rollback under incident authority; never delete around the
 failed proof.
+
+The worker performs at most the configured number of coordinator steps per
+cycle. `bounded` and `retry_required` outcomes keep the barrier active and run at
+the short continuation cadence; only a fully reconciled manifest phase, every
+canonical provider phase, and all PostgreSQL cleanup permit `releaseBarrier` and
+the normal hourly cadence. `SIGINT` or `SIGTERM` aborts the in-flight signed HTTP
+request or sleep and joins the retention loop before the database pool closes.
+Safe logs record only outcome, resumed-barrier flag, bounded step/request/count
+totals, and a stable failure code. They never contain organization/deployment
+binding, proof bodies, operation bytes, receipts, or credentials.
 
 ## Legacy prelaunch Heat cutover
 

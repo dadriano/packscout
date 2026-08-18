@@ -1,7 +1,16 @@
 import {
   PRODUCTION_REPACK_HEAT_PATHS,
+  canonicalJson,
+  productionHeatFinalizeRequestSchema,
+  productionHeatRefreshFrameRequestSchema,
+  productionHeatStartRequestSchema,
   type ProductionRepackHeatPath,
 } from "@packscout/contracts";
+import {
+  parseHeatManifestSourceProof,
+  serializeHeatManifestSourceProof,
+  type ActiveCatalogHeatManifest,
+} from "./active-catalog-heat-manifest.ts";
 import type { PackscoutPrismaClient } from "./database.ts";
 import {
   PrismaCatalogPromotionRepository,
@@ -22,6 +31,13 @@ export interface HeatPromotionOperationRecord
   extends Omit<PromotionOperationRecord, "operationKind" | "requestPath"> {
   readonly operationKind: HeatPromotionOperationKind;
   readonly requestPath: ProductionRepackHeatPath;
+}
+
+export interface HeatPromotionAttemptClaim extends Omit<
+  PromotionAttemptClaim,
+  "manifestSourceProofBody" | "manifestSourceProofSha256"
+> {
+  readonly manifestSourceProof: ActiveCatalogHeatManifest | null;
 }
 
 const pathByKind = Object.freeze({
@@ -82,13 +98,38 @@ export class PrismaHeatPromotionRepository {
     return this.#shared.coalesceSettledWatermark(input);
   }
 
-  claimAttempt(input: {
+  async claimAttempt(input: {
     laneKey: "heat";
     claimOwner: string;
     now: Date;
     claimExpiresAt: Date;
-  }): Promise<PromotionAttemptClaim | null> {
-    return this.#shared.claimAttempt(input);
+  }): Promise<HeatPromotionAttemptClaim | null> {
+    const claim = await this.#shared.claimAttempt(input);
+    if (claim === null) return null;
+    if ((claim.manifestSourceProofBody === null) !==
+      (claim.manifestSourceProofSha256 === null)) {
+      throw new PromotionLedgerError("PROMOTION_ATTEMPT_CONFLICT");
+    }
+    let manifestSourceProof: ActiveCatalogHeatManifest | null = null;
+    if (claim.manifestSourceProofBody !== null &&
+      claim.manifestSourceProofSha256 !== null) {
+      try {
+        manifestSourceProof = await parseHeatManifestSourceProof(
+          claim.manifestSourceProofBody,
+          claim.manifestSourceProofSha256,
+        );
+      } catch {
+        throw new PromotionLedgerError("PROMOTION_ATTEMPT_CONFLICT");
+      }
+    }
+    const {
+      manifestSourceProofBody: _manifestSourceProofBody,
+      manifestSourceProofSha256: _manifestSourceProofSha256,
+      ...publicClaim
+    } = claim;
+    void _manifestSourceProofBody;
+    void _manifestSourceProofSha256;
+    return Object.freeze({ ...publicClaim, manifestSourceProof });
   }
 
   heartbeat(input: {
@@ -107,6 +148,7 @@ export class PrismaHeatPromotionRepository {
     contentIdentity: string;
     publicationIdentity: string;
     preparedClassification: "publish" | "refresh_unchanged";
+    manifestSourceProof: ActiveCatalogHeatManifest;
     operations: readonly PromotionOperationInput[];
   }): Promise<readonly HeatPromotionOperationRecord[] | null> {
     for (const operation of input.operations) {
@@ -117,7 +159,59 @@ export class PrismaHeatPromotionRepository {
         ]
       ) throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
     }
-    const persisted = await this.#shared.persistAssembledOperations(input);
+    const expectedAlignment = canonicalJson(
+      input.manifestSourceProof.manifestAlignment,
+    );
+    try {
+      if (input.preparedClassification === "publish") {
+        if (
+          input.operations.length < 2 ||
+          input.operations[0]?.operationKind !== "start" ||
+          input.operations.at(-1)?.operationKind !== "finalize" ||
+          input.operations.slice(1, -1).some(({ operationKind }) =>
+            operationKind !== "applyBatch")
+        ) throw new Error("invalid Heat publish graph");
+        const start = productionHeatStartRequestSchema.parse(
+          JSON.parse(input.operations[0].canonicalRequestBody) as unknown,
+        );
+        const finalize = productionHeatFinalizeRequestSchema.parse(
+          JSON.parse(input.operations.at(-1)!.canonicalRequestBody) as unknown,
+        );
+        if (
+          canonicalJson(start) !== input.operations[0].canonicalRequestBody ||
+          canonicalJson(finalize) !==
+            input.operations.at(-1)!.canonicalRequestBody ||
+          canonicalJson(start.frame.manifestAlignment) !== expectedAlignment ||
+          canonicalJson(finalize.expectedManifestAlignment) !== expectedAlignment
+        ) throw new Error("mixed Heat manifest alignment");
+      } else {
+        if (
+          input.operations.length !== 1 ||
+          input.operations[0]?.operationKind !== "refreshFrame"
+        ) throw new Error("invalid Heat refresh graph");
+        const refresh = productionHeatRefreshFrameRequestSchema.parse(
+          JSON.parse(input.operations[0].canonicalRequestBody) as unknown,
+        );
+        if (
+          canonicalJson(refresh) !== input.operations[0].canonicalRequestBody ||
+          canonicalJson(refresh.frame.manifestAlignment) !== expectedAlignment
+        ) throw new Error("mixed Heat manifest alignment");
+      }
+    } catch {
+      throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
+    }
+    let manifestSourceProof;
+    try {
+      manifestSourceProof = await serializeHeatManifestSourceProof(
+        input.manifestSourceProof,
+      );
+    } catch {
+      throw new PromotionLedgerError("PROMOTION_INPUT_INVALID");
+    }
+    const persisted = await this.#shared.persistAssembledOperations({
+      ...input,
+      manifestSourceProof,
+    });
     return persisted?.map(heatOperation) ?? null;
   }
 

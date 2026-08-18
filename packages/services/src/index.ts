@@ -7,6 +7,7 @@ export * from "./catalog-release-types.ts";
 export * from "./catalog-promotion-bootstrap.ts";
 export * from "./catalog-promotion-operations.ts";
 export * from "./catalog-promotion-runner.ts";
+export * from "./catalog-promotion-retention-runner.ts";
 export * from "./catalog-promotion-types.ts";
 export * from "./catalog-manifest-composer.ts";
 export * from "./catalog-manifest-promotion-bootstrap.ts";

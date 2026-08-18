@@ -18,22 +18,42 @@ import {
   validateHeatPromotionOperation,
 } from "./heat-promotion-operations.ts";
 import type {
-  ActiveCatalogHeatRelease,
+  ActiveCatalogHeatManifest,
   ActiveHeatFrameBaseline,
   HeatPromotionObservationPort,
 } from "./heat-promotion-types.ts";
 
-const releaseId = "82000000-0000-4000-8000-000000000001";
+const releaseId = "82000000-0000-5000-8000-000000000001";
 const repackA = "83000000-0000-5000-8000-000000000001";
 const repackB = "83000000-0000-5000-8000-000000000002";
 const frameEndedAt = new Date("2026-08-15T12:00:00.000Z");
 const calculatedAt = new Date("2026-08-15T12:00:01.000Z");
 const targetFrameSequence = BigInt(frameEndedAt.getTime() / 60_000);
 
-const catalog: ActiveCatalogHeatRelease = {
+const manifestAlignment = Object.freeze({
   publicReleaseId: releaseId,
+  manifestFingerprint: "1".repeat(64),
+  sharedConfigurationEpoch: Object.freeze({
+    configurationKey: "catalog-v1",
+    revision: 1,
+    publicChangeSequence: "20",
+    configurationHash: "2".repeat(64),
+  }),
+  providerReferenceSetHash: "3".repeat(64),
+});
+
+const catalog: ActiveCatalogHeatManifest = {
+  manifestAlignment,
+  providerReferences: [],
+  publicRepackOwnership: [repackA, repackB].map((publicRepackId) => ({
+    publicRepackId,
+    platformKey: "alpha",
+    publicProviderReleaseId:
+      "84000000-0000-5000-8000-000000000001",
+    providerReleaseFingerprint: "4".repeat(64),
+  })),
   publicRepackIds: [repackA, repackB],
-  confirmedWatermark: 40n,
+  confirmedManifestWatermark: 40n,
   terminalReceiptSha256: "a".repeat(64),
 };
 
@@ -90,7 +110,7 @@ test("one deterministic frame reads only active public IDs through settlement", 
     repackB,
   ]);
   assert.equal(first.frame.sourceWatermark, "44");
-  assert.equal(first.frame.catalogPublicReleaseId, releaseId);
+  assert.deepEqual(first.frame.manifestAlignment, manifestAlignment);
   assert.equal(first.frame.currentWindowEndedAt, frameEndedAt.toISOString());
   assert.equal(first.frame.expiresAt, "2026-08-15T12:15:01.000Z");
   assert.deepEqual(second, first);
@@ -101,11 +121,6 @@ test("coverage, catalog ordering, and minute identity fail closed", async () => 
     prepare({ observations: observationPort({ coverage: false }) }),
     (error: unknown) => error instanceof HeatPromotionPreparationError &&
       error.code === "HEAT_OBSERVATION_COVERAGE_INCOMPLETE",
-  );
-  await assert.rejects(
-    prepare({ sourceWatermark: 39n }),
-    (error: unknown) => error instanceof HeatPromotionPreparationError &&
-      error.code === "HEAT_FRAME_SEQUENCE_INVALID",
   );
   await assert.rejects(
     prepare({ targetFrameSequence: targetFrameSequence + 1n }),
@@ -155,7 +170,7 @@ test("quiet minutes refresh one frame per boundary without rewriting signals", a
     frameIds.add(plan.publicHeatFrameId);
     baseline = {
       publicHeatFrameId: plan.publicHeatFrameId,
-      catalogPublicReleaseId: plan.catalogPublicReleaseId,
+      manifestAlignment: plan.manifestAlignment,
       frameSequence: Number(plan.targetFrameSequence),
       sourceWatermark: plan.sourceWatermark,
       signalSetHash: plan.signalSetHash,
@@ -170,7 +185,7 @@ test("quiet minutes refresh one frame per boundary without rewriting signals", a
 test("A to B to A uses a retained release-scoped set without restaging", async () => {
   const currentB: ActiveHeatFrameBaseline = {
     publicHeatFrameId: "84000000-0000-4000-8000-000000000001",
-    catalogPublicReleaseId: releaseId,
+    manifestAlignment,
     frameSequence: Number(targetFrameSequence - 1n),
     sourceWatermark: 43n,
     signalSetHash: "c".repeat(64),
@@ -190,7 +205,70 @@ test("A to B to A uses a retained release-scoped set without restaging", async (
   assert.equal(plan.operations.length, 1);
   assert.equal(plan.operations[0]?.operationKind, "refreshFrame");
   assert.deepEqual(lookup, {
-    catalogPublicReleaseId: releaseId,
+    manifestAlignment,
+    signalSetHash: plan.signalSetHash,
+    contentIdentity: plan.contentIdentity,
+    signalCount: plan.signalCount,
+    reusableAt: calculatedAt,
+  });
+});
+
+test("a first-time manifest alignment stages its own identical signal set", async () => {
+  const baseline: ActiveHeatFrameBaseline = {
+    publicHeatFrameId: "84000000-0000-4000-8000-000000000002",
+    manifestAlignment: {
+      ...manifestAlignment,
+      providerReferenceSetHash: "5".repeat(64),
+    },
+    frameSequence: Number(targetFrameSequence - 1n),
+    sourceWatermark: 43n,
+    signalSetHash: "c".repeat(64),
+    frameHash: "d".repeat(64),
+    signalCount: 2,
+    terminalReceiptSha256: "e".repeat(64),
+  };
+  let reuseChecked = false;
+  const plan = await prepare({
+    baseline,
+    async canReuseSignalSet() {
+      reuseChecked = true;
+      return false;
+    },
+  });
+  assert.equal(plan.classification, "publish");
+  assert.equal(reuseChecked, true);
+  assert.equal(plan.operations.at(-1)?.operationKind, "finalize");
+});
+
+test("a manifest rollback reactivates its retained signal set", async () => {
+  const baseline: ActiveHeatFrameBaseline = {
+    publicHeatFrameId: "84000000-0000-4000-8000-000000000003",
+    manifestAlignment: {
+      ...manifestAlignment,
+      publicReleaseId: "82000000-0000-5000-8000-000000000002",
+      manifestFingerprint: "5".repeat(64),
+      providerReferenceSetHash: "6".repeat(64),
+    },
+    frameSequence: Number(targetFrameSequence - 1n),
+    sourceWatermark: 43n,
+    signalSetHash: "c".repeat(64),
+    frameHash: "d".repeat(64),
+    signalCount: 2,
+    terminalReceiptSha256: "e".repeat(64),
+  };
+  let lookup: unknown = null;
+  const plan = await prepare({
+    baseline,
+    async canReuseSignalSet(input) {
+      lookup = input;
+      return true;
+    },
+  });
+  assert.equal(plan.classification, "refresh_unchanged");
+  assert.equal(plan.operations.length, 1);
+  assert.equal(plan.operations[0]?.operationKind, "refreshFrame");
+  assert.deepEqual(lookup, {
+    manifestAlignment,
     signalSetHash: plan.signalSetHash,
     contentIdentity: plan.contentIdentity,
     signalCount: plan.signalCount,

@@ -2,6 +2,7 @@ import {
   EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
   PRODUCTION_HEAT_RETENTION_MILLISECONDS,
   REPACK_HEAT_PUBLICATION_SCHEMA_VERSION,
+  canonicalJson,
   productionHeatFinalizeRequestSchema,
   productionHeatRefreshFrameRequestSchema,
   productionHeatStartRequestSchema,
@@ -21,9 +22,10 @@ import {
   storeProductionHeatReceipt,
 } from "./productionHeatOperations";
 import {
+  type ActiveCatalogHeatManifest,
   assertMonotonicHeatFrame,
   assertProductionHeatFrame,
-  loadActiveCatalogRelease,
+  loadActiveCatalogHeatManifest,
   loadActiveHeatFrame,
   loadHeatState,
   parseProductionHeatRequest,
@@ -44,13 +46,13 @@ async function publicationById(ctx: MutationCtx, publicationId: string) {
 
 async function signalSetByHash(
   ctx: MutationCtx,
-  releaseId: Id<"dataReleases">,
+  manifestId: Id<"globalCatalogManifests">,
   signalSetHash: string,
 ): Promise<Doc<"repackHeatSignalSets"> | null> {
   const matches = await ctx.db
     .query("repackHeatSignalSets")
-    .withIndex("by_release_id_and_signal_set_hash", (index) =>
-      index.eq("releaseId", releaseId).eq("signalSetHash", signalSetHash),
+    .withIndex("by_manifest_id_and_signal_set_hash", (index) =>
+      index.eq("manifestId", manifestId).eq("signalSetHash", signalSetHash),
     )
     .take(2);
   if (matches.length > 1) {
@@ -87,7 +89,7 @@ async function activateFrame(
   input: Readonly<{
     frame: ProductionHeatFrameEnvelope;
     publicationId: string;
-    release: Doc<"dataReleases">;
+    catalog: ActiveCatalogHeatManifest;
     signalSet: Doc<"repackHeatSignalSets">;
     expectedActivePublicHeatFrameId?: string | null;
   }>,
@@ -118,7 +120,8 @@ async function activateFrame(
     Date.parse(input.frame.expiresAt) + PRODUCTION_HEAT_RETENTION_MILLISECONDS,
   ).toISOString();
   const frameId = await ctx.db.insert("repackHeatSnapshots", {
-    releaseId: input.release._id,
+    manifestId: input.catalog.manifestDocument._id,
+    manifestAlignment: input.catalog.alignment,
     signalSetId: input.signalSet._id,
     publicHeatSnapshotId: input.frame.publicHeatFrameId,
     publicationId: input.publicationId,
@@ -185,7 +188,7 @@ function activationDetails(
   previousPublicHeatFrameId: string | null,
 ) {
   return {
-    catalogPublicReleaseId: frame.catalogPublicReleaseId,
+    manifestAlignment: frame.manifestAlignment,
     activePublicHeatFrameId: frame.publicHeatFrameId,
     previousPublicHeatFrameId,
     frameHash: frame.frameHash,
@@ -213,23 +216,27 @@ export const start = internalMutation({
     });
     if (replay !== null) return replay;
     const frame = await assertProductionHeatFrame(request.frame);
-    const release = await loadActiveCatalogRelease(
+    const catalog = await loadActiveCatalogHeatManifest(
       ctx,
-      frame.catalogPublicReleaseId,
-      frame.sourceWatermark,
+      frame.manifestAlignment,
     );
     await assertUnusedHeatIdentity(ctx, request.publicationId);
     if (
-      frame.signalCount !== release.metadata.repackCount ||
+      frame.signalCount !== catalog.manifest.counts.repacks ||
       (frame.signalCount === 0) !== (request.expectedBatchCount === 0) ||
       request.expectedBatchCount > frame.signalCount ||
-      await signalSetByHash(ctx, release._id, frame.signalSetHash) !== null
+      await signalSetByHash(
+        ctx,
+        catalog.manifestDocument._id,
+        frame.signalSetHash,
+      ) !== null
     ) {
       refuseProductionDataRelease("PUBLICATION_RECONCILIATION_FAILED");
     }
     const now = new Date().toISOString();
     const signalSetId = await ctx.db.insert("repackHeatSignalSets", {
-      releaseId: release._id,
+      manifestId: catalog.manifestDocument._id,
+      manifestAlignment: catalog.alignment,
       signalSetHash: frame.signalSetHash,
       lifecycle: "staging",
       sourceKind: "observed",
@@ -244,7 +251,7 @@ export const start = internalMutation({
     });
     await ctx.db.insert("repackHeatPublications", {
       publicationId: request.publicationId,
-      releaseId: release._id,
+      manifestId: catalog.manifestDocument._id,
       signalSetId,
       frame,
       expectedBatchCount: request.expectedBatchCount,
@@ -267,7 +274,7 @@ export const start = internalMutation({
       serverTime: now,
       requestDigest,
       details: {
-        catalogPublicReleaseId: frame.catalogPublicReleaseId,
+        manifestAlignment: frame.manifestAlignment,
         frameHash: frame.frameHash,
         signalSetHash: frame.signalSetHash,
         sourceWatermark: frame.sourceWatermark,
@@ -299,15 +306,15 @@ export const finalize = internalMutation({
       "repackHeatSignalSets",
       publication.signalSetId,
     );
-    const release = await loadActiveCatalogRelease(
+    const catalog = await loadActiveCatalogHeatManifest(
       ctx,
-      request.expectedCatalogPublicReleaseId,
-      frame.sourceWatermark,
+      request.expectedManifestAlignment,
     );
     if (
       publication.state !== "staging" ||
-      publication.releaseId !== release._id ||
-      frame.catalogPublicReleaseId !== request.expectedCatalogPublicReleaseId ||
+      publication.manifestId !== catalog.manifestDocument._id ||
+      canonicalJson(frame.manifestAlignment) !==
+        canonicalJson(request.expectedManifestAlignment) ||
       frame.signalSetHash !== request.expectedSignalSetHash ||
       frame.frameHash !== request.expectedFrameHash ||
       frame.signalCount !== request.expectedSignalCount ||
@@ -317,7 +324,9 @@ export const finalize = internalMutation({
       publication.acceptedSignalSetHash !== request.expectedSignalSetHash ||
       signalSet === null ||
       signalSet.lifecycle !== "staging" ||
-      signalSet.releaseId !== release._id ||
+      signalSet.manifestId !== catalog.manifestDocument._id ||
+      canonicalJson(signalSet.manifestAlignment) !==
+        canonicalJson(catalog.alignment) ||
       signalSet.signalSetHash !== request.expectedSignalSetHash ||
       signalSet.signalCount !== request.expectedSignalCount ||
       signalSet.originatingPublicationId !== request.publicationId
@@ -327,7 +336,7 @@ export const finalize = internalMutation({
     const activated = await activateFrame(ctx, {
       frame,
       publicationId: request.publicationId,
-      release,
+      catalog,
       signalSet,
       expectedActivePublicHeatFrameId:
         request.expectedActivePublicHeatFrameId,
@@ -370,14 +379,13 @@ export const refreshFrame = internalMutation({
     });
     if (replay !== null) return replay;
     const frame = await assertProductionHeatFrame(request.frame);
-    const release = await loadActiveCatalogRelease(
+    const catalog = await loadActiveCatalogHeatManifest(
       ctx,
-      frame.catalogPublicReleaseId,
-      frame.sourceWatermark,
+      frame.manifestAlignment,
     );
     const signalSet = await signalSetByHash(
       ctx,
-      release._id,
+      catalog.manifestDocument._id,
       frame.signalSetHash,
     );
     const state = await loadHeatState(ctx);
@@ -386,19 +394,20 @@ export const refreshFrame = internalMutation({
     if (
       signalSet === null ||
       signalSet.lifecycle !== "complete" ||
-      signalSet.releaseId !== release._id ||
+      signalSet.manifestId !== catalog.manifestDocument._id ||
+      canonicalJson(signalSet.manifestAlignment) !==
+        canonicalJson(catalog.alignment) ||
       signalSet.signalCount !== frame.signalCount ||
-      frame.signalCount !== release.metadata.repackCount ||
+      frame.signalCount !== catalog.manifest.counts.repacks ||
       active === null ||
-      active.publicHeatSnapshotId !== request.expectedActivePublicHeatFrameId ||
-      active.releaseId !== release._id
+      active.publicHeatSnapshotId !== request.expectedActivePublicHeatFrameId
     ) {
       refuseProductionDataRelease("PUBLICATION_PREDECESSOR_CONFLICT");
     }
     const activated = await activateFrame(ctx, {
       frame,
       publicationId: request.publicationId,
-      release,
+      catalog,
       signalSet,
       expectedActivePublicHeatFrameId:
         request.expectedActivePublicHeatFrameId,
