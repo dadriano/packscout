@@ -46,6 +46,106 @@
   line-height: 1.75;
 }
 
+.methodSection {
+  max-width: 760px;
+  margin-top: clamp(2rem, 5vw, 3.25rem);
+  padding-left: clamp(0rem, 4vw, 3rem);
+  border-top: 1px solid var(--color-border);
+  padding-top: clamp(2rem, 5vw, 3rem);
+}
+
+.methodHeading {
+  max-width: 680px;
+  margin: 0.55rem 0 0;
+  font-size: clamp(1.55rem, 3.4vw, 2.15rem);
+  font-weight: 730;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.methodSummary {
+  max-width: 650px;
+  margin: 0.85rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.96rem;
+  line-height: 1.75;
+}
+
+.methodList {
+  display: grid;
+  margin: 1.45rem 0 0;
+  padding: 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+}
+
+.methodList li {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 1rem;
+  padding-block: 1.1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.methodNumber {
+  color: var(--color-action);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+}
+
+.methodList h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 730;
+  letter-spacing: -0.015em;
+}
+
+.methodList p {
+  margin: 0.42rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.methodDisclaimer {
+  max-width: 650px;
+  margin: 1.15rem 0 0;
+  border-left: 3px solid var(--color-action);
+  background: color-mix(in srgb, var(--color-action-soft) 68%, transparent);
+  padding: 0.75rem 0.9rem;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.methodLink {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 1rem;
+  color: var(--color-action);
+  font-size: 0.8rem;
+  font-weight: 720;
+  line-height: 1.4;
+  text-underline-offset: 0.2em;
+}
+
+.methodLink:hover {
+  text-decoration: underline;
+}
+
+.methodLink span {
+  transition: transform 150ms ease;
+}
+
+.methodLink:hover span {
+  transform: translateX(2px);
+}
+
 .guideGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -420,6 +520,15 @@
     padding-left: 0;
   }
 
+  .methodSection {
+    padding-left: 0;
+  }
+
+  .methodList li {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.7rem;
+  }
+
   .indexHeading {
     font-size: clamp(2.05rem, 11.5vw, 3.15rem);
   }
@@ -458,7 +567,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .guideAction span,
-  .relatedLink span {
+  .relatedLink span,
+  .methodLink span {
     transition: none;
   }
 }

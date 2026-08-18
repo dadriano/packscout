@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { PublicCollectible } from "@packscout/contracts";
+import { SavedCollectibleButton } from "@/components/auth/SavedItemButton.client";
 import {
   formatCollectibleDescriptor,
   formatCollectibleIdentity,
 } from "@/lib/collectible-identity";
+import { shouldApplyDesiredCollectibleSearchResults } from "@/lib/desired-collectible-search-ui";
 import styles from "./DesiredCollectibleSearch.module.css";
 
 type CollectibleOption = Pick<
@@ -89,6 +91,9 @@ export function DesiredCollectibleSearch({
   const id = useId();
   const listboxId = `${id}-listbox`;
   const statusId = `${id}-status`;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const searchControllerRef = useRef<AbortController | null>(null);
+  const dismissedRef = useRef(false);
   const [search, setSearch] = useState(selected?.name ?? "");
   const [options, setOptions] = useState<readonly CollectibleOption[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -106,8 +111,18 @@ export function DesiredCollectibleSearch({
 
   useEffect(() => {
     if (!searchable) return;
+    dismissedRef.current = false;
     const controller = new AbortController();
+    searchControllerRef.current = controller;
     const timeout = window.setTimeout(() => {
+      if (
+        !shouldApplyDesiredCollectibleSearchResults({
+          aborted: controller.signal.aborted,
+          dismissed: dismissedRef.current,
+        })
+      ) {
+        return;
+      }
       setStatus("loading");
       void fetch(`/api/collectibles/search?q=${encodeURIComponent(normalized)}`, {
         method: "GET",
@@ -122,7 +137,14 @@ export function DesiredCollectibleSearch({
           return readOptions(await response.json());
         })
         .then((matches) => {
-          if (controller.signal.aborted) return;
+          if (
+            !shouldApplyDesiredCollectibleSearchResults({
+              aborted: controller.signal.aborted,
+              dismissed: dismissedRef.current,
+            })
+          ) {
+            return;
+          }
           if (matches === null) {
             setOptions([]);
             setStatus("failed");
@@ -133,23 +155,55 @@ export function DesiredCollectibleSearch({
           setStatus("ready");
         })
         .catch(() => {
-          if (!controller.signal.aborted) {
-            setOptions([]);
-            setStatus("failed");
+          if (
+            !shouldApplyDesiredCollectibleSearchResults({
+              aborted: controller.signal.aborted,
+              dismissed: dismissedRef.current,
+            })
+          ) {
+            return;
           }
+          setOptions([]);
+          setStatus("failed");
         });
     }, 220);
     return () => {
       window.clearTimeout(timeout);
       controller.abort();
+      if (searchControllerRef.current === controller) {
+        searchControllerRef.current = null;
+      }
     };
   }, [normalized, searchable]);
 
-  function choose(option: CollectibleOption) {
-    setSearch(option.name);
+  function closeOptions() {
+    dismissedRef.current = true;
+    searchControllerRef.current?.abort();
+    searchControllerRef.current = null;
     setOptions([]);
     setActiveIndex(-1);
     setStatus("idle");
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function closeOnOutsidePress(event: PointerEvent) {
+      const root = rootRef.current;
+      if (
+        event.target instanceof Node &&
+        root?.contains(event.target)
+      ) {
+        return;
+      }
+      closeOptions();
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
+  }, [open]);
+
+  function choose(option: CollectibleOption) {
+    closeOptions();
+    setSearch(option.name);
     onSelect(option.publicCollectibleId);
   }
 
@@ -168,7 +222,7 @@ export function DesiredCollectibleSearch({
           : "Choose an exact collectible from the results.";
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} ref={rootRef}>
       <label className={styles.label} htmlFor={`${id}-input`}>
         Desired chase collectible
       </label>
@@ -200,8 +254,7 @@ export function DesiredCollectibleSearch({
               event.preventDefault();
               choose(visibleOptions[activeIndex]!);
             } else if (event.key === "Escape") {
-              setOptions([]);
-              setActiveIndex(-1);
+              closeOptions();
             }
           }}
           placeholder="Search a card, watch, coin, or collectible"
@@ -215,9 +268,7 @@ export function DesiredCollectibleSearch({
             disabled={pending}
             onClick={() => {
               setSearch("");
-              setOptions([]);
-              setActiveIndex(-1);
-              setStatus("idle");
+              closeOptions();
               onSelect(null);
             }}
             type="button"
@@ -229,6 +280,13 @@ export function DesiredCollectibleSearch({
       <p aria-live="polite" className={styles.status} id={statusId} role="status">
         {statusCopy}
       </p>
+      {selected ? (
+        <div className={styles.saveAction}>
+          <SavedCollectibleButton
+            publicCollectibleId={selected.publicCollectibleId}
+          />
+        </div>
+      ) : null}
       {open ? (
         <ul className={styles.listbox} id={listboxId} role="listbox">
           {visibleOptions.map((option, index) => (

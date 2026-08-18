@@ -66,6 +66,7 @@ import type * as publicRepackValidation from "../publicRepackValidation.js";
 import type * as publicRepacks from "../publicRepacks.js";
 import type * as repackHeatReadModel from "../repackHeatReadModel.js";
 import type * as repackHeatTestCatalog from "../repackHeatTestCatalog.js";
+import type * as savedItems from "../savedItems.js";
 
 import type {
   ApiFromModules,
@@ -132,6 +133,7 @@ declare const fullApi: ApiFromModules<{
   publicRepacks: typeof publicRepacks;
   repackHeatReadModel: typeof repackHeatReadModel;
   repackHeatTestCatalog: typeof repackHeatTestCatalog;
+  savedItems: typeof savedItems;
 }>;
 
 /**

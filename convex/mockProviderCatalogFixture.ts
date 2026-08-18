@@ -195,7 +195,7 @@ export async function buildMockProviderCatalogReleasePlans(input: {
       });
     }
 
-    const publicAssetOrigins: string[] = [];
+    const publicAssetOrigins = [...fixture.publicAssetOrigins];
     const governingHashes = {
       providerConfigurationHash:
         await recomputeProviderCatalogReleaseGoverningHashV1({

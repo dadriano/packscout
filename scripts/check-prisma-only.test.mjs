@@ -74,3 +74,40 @@ test("Prisma-only check rejects legacy dependency content and paths", async () =
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("Prisma-only check skips only generated Next build directories", async () => {
+  const root = await createFixture();
+  try {
+    for (const generatedDirectory of [".next", ".next-build", ".next-dev"]) {
+      const generatedRoot = path.join(
+        root,
+        "apps",
+        "frontend",
+        generatedDirectory,
+        "static",
+      );
+      await mkdir(generatedRoot, { recursive: true });
+      await writeFile(
+        path.join(generatedRoot, "third-party.js"),
+        `export const generated = "${legacyName}";\n`,
+      );
+    }
+
+    const result = await execFileAsync(process.execPath, [checker, "--root", root]);
+    assert.match(result.stdout, /check:prisma-only ok/);
+
+    await writeFile(
+      path.join(root, "apps", "frontend", "source.ts"),
+      `export const forbidden = "${legacyName}";\n`,
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [checker, "--root", root]),
+      (error) => {
+        assert.match(error.stderr, /apps\/frontend\/source\.ts/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

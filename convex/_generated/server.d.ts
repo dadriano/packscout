@@ -34,6 +34,7 @@ type Env = {
   readonly PACKSCOUT_PUBLIC_ORIGIN_SET_HASH: string | undefined;
   readonly PACKSCOUT_RUNTIME_ENVIRONMENT:
     "local" | "development" | "preproduction" | "production" | undefined;
+  readonly PRIVY_APP_ID: string | undefined;
 };
 
 /**

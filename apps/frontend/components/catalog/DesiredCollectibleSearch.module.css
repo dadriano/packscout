@@ -58,6 +58,10 @@
   font-weight: 650;
 }
 
+.saveAction {
+  margin-top: 0.1rem;
+}
+
 .listbox {
   background: var(--color-surface-raised, var(--color-surface));
   border: 1px solid var(--color-border);

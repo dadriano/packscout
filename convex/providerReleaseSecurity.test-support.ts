@@ -180,10 +180,16 @@ export async function buildProviderPublishPlan(
   }> = {},
 ): Promise<ProviderCatalogReleasePublishPlanV1> {
   const fixture = buildMockDataReleaseV2();
+  const publicAssetOrigins = [
+    ...(input.publicAssetOrigins ?? fixture.publicAssetOrigins),
+  ];
   const vendor = {
     ...fixture.vendors[0]!,
     publicVendorId: input.publicVendorId ?? fixture.vendors[0]!.publicVendorId,
     displayName: input.vendorDisplayName ?? fixture.vendors[0]!.displayName,
+    imageOrigins: fixture.vendors[0]!.imageOrigins.filter((origin) =>
+      publicAssetOrigins.includes(origin)
+    ),
   };
   const records = [vendor];
   const byteCount = providerCatalogReleaseBatchByteCount(records);
@@ -218,7 +224,6 @@ export async function buildProviderPublishPlan(
   const contentHash = await recomputeProviderCatalogReleaseContentHashV1({
     entityHashes,
   });
-  const publicAssetOrigins = [...(input.publicAssetOrigins ?? [])];
   const checkpointSequence = input.checkpointSequence ?? "20";
   const platformKey = input.platformKey ?? "alpha";
   const dataAsOf = input.dataAsOf ?? "2026-08-15T11:58:00.000Z";

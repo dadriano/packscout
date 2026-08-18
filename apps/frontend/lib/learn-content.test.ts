@@ -6,6 +6,7 @@ import {
   formatReadingTime,
   getLearnMetricDefinitions,
   LEARN_GUIDES,
+  PACKSCOUT_EV_METHOD,
 } from "./learn-content";
 import { METRIC_TRUST_COPY } from "./metric-vocabulary";
 
@@ -107,4 +108,28 @@ test("keeps repack and red-flag guidance evidence-based and catalog-linked", () 
     ],
   );
   assert.equal(findLearnGuide("not-a-guide"), undefined);
+});
+
+test("documents the PackScout EV method in layman's terms on the learn index", () => {
+  assert.equal(PACKSCOUT_EV_METHOD.title, "PackScout method");
+  assert.equal(PACKSCOUT_EV_METHOD.points.length, 6);
+  assert.match(PACKSCOUT_EV_METHOD.summary, /Heat/i);
+  assert.match(
+    PACKSCOUT_EV_METHOD.points[1]?.body ?? "",
+    /Gross EV/i,
+  );
+  assert.match(
+    PACKSCOUT_EV_METHOD.points[0]?.body ?? "",
+    /never blended/i,
+  );
+  assert.match(
+    PACKSCOUT_EV_METHOD.points[3]?.body ?? "",
+    /timing signal comparing recent activity/i,
+  );
+  assert.match(
+    PACKSCOUT_EV_METHOD.points[3]?.body ?? "",
+    /never replaces PackScout EV/i,
+  );
+  assert.match(PACKSCOUT_EV_METHOD.disclaimer, /negative-EV/i);
+  assert.equal(PACKSCOUT_EV_METHOD.learnMoreHref, "/learn/expected-value");
 });

@@ -141,6 +141,11 @@
   line-height: 1.4;
 }
 
+.saveAction {
+  width: 100%;
+  margin-top: 0.7rem;
+}
+
 .sectionBlock,
 .chase,
 .actions {

@@ -4,6 +4,49 @@ import {
   METRIC_TRUST_COPY,
 } from "./metric-vocabulary";
 
+const HEAT_DEFINITION = getGlossaryDefinition("heat").definition;
+
+export type LearnMethodPoint = Readonly<{
+  title: string;
+  body: string;
+}>;
+
+export const PACKSCOUT_EV_METHOD = Object.freeze({
+  title: "PackScout method",
+  summary:
+    "PackScout EV estimates long-run value from public odds and prices. Heat is a separate timing read of recent activity on that same repack. Both stay independent from vendor marketing.",
+  points: [
+    {
+      title: "Public evidence only",
+      body: "We use supported listing data: stated odds, eligible inventory, repack price, and representative collectible values. Vendor-reported EV stays on its own line and is never blended into PackScout EV.",
+    },
+    {
+      title: "How EV math works",
+      body: "For each published outcome tier, multiply how likely it is by what that tier is worth. Add those up to get Gross EV. Subtract repack price for EV $ and EV %. When a tier is published as a range, we use the midpoint. Multi-card packs apply the same logic across each draw.",
+    },
+    {
+      title: "EV confidence is about evidence, not upside",
+      body: "EV confidence scores how complete the supported evidence is—odds coverage, inventory depth, and value support—not whether EV is positive. Thin or partial evidence lowers confidence; it does not silently fill gaps.",
+    },
+    {
+      title: "What Heat measures",
+      body: `${HEAT_DEFINITION} Heat compares recent opens on one repack to that repack's own baseline—pull activity, observed returns, large hits, chase availability, and pool composition—and rolls them into a Heat index with its own confidence score. Hot, Warm, Normal, and Cold are timing labels only. A hot streak is recent variance, not a prediction for your next rip, and Heat never replaces PackScout EV. When recent pulls are too thin, PackScout shows Not enough data instead of faking a read.`,
+    },
+    {
+      title: "Unavailable beats a guess",
+      body: "Missing odds, incomplete inventory, unsupported currency, thin pull samples, or other evidence gaps produce Unavailable or Not enough data instead of a fabricated comparison. An unavailable value is not zero.",
+    },
+    {
+      title: "What they are not",
+      body: "EV is a long-run average, not a forecast for one pack. Heat is a timing signal, not profit or positive EV. Neither changes your odds on the next open. Not financial or gambling advice.",
+    },
+  ] as const satisfies readonly LearnMethodPoint[],
+  disclaimer:
+    "Most repacks are negative-EV by design. PackScout helps you compare how negative—and how trustworthy the estimate is—not promise an edge.",
+  learnMoreHref: "/learn/expected-value",
+  learnMoreLabel: "Read the full EV guide",
+});
+
 export const LEARN_GUIDE_SLUGS = [
   "what-is-a-repack",
   "expected-value",

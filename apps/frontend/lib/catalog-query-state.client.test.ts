@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DEFAULT_CATALOG_QUERY,
+  catalogSheetInspectorInitiallyOpen,
   nextCatalogPage,
   parseCatalogQueryState,
   previousCatalogPage,
@@ -159,5 +160,16 @@ test("Overview serializes only compatible accepted filters", () => {
       vendors: ["courtyard"],
     }),
     "/?vendor=courtyard",
+  );
+});
+
+test("the all-repacks sheet stays closed unless the query asked for a specific pack", () => {
+  assert.equal(
+    catalogSheetInspectorInitiallyOpen(DEFAULT_CATALOG_QUERY.selectedPublicRepackId),
+    false,
+  );
+  assert.equal(
+    catalogSheetInspectorInitiallyOpen("00000000-0000-5000-8000-000000000301"),
+    true,
   );
 });

@@ -21,6 +21,7 @@ import {
   MOCK_DATA_RELEASE_PUBLIC_ID,
   MOCK_REPACK_SEARCH_SHARD_HASH,
   MOCK_REPACK_SEARCH_INDEX_HASH,
+  MOCK_PUBLIC_ASSET_ORIGINS,
   buildMockDataReleaseV2,
 } from "./mockDataReleaseFixture";
 import {

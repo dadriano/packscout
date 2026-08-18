@@ -173,7 +173,7 @@ export function OpportunityTable({
                     </button>
                   </td>
                   <td>
-                    <RepackHeatBadge heat={row.heat} />
+                    <RepackHeatBadge heat={row.heat} variant="icon" />
                   </td>
                   <td>
                     <span className={styles.vendor}>

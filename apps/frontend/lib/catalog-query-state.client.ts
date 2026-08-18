@@ -179,6 +179,12 @@ export function serializeCatalogQueryState(query: ListPublicRepacksInput): strin
   return serialized ? `/packs?${serialized}` : "/packs";
 }
 
+export function catalogSheetInspectorInitiallyOpen(
+  selectedPublicRepackId: ListPublicRepacksInput["selectedPublicRepackId"],
+): boolean {
+  return selectedPublicRepackId !== null;
+}
+
 export function serializeDashboardFilters(
   filters: ListPublicRepacksInput["filters"],
 ): string {
