@@ -70,3 +70,111 @@
   letter-spacing: 0.045em;
   text-transform: uppercase;
 }
+
+.iconRoot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.iconRoot[data-state="hot"] {
+  --heat-color: #db5b3f;
+}
+
+.iconRoot[data-state="warm"] {
+  --heat-color: var(--color-warning);
+}
+
+.iconRoot[data-state="normal"] {
+  --heat-color: var(--color-action);
+}
+
+.iconRoot[data-state="cold"] {
+  --heat-color: #3f7edb;
+}
+
+.iconRoot[data-state="insufficient_data"],
+.iconRoot[data-state="unavailable"] {
+  --heat-color: var(--color-status-neutral);
+}
+
+.iconTrigger {
+  --heat-soft: color-mix(in srgb, var(--heat-color) 9%, transparent);
+  display: inline-grid;
+  width: 1.55rem;
+  height: 1.55rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--heat-color) 30%, var(--color-border));
+  border-radius: 999px;
+  background: var(--heat-soft);
+  color: var(--color-text);
+  cursor: help;
+  padding: 0;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.iconTrigger:hover,
+.iconTrigger[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--heat-color) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--heat-color) 14%, transparent);
+}
+
+.iconMarker {
+  width: 0.52rem;
+  height: 0.52rem;
+  border: 1px solid color-mix(in srgb, var(--heat-color) 72%, var(--color-text));
+  border-radius: 999px;
+  background: var(--heat-color);
+}
+
+.iconRoot[data-state="insufficient_data"] .iconMarker,
+.iconRoot[data-state="unavailable"] .iconMarker {
+  background: transparent;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 60;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  display: flex;
+  width: min(14rem, calc(100vw - 2rem));
+  flex-direction: column;
+  gap: 0.18rem;
+  border: 1px solid var(--color-border-strong);
+  border-block-start: 2px solid var(--heat-color);
+  border-radius: 0.45rem;
+  background: var(--color-surface-raised);
+  box-shadow:
+    0 18px 45px color-mix(in srgb, var(--color-text) 12%, transparent),
+    var(--shadow-control);
+  color: var(--color-text);
+  padding: 0.62rem 0.72rem;
+  text-align: start;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.tooltipLabel {
+  font-size: 0.74rem;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.tooltipSupporting {
+  color: var(--color-text-muted);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iconTrigger {
+    transition: none;
+  }
+}

@@ -2,9 +2,13 @@
   display: grid;
   width: 100%;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 390px);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 1.25rem;
+}
+
+.workspace[data-has-side-inspector="true"] {
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 390px);
 }
 
 .resultsColumn {
@@ -48,7 +52,7 @@
 }
 
 @media (max-width: 1020px) {
-  .workspace {
+  .workspace[data-has-side-inspector="true"] {
     grid-template-columns: 1fr;
   }
 

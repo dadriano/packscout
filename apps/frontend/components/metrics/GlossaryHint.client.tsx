@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   CLOSED_GLOSSARY_HINT_STATE,
+  GLOSSARY_OPEN_EVENT,
   positionGlossaryPanel,
   reduceGlossaryHintState,
 } from "@/lib/glossary-hint.client";
@@ -20,8 +21,6 @@ import {
   type GlossaryFieldKey,
 } from "@/lib/metric-vocabulary";
 import styles from "./GlossaryHint.module.css";
-
-const GLOSSARY_OPEN_EVENT = "packscout:glossary-open" as const;
 
 type GlossaryHintProps = Readonly<{
   field: GlossaryFieldKey;

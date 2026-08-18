@@ -2,6 +2,10 @@
 
 import type { ReactNode, RefObject } from "react";
 import type { DashboardBundle } from "@packscout/contracts";
+import {
+  DEFAULT_CATALOG_QUERY,
+  serializeCatalogQueryState,
+} from "@/lib/catalog-query-state.client";
 import type { ClipboardWriter } from "./pack-actions.client";
 import { CatalogSummaries } from "./CatalogSummaries";
 import { OpportunityTable } from "./OpportunityTable.client";
@@ -50,10 +54,23 @@ export function OverviewDashboard({
       ? bundle.selectedRepack
       : null;
 
+  const showSideInspector =
+    inspectorOpen && inspectorPlacement === "side";
+  const showSheetInspector =
+    inspectorOpen && inspectorPlacement === "sheet" && selectedRepack;
+  const repacksHref = serializeCatalogQueryState({
+    ...DEFAULT_CATALOG_QUERY,
+    filters: bundle.activeFilters,
+  });
+
   return (
-    <section aria-label="PackScout repack overview" className={styles.workspace}>
+    <section
+      aria-label="PackScout repack overview"
+      className={styles.workspace}
+      data-has-side-inspector={showSideInspector}
+    >
       <div className={styles.resultsColumn}>
-        <OverviewKpis kpis={bundle.kpis} />
+        <OverviewKpis kpis={bundle.kpis} repacksHref={repacksHref} />
         {controls ? <div className={styles.controls}>{controls}</div> : null}
         <OpportunityTable
           onSelectOpportunity={onSelectOpportunity}
@@ -72,28 +89,43 @@ export function OverviewDashboard({
         </div>
       </div>
 
-      <div className={styles.inspectorColumn}>
-        {!inspectorOpen ? null : selectedRepack ? (
-          <RepackInspector
-            clipboardWriter={clipboardWriter}
-            key={selectedRepack.publicRepackId}
-            metadata={bundle.metadata}
-            onActionOutcome={onInspectorAction}
-            onClose={onCloseInspector}
-            repack={selectedRepack}
-            placement={inspectorPlacement}
-            returnFocusRef={inspectorReturnFocusRef}
-          />
-        ) : (
-          <aside aria-label="Repack details" className={styles.pendingInspector}>
-            <p>
-              {selectedId
-                ? "Updating selected repack details…"
-                : "Select an opportunity to inspect its current evidence."}
-            </p>
-          </aside>
-        )}
-      </div>
+      {showSideInspector ? (
+        <div className={styles.inspectorColumn}>
+          {selectedRepack ? (
+            <RepackInspector
+              clipboardWriter={clipboardWriter}
+              key={selectedRepack.publicRepackId}
+              metadata={bundle.metadata}
+              onActionOutcome={onInspectorAction}
+              onClose={onCloseInspector}
+              repack={selectedRepack}
+              placement={inspectorPlacement}
+              returnFocusRef={inspectorReturnFocusRef}
+            />
+          ) : (
+            <aside aria-label="Repack details" className={styles.pendingInspector}>
+              <p>
+                {selectedId
+                  ? "Updating selected repack details…"
+                  : "Select an opportunity to inspect its current evidence."}
+              </p>
+            </aside>
+          )}
+        </div>
+      ) : null}
+
+      {showSheetInspector ? (
+        <RepackInspector
+          clipboardWriter={clipboardWriter}
+          key={selectedRepack.publicRepackId}
+          metadata={bundle.metadata}
+          onActionOutcome={onInspectorAction}
+          onClose={onCloseInspector}
+          repack={selectedRepack}
+          placement="sheet"
+          returnFocusRef={inspectorReturnFocusRef}
+        />
+      ) : null}
     </section>
   );
 }

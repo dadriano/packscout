@@ -123,7 +123,7 @@ function RepackRow({
         </button>
       </td>
       <td>
-        <RepackHeatBadge heat={repack.heat} />
+        <RepackHeatBadge heat={repack.heat} variant="icon" />
       </td>
       <td className={styles.numeric}>
         {displayPrice ? (
@@ -133,10 +133,10 @@ function RepackRow({
         )}
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={estimate.evDollars} showGlossary={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={estimate.evDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={estimate.evPercent} showGlossary={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={estimate.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
         <span title={estimate.confidence.accessibleLabel}>
@@ -144,13 +144,13 @@ function RepackRow({
         </span>
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={vendorEstimate.evPercent} showGlossary={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={vendorEstimate.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={buyback} showGlossary={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={buyback} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={estimate.grossEv} showGlossary={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={estimate.grossEv} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td>
         {displayedChase ? (
@@ -171,7 +171,7 @@ function RepackRow({
         )}
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={displayedChaseValue} showGlossary={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={displayedChaseValue} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td>
         {actions.promo ? (
