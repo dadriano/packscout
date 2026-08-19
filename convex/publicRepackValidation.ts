@@ -371,6 +371,9 @@ export function rowMatchesFilters(
     readonly ignoreCategories?: boolean;
   } = {},
 ): boolean {
+  if (filters.availability === "active" && row.availability !== "active") {
+    return false;
+  }
   if (
     !options.ignoreVendors &&
     filters.vendors.length > 0 &&

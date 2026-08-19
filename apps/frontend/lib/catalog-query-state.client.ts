@@ -27,6 +27,7 @@ export const DEFAULT_CATALOG_QUERY: ListPublicRepacksInput = Object.freeze({
     vendors: Object.freeze([]),
     categories: Object.freeze([]),
     collectibleTypes: Object.freeze([]),
+    availability: "active",
     price: Object.freeze({
       mode: "full",
       minMinor: PUBLIC_REPACK_PRICE_MIN_MINOR,
@@ -73,6 +74,7 @@ function onlyKnownKeys(parameters: URLSearchParams): boolean {
     "vendor",
     "category",
     "collectibleType",
+    "availability",
     "minPrice",
     "maxPrice",
     "sort",
@@ -88,6 +90,7 @@ function hasDuplicateSingleton(parameters: URLSearchParams): boolean {
   return [
     "q",
     "chase",
+    "availability",
     "minPrice",
     "maxPrice",
     "sort",
@@ -123,6 +126,11 @@ export function parseCatalogQueryState(
     return { ok: false, message: "The catalog sort is invalid." };
   }
 
+  const availabilityRaw = parameters.get("availability");
+  if (availabilityRaw !== null && availabilityRaw !== "all") {
+    return { ok: false, message: "The catalog availability filter is invalid." };
+  }
+
   const cursor = parameters.get("cursor");
   const cursorStack = parameters.get("cursorStack");
   const queryFingerprint = parameters.get("queryFingerprint");
@@ -132,6 +140,7 @@ export function parseCatalogQueryState(
       vendors: canonicalValues(parameters.getAll("vendor")),
       categories: canonicalValues(parameters.getAll("category")),
       collectibleTypes: canonicalValues(parameters.getAll("collectibleType")),
+      availability: availabilityRaw === "all" ? "all" : "active",
       price:
         minRaw === null && maxRaw === null
           ? DEFAULT_CATALOG_QUERY.filters.price
@@ -163,6 +172,9 @@ export function serializeCatalogQueryState(query: ListPublicRepacksInput): strin
   for (const category of parsed.filters.categories) parameters.append("category", category);
   for (const collectibleType of parsed.filters.collectibleTypes) {
     parameters.append("collectibleType", collectibleType);
+  }
+  if (parsed.filters.availability !== DEFAULT_CATALOG_QUERY.filters.availability) {
+    parameters.set("availability", parsed.filters.availability);
   }
   if (parsed.filters.price.mode === "narrowed") {
     parameters.set("minPrice", formatDollarAmount(parsed.filters.price.minMinor));

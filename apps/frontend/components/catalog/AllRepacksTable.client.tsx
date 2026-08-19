@@ -236,7 +236,7 @@ export function AllRepacksTable({
         <p aria-live="polite" className={styles.orderStatus}>
           {activeQuery.search
             ? "Ordered by relevance"
-            : `Sorted by ${ALL_REPACKS_HEADERS.find(({ sort }) => sort === activeQuery.sort)?.label ?? "PackScout EV $"}, ${activeQuery.direction === "asc" ? "ascending" : "descending"}`}
+            : `Sorted by ${ALL_REPACKS_HEADERS.find(({ sort }) => sort === activeQuery.sort)?.label ?? "EV $"}, ${activeQuery.direction === "asc" ? "ascending" : "descending"}`}
         </p>
       </div>
 

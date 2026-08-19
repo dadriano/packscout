@@ -98,14 +98,19 @@ export const getDashboardBundle = query({
       return publicReadError("INVALID_QUERY");
     }
 
-    const activeRows = allRows.filter((row) => row.availability === "active");
     const matchingRows = matchingRepackRows(
-      activeRows,
+      allRows,
       request.value.filters,
       "",
     );
+    // Opportunities are actionable buys, so they stay active-only even when the
+    // caller opted into seeing sold-out repacks in the counts and summaries.
     const opportunityRows = [...matchingRows]
-      .filter((row) => row.packScoutEvDollarsMinor !== null)
+      .filter(
+        (row) =>
+          row.availability === "active" &&
+          row.packScoutEvDollarsMinor !== null,
+      )
       .sort((left, right) =>
         compareRepackRows(left, right, {
           search: "",
@@ -141,9 +146,10 @@ export const getDashboardBundle = query({
       categorySummaries: repackSummaries(matchingRows, "category"),
       facets: contextualFacets(
         allRows,
-        activeRows,
+        allRows,
         request.value.filters,
         "",
+        active.catalog.categoryByPublicId,
       ),
       activeFilters: request.value.filters,
       selectedRepack,
@@ -278,6 +284,7 @@ export const listPublicRepacks = query({
         eligibleRows,
         request.value.filters,
         request.value.search,
+        active.catalog.categoryByPublicId,
       ),
       activeQuery: {
         search: request.value.search,

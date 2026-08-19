@@ -77,6 +77,9 @@ function activeConstraints(page: ListPublicRepacksPage) {
       value: page.activeQuery.filters.collectibleTypes.join(", "),
     });
   }
+  if (page.activeQuery.filters.availability === "all") {
+    constraints.push({ label: "Availability", value: "Including sold out" });
+  }
   if (page.activeQuery.filters.price.mode === "narrowed") {
     constraints.push({
       label: "Repack Price",

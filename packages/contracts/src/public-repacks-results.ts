@@ -117,23 +117,36 @@ export const contextualFacetOptionSchema = z
   })
   .strict();
 
+function canonicalKeyOrder<T extends { readonly key: string }>(
+  values: readonly T[],
+): boolean {
+  return values.every(
+    ({ key }, index) => index === 0 || values[index - 1]!.key < key,
+  );
+}
+
 function canonicalFacetList(keySchema: z.ZodType<string>, maximum: number) {
   return z
     .array(contextualFacetOptionSchema.extend({ key: keySchema }))
     .max(maximum)
-    .refine(
-      (values) =>
-        values.every(
-          ({ key }, index) => index === 0 || values[index - 1]!.key < key,
-        ),
-      { message: "public_facets.not_canonical" },
-    );
+    .refine(canonicalKeyOrder, { message: "public_facets.not_canonical" });
 }
+
+export const categoryFacetOptionSchema = contextualFacetOptionSchema
+  .extend({
+    key: publicCategoryIdSchema,
+    parentKey: publicCategoryIdSchema.nullable(),
+    depth: z.number().int().min(0).max(12),
+  })
+  .strict();
 
 export const contextualRepackFacetsSchema = z
   .object({
     vendors: canonicalFacetList(publicVendorKeySchema, 128),
-    categories: canonicalFacetList(publicCategoryIdSchema, 4_096),
+    categories: z
+      .array(categoryFacetOptionSchema)
+      .max(4_096)
+      .refine(canonicalKeyOrder, { message: "public_facets.not_canonical" }),
     collectibleTypes: canonicalFacetList(publicCollectibleTypeSchema, 8),
   })
   .strict();
@@ -502,6 +515,7 @@ export const findRepacksByDesiredCollectibleResultSchema = publicResultSchema(
 export type ContextualRepackFacets = z.infer<
   typeof contextualRepackFacetsSchema
 >;
+export type CategoryFacetOption = z.infer<typeof categoryFacetOptionSchema>;
 export type DashboardKpis = z.infer<typeof dashboardKpisSchema>;
 export type DashboardBundle = z.infer<typeof dashboardBundleSchema>;
 export type PublicShellStatus = z.infer<typeof publicShellStatusSchema>;

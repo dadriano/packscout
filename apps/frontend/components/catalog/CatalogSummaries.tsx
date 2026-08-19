@@ -29,7 +29,7 @@ export function CatalogSummaries({
         </div>
         <div aria-hidden="true" className={styles.columns}>
           <span>Repacks</span>
-          <span>Median PackScout EV</span>
+          <span>Median EV</span>
         </div>
       </div>
 
