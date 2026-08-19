@@ -71,41 +71,36 @@
 
 .table th:nth-child(3),
 .table td:nth-child(3) {
-  width: 4rem;
+  width: 16%;
 }
 
 .table th:nth-child(4),
 .table td:nth-child(4) {
-  width: 16%;
-}
-
-.table th:nth-child(5),
-.table td:nth-child(5) {
   width: 11%;
 }
 
-.table td:nth-child(5) {
+.table td:nth-child(4) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.table th:nth-child(5),
+.table td:nth-child(5) {
+  width: 6.6rem;
+}
+
 .table th:nth-child(6),
 .table td:nth-child(6) {
-  width: 6.6rem;
+  width: 7.4rem;
 }
 
 .table th:nth-child(7),
 .table td:nth-child(7) {
-  width: 7.4rem;
+  width: 6.1rem;
 }
 
 .table th:nth-child(8),
 .table td:nth-child(8) {
-  width: 6.1rem;
-}
-
-.table th:nth-child(9),
-.table td:nth-child(9) {
   width: 7.1rem;
 }
 

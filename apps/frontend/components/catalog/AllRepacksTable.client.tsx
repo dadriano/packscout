@@ -25,7 +25,6 @@ import {
   type CatalogSortDirection,
 } from "@/lib/all-repacks-table";
 import { presentChaseMatchEvidence } from "./pack-inspector-presentation";
-import { RepackHeatBadge } from "./RepackHeatBadge";
 import styles from "./AllRepacksTable.module.css";
 
 type AllRepacksTableProps = Readonly<{
@@ -121,9 +120,6 @@ function RepackRow({
             ) : null}
           </span>
         </button>
-      </td>
-      <td>
-        <RepackHeatBadge heat={repack.heat} variant="icon" />
       </td>
       <td className={styles.numeric}>
         {displayPrice ? (

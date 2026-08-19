@@ -24,7 +24,6 @@ import {
 } from "@/lib/metric-presentation";
 import { EXPECTED_VALUE_ARTICLE_HREF } from "@/lib/metric-vocabulary";
 import { CatalogImage } from "./CatalogImage.client";
-import { RepackHeatDetails } from "./RepackHeatDetails";
 import {
   buildPublishedRepackHref,
   copyPublicPromoCode,
@@ -385,11 +384,6 @@ export function RepackInspector({
           </Link>
         </div>
       </div>
-
-      <RepackHeatDetails
-        headingId={`recent-heat-${repack.publicRepackId}`}
-        heat={repack.heat}
-      />
 
       <section aria-labelledby={`top-chase-${repack.publicRepackId}`} className={styles.chase}>
         <div className={styles.sectionHeading}>

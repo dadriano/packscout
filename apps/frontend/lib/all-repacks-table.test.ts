@@ -15,7 +15,6 @@ test("the repack table exposes both EV sources and PackScout confidence", () => 
       "Vendor",
       "Category",
       "Repack",
-      "Heat",
       "Repack Price",
       "EV $",
       "EV %",
