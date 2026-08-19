@@ -8,6 +8,7 @@ import {
   type ListPublicRepacksInput,
   type PublicRepackSort,
 } from "@packscout/contracts";
+import type { DashboardProvider } from "./provider-banner";
 
 const SORT_KEYS = new Set<PublicRepackSort>([
   "repack",
@@ -199,12 +200,16 @@ export function catalogSheetInspectorInitiallyOpen(
 
 export function serializeDashboardFilters(
   filters: ListPublicRepacksInput["filters"],
+  provider?: DashboardProvider,
 ): string {
   const query = listPublicRepacksInputSchema.parse({ filters });
   const allPacksHref = serializeCatalogQueryState(query);
-  return allPacksHref === "/packs"
-    ? "/"
-    : allPacksHref.replace("/packs?", "/?");
+  const filterQuery =
+    allPacksHref === "/packs"
+      ? ""
+      : allPacksHref.slice("/packs?".length);
+  const dashboardQuery = [provider, filterQuery].filter(Boolean).join("&");
+  return dashboardQuery ? `/?${dashboardQuery}` : "/";
 }
 
 export function resetCatalogPagination(

@@ -1,9 +1,12 @@
 import Link from "next/link";
+import type { DashboardHref } from "@/lib/provider-banner";
 
 export function DashboardPageHeader({
   activeView,
+  overviewHref = "/",
 }: {
   activeView: "overview" | "all-repacks";
+  overviewHref?: DashboardHref;
 }) {
   return (
     <div className="page-heading-row">
@@ -16,7 +19,7 @@ export function DashboardPageHeader({
             aria-current={activeView === "overview" ? "page" : undefined}
             aria-selected={activeView === "overview"}
             className="dashboard-tabs__tab"
-            href="/"
+            href={overviewHref}
             role="tab"
           >
             Overview
