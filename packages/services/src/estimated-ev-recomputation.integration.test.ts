@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   PrismaEstimatedEvRecomputationRepository,
+  PrismaImportRunRepository,
   IngestionPersistenceRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
@@ -245,10 +246,66 @@ test("page commits durably coalesce same-page EV work and queue later pack and i
     const initial = source(1, "2026-08-06T10:00:00.000Z");
     await commit(harness, 1, initial, [pack(initial, 10), evInput(initial)]);
     assert.equal((await requests(harness)).length, 1);
+    const pendingCheckpoint =
+      await harness.database.settled_public_watermarks.findUniqueOrThrow({
+        where: { organization_id: ids.organization },
+      });
+    assert.equal(pendingCheckpoint.settled_sequence, 0n);
+    assert.ok(pendingCheckpoint.source_head_sequence > 0n);
+    const runs = new PrismaImportRunRepository(harness.database);
+    assert.equal(
+      (
+        await runs.claimRun({
+          organizationId: ids.organization,
+          runId: ids.run,
+          workerId: "provider-worker-settlement-test",
+          claimedAt: new Date("2026-08-06T10:00:20.000Z"),
+          leaseExpiresAt: new Date("2026-08-06T10:02:20.000Z"),
+        })
+      ).kind,
+      "claimed",
+    );
+    assert.equal(
+      (
+        await runs.finishRun({
+          organizationId: ids.organization,
+          runId: ids.run,
+          workerId: "provider-worker-settlement-test",
+          state: "succeeded",
+          reachedProviderHead: true,
+          failureCode: null,
+          failureSummary: null,
+          finishedAt: new Date("2026-08-06T10:00:30.000Z"),
+        })
+      ).kind,
+      "finished",
+    );
+    assert.equal(
+      (
+        await harness.database.settled_public_watermarks.findUniqueOrThrow({
+          where: { organization_id: ids.organization },
+        })
+      ).settled_sequence,
+      0n,
+    );
     const first = await processor(harness, time.clock).runCycle();
     assert.deepEqual(
       { completed: first.completed, estimated: first.estimated },
       { completed: 1, estimated: 1 },
+    );
+    const estimatedCheckpoint =
+      await harness.database.settled_public_watermarks.findUniqueOrThrow({
+        where: { organization_id: ids.organization },
+      });
+    assert.equal(
+      estimatedCheckpoint.settled_sequence,
+      estimatedCheckpoint.source_head_sequence,
+    );
+    assert.equal(
+      await harness.database.public_derivation_obligations.count({
+        where: { organization_id: ids.organization, state: "succeeded" },
+      }),
+      2,
     );
 
     const repriced = source(2, "2026-08-06T11:00:00.000Z");
@@ -371,6 +428,14 @@ test("transient processor failures retry durably and incomplete unsupported inpu
     };
     const worker = processor(harness, time.clock, transientThenReal);
     assert.equal((await worker.runCycle()).retrying, 1);
+    assert.equal(
+      (
+        await harness.database.settled_public_watermarks.findUniqueOrThrow({
+          where: { organization_id: ids.organization },
+        })
+      ).settled_sequence,
+      0n,
+    );
     let [request] = await requests(harness);
     assert.deepEqual(
       { state: request?.state, attempts: request?.attempt_count, code: request?.failure_code },
@@ -395,6 +460,28 @@ test("transient processor failures retry durably and incomplete unsupported inpu
     assert.equal(explanation?.status, "unavailable");
     assert.ok(explanation?.reasonCodes.includes("unsupported_currency"));
     assert.ok(explanation?.reasonCodes.includes("incomplete_probability_coverage"));
+    const unavailableObligations =
+      await harness.database.public_derivation_obligations.findMany({
+        where: {
+          organization_id: ids.organization,
+          state: "business_unavailable",
+        },
+      });
+    assert.equal(unavailableObligations.length, 2);
+    assert.ok(
+      unavailableObligations.every(
+        ({ outcome_reason_code }) =>
+          outcome_reason_code === "unsupported_currency",
+      ),
+    );
+    const unavailableCheckpoint =
+      await harness.database.settled_public_watermarks.findUniqueOrThrow({
+        where: { organization_id: ids.organization },
+      });
+    assert.equal(
+      unavailableCheckpoint.settled_sequence,
+      unavailableCheckpoint.source_head_sequence,
+    );
     assert.deepEqual(harness.availability, ["UNAVAILABLE"]);
   } finally {
     await harness.close();

@@ -117,6 +117,13 @@ export interface ProjectDerivedSourceRecordInput {
   sourceRecordId: string;
   projections: readonly CanonicalProjectionInput[];
   acceptedAt: Date;
+  recomputation?: Readonly<{
+    requestId: string;
+    claimToken: string;
+    originatingPublicChangeSequence: bigint;
+    resultStatus: "estimated" | "unavailable";
+    outcomeReasonCode?: string;
+  }>;
 }
 
 export interface MaterializeAndProjectSourceRecordInput {

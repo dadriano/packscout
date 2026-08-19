@@ -223,14 +223,38 @@ test("PostgreSQL rejects cross-organization references, invalid state, and dupli
       `),
       /foreign key constraint/i,
     );
+    await harness.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRawUnsafe(`
+        insert into public.settled_public_watermarks (
+          organization_id, next_sequence, source_head_sequence, source_head_at
+        ) values (
+          '${ids.organization}', 2, 1, current_timestamp
+        )
+      `);
+      await transaction.$executeRawUnsafe(`
+        insert into public.public_change_causes (
+          organization_id, sequence, change_kind, entity_key,
+          occurred_at, authoritative_transaction_id
+        ) values (
+          '${ids.organization}', 1, 'manual_correction', 'canonical:v1:pack-1',
+          current_timestamp, 'schema-parity-test'
+        )
+      `);
+      await transaction.$executeRawUnsafe(`
+        insert into public.public_change_catalog_impacts (
+          organization_id, cause_sequence, provider_platform_keys
+        ) values ('${ids.organization}', 1, array['beezie']::text[])
+      `);
+    });
     await assert.rejects(
       harness.prisma.$executeRawUnsafe(`
         insert into public.estimated_ev_recomputation_requests (
           request_key, organization_id, provider_id, configuration_revision_id,
-          platform_key, pack_external_id, ev_input_external_id, state
+          platform_key, pack_external_id, ev_input_external_id,
+          originating_public_change_sequence, state
         ) values (
           repeat('a', 64), '${ids.organization}', '${ids.provider}', '${ids.configuration}',
-          'beezie', 'pack-1', 'input-1', 'running'
+          'beezie', 'pack-1', 'input-1', 1, 'running'
         )
       `),
       /check constraint/i,

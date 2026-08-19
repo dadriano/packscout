@@ -17,6 +17,7 @@ const organizationId = "50000000-0000-4000-8000-000000000001";
 const providerId = "50000000-0000-4000-8000-000000000002";
 const runId = "50000000-0000-4000-8000-000000000003";
 const quarantineId = "50000000-0000-4000-8000-000000000004";
+const deploymentScopeDigest = "d".repeat(64);
 const occurredAt = new Date("2026-08-06T12:00:00.000Z");
 const sensitive = "Bearer secret-token username=private 0xraw-wallet";
 
@@ -102,6 +103,99 @@ test("adding a test sink requires only composition and no pipeline branch", asyn
   assert.equal(result.status, "accepted");
   assert.equal(adminSink.events.length, 1);
   assert.deepEqual(testSink.events, adminSink.events);
+});
+
+test("promotion events expose only bounded reusable lane evidence", async () => {
+  const sink = new CapturePublisher();
+  const service = new OperationalEventService(
+    sink,
+    ids(),
+    { now: () => new Date(occurredAt) },
+  );
+  await service.promotionActivationDelayed({
+    organizationId,
+    deploymentScopeDigest,
+    lane: "provider",
+    platformKey: "alpha",
+    targetWatermark: 42n,
+    confirmedWatermark: 41n,
+    durationMs: 60_001,
+  });
+  await service.promotionSettlementBlocked({
+    organizationId,
+    deploymentScopeDigest,
+    lane: "provider",
+    platformKey: "alpha",
+    sourceHeadWatermark: 44n,
+    settledWatermark: 42n,
+    technicalFailureCount: 2,
+  });
+  await service.promotionFailed({
+    organizationId,
+    deploymentScopeDigest,
+    lane: "heat",
+    attemptId: "50000000-0000-4000-8000-000000000098",
+    targetWatermark: 45n,
+    confirmedWatermark: 44n,
+    failureCode: sensitive,
+    reconciliation: true,
+  });
+  await service.promotionRecovered({
+    organizationId,
+    deploymentScopeDigest,
+    lane: "provider",
+    platformKey: "alpha",
+    targetWatermark: 44n,
+    confirmedWatermark: 44n,
+  });
+
+  assert.deepEqual(sink.events.map(({ kind }) => kind), [
+    "promotion_activation_delayed",
+    "promotion_settlement_blocked",
+    "promotion_failed",
+    "promotion_recovered",
+  ]);
+  assert.deepEqual(sink.events[0]?.evidence, {
+    lane: "provider",
+    platformKey: "alpha",
+    condition: "activation_lag",
+    targetWatermark: "42",
+    confirmedWatermark: "41",
+    durationMs: 60_001,
+  });
+  assert.equal(
+    sink.events[2]?.evidence.failureCode,
+    "PROMOTION_PUBLICATION_FAILED",
+  );
+  const rendered = JSON.stringify(sink.events);
+  assert.equal(rendered.includes(sensitive), false);
+  assert.equal(rendered.includes("secret-token"), false);
+  assert.equal(rendered.includes("providerId"), true);
+  assert.equal(sink.events.every(({ providerId }) => providerId === null), true);
+  assert.equal(
+    sink.events.every(({ dedupeKey, recoveryKey }) =>
+      dedupeKey.includes(deploymentScopeDigest) &&
+      recoveryKey.includes(deploymentScopeDigest)
+    ),
+    true,
+  );
+  assert.deepEqual(
+    await service.promotionActivationDelayed({
+      organizationId,
+      deploymentScopeDigest: "production-us",
+    lane: "provider",
+    platformKey: "alpha",
+      targetWatermark: 45n,
+      confirmedWatermark: 44n,
+      durationMs: 60_000,
+    }),
+    {
+      status: "failed",
+      alertId: null,
+      failureCode: "NOTIFICATION_PUBLISH_FAILED",
+    },
+  );
+  assert.equal(sink.events.length, 4);
 });
 
 test("sink failures are isolated from the event caller", async () => {

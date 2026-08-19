@@ -1,17 +1,33 @@
 import {
   REPACK_HEAT_MAXIMUM_TTL_MILLISECONDS,
+  canonicalJson,
+  hydrateRepackHeatSignal,
   parseRepackHeatTimestampMillis,
   publicRepackHeatSignalSchema,
   unavailableRepackHeat,
+  type GlobalCatalogManifestV1,
+  type ProductionHeatManifestAlignment,
   type PublicRepackHeat,
   type PublicRepackDetail,
   type PublicRepackViewDetail,
 } from "@packscout/contracts";
 import type { Doc } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
+import type { PublicProviderCatalog } from "./publicProviderCatalogReadModel";
+
+export type PublicCatalogHeatContext = Readonly<{
+  manifestDocument: Doc<"globalCatalogManifests">;
+  manifest: GlobalCatalogManifestV1;
+  alignment: ProductionHeatManifestAlignment;
+  catalog: PublicProviderCatalog;
+}>;
 
 type HeatSnapshotContext =
-  | Readonly<{ status: "current"; snapshot: Doc<"repackHeatSnapshots"> }>
+  | Readonly<{
+      status: "current";
+      snapshot: Doc<"repackHeatSnapshots">;
+      signalSet: Doc<"repackHeatSignalSets">;
+    }>
   | Readonly<{
       status: "expired";
       lastCalculatedAt: string;
@@ -28,7 +44,8 @@ function unavailable(reason: "NOT_PUBLISHED" | "RELEASE_MISMATCH") {
 
 async function loadHeatSnapshotContext(
   ctx: QueryCtx,
-  release: Doc<"dataReleases">,
+  active: PublicCatalogHeatContext,
+  currentTime: number,
 ): Promise<HeatSnapshotContext> {
   const states = await ctx.db
     .query("repackHeatState")
@@ -44,39 +61,46 @@ async function loadHeatSnapshotContext(
     "repackHeatSnapshots",
     state.activeHeatSnapshotId,
   );
-  const baselineWindowStartedAt =
-    snapshot === null
-      ? null
-      : parseRepackHeatTimestampMillis(snapshot.baselineWindowStartedAt);
-  const baselineWindowEndedAt =
-    snapshot === null
-      ? null
-      : parseRepackHeatTimestampMillis(snapshot.baselineWindowEndedAt);
-  const currentWindowStartedAt =
-    snapshot === null
-      ? null
-      : parseRepackHeatTimestampMillis(snapshot.currentWindowStartedAt);
-  const currentWindowEndedAt =
-    snapshot === null
-      ? null
-      : parseRepackHeatTimestampMillis(snapshot.currentWindowEndedAt);
-  const calculatedAt =
-    snapshot === null
-      ? null
-      : parseRepackHeatTimestampMillis(snapshot.calculatedAt);
-  const expiresAt =
-    snapshot === null ? null : parseRepackHeatTimestampMillis(snapshot.expiresAt);
+  const signalSet = snapshot === null
+    ? null
+    : await ctx.db.get("repackHeatSignalSets", snapshot.signalSetId);
+  const baselineWindowStartedAt = snapshot === null
+    ? null
+    : parseRepackHeatTimestampMillis(snapshot.baselineWindowStartedAt);
+  const baselineWindowEndedAt = snapshot === null
+    ? null
+    : parseRepackHeatTimestampMillis(snapshot.baselineWindowEndedAt);
+  const currentWindowStartedAt = snapshot === null
+    ? null
+    : parseRepackHeatTimestampMillis(snapshot.currentWindowStartedAt);
+  const currentWindowEndedAt = snapshot === null
+    ? null
+    : parseRepackHeatTimestampMillis(snapshot.currentWindowEndedAt);
+  const calculatedAt = snapshot === null
+    ? null
+    : parseRepackHeatTimestampMillis(snapshot.calculatedAt);
+  const expiresAt = snapshot === null
+    ? null
+    : parseRepackHeatTimestampMillis(snapshot.expiresAt);
   if (
     snapshot === null ||
+    signalSet === null ||
     snapshot.lifecycle !== "complete" ||
-    snapshot.releaseId !== release._id ||
+    signalSet.lifecycle !== "complete" ||
+    snapshot.manifestId !== active.manifestDocument._id ||
+    signalSet.manifestId !== active.manifestDocument._id ||
+    canonicalJson(snapshot.manifestAlignment) !==
+      canonicalJson(active.alignment) ||
+    canonicalJson(signalSet.manifestAlignment) !==
+      canonicalJson(active.alignment) ||
+    signalSet._id !== snapshot.signalSetId ||
     !Number.isSafeInteger(snapshot.sequence) ||
     snapshot.sequence < 0 ||
     state.latestSequence !== snapshot.sequence ||
     state.activeHeatSnapshotId === state.previousHeatSnapshotId ||
     !Number.isSafeInteger(snapshot.signalCount) ||
-    snapshot.signalCount < 0 ||
-    snapshot.signalCount > release.metadata.repackCount ||
+    snapshot.signalCount !== active.manifest.counts.repacks ||
+    signalSet.signalCount !== snapshot.signalCount ||
     baselineWindowStartedAt === null ||
     baselineWindowEndedAt === null ||
     currentWindowStartedAt === null ||
@@ -90,18 +114,30 @@ async function loadHeatSnapshotContext(
     calculatedAt >= expiresAt ||
     expiresAt - calculatedAt > REPACK_HEAT_MAXIMUM_TTL_MILLISECONDS ||
     state.expiresAt !== snapshot.expiresAt ||
-    (release.metadata.dataSource === "mock" &&
+    (active.manifest.dataSource === "mock" &&
       snapshot.sourceKind !== "simulated") ||
-    (release.metadata.dataSource === "canonical" &&
+    (active.manifest.dataSource === "canonical" &&
       snapshot.sourceKind !== "observed") ||
+    signalSet.sourceKind !== snapshot.sourceKind ||
+    signalSet.scenarioVersion !== snapshot.scenarioVersion ||
+    signalSet.aggregationVersion !== snapshot.aggregationVersion ||
+    signalSet.heatPolicyVersion !== snapshot.heatPolicyVersion ||
     (snapshot.sourceKind === "observed" &&
-      (snapshot.simulationRunId !== null || snapshot.scenarioVersion !== null)) ||
+      (snapshot.simulationRunId !== null ||
+        snapshot.scenarioVersion !== null ||
+        snapshot.publicationId === null ||
+        snapshot.publicationId !== snapshot.publicHeatSnapshotId ||
+        snapshot.sourceWatermark === null ||
+        !/^[1-9][0-9]{0,18}$/u.test(snapshot.sourceWatermark))) ||
     (snapshot.sourceKind === "simulated" &&
-      (snapshot.simulationRunId === null || snapshot.scenarioVersion === null))
+      (snapshot.simulationRunId === null ||
+        snapshot.scenarioVersion === null ||
+        snapshot.publicationId !== null ||
+        snapshot.sourceWatermark !== null))
   ) {
     return unavailable("RELEASE_MISMATCH");
   }
-  if (state.freshness === "expired") {
+  if (state.freshness === "expired" || expiresAt <= currentTime) {
     return {
       status: "expired",
       lastCalculatedAt: snapshot.calculatedAt,
@@ -111,7 +147,7 @@ async function loadHeatSnapshotContext(
   if (state.freshness !== "current") {
     return unavailable("NOT_PUBLISHED");
   }
-  return { status: "current", snapshot };
+  return { status: "current", snapshot, signalSet };
 }
 
 function heatWrapperFromContext(
@@ -129,33 +165,49 @@ function heatWrapperFromContext(
 
 async function loadCurrentHeat(
   ctx: QueryCtx,
-  release: Doc<"dataReleases">,
+  active: PublicCatalogHeatContext,
   snapshot: Doc<"repackHeatSnapshots">,
+  signalSet: Doc<"repackHeatSignalSets">,
   publicRepackId: string,
 ): Promise<PublicRepackHeat> {
   const documents = await ctx.db
     .query("repackHeatSignals")
-    .withIndex("by_heat_snapshot_id_and_public_repack_id", (index) =>
+    .withIndex("by_signal_set_id_and_public_repack_id", (index) =>
       index
-        .eq("heatSnapshotId", snapshot._id)
+        .eq("signalSetId", signalSet._id)
         .eq("publicRepackId", publicRepackId),
     )
     .take(2);
   if (documents.length === 0) return unavailableRepackHeat("NOT_PUBLISHED");
   if (documents.length !== 1) return unavailableRepackHeat("RELEASE_MISMATCH");
   const document = documents[0]!;
-  const repack = await ctx.db.get("repacks", document.repackId);
-  const parsed = publicRepackHeatSignalSchema.safeParse(document.detail);
+  const release = active.catalog.repackReleaseByPublicId.get(publicRepackId);
+  const repack = await ctx.db.get("providerCatalogRepacks", document.repackId);
+  let hydrated: unknown;
+  try {
+    hydrated = hydrateRepackHeatSignal(document.detail, {
+      baselineWindowStartedAt: snapshot.baselineWindowStartedAt,
+      baselineWindowEndedAt: snapshot.baselineWindowEndedAt,
+      currentWindowStartedAt: snapshot.currentWindowStartedAt,
+      currentWindowEndedAt: snapshot.currentWindowEndedAt,
+      calculatedAt: snapshot.calculatedAt,
+      expiresAt: snapshot.expiresAt,
+    });
+  } catch {
+    return unavailableRepackHeat("RELEASE_MISMATCH");
+  }
+  const parsed = publicRepackHeatSignalSchema.safeParse(hydrated);
   if (
     !parsed.success ||
+    release === undefined ||
     repack === null ||
     repack.releaseId !== release._id ||
     repack.publicRepackId !== publicRepackId ||
-    document.releaseId !== release._id ||
+    document.providerReleaseId !== release._id ||
+    document.signalSetId !== signalSet._id ||
     document.publicRepackId !== publicRepackId ||
     parsed.data.publicRepackId !== publicRepackId ||
-    parsed.data.baselineWindow.startedAt !==
-      snapshot.baselineWindowStartedAt ||
+    parsed.data.baselineWindow.startedAt !== snapshot.baselineWindowStartedAt ||
     parsed.data.baselineWindow.endedAt !== snapshot.baselineWindowEndedAt ||
     parsed.data.currentWindow.startedAt !== snapshot.currentWindowStartedAt ||
     parsed.data.currentWindow.endedAt !== snapshot.currentWindowEndedAt ||
@@ -174,10 +226,11 @@ async function loadCurrentHeat(
 
 export async function attachHeatToRepackDetails(
   ctx: QueryCtx,
-  release: Doc<"dataReleases">,
+  active: PublicCatalogHeatContext,
   details: readonly PublicRepackDetail[],
+  currentTime: number,
 ): Promise<PublicRepackViewDetail[]> {
-  const context = await loadHeatSnapshotContext(ctx, release);
+  const context = await loadHeatSnapshotContext(ctx, active, currentTime);
   if (context.status !== "current") {
     const heat = heatWrapperFromContext(context);
     return details.map((detail) => ({ ...detail, heat }));
@@ -186,10 +239,11 @@ export async function attachHeatToRepackDetails(
     details.map((detail) =>
       loadCurrentHeat(
         ctx,
-        release,
+        active,
         context.snapshot,
+        context.signalSet,
         detail.publicRepackId,
-      ),
+      )
     ),
   );
   return details.map((detail, index) => ({ ...detail, heat: heat[index]! }));

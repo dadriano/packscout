@@ -60,7 +60,10 @@ export async function readDashboardBundle(
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
     return getDashboardBundleResultSchema.parse(
-      await fetchQuery(api.publicRepacks.getDashboardBundle, input, { url }),
+      await fetchQuery(api.publicRepacks.getDashboardBundle, {
+        ...input,
+        currentTime: Date.now(),
+      }, { url }),
     );
   } catch {
     return publicReadError("RELEASE_UNAVAILABLE");
@@ -74,7 +77,10 @@ export async function readPublicRepacks(
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
     return listPublicRepacksResultSchema.parse(
-      await fetchQuery(api.publicRepacks.listPublicRepacks, input, { url }),
+      await fetchQuery(api.publicRepacks.listPublicRepacks, {
+        ...input,
+        currentTime: Date.now(),
+      }, { url }),
     );
   } catch {
     return publicReadError("RELEASE_UNAVAILABLE");
@@ -88,7 +94,10 @@ export async function readPublicRepack(
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
     return getPublicRepackResultSchema.parse(
-      await fetchQuery(api.publicRepacks.getPublicRepack, input, { url }),
+      await fetchQuery(api.publicRepacks.getPublicRepack, {
+        ...input,
+        currentTime: Date.now(),
+      }, { url }),
     );
   } catch {
     return publicReadError("RELEASE_UNAVAILABLE");
@@ -116,7 +125,10 @@ export async function readRepacksByDesiredCollectible(
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
     return findRepacksByDesiredCollectibleResultSchema.parse(
-      await fetchQuery(api.publicRepacks.findRepacksByDesiredCollectible, input, { url }),
+      await fetchQuery(api.publicRepacks.findRepacksByDesiredCollectible, {
+        ...input,
+        currentTime: Date.now(),
+      }, { url }),
     );
   } catch {
     return publicReadError("RELEASE_UNAVAILABLE");

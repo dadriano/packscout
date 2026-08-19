@@ -19,6 +19,7 @@ export interface EstimatedEvRecomputationClaim {
   readonly evInputRevisionId: string | null;
   readonly claimToken: string;
   readonly attemptCount: number;
+  readonly originatingPublicChangeSequence: bigint;
 }
 
 export interface EstimatedEvRecomputationQueue {
@@ -34,6 +35,8 @@ export interface EstimatedEvRecomputationQueue {
     completedAt: Date;
     resultStatus: "estimated" | "unavailable";
     calculationRevisionId: string;
+    outcomeReasonCode?: string;
+    originatingPublicChangeSequence?: bigint;
   }): Promise<boolean>;
   recordFailure(input: {
     requestId: string;
@@ -175,14 +178,26 @@ export class EstimatedEvRecomputationProcessor {
           currencyPolicy: {
             verifiedUsdStablecoins: this.#verifiedUsdStablecoins,
           },
+          recomputation: {
+            requestId: claim.id,
+            claimToken: claim.claimToken,
+            originatingPublicChangeSequence:
+              claim.originatingPublicChangeSequence,
+          },
         });
-        const completed = await this.queue.complete({
-          requestId: claim.id,
-          claimToken: claim.claimToken,
-          completedAt: this.clock.now(),
-          resultStatus: result.explanation.status,
-          calculationRevisionId: result.calculationRevisionId,
-        });
+        const completed = result.derivationAcknowledged === true ||
+          await this.queue.complete({
+            requestId: claim.id,
+            claimToken: claim.claimToken,
+            completedAt: this.clock.now(),
+            resultStatus: result.explanation.status,
+            calculationRevisionId: result.calculationRevisionId,
+            ...(result.explanation.status === "unavailable"
+              ? { outcomeReasonCode: result.explanation.reasonCodes[0] }
+              : {}),
+            originatingPublicChangeSequence:
+              claim.originatingPublicChangeSequence,
+          });
         if (!completed) {
           counts.lost += 1;
           continue;

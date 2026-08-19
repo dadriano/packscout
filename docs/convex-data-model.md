@@ -11,120 +11,174 @@ authoritative for those records.
 ## Entity relationship view
 
 ```text
-DATA_RELEASE_STATE
-  activeReleaseId  ───────────────┐
-  previousReleaseId ────────────┐ │
-                                 ▼ ▼
-                         DATA_RELEASES
-                         │ release metadata and counts
-                         │
-        ┌────────────────┼───────────────┬────────────────┐
-        ▼                ▼               ▼                ▼
-     VENDORS         CATEGORIES       REPACKS        COLLECTIBLES
-        │                │               │                │
-        │                └──────┐        │                │
-        └───────────────────────┼────────┘                │
-                               │                         │
-                               ▼                         │
-                       REPACK_CHASES ◀────────────────────┘
-                               │
-                               │ desired-collectible lookup
-                               ▼
-                       matching REPACKS
+PROVIDER_CATALOG_COMPLETED_HEADS ───────────────┐
+  one independently completed head per platform │
+                                                ▼
+ACTIVE_CATALOG_MANIFEST_STATE          PROVIDER_CATALOG_RELEASES
+  activeManifestId  ────────────┐        immutable, platform-owned
+  previousManifestId ─────────┐ │                 ▲
+  aggregate observation       │ │                 │
+                              ▼ ▼                 │
+                    GLOBAL_CATALOG_MANIFESTS      │
+                      bounded provider graph      │
+                              │                   │
+                              ▼                   │
+              CATALOG_MANIFEST_PROVIDER_REFERENCES
+                              │
+                              └───────────────────┘
 
-DATA_RELEASES ───────────────▶ REPACK_SEARCH_SHARDS
-DATA_RELEASES ───────────────▶ DATA_RELEASE_BATCHES
-DATA_RELEASES ───────────────▶ DATA_RELEASE_OPERATIONS
+PROVIDER_CATALOG_RELEASES
+  ├── PROVIDER_CATALOG_VENDORS
+  ├── PROVIDER_CATALOG_CATEGORIES
+  ├── PROVIDER_CATALOG_REPACKS ────────────┐
+  ├── PROVIDER_CATALOG_COLLECTIBLES ────┐  │
+  ├── PROVIDER_CATALOG_REPACK_CHASES ◀──┴──┘
+  └── PROVIDER_CATALOG_SEARCH_SHARDS
 
-DATA_RELEASES ──────────────▶ REPACK_HEAT_SNAPSHOTS
-REPACK_HEAT_STATE ──────────▶ active + previous REPACK_HEAT_SNAPSHOTS
-REPACK_HEAT_SNAPSHOTS ──────▶ REPACK_HEAT_SIGNALS ─────▶ REPACKS
+ACTIVE_CATALOG_MANIFEST_STATE ──▶ active GLOBAL_CATALOG_MANIFEST
+                                            │ exact manifest alignment
+                                            ▼
+REPACK_HEAT_STATE ──────────────▶ REPACK_HEAT_SNAPSHOTS
+  active + previous                       │
+                                         ▼
+                              REPACK_HEAT_SIGNAL_SETS
+                                         │
+                                         ▼
+                              REPACK_HEAT_SIGNALS
+                                │ provider release + repack
+                                └─────────────▶ PROVIDER_CATALOG_REPACKS
 
-PRIVY IDENTITY ─────────────▶ SAVED_REPACKS ────────────▷ REPACKS
-PRIVY IDENTITY ─────────────▶ SAVED_COLLECTIBLES ───────▷ COLLECTIBLES
+PRIVY IDENTITY ─────────────▶ SAVED_REPACKS ────────────▷ PROVIDER_CATALOG_REPACKS
+PRIVY IDENTITY ─────────────▶ SAVED_COLLECTIBLES ───────▷ PROVIDER_CATALOG_COLLECTIBLES
 ```
 
-Every public entity belongs to exactly one immutable data release. Public
-queries resolve the active release first, so one response never combines
-entities from different releases.
+Every public entity belongs to exactly one immutable provider release. A
+provider's completed head is not public by itself. Public queries first resolve
+one complete active global manifest, validate its canonical provider-reference
+graph, and then compose only the selected releases. One response therefore
+never combines a provider release outside the active manifest or releases from
+different configuration epochs.
 
 ## Field-level text ERD
 
 ```text
-dataReleaseState
+providerCatalogCompletedHeads
   _id
-  key = "singleton"
-  activeReleaseId?      -> dataReleases._id
-  previousReleaseId?    -> dataReleases._id
-  dataAsOf, staleAt, freshness, delayedVendorCount
+  platformKey
+  releaseId             -> providerCatalogReleases._id
+  publicProviderReleaseId
+  sharedConfigurationEpoch, providerCheckpoint, observation
+  terminal operation kind/ID and terminal receipt SHA
 
-dataReleases
+providerCatalogReleases
   _id
-  publicReleaseId
+  platformKey
+  publicProviderReleaseId
   lifecycle
-  metadata              (schema, hashes, counts, policy versions, freshness)
-                        includes repackSearchIndexHash
-  searchShardCount
+  sharedConfigurationEpoch, dataAsOf
+  providerReleaseFingerprint, contentHash
+  governingHashes, entityHashes, counts
+  publicAssetOrigins, search algorithm/index hash
+  batch count/chain hash, completion proof, retention boundary
 
-vendors
+providerCatalogVendors
   _id
-  releaseId             -> dataReleases._id
+  releaseId             -> providerCatalogReleases._id
   publicVendorId
   vendorKey
   detail                (name, public logo/site, approved hosts/origins/promo)
 
-categories
+providerCatalogCategories
   _id
-  releaseId             -> dataReleases._id
+  releaseId             -> providerCatalogReleases._id
   publicCategoryId
-  parentCategoryId?     -> categories._id
+  parentCategoryId?     -> providerCatalogCategories._id
   categoryKey
   detail                (name, kind, depth, canonical ancestor path)
 
-repacks
+providerCatalogRepacks
   _id
-  releaseId             -> dataReleases._id
+  releaseId             -> providerCatalogReleases._id
   publicRepackId
-  vendorId              -> vendors._id
+  vendorId              -> providerCatalogVendors._id
   detail                (offer, classifications, both EVs, content summary)
 
-collectibles
+providerCatalogCollectibles
   _id
-  releaseId             -> dataReleases._id
+  releaseId             -> providerCatalogReleases._id
   publicCollectibleId
   collectibleType
   normalizedName
   searchText
   detail                (identity, aliases, type, categories, valuation, image)
 
-repackChases
+providerCatalogRepackChases
   _id
-  releaseId             -> dataReleases._id
-  repackId              -> repacks._id
-  collectibleId         -> collectibles._id
+  releaseId             -> providerCatalogReleases._id
+  repackId              -> providerCatalogRepacks._id
+  collectibleId         -> providerCatalogCollectibles._id
   detail                (role, evidence, probability, match confidence)
 
-repackSearchShards
+providerCatalogSearchShards / providerCatalogSearchShardProofs
   _id
-  releaseId             -> dataReleases._id
-  shardNumber
-  rows[]                (bounded repack search/filter/sort projection)
+  releaseId             -> providerCatalogReleases._id
+  shard number, row/byte counts, content hash
+  rows[]                (bounded provider-scoped search/filter/sort projection)
 
-dataReleaseBatches
+providerCatalogPublications / providerCatalogBatches
   _id
-  releaseId             -> dataReleases._id
-  batchIndex, kind, idempotencyKey, bodyHash, counts
+  releaseId             -> providerCatalogReleases._id
+  exact platform/checkpoint/observation and expected completion head
+  accepted reconciliation state and bounded batch chain
 
-dataReleaseOperations
+providerCatalogOperations
   _id
-  publicReleaseId?      -> dataReleases.publicReleaseId (logical)
-  operationId, kind, idempotencyKey, status, result, receipts
+  platformKey, publicProviderReleaseId?
+  operation identity, kind, idempotency/body hash, status/result, exact receipt
 
-blockedDataReleaseManifests
+providerCatalogReleaseCompletionProofs / providerCatalogTerminalReceiptProofs
   _id
-  fingerprint           -> dataReleases.metadata.manifestFingerprint (logical)
-  originatingOperationId -> dataReleaseOperations.operationId (logical)
-  active, reason, timestamps, release receipt
+  releaseId             -> providerCatalogReleases._id
+  bounded immutable finalize/reuse proof and terminal receipt digest
+
+providerCatalogReleaseBlocks
+  _id
+  platformKey, providerReleaseFingerprint, blockSequence
+  stable reason, originating operation, terminal receipt proof
+
+globalCatalogManifests
+  _id
+  publicReleaseId       (existing public catalog identity)
+  manifestFingerprint, providerReferenceSetHash
+  manifest              (same-epoch canonical provider references,
+                         governing/composition/entity hashes and counts)
+  providerReleaseIds[]  -> providerCatalogReleases._id (bounded to eight)
+  lifecycle, creation and retention boundary
+
+catalogManifestProviderReferences
+  _id
+  manifestId            -> globalCatalogManifests._id
+  releaseId             -> providerCatalogReleases._id
+  platformKey, public provider release ID, both fingerprints
+
+activeCatalogManifestState
+  _id
+  key = "singleton"
+  generation
+  activeManifestId?     -> globalCatalogManifests._id
+  previousManifestId?   -> globalCatalogManifests._id
+  active/previous bounded manifest pointers
+  aggregate observation (selected providers, watermarks, global freshness)
+  terminal operation and receipt proof
+
+catalogManifestOperations / catalogManifestBlocks
+  exact activation, refresh, rollback, clear, and block receipts/proofs
+
+catalogRetentionState / catalogRetentionOperations
+  generation-CAS reference audit and bounded manifest/provider cleanup receipts
+
+dataReleaseAuthNonces
+  shared authenticated-publication replay defense; preserved across cutover
 
 repackHeatState
   _id
@@ -137,10 +191,14 @@ repackHeatState
 
 repackHeatSnapshots
   _id
-  releaseId             -> dataReleases._id
-  publicHeatSnapshotId  (content-bound public identity)
+  manifestId            -> globalCatalogManifests._id
+  manifestAlignment     (public manifest identity, fingerprint,
+                         configuration epoch, provider-reference-set hash)
+  signalSetId           -> repackHeatSignalSets._id
+  publicHeatSnapshotId  (temporal frame/publication identity)
+  publicationId?        (required for observed production frames)
   simulationRunId?      (required only for simulated frames)
-  sequence, lifecycle, sourceKind
+  sequence, sourceWatermark?, lifecycle, sourceKind
   scenarioVersion?      (required only for simulated frames)
   aggregationVersion, heatPolicyVersion, contentHash
   signalCount
@@ -148,29 +206,45 @@ repackHeatSnapshots
   currentWindowStartedAt, currentWindowEndedAt
   calculatedAt, expiresAt
 
+repackHeatSignalSets
+  _id
+  manifestId            -> globalCatalogManifests._id
+  manifestAlignment     (exact active manifest/provider set)
+  signalSetHash         (content address over temporal-free signal cores)
+  lifecycle, sourceKind, scenarioVersion?
+  aggregationVersion, heatPolicyVersion, signalCount
+  originatingPublicationId?, createdAt, completedAt?, retentionEligibleAt?
+
 repackHeatSignals
   _id
-  heatSnapshotId        -> repackHeatSnapshots._id
-  releaseId             -> dataReleases._id
-  repackId              -> repacks._id
+  signalSetId           -> repackHeatSignalSets._id
+  providerReleaseId     -> providerCatalogReleases._id
+  repackId              -> providerCatalogRepacks._id
   publicRepackId
-  detail                (bounded public heat aggregate and evidence components)
+  detail                (bounded temporal-free public aggregate core)
+
+repackHeatPublications / repackHeatBatches / repackHeatOperations
+  manifest-bound staged frame, bounded batch reconciliation, and exact receipts
+  never contain organization, internal provider identity, actor, credential,
+  tenant, or raw source fields
 
 savedRepacks
   _id
   ownerTokenIdentifier  (verified Convex auth identity; never client supplied)
-  publicRepackId         -> repacks.publicRepackId (stable logical reference)
+  publicRepackId         -> providerCatalogRepacks.publicRepackId (stable logical reference)
 
 savedCollectibles
   _id
   ownerTokenIdentifier  (verified Convex auth identity; never client supplied)
-  publicCollectibleId    -> collectibles.publicCollectibleId (stable logical reference)
+  publicCollectibleId    -> providerCatalogCollectibles.publicCollectibleId (stable logical reference)
 ```
 
 Convex document IDs provide table-aware references, not SQL foreign keys or
-cascades. Release finalization code is responsible for uniqueness, same-release
-ownership, complete references, and count/hash reconciliation before changing
-the active pointer.
+cascades. Provider finalization proves uniqueness, provider ownership, complete
+references, counts, hashes, and exact receipts without changing public state.
+Manifest activation then proves the same configuration epoch, enabled-platform
+set, shared-reference byte agreement, aggregate graph, and expected active
+pointer before one compare-and-swap exposes the selected provider union.
 
 Saved-item references deliberately use stable public IDs instead of release-
 scoped Convex document IDs. They can survive an immutable release swap and
@@ -178,12 +252,12 @@ resolve again when the same public entity appears in a later release.
 
 ## Product entities
 
-### `vendors`
+### Vendors (`providerCatalogVendors`)
 
 One frontend-safe vendor identity and its approved public presentation and
-action configuration. A vendor has many repacks within a release.
+action configuration. A vendor has many repacks within its provider release.
 
-### `categories`
+### Categories (`providerCatalogCategories`)
 
 A normalized hierarchy such as `Sports → Basketball → NBA` or
 `Trading cards → Pokémon`. Parent and ancestor identifiers make hierarchy
@@ -193,7 +267,7 @@ filterable as Trading Cards, Sports, Basketball, or NBA. Ancestors on that
 single path do not make it mixed. Physical collectible type is modeled
 separately.
 
-### `repacks`
+### Repacks (`providerCatalogRepacks`)
 
 One display-ready repack or gacha aggregate. It includes the current offer,
 availability, category and collectible-type classification, bounded content
@@ -213,14 +287,14 @@ from this public model: pack-like records become repacks, item-like records
 become collectibles, vendor-specific category evidence becomes normalized
 category relationships, and derived metrics become release-scoped projections.
 
-### `collectibles`
+### Collectibles (`providerCatalogCollectibles`)
 
 Normalized, searchable chase identities. The table supports cards, watches,
 coins, sealed products, memorabilia, and other collectible types. Searchable
 identity fields are bounded and public; raw source records and internal
 identity-resolution evidence are excluded.
 
-### `repackChases`
+### Repack chases (`providerCatalogRepackChases`)
 
 The many-to-many relationship between repacks and collectibles. It records the
 role, public evidence classification, optional probability and valuation, and
@@ -288,39 +362,82 @@ without treating an unsupported currency or missing repack price as zero.
 Sanitized non-ISO codes such as `USDC` use a bounded code-plus-amount display
 instead of being passed to an ISO currency formatter.
 
-Chase-match confidence is a separate field on `repackChases`; it expresses how
-certain PackScout is that a collectible can occur in a repack.
+Chase-match confidence is a separate field on
+`providerCatalogRepackChases`; it expresses how certain PackScout is that a
+collectible can occur in a repack.
 
 ## Repack heat boundary
 
-Heat is a mutable, release-aligned read projection next to the immutable catalog;
-it is not part of the catalog release hash. Each signal keeps observed activity,
-observed return, large-hit frequency, chase availability, and pool-composition
-components separate. It also carries its current and baseline windows, sample
-requirements, limitations, provenance, policy version, calculation time, and
-expiry. Heat never substitutes for vendor-reported EV or PackScout modeled EV.
+Heat is a mutable, manifest-aligned read projection next to the immutable
+provider releases and global manifests; it is not part of any provider release
+or manifest content hash. Immutable, content-addressed signal sets hold only
+temporal-free aggregate cores. Each signal set and frame carries the active
+manifest's public identity, fingerprint, shared configuration epoch, and exact
+provider-reference-set hash. Temporal frame envelopes also hold the settled
+source watermark, closed minute, 24-hour baseline, 15-minute current window,
+calculation time, and 15-minute expiry. Public reads hydrate the existing signal
+DTO from those records. Heat never substitutes for vendor-reported EV or
+PackScout modeled EV.
 
 Public reads first resolve `repackHeatState`, then require one complete active
-snapshot for the same active catalog release. Each signal must match its repack,
-snapshot timestamps, policy, source kind, aggregation version, and simulated
-scenario when applicable. Missing, malformed, cross-release, or misaligned heat
-degrades to an unavailable heat wrapper while the valid catalog remains
-readable. Explicitly expired state returns an expired wrapper without a signal.
-Queries do not use wall-clock time to infer freshness because cached Convex
-queries do not rerun merely as time passes. Freshness is materialized by the
-ID-bound scheduled expiry; already-open browser views also stop presenting a
-current signal at its explicit deadline.
+snapshot whose manifest alignment exactly matches
+`activeCatalogManifestState`. Each signal must point to a provider release and
+repack selected by that manifest and must match the snapshot timestamps, policy,
+source kind, aggregation version, and simulated scenario when applicable.
+Missing, malformed, cross-manifest, unselected-provider, or otherwise
+misaligned Heat degrades to an unavailable Heat wrapper while the valid catalog
+remains readable. Explicitly expired state returns an expired wrapper without a
+signal. Queries do not use wall-clock time to infer freshness because cached
+Convex queries do not rerun merely as time passes. Freshness is materialized by
+the ID-bound scheduled expiry; already-open browser views also stop presenting
+a current signal at its explicit deadline.
 
-Publishing a current frame atomically advances the heat pointer and retains at
-most the current and previous snapshots. Frames must be canonical, not already
-expired, within the publish-lag/future-skew policy, and bounded by the policy
-TTL. Every frame strictly advances the active baseline window, current window,
-calculation time, and expiry even when a new simulation run starts. The public
-snapshot ID is derived from the aggregate frame hash: an exact replay is
-unchanged, while the same ID with different content is a conflict. Sequence
-gaps and unsorted or duplicate signal identities fail before writes. Publishing
-also schedules an expiry operation bound to the exact snapshot ID and expected
-`expiresAt`; a stale job cannot expire a newer frame.
+Production publishing uses authenticated private `active-state`, `start`,
+`apply-batch`, `finalize`, `status`, `refresh-frame`, and `retain` endpoints
+under `/internal/repack-heat/v1/`. Changed signal content stages at most 100
+records and 48 KiB per batch, reconciles exactly one valid signal for every
+repack selected by the active manifest, and changes the pointer only in the
+successful finalize transaction. Finalize rechecks the expected active manifest
+and expected active Heat frame, so a manifest change, concurrent publisher, or
+restart cannot expose a frame for the wrong provider set or overwrite a newer
+frame. Exact operation replay returns the stored receipt; conflicting reuse
+fails closed.
+
+Every frame sequence equals its closed UTC minute. Frame sequence, all window
+boundaries, calculation time, expiry, and active frame identity strictly
+advance. The settled source watermark never decreases; equality is expected
+during quiet minutes. `refresh-frame` can reuse any completed immutable signal
+set for the same manifest alignment, including A → B → A, without rewriting
+signal documents. The active-state probe returns an exact canonical
+terminal-receipt SHA only when the Heat and manifest pointers remain aligned,
+which lets a fresh durable runner prove bootstrap state without adopting an
+unknown remote frame.
+
+Activation schedules an expiry mutation bound to the exact frame ID and
+`expiresAt`. At the 15-minute boundary it materializes expired state and
+reactively invalidates public queries even when the PostgreSQL worker is down;
+a delayed callback for an older frame cannot expire its successor. Queries do
+not read the wall clock. Hourly retention preserves active and previous frames
+and their proving terminal receipts, deletes retired frames and unreferenced
+signal sets after seven days, and removes abandoned staging data after its
+unactivatable frame expires.
+
+`PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` is a JSON object keyed by active key ID.
+Each value is canonical padded base64 for 32–256 opaque secret bytes, matching
+the worker's `PACKSCOUT_CONVEX_PUBLICATION_SECRET_BASE64`; values are decoded
+before HMAC-SHA256 import and are never stored in Convex documents. Rotate by
+adding the new key ID and base64 secret to the map, deploying workers with the
+new key ID, then removing the retired entry only after the authentication and
+nonce windows have elapsed.
+
+Provider-release publishing additionally requires
+`PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS`, a strict JSON object mapping each
+provider publisher key ID to exactly one canonical `platformKey`. Convex passes
+the authenticated key ID—not a caller-supplied authority field—to every
+provider-release mutation and rejects a request whose platform does not match
+that server-side binding. Multiple key IDs may temporarily map to the same
+platform during a key rotation. The binding map contains no secrets and is
+never returned in receipts or errors.
 
 ### Local simulation lifecycle
 
@@ -338,11 +455,13 @@ explicit seed + startAt + frame + scenario step + publication cadence
 Synthetic raw activity, outcome keys, and pull histories are discarded after
 projection and are never mutation arguments or Convex documents. The publisher
 requires both the exact local runtime and its temporary enable flag, an active
-complete mock catalog release, complete signal coverage, and canonical hashes.
+complete mock catalog manifest, complete signal coverage for its selected
+provider releases, exact manifest alignment, and canonical hashes.
 The local script independently refuses cloud deploy keys, non-loopback URLs,
 self-hosted selection, and non-local deployments. The scheduled expiry requires
-the exact local mock release and snapshot binding but not the temporary flag, so
-the script can always remove that flag immediately after one-shot publication.
+the exact local mock manifest and snapshot binding but not the temporary flag,
+so the script can always remove that flag immediately after one-shot
+publication.
 
 The default current window is 15 minutes and the baseline window is 24 hours.
 One-shot resolves `startAt` once to the current time and is the command default.
@@ -360,65 +479,102 @@ behind.
 
 ```text
 search phrase
-  → active-release COLLECTIBLES search
+  → resolve active global manifest
+  → release-filtered PROVIDER_CATALOG_COLLECTIBLES search per selected provider
+  → validate and deterministically merge identical shared identities
   → selected publicCollectibleId
-  → REPACK_CHASES by releaseId + collectibleId
-  → point-load active-release REPACKS
+  → PROVIDER_CATALOG_REPACK_CHASES by each owning release + collectible
+  → point-load selected-release PROVIDER_CATALOG_REPACKS
   → return match evidence, chase confidence, and both EV estimates
 ```
 
 The exact collectible selection is included in pagination/query identity when
 it filters the main repack list. Changing the desired collectible resets the
 cursor. Generic repack search remains a bounded projection in
-`repackSearchShards`.
+`providerCatalogSearchShards` for each manifest-selected provider release.
 
 ## Release infrastructure
 
-- `dataReleaseState` atomically points to the active and retained release.
-- `dataReleases` stores immutable public release metadata, hashes, counts, and
-  freshness.
-- `repackSearchShards` provides bounded general search, facets, and sorting.
-- `dataReleaseBatches` and `dataReleaseOperations` provide idempotent
-  publication receipts without exposing pipeline internals to public queries.
-  Each batch receipt hashes its own kind and canonical body.
-- `blockedDataReleaseManifests` mirrors the authoritative pipeline block set
-  for publication safety.
+- `providerCatalogReleases` stores immutable, platform-owned content and proof.
+  Its entity, shard, reconciliation, batch, publication, operation, and bounded
+  terminal-proof tables let one provider complete independently. The separate
+  `providerCatalogCompletedHeads` row advances on finalize or unchanged reuse;
+  completion has no public side effect.
+- `globalCatalogManifests` stores one immutable, same-configuration-epoch
+  provider graph. `catalogManifestProviderReferences` is its independently
+  auditable edge index; every public and retention read compares those edges
+  with the manifest's embedded canonical references.
+- `activeCatalogManifestState` is the only public catalog pointer. One
+  expected-generation/expected-active-manifest compare-and-swap moves active to
+  previous and exposes the new provider union atomically. Its aggregate
+  observation may refresh truthful freshness without minting a new manifest or
+  invalidating same-manifest cursors.
+- `providerCatalogReleaseBlocks` and `catalogManifestBlocks` prevent a rejected
+  immutable artifact from becoming eligible. `catalogManifestOperations`
+  stores exact activation, refresh, block, rollback, and clear receipts.
+- `catalogRetentionState` and `catalogRetentionOperations` protect the complete
+  manifest-to-provider graph and coordinate bounded generation-CAS deletion.
+  `dataReleaseAuthNonces` remains the shared request-replay defense; it is not a
+  catalog source of truth.
 
 Convex indexes are lookup indexes rather than uniqueness constraints. The
-publisher must reconcile identifiers, release ownership, hierarchy, hashes,
-counts, and materialized metrics before a release can become active.
-Every shard is hashed individually, and the canonical shard descriptor set is
-anchored by `dataReleases.metadata.repackSearchIndexHash`; public reads fail
-closed when either layer diverges.
+provider publisher must reconcile identifiers, single-provider ownership,
+hierarchy, hashes, counts, materialized metrics, every shard, and the canonical
+provider shard-index hash before completion. The manifest composer then proves
+the enabled-platform set, same epoch, unique vendor/repack ownership, identical
+bytes for repeated shared categories and collectibles, aggregate hashes/counts,
+origin policy, and cross-reference graph. Public reads fail closed when any
+stored release, edge, shard, or aggregate proof diverges.
 
-The public contract supports at most 8,000 repacks per release. Search shards
-hold at most 32 rows and 48 KiB each; these coordinated limits keep the complete
-facet/sort projection inside the bounded Convex read path. One collectible may
-relate to at most 500 published repacks, which bounds exact-chase lookups before
-the requested page is hydrated.
+The active manifest supports at most eight provider references and 8,000
+repacks in aggregate. Provider search shards hold at most 32 rows and 48 KiB
+each, and the aggregate manifest contains at most 250 shards. The sum of
+physical category copies across selected providers is capped at 4,096 so shared
+identity validation remains exhaustive. One collectible occurrence may relate
+to at most 500 repacks in its provider release. Untyped collectible search runs
+one release-filtered query per selected provider; the six-value typed OR filter
+runs at most 48 release-and-type-filtered queries. Results are bounded,
+validated, deduplicated only when shared public bytes agree, and merged
+deterministically.
 
-Canonical publication requires a separate activation gate that recomputes the
-release content, configuration, manifest, batch-body, shard, and shard-index
-hashes; reconciles all counts and references; and compares `originSetHash` with
-the deployment-approved origin-set hash. Public reads already fail closed for a
-canonical release when that deployment hash is absent or does not match.
+Canonical publication therefore has two gates. Provider finalization recomputes
+provider content, configuration, batch-body, shard, and shard-index hashes and
+persists a bounded completion proof. Manifest activation recomputes the
+canonical provider reference set, composition graph, global content/search
+hashes and counts, compares `originSetHash` with the deployment-approved value,
+and rechecks every selected terminal receipt. A missing provider receipt or
+deployment hash leaves the prior manifest readable.
 
-The production publisher/finalizer that performs the full canonical activation
-gate is not implemented by this frontend-serving schema slice. Canonical
-publication therefore remains blocked until that pipeline-owned boundary is
-delivered and verified. The development-only mock seed independently
-recomputes its complete release and projection hashes before writing.
+The production manifest and Heat publisher/finalizer boundaries both stage,
+reconcile, authenticate, and atomically activate independent pointers. Heat
+additionally binds the exact active manifest and provider set, so catalog
+activation never waits for Heat but wrong-manifest Heat is unavailable. The
+development-only mock seed independently recomputes complete provider releases,
+the manifest graph, and projection hashes before writing.
 
 ## Cutover and deployment boundary
 
-This is a clean V2 replacement. Runtime code does not read or write the former
-snapshot/pack tables and does not translate V1 records. Existing documents in
-an older Convex deployment may remain physically present after the new schema
-is pushed because removing a table declaration is not a data-deletion request;
-they are dormant because no V2 function references them.
+This is a clean prelaunch replacement. Runtime code does not read or write the
+obsolete single-release catalog tables and does not translate them into provider
+releases or manifests. There are no aliases, compatibility tables, dual reads,
+dual writes, or optional legacy Heat fields.
 
-Do not purge those documents as part of an application deploy. Back up and
-remove them only through a separately approved, environment-scoped cleanup
-after a V2 release has been published, activated, and read back successfully.
-The development mock seed creates only the V2 entities described above and is
-guarded from production use.
+In an approved preproduction cutover, stop all publication workers and run the
+target-bound reset in the
+[promotion runbook](postgres-convex-promotion-runbook.md) before PostgreSQL
+migration `20260816030000_heat_manifest_alignment` and before this Convex
+schema is deployed. The reset takes a verified deployment-wide Convex export,
+clears the closed obsolete catalog and pre-manifest Heat table allowlists,
+preserves `dataReleaseAuthNonces`, and deletes only the target-bound obsolete
+PostgreSQL `catalog`/`heat` promotion ledger. It proves canonical history,
+causal settlement, approved configuration, governed mappings, and normalized
+Heat are unchanged.
+
+After the migration and schema deploy, authenticated bootstrap must prove empty
+provider, manifest, retention, and Heat publication state before claims begin.
+Any existing provider-manifest document, observed production data, second
+organization, missing backup, or alignment mismatch is a cutover stop—not
+permission to purge, seed mock data, or add compatibility behavior. The
+development mock seed creates only the provider releases, manifest graph, and
+manifest-aligned Heat entities described above and remains guarded from
+production use.

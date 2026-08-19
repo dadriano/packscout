@@ -3,8 +3,14 @@ import {
   REPACK_HEAT_MAXIMUM_FUTURE_SKEW_MILLISECONDS,
   REPACK_HEAT_MAXIMUM_PUBLISH_LAG_MILLISECONDS,
   REPACK_HEAT_MAXIMUM_TTL_MILLISECONDS,
+  EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
+  extendProductionHeatSignalSetHash,
   parseRepackHeatTimestampMillis,
+  productionHeatCoreByteCount,
   publicRepackHeatSignalSchema,
+  recomputeProductionHeatBatchHash,
+  repackHeatSignalCore,
+  type ProductionHeatManifestAlignment,
   type PublicRepackHeatSignal,
 } from "@packscout/contracts";
 import { ConvexError, v } from "convex/values";
@@ -12,7 +18,6 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { env, internalMutation, type MutationCtx } from "./_generated/server";
 import { canonicalJson, sha256CanonicalJson } from "./dataReleaseCanonicalHash";
-import { MOCK_DATA_RELEASE_PUBLIC_ID } from "./mockDataReleaseFixture";
 import {
   MOCK_HEAT_AGGREGATION_VERSION,
   MOCK_HEAT_FRAME_HASH_DOMAIN,
@@ -21,7 +26,17 @@ import {
   mockHeatFrameBody,
   mockHeatSnapshotIdFromHash,
 } from "./mockHeatSimulationFixture";
-import { publicRepackHeatSignalValidator } from "./schema";
+import {
+  productionHeatManifestAlignmentValidator,
+  publicRepackHeatSignalValidator,
+} from "./schema";
+import {
+  loadActiveCatalogHeatManifest,
+  loadOwnedHeatRepacks,
+  assertStoredHeatManifest,
+  type ActiveCatalogHeatManifest,
+  type OwnedHeatRepack,
+} from "./productionHeatProtocol";
 
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const snapshotIdPattern =
@@ -37,7 +52,7 @@ type RefusalCode =
   | "MOCK_HEAT_STATE_INVALID";
 
 interface PublishFrameInput {
-  readonly publicReleaseId: string;
+  readonly manifestAlignment: ProductionHeatManifestAlignment;
   readonly publicHeatSnapshotId: string;
   readonly simulationRunId: string;
   readonly sequence: number;
@@ -82,61 +97,89 @@ function assertEnvironment(): void {
   }
 }
 
-async function loadMockRelease(ctx: MutationCtx) {
-  const states = await ctx.db
-    .query("dataReleaseState")
-    .withIndex("by_key", (index) => index.eq("key", "singleton"))
-    .take(2);
-  if (states.length !== 1 || states[0]!.activeReleaseId === null) {
+async function loadMockCatalog(
+  ctx: MutationCtx,
+  alignment: ProductionHeatManifestAlignment,
+): Promise<ActiveCatalogHeatManifest> {
+  try {
+    return await loadActiveCatalogHeatManifest(ctx, alignment, "mock");
+  } catch {
     refuse("MOCK_HEAT_RELEASE_UNSAFE");
   }
-  const release = await ctx.db.get("dataReleases", states[0]!.activeReleaseId!);
-  if (
-    release === null ||
-    release.lifecycle !== "complete" ||
-    release.publicReleaseId !== MOCK_DATA_RELEASE_PUBLIC_ID ||
-    release.metadata.dataSource !== "mock"
-  ) {
-    refuse("MOCK_HEAT_RELEASE_UNSAFE");
-  }
-  return release;
 }
 
 async function repacksByPublicId(
   ctx: MutationCtx,
-  releaseId: Id<"dataReleases">,
-) {
-  const repacks = await ctx.db
-    .query("repacks")
-    .withIndex("by_release_id_and_public_repack_id", (index) =>
-      index.eq("releaseId", releaseId),
-    )
-    .take(MAX_PUBLIC_REPACKS_PER_RELEASE + 1);
-  if (repacks.length > MAX_PUBLIC_REPACKS_PER_RELEASE) {
+  catalog: ActiveCatalogHeatManifest,
+  publicRepackIds: readonly string[],
+): Promise<ReadonlyMap<string, OwnedHeatRepack>> {
+  try {
+    return await loadOwnedHeatRepacks(ctx, catalog, publicRepackIds);
+  } catch {
     refuse("MOCK_HEAT_RELEASE_UNSAFE");
   }
-  return new Map(repacks.map((repack) => [repack.publicRepackId, repack]));
+}
+
+async function mockSignalSetHash(
+  signals: readonly PublicRepackHeatSignal[],
+): Promise<string> {
+  const batchHash = await recomputeProductionHeatBatchHash(signals);
+  return await extendProductionHeatSignalSetHash({
+    previousHash: EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
+    batchIndex: 0,
+    batchHash,
+    recordCount: signals.length,
+    coreByteCount: productionHeatCoreByteCount(signals),
+  });
 }
 
 async function deleteRetainedSnapshot(
   ctx: MutationCtx,
   snapshotId: Id<"repackHeatSnapshots"> | null,
-  releaseId: Id<"dataReleases">,
 ): Promise<void> {
   if (snapshotId === null) return;
   const snapshot = await ctx.db.get("repackHeatSnapshots", snapshotId);
   if (
     snapshot === null ||
     snapshot.lifecycle !== "retired" ||
-    snapshot.releaseId !== releaseId ||
     snapshot.sourceKind !== "simulated"
+  ) {
+    refuse("MOCK_HEAT_STATE_INVALID");
+  }
+  try {
+    await assertStoredHeatManifest(
+      ctx,
+      snapshot.manifestId,
+      snapshot.manifestAlignment,
+    );
+  } catch {
+    refuse("MOCK_HEAT_STATE_INVALID");
+  }
+  await ctx.db.delete("repackHeatSnapshots", snapshotId);
+  const remainingFrames = await ctx.db
+    .query("repackHeatSnapshots")
+    .withIndex("by_signal_set_id", (index) =>
+      index.eq("signalSetId", snapshot.signalSetId),
+    )
+    .take(1);
+  if (remainingFrames.length > 0) return;
+  const signalSet = await ctx.db.get(
+    "repackHeatSignalSets",
+    snapshot.signalSetId,
+  );
+  if (
+    signalSet === null ||
+    signalSet.manifestId !== snapshot.manifestId ||
+    canonicalJson(signalSet.manifestAlignment) !==
+      canonicalJson(snapshot.manifestAlignment) ||
+    signalSet.sourceKind !== "simulated"
   ) {
     refuse("MOCK_HEAT_STATE_INVALID");
   }
   const signals = await ctx.db
     .query("repackHeatSignals")
-    .withIndex("by_heat_snapshot_id_and_public_repack_id", (index) =>
-      index.eq("heatSnapshotId", snapshotId),
+    .withIndex("by_signal_set_id_and_public_repack_id", (index) =>
+      index.eq("signalSetId", signalSet._id),
     )
     .take(MAX_PUBLIC_REPACKS_PER_RELEASE + 1);
   if (signals.length > MAX_PUBLIC_REPACKS_PER_RELEASE) {
@@ -145,18 +188,32 @@ async function deleteRetainedSnapshot(
   for (const signal of signals) {
     await ctx.db.delete("repackHeatSignals", signal._id);
   }
-  await ctx.db.delete("repackHeatSnapshots", snapshotId);
+  await ctx.db.delete("repackHeatSignalSets", signalSet._id);
 }
 
 async function replayIsExact(
   ctx: MutationCtx,
-  releaseId: Id<"dataReleases">,
+  manifestId: Id<"globalCatalogManifests">,
   snapshot: Doc<"repackHeatSnapshots">,
   args: Omit<PublishFrameInput, "signals">,
   parsedSignals: readonly PublicRepackHeatSignal[],
 ): Promise<boolean> {
+  const signalSet = await ctx.db.get(
+    "repackHeatSignalSets",
+    snapshot.signalSetId,
+  );
   if (
-    snapshot.releaseId !== releaseId ||
+    signalSet === null ||
+    signalSet.lifecycle !== "complete" ||
+    signalSet.manifestId !== manifestId ||
+    canonicalJson(signalSet.manifestAlignment) !==
+      canonicalJson(args.manifestAlignment) ||
+    signalSet.sourceKind !== "simulated" ||
+    signalSet.signalSetHash !== await mockSignalSetHash(parsedSignals) ||
+    signalSet.signalCount !== parsedSignals.length ||
+    snapshot.manifestId !== manifestId ||
+    canonicalJson(snapshot.manifestAlignment) !==
+      canonicalJson(args.manifestAlignment) ||
     snapshot.publicHeatSnapshotId !== args.publicHeatSnapshotId ||
     snapshot.simulationRunId !== args.simulationRunId ||
     snapshot.sequence !== args.sequence ||
@@ -179,14 +236,14 @@ async function replayIsExact(
   }
   const stored = await ctx.db
     .query("repackHeatSignals")
-    .withIndex("by_heat_snapshot_id_and_public_repack_id", (index) =>
-      index.eq("heatSnapshotId", snapshot._id),
+    .withIndex("by_signal_set_id_and_public_repack_id", (index) =>
+      index.eq("signalSetId", signalSet._id),
     )
     .take(MAX_PUBLIC_REPACKS_PER_RELEASE + 1);
   return (
     stored.length === parsedSignals.length &&
     canonicalJson(stored.map(({ detail }) => detail)) ===
-      canonicalJson(parsedSignals)
+      canonicalJson(parsedSignals.map(repackHeatSignalCore))
   );
 }
 
@@ -199,7 +256,6 @@ async function publishMockHeatFrame(
   const calculatedAt = parseRepackHeatTimestampMillis(args.calculatedAt);
   const expiresAt = parseRepackHeatTimestampMillis(args.expiresAt);
   if (
-    args.publicReleaseId !== MOCK_DATA_RELEASE_PUBLIC_ID ||
     args.sourceKind !== "simulated" ||
     args.scenarioVersion !== MOCK_HEAT_SCENARIO_VERSION ||
     args.aggregationVersion !== MOCK_HEAT_AGGREGATION_VERSION ||
@@ -257,7 +313,7 @@ async function publishMockHeatFrame(
   const recomputedHash = await sha256CanonicalJson(
     MOCK_HEAT_FRAME_HASH_DOMAIN,
     mockHeatFrameBody({
-      publicReleaseId: MOCK_DATA_RELEASE_PUBLIC_ID,
+      manifestAlignment: args.manifestAlignment,
       simulationRunId: args.simulationRunId,
       sequence: args.sequence,
       sourceKind: "simulated",
@@ -275,10 +331,12 @@ async function publishMockHeatFrame(
   ) {
     refuse("MOCK_HEAT_FRAME_INVALID");
   }
+  const signalSetHash = await mockSignalSetHash(parsedSignals);
 
-  const release = await loadMockRelease(ctx);
-  const repacks = await repacksByPublicId(ctx, release._id);
+  const catalog = await loadMockCatalog(ctx, args.manifestAlignment);
+  const repacks = await repacksByPublicId(ctx, catalog, publicIds);
   if (
+    parsedSignals.length !== catalog.manifest.counts.repacks ||
     parsedSignals.length !== repacks.size ||
     parsedSignals.some(({ publicRepackId }) => !repacks.has(publicRepackId))
   ) {
@@ -296,7 +354,7 @@ async function publishMockHeatFrame(
     if (
       await replayIsExact(
         ctx,
-        release._id,
+        catalog.manifestDocument._id,
         existing[0]!,
         args,
         parsedSignals,
@@ -404,11 +462,72 @@ async function publishMockHeatFrame(
     }
   }
 
+  const matchingSignalSets = await ctx.db
+    .query("repackHeatSignalSets")
+    .withIndex("by_manifest_id_and_signal_set_hash", (index) =>
+      index
+        .eq("manifestId", catalog.manifestDocument._id)
+        .eq("signalSetHash", signalSetHash),
+    )
+    .take(2);
+  if (matchingSignalSets.length > 1) refuse("MOCK_HEAT_STATE_INVALID");
+  let signalSet = matchingSignalSets[0] ?? null;
+  if (signalSet === null) {
+    const now = new Date(serverNow).toISOString();
+    const signalSetId = await ctx.db.insert("repackHeatSignalSets", {
+      manifestId: catalog.manifestDocument._id,
+      manifestAlignment: catalog.alignment,
+      signalSetHash,
+      lifecycle: "complete",
+      sourceKind: "simulated",
+      scenarioVersion: MOCK_HEAT_SCENARIO_VERSION,
+      aggregationVersion: MOCK_HEAT_AGGREGATION_VERSION,
+      heatPolicyVersion: MOCK_HEAT_POLICY_VERSION,
+      signalCount: parsedSignals.length,
+      originatingPublicationId: null,
+      createdAt: now,
+      completedAt: now,
+    });
+    for (const detail of parsedSignals) {
+      const owned = repacks.get(detail.publicRepackId)!;
+      await ctx.db.insert("repackHeatSignals", {
+        signalSetId,
+        providerReleaseId: owned.release._id,
+        repackId: owned.repack._id,
+        publicRepackId: detail.publicRepackId,
+        detail: repackHeatSignalCore(detail),
+      });
+    }
+    signalSet = (await ctx.db.get("repackHeatSignalSets", signalSetId))!;
+  } else {
+    const stored = await ctx.db
+      .query("repackHeatSignals")
+      .withIndex("by_signal_set_id_and_public_repack_id", (index) =>
+        index.eq("signalSetId", signalSet!._id),
+      )
+      .take(MAX_PUBLIC_REPACKS_PER_RELEASE + 1);
+    if (
+      signalSet.lifecycle !== "complete" ||
+      signalSet.manifestId !== catalog.manifestDocument._id ||
+      canonicalJson(signalSet.manifestAlignment) !==
+        canonicalJson(catalog.alignment) ||
+      signalSet.sourceKind !== "simulated" ||
+      signalSet.signalCount !== parsedSignals.length ||
+      canonicalJson(stored.map(({ detail }) => detail)) !==
+        canonicalJson(parsedSignals.map(repackHeatSignalCore))
+    ) {
+      refuse("MOCK_HEAT_STATE_INVALID");
+    }
+  }
   const snapshotId = await ctx.db.insert("repackHeatSnapshots", {
-    releaseId: release._id,
+    manifestId: catalog.manifestDocument._id,
+    manifestAlignment: catalog.alignment,
+    signalSetId: signalSet._id,
     publicHeatSnapshotId: args.publicHeatSnapshotId,
+    publicationId: null,
     simulationRunId: args.simulationRunId,
     sequence: args.sequence,
+    sourceWatermark: null,
     lifecycle: "staging",
     sourceKind: "simulated",
     scenarioVersion: MOCK_HEAT_SCENARIO_VERSION,
@@ -423,23 +542,12 @@ async function publishMockHeatFrame(
     calculatedAt: args.calculatedAt,
     expiresAt: args.expiresAt,
   });
-  for (const detail of parsedSignals) {
-    const repack = repacks.get(detail.publicRepackId)!;
-    await ctx.db.insert("repackHeatSignals", {
-      heatSnapshotId: snapshotId,
-      releaseId: release._id,
-      repackId: repack._id,
-      publicRepackId: detail.publicRepackId,
-      detail,
-    });
-  }
   await ctx.db.patch("repackHeatSnapshots", snapshotId, {
     lifecycle: "complete",
   });
   await deleteRetainedSnapshot(
     ctx,
     state?.previousHeatSnapshotId ?? null,
-    release._id,
   );
   if (active !== null) {
     await ctx.db.patch("repackHeatSnapshots", active._id, {
@@ -485,7 +593,7 @@ async function publishMockHeatFrame(
 }
 
 const frameArgs = {
-  publicReleaseId: v.string(),
+  manifestAlignment: productionHeatManifestAlignmentValidator,
   publicHeatSnapshotId: v.string(),
   simulationRunId: v.string(),
   sequence: v.number(),
@@ -550,8 +658,19 @@ export const expireActiveFrame = internalMutation({
     ) {
       refuse("MOCK_HEAT_STATE_INVALID");
     }
-    const release = await loadMockRelease(ctx);
-    if (snapshot.releaseId !== release._id || snapshot.sourceKind !== "simulated") {
+    let catalog: ActiveCatalogHeatManifest;
+    try {
+      catalog = await loadMockCatalog(ctx, snapshot.manifestAlignment);
+    } catch {
+      return {
+        status: "unchanged" as const,
+        publicHeatSnapshotId: args.publicHeatSnapshotId,
+      };
+    }
+    if (
+      snapshot.manifestId !== catalog.manifestDocument._id ||
+      snapshot.sourceKind !== "simulated"
+    ) {
       return {
         status: "unchanged" as const,
         publicHeatSnapshotId: args.publicHeatSnapshotId,

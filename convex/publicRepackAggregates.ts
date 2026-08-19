@@ -8,7 +8,16 @@ import {
   rowMatchesSearch,
   type RepackSearchRow,
 } from "./publicRepackValidation";
-import type { CategoryHierarchy } from "./publicRepackReadModel";
+
+/**
+ * The subset of category detail the facet tree needs. The active provider
+ * catalog already carries parent and depth on every category, so callers pass
+ * its `categoryByPublicId` map straight through.
+ */
+export type CategoryHierarchy = ReadonlyMap<
+  string,
+  Readonly<{ parentPublicCategoryId: string | null; depth: number }>
+>;
 
 export function selectionsAreKnown(
   rows: readonly RepackSearchRow[],
