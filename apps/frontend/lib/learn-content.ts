@@ -4,8 +4,6 @@ import {
   METRIC_TRUST_COPY,
 } from "./metric-vocabulary";
 
-const HEAT_DEFINITION = getGlossaryDefinition("heat").definition;
-
 export type LearnMethodPoint = Readonly<{
   title: string;
   body: string;
@@ -14,7 +12,7 @@ export type LearnMethodPoint = Readonly<{
 export const PACKSCOUT_EV_METHOD = Object.freeze({
   title: "PackScout method",
   summary:
-    "PackScout EV estimates long-run value from public odds and prices. Heat is a separate timing read of recent activity on that same repack. Both stay independent from vendor marketing.",
+    "PackScout EV estimates long-run value from supported public odds, inventory, and prices. It stays separate from vendor-reported EV and vendor marketing.",
   points: [
     {
       title: "Public evidence only",
@@ -29,16 +27,12 @@ export const PACKSCOUT_EV_METHOD = Object.freeze({
       body: "EV confidence scores how complete the supported evidence is—odds coverage, inventory depth, and value support—not whether EV is positive. Thin or partial evidence lowers confidence; it does not silently fill gaps.",
     },
     {
-      title: "What Heat measures",
-      body: `${HEAT_DEFINITION} Heat compares recent opens on one repack to that repack's own baseline—pull activity, observed returns, large hits, chase availability, and pool composition—and rolls them into a Heat index with its own confidence score. Hot, Warm, Normal, and Cold are timing labels only. A hot streak is recent variance, not a prediction for your next rip, and Heat never replaces PackScout EV. When recent pulls are too thin, PackScout shows Not enough data instead of faking a read.`,
-    },
-    {
       title: "Unavailable beats a guess",
-      body: "Missing odds, incomplete inventory, unsupported currency, thin pull samples, or other evidence gaps produce Unavailable or Not enough data instead of a fabricated comparison. An unavailable value is not zero.",
+      body: "Missing odds, incomplete inventory, unsupported currency, or other evidence gaps produce Unavailable instead of a fabricated comparison. An unavailable value is not zero.",
     },
     {
-      title: "What they are not",
-      body: "EV is a long-run average, not a forecast for one pack. Heat is a timing signal, not profit or positive EV. Neither changes your odds on the next open. Not financial or gambling advice.",
+      title: "What EV is not",
+      body: "EV is a long-run average, not a forecast for one pack. It does not change your odds on the next open. Not financial or gambling advice.",
     },
   ] as const satisfies readonly LearnMethodPoint[],
   disclaimer:
