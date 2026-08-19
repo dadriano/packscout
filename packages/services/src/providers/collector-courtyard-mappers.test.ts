@@ -296,14 +296,21 @@ function projectionService() {
   );
 }
 
-test("V2 manifest registers only Collector Crypt and Courtyard", () => {
+test("V2 manifest registers the audited live platforms", () => {
   assert.deepEqual(
-    providerMapperManifest.map((entry) => ({
-      platform: entry.platformKey,
-      version: entry.mappingVersion,
-      kinds: entry.supportedRecordKinds,
-    })),
+    providerMapperManifest
+      .map((entry) => ({
+        platform: entry.platformKey,
+        version: entry.mappingVersion,
+        kinds: entry.supportedRecordKinds,
+      }))
+      .sort((left, right) => left.platform.localeCompare(right.platform)),
     [
+      {
+        platform: "clutchpacks",
+        version: "v2",
+        kinds: ["catalog", "pull", "trade"],
+      },
       {
         platform: "collector_crypt",
         version: "v2",
@@ -314,10 +321,20 @@ test("V2 manifest registers only Collector Crypt and Courtyard", () => {
         version: "v2",
         kinds: ["catalog", "pull", "trade"],
       },
+      {
+        platform: "phygitals",
+        version: "v2",
+        kinds: ["catalog", "pull", "trade"],
+      },
     ],
   );
   const registry = createProviderMappingAdapterRegistryFromManifest();
-  assert.deepEqual(registry.keys(), ["collector-crypt-v2", "courtyard-v2"]);
+  assert.deepEqual([...registry.keys()].sort(), [
+    "clutchpacks-v2",
+    "collector-crypt-v2",
+    "courtyard-v2",
+    "phygitals-v2",
+  ]);
 });
 
 test("Collector Crypt maps V2 cards and packs without legacy identity prefixes", async () => {
@@ -367,6 +384,32 @@ test("Collector Crypt maps V2 cards and packs without legacy identity prefixes",
       "accepted",
     );
   }
+});
+
+test("live outer availability is authoritative for provider packs", async () => {
+  const collector = mappedCandidates(
+    await mapRecord(new CollectorCryptMappingAdapter(), {
+      ...collectorPack(),
+      available: false,
+    }),
+  );
+  const collectorPackCandidate = collector.find(
+    ({ candidateKind }) => candidateKind === "pack",
+  );
+  assert.ok(collectorPackCandidate?.candidateKind === "pack");
+  assert.equal(collectorPackCandidate.availability, "disabled");
+
+  const courtyard = mappedCandidates(
+    await mapRecord(new CourtyardMappingAdapter(), {
+      ...courtyardPack(false),
+      available: true,
+    }),
+  );
+  const courtyardPackCandidate = courtyard.find(
+    ({ candidateKind }) => candidateKind === "pack",
+  );
+  assert.ok(courtyardPackCandidate?.candidateKind === "pack");
+  assert.equal(courtyardPackCandidate.availability, "active");
 });
 
 test("Collector Crypt keeps null pull evidence and converts buyback micro-USDC", async () => {

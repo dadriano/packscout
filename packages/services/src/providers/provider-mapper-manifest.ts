@@ -3,12 +3,17 @@ import type {
   ProviderMappingAdapter,
   ProviderRecordKind,
 } from "../provider-adapter.ts";
+import { ClutchpacksMappingAdapter } from "./clutchpacks/mapper.ts";
 import { CollectorCryptMappingAdapter } from "./collector-crypt/mapper.ts";
 import { CourtyardMappingAdapter } from "./courtyard/mapper.ts";
+import { PhygitalsMappingAdapter } from "./phygitals/mapper.ts";
 
 export const collectorCryptProviderMappingAdapter =
   new CollectorCryptMappingAdapter();
+export const clutchpacksProviderMappingAdapter =
+  new ClutchpacksMappingAdapter();
 export const courtyardProviderMappingAdapter = new CourtyardMappingAdapter();
+export const phygitalsProviderMappingAdapter = new PhygitalsMappingAdapter();
 
 export interface ProviderMapperManifestEntry {
   readonly platformKey: string;
@@ -34,11 +39,25 @@ export const providerMapperManifest: readonly ProviderMapperManifestEntry[] =
       adapter: collectorCryptProviderMappingAdapter,
     }),
     Object.freeze({
+      platformKey: clutchpacksProviderMappingAdapter.platformKey,
+      adapterKey: clutchpacksProviderMappingAdapter.key,
+      mappingVersion: "v2",
+      supportedRecordKinds: v2RecordKinds,
+      adapter: clutchpacksProviderMappingAdapter,
+    }),
+    Object.freeze({
       platformKey: courtyardProviderMappingAdapter.platformKey,
       adapterKey: courtyardProviderMappingAdapter.key,
       mappingVersion: "v2",
       supportedRecordKinds: v2RecordKinds,
       adapter: courtyardProviderMappingAdapter,
+    }),
+    Object.freeze({
+      platformKey: phygitalsProviderMappingAdapter.platformKey,
+      adapterKey: phygitalsProviderMappingAdapter.key,
+      mappingVersion: "v2",
+      supportedRecordKinds: v2RecordKinds,
+      adapter: phygitalsProviderMappingAdapter,
     }),
   ]);
 

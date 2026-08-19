@@ -24,6 +24,25 @@ test("archive-backed record fixtures preserve V2 envelopes without inventing a p
   assert.equal("next_cursor" in sanitizedProviderStreamV2Records, false);
 });
 
+test("live catalog availability is retained while the digest-pinned archive remains readable", () => {
+  const archiveRecord = parseProviderStreamRecordV2(
+    sanitizedProviderStreamV2Records.courtyardCatalogPack,
+  );
+  assert.equal(
+    archiveRecord.stream === "catalog" ? archiveRecord.available : undefined,
+    undefined,
+  );
+
+  const liveRecord = parseProviderStreamRecordV2({
+    ...sanitizedProviderStreamV2Records.courtyardCatalogPack,
+    available: false,
+  });
+  assert.equal(
+    liveRecord.stream === "catalog" ? liveRecord.available : undefined,
+    false,
+  );
+});
+
 test("missing pull outcomes remain explicit while absent relationship fields fail", () => {
   const invalidPull = structuredClone(
     sanitizedProviderStreamV2Records.collectorCryptCardlessPull,

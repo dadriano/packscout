@@ -145,6 +145,11 @@ export const catalogRecordV2Schema = z
     stream: z.literal("catalog"),
     entity: z.enum(["pack", "card"]),
     first_seen_at: timestampSchema,
+    /**
+     * The live API always supplies this field. It remains optional only so the
+     * digest-pinned August 13 archive can still be replayed and audited.
+     */
+    available: z.boolean().nullable().optional(),
   })
   .strict();
 

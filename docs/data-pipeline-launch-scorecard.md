@@ -1,14 +1,15 @@
 # Data Pipeline Launch Scorecard
 
-**Evidence date:** 2026-08-14
+**Evidence date:** 2026-08-19
 
 **Provider record contract:** PASS for the August 13 archive
 
 **Archive import:** IMPLEMENTED; database reconciliation required per target
 
-**Live HTTP transport:** BLOCKED on one sanitized real response wrapper
+**Live HTTP transport:** PASS for the observed DataForrest wrapper
 
-**Scheduled provider launch:** BLOCKED
+**Scheduled provider launch:** BLOCKED on complete mapper, database, and
+capacity reconciliation
 
 ## Current boundary
 
@@ -20,13 +21,15 @@ V2 separates two facts:
 
 1. The August 13 archive proves every record envelope and the Collector Crypt
    and Courtyard nested mapping shapes.
-2. The archive does not prove the live API page wrapper, response serialization,
-   terminal cursor, headers, errors, or rate-limit signals.
+2. A sanitized August 19 live inspection proves the DataForrest JSON wrapper,
+   platform-scoped cursors, terminal poll signal, bearer failures, and the four
+   current platforms. It does not make the older sample database compatible
+   with normalized live history.
 
-The common HTTP adapter therefore accepts only a provider-local response
-decoder. No production decoder is registered until a sanitized live page locks
-the missing transport evidence. The internal page uses one provider cursor and
-may interleave catalog, pull, and trade records.
+The common HTTP adapter accepts a provider-local response decoder. The
+DataForrest decoder is registered in admin and worker composition. It maps
+`records`, `next_cursor`, and `poll_after_seconds` to an internal page using one
+platform-scoped provider cursor and mixed catalog, pull, and trade records.
 
 Detailed contract: [Provider Data Contract V2](./provider-data-contract-v2.md).
 
@@ -52,7 +55,7 @@ a card or outcome value.
 | --- | --- | --- |
 | Mixed-stream record validation | Strict V2 union, platform binding, global page-order indices | PASS |
 | Single provider cursor | One checkpoint per immutable configuration; repeat/cycle/length guards | PASS |
-| Provider isolation | Record-oriented Collector Crypt and Courtyard mappers only | PASS |
+| Provider isolation | Record-oriented mapper selected for each platform record | IN REVIEW |
 | Unknown trade events | Canonical `other`, protected raw value retained | PASS |
 | Source replay | Fact hash excludes observation time; repeated collection records an observation | PASS |
 | Mutable catalog | Stable identity permits fact revisions and canonical history | PASS |
@@ -61,6 +64,8 @@ a card or outcome value.
 | Archive storage | Hash-bound page metadata; each raw record stored once | PASS |
 | V1 removal | Repository checker rejects V1 contracts, adapter keys, and paths | PASS |
 | Public-data boundary | Raw records, pulls, trades, identities, and cursors excluded from Convex | DESIGN ENFORCED |
+| Live wrapper | Strict DataForrest decoder and platform-scoped cursor transport | PASS |
+| Live page bound | Explicit 10 MiB cap covers observed default pages | PASS |
 
 PASS here means committed automated behavior after the repository verifier is
 green. It does not claim that a target database has imported or reconciled the
@@ -85,20 +90,23 @@ catalog. All pack relationships should resolve.
 
 ## Live HTTP launch blockers
 
-Capture one sanitized real response and its headers, then implement the
-provider-local decoder and prove:
+The wrapper and transport are implemented. Before a scheduled full-history run:
 
-1. Body serialization and wrapper fields.
-2. `nextCursor` and `hasMore` behavior at provider head.
-3. Initial null-cursor full-history ordering and incremental continuation.
-4. Page-size limits and cursor expiry.
-5. Authentication failure, rate limiting, server failure, and malformed-page
-   responses.
-6. Exact replay, conflicting immutable event, catalog correction, malformed
-   record, timeout recovery, and lost-worker recovery.
+1. Finish and verify conservative V2 mapping for Courtyard, Collector Crypt,
+   Phygitals, and ClutchPacks.
+2. Preserve the August 13 sample as dated evidence and provision a clean live
+   database/source namespace. Do not attach live revisions to archive providers.
+3. Provision enough storage for roughly 14.5 million records plus indexes, WAL,
+   and recovery headroom. The current generic source-and-canonical layout must
+   be measured before using a local disk near capacity.
+4. Run connection tests for all four immutable HTTP revisions without logging
+   credential or record evidence.
+5. Prove cursor-expiry, rate-limit, transient-server-failure, timeout, and
+   lost-worker recovery with the production decoder.
+6. Reconcile source, outcome, canonical, relationship, quarantine, and provider
+   head counts, then prove an incremental head replay is a no-op.
 
-Only after those checks pass may the V2 HTTP adapter be registered in admin and
-worker production composition or a schedule be activated.
+Only after those checks pass may a schedule be activated.
 
 ## Convex promotion boundary
 

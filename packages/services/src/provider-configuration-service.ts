@@ -274,7 +274,7 @@ export class ProviderConfigurationService {
   ) {
     this.#timeoutMs = dependencies.connectionTimeoutMs ?? 10_000;
     this.#maximumResponseBytes =
-      dependencies.maximumConnectionResponseBytes ?? 2 * 1024 * 1024;
+      dependencies.maximumConnectionResponseBytes ?? 10 * 1024 * 1024;
     if (
       !Number.isInteger(this.#timeoutMs) ||
       this.#timeoutMs < 1 ||

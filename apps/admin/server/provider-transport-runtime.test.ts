@@ -2,13 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ProviderConfigurationSummary } from "@packscout/contracts";
 import {
-  ProviderConfigurationServiceError,
-  ProviderTransportAdapterRegistry,
   type InternalProviderRevision,
   type ProviderConfigurationRepository,
   type ProviderHealthRepository,
 } from "@packscout/services";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
+import { createProviderLiveTransportRegistry } from "./provider-transport-runtime.ts";
 
 function configurationRepository() {
   let provider: ProviderConfigurationSummary | null = null;
@@ -78,8 +77,20 @@ function configurationRepository() {
       };
       return input.test;
     },
-    async activateRevision() {
-      return { kind: "connection_required" } as const;
+    async activateRevision(input) {
+      if (
+        !provider ||
+        provider.latestRevision.lastConnectionTest?.verdict !== "success"
+      ) {
+        return { kind: "connection_required" } as const;
+      }
+      provider = {
+        ...provider,
+        state: "active",
+        activeRevisionId: input.expectedRevisionId,
+        nextRunAt: input.nextRunAt.toISOString(),
+      };
+      return { kind: "updated", provider } as const;
     },
     async transitionState() {
       return { kind: "lifecycle_conflict" } as const;
@@ -95,7 +106,36 @@ function configurationRepository() {
   return repository;
 }
 
-test("admin keeps V2 provider drafts configurable while the missing decoder fails closed", async () => {
+test("admin tests and activates a live decoder-backed V2 provider", async () => {
+  const transportAdapters = createProviderLiveTransportRegistry({
+    resolveHost: async () => ["8.8.8.8"],
+    httpClient: async (_input, init) => {
+      assert.equal(
+        new Headers(init?.headers).get("authorization"),
+        "Bearer sanitized-secret",
+      );
+      return new Response(
+        JSON.stringify({
+          records: [
+            {
+              stream: "catalog",
+              platform: "courtyard",
+              record_id: "sanitized-pack",
+              entity: "pack",
+              first_seen_at: "2026-08-19T12:00:00Z",
+              occurred_at: "2026-08-19T12:00:00Z",
+              collected_at: "2026-08-19T12:00:01Z",
+              available: true,
+              data: {},
+            },
+          ],
+          next_cursor: "sanitized-cursor",
+          poll_after_seconds: 0,
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    },
+  });
   const runtime = createProviderAdminRuntime({
     repository: configurationRepository(),
     healthRepository: {
@@ -106,6 +146,7 @@ test("admin keeps V2 provider drafts configurable while the missing decoder fail
     credentialKey: new Uint8Array(32).fill(1),
     actorPseudonymKey: new Uint8Array(32).fill(2),
     environment: "test",
+    transportAdapters,
   });
   const actor = {
     organizationId: "00000000-0000-4000-8000-000000000001",
@@ -118,7 +159,7 @@ test("admin keeps V2 provider drafts configurable while the missing decoder fail
     displayName: "Courtyard",
     adapterKey: "http-cursor-v2",
     endpoint: "https://provider.example/feed",
-    auth: { mode: "none" },
+    auth: { mode: "bearer", bearerSecret: "sanitized-secret" },
     scheduleSeconds: 300,
     staleAfterSeconds: 900,
   });
@@ -129,27 +170,93 @@ test("admin keeps V2 provider drafts configurable while the missing decoder fail
     provider.id,
     provider.latestRevision.id,
   );
-  assert.equal(connection.verdict, "unreachable");
-  assert.equal(connection.sanitizedCode, "invalid_configuration");
-  await assert.rejects(
-    runtime.configuration.activateRevision(
-      actor,
-      provider.id,
-      provider.latestRevision.id,
-    ),
-    (error: unknown) =>
-      error instanceof ProviderConfigurationServiceError &&
-      error.code === "PROVIDER_CONNECTION_FAILED",
+  assert.equal(connection.verdict, "success");
+  assert.deepEqual(connection.recordCounts, {
+    catalog: 1,
+    pulls: 0,
+    trades: 0,
+  });
+  const activated = await runtime.configuration.activateRevision(
+    actor,
+    provider.id,
+    provider.latestRevision.id,
   );
+  assert.equal(activated.state, "active");
+  assert.equal(activated.activeRevisionId, provider.latestRevision.id);
 
-  const liveTransports = new ProviderTransportAdapterRegistry();
-  assert.equal(liveTransports.keys().length, 0);
+  assert.deepEqual(transportAdapters.keys(), ["http-cursor-v2"]);
   assert.throws(
-    () => liveTransports.resolve("http-cursor-v2", "courtyard"),
+    () => transportAdapters.resolve("http-cursor-v2", "gamestop"),
     (error: unknown) =>
       typeof error === "object" &&
       error !== null &&
       "code" in error &&
-      error.code === "unknown_adapter_key",
+      error.code === "unsupported_adapter_platform",
   );
+});
+
+test("admin live connection tests retain the explicit ten MiB response bound", async () => {
+  const records = Array.from({ length: 500 }, (_, index) => ({
+    stream: "catalog",
+    platform: "phygitals",
+    record_id: `sanitized-card-${index}`,
+    entity: "card",
+    first_seen_at: "2026-08-19T12:00:00Z",
+    occurred_at: "2026-08-19T12:00:00Z",
+    collected_at: "2026-08-19T12:00:01Z",
+    available: null,
+    data: { sanitizedPadding: "x".repeat(6_000) },
+  }));
+  const body = JSON.stringify({
+    records,
+    next_cursor: "sanitized-phygitals-cursor",
+    poll_after_seconds: 0,
+  });
+  assert.ok(body.length > 2 * 1024 * 1024);
+  assert.ok(body.length < 10 * 1024 * 1024);
+
+  const runtime = createProviderAdminRuntime({
+    repository: configurationRepository(),
+    healthRepository: {
+      async loadHealthEvidence() {
+        return null;
+      },
+    } satisfies ProviderHealthRepository,
+    credentialKey: new Uint8Array(32).fill(1),
+    actorPseudonymKey: new Uint8Array(32).fill(2),
+    environment: "test",
+    transportAdapters: createProviderLiveTransportRegistry({
+      resolveHost: async () => ["8.8.8.8"],
+      httpClient: async () =>
+        new Response(body, {
+          headers: { "content-type": "application/json" },
+        }),
+    }),
+  });
+  const actor = {
+    organizationId: "00000000-0000-4000-8000-000000000001",
+    operatorId: "00000000-0000-4000-8000-000000000002",
+    role: "admin" as const,
+  };
+  const provider = await runtime.configuration.createProvider(actor, {
+    platformKey: "phygitals",
+    displayName: "Phygitals",
+    adapterKey: "http-cursor-v2",
+    endpoint: "https://provider.example/feed",
+    auth: { mode: "bearer", bearerSecret: "sanitized-secret" },
+    scheduleSeconds: 300,
+    staleAfterSeconds: 900,
+  });
+
+  const result = await runtime.configuration.testConnection(
+    actor,
+    provider.id,
+    provider.latestRevision.id,
+  );
+  assert.equal(result.verdict, "success");
+  assert.deepEqual(result.recordCounts, {
+    catalog: 500,
+    pulls: 0,
+    trades: 0,
+  });
 });

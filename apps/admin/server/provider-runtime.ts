@@ -16,7 +16,7 @@ import type {
   ProviderHealthView,
   ProvidersRouterDependencies,
 } from "./routes/providers.ts";
-import { createProviderConfigurationTransportRegistry } from "./provider-transport-runtime.ts";
+import { createProviderLiveTransportRegistry } from "./provider-transport-runtime.ts";
 
 interface ProviderCatalogRepository extends ProviderConfigurationRepository {
   listProviders(
@@ -61,7 +61,7 @@ export function createProviderAdminRuntime(
     input.operational,
   );
   const transportAdapters =
-    input.transportAdapters ?? createProviderConfigurationTransportRegistry();
+    input.transportAdapters ?? createProviderLiveTransportRegistry();
   const configuration = new ProviderConfigurationService({
     repository: input.repository,
     adapters: transportAdapters,

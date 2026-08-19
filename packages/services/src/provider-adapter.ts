@@ -211,7 +211,10 @@ export interface ProviderHttpResponseDecoderInputV2 {
 }
 
 export interface ProviderHttpDecodedPageV2 {
-  /** Exact protected response evidence in a JSON-compatible decoder-owned form. */
+  /**
+   * Protected decoder-owned page evidence. A decoder may return a hash-bound
+   * manifest when individual raw records are persisted separately.
+   */
   readonly rawPage: unknown;
   readonly records: unknown;
   readonly nextCursor: unknown;

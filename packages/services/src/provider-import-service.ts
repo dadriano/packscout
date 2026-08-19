@@ -35,13 +35,13 @@ import type {
 } from "./provider-import-types.ts";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
-const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_TRANSIENT_RETRIES = 2;
 const DEFAULT_RETRY_BASE_MS = 250;
 const DEFAULT_RETRY_MAX_MS = 2_000;
 const DEFAULT_LEASE_DURATION_MS = 120_000;
-const DEFAULT_MAX_PAGES = 10_000;
-const DEFAULT_MAX_RUN_DURATION_MS = 15 * 60_000;
+const DEFAULT_MAX_PAGES = 50_000;
+const DEFAULT_MAX_RUN_DURATION_MS = 4 * 60 * 60_000;
 
 export interface ProviderImportSleeper {
   sleep(milliseconds: number): Promise<void>;

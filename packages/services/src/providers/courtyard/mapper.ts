@@ -232,6 +232,12 @@ function mapPack(
   const outOfStock = data.outOfStock === true;
   const closed = sale?.closed === true;
   const status = optionalString(data.status);
+  const fallbackAvailability =
+    outOfStock || closed
+      ? "sold_out"
+      : status?.toUpperCase() === "ACTIVE"
+        ? "active"
+        : "disabled";
   const pack: CanonicalPackCandidate = {
     candidateKind: "pack",
     source,
@@ -242,11 +248,13 @@ function mapPack(
     category:
       optionalString(category?.title) ?? optionalString(category?.id),
     availability:
-      outOfStock || closed
-        ? "sold_out"
-        : status?.toUpperCase() === "ACTIVE"
-          ? "active"
-          : "disabled",
+      record.available === true
+        ? "active"
+        : record.available === false
+          ? outOfStock || closed
+            ? "sold_out"
+            : "disabled"
+          : fallbackAvailability,
     sourceStatus: status,
     price: { amount: price, currency: "USD" },
     imageUrls: uniqueStrings([

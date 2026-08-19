@@ -212,6 +212,14 @@ function mapPack(
   const chases = topChases(data);
   const archived = data.archived === true;
   const isPublic = data.public !== false;
+  const availability =
+    record.available === true
+      ? "active"
+      : record.available === false
+        ? "disabled"
+        : archived || !isPublic
+          ? "disabled"
+          : "active";
   const packQuality = [
     ...(providerEv === null
       ? [warning("COLLECTOR_CRYPT_PROVIDER_EV_INVALID", "data.targetEV")]
@@ -234,7 +242,7 @@ function mapPack(
     name,
     description: null,
     category: optionalString(data.menuCategory),
-    availability: archived || !isPublic ? "disabled" : "active",
+    availability,
     sourceStatus: archived ? "archived" : isPublic ? "public" : "private",
     price: { amount: price, currency: "USD" },
     imageUrls: uniqueStrings([data.image, data.thumbnailUrl]),

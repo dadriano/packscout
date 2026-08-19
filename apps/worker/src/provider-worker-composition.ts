@@ -52,9 +52,8 @@ export interface ProviderWorkerCompositionInput {
   readonly logger: ProviderWorkerLogger;
   readonly observability: OperationalObservability;
   /**
-   * Live transports are registered only after their provider response decoder
-   * is known. The default is intentionally empty so production cannot pretend
-   * the archive-derived V2 record contract proves the live API page wrapper.
+   * Production supplies the live decoder-backed registry. The empty default
+   * keeps isolated composition tests explicit about external transport access.
    */
   readonly transportAdapters?: ProviderTransportAdapterRegistry;
 }

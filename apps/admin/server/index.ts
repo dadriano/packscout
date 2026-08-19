@@ -12,13 +12,12 @@ import {
   PrismaProviderConfigurationRepository,
   PrismaProviderHealthRepository,
 } from "@packscout/database";
-import { ProviderTransportAdapterRegistry } from "@packscout/services";
 import { createAdminApp } from "./app.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
 import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
 import { createAdminOperationalRuntime } from "./operational-runtime.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
-import { createProviderConfigurationTransportRegistry } from "./provider-transport-runtime.ts";
+import { createProviderLiveTransportRegistry } from "./provider-transport-runtime.ts";
 import {
   adminDevelopmentAllowedOrigins,
   adminDevelopmentServerNetwork,
@@ -124,11 +123,7 @@ try {
   await databaseLifecycle.start();
   const database = databaseLifecycle.client;
   const providerRepository = new PrismaProviderConfigurationRepository(database);
-  // The Aug-13 archive establishes V2 records, not the live API page wrapper.
-  // Production remains fail-closed until a real response decoder is supplied.
-  const liveTransportAdapters = new ProviderTransportAdapterRegistry();
-  const configurationTransportAdapters =
-    createProviderConfigurationTransportRegistry();
+  const liveTransportAdapters = createProviderLiveTransportRegistry();
   const operational = createAdminOperationalRuntime({
     database,
     actorPseudonymKey: providerActorKey,
@@ -157,7 +152,7 @@ try {
       actorPseudonymKey: providerActorKey,
       environment: isDevelopment ? "local" : "production",
       operational,
-      transportAdapters: configurationTransportAdapters,
+      transportAdapters: liveTransportAdapters,
     }),
     importOperations: createAdminImportOperationsRuntime({
       database,

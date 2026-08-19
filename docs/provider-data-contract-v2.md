@@ -1,16 +1,18 @@
 # Provider Data Contract V2
 
-**Status:** approved record contract; live HTTP wrapper pending evidence
-**Evidence date:** 2026-08-13 UTC
+**Status:** approved record contract and observed live HTTP transport
+**Evidence date:** 2026-08-19 UTC
 
 ## Evidence boundary
 
 V2 is grounded in `packscout_sample_2026-08-13.zip` (SHA-256
 `cf1306ebfc449aed187457660dd3c374afde1b4520c2f93d09718129ecfb08f8`).
 The archive contains 317,697 newline-delimited JSON records from Collector Crypt
-and Courtyard. It proves the record envelopes and provider payload shapes. It
-does not prove the live API response wrapper, headers, error body, rate-limit
-signals, or terminal cursor field.
+and Courtyard. It proves the original record envelopes and those two provider
+payload shapes. A sanitized live API inspection on August 19 additionally
+proved the response wrapper, platform-scoped cursor behavior, terminal polling
+signal, authentication failures, and the live `available` and
+`payment_method` fields. The credential itself is never fixture or log data.
 
 | Platform | Catalog | Pulls | Trades | Total |
 | --- | ---: | ---: | ---: | ---: |
@@ -34,9 +36,12 @@ All records contain:
 - `collected_at`
 - opaque provider-owned `data`
 
-Catalog records also contain `entity` (`pack` or `card`) and `first_seen_at`.
+Catalog records also contain `entity` (`pack` or `card`), `first_seen_at`, and
+live availability (`boolean` for packs and `null` for cards). Archive records
+predating that field remain valid only through the digest-bound archive path.
 Pulls contain `pack_id` and nullable `card_id`. Trades contain `card_id`, raw
-`event_type`, nullable `amount`, nullable `currency`, and `tx_hash`.
+`event_type`, nullable `amount`, nullable `currency`, nullable
+`payment_method`, and `tx_hash`.
 
 Outer identities and relationships are authoritative. A provider-local mapper
 may read nested data for canonical fields, but nested lookalike IDs cannot
@@ -62,11 +67,27 @@ can resume rather than restart full history. Continuing pages must contain a
 record and advance to a cursor not previously seen in the run. Cursors are
 opaque, limited to 2,048 characters, and never parsed for product meaning.
 
-The common HTTP client sends `platform` and, after a checkpoint exists,
-`cursor`. It does not send a stream selector. A provider-local response decoder
-owns body serialization and raw wrapper interpretation before producing the
-normalized page above. No production decoder is registered until one sanitized
-live response establishes that wrapper.
+The DataForrest HTTP client sends `platform` and, after a checkpoint exists,
+`cursor`. It does not send a stream selector. The cursor is bound to the
+platform filter. The observed response is:
+
+```text
+{
+  records: ProviderRecordV2[]
+  next_cursor: string
+  poll_after_seconds: number
+}
+```
+
+`poll_after_seconds === 0` means another page is immediately available. A
+positive value means the provider is at head, so the normalized page uses
+`hasMore: false` while retaining `next_cursor` as the durable checkpoint.
+
+The production decoder validates the wrapper before producing the normalized
+page. Default 500-record responses observed between roughly 0.6 MiB and 3.1 MiB
+across the four platforms. Live connection tests and imports therefore retain
+an explicit 10 MiB response limit; they do not rely on the common adapter's
+smaller fallback.
 
 ## Mapping decisions
 
@@ -100,17 +121,21 @@ live response establishes that wrapper.
 - Archive imports use a separate resumable operation and do not advance the
   live provider checkpoint. Page rows retain only hash-bound archive metadata;
   each raw record payload is stored once.
+- Live DataForrest page rows retain a body digest, count, next cursor, and poll
+  interval rather than duplicating every record payload. Each source record is
+  still retained as protected evidence.
 
-## Remaining live-API evidence
+## Remaining launch evidence
 
-Before activating scheduled HTTP imports, capture and sanitize one real page
-and its headers to lock:
+Before activating a full-history import, complete and reconcile:
 
-- response serialization and wrapper fields;
-- terminal cursor and `hasMore` behavior;
-- initial full-history and incremental ordering;
-- page-size and cursor-expiry rules;
-- authentication, error, and rate-limit responses.
+- provider mapping coverage for all four registered platforms;
+- clean-database bootstrap and resumable full-history execution;
+- storage capacity for the approximately 14.5 million-record history;
+- transient failure, cursor expiry, and sustained rate-limit behavior;
+- exact source/canonical counts and a no-op replay at provider head.
 
-If those facts differ, update only the provider-local decoder unless they
-invalidate the normalized one-cursor page contract.
+The August 13 sample database is not a valid live-import target. Live history
+adds normalized event, currency, payment-method, and availability facts, so an
+overlapping immutable event may correctly differ from its archive-era record.
+Keep the sample as dated evidence and use a clean live source namespace.
