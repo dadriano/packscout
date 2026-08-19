@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
+import { AuthProviderBoundary } from "@/components/auth/AuthProviderBoundary.client";
+import { resolvePublicAuthConfiguration } from "@/components/auth/auth-config";
 import { AppShell } from "@/components/shell/AppShell";
+import { readPublicConvexOrigin } from "@/lib/security-policy.server";
 import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/theme-bootstrap";
 import "./globals.css";
 
@@ -30,6 +33,10 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;
+  const configuration = resolvePublicAuthConfiguration({
+    privyAppId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
+    convexUrl: readPublicConvexOrigin() ?? undefined,
+  });
 
   return (
     <html data-scroll-behavior="smooth" lang="en" suppressHydrationWarning>
@@ -42,7 +49,9 @@ export default async function RootLayout({
         />
       </head>
       <body>
-        <AppShell>{children}</AppShell>
+        <AuthProviderBoundary configuration={configuration} nonce={nonce}>
+          <AppShell>{children}</AppShell>
+        </AuthProviderBoundary>
       </body>
     </html>
   );

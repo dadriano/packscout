@@ -14,6 +14,7 @@ import type {
   PublicRepackChase,
   PublicRepackViewDetail,
 } from "@packscout/contracts";
+import { SavedRepackButton } from "@/components/auth/SavedItemButton.client";
 import { EstimatedEvMetrics } from "@/components/metrics/EstimatedEvMetrics";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
@@ -225,22 +226,24 @@ export function RepackInspector({
     };
   }, [placement]);
 
-  function closeSheet() {
-    if (dialogRef.current?.open) dialogRef.current.close();
+  function closeInspector() {
+    if (placement === "sheet" && dialogRef.current?.open) {
+      dialogRef.current.close();
+    }
     onClose?.();
     requestAnimationFrame(() => returnFocusRef?.current?.focus());
   }
 
   function handleSheetCancel(event: SyntheticEvent<HTMLDialogElement>) {
     event.preventDefault();
-    closeSheet();
+    closeInspector();
   }
 
   function handleSheetKeys(event: KeyboardEvent<HTMLElement>) {
     if (placement !== "sheet") return;
     if (event.key === "Escape") {
       event.preventDefault();
-      closeSheet();
+      closeInspector();
       return;
     }
     if (event.key !== "Tab") return;
@@ -263,12 +266,12 @@ export function RepackInspector({
 
   const content = (
     <>
-      {placement === "sheet" ? (
+      {onClose ? (
         <button
           aria-label="Close repack details"
-          autoFocus
+          autoFocus={placement === "sheet"}
           className={styles.closeButton}
-          onClick={closeSheet}
+          onClick={closeInspector}
           ref={closeButtonRef}
           type="button"
         >
@@ -316,6 +319,9 @@ export function RepackInspector({
               <small aria-hidden="true">{price.reasonCopy}</small>
             ) : null}
           </p>
+          <div className={styles.saveAction}>
+            <SavedRepackButton publicRepackId={repack.publicRepackId} />
+          </div>
         </div>
       </header>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   PUBLIC_REPACK_PRICE_MAX_MINOR,
   PUBLIC_REPACK_PRICE_MIN_MINOR,
@@ -27,6 +27,47 @@ function selectionSummary(values: readonly string[], fallback: string): string {
   return `${values.length} selected`;
 }
 
+function ApplyIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="14" viewBox="0 0 16 16" width="14">
+      <path
+        d="M3.5 8.2 6.6 11.3 12.5 4.8"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
+function ResetIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="14" viewBox="0 0 16 16" width="14">
+      <path
+        d="M3.2 8a4.8 4.8 0 0 1 8.1-3.4M12.8 8A4.8 4.8 0 0 1 4.7 11.4M3.2 3.6V8h4.4"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
+function draftStatusMessage(
+  valid: boolean,
+  changed: boolean,
+  accepted: PublicRepackFilters,
+): string {
+  if (!valid) return "Enter a valid $10–$12,000 range.";
+  if (changed) return "Filters have unapplied changes.";
+  if (accepted.price.mode === "full") {
+    return "Full price range includes repacks without a USD comparison price.";
+  }
+  return "Narrowed price range excludes repacks without a USD comparison price.";
+}
+
 function CatalogFiltersDraft({
   accepted,
   facets,
@@ -41,6 +82,36 @@ function CatalogFiltersDraft({
   );
   const [minimum, setMinimum] = useState(dollars(accepted.price.minMinor));
   const [maximum, setMaximum] = useState(dollars(accepted.price.maxMinor));
+  const rootRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    function closeOpenDisclosures(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      rootRef.current
+        ?.querySelectorAll<HTMLDetailsElement>("details[open]")
+        .forEach((details) => {
+          if (!details.contains(target)) {
+            details.open = false;
+          }
+        });
+    }
+
+    document.addEventListener("pointerdown", closeOpenDisclosures);
+    return () => document.removeEventListener("pointerdown", closeOpenDisclosures);
+  }, []);
+
+  function handleDisclosureToggle(event: React.SyntheticEvent<HTMLDetailsElement>) {
+    const current = event.currentTarget;
+    if (!current.open) return;
+    rootRef.current
+      ?.querySelectorAll<HTMLDetailsElement>("details[open]")
+      .forEach((details) => {
+        if (details !== current) {
+          details.open = false;
+        }
+      });
+  }
 
   const draft = useMemo<PublicRepackFilters>(() => {
     const minMinor = Math.round(minimum * 100);
@@ -65,6 +136,7 @@ function CatalogFiltersDraft({
     maximum <= PUBLIC_REPACK_PRICE_MAX_MINOR / 100 &&
     minimum <= maximum;
   const changed = JSON.stringify(draft) !== JSON.stringify(accepted);
+  const statusMessage = draftStatusMessage(valid, changed, accepted);
 
   function toggle(
     key: string,
@@ -79,9 +151,9 @@ function CatalogFiltersDraft({
   }
 
   return (
-    <section aria-label="Catalog filters" className={styles.root}>
+    <section aria-label="Catalog filters" className={styles.root} ref={rootRef}>
       <div className={styles.filterGrid}>
-        <details className={styles.disclosure}>
+        <details className={styles.disclosure} onToggle={handleDisclosureToggle}>
           <summary>
             <span><span className={styles.label}>Vendor</span>{selectionSummary(vendors, "All vendors")}</span>
             <span aria-hidden="true">⌄</span>
@@ -102,7 +174,7 @@ function CatalogFiltersDraft({
           </fieldset>
         </details>
 
-        <details className={styles.disclosure}>
+        <details className={styles.disclosure} onToggle={handleDisclosureToggle}>
           <summary>
             <span><span className={styles.label}>Category</span>{selectionSummary(categories, "All categories")}</span>
             <span aria-hidden="true">⌄</span>
@@ -123,7 +195,7 @@ function CatalogFiltersDraft({
           </fieldset>
         </details>
 
-        <details className={styles.disclosure}>
+        <details className={styles.disclosure} onToggle={handleDisclosureToggle}>
           <summary>
             <span><span className={styles.label}>Collectible type</span>{selectionSummary(collectibleTypes, "All types")}</span>
             <span aria-hidden="true">⌄</span>
@@ -144,7 +216,10 @@ function CatalogFiltersDraft({
           </fieldset>
         </details>
 
-        <fieldset aria-describedby="catalog-price-help" className={styles.priceGroup}>
+        <fieldset
+          aria-describedby="catalog-filter-status"
+          className={styles.priceGroup}
+        >
           <legend className={styles.label}>Repack Price</legend>
           <label>
             <span className="sr-only">Minimum repack price in dollars</span>
@@ -175,30 +250,39 @@ function CatalogFiltersDraft({
             />
           </label>
         </fieldset>
+
+        <div className={styles.actionGroup}>
+          <button
+            aria-label={pending ? "Applying filters" : "Apply filters"}
+            className={styles.apply}
+            disabled={!valid || !changed || pending}
+            onClick={() => onApply(draft)}
+            title={pending ? "Applying filters" : "Apply filters"}
+            type="button"
+          >
+            <ApplyIcon />
+          </button>
+          <button
+            aria-label="Reset filters"
+            className={styles.reset}
+            disabled={pending}
+            onClick={onReset}
+            title="Reset filters"
+            type="button"
+          >
+            <ResetIcon />
+          </button>
+        </div>
       </div>
 
-      <div className={styles.actions}>
-        <p className={styles.draftStatus} id="catalog-price-help">
-          {!valid
-            ? "Enter a valid $10–$12,000 range."
-            : changed
-              ? "Filters have unapplied changes."
-              : accepted.price.mode === "full"
-                ? "Full price range includes repacks without a USD comparison price."
-                : "Narrowed price range excludes repacks without a USD comparison price."}
-        </p>
-        <button
-          className={styles.apply}
-          disabled={!valid || !changed || pending}
-          onClick={() => onApply(draft)}
-          type="button"
-        >
-          {pending ? "Applying…" : "Apply"}
-        </button>
-        <button className={styles.reset} disabled={pending} onClick={onReset} type="button">
-          Reset
-        </button>
-      </div>
+      <p
+        aria-live="polite"
+        className={!valid || changed ? styles.draftStatus : "sr-only"}
+        id="catalog-filter-status"
+        role="status"
+      >
+        {statusMessage}
+      </p>
     </section>
   );
 }

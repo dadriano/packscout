@@ -16,9 +16,11 @@
     "packages/services"
   ],
   "overrides": {
+    "axios": "1.18.0",
     "deepmerge-ts": "8.0.1",
     "postcss": "8.5.25",
-    "sharp": "0.35.3"
+    "sharp": "0.35.3",
+    "ws": "8.21.3"
   },
   "scripts": {
     "postinstall": "npm run db:prisma:generate",

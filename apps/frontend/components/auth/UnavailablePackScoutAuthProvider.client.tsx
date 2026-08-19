@@ -1,0 +1,23 @@
+"use client";
+
+import type { ReactNode } from "react";
+import {
+  PackScoutAuthContext,
+  unavailableAuthValue,
+} from "./AuthContext.client";
+import {
+  SavedItemsContext,
+  unavailableSavedItemsValue,
+} from "./SavedItemsContext.client";
+
+export function UnavailablePackScoutAuthProvider({
+  children,
+}: Readonly<{ children: ReactNode }>) {
+  return (
+    <PackScoutAuthContext.Provider value={unavailableAuthValue}>
+      <SavedItemsContext.Provider value={unavailableSavedItemsValue}>
+        {children}
+      </SavedItemsContext.Provider>
+    </PackScoutAuthContext.Provider>
+  );
+}

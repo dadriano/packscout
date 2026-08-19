@@ -1,3 +1,5 @@
+export const GLOSSARY_OPEN_EVENT = "packscout:glossary-open" as const;
+
 export type GlossaryHintState = Readonly<{
   open: boolean;
   pinned: boolean;

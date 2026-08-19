@@ -32,6 +32,8 @@ const checkedExtensions = new Set([
 const skippedDirectories = new Set([
   ".git",
   ".next",
+  ".next-build",
+  ".next-dev",
   ".tasks",
   ".worktrees",
   "build",

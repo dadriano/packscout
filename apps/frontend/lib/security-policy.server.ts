@@ -8,11 +8,13 @@ export type PublicSecurityConfiguration = Readonly<{
   convexWebSocketOrigin: string | null;
   imageOrigins: readonly string[];
   imageOriginSetHash: string;
+  privyAuthenticationEnabled: boolean;
 }>;
 
 type SecurityEnvironment = Readonly<{
   NODE_ENV?: string;
   NEXT_PUBLIC_CONVEX_URL?: string;
+  NEXT_PUBLIC_PRIVY_APP_ID?: string;
   PACKSCOUT_PUBLIC_IMAGE_ORIGINS?: string;
   PACKSCOUT_PUBLIC_ORIGIN_SET_HASH?: string;
 }>;
@@ -26,6 +28,9 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const CONVEX_HOST_PATTERN =
   /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.convex\.cloud$/;
 const NONCE_PATTERN = /^[A-Za-z0-9+/_=-]{16,128}$/;
+const PRIVY_APP_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+const PRIVY_AUTH_ORIGIN = "https://auth.privy.io";
+const PRIVY_TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
 
 function configuredValue(value: string | undefined): string | null {
   if (value === undefined || value === "") return null;
@@ -132,6 +137,16 @@ function parseImageOrigins(value: string | null): readonly string[] {
   return Object.freeze([...unique].sort());
 }
 
+function parsePrivyAuthenticationEnabled(value: string | null): boolean {
+  if (value === null) return false;
+  if (!PRIVY_APP_ID_PATTERN.test(value)) {
+    throw new Error(
+      "Privy app ID must be a bounded 8-128 character public identifier.",
+    );
+  }
+  return true;
+}
+
 export function hashImageOriginSet(origins: readonly string[]): string {
   return createHash("sha256")
     .update(JSON.stringify([...origins].sort()))
@@ -153,9 +168,12 @@ export function readPublicSecurityConfiguration(
   const expectedHash = configuredValue(
     environment.PACKSCOUT_PUBLIC_ORIGIN_SET_HASH,
   );
+  const privyAppId = configuredValue(environment.NEXT_PUBLIC_PRIVY_APP_ID);
   const convex = parseConvexOrigins(convexValue, mode);
   const imageOrigins = parseImageOrigins(imageValue);
   const imageOriginSetHash = hashImageOriginSet(imageOrigins);
+  const privyAuthenticationEnabled =
+    parsePrivyAuthenticationEnabled(privyAppId);
 
   const hasProductionConfiguration =
     convexValue !== null || imageValue !== null || expectedHash !== null;
@@ -190,6 +208,7 @@ export function readPublicSecurityConfiguration(
     ...convex,
     imageOrigins,
     imageOriginSetHash,
+    privyAuthenticationEnabled,
   });
 }
 
@@ -208,6 +227,9 @@ export function buildContentSecurityPolicy(input: Readonly<{
     "'self'",
     input.configuration.convexHttpOrigin,
     input.configuration.convexWebSocketOrigin,
+    ...(input.configuration.privyAuthenticationEnabled
+      ? [PRIVY_AUTH_ORIGIN]
+      : []),
   ].filter((source): source is string => source !== null);
   const scriptSources = [
     "'self'",
@@ -216,8 +238,11 @@ export function buildContentSecurityPolicy(input: Readonly<{
     ...(input.configuration.environment === "development"
       ? ["'unsafe-eval'"]
       : []),
+    ...(input.configuration.privyAuthenticationEnabled
+      ? [PRIVY_TURNSTILE_ORIGIN]
+      : []),
   ];
-  return [
+  const directives = [
     "default-src 'self'",
     `script-src ${scriptSources.join(" ")}`,
     "style-src 'self' 'unsafe-inline'",
@@ -232,5 +257,12 @@ export function buildContentSecurityPolicy(input: Readonly<{
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-  ].join("; ");
+  ];
+  if (input.configuration.privyAuthenticationEnabled) {
+    directives.push(
+      `child-src 'self' ${PRIVY_AUTH_ORIGIN}`,
+      `frame-src 'self' ${PRIVY_AUTH_ORIGIN} ${PRIVY_TURNSTILE_ORIGIN}`,
+    );
+  }
+  return directives.join("; ");
 }

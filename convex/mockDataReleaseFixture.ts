@@ -26,14 +26,46 @@ export const MOCK_DATA_RELEASE_SEED_IDEMPOTENCY_KEY =
 export const MOCK_DATA_RELEASE_SEED_OPERATION_ID =
   "packscout-mock-data-release-seed-v2" as const;
 
+export const MOCK_PUBLIC_ASSET_ORIGINS = Object.freeze([
+  "https://images.pokemontcg.io",
+  "https://placehold.co",
+] as const);
+
+const mockCollectibleImages = Object.freeze({
+  charizard: {
+    url: "https://images.pokemontcg.io/base1/4_hires.png",
+    alt: "1999 Pokemon Base Set Charizard Holo PSA 10",
+  },
+  umbreon: {
+    url: "https://images.pokemontcg.io/swsh7/215_hires.png",
+    alt: "2021 Umbreon VMAX Alternate Art PSA 10",
+  },
+  lebron: {
+    url: "https://placehold.co/160x220/1a1a2e/eee/png?text=LeBron+Rookie",
+    alt: "2003 Topps Chrome LeBron James Rookie PSA 10",
+  },
+  rolex: {
+    url: "https://placehold.co/160x220/1a1a2e/eee/png?text=Rolex+Sub",
+    alt: "Rolex Submariner Date 126610LN",
+  },
+  pikachu: {
+    url: "https://images.pokemontcg.io/swsh4/188_hires.png",
+    alt: "Rainbow Pikachu VMAX PSA 10",
+  },
+  jordan: {
+    url: "https://placehold.co/160x220/1a1a2e/eee/png?text=Jordan+Rookie",
+    alt: "1986 Fleer Michael Jordan Rookie PSA 9",
+  },
+} as const);
+
 export const MOCK_DATA_RELEASE_PUBLIC_CONFIG_HASH =
-  "e19e2372aab40a66a23eb6b65dc8da3acd3f24c2b13322b4d4f23b2e9a9bff48" as const;
+  "dc9d0712e8da3d32bbe6ab25f4b0aeb9e3e16e68ca2455d019029a97f18ea594" as const;
 export const MOCK_DATA_RELEASE_ORIGIN_SET_HASH =
-  "5f1fb126e865e933af8ce480ffd76c1ecdd7427ddb13681bebe69eb51474c902" as const;
+  "f75b1b355d9a6250517094458cbe9aae4e361a589c92ec2c0ab4964d8f20af63" as const;
 export const MOCK_DATA_RELEASE_MANIFEST_FINGERPRINT =
   "6dfc22527c62382443911af48654cab7fd3b860b929c1a46b4fa26342dab3a1b" as const;
 export const MOCK_DATA_RELEASE_CONTENT_HASH =
-  "11db838a03262821f115f07a1f2986feface45494da1b72d5de489f6266bfd72" as const;
+  "095a18686a074a148993dcdce344af322ab729012c2b75c6517131baba14e9ce" as const;
 export const MOCK_REPACK_SEARCH_SHARD_HASH =
   "baef9cc7ca84d532dc3b1ebf38a373fb0a3b03536e8d8efa8bc4fec540bc4622" as const;
 export const MOCK_REPACK_SEARCH_INDEX_HASH =
@@ -82,7 +114,7 @@ const vendors: readonly PublicVendor[] = [
     logoUrl: null,
     websiteUrl: "https://collector.example",
     listingHosts: ["collector.example"],
-    imageOrigins: [],
+    imageOrigins: [...MOCK_PUBLIC_ASSET_ORIGINS],
     referralParameters: [{ name: "ref", value: "packscout" }],
     publicPromo: { code: "SCOUT", label: "PackScout promo" },
   },
@@ -93,7 +125,7 @@ const vendors: readonly PublicVendor[] = [
     logoUrl: null,
     websiteUrl: "https://courtyard.example",
     listingHosts: ["courtyard.example"],
-    imageOrigins: [],
+    imageOrigins: [...MOCK_PUBLIC_ASSET_ORIGINS],
     referralParameters: [{ name: "utm_source", value: "packscout" }],
     publicPromo: null,
   },
@@ -198,6 +230,7 @@ type CollectibleInput = Readonly<{
   grade?: string | null;
   grader?: string | null;
   valuationMinor: number | null;
+  primaryImage?: PublicCollectible["primaryImage"];
 }>;
 
 function collectible(input: CollectibleInput): PublicCollectible {
@@ -222,7 +255,7 @@ function collectible(input: CollectibleInput): PublicCollectible {
     subject: input.subject,
     grade: input.grade ?? null,
     grader: input.grader ?? null,
-    primaryImage: null,
+    primaryImage: input.primaryImage ?? null,
     valuation:
       input.valuationMinor === null ? null : valuation(input.valuationMinor),
     searchText: buildPublicCollectibleSearchText({
@@ -256,6 +289,7 @@ const collectibles: readonly PublicCollectible[] = [
     grade: "10",
     grader: "PSA",
     valuationMinor: 8_500_000,
+    primaryImage: mockCollectibleImages.charizard,
   }),
   collectible({
     id: collectibleIds.umbreon,
@@ -271,6 +305,7 @@ const collectibles: readonly PublicCollectible[] = [
     grade: "10",
     grader: "PSA",
     valuationMinor: 155_200,
+    primaryImage: mockCollectibleImages.umbreon,
   }),
   collectible({
     id: collectibleIds.lebron,
@@ -286,6 +321,7 @@ const collectibles: readonly PublicCollectible[] = [
     grade: "10",
     grader: "PSA",
     valuationMinor: 240_000,
+    primaryImage: mockCollectibleImages.lebron,
   }),
   collectible({
     id: collectibleIds.rolex,
@@ -299,6 +335,7 @@ const collectibles: readonly PublicCollectible[] = [
     referenceNumber: "126610LN",
     subject: "Submariner Date",
     valuationMinor: 1_550_000,
+    primaryImage: mockCollectibleImages.rolex,
   }),
   collectible({
     id: collectibleIds.pikachu,
@@ -314,6 +351,7 @@ const collectibles: readonly PublicCollectible[] = [
     grade: "10",
     grader: "PSA",
     valuationMinor: 67_500,
+    primaryImage: mockCollectibleImages.pikachu,
   }),
   collectible({
     id: collectibleIds.jordan,
@@ -329,6 +367,7 @@ const collectibles: readonly PublicCollectible[] = [
     grade: "9",
     grader: "PSA",
     valuationMinor: 2_150_000,
+    primaryImage: mockCollectibleImages.jordan,
   }),
 ];
 
@@ -624,7 +663,7 @@ function repack(input: RepackInput): PublicRepackDetail {
               sourceKind: "vendor_reported",
             },
           },
-    primaryImage: null,
+    primaryImage: topChase?.collectible.primaryImage ?? null,
     evEstimates: {
       vendorReported: vendorReported(input.priceMinor, input.vendorGrossMinor),
       packScout: packScout(
@@ -811,7 +850,7 @@ export function buildMockDataReleaseV2(): DataReleaseManifestV2 {
       collectibleCount: collectibles.length,
       repackChaseCount: repackChases.length,
     },
-    publicAssetOrigins: [],
+    publicAssetOrigins: [...MOCK_PUBLIC_ASSET_ORIGINS],
     vendors,
     categories,
     repacks,
