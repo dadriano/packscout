@@ -41,6 +41,7 @@ export function parseDashboardRouteQuery(
     "vendor",
     "category",
     "collectibleType",
+    "availability",
     "minPrice",
     "maxPrice",
   ]);

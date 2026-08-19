@@ -88,6 +88,8 @@ const defaultPriceFilter = Object.freeze({
   maxMinor: PUBLIC_REPACK_PRICE_MAX_MINOR,
 });
 
+export const publicRepackAvailabilityFilterSchema = z.enum(["active", "all"]);
+
 const defaultRepackFilters = Object.freeze({
   vendors: Object.freeze([] as string[]),
   categories: Object.freeze([] as string[]),
@@ -96,6 +98,7 @@ const defaultRepackFilters = Object.freeze({
       "card" | "watch" | "coin" | "sealed_product" | "memorabilia" | "other"
     >,
   ),
+  availability: "active" as const,
   price: defaultPriceFilter,
 });
 
@@ -106,6 +109,7 @@ export const publicRepackFiltersSchema = z
     collectibleTypes: canonicalSelectionSchema(publicCollectibleTypeSchema, 8).default(
       [],
     ),
+    availability: publicRepackAvailabilityFilterSchema.default("active"),
     price: publicPriceFilterSchema.default(defaultPriceFilter),
   })
   .strict();
@@ -288,6 +292,9 @@ export function normalizeListPublicRepacksInput(
 }
 
 export type PublicPriceFilter = z.infer<typeof publicPriceFilterSchema>;
+export type PublicRepackAvailabilityFilter = z.infer<
+  typeof publicRepackAvailabilityFilterSchema
+>;
 export type PublicRepackFilters = z.infer<typeof publicRepackFiltersSchema>;
 export type PublicRepackSort = z.infer<typeof publicRepackSortSchema>;
 export type DashboardQueryInput = z.infer<typeof dashboardQueryInputSchema>;

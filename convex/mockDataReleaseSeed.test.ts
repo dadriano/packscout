@@ -342,6 +342,19 @@ describe("mock V2 data release", () => {
     expect(dashboard.data.kpis.totalRepacks).toBe(5);
     expect(dashboard.data.selectedRepack).not.toBeNull();
 
+    const dashboardWithSoldOut = await t.query(
+      api.publicRepacks.getDashboardBundle,
+      { filters: { availability: "all" } },
+    );
+    expect(getDashboardBundleResultSchema.parse(dashboardWithSoldOut).ok).toBe(true);
+    if (!dashboardWithSoldOut.ok) throw new Error("Expected sold-out dashboard.");
+    expect(dashboardWithSoldOut.data.kpis.totalRepacks).toBe(6);
+    expect(
+      dashboardWithSoldOut.data.opportunities.every(
+        ({ availability }) => availability === "active",
+      ),
+    ).toBe(true);
+
     const list = await t.query(api.publicRepacks.listPublicRepacks, {
       search: "pokemon",
       pageSize: 2,
@@ -361,7 +374,37 @@ describe("mock V2 data release", () => {
     });
     expect(listPublicRepacksResultSchema.parse(hierarchyResults).ok).toBe(true);
     if (!hierarchyResults.ok) throw new Error("Expected hierarchy results.");
-    expect(hierarchyResults.data.range.total).toBe(2);
+    expect(hierarchyResults.data.range.total).toBe(1);
+
+    const hierarchyWithSoldOut = await t.query(api.publicRepacks.listPublicRepacks, {
+      filters: {
+        categories: [sportsCategory.publicCategoryId],
+        availability: "all",
+      },
+    });
+    expect(listPublicRepacksResultSchema.parse(hierarchyWithSoldOut).ok).toBe(true);
+    if (!hierarchyWithSoldOut.ok) throw new Error("Expected sold-out results.");
+    expect(hierarchyWithSoldOut.data.range.total).toBe(2);
+    expect(
+      hierarchyWithSoldOut.data.rows.some(
+        ({ availability }) => availability === "sold_out",
+      ),
+    ).toBe(true);
+    expect(
+      hierarchyResults.data.rows.every(
+        ({ availability }) => availability === "active",
+      ),
+    ).toBe(true);
+    expect(
+      hierarchyResults.data.facets.categories.some(
+        (facet) =>
+          facet.key === sportsCategory.publicCategoryId &&
+          facet.parentKey ===
+            fixture.categories.find(({ categoryKey }) => categoryKey === "trading_cards")
+              ?.publicCategoryId &&
+          facet.depth === 1,
+      ),
+    ).toBe(true);
     expect(
       hierarchyResults.data.rows.every(({ categories }) =>
         ["Sports", "Basketball", "NBA"].every((label) =>

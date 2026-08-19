@@ -8,6 +8,7 @@ import {
   rowMatchesSearch,
   type RepackSearchRow,
 } from "./publicRepackValidation";
+import type { CategoryHierarchy } from "./publicRepackReadModel";
 
 export function selectionsAreKnown(
   rows: readonly RepackSearchRow[],
@@ -87,6 +88,7 @@ export function contextualFacets(
   countableRows: readonly RepackSearchRow[],
   filters: PublicRepackFilters,
   search: string,
+  categoryHierarchy: CategoryHierarchy,
 ): ContextualRepackFacets {
   const vendorLabels = new Map<string, string>();
   const categoryLabels = new Map<string, string>();
@@ -147,9 +149,24 @@ export function contextualFacets(
       .filter((option) => option.repackCount > 0 || option.selected)
       .sort((left, right) => left.key.localeCompare(right.key));
 
+  const categories = [...categoryLabels]
+    .map(([key, label]) => {
+      const node = categoryHierarchy.get(key);
+      return {
+        key,
+        label,
+        repackCount: categoryCounts.get(key) ?? 0,
+        selected: filters.categories.includes(key),
+        parentKey: node?.parentPublicCategoryId ?? null,
+        depth: node?.depth ?? 0,
+      };
+    })
+    .filter((option) => option.repackCount > 0 || option.selected)
+    .sort((left, right) => left.key.localeCompare(right.key));
+
   return {
     vendors: options(vendorLabels, vendorCounts, filters.vendors),
-    categories: options(categoryLabels, categoryCounts, filters.categories),
+    categories,
     collectibleTypes: options(
       collectibleTypeLabels,
       collectibleTypeCounts,

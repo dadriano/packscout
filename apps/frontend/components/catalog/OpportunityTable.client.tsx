@@ -95,7 +95,7 @@ export function OpportunityTable({
     <section aria-labelledby="top-opportunities-heading" className={styles.section}>
       <div className={styles.sectionHeader}>
         <div>
-          <p className={styles.eyebrow}>Ranked by PackScout EV $</p>
+          <p className={styles.eyebrow}>Ranked by EV $</p>
           <h2 className={styles.heading} id="top-opportunities-heading">
             Top opportunities
           </h2>
@@ -131,7 +131,7 @@ export function OpportunityTable({
                 <ColumnLabel field="repackPrice">Repack price</ColumnLabel>
               </th>
               <th scope="col">
-                <ColumnLabel field="evPercent">PackScout EV %</ColumnLabel>
+                <ColumnLabel field="evPercent">EV %</ColumnLabel>
               </th>
               <th scope="col">
                 <ColumnLabel field="buybackPercent">Buyback %</ColumnLabel>

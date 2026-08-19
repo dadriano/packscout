@@ -53,6 +53,22 @@ test("query state is normalized and serialized in canonical order", () => {
   );
 });
 
+test("sold-out repacks stay hidden unless the URL opts into every availability", () => {
+  const parsed = parseCatalogQueryState(new URLSearchParams());
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.query.filters.availability, "active");
+
+  const including = parseCatalogQueryState(new URLSearchParams("availability=all"));
+  assert.equal(including.ok, true);
+  if (!including.ok) return;
+  assert.equal(including.query.filters.availability, "all");
+  assert.equal(
+    serializeCatalogQueryState(including.query),
+    "/packs?availability=all",
+  );
+});
+
 test("malformed singleton, partial price, unknown key, and cursor state are rejected", () => {
   for (const query of [
     "q=one&q=two",
@@ -60,6 +76,9 @@ test("malformed singleton, partial price, unknown key, and cursor state are reje
     "surprise=true",
     "cursor=page-two",
     "sort=probability",
+    "availability=active",
+    "availability=sold_out",
+    "availability=all&availability=active",
   ]) {
     assert.equal(parseCatalogQueryState(new URLSearchParams(query)).ok, false, query);
   }

@@ -37,6 +37,7 @@ import {
   loadRepackDetail,
   loadRepackDetails,
   loadRepackSearchRows,
+  loadCategoryHierarchy,
   oneReleaseByPublicId,
 } from "./publicRepackReadModel";
 import { attachHeatToRepackDetails } from "./repackHeatReadModel";
@@ -84,18 +85,25 @@ export const getDashboardBundle = query({
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
     const allRows = await loadRepackSearchRows(ctx, active.release);
     if (allRows === null) return publicReadError("RELEASE_UNAVAILABLE");
+    const categoryHierarchy = await loadCategoryHierarchy(ctx, active.release._id);
+    if (categoryHierarchy === null) return publicReadError("RELEASE_UNAVAILABLE");
     if (!selectionsAreKnown(allRows, request.value.filters)) {
       return publicReadError("INVALID_QUERY");
     }
 
-    const activeRows = allRows.filter((row) => row.availability === "active");
     const matchingRows = matchingRepackRows(
-      activeRows,
+      allRows,
       request.value.filters,
       "",
     );
+    // Opportunities are actionable buys, so they stay active-only even when the
+    // caller opted into seeing sold-out repacks in the counts and summaries.
     const opportunityRows = [...matchingRows]
-      .filter((row) => row.packScoutEvDollarsMinor !== null)
+      .filter(
+        (row) =>
+          row.availability === "active" &&
+          row.packScoutEvDollarsMinor !== null,
+      )
       .sort((left, right) =>
         compareRepackRows(left, right, {
           search: "",
@@ -130,9 +138,10 @@ export const getDashboardBundle = query({
       categorySummaries: repackSummaries(matchingRows, "category"),
       facets: contextualFacets(
         allRows,
-        activeRows,
+        allRows,
         request.value.filters,
         "",
+        categoryHierarchy,
       ),
       activeFilters: request.value.filters,
       selectedRepack,
@@ -225,6 +234,8 @@ export const listPublicRepacks = query({
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
     const allRows = await loadRepackSearchRows(ctx, active.release);
     if (allRows === null) return publicReadError("RELEASE_UNAVAILABLE");
+    const categoryHierarchy = await loadCategoryHierarchy(ctx, active.release._id);
+    if (categoryHierarchy === null) return publicReadError("RELEASE_UNAVAILABLE");
     if (!selectionsAreKnown(allRows, request.value.filters)) {
       return publicReadError("INVALID_QUERY");
     }
@@ -325,6 +336,7 @@ export const listPublicRepacks = query({
         eligibleRows,
         request.value.filters,
         request.value.search,
+        categoryHierarchy,
       ),
       activeQuery: {
         search: request.value.search,

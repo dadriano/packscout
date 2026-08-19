@@ -9,6 +9,7 @@ import {
 import {
   PUBLIC_READ_ERRORS,
   acceptedRepackQuerySchema,
+  contextualRepackFacetsSchema,
   desiredCollectibleRepackResultsSchema,
   encodePublicCursorStack,
   findRepacksByDesiredCollectibleInputSchema,
@@ -48,8 +49,15 @@ test("repack query normalization is deterministic across all aggregate facets", 
   assert.deepEqual(query.filters.vendors, ["collector_example"]);
   assert.deepEqual(query.filters.categories, [SYNTHETIC_POKEMON_CATEGORY_ID]);
   assert.deepEqual(query.filters.collectibleTypes, ["card", "watch"]);
+  assert.equal(query.filters.availability, "active");
   assert.equal(query.sort, "packscout_ev_dollars");
   assert.equal(query.desiredPublicCollectibleId, null);
+
+  assert.equal(
+    normalizeListPublicRepacksInput({ filters: { availability: "all" } }).filters
+      .availability,
+    "all",
+  );
 
   const desired = normalizeListPublicRepacksInput({
     desiredPublicCollectibleId: SYNTHETIC_CHARIZARD_ID,
@@ -81,6 +89,7 @@ test("repack cursors and public inputs reject partial or legacy-shaped state", (
     { cursor: "next-cursor" },
     { sort: "ev_dollars" },
     { filters: { platforms: ["collector_example"] } },
+    { filters: { availability: "sold_out" } },
     { selectedPublicPackId: SYNTHETIC_FOCUSED_REPACK_ID },
     {
       desiredPublicCollectibleId: SYNTHETIC_CHARIZARD_ID,
@@ -236,4 +245,38 @@ test("list pages bind each desired-collectible row to exact chase evidence", () 
   const inactive = structuredClone(page);
   inactive.activeQuery.desiredPublicCollectibleId = null;
   assert.equal(listPublicRepacksPageSchema.safeParse(inactive).success, false);
+});
+
+test("category facets require parent and depth so the dashboard can nest subcategories", () => {
+  const pokemon = {
+    key: SYNTHETIC_POKEMON_CATEGORY_ID,
+    label: "Pokemon",
+    repackCount: 2,
+    selected: false,
+    parentKey: null,
+    depth: 0,
+  };
+  assert.equal(
+    contextualRepackFacetsSchema.safeParse({
+      vendors: [],
+      categories: [pokemon],
+      collectibleTypes: [],
+    }).success,
+    true,
+  );
+  assert.equal(
+    contextualRepackFacetsSchema.safeParse({
+      vendors: [],
+      categories: [
+        {
+          key: pokemon.key,
+          label: pokemon.label,
+          repackCount: pokemon.repackCount,
+          selected: pokemon.selected,
+        },
+      ],
+      collectibleTypes: [],
+    }).success,
+    false,
+  );
 });

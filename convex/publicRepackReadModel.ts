@@ -265,3 +265,47 @@ export async function loadDesiredChases(
   }
   return byPublicRepackId;
 }
+
+const MAX_PUBLIC_CATEGORIES = 4_096;
+
+export type CategoryHierarchy = ReadonlyMap<
+  string,
+  Readonly<{ parentPublicCategoryId: string | null; depth: number }>
+>;
+
+export async function loadCategoryHierarchy(
+  ctx: QueryCtx,
+  releaseId: Id<"dataReleases">,
+): Promise<CategoryHierarchy | null> {
+  const documents = await ctx.db
+    .query("categories")
+    .withIndex("by_release_id_and_public_category_id", (index) =>
+      index.eq("releaseId", releaseId),
+    )
+    .take(MAX_PUBLIC_CATEGORIES + 1);
+  if (documents.length > MAX_PUBLIC_CATEGORIES) return null;
+
+  const hierarchy = new Map<
+    string,
+    { parentPublicCategoryId: string | null; depth: number }
+  >();
+  for (const document of documents) {
+    const parentPublicCategoryId = document.detail.parentPublicCategoryId;
+    const depth = document.detail.depth;
+    if (
+      hierarchy.has(document.publicCategoryId) ||
+      document.detail.publicCategoryId !== document.publicCategoryId ||
+      (parentPublicCategoryId === null) !== (depth === 0) ||
+      !Number.isInteger(depth) ||
+      depth < 0 ||
+      depth > 12
+    ) {
+      return null;
+    }
+    hierarchy.set(document.publicCategoryId, {
+      parentPublicCategoryId,
+      depth,
+    });
+  }
+  return hierarchy;
+}

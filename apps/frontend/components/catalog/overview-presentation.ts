@@ -256,7 +256,7 @@ export function presentCatalogSummaries(
         repackCountLabel: repacks,
         barRatio: largestCount === 0 ? 0 : summary.repackCount / largestCount,
         medianEvPercent: median,
-        accessibleLabel: `${summary.label}: ${repacks} repacks. Median PackScout EV: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
+        accessibleLabel: `${summary.label}: ${repacks} repacks. Median EV: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
       };
     }),
   );
