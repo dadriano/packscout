@@ -80,9 +80,9 @@ function presentSummaryEvPercent(
     const reasonCopy = getPublicReasonCopy(metric.reason);
     return {
       availability: "unavailable",
-      label: "PackScout EV %",
+      label: "EV %",
       displayValue: "Unavailable",
-      accessibleLabel: `PackScout EV %: Unavailable. ${reasonCopy}`,
+      accessibleLabel: `EV %: Unavailable. ${reasonCopy}`,
       glossaryKey: "evPercent",
       semanticState: "unavailable",
       semanticLabel: "Unavailable",
@@ -99,9 +99,9 @@ function presentSummaryEvPercent(
   const displayValue = formatSignedEvPercent(metric.basisPoints);
   return {
     availability: "available",
-    label: "PackScout EV %",
+    label: "EV %",
     displayValue,
-    accessibleLabel: `PackScout EV %: ${displayValue}. ${semanticLabel}.`,
+    accessibleLabel: `EV %: ${displayValue}. ${semanticLabel}.`,
     glossaryKey: "evPercent",
     semanticState,
     semanticLabel,
@@ -135,8 +135,8 @@ export function presentDashboardKpis(
       id: "positiveEv",
       label: "Positive EV",
       value: countLabel(kpis.positiveEvRepacks),
-      helper: "Repacks with positive PackScout EV",
-      accessibleLabel: `${countLabel(kpis.positiveEvRepacks)} active repacks have positive PackScout EV.`,
+      helper: "Repacks with positive EV",
+      accessibleLabel: `${countLabel(kpis.positiveEvRepacks)} active repacks have positive EV.`,
       state: "positive",
       stateLabel: "Positive",
     },
@@ -144,7 +144,7 @@ export function presentDashboardKpis(
       id: "medianEv",
       label: "Median EV",
       value: median.displayValue,
-      helper: `Median PackScout EV · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
+      helper: `Median EV · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
       accessibleLabel: median.accessibleLabel,
       state: median.semanticState ?? "plain",
       stateLabel: median.semanticLabel,

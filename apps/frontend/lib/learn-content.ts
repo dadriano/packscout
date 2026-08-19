@@ -10,13 +10,13 @@ export type LearnMethodPoint = Readonly<{
 }>;
 
 export const PACKSCOUT_EV_METHOD = Object.freeze({
-  title: "PackScout method",
+  title: "EV estimation method",
   summary:
-    "PackScout EV estimates long-run value from supported public odds, inventory, and prices. It stays separate from vendor-reported EV and vendor marketing.",
+    "Estimated EV uses supported public odds, inventory, and prices to model long-run value. It stays separate from vendor-reported EV and vendor marketing.",
   points: [
     {
       title: "Public evidence only",
-      body: "We use supported listing data: stated odds, eligible inventory, repack price, and representative collectible values. Vendor-reported EV stays on its own line and is never blended into PackScout EV.",
+      body: "We use supported listing data: stated odds, eligible inventory, repack price, and representative collectible values. Vendor-reported EV stays on its own line and is never blended into estimated EV.",
     },
     {
       title: "How EV math works",
@@ -36,7 +36,7 @@ export const PACKSCOUT_EV_METHOD = Object.freeze({
     },
   ] as const satisfies readonly LearnMethodPoint[],
   disclaimer:
-    "Most repacks are negative-EV by design. PackScout helps you compare how negative—and how trustworthy the estimate is—not promise an edge.",
+    "Most repacks are negative-EV by design. The estimate helps you compare how negative—and how trustworthy the result is—not promise an edge.",
   learnMoreHref: "/learn/expected-value",
   learnMoreLabel: "Read the full EV guide",
 });
@@ -126,9 +126,9 @@ export const LEARN_GUIDES = Object.freeze([
         ],
       },
       {
-        heading: "Vendor facts and PackScout estimates",
+        heading: "Vendor facts and independent estimates",
         paragraphs: [
-          "Vendors report listing details such as price, eligible inventory, stated odds, and buyback terms. PackScout uses supported post-processed evidence to calculate comparison estimates; it does not control the opening or the item you receive.",
+          "Vendors report listing details such as price, eligible inventory, stated odds, and buyback terms. Supported post-processed evidence is used to calculate independent comparison estimates; those estimates do not control the opening or the item you receive.",
         ],
         callout: {
           label: "Keep the sources separate",
@@ -147,7 +147,7 @@ export const LEARN_GUIDES = Object.freeze([
     slug: "expected-value",
     title: "What is Expected Value (EV)?",
     description:
-      "How vendor-reported EV, PackScout EV, and confidence support informed comparisons.",
+      "How vendor-reported EV, estimated EV, and confidence support informed comparisons.",
     readingTimeMinutes: 6,
     sections: [
       {
@@ -164,16 +164,16 @@ export const LEARN_GUIDES = Object.freeze([
         },
       },
       {
-        heading: "The metrics PackScout shows",
+        heading: "The metrics shown",
         paragraphs: [
-          "PackScout uses the same metric definitions on Dashboard, All Repacks, and Learn so a label keeps one meaning wherever you see it.",
+          "The same metric definitions appear on Dashboard, All Repacks, and Learn so a label keeps one meaning wherever you see it.",
         ],
         metricKeys: EXPECTED_VALUE_METRIC_KEYS,
       },
       {
-        heading: "Vendor-reported EV and PackScout EV stay separate",
+        heading: "Vendor-reported EV and estimated EV stay separate",
         paragraphs: [
-          "A vendor may publish its own EV using its inventory, odds, and valuation approach. PackScout independently calculates PackScout EV from supported post-processed evidence.",
+          "A vendor may publish its own EV using its inventory, odds, and valuation approach. Estimated EV is calculated independently from supported post-processed evidence.",
           METRIC_TRUST_COPY.sourceExplanation,
           "A missing estimate is not replaced with the other source, and disagreement does not mean either value was silently changed.",
         ],
@@ -198,7 +198,7 @@ export const LEARN_GUIDES = Object.freeze([
       {
         heading: "Confidence, coverage, and unavailable estimates",
         paragraphs: [
-          "An estimate is only as useful as its supported odds, inventory, prices, and relationships. Coverage describes how much of that required evidence PackScout can support; it is not a promise that every source is complete or current.",
+          "An estimate is only as useful as its supported odds, inventory, prices, and relationships. Coverage describes how much of that required evidence is supported; it is not a promise that every source is complete or current.",
           METRIC_TRUST_COPY.confidenceExplanation,
           METRIC_TRUST_COPY.unavailableExplanation,
           "An unavailable value is not zero. It means the comparison should wait for better evidence rather than filling a gap with an invented number.",
@@ -213,7 +213,7 @@ export const LEARN_GUIDES = Object.freeze([
     ],
     relatedLink: {
       href: "/",
-      label: "Explore PackScout EV on Dashboard",
+      label: "Explore EV on Dashboard",
       description:
         "Return to Overview to compare supported long-run estimates and catalog context.",
     },
@@ -243,7 +243,7 @@ export const LEARN_GUIDES = Object.freeze([
           },
           {
             title: "Unsupported values",
-            body: "A stated item value should have a credible basis. Treat a headline value differently from a PackScout estimate or a vendor buyback offer.",
+            body: "A stated item value should have a credible basis. Treat a headline value differently from an independent estimate or a vendor buyback offer.",
           },
           {
             title: "Stale listings",
@@ -256,9 +256,9 @@ export const LEARN_GUIDES = Object.freeze([
         ],
       },
       {
-        heading: "How PackScout handles evidence gaps",
+        heading: "How evidence gaps are handled",
         paragraphs: [
-          "PackScout shows Unavailable when supported evidence is not sufficient for a trustworthy value. It does not treat a missing estimate as zero or manufacture a comparison from unsupported claims.",
+          "Unavailable appears when supported evidence is not sufficient for a trustworthy value. A missing estimate is not treated as zero, and a comparison is not manufactured from unsupported claims.",
         ],
         callout: {
           label: "Source check",

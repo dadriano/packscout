@@ -32,7 +32,7 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
       >
         <p className={styles.eyebrow}>{PACKSCOUT_EV_METHOD.title}</p>
         <h2 className={styles.methodHeading} id="packscout-ev-method-heading">
-          How PackScout EV works
+          How estimated EV works
         </h2>
         <p className={styles.methodSummary}>{PACKSCOUT_EV_METHOD.summary}</p>
 

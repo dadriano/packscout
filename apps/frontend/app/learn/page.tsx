@@ -8,7 +8,7 @@ import { dataReleaseStatusFromPublicResult } from "@/lib/public-release-status";
 export const metadata: Metadata = {
   title: "Learn",
   description:
-    "Practical guides to collectible repacks, PackScout Estimated EV, and evidence-based red flags.",
+    "Practical guides to collectible repacks, estimated EV, and evidence-based red flags.",
 };
 
 export const dynamic = "force-dynamic";

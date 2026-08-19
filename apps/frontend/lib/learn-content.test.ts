@@ -28,7 +28,7 @@ test("keeps exactly three version-controlled guides in the approved order", () =
         slug: "expected-value",
         title: "What is Expected Value (EV)?",
         description:
-          "How vendor-reported EV, PackScout EV, and confidence support informed comparisons.",
+          "How vendor-reported EV, estimated EV, and confidence support informed comparisons.",
       },
       {
         slug: "repack-red-flags",
@@ -50,19 +50,18 @@ test("uses the shared Dashboard vocabulary for Expected Value education", () => 
       {
         key: "grossEv",
         label: "Gross EV",
-        definition:
-          "PackScout’s estimated value of contents before fees and shipping",
+        definition: "Estimated value of contents before fees and shipping",
       },
       {
         key: "evDollars",
         label: "EV $",
-        definition: "PackScout Gross EV minus Repack Price",
+        definition: "Gross EV minus Repack Price",
       },
       {
         key: "evPercent",
         label: "EV %",
         definition:
-          "The percentage PackScout Gross EV is above or below Repack Price",
+          "The difference between Gross EV and Repack Price, shown as a percentage of Repack Price",
       },
       {
         key: "buybackPercent",
@@ -110,8 +109,8 @@ test("keeps repack and red-flag guidance evidence-based and catalog-linked", () 
   assert.equal(findLearnGuide("not-a-guide"), undefined);
 });
 
-test("documents the PackScout EV method in layman's terms on the learn index", () => {
-  assert.equal(PACKSCOUT_EV_METHOD.title, "PackScout method");
+test("documents the EV estimation method in layman's terms on the learn index", () => {
+  assert.equal(PACKSCOUT_EV_METHOD.title, "EV estimation method");
   assert.equal(PACKSCOUT_EV_METHOD.points.length, 5);
   assert.match(PACKSCOUT_EV_METHOD.summary, /supported public odds/i);
   assert.match(

@@ -59,7 +59,7 @@ export function presentEstimateTiming(
     calculatedLabel:
       estimate.calculatedAt === null
         ? "Estimate date unavailable"
-        : `PackScout EV calculated ${formatPublicTimestamp(estimate.calculatedAt)}`,
+        : `EV estimate calculated ${formatPublicTimestamp(estimate.calculatedAt)}`,
     calculatedAt: estimate.calculatedAt,
     releaseLabel: `Repack data as of ${formatPublicTimestamp(metadata.dataAsOf)}`,
     dataAsOf: metadata.dataAsOf,

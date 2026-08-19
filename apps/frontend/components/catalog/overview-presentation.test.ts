@@ -118,7 +118,9 @@ test("always presents four overview KPIs with PackScout EV meaning", () => {
     presentation.map(({ value }) => value),
     ["1,248", "612", "+1.80%", "Unavailable"],
   );
-  assert.match(presentation[2]?.helper ?? "", /high confidence/i);
+  assert.equal(presentation[1]?.helper, "Repacks with positive EV");
+  assert.equal(presentation[2]?.helper, "Median EV · 500 high confidence");
+  assert.equal(presentation[2]?.accessibleLabel, "EV %: +1.80%. Positive.");
   assert.equal(presentation[3]?.reasonCopy, "Collectible value unavailable.");
 });
 

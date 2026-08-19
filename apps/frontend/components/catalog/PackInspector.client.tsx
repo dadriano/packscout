@@ -324,103 +324,119 @@ export function RepackInspector({
         </div>
       </header>
 
-      <div className={styles.sectionBlock}>
-        <EstimatedEvMetrics compact presentation={packScoutEv} />
-        <div className={styles.vendorEstimate}>
-          <div className={styles.sectionHeading}>
-            <h3>Vendor-reported EV</h3>
-            <span>Reported by vendor</span>
+      <div className={styles.detailsGrid}>
+        <div className={styles.sectionBlock}>
+          <EstimatedEvMetrics compact presentation={packScoutEv} />
+          <div className={styles.vendorEstimate}>
+            <div className={styles.sectionHeading}>
+              <h3>Vendor-reported EV</h3>
+              <span>Reported by vendor</span>
+            </div>
+            <div className={styles.vendorEstimateMetrics}>
+              <MetricValue
+                compact
+                metric={vendorEv.evPercent}
+                showReason={false}
+                showSemanticState={false}
+              />
+              <MetricValue
+                compact
+                metric={vendorEv.reportedGrossEv}
+                showReason={false}
+                showSemanticState={false}
+              />
+            </div>
+            {vendorEv.reasonCopy ? (
+              <p className={styles.vendorEstimateReason}>
+                {vendorEv.reasonCopy}
+              </p>
+            ) : null}
+            {vendorObservation ? (
+              <p className={styles.vendorEstimateContext}>
+                <time dateTime={vendorObservation.observedAt}>
+                  {vendorObservation.label}
+                </time>
+              </p>
+            ) : null}
           </div>
-          <div className={styles.vendorEstimateMetrics}>
-            <MetricValue
-              compact
-              metric={vendorEv.evPercent}
-              showReason={false}
-              showSemanticState={false}
-            />
-            <MetricValue
-              compact
-              metric={vendorEv.reportedGrossEv}
-              showReason={false}
-              showSemanticState={false}
-            />
+          <div className={styles.buybackMetric}>
+            <MetricValue compact metric={buyback} />
           </div>
-          {vendorEv.reasonCopy ? (
-            <p className={styles.vendorEstimateReason}>{vendorEv.reasonCopy}</p>
-          ) : null}
-          {vendorObservation ? (
-            <p className={styles.vendorEstimateContext}>
-              <time dateTime={vendorObservation.observedAt}>
-                {vendorObservation.label}
-              </time>
+          <div className={styles.estimateContext}>
+            <p>{coverage}</p>
+            <p>
+              {timing.calculatedAt ? (
+                <time dateTime={timing.calculatedAt}>
+                  {timing.calculatedLabel}
+                </time>
+              ) : (
+                timing.calculatedLabel
+              )}
             </p>
-          ) : null}
+            <p>
+              <time dateTime={timing.dataAsOf}>{timing.releaseLabel}</time>
+            </p>
+            {packScoutEv.confidence.limitations.length > 0 ? (
+              <ul className={styles.limitations}>
+                {packScoutEv.confidence.limitations.map((limitation) => (
+                  <li key={limitation}>{limitation}</li>
+                ))}
+              </ul>
+            ) : null}
+            <Link
+              className={styles.learnLink}
+              href={EXPECTED_VALUE_ARTICLE_HREF}
+            >
+              How this estimate works
+              <span aria-hidden="true"> →</span>
+            </Link>
+          </div>
         </div>
-        <div className={styles.buybackMetric}>
-          <MetricValue compact metric={buyback} />
-        </div>
-        <div className={styles.estimateContext}>
-          <p>{coverage}</p>
-          <p>
-            {timing.calculatedAt ? (
-              <time dateTime={timing.calculatedAt}>{timing.calculatedLabel}</time>
+
+        <div className={styles.secondaryDetails}>
+          <section
+            aria-labelledby={`top-chase-${repack.publicRepackId}`}
+            className={styles.chase}
+          >
+            <div className={styles.sectionHeading}>
+              <h3 id={`top-chase-${repack.publicRepackId}`}>
+                {showsDesiredChase ? "Desired chase match" : "Top chase"}
+              </h3>
+              <span>{chaseValueLabel}</span>
+            </div>
+            {chase.availability === "available" ? (
+              <div className={styles.chaseContent}>
+                <span className="sr-only">{chase.accessibleLabel}</span>
+                <CatalogImage
+                  fallback="none"
+                  fallbackAlt={chase.name}
+                  image={chase.image}
+                  variant="chase"
+                />
+                <div aria-hidden="true">
+                  <p className={styles.chaseName}>{chase.name}</p>
+                  <p className={styles.chaseValue}>{chase.displayValue}</p>
+                  {chase.valueAvailability === "unavailable" ? (
+                    <p className={styles.chaseValueReason}>
+                      {chase.reasonCopy}
+                    </p>
+                  ) : null}
+                  <p className={styles.chaseEvidence}>{chase.evidenceLabel}</p>
+                  <p className={styles.chaseEvidence}>
+                    {chase.matchConfidenceLabel}
+                  </p>
+                </div>
+              </div>
             ) : (
-              timing.calculatedLabel
+              <div className={styles.chaseUnavailable}>
+                <span className="sr-only">{chase.accessibleLabel}</span>
+                <span aria-hidden="true">{chase.name}</span>
+                <small aria-hidden="true">{chase.reasonCopy}</small>
+              </div>
             )}
-          </p>
-          <p>
-            <time dateTime={timing.dataAsOf}>{timing.releaseLabel}</time>
-          </p>
-          {packScoutEv.confidence.limitations.length > 0 ? (
-            <ul className={styles.limitations}>
-              {packScoutEv.confidence.limitations.map((limitation) => (
-                <li key={limitation}>{limitation}</li>
-              ))}
-            </ul>
-          ) : null}
-          <Link className={styles.learnLink} href={EXPECTED_VALUE_ARTICLE_HREF}>
-            How this estimate works
-            <span aria-hidden="true"> →</span>
-          </Link>
+          </section>
         </div>
       </div>
-
-      <section aria-labelledby={`top-chase-${repack.publicRepackId}`} className={styles.chase}>
-        <div className={styles.sectionHeading}>
-          <h3 id={`top-chase-${repack.publicRepackId}`}>
-            {showsDesiredChase ? "Desired chase match" : "Top chase"}
-          </h3>
-          <span>
-            {chaseValueLabel}
-          </span>
-        </div>
-        {chase.availability === "available" ? (
-          <div className={styles.chaseContent}>
-            <span className="sr-only">{chase.accessibleLabel}</span>
-            <CatalogImage
-              fallback="none"
-              fallbackAlt={chase.name}
-              image={chase.image}
-              variant="chase"
-            />
-            <div aria-hidden="true">
-              <p className={styles.chaseName}>{chase.name}</p>
-              <p className={styles.chaseValue}>{chase.displayValue}</p>
-              {chase.valueAvailability === "unavailable" ? (
-                <p className={styles.chaseValueReason}>{chase.reasonCopy}</p>
-              ) : null}
-              <p className={styles.chaseEvidence}>{chase.evidenceLabel}</p>
-              <p className={styles.chaseEvidence}>{chase.matchConfidenceLabel}</p>
-            </div>
-          </div>
-        ) : (
-          <div className={styles.chaseUnavailable}>
-            <span className="sr-only">{chase.accessibleLabel}</span>
-            <span aria-hidden="true">{chase.name}</span>
-            <small aria-hidden="true">{chase.reasonCopy}</small>
-          </div>
-        )}
-      </section>
 
       <PartnerActions
         clipboardWriter={clipboardWriter}
