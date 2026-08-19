@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/006
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including all eight launch-provider fixtures and evidence-quality verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -69,8 +69,15 @@ The normalized output is provider-neutral, coherent at one observation boundary,
 
 ## Acceptance Criteria
 
-- [ ] All eight launch providers have sanitized fixtures and an explicit capability outcome for every required input.
-- [ ] Equivalent evidence normalizes identically while source-specific parsing remains outside generic calculation behavior.
-- [ ] Current-pool priority, published fallback, rounding tolerance, material conflict, restock, depletion, and pull behavior match the approved policy.
-- [ ] Buyback scope, payout basis, eligibility, adjustments, and already-adjusted values cannot be omitted or double-applied.
-- [ ] Missing capabilities fail closed without defaults, normalization, provider-EV substitution, raw-payload exposure, or cross-provider leakage.
+- [x] All eight launch providers have sanitized fixtures and an explicit capability outcome for every required input.
+- [x] Equivalent evidence normalizes identically while source-specific parsing remains outside generic calculation behavior.
+- [x] Current-pool priority, published fallback, rounding tolerance, material conflict, restock, depletion, and pull behavior match the approved policy.
+- [x] Buyback scope, payout basis, eligibility, adjustments, and already-adjusted values cannot be omitted or double-applied.
+- [x] Missing capabilities fail closed without defaults, normalization, provider-EV substitution, raw-payload exposure, or cross-provider leakage.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — shared rulebook `packages/services/src/providers/buyback-ev-evidence.ts` plus eight provider-owned normalization boundaries (beezie, clutchpacks, collector-crypt, courtyard, gamestop, phygitals, stadium-vault, trove), each returning a complete `PackScoutBuybackEvInputV1` or canonical unavailable evidence; current-pool priority with populated published-odds comparison, material-conflict/non-atomic/pull/restock policies, homogeneous-bucket enforcement, USD/allowlisted-stablecoin normalization, and cross-provider equivalence proven by deep-equal economics tests.
+- Divergences: (1) GameStop fixed-offer and Trove final-payout-basis capabilities are modeled from the feature's evidence vocabulary, not from the legacy catalog mappers (which carry no buyback terms) — the sanitized source slices define what each provider must supply; real per-provider terms remain an External Dependency to confirm during task 013 launch certification against product truth. (2) Provider keys reuse the existing underscored platform keys while product keys use hyphens to satisfy the contract pattern.
+- Verification: full services suite npm test --workspace @packscout/services (476 pass, includes the 75 new provider-evidence tests plus 002/003 suites as regression), typecheck, lint, scan:framework-standards:ratchet 0 new findings — all run by the orchestrator at the Group B integration checkpoint. Task file predates a ## Verification anchor; the package suite is the fallback anchor.
