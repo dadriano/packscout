@@ -146,6 +146,7 @@ export function DashboardOverviewClient({
               startTransition(() => router.push(dashboardHrefFor(provider)))
             }
             pending={pending}
+            showAvailabilityToggle={false}
           />
         }
         inspectorOpen={narrowInspector ? sheetOpen : !sideInspectorDismissed}

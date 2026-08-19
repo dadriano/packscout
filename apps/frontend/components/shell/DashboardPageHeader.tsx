@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { METRIC_TRUST_COPY } from "@/lib/metric-vocabulary";
 import type { DashboardHref } from "@/lib/provider-banner";
 
 export function DashboardPageHeader({
@@ -35,7 +36,7 @@ export function DashboardPageHeader({
           </Link>
         </nav>
       </div>
-      <p className="dashboard-disclaimer">PackScout EV · Estimated · Not financial advice.</p>
+      <p className="dashboard-disclaimer">{METRIC_TRUST_COPY.dashboardDisclaimer}</p>
     </div>
   );
 }

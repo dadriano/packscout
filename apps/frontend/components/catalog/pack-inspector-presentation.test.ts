@@ -101,7 +101,7 @@ test("keeps PackScout calculation time distinct from release data time", () => {
 
   assert.equal(
     timing.calculatedLabel,
-    "PackScout EV calculated Aug 10, 2026, 10:30 AM UTC",
+    "EV estimate calculated Aug 10, 2026, 10:30 AM UTC",
   );
   assert.equal(
     timing.releaseLabel,

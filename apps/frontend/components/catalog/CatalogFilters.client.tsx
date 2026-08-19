@@ -22,6 +22,7 @@ type CatalogFiltersProps = Readonly<{
   accepted: PublicRepackFilters;
   facets: ContextualRepackFacets;
   pending?: boolean;
+  showAvailabilityToggle?: boolean;
   onApply: (filters: PublicRepackFilters) => void;
   onReset: () => void;
 }>;
@@ -81,6 +82,7 @@ function CatalogFiltersDraft({
   accepted,
   facets,
   pending = false,
+  showAvailabilityToggle = true,
   onApply,
   onReset,
 }: CatalogFiltersProps) {
@@ -266,19 +268,6 @@ function CatalogFiltersDraft({
         >
           <legend className={styles.label}>Repack Price</legend>
           <div className={styles.sliderRow}>
-            <label className={styles.priceField}>
-              <span className="sr-only">Minimum repack price in dollars</span>
-              <span aria-hidden="true">$</span>
-              <input
-                inputMode="decimal"
-                max={PRICE_FILTER_MAX_DOLLARS}
-                min={PRICE_FILTER_MIN_DOLLARS}
-                onChange={(event) => setMinimum(event.currentTarget.valueAsNumber)}
-                step="0.01"
-                type="number"
-                value={Number.isFinite(minimum) ? minimum : ""}
-              />
-            </label>
             <div
               className={styles.slider}
               onPointerDown={handleSliderPointerDown}
@@ -318,20 +307,35 @@ function CatalogFiltersDraft({
                 value={Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS}
               />
             </div>
-            <label className={styles.priceField}>
-              <span className="sr-only">Maximum repack price in dollars</span>
-              <span aria-hidden="true">$</span>
-              <input
-                aria-invalid={!valid}
-                inputMode="decimal"
-                max={PRICE_FILTER_MAX_DOLLARS}
-                min={PRICE_FILTER_MIN_DOLLARS}
-                onChange={(event) => setMaximum(event.currentTarget.valueAsNumber)}
-                step="0.01"
-                type="number"
-                value={Number.isFinite(maximum) ? maximum : ""}
-              />
-            </label>
+            <div className={styles.priceFields}>
+              <label className={styles.priceField}>
+                <span className="sr-only">Minimum repack price in dollars</span>
+                <span aria-hidden="true">$</span>
+                <input
+                  inputMode="decimal"
+                  max={PRICE_FILTER_MAX_DOLLARS}
+                  min={PRICE_FILTER_MIN_DOLLARS}
+                  onChange={(event) => setMinimum(event.currentTarget.valueAsNumber)}
+                  step="0.01"
+                  type="number"
+                  value={Number.isFinite(minimum) ? minimum : ""}
+                />
+              </label>
+              <label className={styles.priceField}>
+                <span className="sr-only">Maximum repack price in dollars</span>
+                <span aria-hidden="true">$</span>
+                <input
+                  aria-invalid={!valid}
+                  inputMode="decimal"
+                  max={PRICE_FILTER_MAX_DOLLARS}
+                  min={PRICE_FILTER_MIN_DOLLARS}
+                  onChange={(event) => setMaximum(event.currentTarget.valueAsNumber)}
+                  step="0.01"
+                  type="number"
+                  value={Number.isFinite(maximum) ? maximum : ""}
+                />
+              </label>
+            </div>
           </div>
         </fieldset>
 
@@ -359,17 +363,28 @@ function CatalogFiltersDraft({
         </div>
       </div>
 
-      <div className={styles.footerRow}>
-        <label className={styles.availabilityToggle}>
-          <input
-            checked={availability === "all"}
-            onChange={(event) =>
-              setAvailability(event.currentTarget.checked ? "all" : "active")
-            }
-            type="checkbox"
-          />
-          <span>Include sold out</span>
-        </label>
+      {showAvailabilityToggle ? (
+        <div className={styles.footerRow}>
+          <label className={styles.availabilityToggle}>
+            <input
+              checked={availability === "all"}
+              onChange={(event) =>
+                setAvailability(event.currentTarget.checked ? "all" : "active")
+              }
+              type="checkbox"
+            />
+            <span>Include sold out</span>
+          </label>
+          <p
+            aria-live="polite"
+            className={!valid || changed ? styles.draftStatus : "sr-only"}
+            id="catalog-filter-status"
+            role="status"
+          >
+            {statusMessage}
+          </p>
+        </div>
+      ) : (
         <p
           aria-live="polite"
           className={!valid || changed ? styles.draftStatus : "sr-only"}
@@ -378,7 +393,7 @@ function CatalogFiltersDraft({
         >
           {statusMessage}
         </p>
-      </div>
+      )}
     </section>
   );
 }

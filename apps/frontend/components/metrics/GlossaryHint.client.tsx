@@ -148,7 +148,7 @@ export function GlossaryHint({
           <span className={styles.definition}>{definition.definition}</span>
           {definition.learnHref ? (
             <Link className={styles.learnLink} href={definition.learnHref}>
-              Learn how PackScout estimates EV
+              Learn how EV is estimated
               <span aria-hidden="true"> →</span>
             </Link>
           ) : null}
