@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/006
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including all eight launch-provider fixtures and evidence-quality verification
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 

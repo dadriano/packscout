@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/005, buyback-adjusted-ev/007
 **Estimated scope:** medium
 **Estimated effort:** 1–2 days for one builder, including policy derivation, time boundaries, and adversarial verification
-**Status:** todo
+**Status:** done
 
 ## Start Here
 
@@ -57,8 +57,15 @@ Task 002 emits the protected confidence input alongside each calculation. Downst
 
 ## Acceptance Criteria
 
-- [ ] Every penalty combination and the exact 15-, 30-, and 60-minute boundaries produce the approved score, band, limitation set, and availability.
-- [ ] Positive, neutral, and negative EV with identical evidence receive identical confidence.
-- [ ] Missing essential evidence and evidence older than 60 minutes cannot produce an available low-confidence result.
-- [ ] Sold-out history, calculation time, data-as-of time, limitation ordering, and unsupported-version states validate deterministically.
-- [ ] Public explanation copy remains bounded and never exposes provider payloads or claims confidence measures return.
+- [x] Every penalty combination and the exact 15-, 30-, and 60-minute boundaries produce the approved score, band, limitation set, and availability.
+- [x] Positive, neutral, and negative EV with identical evidence receive identical confidence.
+- [x] Missing essential evidence and evidence older than 60 minutes cannot produce an available low-confidence result.
+- [x] Sold-out history, calculation time, data-as-of time, limitation ordering, and unsupported-version states validate deterministically.
+- [x] Public explanation copy remains bounded and never exposes provider payloads or claims confidence measures return.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — `evaluatePackScoutBuybackEvConfidenceV1` in `packages/services/src/buyback-adjusted-ev-confidence.ts` applies the exact V1 penalty table with inclusive 15/30/60-minute boundaries, canonical limitation ordering, bounded explanation copy, and fail-closed version/time validation; every output parses through the task-001 evaluation contract. Sold-out historical wrapping deferred to task 007 per this task's interface contract.
+- Divergences: a failed availability gate whose known evidence is still current (age <= 60 min) throws instead of returning an unavailable evaluation, because the contract's unavailable branch only admits expired or unknown-source-time freshness; the canonical task-002 failed-gate output carries a null observation time so this edge is unreachable in the pipeline, and failing closed honors "never fabricate a score". Revisit at task 006 wiring if recomputation ever routes fresh failed gates here.
+- Verification: node --import tsx --test src/buyback-adjusted-ev-confidence.test.ts (11 pass, independently re-run by the orchestrator), eslint clean; package-wide suite deferred to the Group B integration checkpoint. Task file predates a ## Verification anchor; focused suite is the fallback anchor.

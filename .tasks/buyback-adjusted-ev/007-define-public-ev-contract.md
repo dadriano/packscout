@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/008
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder, including strict public schemas, invariants, fixtures, and compatibility removal
-**Status:** todo
+**Status:** done
 
 ## Start Here
 
@@ -73,8 +73,15 @@ All public result envelopes preserve active release identity and carry byte-equi
 
 ## Acceptance Criteria
 
-- [ ] Current, historical, unavailable, zero, neutral, positive, negative, delayed, expired, and sold-out fixtures validate with exact semantics.
-- [ ] Inconsistent arithmetic, versions, confidence, timing, nullability, protected fields, and unknown nested fields are rejected.
-- [ ] Vendor-reported EV stays independent, while uniform, variable, fixed/final, undocumented, and unavailable buyback summaries remain honest and bounded.
-- [ ] Summary, detail, dashboard, list, desired-collectible, sort-row, and selected-item projections remain aligned and bounded.
-- [ ] No alias, dual contract, mixed interpretation, or runtime fallback to pre-buyback Gross EV remains in the new public surface.
+- [x] Current, historical, unavailable, zero, neutral, positive, negative, delayed, expired, and sold-out fixtures validate with exact semantics.
+- [x] Inconsistent arithmetic, versions, confidence, timing, nullability, protected fields, and unknown nested fields are rejected.
+- [x] Vendor-reported EV stays independent, while uniform, variable, fixed/final, undocumented, and unavailable buyback summaries remain honest and bounded.
+- [x] Summary, detail, dashboard, list, desired-collectible, sort-row, and selected-item projections remain aligned and bounded.
+- [x] No alias, dual contract, mixed interpretation, or runtime fallback to pre-buyback Gross EV remains in the new public surface.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — `data_release_v3` contract in `packages/contracts/src/data-release-v3*.ts`: strict current/sold-out-historical/unavailable `evEstimates.packScout` union with exact method/policy versions, half-up arithmetic reconciliation against public pack price, 60-minute expiry deadline with reference-clock rejection, frozen sold-out history, bounded buyback summary enum, structurally independent vendor EV, byte-equivalent projections across summary/detail/dashboard/list/desired-collectible/sort-row, protected-key rejection at every nesting level, and an explicit test that the pre-buyback v2 shape cannot enter v3. v2 files intentionally untouched — they remain the active runtime contract until the task-008 cutover.
+- Divergences: none identified (builder agent was interrupted before writing its final report; the orchestrator completed verification and reviewed exports/tests directly).
+- Verification: npm test --workspace @packscout/contracts (177 pass — 24 new v3 tests), typecheck clean, lint clean, all independently re-run by the orchestrator after the interruption. Task file predates a ## Verification anchor; the contracts package suite is the fallback anchor.

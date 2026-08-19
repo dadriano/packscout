@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/005
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder, including pure calculation, edge cases, and adversarial verification
-**Status:** todo
+**Status:** done
 
 ## Start Here
 
@@ -57,8 +57,15 @@ It performs no network, provider, persistence, publication, logging, or wall-clo
 
 ## Acceptance Criteria
 
-- [ ] Golden positive, neutral, negative, zero-payout, uniform-rate, outcome-specific, fixed-offer, fee, cap, floor, per-pack, and per-draw cases produce exact results.
-- [ ] Missing terms, unknown eligibility, incomplete coverage, bad ranges, ambiguous draws, unsupported currency, invalid price, and overflow fail closed with deterministic reasons.
-- [ ] Probability mass is never normalized, buyback is applied exactly once, vendor-reported EV never enters the result, and recent pulls never estimate odds.
-- [ ] Exact arithmetic and single-boundary rounding pass threshold, large-value, repeated-run, and canonical-order tests.
-- [ ] The public four-metric relationships remain mathematically consistent for every available generated case.
+- [x] Golden positive, neutral, negative, zero-payout, uniform-rate, outcome-specific, fixed-offer, fee, cap, floor, per-pack, and per-draw cases produce exact results.
+- [x] Missing terms, unknown eligibility, incomplete coverage, bad ranges, ambiguous draws, unsupported currency, invalid price, and overflow fail closed with deterministic reasons.
+- [x] Probability mass is never normalized, buyback is applied exactly once, vendor-reported EV never enters the result, and recent pulls never estimate odds.
+- [x] Exact arithmetic and single-boundary rounding pass threshold, large-value, repeated-run, and canonical-order tests.
+- [x] The public four-metric relationships remain mathematically consistent for every available generated case.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — `calculatePackScoutBuybackAdjustedEvV1` in `packages/services/src/buyback-adjusted-ev-calculator.ts` is a pure bigint-rational calculator with single half-up rounding, exact payout order, uniform-rate shorthand equivalence, ineligible-zero-payout probability retention, and deterministic byte-equivalent output; golden $100/85%/$100 case deep-equals the contract fixture.
+- Divergences: (1) unparseable input maps to MISSING_PROVENANCE + MISSING_SOURCE_TIME base reasons because the result contract cross-checks force null provenance/unknown time for untrusted input; (2) clock-precedes-observation returns MISSING_SOURCE_TIME with provenance retained; (3) non-canonical calculatedAt throws a typed configuration error (house style); (4) 4,096-bit accumulator ceiling and post-round bounds fail closed as ARITHMETIC_OVERFLOW; (5) STALE_EVIDENCE is never emitted here — freshness is the task-003 boundary; (6) test-support re-declares golden fixture builders because deep imports into contracts are blocked by its exports map.
+- Verification: node --import tsx --test src/buyback-adjusted-ev-calculator.test.ts (27 pass, independently re-run by the orchestrator), eslint clean. Task file predates a ## Verification anchor; focused suite is the fallback anchor.

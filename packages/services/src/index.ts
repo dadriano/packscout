@@ -1,4 +1,6 @@
 export * from "./auth-service.ts";
+export * from "./buyback-adjusted-ev-calculator.ts";
+export * from "./buyback-adjusted-ev-confidence.ts";
 export * from "./canonical-projection-validation.ts";
 export * from "./catalog-ev-input-projection.ts";
 export * from "./catalog-projection-contracts.ts";
