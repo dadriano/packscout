@@ -1,12 +1,9 @@
-import { createHash } from "node:crypto";
 import {
   normalizeCanonicalIdentity,
   normalizeCanonicalTimestamp,
 } from "./canonical-projection-validation.ts";
 import {
   calculatePackScoutEstimatedEv,
-  PACKSCOUT_ESTIMATED_EV_METHOD,
-  PACKSCOUT_ESTIMATED_EV_METHOD_VERSION,
   PACKSCOUT_ESTIMATED_EV_UNAVAILABLE_REASON_ORDER,
   type CalculatePackScoutEstimatedEvInput,
   type PackScoutEstimatedEvResult,
@@ -14,6 +11,7 @@ import {
 } from "./estimated-ev-calculator.ts";
 import {
   ESTIMATED_EV_PROJECTION_SCHEMA_VERSION,
+  estimatedEvCalculationFingerprint,
   type CanonicalEstimatedEvProjectionContent,
   type EstimatedEvInputManifest,
   type EstimatedEvInputManifestBucket,
@@ -204,31 +202,6 @@ function calculatorInput(
       verifiedUsdStablecoins: manifest.verifiedUsdStablecoins,
     },
   };
-}
-
-function canonicalJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalJson);
-  const object = record(value);
-  if (!object) return value;
-  return Object.fromEntries(
-    Object.keys(object)
-      .sort()
-      .map((key) => [key, canonicalJson(object[key])]),
-  );
-}
-
-function calculationFingerprint(manifest: EstimatedEvInputManifest): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify(
-        canonicalJson({
-          method: PACKSCOUT_ESTIMATED_EV_METHOD,
-          methodVersion: PACKSCOUT_ESTIMATED_EV_METHOD_VERSION,
-          manifest,
-        }),
-      ),
-    )
-    .digest("hex");
 }
 
 function projectionContent(
@@ -427,7 +400,7 @@ export class PackScoutEstimatedEvService {
         command.currencyPolicy.verifiedUsdStablecoins,
       ),
     });
-    const fingerprint = calculationFingerprint(manifest);
+    const fingerprint = estimatedEvCalculationFingerprint(manifest);
     const current = inputs.calculation ? persistedContent(inputs.calculation) : null;
     if (current?.calculationFingerprint === fingerprint && inputs.calculation) {
       const unchanged: RecalculatePackScoutEstimatedEvResult = {
@@ -435,6 +408,7 @@ export class PackScoutEstimatedEvService {
         calculationRevisionId: inputs.calculation.revisionId,
         calculationRevisionNumber: inputs.calculation.revisionNumber,
         explanation: explanation(current, inputs.pack),
+        derivationAcknowledged: false,
       };
       this.reportAvailability(organizationId, providerId, unchanged.explanation);
       return unchanged;
@@ -467,6 +441,17 @@ export class PackScoutEstimatedEvService {
         sourceCollectedAt,
       }),
       acceptedAt: calculatedAt,
+      ...(command.recomputation
+        ? {
+            recomputation: {
+              ...command.recomputation,
+              resultStatus: result.status,
+              ...(result.status === "unavailable"
+                ? { outcomeReasonCode: result.reasonCodes[0] }
+                : {}),
+            },
+          }
+        : {}),
     });
     const persistedCalculation = persistedContent(persisted.calculation);
     if (!persistedCalculation) {
@@ -477,6 +462,7 @@ export class PackScoutEstimatedEvService {
       calculationRevisionId: persisted.calculation.revisionId,
       calculationRevisionNumber: persisted.calculation.revisionNumber,
       explanation: explanation(persistedCalculation, inputs.pack),
+      derivationAcknowledged: persisted.derivationAcknowledged ?? false,
     };
     this.reportAvailability(organizationId, providerId, recalculated.explanation);
     return recalculated;

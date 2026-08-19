@@ -2,6 +2,7 @@ import {
   operationalNotificationSchema,
   type NotificationPublishResult,
   type OperationalNotification,
+  type PromotionLane,
 } from "@packscout/contracts";
 import type {
   ProviderClock,
@@ -62,6 +63,31 @@ const noopObservability: OperationalObservability = {
 
 function safeCode(code: string, fallback: string): string {
   return /^[A-Z][A-Z0-9_]{0,127}$/.test(code) ? code : fallback;
+}
+
+function safeWatermark(value: bigint): string {
+  return value >= 0n && value <= 9_999_999_999_999_999_999n
+    ? String(value)
+    : "0";
+}
+
+function laneLabel(lane: PromotionLane): "Provider" | "Manifest" | "Heat" {
+  return lane === "provider"
+    ? "Provider" : lane === "manifest" ? "Manifest" : "Heat";
+}
+
+function promotionAlertScope(
+  deploymentScopeDigest: string,
+  lane: PromotionLane,
+  platformKey?: string,
+): string | null {
+  if (!/^[0-9a-f]{64}$/u.test(deploymentScopeDigest) ||
+      (lane === "provider") !== (platformKey !== undefined) ||
+      platformKey !== undefined &&
+        !/^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/u.test(platformKey)) return null;
+  return `promotion:${deploymentScopeDigest}:${lane}${
+    platformKey === undefined ? "" : `:${platformKey}`
+  }`;
 }
 
 function failedNotification(): NotificationPublishResult {
@@ -269,6 +295,171 @@ export class OperationalEventService {
         outcome: "RETENTION_RECOVERED",
         count: Math.max(0, Math.floor(input.expiredCount)),
         durationMs: Math.max(0, Math.floor(input.durationMs)),
+      },
+    });
+  }
+
+  promotionActivationDelayed(input: {
+    organizationId: string;
+    deploymentScopeDigest: string;
+    lane: PromotionLane;
+    platformKey?: string;
+    targetWatermark: bigint;
+    confirmedWatermark: bigint;
+    durationMs: number;
+  }): Promise<NotificationPublishResult> {
+    const alertScope = promotionAlertScope(
+      input.deploymentScopeDigest,
+      input.lane,
+      input.platformKey,
+    );
+    if (alertScope === null) return Promise.resolve(failedNotification());
+    return this.emit({
+      organizationId: input.organizationId,
+      kind: "promotion_activation_delayed",
+      severity: "warning",
+      providerId: null,
+      runId: null,
+      quarantineId: null,
+      dedupeKey: `${alertScope}:activation-delayed`,
+      recoveryKey: `${alertScope}:health`,
+      title: `${laneLabel(input.lane)} publication is delayed`,
+      summary: "A ready public watermark has not been confirmed within its activation target.",
+      evidence: {
+        lane: input.lane,
+        ...(input.platformKey === undefined ? {} : {
+          platformKey: input.platformKey,
+        }),
+        condition: "activation_lag",
+        targetWatermark: safeWatermark(input.targetWatermark),
+        confirmedWatermark: safeWatermark(input.confirmedWatermark),
+        durationMs: Math.max(0, Math.floor(input.durationMs)),
+      },
+    });
+  }
+
+  promotionSettlementBlocked(input: {
+    organizationId: string;
+    deploymentScopeDigest: string;
+    lane: PromotionLane;
+    platformKey?: string;
+    sourceHeadWatermark: bigint;
+    settledWatermark: bigint;
+    technicalFailureCount: number;
+  }): Promise<NotificationPublishResult> {
+    const alertScope = promotionAlertScope(
+      input.deploymentScopeDigest,
+      input.lane,
+      input.platformKey,
+    );
+    if (alertScope === null) return Promise.resolve(failedNotification());
+    return this.emit({
+      organizationId: input.organizationId,
+      kind: "promotion_settlement_blocked",
+      severity: "critical",
+      providerId: null,
+      runId: null,
+      quarantineId: null,
+      dedupeKey: `${alertScope}:settlement-blocked`,
+      recoveryKey: `${alertScope}:health`,
+      title: `${laneLabel(input.lane)} settlement is blocked`,
+      summary: "A technical derivation outcome is preventing the public watermark from settling.",
+      evidence: {
+        lane: input.lane,
+        ...(input.platformKey === undefined ? {} : {
+          platformKey: input.platformKey,
+        }),
+        condition: "settlement_blocked",
+        targetWatermark: safeWatermark(input.sourceHeadWatermark),
+        confirmedWatermark: safeWatermark(input.settledWatermark),
+        count: Math.max(1, Math.floor(input.technicalFailureCount)),
+      },
+    });
+  }
+
+  promotionFailed(input: {
+    organizationId: string;
+    deploymentScopeDigest: string;
+    lane: PromotionLane;
+    platformKey?: string;
+    attemptId: string;
+    targetWatermark: bigint;
+    confirmedWatermark: bigint;
+    failureCode: string;
+    reconciliation: boolean;
+  }): Promise<NotificationPublishResult> {
+    const alertScope = promotionAlertScope(
+      input.deploymentScopeDigest,
+      input.lane,
+      input.platformKey,
+    );
+    if (alertScope === null) return Promise.resolve(failedNotification());
+    return this.emit({
+      organizationId: input.organizationId,
+      kind: "promotion_failed",
+      severity: "critical",
+      providerId: null,
+      runId: null,
+      quarantineId: null,
+      dedupeKey: `${alertScope}:failed`,
+      recoveryKey: `${alertScope}:health`,
+      title: `${laneLabel(input.lane)} publication failed`,
+      summary: input.reconciliation
+        ? "Publication reconciliation reached a safe terminal failure."
+        : "Publication reached a safe terminal failure before confirmation.",
+      evidence: {
+        lane: input.lane,
+        ...(input.platformKey === undefined ? {} : {
+          platformKey: input.platformKey,
+        }),
+        condition: input.reconciliation
+          ? "reconciliation_failure"
+          : "terminal_failure",
+        targetWatermark: safeWatermark(input.targetWatermark),
+        confirmedWatermark: safeWatermark(input.confirmedWatermark),
+        attemptId: input.attemptId,
+        failureCode: safeCode(
+          input.failureCode,
+          "PROMOTION_PUBLICATION_FAILED",
+        ),
+      },
+    });
+  }
+
+  promotionRecovered(input: {
+    organizationId: string;
+    deploymentScopeDigest: string;
+    lane: PromotionLane;
+    platformKey?: string;
+    targetWatermark: bigint;
+    confirmedWatermark: bigint;
+  }): Promise<NotificationPublishResult> {
+    const alertScope = promotionAlertScope(
+      input.deploymentScopeDigest,
+      input.lane,
+      input.platformKey,
+    );
+    if (alertScope === null) return Promise.resolve(failedNotification());
+    return this.emit({
+      organizationId: input.organizationId,
+      kind: "promotion_recovered",
+      severity: "info",
+      providerId: null,
+      runId: null,
+      quarantineId: null,
+      dedupeKey: `${alertScope}:recovered`,
+      recoveryKey: `${alertScope}:health`,
+      title: `${laneLabel(input.lane)} publication recovered`,
+      summary: "The public lane is fully confirmed and has no technical settlement block.",
+      evidence: {
+        lane: input.lane,
+        ...(input.platformKey === undefined ? {} : {
+          platformKey: input.platformKey,
+        }),
+        condition: "recovered",
+        targetWatermark: safeWatermark(input.targetWatermark),
+        confirmedWatermark: safeWatermark(input.confirmedWatermark),
+        outcome: "PROMOTION_RECOVERED",
       },
     });
   }

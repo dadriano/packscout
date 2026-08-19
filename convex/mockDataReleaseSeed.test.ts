@@ -4,8 +4,9 @@ import {
   findRepacksByDesiredCollectibleResultSchema,
   getDashboardBundleResultSchema,
   listPublicRepacksResultSchema,
-  parseDataReleaseManifestV2,
+  normalizeListPublicRepacksInput,
   searchPublicCollectiblesResultSchema,
+  verifyGlobalCatalogManifestV1,
 } from "@packscout/contracts";
 import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -28,6 +29,7 @@ import {
   recomputeMockDataReleaseHashes,
 } from "./mockDataReleaseSearch";
 import { isValidRepackSearchRow } from "./publicRepackValidation";
+import { resolvePublicCatalogPagination } from "./publicCatalogPagination";
 
 const modules = import.meta.glob("./**/*.ts");
 type DataReleaseTest = TestConvex<typeof schema>;
@@ -86,16 +88,28 @@ afterEach(() => {
 
 async function databaseCounts(t: DataReleaseTest) {
   return await t.run(async (ctx) => ({
-    states: (await ctx.db.query("dataReleaseState").take(3)).length,
-    releases: (await ctx.db.query("dataReleases").take(3)).length,
-    vendors: (await ctx.db.query("vendors").take(10)).length,
-    categories: (await ctx.db.query("categories").take(10)).length,
-    repacks: (await ctx.db.query("repacks").take(10)).length,
-    collectibles: (await ctx.db.query("collectibles").take(10)).length,
-    chases: (await ctx.db.query("repackChases").take(20)).length,
-    shards: (await ctx.db.query("repackSearchShards").take(3)).length,
-    batches: (await ctx.db.query("dataReleaseBatches").take(10)).length,
-    operations: (await ctx.db.query("dataReleaseOperations").take(3)).length,
+    states: (await ctx.db.query("activeCatalogManifestState").take(3)).length,
+    manifests: (await ctx.db.query("globalCatalogManifests").take(3)).length,
+    providerHeads:
+      (await ctx.db.query("providerCatalogCompletedHeads").take(3)).length,
+    providerReleases:
+      (await ctx.db.query("providerCatalogReleases").take(3)).length,
+    vendors: (await ctx.db.query("providerCatalogVendors").take(10)).length,
+    categories:
+      (await ctx.db.query("providerCatalogCategories").take(10)).length,
+    repacks: (await ctx.db.query("providerCatalogRepacks").take(10)).length,
+    collectibles:
+      (await ctx.db.query("providerCatalogCollectibles").take(10)).length,
+    chases:
+      (await ctx.db.query("providerCatalogRepackChases").take(20)).length,
+    shards:
+      (await ctx.db.query("providerCatalogSearchShards").take(3)).length,
+    shardProofs:
+      (await ctx.db.query("providerCatalogSearchShardProofs").take(3)).length,
+    providerOperations:
+      (await ctx.db.query("providerCatalogOperations").take(3)).length,
+    manifestOperations:
+      (await ctx.db.query("catalogManifestOperations").take(3)).length,
   }));
 }
 
@@ -203,94 +217,129 @@ describe("mock V2 data release", () => {
     expect(canonicalJson({ b: 2, a: 1 })).toBe('{"a":1,"b":2}');
   });
 
-  test("seeds all V2 entities once and returns unchanged on replay", async () => {
+  test("seeds one proven catalog manifest graph and replays without dual writes", async () => {
     enableSeed();
     vi.useFakeTimers();
     vi.setSystemTime("2026-08-12T12:00:00Z");
     const t = createTest();
-    await expect(t.mutation(internal.mockDataReleaseSeed.seed, {})).resolves.toEqual({
+    const created = await t.mutation(internal.mockDataReleaseSeed.seed, {});
+    expect(created).toEqual({
       status: "created",
-      publicReleaseId: MOCK_DATA_RELEASE_PUBLIC_ID,
+      publicReleaseId: expect.any(String),
       repackCount: 6,
     });
     const storedManifest = await t.run(async (ctx) => {
-      const release = await ctx.db.query("dataReleases").first();
-      if (release === null) throw new Error("Expected the seeded data release.");
-      return {
-        metadata: release.metadata,
-        publicAssetOrigins: [...MOCK_PUBLIC_ASSET_ORIGINS],
-        vendors: (await ctx.db.query("vendors").collect()).map(
-          ({ detail }) => detail,
-        ),
-        categories: (await ctx.db.query("categories").collect()).map(
-          ({ detail }) => detail,
-        ),
-        repacks: (await ctx.db.query("repacks").collect()).map(
-          ({ detail }) => detail,
-        ),
-        collectibles: (await ctx.db.query("collectibles").collect()).map(
-          ({ detail }) => detail,
-        ),
-        repackChases: (await ctx.db.query("repackChases").collect()).map(
-          ({ detail }) => detail,
-        ),
-      };
+      const document = await ctx.db.query("globalCatalogManifests").unique();
+      if (document === null) throw new Error("Expected the seeded manifest.");
+      return document.manifest;
     });
-    expect(() => parseDataReleaseManifestV2(storedManifest)).not.toThrow();
+    await expect(verifyGlobalCatalogManifestV1(storedManifest)).resolves.toEqual(
+      storedManifest,
+    );
+    expect(storedManifest.publicReleaseId).toBe(created.publicReleaseId);
+    expect(storedManifest.counts).toMatchObject({
+      vendors: 2,
+      categories: 6,
+      collectibles: 6,
+      repacks: 6,
+      repackChases: 9,
+      searchShards: 2,
+    });
     const beforeReplay = await t.run(async (ctx) => ({
-      state: (await ctx.db.query("dataReleaseState").first())!,
-      release: (await ctx.db.query("dataReleases").first())!,
-      vendorIds: (await ctx.db.query("vendors").collect()).map(({ _id }) => _id),
-      categoryIds: (await ctx.db.query("categories").collect()).map(({ _id }) => _id),
-      repackIds: (await ctx.db.query("repacks").collect()).map(({ _id }) => _id),
-      collectibleIds: (await ctx.db.query("collectibles").collect()).map(
+      state: (await ctx.db.query("activeCatalogManifestState").unique())!,
+      manifest: (await ctx.db.query("globalCatalogManifests").unique())!,
+      releaseIds: (await ctx.db.query("providerCatalogReleases").collect()).map(
         ({ _id }) => _id,
       ),
-      chaseIds: (await ctx.db.query("repackChases").collect()).map(({ _id }) => _id),
-      shard: (await ctx.db.query("repackSearchShards").first())!,
-      operation: (await ctx.db.query("dataReleaseOperations").first())!,
+      vendorIds: (await ctx.db.query("providerCatalogVendors").collect()).map(
+        ({ _id }) => _id,
+      ),
+      categoryIds:
+        (await ctx.db.query("providerCatalogCategories").collect()).map(
+          ({ _id }) => _id,
+        ),
+      repackIds: (await ctx.db.query("providerCatalogRepacks").collect()).map(
+        ({ _id }) => _id,
+      ),
+      collectibleIds:
+        (await ctx.db.query("providerCatalogCollectibles").collect()).map(
+        ({ _id }) => _id,
+      ),
+      chaseIds:
+        (await ctx.db.query("providerCatalogRepackChases").collect()).map(
+          ({ _id }) => _id,
+        ),
+      shardIds:
+        (await ctx.db.query("providerCatalogSearchShards").collect()).map(
+          ({ _id }) => _id,
+        ),
+      providerOperationIds:
+        (await ctx.db.query("providerCatalogOperations").collect()).map(
+          ({ _id }) => _id,
+        ),
+      manifestOperationIds:
+        (await ctx.db.query("catalogManifestOperations").collect()).map(
+          ({ _id }) => _id,
+        ),
     }));
     vi.setSystemTime("2026-08-12T12:01:00Z");
     await expect(t.mutation(internal.mockDataReleaseSeed.seed, {})).resolves.toEqual({
       status: "unchanged",
-      publicReleaseId: MOCK_DATA_RELEASE_PUBLIC_ID,
+      publicReleaseId: created.publicReleaseId,
       repackCount: 6,
     });
     const afterReplay = await t.run(async (ctx) => ({
-      state: (await ctx.db.query("dataReleaseState").first())!,
-      release: (await ctx.db.query("dataReleases").first())!,
-      vendorIds: (await ctx.db.query("vendors").collect()).map(({ _id }) => _id),
-      categoryIds: (await ctx.db.query("categories").collect()).map(({ _id }) => _id),
-      repackIds: (await ctx.db.query("repacks").collect()).map(({ _id }) => _id),
-      collectibleIds: (await ctx.db.query("collectibles").collect()).map(
+      state: (await ctx.db.query("activeCatalogManifestState").unique())!,
+      manifest: (await ctx.db.query("globalCatalogManifests").unique())!,
+      releaseIds: (await ctx.db.query("providerCatalogReleases").collect()).map(
         ({ _id }) => _id,
       ),
-      chaseIds: (await ctx.db.query("repackChases").collect()).map(({ _id }) => _id),
-      shard: (await ctx.db.query("repackSearchShards").first())!,
-      operation: (await ctx.db.query("dataReleaseOperations").first())!,
+      vendorIds: (await ctx.db.query("providerCatalogVendors").collect()).map(
+        ({ _id }) => _id,
+      ),
+      categoryIds:
+        (await ctx.db.query("providerCatalogCategories").collect()).map(
+          ({ _id }) => _id,
+        ),
+      repackIds: (await ctx.db.query("providerCatalogRepacks").collect()).map(
+        ({ _id }) => _id,
+      ),
+      collectibleIds:
+        (await ctx.db.query("providerCatalogCollectibles").collect()).map(
+        ({ _id }) => _id,
+      ),
+      chaseIds:
+        (await ctx.db.query("providerCatalogRepackChases").collect()).map(
+          ({ _id }) => _id,
+        ),
+      shardIds:
+        (await ctx.db.query("providerCatalogSearchShards").collect()).map(
+          ({ _id }) => _id,
+        ),
+      providerOperationIds:
+        (await ctx.db.query("providerCatalogOperations").collect()).map(
+          ({ _id }) => _id,
+        ),
+      manifestOperationIds:
+        (await ctx.db.query("catalogManifestOperations").collect()).map(
+          ({ _id }) => _id,
+        ),
     }));
-    const { state: beforeState, ...beforeImmutable } = beforeReplay;
-    const { state: afterState, ...afterImmutable } = afterReplay;
-    expect(afterImmutable).toEqual(beforeImmutable);
-    expect(afterState._id).toBe(beforeState._id);
-    expect(afterState.latestObservationSequence).toBe(
-      beforeState.latestObservationSequence,
-    );
-    expect(afterState.lastSuccessfulObservationAt).toBe(
-      "2026-08-12T12:01:00.000Z",
-    );
-    expect(afterState.staleAt).toBe("2026-08-12T12:16:00.000Z");
+    expect(afterReplay).toEqual(beforeReplay);
     await expect(databaseCounts(t)).resolves.toEqual({
       states: 1,
-      releases: 1,
+      manifests: 1,
+      providerHeads: 2,
+      providerReleases: 2,
       vendors: 2,
-      categories: 6,
+      categories: 8,
       repacks: 6,
-      collectibles: 6,
+      collectibles: 7,
       chases: 9,
-      shards: 1,
-      batches: 6,
-      operations: 1,
+      shards: 2,
+      shardProofs: 2,
+      providerOperations: 2,
+      manifestOperations: 1,
     });
   });
 
@@ -301,15 +350,18 @@ describe("mock V2 data release", () => {
     ).rejects.toThrow("MOCK_SEED_DISABLED");
     await expect(databaseCounts(disabled)).resolves.toEqual({
       states: 0,
-      releases: 0,
+      manifests: 0,
+      providerHeads: 0,
+      providerReleases: 0,
       vendors: 0,
       categories: 0,
       repacks: 0,
       collectibles: 0,
       chases: 0,
       shards: 0,
-      batches: 0,
-      operations: 0,
+      shardProofs: 0,
+      providerOperations: 0,
+      manifestOperations: 0,
     });
 
     enableSeed("production");
@@ -319,30 +371,40 @@ describe("mock V2 data release", () => {
     ).rejects.toThrow("MOCK_SEED_ENVIRONMENT_UNSAFE");
     await expect(databaseCounts(production)).resolves.toEqual({
       states: 0,
-      releases: 0,
+      manifests: 0,
+      providerHeads: 0,
+      providerReleases: 0,
       vendors: 0,
       categories: 0,
       repacks: 0,
       collectibles: 0,
       chases: 0,
       shards: 0,
-      batches: 0,
-      operations: 0,
+      shardProofs: 0,
+      providerOperations: 0,
+      manifestOperations: 0,
     });
   });
 
   test("serves dashboard/list and finds every repack for a desired chase", async () => {
     enableSeed();
     const t = createTest();
-    await t.mutation(internal.mockDataReleaseSeed.seed, {});
+    const seeded = await t.mutation(internal.mockDataReleaseSeed.seed, {});
 
-    const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {});
+    const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {
+      currentTime: Date.now(),
+    });
     expect(getDashboardBundleResultSchema.parse(dashboard).ok).toBe(true);
     if (!dashboard.ok) throw new Error("Expected dashboard success.");
+    expect(dashboard.data.metadata.publicReleaseId).toBe(seeded.publicReleaseId);
     expect(dashboard.data.kpis.totalRepacks).toBe(5);
     expect(dashboard.data.selectedRepack).not.toBeNull();
+    expect(dashboard.data.details.every(({ heat }) =>
+      heat.status === "unavailable" && heat.reason === "NOT_PUBLISHED"
+    )).toBe(true);
 
     const list = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       search: "pokemon",
       pageSize: 2,
     });
@@ -357,6 +419,7 @@ describe("mock V2 data release", () => {
     );
     if (sportsCategory === undefined) throw new Error("Expected Sports category.");
     const hierarchyResults = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       filters: { categories: [sportsCategory.publicCategoryId] },
     });
     expect(listPublicRepacksResultSchema.parse(hierarchyResults).ok).toBe(true);
@@ -372,6 +435,7 @@ describe("mock V2 data release", () => {
 
     const desiredCollectible = fixture.collectibles[0]!;
     const desiredPage = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       desiredPublicCollectibleId: desiredCollectible.publicCollectibleId,
       pageSize: 2,
     });
@@ -397,7 +461,10 @@ describe("mock V2 data release", () => {
 
     const desired = await t.query(
       api.publicRepacks.findRepacksByDesiredCollectible,
-      { publicCollectibleId: desiredCollectible.publicCollectibleId },
+      {
+        currentTime: Date.now(),
+        publicCollectibleId: desiredCollectible.publicCollectibleId,
+      },
     );
     expect(findRepacksByDesiredCollectibleResultSchema.parse(desired).ok).toBe(
       true,
@@ -430,12 +497,77 @@ describe("mock V2 data release", () => {
     expect(aliasSearch.data.matches[0]?.name).toContain("Umbreon");
   });
 
+  test("keeps same-manifest cursors and distinguishes retained from expired releases", async () => {
+    enableSeed();
+    const t = createTest();
+    const seeded = await t.mutation(internal.mockDataReleaseSeed.seed, {});
+    const first = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+      pageSize: 2,
+    });
+    if (!first.ok || first.data.nextCursor === null) {
+      throw new Error("Expected a first page cursor.");
+    }
+    await expect(t.mutation(internal.mockDataReleaseSeed.seed, {})).resolves
+      .toMatchObject({
+        status: "unchanged",
+        publicReleaseId: seeded.publicReleaseId,
+      });
+    const sameManifest = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+      pageSize: 2,
+      cursor: first.data.nextCursor,
+      queryFingerprint: first.data.queryFingerprint,
+    });
+    expect(sameManifest).toMatchObject({
+      ok: true,
+      data: {
+        metadata: { publicReleaseId: seeded.publicReleaseId },
+        paginationReset: null,
+        range: { start: 3 },
+      },
+    });
+
+    const cursorInput = normalizeListPublicRepacksInput({
+      pageSize: 2,
+      cursor: first.data.nextCursor,
+      queryFingerprint: first.data.queryFingerprint,
+    });
+    const nextPublicReleaseId = "70000000-0000-5000-8000-000000000001";
+    await expect(t.run((ctx) =>
+      resolvePublicCatalogPagination(
+        ctx,
+        cursorInput,
+        nextPublicReleaseId,
+        "f".repeat(64),
+      )
+    )).resolves.toEqual({
+      ok: true,
+      offset: 0,
+      paginationReset: "release_changed",
+    });
+
+    await t.run(async (ctx) => {
+      const manifest = await ctx.db.query("globalCatalogManifests").unique();
+      if (manifest === null) throw new Error("Expected retained manifest.");
+      await ctx.db.delete("globalCatalogManifests", manifest._id);
+    });
+    await expect(t.run((ctx) =>
+      resolvePublicCatalogPagination(
+        ctx,
+        cursorInput,
+        nextPublicReleaseId,
+        "f".repeat(64),
+      )
+    )).resolves.toEqual({ ok: false, code: "CURSOR_EXPIRED" });
+  });
+
   test("fails closed when an off-page materialized repack row is tampered", async () => {
     enableSeed();
     const t = createTest();
     await t.mutation(internal.mockDataReleaseSeed.seed, {});
     await t.run(async (ctx) => {
-      const shard = await ctx.db.query("repackSearchShards").first();
+      const shard = await ctx.db.query("providerCatalogSearchShards").first();
       const offPageIndex = (shard?.rows.length ?? 0) - 1;
       const offPageRow = shard?.rows[offPageIndex];
       if (
@@ -445,7 +577,7 @@ describe("mock V2 data release", () => {
       ) {
         throw new Error("Expected the seeded search row.");
       }
-      await ctx.db.patch("repackSearchShards", shard._id, {
+      await ctx.db.patch("providerCatalogSearchShards", shard._id, {
         rows: shard.rows.map((row, index) =>
           index === offPageIndex
             ? {
@@ -457,7 +589,9 @@ describe("mock V2 data release", () => {
       });
     });
 
-    const result = await t.query(api.publicRepacks.getDashboardBundle, {});
+    const result = await t.query(api.publicRepacks.getDashboardBundle, {
+      currentTime: Date.now(),
+    });
     expect(getDashboardBundleResultSchema.parse(result)).toMatchObject({
       ok: false,
       code: "RELEASE_UNAVAILABLE",
@@ -470,11 +604,11 @@ describe("mock V2 data release", () => {
     await t.mutation(internal.mockDataReleaseSeed.seed, {});
     await t.run(async (ctx) => {
       const collectible = await ctx.db
-        .query("collectibles")
+        .query("providerCatalogCollectibles")
         .filter((query) => query.eq(query.field("detail.name"), "1999 Pokemon Base Set Charizard Holo PSA 10"))
         .first();
       if (collectible === null) throw new Error("Expected seeded collectible.");
-      await ctx.db.patch("collectibles", collectible._id, {
+      await ctx.db.patch("providerCatalogCollectibles", collectible._id, {
         normalizedName: `${collectible.normalizedName} tampered`,
       });
     });
@@ -496,7 +630,7 @@ describe("mock V2 data release", () => {
     await t.mutation(internal.mockDataReleaseSeed.seed, {});
     await t.run(async (ctx) => {
       const relation = await ctx.db
-        .query("repackChases")
+        .query("providerCatalogRepackChases")
         .filter((query) =>
           query.eq(
             query.field("detail.publicCollectibleId"),
@@ -505,7 +639,7 @@ describe("mock V2 data release", () => {
         )
         .first();
       if (relation === null) throw new Error("Expected seeded chase relation.");
-      await ctx.db.patch("repackChases", relation._id, {
+      await ctx.db.patch("providerCatalogRepackChases", relation._id, {
         detail: {
           ...relation.detail,
           collectible: {
@@ -517,6 +651,7 @@ describe("mock V2 data release", () => {
     });
 
     const result = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       desiredPublicCollectibleId: desiredCollectible.publicCollectibleId,
     });
     expect(listPublicRepacksResultSchema.parse(result)).toMatchObject({

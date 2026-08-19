@@ -10,6 +10,11 @@ import type {
   PackscoutQueryClient,
 } from "./database.ts";
 import { isPrismaUniqueConstraintError } from "./prisma-error.ts";
+import {
+  advanceSettledPublicWatermark,
+  allocatePublicChangeCauses,
+  providerPublicEntityKey,
+} from "./public-change-settlement-repository.ts";
 
 export interface StoredProviderCredential {
   readonly ciphertext: Uint8Array;
@@ -461,6 +466,9 @@ export class PrismaProviderConfigurationRepository {
         };
       }
       if (!current.revision.testedAt) return { kind: "connection_required" };
+      const publicStateChanged =
+        current.provider.state !== "active" ||
+        current.provider.activeRevisionId !== current.revision.id;
       await transaction.provider_sources.updateMany({
         where: { id: input.providerId, organization_id: input.organizationId },
         data: {
@@ -491,6 +499,39 @@ export class PrismaProviderConfigurationRepository {
         occurredAt: input.activatedAt,
         metadata: {},
       });
+      if (publicStateChanged) {
+        await allocatePublicChangeCauses(transaction, {
+          organizationId: input.organizationId,
+          changes: [{
+            changeKind:
+              current.provider.activeRevisionId === current.revision.id
+                ? "provider_lifecycle"
+                : "public_configuration",
+            entityKey: providerPublicEntityKey(input.providerId),
+            sourceKey: current.provider.platformKey,
+            sourceRevisionKey: current.revision.id,
+            metadata: {
+              providerId: input.providerId,
+              platformKey: current.provider.platformKey,
+              state: "active",
+              configurationRevisionId: current.revision.id,
+            },
+            occurredAt: input.activatedAt,
+            catalogImpact: {
+              kind: "catalog",
+              providerPlatformKeys: [current.provider.platformKey],
+              manifestLifecycle: {
+                platformKey: current.provider.platformKey,
+                state: "active",
+              },
+            },
+          }],
+        });
+        await advanceSettledPublicWatermark(transaction, {
+          organizationId: input.organizationId,
+          settledAt: input.activatedAt,
+        });
+      }
       return {
         kind: "updated",
         provider: await this.requireSummary(
@@ -552,6 +593,34 @@ export class PrismaProviderConfigurationRepository {
         outcome: "success",
         occurredAt: input.changedAt,
         metadata: { state: input.targetState },
+      });
+      await allocatePublicChangeCauses(transaction, {
+        organizationId: input.organizationId,
+        changes: [{
+          changeKind: "provider_lifecycle",
+          entityKey: providerPublicEntityKey(input.providerId),
+          sourceKey: current.provider.platformKey,
+          sourceRevisionKey: current.revision.id,
+          metadata: {
+            providerId: input.providerId,
+            platformKey: current.provider.platformKey,
+            state: input.targetState,
+            configurationRevisionId: current.provider.activeRevisionId,
+          },
+          occurredAt: input.changedAt,
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: [],
+            manifestLifecycle: {
+              platformKey: current.provider.platformKey,
+              state: input.targetState,
+            },
+          },
+        }],
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: input.organizationId,
+        settledAt: input.changedAt,
       });
       return {
         kind: "updated",
