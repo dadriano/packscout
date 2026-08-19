@@ -16,7 +16,6 @@ export const ALL_REPACKS_HEADERS: readonly AllRepacksHeader[] = Object.freeze([
   { key: "vendor", label: "Vendor" },
   { key: "category", label: "Category" },
   { key: "repack", label: "Repack", sort: "repack" },
-  { key: "heat", label: "Heat" },
   { key: "repackPrice", label: "Repack Price", sort: "repack_price" },
   { key: "evDollars", label: "EV $", sort: "packscout_ev_dollars" },
   { key: "evPercent", label: "EV %", sort: "packscout_ev_percent" },
