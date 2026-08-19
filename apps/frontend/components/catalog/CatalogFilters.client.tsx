@@ -14,6 +14,7 @@ import {
   clampPriceFilter,
   closerPriceThumb,
   formatFilterPrice,
+  roundPriceFilterDollars,
   sliderValueFromPointer,
 } from "./catalog-filters-presentation";
 import styles from "./CatalogFilters.module.css";
@@ -28,7 +29,7 @@ type CatalogFiltersProps = Readonly<{
 }>;
 
 function dollars(minorUnits: number): number {
-  return minorUnits / 100;
+  return roundPriceFilterDollars(minorUnits / 100);
 }
 
 function selectionSummary(values: readonly string[], fallback: string): string {
@@ -312,11 +313,13 @@ function CatalogFiltersDraft({
                 <span className="sr-only">Minimum repack price in dollars</span>
                 <span aria-hidden="true">$</span>
                 <input
-                  inputMode="decimal"
+                  inputMode="numeric"
                   max={PRICE_FILTER_MAX_DOLLARS}
                   min={PRICE_FILTER_MIN_DOLLARS}
-                  onChange={(event) => setMinimum(event.currentTarget.valueAsNumber)}
-                  step="0.01"
+                  onChange={(event) =>
+                    setMinimum(roundPriceFilterDollars(event.currentTarget.valueAsNumber))
+                  }
+                  step="1"
                   type="number"
                   value={Number.isFinite(minimum) ? minimum : ""}
                 />
@@ -326,11 +329,13 @@ function CatalogFiltersDraft({
                 <span aria-hidden="true">$</span>
                 <input
                   aria-invalid={!valid}
-                  inputMode="decimal"
+                  inputMode="numeric"
                   max={PRICE_FILTER_MAX_DOLLARS}
                   min={PRICE_FILTER_MIN_DOLLARS}
-                  onChange={(event) => setMaximum(event.currentTarget.valueAsNumber)}
-                  step="0.01"
+                  onChange={(event) =>
+                    setMaximum(roundPriceFilterDollars(event.currentTarget.valueAsNumber))
+                  }
+                  step="1"
                   type="number"
                   value={Number.isFinite(maximum) ? maximum : ""}
                 />

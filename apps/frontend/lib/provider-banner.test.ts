@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import sharp from "sharp";
 import {
   DASHBOARD_PROVIDERS,
   dashboardHrefFor,
@@ -15,6 +15,17 @@ const frontendRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+
+async function readLossyWebpDimensions(assetPath: string) {
+  const bytes = await readFile(assetPath);
+  assert.equal(bytes.subarray(0, 4).toString(), "RIFF");
+  assert.equal(bytes.subarray(8, 12).toString(), "WEBP");
+  assert.equal(bytes.subarray(12, 16).toString(), "VP8 ");
+  return {
+    width: bytes.readUInt16LE(26) & 0x3fff,
+    height: bytes.readUInt16LE(28) & 0x3fff,
+  };
+}
 
 test("provider query flags resolve only the two approved campaigns", () => {
   assert.deepEqual(parseDashboardProviderQuery(new URLSearchParams()), {
@@ -64,9 +75,8 @@ test("every provider campaign has an accessible destination and compact deployed
       existsSync(assetPath),
       `${banner.imageSrc} should exist under public`,
     );
-    const metadata = await sharp(assetPath).metadata();
     assert.deepEqual(
-      { width: metadata.width, height: metadata.height },
+      await readLossyWebpDimensions(assetPath),
       { width: 1600, height: 225 },
     );
   }
