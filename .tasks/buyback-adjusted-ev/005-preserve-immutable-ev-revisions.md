@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/006
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder, including revision identity, persistence safety, provenance, and replay verification
-**Status:** todo
+**Status:** done
 
 ## Start Here
 
@@ -57,8 +57,15 @@ The current-revision reader selects only completed revisions for the requested m
 
 ## Acceptance Criteria
 
-- [ ] Available and unavailable revisions persist all approved identities, timestamps, versions, provenance, and arithmetic invariants immutably.
-- [ ] Identical replay is unchanged, conflicting identity reuse is rejected, and failed work cannot replace a completed revision.
-- [ ] Historical pre-buyback results remain distinguishable and are never selected or relabeled under the new method.
-- [ ] Scope, bounds, logs, and projections expose no raw payload, credential, organization identifier, or protected evidence publicly.
-- [ ] A deterministic trace proves the exact normalized source, calculator, confidence policy, and output behind each revision.
+- [x] Available and unavailable revisions persist all approved identities, timestamps, versions, provenance, and arithmetic invariants immutably.
+- [x] Identical replay is unchanged, conflicting identity reuse is rejected, and failed work cannot replace a completed revision.
+- [x] Historical pre-buyback results remain distinguishable and are never selected or relabeled under the new method.
+- [x] Scope, bounds, logs, and projections expose no raw payload, credential, organization identifier, or protected evidence publicly.
+- [x] A deterministic trace proves the exact normalized source, calculator, confidence policy, and output behind each revision.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — three additive PostgreSQL tables (immutable completed revisions with DB-enforced four-metric arithmetic, protected source-ref trace, deduped failure ledger), fingerprint/result-hash identity with replay-unchanged and conflict-rejection semantics, method-versioned reader that structurally excludes pre-buyback rows, sanitized projection scanned against the protected-field vocabulary, and bounded operational events with no money values.
+- Divergences: (1) EXPECTED_MIGRATION pin in packages/database/src/database.ts and two migration-name literals in database.lifecycle.test.ts updated beyond the listed shared files — structurally required by any new migration, matching prior migration commits; (2) failed work lives in a separate failures table with explicit lifecycle checks rather than a mixed-lifecycle revisions table, keeping completed uniques and immutability triggers unconditional; (3) the effective fingerprint excludes the calculation clock (replay semantics match the old method) — the clock is pinned by the result hash so clock-drifted redelivery is rejected as RESULT_CONFLICT instead of minting history. Design discovery recorded: an available calculation composed with an expired task-003 evaluation persists as an unavailable STALE_EVIDENCE revision.
+- Verification: 16 focused tests (DB-backed integration executed against migrated throwaway PostgreSQL databases), db:prisma:validate, test:prisma-schema 5/5, test:prisma-lifecycle 5/5, package typecheck+lint for database and services, ratchet 0 new findings — all re-run independently by the orchestrator. Task file predates a ## Verification anchor; the focused suites plus prisma gates are the fallback anchor.

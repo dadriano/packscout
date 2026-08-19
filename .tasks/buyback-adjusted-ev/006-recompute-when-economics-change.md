@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/008, buyback-adjusted-ev/009, buyback-adjusted-ev/012
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder, including invalidation, concurrency, retry, and lifecycle verification
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 
