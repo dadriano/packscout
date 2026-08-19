@@ -11,6 +11,7 @@ export async function attachHeatToCatalogManifestDetails(
   ctx: QueryCtx,
   active: ActivePublicCatalogManifest,
   details: readonly PublicRepackDetail[],
+  currentTime: number,
 ): Promise<PublicRepackViewDetail[]> {
-  return await attachHeatToRepackDetails(ctx, active, details);
+  return await attachHeatToRepackDetails(ctx, active, details, currentTime);
 }

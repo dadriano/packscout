@@ -45,6 +45,7 @@ function unavailable(reason: "NOT_PUBLISHED" | "RELEASE_MISMATCH") {
 async function loadHeatSnapshotContext(
   ctx: QueryCtx,
   active: PublicCatalogHeatContext,
+  currentTime: number,
 ): Promise<HeatSnapshotContext> {
   const states = await ctx.db
     .query("repackHeatState")
@@ -136,7 +137,7 @@ async function loadHeatSnapshotContext(
   ) {
     return unavailable("RELEASE_MISMATCH");
   }
-  if (state.freshness === "expired") {
+  if (state.freshness === "expired" || expiresAt <= currentTime) {
     return {
       status: "expired",
       lastCalculatedAt: snapshot.calculatedAt,
@@ -227,8 +228,9 @@ export async function attachHeatToRepackDetails(
   ctx: QueryCtx,
   active: PublicCatalogHeatContext,
   details: readonly PublicRepackDetail[],
+  currentTime: number,
 ): Promise<PublicRepackViewDetail[]> {
-  const context = await loadHeatSnapshotContext(ctx, active);
+  const context = await loadHeatSnapshotContext(ctx, active, currentTime);
   if (context.status !== "current") {
     const heat = heatWrapperFromContext(context);
     return details.map((detail) => ({ ...detail, heat }));

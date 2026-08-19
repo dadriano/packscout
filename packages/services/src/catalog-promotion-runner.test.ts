@@ -326,6 +326,26 @@ test("close settled changes coalesce only the highest watermark behind one activ
   assert.equal(ledger.baseline?.observationSequence, 24);
 });
 
+test("bounded catalog cycles release the lease with the next retry count", async () => {
+  const clock = new MutableTestClock();
+  const ledger = new MemoryCatalogPromotionLedger();
+  const transport = new FakeCatalogPublicationTransport();
+  const plan = await assembledPlan();
+  const first = await runner({
+    clock,
+    ledger,
+    transport,
+    plan,
+    maximumOperationsPerCycle: 1,
+  }).runCycle();
+
+  assert.equal(first.outcome, "progressed");
+  assert.equal(first.operationsAcknowledged, 1);
+  assert.equal(ledger.attempt?.retryCount, 1);
+  assert.deepEqual(ledger.retryFailureCodes, ["CATALOG_CYCLE_BOUNDED"]);
+  assert.equal(ledger.attempt?.nextRetryAt?.getTime(), clock.now().getTime() + 1);
+});
+
 test("stale operation acknowledgement loses the lease without terminal mutation", async () => {
   const clock = new MutableTestClock();
   const ledger = new MemoryCatalogPromotionLedger();

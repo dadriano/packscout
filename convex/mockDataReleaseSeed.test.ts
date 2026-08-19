@@ -391,7 +391,9 @@ describe("mock V2 data release", () => {
     const t = createTest();
     const seeded = await t.mutation(internal.mockDataReleaseSeed.seed, {});
 
-    const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {});
+    const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {
+      currentTime: Date.now(),
+    });
     expect(getDashboardBundleResultSchema.parse(dashboard).ok).toBe(true);
     if (!dashboard.ok) throw new Error("Expected dashboard success.");
     expect(dashboard.data.metadata.publicReleaseId).toBe(seeded.publicReleaseId);
@@ -402,6 +404,7 @@ describe("mock V2 data release", () => {
     )).toBe(true);
 
     const list = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       search: "pokemon",
       pageSize: 2,
     });
@@ -416,6 +419,7 @@ describe("mock V2 data release", () => {
     );
     if (sportsCategory === undefined) throw new Error("Expected Sports category.");
     const hierarchyResults = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       filters: { categories: [sportsCategory.publicCategoryId] },
     });
     expect(listPublicRepacksResultSchema.parse(hierarchyResults).ok).toBe(true);
@@ -431,6 +435,7 @@ describe("mock V2 data release", () => {
 
     const desiredCollectible = fixture.collectibles[0]!;
     const desiredPage = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       desiredPublicCollectibleId: desiredCollectible.publicCollectibleId,
       pageSize: 2,
     });
@@ -456,7 +461,10 @@ describe("mock V2 data release", () => {
 
     const desired = await t.query(
       api.publicRepacks.findRepacksByDesiredCollectible,
-      { publicCollectibleId: desiredCollectible.publicCollectibleId },
+      {
+        currentTime: Date.now(),
+        publicCollectibleId: desiredCollectible.publicCollectibleId,
+      },
     );
     expect(findRepacksByDesiredCollectibleResultSchema.parse(desired).ok).toBe(
       true,
@@ -494,6 +502,7 @@ describe("mock V2 data release", () => {
     const t = createTest();
     const seeded = await t.mutation(internal.mockDataReleaseSeed.seed, {});
     const first = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       pageSize: 2,
     });
     if (!first.ok || first.data.nextCursor === null) {
@@ -505,6 +514,7 @@ describe("mock V2 data release", () => {
         publicReleaseId: seeded.publicReleaseId,
       });
     const sameManifest = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       pageSize: 2,
       cursor: first.data.nextCursor,
       queryFingerprint: first.data.queryFingerprint,
@@ -579,7 +589,9 @@ describe("mock V2 data release", () => {
       });
     });
 
-    const result = await t.query(api.publicRepacks.getDashboardBundle, {});
+    const result = await t.query(api.publicRepacks.getDashboardBundle, {
+      currentTime: Date.now(),
+    });
     expect(getDashboardBundleResultSchema.parse(result)).toMatchObject({
       ok: false,
       code: "RELEASE_UNAVAILABLE",
@@ -639,6 +651,7 @@ describe("mock V2 data release", () => {
     });
 
     const result = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       desiredPublicCollectibleId: desiredCollectible.publicCollectibleId,
     });
     expect(listPublicRepacksResultSchema.parse(result)).toMatchObject({

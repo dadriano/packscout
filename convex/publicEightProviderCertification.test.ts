@@ -215,7 +215,9 @@ describe("eight-provider public catalog certification", () => {
     expect(seeded.manifest.enabledPlatformKeys).toHaveLength(8);
     expect(seeded.manifest.providerReferences).toHaveLength(8);
 
-    const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {});
+    const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {
+      currentTime: Date.now(),
+    });
     if (!dashboard.ok) {
       throw new Error(`Expected dashboard success: ${dashboard.code}`);
     }
@@ -232,6 +234,7 @@ describe("eight-provider public catalog certification", () => {
     const fixture = buildMockDataReleaseV2();
     const desiredCollectible = fixture.collectibles[0]!;
     const firstPage = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       search: "pokemon",
       sort: "repack_price",
       direction: "asc",
@@ -246,6 +249,7 @@ describe("eight-provider public catalog certification", () => {
     expect(firstPage.data.desiredChaseMatches).toHaveLength(2);
 
     const secondPage = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
       search: "pokemon",
       sort: "repack_price",
       direction: "asc",

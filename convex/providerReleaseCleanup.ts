@@ -4,6 +4,7 @@ import {
   providerReleaseNonceCleanupReceiptSchema,
 } from "@packscout/contracts";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { refuseProviderRelease } from "./providerReleaseErrors";
 import {
@@ -29,6 +30,8 @@ const EXECUTION_ARGS = {
   authenticatedKeyId: v.string(),
 } as const;
 
+const SCHEDULED_NONCE_CLEANUP_BATCH_SIZE = 100;
+
 async function cleanupNonces(
   ctx: MutationCtx,
   maximumDocuments: number,
@@ -49,6 +52,30 @@ async function cleanupNonces(
     hasMore: expired.length > maximumDocuments,
   };
 }
+
+export const scheduledNonceCleanup = internalMutation({
+  args: {},
+  returns: v.object({
+    deletedDocumentCount: v.number(),
+    deletedNonceCount: v.number(),
+    hasMore: v.boolean(),
+  }),
+  handler: async (ctx) => {
+    const progress = await cleanupNonces(
+      ctx,
+      SCHEDULED_NONCE_CLEANUP_BATCH_SIZE,
+      new Date().toISOString(),
+    );
+    if (progress.hasMore) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.providerReleaseCleanup.scheduledNonceCleanup,
+        {},
+      );
+    }
+    return progress;
+  },
+});
 
 export const cleanup = internalMutation({
   args: EXECUTION_ARGS,

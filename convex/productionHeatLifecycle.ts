@@ -461,15 +461,26 @@ export const expireActiveFrame = internalMutation({
   handler: async (ctx, args) => {
     const state = await loadHeatState(ctx);
     const active = await loadActiveHeatFrame(ctx, state);
+    const expectedExpiresAt = Date.parse(args.expectedExpiresAt);
     if (
       state === null ||
       active === null ||
       active.publicHeatSnapshotId !== args.publicHeatFrameId ||
       active.expiresAt !== args.expectedExpiresAt ||
       state.expiresAt !== args.expectedExpiresAt ||
-      Date.now() < Date.parse(args.expectedExpiresAt) ||
       state.freshness === "expired"
     ) {
+      return "unchanged" as const;
+    }
+    if (!Number.isFinite(expectedExpiresAt)) {
+      refuseProductionDataRelease("PUBLICATION_STATE_CONFLICT");
+    }
+    if (Date.now() < expectedExpiresAt) {
+      await ctx.scheduler.runAt(
+        expectedExpiresAt,
+        internal.productionHeatLifecycle.expireActiveFrame,
+        args,
+      );
       return "unchanged" as const;
     }
     if (state.freshness !== "current") {

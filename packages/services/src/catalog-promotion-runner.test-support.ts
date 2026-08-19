@@ -56,6 +56,7 @@ export class MemoryCatalogPromotionLedger implements CatalogPromotionLedgerPort 
     requestedWatermark: bigint;
   }> = [];
   readonly retryDelays: number[] = [];
+  readonly retryFailureCodes: string[] = [];
   private claimNumber = 0;
   private attemptNumber = 0;
   private lastActivatedAt: Date | null = null;
@@ -174,7 +175,11 @@ export class MemoryCatalogPromotionLedger implements CatalogPromotionLedgerPort 
     acknowledgedAt: Date;
   }): Promise<boolean> {
     if (!this.validClaim(input.attemptId, input.claimToken)) return Promise.resolve(false);
+    if (input.retryCount !== this.attempt!.retryCount + 1) {
+      throw new Error("PROMOTION_ATTEMPT_CONFLICT");
+    }
     this.retryDelays.push(input.retryAt.getTime() - input.acknowledgedAt.getTime());
+    this.retryFailureCodes.push(input.failureCode);
     this.attempt!.retryCount = input.retryCount;
     this.attempt!.nextRetryAt = input.retryAt;
     return Promise.resolve(true);

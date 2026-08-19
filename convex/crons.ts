@@ -10,4 +10,11 @@ crons.interval(
   {},
 );
 
+crons.interval(
+  "remove expired publication nonces",
+  { hours: 1 },
+  internal.providerReleaseCleanup.scheduledNonceCleanup,
+  {},
+);
+
 export default crons;

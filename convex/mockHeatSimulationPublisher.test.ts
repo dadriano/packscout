@@ -89,20 +89,28 @@ async function queryEveryHeatSurface(t: HeatTest) {
   const fixture = buildMockDataReleaseV2();
   const repack = fixture.repacks[0]!;
   const collectible = fixture.collectibles[0]!;
-  const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {});
-  const list = await t.query(api.publicRepacks.listPublicRepacks, {});
+  const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {
+    currentTime: Date.now(),
+  });
+  const list = await t.query(api.publicRepacks.listPublicRepacks, {
+    currentTime: Date.now(),
+  });
   expect(getDashboardBundleResultSchema.safeParse(dashboard).success).toBe(true);
   expect(listPublicRepacksResultSchema.safeParse(list).success).toBe(true);
   if (!dashboard.ok || !list.ok) {
     throw new Error("Expected public catalog surfaces to remain readable.");
   }
   const detail = await t.query(api.publicRepacks.getPublicRepack, {
+    currentTime: Date.now(),
     publicRepackId: repack.publicRepackId,
     publicReleaseId: list.data.metadata.publicReleaseId,
   });
   const desired = await t.query(
     api.publicRepacks.findRepacksByDesiredCollectible,
-    { publicCollectibleId: collectible.publicCollectibleId },
+    {
+      currentTime: Date.now(),
+      publicCollectibleId: collectible.publicCollectibleId,
+    },
   );
   expect(getPublicRepackResultSchema.safeParse(detail).success).toBe(true);
   expect(

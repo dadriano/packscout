@@ -62,6 +62,10 @@ function directArgs(args: Record<string, unknown>): Record<string, unknown> {
   );
 }
 
+function currentTimeIsValid(currentTime: number): boolean {
+  return Number.isSafeInteger(currentTime) && currentTime >= 0;
+}
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -80,9 +84,12 @@ export const getDashboardBundle = query({
   args: {
     filters: v.optional(v.any()),
     selectedPublicRepackId: v.optional(v.any()),
+    currentTime: v.number(),
   },
   handler: async (ctx, args): Promise<GetDashboardBundleResult> => {
-    const request = parseDashboardRequest(directArgs(args));
+    const { currentTime, ...queryArgs } = args;
+    if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
+    const request = parseDashboardRequest(directArgs(queryArgs));
     if (!request.ok) return publicReadError("INVALID_QUERY");
     const active = await loadActivePublicCatalogManifest(ctx);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
@@ -117,6 +124,7 @@ export const getDashboardBundle = query({
       ctx,
       active,
       baseDetails,
+      currentTime,
     );
     const selectedRepack =
       details.find(
@@ -156,9 +164,12 @@ export const listPublicRepacks = query({
     pageSize: v.optional(v.any()),
     desiredPublicCollectibleId: v.optional(v.any()),
     selectedPublicRepackId: v.optional(v.any()),
+    currentTime: v.number(),
   },
   handler: async (ctx, args): Promise<ListPublicRepacksResult> => {
-    const request = parseRepackListRequest(directArgs(args));
+    const { currentTime, ...queryArgs } = args;
+    if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
+    const request = parseRepackListRequest(directArgs(queryArgs));
     if (!request.ok) return publicReadError("INVALID_QUERY");
     const active = await loadActivePublicCatalogManifest(ctx);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
@@ -230,6 +241,7 @@ export const listPublicRepacks = query({
       ctx,
       active,
       baseDetails,
+      currentTime,
     );
     const selectedRepack =
       details.find(
@@ -297,9 +309,12 @@ export const getPublicRepack = query({
   args: {
     publicRepackId: v.any(),
     publicReleaseId: v.any(),
+    currentTime: v.number(),
   },
   handler: async (ctx, args): Promise<GetPublicRepackResult> => {
-    const request = getPublicRepackInputSchema.safeParse(args);
+    const { currentTime, ...queryArgs } = args;
+    if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
+    const request = getPublicRepackInputSchema.safeParse(queryArgs);
     if (!request.success) return publicReadError("INVALID_QUERY");
     const active = await loadActivePublicCatalogManifest(ctx);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
@@ -323,6 +338,7 @@ export const getPublicRepack = query({
       ctx,
       active,
       [detail],
+      currentTime,
     );
     return success(view!);
   },
@@ -410,6 +426,7 @@ async function desiredCollectibleMatches(
   active: ActivePublicCatalogManifest,
   rows: readonly RepackSearchRow[],
   input: FindRepacksByDesiredCollectibleInput,
+  currentTime: number,
 ): Promise<{
   readonly matches: DesiredCollectibleRepackMatch[];
   readonly total: number;
@@ -437,7 +454,8 @@ async function desiredCollectibleMatches(
   const details = await attachHeatToCatalogManifestDetails(
       ctx,
       active,
-    baseDetails,
+      baseDetails,
+      currentTime,
   );
   return {
     matches: details.map((detail) => ({
@@ -455,10 +473,13 @@ export const findRepacksByDesiredCollectible = query({
     sort: v.optional(v.any()),
     direction: v.optional(v.any()),
     limit: v.optional(v.any()),
+    currentTime: v.number(),
   },
   handler: async (ctx, args): Promise<FindRepacksByDesiredCollectibleResult> => {
+    const { currentTime, ...queryArgs } = args;
+    if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = findRepacksByDesiredCollectibleInputSchema.safeParse(
-      directArgs(args),
+      directArgs(queryArgs),
     );
     if (!request.success) return publicReadError("INVALID_QUERY");
     const active = await loadActivePublicCatalogManifest(ctx);
@@ -485,6 +506,7 @@ export const findRepacksByDesiredCollectible = query({
       active,
       rows,
       request.data,
+      currentTime,
     );
     if (matchResult === null) return publicReadError("RELEASE_UNAVAILABLE");
     return success({

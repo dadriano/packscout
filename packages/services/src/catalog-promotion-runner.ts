@@ -274,7 +274,7 @@ export class CatalogPromotionRunner {
           attemptId: claim.attemptId,
           claimToken: claim.claimToken,
           failureCode: "CATALOG_CYCLE_BOUNDED",
-          retryCount: claim.retryCount,
+          retryCount: claim.retryCount + 1,
           retryAt: new Date(this.options.clock.now().getTime() + 1),
           acknowledgedAt: this.options.clock.now(),
         });

@@ -113,7 +113,9 @@ async function seedPublicCatalogManifest(
 async function publicVisibility(t: ProviderTest) {
   return {
     shell: await t.query(api.publicRepacks.getPublicShellStatus, {}),
-    dashboard: await t.query(api.publicRepacks.getDashboardBundle, {}),
+    dashboard: await t.query(api.publicRepacks.getDashboardBundle, {
+      currentTime: Date.now(),
+    }),
   };
 }
 
@@ -906,5 +908,51 @@ describe("provider release HTTP security", () => {
     });
     expect(stored.blocked).toHaveLength(1);
     expect(await publicVisibility(t)).toEqual(baseline);
+  });
+
+  test("scheduled cleanup drains expired publication nonces in bounded batches", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-16T12:00:00.000Z");
+    const t = createTest();
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 101; index += 1) {
+        await ctx.db.insert("dataReleaseAuthNonces", {
+          keyId: PROVIDER_TEST_KEY_ID,
+          nonceHash: index.toString(16).padStart(64, "0"),
+          requestDigest: "f".repeat(64),
+          acceptedAt: "2026-08-15T10:00:00.000Z",
+          expiresAt: "2026-08-15T11:00:00.000Z",
+        });
+      }
+      await ctx.db.insert("dataReleaseAuthNonces", {
+        keyId: PROVIDER_TEST_KEY_ID,
+        nonceHash: "e".repeat(64),
+        requestDigest: "f".repeat(64),
+        acceptedAt: "2026-08-16T11:00:00.000Z",
+        expiresAt: "2026-08-16T13:00:00.000Z",
+      });
+    });
+
+    await expect(t.mutation(
+      internal.providerReleaseCleanup.scheduledNonceCleanup,
+      {},
+    )).resolves.toEqual({
+      deletedDocumentCount: 100,
+      deletedNonceCount: 100,
+      hasMore: true,
+    });
+    await expect(t.mutation(
+      internal.providerReleaseCleanup.scheduledNonceCleanup,
+      {},
+    )).resolves.toEqual({
+      deletedDocumentCount: 1,
+      deletedNonceCount: 1,
+      hasMore: false,
+    });
+    await expect(t.run((ctx) =>
+      ctx.db.query("dataReleaseAuthNonces").collect()
+    )).resolves.toMatchObject([
+      { expiresAt: "2026-08-16T13:00:00.000Z" },
+    ]);
   });
 });

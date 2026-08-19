@@ -808,7 +808,9 @@ describe("production Heat publication", () => {
     expect(after.frameIds).toEqual(before.frameIds);
     expect(after.signalSetIds).toEqual(before.signalSetIds);
     expect(after.signalIds).toEqual(before.signalIds);
-    const publicResult = await t.query(api.publicRepacks.listPublicRepacks, {});
+    const publicResult = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+    });
     if (!publicResult.ok) throw new Error(JSON.stringify(publicResult));
     expect(publicResult.data.details.every(({ heat }) =>
       heat.status === "current"
@@ -975,7 +977,7 @@ describe("production Heat publication", () => {
     const nextAlignment = await activateEquivalentCatalog(t);
     const misalignedPublic = await t.query(
       api.publicRepacks.listPublicRepacks,
-      {},
+      { currentTime: Date.now() },
     );
     expect(misalignedPublic.ok).toBe(true);
     if (!misalignedPublic.ok) throw new Error("Expected readable catalog data.");
@@ -1114,7 +1116,9 @@ describe("production Heat publication", () => {
     );
     activeManifestAlignment = first.frame.manifestAlignment;
 
-    const mismatched = await t.query(api.publicRepacks.listPublicRepacks, {});
+    const mismatched = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+    });
     expect(mismatched.ok).toBe(true);
     if (!mismatched.ok) throw new Error("Expected readable catalog data.");
     expect(mismatched.data.details.every(({ heat }) =>
@@ -1150,7 +1154,9 @@ describe("production Heat publication", () => {
     expect(afterRollbackReuse.signals.map(({ _id }) => _id)).toEqual(
       beforeRollback.signals.map(({ _id }) => _id),
     );
-    const readable = await t.query(api.publicRepacks.listPublicRepacks, {});
+    const readable = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+    });
     expect(readable.ok).toBe(true);
     if (!readable.ok) throw new Error("Expected readable catalog data.");
     expect(readable.data.details.every(({ heat }) =>
@@ -1250,7 +1256,9 @@ describe("production Heat publication", () => {
     await t.finishInProgressScheduledFunctions();
     expect((await t.run((ctx) => ctx.db.query("repackHeatState").unique()))?.freshness)
       .toBe("expired");
-    const expired = await t.query(api.publicRepacks.listPublicRepacks, {});
+    const expired = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+    });
     if (!expired.ok) throw new Error(JSON.stringify(expired));
     expect(expired.data.details.every(({ heat }) =>
       heat.status === "expired"
@@ -1283,13 +1291,34 @@ describe("production Heat publication", () => {
     });
   });
 
+  test("public reads expire Heat when the scheduled expiry write is missing", async () => {
+    configure();
+    const t = createTest();
+    await seedCanonicalCatalog(t);
+    const plan = await buildPlan();
+    await publish(t, plan);
+
+    vi.setSystemTime(plan.frame.expiresAt);
+    const expired = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+    });
+    if (!expired.ok) throw new Error(JSON.stringify(expired));
+    expect(expired.data.details.every(({ heat }) =>
+      heat.status === "expired"
+    )).toBe(true);
+    expect((await t.run((ctx) => ctx.db.query("repackHeatState").unique()))?.freshness)
+      .toBe("current");
+  });
+
   test("materializes expiry after fifteen minutes and retains only unprotected old data", async () => {
     configure();
     const t = createTest();
     await seedCanonicalCatalog(t);
     const plan = await buildPlan();
     await publish(t, plan);
-    const before = await t.query(api.publicRepacks.listPublicRepacks, {});
+    const before = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+    });
     if (!before.ok) throw new Error(JSON.stringify(before));
     expect(before.data.details.every(({ heat }) =>
       heat.status === "current"
@@ -1300,7 +1329,9 @@ describe("production Heat publication", () => {
       publicHeatFrameId: FIRST_FRAME_ID,
       expectedExpiresAt: plan.frame.expiresAt,
     })).resolves.toBe("expired");
-    const expired = await t.query(api.publicRepacks.listPublicRepacks, {});
+    const expired = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+    });
     expect(expired.ok).toBe(true);
     if (!expired.ok) throw new Error("Expected readable catalog data.");
     expect(expired.data.details.every(({ heat }) =>
