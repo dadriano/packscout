@@ -8,6 +8,7 @@ import {
 import type { RunCounters } from "./pipeline-types.ts";
 
 export type PersistedImportTrigger = "scheduled" | "manual";
+export type PersistedImportWorkerLane = "general" | "controlled";
 export type PersistedImportRunState =
   | "queued"
   | "running"
@@ -21,6 +22,7 @@ export interface PersistedImportRun {
   readonly providerId: string;
   readonly configRevisionId: string;
   readonly trigger: PersistedImportTrigger | "recovery" | "archive";
+  readonly workerLane: PersistedImportWorkerLane;
   readonly archiveSha256: string | null;
   readonly state: PersistedImportRunState;
   readonly requestedCursor: string | null;
@@ -48,6 +50,7 @@ export interface ClaimedImportRun extends PersistedImportRun {
 export type RequestImportPersistenceResult =
   | { readonly kind: "created"; readonly run: PersistedImportRun }
   | { readonly kind: "active"; readonly run: PersistedImportRun }
+  | { readonly kind: "worker_lane_conflict"; readonly run: PersistedImportRun }
   | { readonly kind: "not_found" }
   | { readonly kind: "provider_unavailable" }
   | {
@@ -76,12 +79,19 @@ export type FinishImportPersistenceResult =
   | { readonly kind: "ownership_lost" }
   | { readonly kind: "already_terminal"; readonly run: PersistedImportRun };
 
+export type YieldImportPersistenceResult =
+  | { readonly kind: "yielded"; readonly run: PersistedImportRun }
+  | { readonly kind: "not_found" }
+  | { readonly kind: "ownership_lost" }
+  | { readonly kind: "already_terminal"; readonly run: PersistedImportRun };
+
 interface ImportRunRow {
   readonly id: string;
   readonly organization_id: string;
   readonly provider_id: string;
   readonly config_revision_id: string;
   readonly trigger: PersistedImportTrigger | "recovery" | "archive";
+  readonly worker_lane: PersistedImportWorkerLane;
   readonly archive_sha256: string | null;
   readonly state: PersistedImportRunState;
   readonly requested_cursor: string | null;
@@ -158,10 +168,12 @@ export class PrismaImportRunRepository {
     providerId: string;
     runId: string;
     trigger: PersistedImportTrigger;
+    workerLane?: PersistedImportWorkerLane;
     requestedByActorKey: string | null;
     requestedAt: Date;
     expectedConfigurationRevisionId?: string;
   }): Promise<RequestImportPersistenceResult> {
+    const workerLane = input.workerLane ?? "general";
     return this.database.$transaction(async (transaction) => {
       await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`
         select id
@@ -211,14 +223,19 @@ export class PrismaImportRunRepository {
         input.organizationId,
         input.providerId,
       );
-      if (activeRun) return { kind: "active", run: activeRun };
+      if (activeRun) {
+        return activeRun.workerLane === workerLane
+          ? { kind: "active", run: activeRun }
+          : { kind: "worker_lane_conflict", run: activeRun };
+      }
       const checkpoint = await transaction.provider_cursor_checkpoints.findFirst({
         where: {
           organization_id: input.organizationId,
           provider_id: input.providerId,
-          config_revision_id: provider.active_revision_id,
+          cursor: { not: null },
         },
         select: { cursor: true },
+        orderBy: [{ updated_at: "desc" }, { config_revision_id: "desc" }],
       });
       await transaction.import_runs.create({
         data: {
@@ -227,6 +244,7 @@ export class PrismaImportRunRepository {
           provider_id: input.providerId,
           config_revision_id: provider.active_revision_id,
           trigger: input.trigger,
+          worker_lane: workerLane,
           requested_by_actor_key: input.requestedByActorKey,
           state: "queued",
           requested_cursor: checkpoint?.cursor ?? null,
@@ -254,6 +272,7 @@ export class PrismaImportRunRepository {
             providerId: input.providerId,
             configRevisionId: provider.active_revision_id,
             trigger: input.trigger,
+            workerLane,
           },
           occurred_at: input.requestedAt,
         },
@@ -480,6 +499,7 @@ export class PrismaImportRunRepository {
     organizationId: string;
     runId: string;
     workerId: string;
+    workerLane?: PersistedImportWorkerLane;
     claimedAt: Date;
     leaseExpiresAt: Date;
   }): Promise<ClaimImportPersistenceResult> {
@@ -492,8 +512,9 @@ export class PrismaImportRunRepository {
       );
       if (!locked) return { kind: "not_found" };
       const { run } = locked;
+      const workerLane = input.workerLane ?? "general";
       const canClaim =
-        run.trigger !== "archive" && (run.state === "queued" ||
+        run.trigger !== "archive" && run.workerLane === workerLane && (run.state === "queued" ||
         (run.state === "running" &&
           locked.leaseExpiresAt !== null &&
           locked.leaseExpiresAt <= input.claimedAt));
@@ -516,6 +537,7 @@ export class PrismaImportRunRepository {
         select id
         from import_runs
         where trigger <> 'archive'::import_trigger
+          and worker_lane = 'general'::import_worker_lane
           and (
             state = 'queued'::import_run_state
             or (
@@ -586,6 +608,47 @@ export class PrismaImportRunRepository {
       returning id
     `);
     return updated.length === 1;
+  }
+
+  async yieldRun(input: {
+    organizationId: string;
+    runId: string;
+    workerId: string;
+    yieldedAt: Date;
+  }): Promise<YieldImportPersistenceResult> {
+    return this.database.$transaction(async (transaction) => {
+      const locked = await this.lockRun(
+        transaction,
+        input.organizationId,
+        input.runId,
+      );
+      if (!locked) return { kind: "not_found" };
+      if (locked.run.state !== "running") {
+        return { kind: "already_terminal", run: locked.run };
+      }
+      if (locked.leaseOwner !== input.workerId) return { kind: "ownership_lost" };
+      await transaction.import_runs.updateMany({
+        where: {
+          organization_id: input.organizationId,
+          id: input.runId,
+          state: "running",
+          lease_owner: input.workerId,
+        },
+        data: {
+          state: "queued",
+          heartbeat_at: input.yieldedAt,
+          lease_owner: null,
+          lease_expires_at: null,
+        },
+      });
+      const yielded = await this.loadRun(
+        transaction,
+        input.organizationId,
+        input.runId,
+      );
+      if (!yielded) throw new Error("Yielded import run could not be loaded.");
+      return { kind: "yielded", run: yielded };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   async finishRun(input: {
@@ -710,9 +773,10 @@ export class PrismaImportRunRepository {
           where: {
             organization_id: run.organizationId,
             provider_id: run.providerId,
-            config_revision_id: run.configRevisionId,
+            cursor: { not: null },
           },
           select: { cursor: true },
+          orderBy: [{ updated_at: "desc" }, { config_revision_id: "desc" }],
         });
     const claimed = await this.loadRun(database, run.organizationId, run.id);
     if (!claimed) throw new Error("Claimed import run could not be loaded.");
@@ -749,7 +813,7 @@ export class PrismaImportRunRepository {
       currentCursor:
         run.trigger === "archive"
           ? claimed.finalCursor ?? claimed.requestedCursor
-          : checkpoint?.cursor ?? null,
+          : checkpoint?.cursor ?? claimed.finalCursor ?? claimed.requestedCursor,
       nextPageNumber: claimed.counters.pages + 1,
       committedCursors,
       committedArchiveUncompressedBytes:
@@ -819,6 +883,7 @@ export class PrismaImportRunRepository {
       providerId: row.provider_id,
       configRevisionId: row.config_revision_id,
       trigger: row.trigger,
+      workerLane: row.worker_lane,
       archiveSha256: row.archive_sha256,
       state: row.state,
       requestedCursor: row.requested_cursor,

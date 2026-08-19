@@ -110,7 +110,86 @@ test("startup fails closed when the expected Prisma migration is not ready", asy
   try {
     await harness.client.$executeRaw`
       delete from public."_prisma_migrations"
-      where migration_name = '20260814000000_provider_stream_v2_cutover'
+      where migration_name = '20260816050000_promotion_constraint_hardening'
+    `;
+    const lifecycle = harness.createClientLifecycle();
+    try {
+      await assert.rejects(
+        lifecycle.start(),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(error.message, "PackScout database schema is not ready.");
+          return true;
+        },
+      );
+    } finally {
+      await lifecycle.close();
+    }
+  } finally {
+    await harness.close();
+  }
+});
+
+test("startup fails closed when the expected migration checksum is inconsistent", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await harness.client.$executeRaw`
+      update public."_prisma_migrations"
+      set checksum = ${"0".repeat(64)}
+      where migration_name = '20260816050000_promotion_constraint_hardening'
+    `;
+    const lifecycle = harness.createClientLifecycle();
+    try {
+      await assert.rejects(
+        lifecycle.start(),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(error.message, "PackScout database schema is not ready.");
+          return true;
+        },
+      );
+    } finally {
+      await lifecycle.close();
+    }
+  } finally {
+    await harness.close();
+  }
+});
+
+test("startup fails closed for an unrecognized successful migration", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await harness.client.$executeRaw`
+      insert into public."_prisma_migrations" (
+        id, checksum, finished_at, migration_name, started_at, applied_steps_count
+      ) values (
+        'unexpected-successful-migration', ${"f".repeat(64)}, current_timestamp,
+        '20260817000000_unrecognized_migration', current_timestamp, 1
+      )
+    `;
+    const lifecycle = harness.createClientLifecycle();
+    try {
+      await assert.rejects(
+        lifecycle.start(),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(error.message, "PackScout database schema is not ready.");
+          return true;
+        },
+      );
+    } finally {
+      await lifecycle.close();
+    }
+  } finally {
+    await harness.close();
+  }
+});
+
+test("startup fails closed for an untracked application table", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await harness.client.$executeRaw`
+      create table public.untracked_schema_extension (id bigint primary key)
     `;
     const lifecycle = harness.createClientLifecycle();
     try {

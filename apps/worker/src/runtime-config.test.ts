@@ -32,6 +32,10 @@ test("worker configuration validates production defaults and bounded overrides",
       PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION: "4",
       PACKSCOUT_WORKER_DATABASE_POOL_MAX: "9",
       PACKSCOUT_WORKER_ID: "worker:production:1",
+      PACKSCOUT_WORKER_IMPORT_MAX_PAGES: "12000",
+      PACKSCOUT_WORKER_IMPORT_MAX_RUN_MS: "43200000",
+      PACKSCOUT_WORKER_IMPORT_MIN_FREE_BYTES: "21474836480",
+      PACKSCOUT_WORKER_IMPORT_PAGE_BUDGET: "40",
       PACKSCOUT_WORKER_MAX_CLAIMS_PER_CYCLE: "12",
       PACKSCOUT_WORKER_POLL_MS: "2500",
       PACKSCOUT_WORKER_RETENTION_BATCH_SIZE: "250",
@@ -45,6 +49,12 @@ test("worker configuration validates production defaults and bounded overrides",
   assert.equal(configuration.environment, "production");
   assert.equal(configuration.workerId, "worker:production:1");
   assert.equal(configuration.pollIntervalMilliseconds, 2_500);
+  assert.equal(configuration.importMaximumPages, 12_000);
+  assert.equal(configuration.importMaximumRunDurationMilliseconds, 43_200_000);
+  assert.equal(configuration.importMinimumFreeBytes, 21_474_836_480);
+  assert.equal(configuration.importPageBudgetPerClaim, 40);
+  assert.equal(configuration.executionMode, "continuous");
+  assert.equal(configuration.oneShotTarget, null);
   assert.equal(configuration.maximumClaimsPerCycle, 12);
   assert.equal(configuration.retentionBatchSize, 250);
   assert.equal(configuration.retentionMaximumBatchesPerCycle, 8);
@@ -71,6 +81,14 @@ test("worker configuration selects the local endpoint policy explicitly", () => 
   assert.equal(configuration.environment, "local");
   assert.equal(configuration.workerId, "local-host:123:worker");
   assert.equal(configuration.pollIntervalMilliseconds, 1_000);
+  assert.equal(configuration.importMaximumPages, 50_000);
+  assert.equal(
+    configuration.importMaximumRunDurationMilliseconds,
+    4 * 60 * 60_000,
+  );
+  assert.equal(configuration.importPageBudgetPerClaim, 50_000);
+  assert.equal(configuration.importMinimumFreeBytes, 0);
+  assert.equal(configuration.executionMode, "continuous");
   assert.equal(configuration.maximumClaimsPerCycle, 25);
   assert.equal(configuration.retentionBatchSize, 100);
   assert.equal(configuration.retentionMaximumBatchesPerCycle, 5);
@@ -133,6 +151,49 @@ test("worker configuration rejects ambiguous environments and unsafe bounds", ()
   assert.throws(
     () =>
       readProviderWorkerConfiguration(
+        validEnvironment({ PACKSCOUT_WORKER_IMPORT_MAX_PAGES: "0" }),
+        "worker:1",
+      ),
+    hasConfigurationCode("IMPORT_MAX_PAGES_INVALID"),
+  );
+  assert.throws(
+    () =>
+      readProviderWorkerConfiguration(
+        validEnvironment({
+          PACKSCOUT_WORKER_IMPORT_MAX_PAGES: "10",
+          PACKSCOUT_WORKER_IMPORT_PAGE_BUDGET: "11",
+        }),
+        "worker:1",
+      ),
+    hasConfigurationCode("IMPORT_PAGE_BUDGET_INVALID"),
+  );
+  assert.throws(
+    () =>
+      readProviderWorkerConfiguration(
+        validEnvironment({ PACKSCOUT_WORKER_IMPORT_MAX_RUN_MS: "119999" }),
+        "worker:1",
+      ),
+    hasConfigurationCode("IMPORT_MAX_DURATION_INVALID"),
+  );
+  assert.throws(
+    () =>
+      readProviderWorkerConfiguration(
+        validEnvironment({ PACKSCOUT_WORKER_IMPORT_MIN_FREE_BYTES: "-1" }),
+        "worker:1",
+      ),
+    hasConfigurationCode("IMPORT_MIN_FREE_BYTES_INVALID"),
+  );
+  assert.throws(
+    () =>
+      readProviderWorkerConfiguration(
+        validEnvironment({ PACKSCOUT_WORKER_IMPORT_MAX_PAGES: "100001" }),
+        "worker:1",
+      ),
+    hasConfigurationCode("IMPORT_MAX_PAGES_INVALID"),
+  );
+  assert.throws(
+    () =>
+      readProviderWorkerConfiguration(
         validEnvironment({ PACKSCOUT_WORKER_RETENTION_BATCH_SIZE: "1001" }),
         "worker:1",
       ),
@@ -168,6 +229,47 @@ test("worker configuration rejects ambiguous environments and unsafe bounds", ()
           "worker:1",
         ),
       hasConfigurationCode("ESTIMATED_EV_STABLECOINS_INVALID"),
+    );
+  }
+});
+
+test("one-shot worker configuration requires one exact tenant-scoped run target", () => {
+  const configuration = readProviderWorkerConfiguration(
+    validEnvironment({
+      PACKSCOUT_WORKER_MODE: "one-shot",
+      PACKSCOUT_WORKER_ONE_SHOT_ORGANIZATION_ID:
+        "10000000-0000-4000-8000-000000000001",
+      PACKSCOUT_WORKER_ONE_SHOT_RUN_ID: "20000000-0000-4000-8000-000000000001",
+    }),
+    "worker:one-shot",
+  );
+  assert.equal(configuration.executionMode, "one-shot");
+  assert.deepEqual(configuration.oneShotTarget, {
+    organizationId: "10000000-0000-4000-8000-000000000001",
+    runId: "20000000-0000-4000-8000-000000000001",
+  });
+
+  for (const overrides of [
+    { PACKSCOUT_WORKER_MODE: "batch" },
+    {
+      PACKSCOUT_WORKER_MODE: "one-shot",
+      PACKSCOUT_WORKER_ONE_SHOT_ORGANIZATION_ID:
+        "10000000-0000-4000-8000-000000000001",
+    },
+    {
+      PACKSCOUT_WORKER_ONE_SHOT_RUN_ID: "20000000-0000-4000-8000-000000000001",
+    },
+  ]) {
+    assert.throws(
+      () =>
+        readProviderWorkerConfiguration(
+          validEnvironment(overrides),
+          "worker:1",
+        ),
+      (error: unknown) =>
+        error instanceof ProviderWorkerConfigurationError &&
+        (error.code === "WORKER_MODE_INVALID" ||
+          error.code === "ONE_SHOT_TARGET_INVALID"),
     );
   }
 });

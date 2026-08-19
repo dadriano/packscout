@@ -8,8 +8,14 @@ import { PACKSCOUT_TRANSACTION_OPTIONS } from "./database.ts";
 import type {
   PackscoutPrismaClient,
   PackscoutQueryClient,
+  PackscoutTransactionClient,
 } from "./database.ts";
 import { isPrismaUniqueConstraintError } from "./prisma-error.ts";
+import {
+  advanceSettledPublicWatermark,
+  allocatePublicChangeCauses,
+  providerPublicEntityKey,
+} from "./public-change-settlement-repository.ts";
 
 export interface StoredProviderCredential {
   readonly ciphertext: Uint8Array;
@@ -471,6 +477,19 @@ export class PrismaProviderConfigurationRepository {
         };
       }
       if (!current.revision.testedAt) return { kind: "connection_required" };
+      if (
+        current.provider.state === "active" &&
+        current.provider.activeRevisionId === current.revision.id
+      ) {
+        return {
+          kind: "updated",
+          provider: await this.toSummary(
+            transaction,
+            current.provider,
+            current.revision,
+          ),
+        };
+      }
       await transaction.provider_sources.updateMany({
         where: { id: input.providerId, organization_id: input.organizationId },
         data: {
@@ -490,6 +509,14 @@ export class PrismaProviderConfigurationRepository {
           updated_at: input.activatedAt,
         },
         update: {},
+      });
+      await this.appendLifecycleChange(transaction, {
+        organizationId: input.organizationId,
+        providerId: input.providerId,
+        platformKey: current.provider.platformKey,
+        configurationRevisionId: current.revision.id,
+        state: "active",
+        changedAt: input.activatedAt,
       });
       await this.appendAudit(transaction, {
         organizationId: input.organizationId,
@@ -550,6 +577,14 @@ export class PrismaProviderConfigurationRepository {
           updated_at: input.changedAt,
         },
       });
+      await this.appendLifecycleChange(transaction, {
+        organizationId: input.organizationId,
+        providerId: input.providerId,
+        platformKey: current.provider.platformKey,
+        configurationRevisionId: current.revision.id,
+        state: input.targetState,
+        changedAt: input.changedAt,
+      });
       await this.appendAudit(transaction, {
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -572,6 +607,48 @@ export class PrismaProviderConfigurationRepository {
         ),
       };
     }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
+  private async appendLifecycleChange(
+    database: PackscoutTransactionClient,
+    input: {
+      organizationId: string;
+      providerId: string;
+      platformKey: string;
+      configurationRevisionId: string;
+      state: "active" | "disabled" | "archived";
+      changedAt: Date;
+    },
+  ): Promise<void> {
+    await allocatePublicChangeCauses(database, {
+      organizationId: input.organizationId,
+      changes: [{
+        changeKind: "provider_lifecycle",
+        entityKey: providerPublicEntityKey(input.providerId),
+        sourceKey: input.platformKey,
+        sourceRevisionKey: input.configurationRevisionId,
+        metadata: {
+          providerId: input.providerId,
+          platformKey: input.platformKey,
+          state: input.state,
+          configurationRevisionId: input.configurationRevisionId,
+        },
+        occurredAt: input.changedAt,
+        catalogImpact: {
+          kind: "catalog",
+          providerPlatformKeys:
+            input.state === "active" ? [input.platformKey] : [],
+          manifestLifecycle: {
+            platformKey: input.platformKey,
+            state: input.state,
+          },
+        },
+      }],
+    });
+    await advanceSettledPublicWatermark(database, {
+      organizationId: input.organizationId,
+      settledAt: input.changedAt,
+    });
   }
 
   private assertCredentialMatchesAuth(input: PersistedProviderRevisionInput): void {

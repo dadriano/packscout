@@ -7,9 +7,7 @@ import { createPrismaClientLifecycle } from "@packscout/database";
 import { createDataForrestProviderTransportRegistry } from "@packscout/services";
 import { createProviderWorkerRuntime } from "./provider-worker-composition.ts";
 import { JsonConsoleProviderWorkerObservability } from "./provider-worker-observability.ts";
-import {
-  JsonConsoleProviderWorkerLogger,
-} from "./provider-worker-runtime.ts";
+import { JsonConsoleProviderWorkerLogger } from "./provider-worker-runtime.ts";
 import {
   ProviderWorkerConfigurationError,
   readProviderWorkerConfiguration,
@@ -21,11 +19,15 @@ const workerRoot = path.resolve(
 );
 const workspaceRoot = path.resolve(workerRoot, "..", "..");
 
-dotenv.config({ path: path.join(workspaceRoot, ".env") });
+if (process.env.PACKSCOUT_WORKER_SKIP_DOTENV !== "1") {
+  dotenv.config({ path: path.join(workspaceRoot, ".env") });
+}
 
 function fallbackWorkerId(): string {
   const host =
-    hostname().replaceAll(/[^A-Za-z0-9._-]/g, "-").slice(0, 64) || "host";
+    hostname()
+      .replaceAll(/[^A-Za-z0-9._-]/g, "-")
+      .slice(0, 64) || "host";
   return `${host}:${process.pid}:${randomUUID()}`;
 }
 
@@ -54,7 +56,14 @@ async function runProviderWorker(): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-      await runtime.start();
+      if (configuration.executionMode === "one-shot") {
+        const result = await runtime.runOneShot(configuration.oneShotTarget!);
+        if (result.failures > 0) {
+          throw new Error("One-shot provider worker failed.");
+        }
+      } else {
+        await runtime.start();
+      }
     } finally {
       process.removeListener("SIGINT", stop);
       process.removeListener("SIGTERM", stop);

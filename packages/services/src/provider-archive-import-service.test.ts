@@ -118,6 +118,9 @@ function serviceHarness(input: {
     async recordRequestAttempt() {
       throw new Error("not used");
     },
+    async yieldRun() {
+      throw new Error("not used");
+    },
     async finishRun(value): Promise<ProviderImportFinishPersistenceResult> {
       finishInput = value;
       return { kind: "finished", run: terminalSummary(run, value) };

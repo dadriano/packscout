@@ -92,6 +92,9 @@
     "start:worker:local": "npm run start:local --workspace=@packscout/worker",
     "start:worker:production": "npm run start:production --workspace=@packscout/worker",
     "start:admin:embedded:local": "tsx scripts/local/start-admin-embedded.ts",
+    "bootstrap:collector-crypt-live:local": "node --import tsx scripts/local/bootstrap-collector-crypt-live.ts",
+    "bootstrap:collector-crypt-live:resume:local": "node --import tsx scripts/local/bootstrap-collector-crypt-live.ts --resume-bootstrap",
+    "import:collector-crypt-live-batch:local": "node --import tsx scripts/local/import-collector-crypt-live-batch.ts",
     "import:provider-archive-v2:local": "node --import tsx scripts/local/import-provider-archive-v2.ts"
   },
   "devDependencies": {

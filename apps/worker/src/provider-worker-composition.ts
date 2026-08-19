@@ -25,6 +25,7 @@ import {
 import { createProviderWorkerOperationalRuntime } from "./provider-worker-operational-runtime.ts";
 import { createProviderWorkerEstimatedEvProcessor } from "./provider-worker-estimated-ev.ts";
 import { createProviderWorkerRetentionCoordinator } from "./provider-worker-retention.ts";
+import { createProviderWorkerDiskGuard } from "./provider-worker-disk-guard.ts";
 import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
 import {
   ProviderWorkerRuntime,
@@ -38,6 +39,10 @@ type RuntimeConfiguration = Pick<
   | "credentialKeyVersion"
   | "environment"
   | "estimatedEvVerifiedUsdStablecoins"
+  | "importMaximumPages"
+  | "importMaximumRunDurationMilliseconds"
+  | "importMinimumFreeBytes"
+  | "importPageBudgetPerClaim"
   | "maximumClaimsPerCycle"
   | "pollIntervalMilliseconds"
   | "retentionBatchSize"
@@ -93,8 +98,7 @@ export function createProviderWorkerRuntime(
     observability: input.observability,
     config: {
       batchSize: input.configuration.retentionBatchSize,
-      maxBatchesPerCycle:
-        input.configuration.retentionMaximumBatchesPerCycle,
+      maxBatchesPerCycle: input.configuration.retentionMaximumBatchesPerCycle,
       organizationDiscoveryLimit:
         input.configuration.retentionOrganizationDiscoveryLimit,
     },
@@ -134,6 +138,17 @@ export function createProviderWorkerRuntime(
     clock,
     ids,
     environment: input.configuration.environment,
+    maximumPages: input.configuration.importMaximumPages,
+    maximumRunDurationMs:
+      input.configuration.importMaximumRunDurationMilliseconds,
+    pageBudgetPerClaim: input.configuration.importPageBudgetPerClaim,
+    pageGuard:
+      input.configuration.importMinimumFreeBytes === 0
+        ? undefined
+        : createProviderWorkerDiskGuard(
+            input.database,
+            input.configuration.importMinimumFreeBytes,
+          ),
   });
   return new ProviderWorkerRuntime({
     scheduler: new ProviderSchedulerService({

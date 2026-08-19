@@ -91,6 +91,58 @@ test("failed imports retain their sanitized failure code in health", async () =>
   assert.equal(healthFailureCode, "IMPORT_TIMEOUT");
 });
 
+test("a cooperative page-budget yield does not change health or emit terminal telemetry", async () => {
+  const calls: string[] = [];
+  const yielded = terminalRun({
+    state: "queued",
+    reachedProviderHead: false,
+    finishedAt: null,
+    failureCode: null,
+    failureSummary: null,
+  });
+  const service = new ProviderImportHealthService(
+    { executeImport: async () => yielded },
+    {
+      async recordRunOutcome() {
+        calls.push("health");
+      },
+    },
+    {
+      events: {
+        async runFailed() {
+          calls.push("failed");
+          return { status: "accepted", alertId: null, failureCode: null };
+        },
+        async runIncomplete() {
+          calls.push("incomplete");
+          return { status: "accepted", alertId: null, failureCode: null };
+        },
+        async providerRecovered() {
+          calls.push("recovered");
+          return { status: "resolved", alertId: null, failureCode: null };
+        },
+      },
+      reporter: {
+        run() {
+          calls.push("run-metric");
+        },
+        cursorLag() {
+          calls.push("lag-metric");
+        },
+      },
+    },
+  );
+
+  const result = await service.executeImport({
+    organizationId: yielded.organizationId,
+    runId: yielded.id,
+    workerId: "cooperative-worker",
+  });
+
+  assert.equal(result, yielded);
+  assert.deepEqual(calls, []);
+});
+
 test("terminal outcomes emit fixed events and run measurements after health persistence", async () => {
   const calls: string[] = [];
   const operational: ProviderImportOperationalHooks = {

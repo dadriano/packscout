@@ -32,6 +32,7 @@ import type {
   ProviderImportRuntimeRevisionRepository,
   ProviderImportServiceErrorCode,
   ProviderImportTerminalFailureCode,
+  ProviderImportWorkerLane,
 } from "./provider-import-types.ts";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
@@ -50,6 +51,17 @@ export interface ProviderImportSleeper {
 export interface ProviderImportRandom {
   value(): number;
 }
+
+export interface ProviderImportPageGuard {
+  canStartPage(input: {
+    readonly organizationId: string;
+    readonly providerId: string;
+    readonly runId: string;
+    readonly pageNumber: number;
+  }): Promise<boolean>;
+}
+
+export const PROVIDER_IMPORT_MAXIMUM_PAGE_STORAGE_BYTES = 1024 * 1024 * 1024;
 
 export interface ProviderImportServiceDependencies {
   readonly runs: ProviderImportRunRepository;
@@ -71,7 +83,11 @@ export interface ProviderImportServiceDependencies {
   readonly retryMaximumMs?: number;
   readonly leaseDurationMs?: number;
   readonly maximumPages?: number;
+  /** Cooperative work budget for one lease claim; unlike maximumPages this is non-terminal. */
+  readonly pageBudgetPerClaim?: number;
   readonly maximumRunDurationMs?: number;
+  /** Fail-closed capacity check performed before every provider page request. */
+  readonly pageGuard?: ProviderImportPageGuard;
 }
 
 export type ProviderImportRequest =
@@ -159,7 +175,9 @@ function terminalFailureForTransport(
   if (
     failure.code === "invalid_response" &&
     failure.issueCodes?.some((code) =>
-      ["cursor_cycle", "cursor_not_advanced", "empty_continuing_page"].includes(code),
+      ["cursor_cycle", "cursor_not_advanced", "empty_continuing_page"].includes(
+        code,
+      ),
     )
   ) {
     return {
@@ -238,9 +256,12 @@ export class ProviderImportService {
   readonly #retryMaximumMs: number;
   readonly #leaseDurationMs: number;
   readonly #maximumPages: number;
+  readonly #pageBudgetPerClaim: number;
   readonly #maximumRunDurationMs: number;
 
-  constructor(private readonly dependencies: ProviderImportServiceDependencies) {
+  constructor(
+    private readonly dependencies: ProviderImportServiceDependencies,
+  ) {
     this.#sleeper = dependencies.sleeper ?? defaultSleeper;
     this.#random = dependencies.random ?? defaultRandom;
     this.#requestTimeoutMs = boundedInteger(
@@ -292,6 +313,13 @@ export class ProviderImportService {
       100_000,
       "Import page limit",
     );
+    this.#pageBudgetPerClaim = boundedInteger(
+      dependencies.pageBudgetPerClaim,
+      this.#maximumPages,
+      1,
+      this.#maximumPages,
+      "Import page budget per claim",
+    );
     this.#maximumRunDurationMs = boundedInteger(
       dependencies.maximumRunDurationMs,
       DEFAULT_MAX_RUN_DURATION_MS,
@@ -303,7 +331,9 @@ export class ProviderImportService {
 
   async requestImport(
     input: ProviderImportRequest,
+    options: { readonly workerLane?: ProviderImportWorkerLane } = {},
   ): Promise<ProviderImportRequestResult> {
+    const workerLane = options.workerLane ?? "general";
     const organizationId = organizationIdForRequest(input);
     const requestedByActorKey =
       input.trigger === "manual"
@@ -317,6 +347,7 @@ export class ProviderImportService {
       providerId: input.providerId,
       runId: this.dependencies.ids.id(),
       trigger: input.trigger,
+      workerLane,
       requestedByActorKey,
       requestedAt: this.dependencies.clock.now(),
       ...(input.trigger === "manual"
@@ -328,6 +359,14 @@ export class ProviderImportService {
     });
     if (result.kind === "created") {
       return { run: result.run, coalesced: false };
+    }
+    if (result.kind === "worker_lane_conflict") {
+      throw new ProviderImportServiceError(
+        "IMPORT_WORKER_LANE_CONFLICT",
+        "Another provider import is assigned to a different worker lane.",
+        409,
+        result.run,
+      );
     }
     if (result.kind === "active") {
       if (result.run.trigger !== input.trigger) {
@@ -365,10 +404,14 @@ export class ProviderImportService {
     organizationId: string;
     runId: string;
     workerId: string;
+    workerLane?: ProviderImportWorkerLane;
   }): Promise<ProviderImportRunSummary> {
     const claimedAt = this.dependencies.clock.now();
     const claim = await this.dependencies.runs.claimRun({
-      ...input,
+      organizationId: input.organizationId,
+      runId: input.runId,
+      workerId: input.workerId,
+      workerLane: input.workerLane ?? "general",
       claimedAt,
       leaseExpiresAt: this.leaseExpiresAt(claimedAt),
     });
@@ -410,11 +453,12 @@ export class ProviderImportService {
     run: ClaimedProviderImportRun,
     claimedAt: Date,
   ): Promise<ProviderImportRunSummary> {
-    const revision = await this.dependencies.revisions.getImmutableRevisionForRuntime({
-      organizationId: run.organizationId,
-      providerId: run.providerId,
-      revisionId: run.configRevisionId,
-    });
+    const revision =
+      await this.dependencies.revisions.getImmutableRevisionForRuntime({
+        organizationId: run.organizationId,
+        providerId: run.providerId,
+        revisionId: run.configRevisionId,
+      });
     if (!revision) {
       return this.finishFailure(run, {
         code: "IMPORT_CONFIGURATION_UNAVAILABLE",
@@ -450,8 +494,8 @@ export class ProviderImportService {
     }
 
     if (run.currentCursor !== null && run.nextPageNumber > 1) {
-      const terminalPageCommitted = await this.dependencies.runs
-        .hasCommittedTerminalPage({
+      const terminalPageCommitted =
+        await this.dependencies.runs.hasCommittedTerminalPage({
           organizationId: run.organizationId,
           runId: run.id,
           pageNumber: run.nextPageNumber - 1,
@@ -467,6 +511,7 @@ export class ProviderImportService {
 
     let cursor = run.currentCursor;
     let pageNumber = run.nextPageNumber;
+    let committedPagesThisClaim = 0;
     const seenCursors = new Set<string>(run.committedCursors);
     if (cursor !== null) seenCursors.add(cursor);
     const runStartedAt = run.startedAt ?? claimedAt;
@@ -482,6 +527,9 @@ export class ProviderImportService {
         });
       }
       await this.requireLease(run);
+      if (!(await this.hasCapacityForPage(run, pageNumber))) {
+        return this.yieldClaim(run);
+      }
       const fetched = await this.fetchWithRetries({
         run,
         revision,
@@ -556,6 +604,25 @@ export class ProviderImportService {
         );
       }
       seenCursors.add(nextCursor);
+      committedPagesThisClaim += 1;
+      if (pageNumber >= this.#maximumPages) {
+        return this.finishFailure(run, {
+          code: "IMPORT_RUN_LIMIT_REACHED",
+          summary: "Import stopped at a configured safety limit.",
+        });
+      }
+      if (
+        this.dependencies.clock.now().getTime() - runStartedAt.getTime() >
+        this.#maximumRunDurationMs
+      ) {
+        return this.finishFailure(run, {
+          code: "IMPORT_RUN_LIMIT_REACHED",
+          summary: "Import stopped at a configured safety limit.",
+        });
+      }
+      if (committedPagesThisClaim >= this.#pageBudgetPerClaim) {
+        return this.yieldClaim(run);
+      }
       pageNumber += 1;
     }
   }
@@ -570,11 +637,19 @@ export class ProviderImportService {
     cursor: string | null;
     seenCursors: ReadonlySet<string>;
   }): Promise<
-    | { readonly page: Awaited<ReturnType<ProviderTransportAdapter["fetchPage"]>> }
+    | {
+        readonly page: Awaited<
+          ReturnType<ProviderTransportAdapter["fetchPage"]>
+        >;
+      }
     | { readonly failure: ImportFailure }
   > {
     let lastFailure: NormalizedProviderTransportFailure | null = null;
-    for (let attempt = 0; attempt <= this.#maximumTransientRetries; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt <= this.#maximumTransientRetries;
+      attempt += 1
+    ) {
       const counted = await this.dependencies.runs.recordRequestAttempt({
         organizationId: input.run.organizationId,
         runId: input.run.id,
@@ -600,7 +675,10 @@ export class ProviderImportService {
           error instanceof ProviderTransportRequestError
             ? error.failure
             : { code: "network_error", retryable: true };
-        if (!lastFailure.retryable || attempt === this.#maximumTransientRetries) {
+        if (
+          !lastFailure.retryable ||
+          attempt === this.#maximumTransientRetries
+        ) {
           return { failure: terminalFailureForTransport(lastFailure) };
         }
         const exponential = Math.min(
@@ -608,7 +686,9 @@ export class ProviderImportService {
           this.#retryBaseMs * 2 ** attempt,
         );
         const random = Math.min(1, Math.max(0, this.#random.value()));
-        await this.#sleeper.sleep(Math.max(1, Math.round(exponential * (0.5 + random * 0.5))));
+        await this.#sleeper.sleep(
+          Math.max(1, Math.round(exponential * (0.5 + random * 0.5))),
+        );
         await this.requireLease(input.run);
       }
     }
@@ -622,9 +702,12 @@ export class ProviderImportService {
     };
   }
 
-  private authForRevision(revision: ProviderImportRuntimeRevision): ProviderAuth {
+  private authForRevision(
+    revision: ProviderImportRuntimeRevision,
+  ): ProviderAuth {
     if (revision.authMode === "none") return { mode: "none" };
-    if (!revision.encryptedCredential) throw new Error("Credential unavailable.");
+    if (!revision.encryptedCredential)
+      throw new Error("Credential unavailable.");
     return {
       mode: "bearer",
       token: this.dependencies.credentialCipher.decrypt(
@@ -650,6 +733,23 @@ export class ProviderImportService {
     if (!renewed) this.throwOwnershipLost();
   }
 
+  private async hasCapacityForPage(
+    run: ClaimedProviderImportRun,
+    pageNumber: number,
+  ): Promise<boolean> {
+    if (!this.dependencies.pageGuard) return true;
+    try {
+      return await this.dependencies.pageGuard.canStartPage({
+        organizationId: run.organizationId,
+        providerId: run.providerId,
+        runId: run.id,
+        pageNumber,
+      });
+    } catch {
+      return false;
+    }
+  }
+
   private leaseExpiresAt(now: Date): Date {
     return new Date(now.getTime() + this.#leaseDurationMs);
   }
@@ -666,6 +766,28 @@ export class ProviderImportService {
     failure: ImportFailure,
   ): Promise<ProviderImportRunSummary> {
     return this.finish(run, "failed", false, failure);
+  }
+
+  private async yieldClaim(
+    run: ClaimedProviderImportRun,
+  ): Promise<ProviderImportRunSummary> {
+    const result = await this.dependencies.runs.yieldRun({
+      organizationId: run.organizationId,
+      runId: run.id,
+      workerId: run.workerId,
+      yieldedAt: this.dependencies.clock.now(),
+    });
+    if (result.kind === "yielded" || result.kind === "already_terminal") {
+      return result.run;
+    }
+    if (result.kind === "not_found") {
+      throw new ProviderImportServiceError(
+        "IMPORT_RUN_NOT_FOUND",
+        "Import run not found.",
+        404,
+      );
+    }
+    return this.throwOwnershipLost();
   }
 
   private async finish(

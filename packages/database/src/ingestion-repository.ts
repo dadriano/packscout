@@ -3,6 +3,7 @@ import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   type PackscoutPrismaClient,
   type PackscoutQueryClient,
+  type PackscoutTransactionClient,
 } from "./database.ts";
 import { estimatedEvRecomputationRequestKey } from "./estimated-ev-recomputation-repository.ts";
 import {
@@ -31,15 +32,47 @@ import {
 } from "./provider-stream-write-policy.ts";
 import { databaseSafeProtectedJsonEvidence } from "./protected-json-evidence.ts";
 import { hashJson } from "./security.ts";
+import {
+  advanceSettledPublicWatermark,
+  allocatePublicChangeCauses,
+  canonicalCatalogPlatformKeys,
+  createPublicDerivationObligationBatch,
+  relationshipPublicEntityKey,
+  type PublicCatalogImpact,
+} from "./public-change-settlement-repository.ts";
 
 const millisecondsPerDay = 24 * 60 * 60 * 1_000;
 const maximumRowsPerWrite = 500;
 const maximumArchiveOperationUncompressedBytes = 4 * 1024 * 1024 * 1024;
 const maximumArchiveOperationElapsedMs = 4 * 60 * 60 * 1_000;
+const catalogProjectionRecordKinds = new Set<CanonicalIdentity["recordKind"]>([
+  "platform",
+  "pack",
+  "catalog_asset",
+  "ev_input",
+  "estimated_ev",
+]);
+
+function relationshipCatalogImpact(input: {
+  sourceRecordKind: CanonicalIdentity["recordKind"];
+  sourcePlatformKey: string;
+  targetPlatformKey: string;
+}): PublicCatalogImpact {
+  return catalogProjectionRecordKinds.has(input.sourceRecordKind)
+    ? {
+        kind: "catalog",
+        providerPlatformKeys: canonicalCatalogPlatformKeys([
+          input.sourcePlatformKey,
+          input.targetPlatformKey,
+        ]),
+      }
+    : { kind: "none" };
+}
 
 interface ChangedPackInput {
   readonly platformKey: string;
   readonly packExternalId: string;
+  readonly causeSequences: readonly bigint[];
 }
 
 interface ChangedEvInput extends ChangedPackInput {
@@ -229,23 +262,69 @@ export class IngestionPersistenceRepository {
             "A live provider page must return a resumable cursor.",
           );
         }
+        if (
+          input.nextCursor === input.requestedCursor &&
+          !stationaryEmptyTerminalPage
+        ) {
+          throw new PersistenceError(
+            "CURSOR_SAFETY_VIOLATION",
+            "A live provider page did not advance its continuing cursor.",
+          );
+        }
         if (!stationaryEmptyTerminalPage) {
-          const reusedCursor = await transaction.import_pages.findFirst({
-            where: {
-              organization_id: input.organizationId,
-              run_id: input.runId,
-              id: { not: insertedPage.id },
-              OR: [
-                { requested_cursor: input.nextCursor },
-                { next_cursor: input.nextCursor },
-              ],
-            },
-            select: { id: true },
-          });
-          if (reusedCursor) {
+          // Replaying a known pagination edge is valid recovery/idempotency.
+          // Reaching an old cursor through a new edge is a regression cycle.
+          const cursorHistory = await transaction.$queryRaw<Array<{
+            currentRunReuse: boolean;
+            priorRunReuse: boolean;
+            exactEdgeReplay: boolean;
+          }>>(Prisma.sql`
+            with prior_run_edges as materialized (
+              select historical_page.requested_cursor, historical_page.next_cursor
+              from public.import_runs as historical_run
+              join public.import_pages as historical_page
+                on historical_page.run_id = historical_run.id
+               and historical_page.organization_id = historical_run.organization_id
+               and historical_page.provider_id = historical_run.provider_id
+              where historical_run.organization_id = ${uuid(input.organizationId)}
+                and historical_run.provider_id = ${uuid(input.providerId)}
+                and historical_run.trigger <> 'archive'::public.import_trigger
+                and historical_run.id <> ${uuid(input.runId)}
+                and historical_page.id <> ${uuid(insertedPage.id)}
+            )
+            select
+              exists (
+                select 1
+                from public.import_pages as current_page
+                where current_page.organization_id = ${uuid(input.organizationId)}
+                  and current_page.run_id = ${uuid(input.runId)}
+                  and current_page.id <> ${uuid(insertedPage.id)}
+                  and current_page.requested_cursor = ${input.nextCursor}
+                limit 1
+              ) as "currentRunReuse",
+              exists (
+                select 1
+                from prior_run_edges
+                where requested_cursor = ${input.nextCursor}
+                   or next_cursor = ${input.nextCursor}
+                limit 1
+              ) as "priorRunReuse",
+              exists (
+                select 1
+                from prior_run_edges
+                where requested_cursor is not distinct from ${input.requestedCursor}
+                  and next_cursor = ${input.nextCursor}
+                limit 1
+              ) as "exactEdgeReplay"
+          `);
+          if (
+            cursorHistory[0]?.currentRunReuse ||
+            (cursorHistory[0]?.priorRunReuse &&
+              !cursorHistory[0].exactEdgeReplay)
+          ) {
             throw new PersistenceError(
               "CURSOR_SAFETY_VIOLATION",
-              "A live provider page attempted to reuse an earlier run cursor.",
+              "A live provider page attempted to reuse an earlier provider cursor.",
             );
           }
         }
@@ -260,8 +339,13 @@ export class IngestionPersistenceRepository {
         insertedPage.id,
         expiresAt,
       );
-      for (const projection of persisted.createdCanonicalProjections) {
-        this.recordEstimatedEvTrigger(projection, changedPacks, changedEvInputs);
+      for (const created of persisted.createdCanonicalProjections) {
+        this.recordEstimatedEvTrigger(
+          created.projection,
+          created.publicChangeSequence,
+          changedPacks,
+          changedEvInputs,
+        );
       }
       await this.enqueueEstimatedEvRecomputations(transaction, {
         organizationId: input.organizationId,
@@ -270,6 +354,10 @@ export class IngestionPersistenceRepository {
         changedPacks: [...changedPacks.values()],
         changedEvInputs: [...changedEvInputs.values()],
         createdAt: input.committedAt,
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: input.organizationId,
+        settledAt: input.committedAt,
       });
 
       const counters: RunCounters = {
@@ -406,8 +494,32 @@ export class IngestionPersistenceRepository {
           projection,
           projectionIndex,
           acceptedAt: input.acceptedAt,
+          publicChangeKind: "quarantine_correction",
         })),
       );
+      const changedPacks = new Map<string, ChangedPackInput>();
+      const changedEvInputs = new Map<string, ChangedEvInput>();
+      results.forEach((result, index) => {
+        if (!result.created) return;
+        this.recordEstimatedEvTrigger(
+          input.projections[index]!,
+          result.publicChangeSequence,
+          changedPacks,
+          changedEvInputs,
+        );
+      });
+      await this.enqueueEstimatedEvRecomputations(transaction, {
+        organizationId: input.organizationId,
+        providerId: input.providerId,
+        configurationRevisionId: input.configurationRevisionId,
+        changedPacks: [...changedPacks.values()],
+        changedEvInputs: [...changedEvInputs.values()],
+        createdAt: input.acceptedAt,
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: input.organizationId,
+        settledAt: input.acceptedAt,
+      });
       return { canonicalRevisionCount: results.filter(({ created }) => created).length };
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
@@ -446,8 +558,13 @@ export class IngestionPersistenceRepository {
           projection,
           projectionIndex,
           acceptedAt: input.acceptedAt,
+          publicChangeKind: "estimated_ev_outcome",
         })),
       );
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: input.organizationId,
+        settledAt: input.acceptedAt,
+      });
       return { canonicalRevisionCount: results.filter(({ created }) => created).length };
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
@@ -564,8 +681,32 @@ export class IngestionPersistenceRepository {
           projection,
           projectionIndex,
           acceptedAt: input.acceptedAt,
+          publicChangeKind: "quarantine_correction",
         })),
       );
+      const changedPacks = new Map<string, ChangedPackInput>();
+      const changedEvInputs = new Map<string, ChangedEvInput>();
+      results.forEach((result, index) => {
+        if (!result.created) return;
+        this.recordEstimatedEvTrigger(
+          input.projections[index]!,
+          result.publicChangeSequence,
+          changedPacks,
+          changedEvInputs,
+        );
+      });
+      await this.enqueueEstimatedEvRecomputations(transaction, {
+        organizationId: input.organizationId,
+        providerId: input.providerId,
+        configurationRevisionId: input.configurationRevisionId,
+        changedPacks: [...changedPacks.values()],
+        changedEvInputs: [...changedEvInputs.values()],
+        createdAt: input.acceptedAt,
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: input.organizationId,
+        settledAt: input.acceptedAt,
+      });
       return {
         sourceRecordId,
         canonicalRevisionCount: results.filter(({ created }) => created).length,
@@ -646,42 +787,108 @@ export class IngestionPersistenceRepository {
     target: CanonicalIdentity;
     resolvedAt: Date;
   }): Promise<number> {
-    const targets = await this.database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      select id
-      from public.canonical_entities
-      where organization_id = ${uuid(input.organizationId)}
-        and platform_key = ${input.target.platformKey}
-        and record_kind = cast(${input.target.recordKind} as public.canonical_record_kind)
-        and external_id = ${input.target.externalId}
-      limit 1
-    `);
-    const target = targets[0];
-    if (!target) return 0;
-    const reconciled = await this.database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      update public.canonical_relationships
-      set target_entity_id = ${uuid(target.id)},
-          resolved_at = ${input.resolvedAt}
-      where organization_id = ${uuid(input.organizationId)}
-        and target_platform_key = ${input.target.platformKey}
-        and target_record_kind = cast(${input.target.recordKind} as public.canonical_record_kind)
-        and target_external_id = ${input.target.externalId}
-        and target_entity_id is null
-      returning id
-    `);
-    return reconciled.length;
+    return this.database.$transaction(async (transaction) => {
+      const targets = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        select id
+        from public.canonical_entities
+        where organization_id = ${uuid(input.organizationId)}
+          and platform_key = ${input.target.platformKey}
+          and record_kind = cast(${input.target.recordKind} as public.canonical_record_kind)
+          and external_id = ${input.target.externalId}
+        for update
+        limit 1
+      `);
+      const target = targets[0];
+      if (!target) return 0;
+      let reconciledCount = 0;
+      while (true) {
+        const relationshipBatch = await transaction.$queryRaw<Array<{
+          id: string;
+          sourceEntityId: string;
+          sourcePlatformKey: string;
+          sourceRecordKind: CanonicalIdentity["recordKind"];
+          relationshipKind: string;
+          targetPlatformKey: string;
+          targetRecordKind: CanonicalIdentity["recordKind"];
+          targetExternalId: string;
+        }>>(Prisma.sql`
+          select relationship.id,
+                 relationship.source_entity_id as "sourceEntityId",
+                 source_entity.platform_key as "sourcePlatformKey",
+                 source_entity.record_kind::text as "sourceRecordKind",
+                 relationship.relationship_kind as "relationshipKind",
+                 relationship.target_platform_key as "targetPlatformKey",
+                 relationship.target_record_kind::text as "targetRecordKind",
+                 relationship.target_external_id as "targetExternalId"
+          from public.canonical_relationships as relationship
+          join public.canonical_entities as source_entity
+            on source_entity.id = relationship.source_entity_id
+           and source_entity.organization_id = relationship.organization_id
+          where relationship.organization_id = ${uuid(input.organizationId)}
+            and relationship.target_platform_key = ${input.target.platformKey}
+            and relationship.target_record_kind = cast(${input.target.recordKind} as public.canonical_record_kind)
+            and relationship.target_external_id = ${input.target.externalId}
+            and relationship.target_entity_id is null
+          order by relationship.id
+          for update of relationship
+          limit ${maximumRowsPerWrite}
+        `);
+        if (relationshipBatch.length === 0) break;
+        const causes = await allocatePublicChangeCauses(transaction, {
+          organizationId: input.organizationId,
+          changes: relationshipBatch.map((relationship) => ({
+            changeKind: "relationship_resolution",
+            entityKey: relationshipPublicEntityKey(relationship),
+            sourceKey: input.target.platformKey,
+            metadata: { relationshipState: "resolved" },
+            occurredAt: input.resolvedAt,
+            catalogImpact: relationshipCatalogImpact(relationship),
+          })),
+        });
+        const rows = relationshipBatch.map((relationship, index) => {
+          const sequence = causes[index]?.sequence;
+          if (sequence === undefined) throw new Error("Resolution cause is missing.");
+          return Prisma.sql`(${uuid(relationship.id)}, ${sequence})`;
+        });
+        await transaction.$executeRaw(Prisma.sql`
+          update public.canonical_relationships as relationship
+          set target_entity_id = ${uuid(target.id)},
+              resolved_at = ${input.resolvedAt},
+              resolved_public_change_sequence = resolved.public_change_sequence
+          from (values ${Prisma.join(rows)})
+            as resolved(relationship_id, public_change_sequence)
+          where relationship.id = resolved.relationship_id
+            and relationship.organization_id = ${uuid(input.organizationId)}
+            and relationship.target_entity_id is null
+        `);
+        reconciledCount += relationshipBatch.length;
+      }
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: input.organizationId,
+        settledAt: input.resolvedAt,
+      });
+      return reconciledCount;
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
   private recordEstimatedEvTrigger(
     projection: CanonicalProjectionInput,
+    publicChangeSequence: bigint,
     changedPacks: Map<string, ChangedPackInput>,
     changedEvInputs: Map<string, ChangedEvInput>,
   ): void {
     if (projection.recordKind === "pack") {
+      const key = `${projection.platformKey}\u0000${projection.externalId}`;
+      const existing = changedPacks.get(key);
       const changed = {
         platformKey: projection.platformKey,
         packExternalId: projection.externalId,
+        causeSequences: [
+          ...(existing?.causeSequences ?? []),
+          publicChangeSequence,
+        ],
       };
-      changedPacks.set(`${changed.platformKey}\u0000${changed.packExternalId}`, changed);
+      changedPacks.set(key, changed);
       return;
     }
     if (projection.recordKind !== "ev_input") return;
@@ -701,15 +908,22 @@ export class IngestionPersistenceRepository {
       platformKey: projection.platformKey,
       packExternalId,
       evInputExternalId: projection.externalId,
+      causeSequences: [publicChangeSequence],
     };
-    changedEvInputs.set(
-      `${changed.platformKey}\u0000${changed.packExternalId}\u0000${changed.evInputExternalId}`,
-      changed,
-    );
+    const key =
+      `${changed.platformKey}\u0000${changed.packExternalId}\u0000${changed.evInputExternalId}`;
+    const existing = changedEvInputs.get(key);
+    changedEvInputs.set(key, {
+      ...changed,
+      causeSequences: [
+        ...(existing?.causeSequences ?? []),
+        publicChangeSequence,
+      ],
+    });
   }
 
   private async enqueueEstimatedEvRecomputations(
-    database: PackscoutQueryClient,
+    database: PackscoutTransactionClient,
     input: {
       organizationId: string;
       providerId: string;
@@ -721,10 +935,18 @@ export class IngestionPersistenceRepository {
   ): Promise<void> {
     const targets = new Map<string, ChangedEvInput>();
     const addTarget = (target: ChangedEvInput) => {
-      targets.set(
-        `${target.platformKey}\u0000${target.packExternalId}\u0000${target.evInputExternalId}`,
-        target,
-      );
+      const key =
+        `${target.platformKey}\u0000${target.packExternalId}\u0000${target.evInputExternalId}`;
+      const existing = targets.get(key);
+      targets.set(key, {
+        ...target,
+        causeSequences: [
+          ...new Set([
+            ...(existing?.causeSequences ?? []),
+            ...target.causeSequences,
+          ]),
+        ],
+      });
     };
     input.changedEvInputs.forEach(addTarget);
     const relatedByPack = new Map<string, string[]>();
@@ -839,6 +1061,10 @@ export class IngestionPersistenceRepository {
         ...identity,
         providerId: input.providerId,
         configurationRevisionId: input.configurationRevisionId,
+        originatingPublicChangeSequence: [...target.causeSequences].sort(
+          (left, right) => (left < right ? -1 : left > right ? 1 : 0),
+        )[0]!,
+        causeSequences: target.causeSequences,
         availableAt: input.createdAt,
         createdAt: input.createdAt,
         updatedAt: input.createdAt,
@@ -851,17 +1077,30 @@ export class IngestionPersistenceRepository {
         ${request.platformKey}, ${request.packExternalId}, ${request.evInputExternalId},
         ${request.packRevisionId ? uuid(request.packRevisionId) : Prisma.sql`null::uuid`},
         ${request.evInputRevisionId ? uuid(request.evInputRevisionId) : Prisma.sql`null::uuid`},
+        ${request.originatingPublicChangeSequence},
         ${request.availableAt}, ${request.createdAt}, ${request.updatedAt}
       )`);
       await database.$executeRaw(Prisma.sql`
         insert into public.estimated_ev_recomputation_requests (
           request_key, organization_id, provider_id, configuration_revision_id,
           platform_key, pack_external_id, ev_input_external_id,
-          pack_revision_id, ev_input_revision_id, available_at, created_at, updated_at
+          pack_revision_id, ev_input_revision_id,
+          originating_public_change_sequence, available_at, created_at, updated_at
         )
         values ${Prisma.join(rows)}
         on conflict do nothing
       `);
+    }
+    for (const requestBatch of batches(requests)) {
+      await createPublicDerivationObligationBatch(database, {
+        organizationId: input.organizationId,
+        obligations: requestBatch.map((request) => ({
+          causeSequences: request.causeSequences,
+          derivationKind: "estimated_ev" as const,
+          derivationKey: request.requestKey,
+          createdAt: request.createdAt,
+        })),
+      });
     }
   }
 

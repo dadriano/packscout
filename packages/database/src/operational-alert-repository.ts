@@ -22,6 +22,7 @@ const recoveryKinds = new Set<OperationalNotification["kind"]>([
   "provider_recovered",
   "quarantine_resolved",
   "retention_recovered",
+  "promotion_recovered",
 ]);
 
 interface LockedAlertRow {

@@ -23,8 +23,7 @@ export interface ProviderWorkerSleeper {
 }
 
 export interface ProviderWorkerImportPort
-  extends ProviderImportExecutionPort,
-    ProviderImportQueueExecutionPort {}
+  extends ProviderImportExecutionPort, ProviderImportQueueExecutionPort {}
 
 export interface ProviderWorkerRetentionPort {
   runCycle(): Promise<ProtectedPayloadRetentionCycleResult>;
@@ -39,6 +38,7 @@ export type ProviderWorkerLogEventName =
   | "provider_import_contended"
   | "provider_import_failed"
   | "provider_import_finished"
+  | "provider_import_yielded"
   | "provider_import_queue_failed"
   | "provider_estimated_ev_cycle_failed"
   | "provider_estimated_ev_cycle_finished"
@@ -77,11 +77,7 @@ export interface ProviderWorkerLogger {
 }
 
 export type ProviderWorkerCycleStopReason =
-  | "claim_limit"
-  | "idle"
-  | "queue_failed"
-  | "scheduler_failed"
-  | "stopped";
+  "claim_limit" | "idle" | "queue_failed" | "scheduler_failed" | "stopped";
 
 export interface ProviderWorkerCycleResult {
   readonly claims: number;
@@ -101,6 +97,11 @@ export interface ProviderWorkerRuntimeDependencies {
   readonly pollIntervalMilliseconds?: number;
   readonly maximumClaimsPerCycle?: number;
   readonly sleeper?: ProviderWorkerSleeper;
+}
+
+export interface ProviderWorkerOneShotTarget {
+  readonly organizationId: string;
+  readonly runId: string;
 }
 
 function boundedInteger(
@@ -177,7 +178,9 @@ export class ProviderWorkerRuntime {
   #sleepController: AbortController | null = null;
   #stopRequested = false;
 
-  constructor(private readonly dependencies: ProviderWorkerRuntimeDependencies) {
+  constructor(
+    private readonly dependencies: ProviderWorkerRuntimeDependencies,
+  ) {
     if (!safeLogValuePattern.test(dependencies.workerId)) {
       throw new RangeError("Provider worker ID is invalid.");
     }
@@ -217,6 +220,27 @@ export class ProviderWorkerRuntime {
       }
     } finally {
       this.#sleepController = null;
+      this.#running = false;
+      this.log({ level: "info", event: "provider_worker_stopped" });
+    }
+  }
+
+  async runOneShot(
+    target: ProviderWorkerOneShotTarget,
+  ): Promise<ProviderWorkerCycleResult> {
+    if (this.#running || this.#cycleInProgress) {
+      throw new Error("Provider worker is already running.");
+    }
+    this.#running = true;
+    this.#cycleInProgress = true;
+    this.#stopRequested = false;
+    this.log({ level: "info", event: "provider_worker_started" });
+    const counts = { claims: 1, executions: 0, contentions: 0, failures: 0 };
+    try {
+      await this.processExactImport(target, counts);
+      return { ...counts, reason: "claim_limit" };
+    } finally {
+      this.#cycleInProgress = false;
       this.#running = false;
       this.log({ level: "info", event: "provider_worker_stopped" });
     }
@@ -262,15 +286,14 @@ export class ProviderWorkerRuntime {
     this.log({
       level: failures > 0 ? "error" : "info",
       event: "provider_estimated_ev_cycle_finished",
-      outcome: failures > 0 ? "degraded" : result.capReached ? "bounded" : "succeeded",
+      outcome:
+        failures > 0 ? "degraded" : result.capReached ? "bounded" : "succeeded",
       evClaimed: safeCount(result.claimed),
       evCompleted: safeCount(result.completed),
       evUnavailable: safeCount(result.unavailable),
       evFailures: failures,
       evCapReached: result.capReached === true,
-      ...(failures > 0
-        ? { failureCode: "ESTIMATED_EV_REQUEST_FAILED" }
-        : {}),
+      ...(failures > 0 ? { failureCode: "ESTIMATED_EV_REQUEST_FAILED" } : {}),
     });
   }
 
@@ -315,7 +338,8 @@ export class ProviderWorkerRuntime {
     this.log({
       level: failures > 0 ? "error" : "info",
       event: "provider_retention_cycle_finished",
-      outcome: failures > 0 ? "degraded" : result.capReached ? "bounded" : "succeeded",
+      outcome:
+        failures > 0 ? "degraded" : result.capReached ? "bounded" : "succeeded",
       retentionBatches: safeCount(result.batchesRun),
       retentionExpired: safeCount(result.expired),
       retentionFailures: failures,
@@ -325,14 +349,12 @@ export class ProviderWorkerRuntime {
     });
   }
 
-  private async processSchedule(
-    counts: {
-      claims: number;
-      executions: number;
-      contentions: number;
-      failures: number;
-    },
-  ): Promise<"failed" | "idle" | "processed"> {
+  private async processSchedule(counts: {
+    claims: number;
+    executions: number;
+    contentions: number;
+    failures: number;
+  }): Promise<"failed" | "idle" | "processed"> {
     let scheduled: ProviderSchedulerResult;
     try {
       scheduled = await this.dependencies.scheduler.runOnce(
@@ -374,7 +396,7 @@ export class ProviderWorkerRuntime {
         workerId: this.dependencies.workerId,
       });
       counts.executions += 1;
-      this.logFinishedRun(run);
+      this.logRunResult(run);
     } catch (error) {
       const code = contentionCode(error);
       if (code !== null) {
@@ -415,7 +437,7 @@ export class ProviderWorkerRuntime {
       if (result.kind === "idle") return "idle";
       counts.claims += 1;
       counts.executions += 1;
-      this.logFinishedRun(result.run);
+      this.logRunResult(result.run);
       return "processed";
     } catch (error) {
       const code = contentionCode(error);
@@ -439,7 +461,64 @@ export class ProviderWorkerRuntime {
     }
   }
 
-  private logFinishedRun(run: ProviderImportRunSummary): void {
+  private async processExactImport(
+    target: ProviderWorkerOneShotTarget,
+    counts: {
+      claims: number;
+      executions: number;
+      contentions: number;
+      failures: number;
+    },
+  ): Promise<void> {
+    try {
+      const run = await this.dependencies.imports.executeImport({
+        organizationId: target.organizationId,
+        runId: target.runId,
+        workerId: this.dependencies.workerId,
+        workerLane: "controlled",
+      });
+      counts.executions += 1;
+      this.logRunResult(run);
+    } catch (error) {
+      const code = contentionCode(error);
+      if (code !== null) {
+        counts.contentions += 1;
+        this.log({
+          level: "info",
+          event: "provider_import_contended",
+          organizationId: safeLogValue(target.organizationId),
+          runId: safeLogValue(target.runId),
+          failureCode: code,
+        });
+        return;
+      }
+      counts.failures += 1;
+      this.log({
+        level: "error",
+        event: "provider_import_failed",
+        organizationId: safeLogValue(target.organizationId),
+        runId: safeLogValue(target.runId),
+        failureCode: "IMPORT_EXECUTION_ERROR",
+      });
+    }
+  }
+
+  private logRunResult(run: ProviderImportRunSummary): void {
+    if (
+      !run.finishedAt &&
+      (run.state === "queued" || run.state === "running")
+    ) {
+      this.log({
+        level: "info",
+        event: "provider_import_yielded",
+        organizationId: safeLogValue(run.organizationId),
+        providerId: safeLogValue(run.providerId),
+        runId: safeLogValue(run.id),
+        runState: run.state,
+        outcome: "page_budget",
+      });
+      return;
+    }
     const failureCode = terminalFailureCode(run.failureCode);
     this.log({
       level: "info",
@@ -452,9 +531,7 @@ export class ProviderWorkerRuntime {
     });
   }
 
-  private log(
-    event: Omit<ProviderWorkerLogEvent, "workerId">,
-  ): void {
+  private log(event: Omit<ProviderWorkerLogEvent, "workerId">): void {
     this.dependencies.logger.write({
       ...event,
       workerId: this.dependencies.workerId,

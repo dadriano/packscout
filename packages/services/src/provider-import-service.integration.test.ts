@@ -31,6 +31,7 @@ import { DefaultProviderImportPagePlanner } from "./provider-import-page-planner
 import {
   ProviderImportService,
   ProviderImportServiceError,
+  type ProviderImportPageGuard,
 } from "./provider-import-service.ts";
 import type {
   ProviderImportPageRepository,
@@ -271,7 +272,12 @@ async function createHarness(
     Omit<ProviderStreamPageStructureV2, "requestedCursor">
   >,
   options: {
+    advanceAfterCommitMs?: number;
     onFetch?: () => Promise<void>;
+    maximumPages?: number;
+    maximumRunDurationMs?: number;
+    pageBudgetPerClaim?: number;
+    pageGuard?: ProviderImportPageGuard;
     pageRepository?: (
       repository: IngestionPersistenceRepository,
     ) => ProviderImportPageRepository;
@@ -331,12 +337,24 @@ async function createHarness(
     retentionDays: 90,
     actorPseudonymKey: "fixture-pseudonym-key",
   });
+  const configuredPages =
+    options.pageRepository?.(ingestion as never) ?? ingestion;
+  const pageRepository: ProviderImportPageRepository =
+    options.advanceAfterCommitMs === undefined
+      ? configuredPages
+      : {
+          commitPage: async (input) => {
+            const result = await configuredPages.commitPage(input);
+            clock.advance(options.advanceAfterCommitMs!);
+            return result;
+          },
+        };
   const transport = new FixtureTransportAdapter(pages, options.onFetch);
   let nextId = 100;
   const service = new ProviderImportService({
     runs,
     revisions: new PrismaProviderConfigurationRepository(harness.database),
-    pages: options.pageRepository?.(ingestion as never) ?? ingestion,
+    pages: pageRepository,
     transportAdapters: new ProviderTransportAdapterRegistry([transport]),
     pagePlanner: new DefaultProviderImportPagePlanner(
       new ProviderMappingAdapterRegistry([new FixtureMappingAdapter()]),
@@ -357,7 +375,16 @@ async function createHarness(
     sleeper: { sleep: async () => undefined },
     random: { value: () => 0 },
     leaseDurationMs: 20_000,
-    maximumRunDurationMs: 60_000,
+    maximumRunDurationMs: options.maximumRunDurationMs ?? 60_000,
+    ...(options.maximumPages === undefined
+      ? {}
+      : { maximumPages: options.maximumPages }),
+    ...(options.pageBudgetPerClaim === undefined
+      ? {}
+      : { pageBudgetPerClaim: options.pageBudgetPerClaim }),
+    ...(options.pageGuard === undefined
+      ? {}
+      : { pageGuard: options.pageGuard }),
   });
   return { ...harness, clock, service, transport };
 }
@@ -462,10 +489,11 @@ test("same-trigger requests coalesce while a different trigger conflicts and the
       transientRetries: 0,
     });
     assert.deepEqual(harness.transport.requests, [null, "opaque-page-2"]);
-    const checkpoint = await harness.database.provider_cursor_checkpoints.findUnique({
-      where: { config_revision_id: ids.revision },
-      select: { cursor: true },
-    });
+    const checkpoint =
+      await harness.database.provider_cursor_checkpoints.findUnique({
+        where: { config_revision_id: ids.revision },
+        select: { cursor: true },
+      });
     assert.equal(checkpoint?.cursor, "opaque-head");
     assert.equal(await harness.database.import_pages.count(), 2);
     assert.equal(await harness.database.source_records.count(), 5);
@@ -483,12 +511,14 @@ test("same-trigger requests coalesce while a different trigger conflicts and the
         { _count: { _all: 1 }, record_kind: "trade" },
       ],
     );
-    const linkedQuarantines = await harness.database.quarantine_records.findMany({
-      where: { source_record_id: { not: null } },
-    });
-    const unlinkedQuarantines = await harness.database.quarantine_records.findMany({
-      where: { source_record_id: null },
-    });
+    const linkedQuarantines =
+      await harness.database.quarantine_records.findMany({
+        where: { source_record_id: { not: null } },
+      });
+    const unlinkedQuarantines =
+      await harness.database.quarantine_records.findMany({
+        where: { source_record_id: null },
+      });
     assert.equal(linkedQuarantines.length, 2);
     assert.equal(unlinkedQuarantines.length, 1);
     assert.equal(unlinkedQuarantines[0]?.record_index, 2);
@@ -505,6 +535,404 @@ test("same-trigger requests coalesce while a different trigger conflicts and the
       (error: unknown) =>
         error instanceof ProviderImportServiceError &&
         error.code === "PROVIDER_NOT_IMPORTABLE",
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("cooperative claims hand one mixed live run between workers without a false terminal outcome", async () => {
+  const harness = await createHarness(
+    new Map([
+      [
+        null,
+        {
+          records: [
+            catalog("batch-card"),
+            pull("batch-pull"),
+            trade("batch-trade"),
+          ],
+          nextCursor: "cooperative-page-2",
+          hasMore: true,
+        },
+      ],
+      [
+        "cooperative-page-2",
+        {
+          records: [catalog("batch-terminal-card")],
+          nextCursor: "cooperative-head",
+          hasMore: false,
+        },
+      ],
+    ]),
+    { pageBudgetPerClaim: 1 },
+  );
+  try {
+    const requested = await harness.service.requestImport({
+      trigger: "manual",
+      providerId: ids.provider,
+      expectedConfigurationRevisionId: ids.revision,
+      actor: {
+        organizationId: ids.organization,
+        operatorId: "admin",
+        role: "admin",
+      },
+    });
+
+    const yielded = await harness.service.executeImport({
+      organizationId: ids.organization,
+      runId: requested.run.id,
+      workerId: "batch-agent-1",
+    });
+    assert.equal(yielded.id, requested.run.id);
+    assert.equal(yielded.state, "queued");
+    assert.equal(yielded.finishedAt, null);
+    assert.equal(yielded.failureCode, null);
+    assert.equal(yielded.reachedProviderHead, false);
+    assert.deepEqual(yielded.counters, {
+      accepted: 3,
+      duplicate: 0,
+      quarantined: 0,
+      pages: 1,
+      records: 3,
+      requestAttempts: 1,
+      transientRetries: 0,
+    });
+
+    const finished = await harness.service.executeImport({
+      organizationId: ids.organization,
+      runId: requested.run.id,
+      workerId: "batch-agent-2",
+    });
+    assert.equal(finished.id, requested.run.id);
+    assert.equal(finished.state, "succeeded");
+    assert.equal(finished.reachedProviderHead, true);
+    assert.equal(finished.counters.pages, 2);
+    assert.equal(finished.counters.records, 4);
+    assert.deepEqual(harness.transport.requests, [null, "cooperative-page-2"]);
+    const stored = await harness.database.import_runs.findUniqueOrThrow({
+      where: { id: requested.run.id },
+      select: {
+        attempt: true,
+        lease_owner: true,
+        lease_expires_at: true,
+        finished_at: true,
+      },
+    });
+    assert.equal(stored.attempt, 2);
+    assert.equal(stored.lease_owner, null);
+    assert.equal(stored.lease_expires_at, null);
+    assert.ok(stored.finished_at);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a controlled run is invisible to generic workers and claimable only by its targeted one-shot lane", async () => {
+  const harness = await createHarness(
+    new Map([
+      [
+        null,
+        {
+          records: [catalog("controlled-card")],
+          nextCursor: "controlled-head",
+          hasMore: false,
+        },
+      ],
+    ]),
+  );
+  try {
+    const requested = await harness.service.requestImport(
+      {
+        trigger: "manual",
+        providerId: ids.provider,
+        expectedConfigurationRevisionId: ids.revision,
+        actor: {
+          organizationId: ids.organization,
+          operatorId: "controlled-supervisor",
+          role: "admin",
+        },
+      },
+      { workerLane: "controlled" },
+    );
+    const coalesced = await harness.service.requestImport(
+      {
+        trigger: "manual",
+        providerId: ids.provider,
+        expectedConfigurationRevisionId: ids.revision,
+        actor: {
+          organizationId: ids.organization,
+          operatorId: "controlled-supervisor",
+          role: "admin",
+        },
+      },
+      { workerLane: "controlled" },
+    );
+    assert.equal(coalesced.coalesced, true);
+    assert.equal(coalesced.run.id, requested.run.id);
+    await assert.rejects(
+      harness.service.requestImport({
+        trigger: "manual",
+        providerId: ids.provider,
+        expectedConfigurationRevisionId: ids.revision,
+        actor: {
+          organizationId: ids.organization,
+          operatorId: "generic-admin",
+          role: "admin",
+        },
+      }),
+      (error: unknown) =>
+        error instanceof ProviderImportServiceError &&
+        error.code === "IMPORT_WORKER_LANE_CONFLICT",
+    );
+    assert.equal(
+      (
+        await harness.database.import_runs.findUniqueOrThrow({
+          where: { id: requested.run.id },
+          select: { worker_lane: true },
+        })
+      ).worker_lane,
+      "controlled",
+    );
+    assert.deepEqual(
+      await harness.service.executeNextImport({
+        workerId: "generic-worker",
+      }),
+      { kind: "idle" },
+    );
+    await assert.rejects(
+      harness.service.executeImport({
+        organizationId: ids.organization,
+        runId: requested.run.id,
+        workerId: "generic-explicit-worker",
+      }),
+      (error: unknown) =>
+        error instanceof ProviderImportServiceError &&
+        error.code === "IMPORT_RUN_NOT_CLAIMABLE",
+    );
+    const finished = await harness.service.executeImport({
+      organizationId: ids.organization,
+      runId: requested.run.id,
+      workerId: "controlled-one-shot-worker",
+      workerLane: "controlled",
+    });
+    assert.equal(finished.state, "succeeded");
+    assert.equal(finished.reachedProviderHead, true);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a mid-claim disk drop cooperatively yields before the next provider page", async () => {
+  const capacity = [true, false];
+  const harness = await createHarness(
+    new Map([
+      [
+        null,
+        {
+          records: [catalog("disk-page-1")],
+          nextCursor: "disk-page-2",
+          hasMore: true,
+        },
+      ],
+      [
+        "disk-page-2",
+        {
+          records: [catalog("disk-page-2")],
+          nextCursor: "disk-head",
+          hasMore: false,
+        },
+      ],
+    ]),
+    {
+      pageBudgetPerClaim: 5_000,
+      pageGuard: {
+        async canStartPage() {
+          return capacity.shift() ?? false;
+        },
+      },
+    },
+  );
+  try {
+    const requested = await harness.service.requestImport({
+      trigger: "scheduled",
+      organizationId: ids.organization,
+      providerId: ids.provider,
+    });
+    const yielded = await harness.service.executeImport({
+      organizationId: ids.organization,
+      runId: requested.run.id,
+      workerId: "disk-guard-worker",
+    });
+    assert.equal(yielded.state, "queued");
+    assert.equal(yielded.finishedAt, null);
+    assert.equal(yielded.failureCode, null);
+    assert.equal(yielded.counters.pages, 1);
+    assert.deepEqual(harness.transport.requests, [null]);
+    assert.equal(
+      await harness.database.audit_events.count({
+        where: {
+          action: "provider.import.finish",
+          subject_id: requested.run.id,
+        },
+      }),
+      0,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("the cumulative duration ceiling remains a terminal safety failure ahead of cooperative yield", async () => {
+  const harness = await createHarness(
+    new Map([
+      [
+        null,
+        {
+          records: [catalog("duration-bound-page")],
+          nextCursor: "duration-bound-next",
+          hasMore: true,
+        },
+      ],
+    ]),
+    {
+      advanceAfterCommitMs: 20_001,
+      pageBudgetPerClaim: 1,
+      maximumRunDurationMs: 20_000,
+    },
+  );
+  try {
+    const requested = await harness.service.requestImport({
+      trigger: "scheduled",
+      organizationId: ids.organization,
+      providerId: ids.provider,
+    });
+    const failed = await harness.service.executeImport({
+      organizationId: ids.organization,
+      runId: requested.run.id,
+      workerId: "duration-bound-worker",
+    });
+    assert.equal(failed.state, "failed");
+    assert.equal(failed.failureCode, "IMPORT_RUN_LIMIT_REACHED");
+    assert.equal(failed.finishedAt instanceof Date, true);
+    assert.equal(failed.counters.pages, 1);
+    assert.equal(failed.finalCursor, "duration-bound-next");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a configuration change inherits provider progress and rejects a cycle into older run history", async () => {
+  const secondRevision = "10000000-0000-4000-8000-000000000021";
+  const harness = await createHarness(
+    new Map([
+      [
+        null,
+        {
+          records: [catalog("history-page-1")],
+          nextCursor: "historical-cursor",
+          hasMore: true,
+        },
+      ],
+      [
+        "historical-cursor",
+        {
+          records: [catalog("history-page-2")],
+          nextCursor: "historical-head",
+          hasMore: false,
+        },
+      ],
+      [
+        "historical-head",
+        {
+          records: [catalog("new-revision-page")],
+          nextCursor: "new-revision-cursor",
+          hasMore: true,
+        },
+      ],
+      [
+        "new-revision-cursor",
+        {
+          records: [catalog("regressing-page")],
+          nextCursor: "historical-cursor",
+          hasMore: false,
+        },
+      ],
+    ]),
+  );
+  try {
+    const first = await harness.service.requestImport({
+      trigger: "scheduled",
+      organizationId: ids.organization,
+      providerId: ids.provider,
+    });
+    const firstFinished = await harness.service.executeImport({
+      organizationId: ids.organization,
+      runId: first.run.id,
+      workerId: "history-worker-1",
+    });
+    assert.equal(firstFinished.state, "succeeded");
+    assert.equal(firstFinished.finalCursor, "historical-head");
+
+    const setup = new PipelineSetupRepository(harness.database);
+    harness.clock.advance(1_000);
+    await setup.createConfigRevision({
+      id: secondRevision,
+      organizationId: ids.organization,
+      providerId: ids.provider,
+      version: 2,
+      adapterKey: "http-cursor-v2",
+      endpointUrl: "https://provider.example/feed-v2",
+      authMode: "none",
+      createdByActorKey: "operator:admin",
+      createdAt: harness.clock.now(),
+    });
+    await setup.recordSuccessfulConnectionTest({
+      organizationId: ids.organization,
+      providerId: ids.provider,
+      revisionId: secondRevision,
+      actorKey: "operator:admin",
+      testedAt: harness.clock.now(),
+      latencyMs: 1,
+    });
+    await setup.activateConfiguration({
+      organizationId: ids.organization,
+      providerId: ids.provider,
+      revisionId: secondRevision,
+      actorKey: "operator:admin",
+      activatedAt: harness.clock.now(),
+      nextRunAt: harness.clock.now(),
+    });
+
+    const second = await harness.service.requestImport({
+      trigger: "scheduled",
+      organizationId: ids.organization,
+      providerId: ids.provider,
+    });
+    assert.equal(second.run.configRevisionId, secondRevision);
+    assert.equal(second.run.requestedCursor, "historical-head");
+    const failed = await harness.service.executeImport({
+      organizationId: ids.organization,
+      runId: second.run.id,
+      workerId: "history-worker-2",
+    });
+    assert.equal(failed.state, "failed");
+    assert.equal(failed.failureCode, "IMPORT_CURSOR_SAFETY_FAILED");
+    assert.equal(failed.finalCursor, "new-revision-cursor");
+    assert.deepEqual(harness.transport.requests, [
+      null,
+      "historical-cursor",
+      "historical-head",
+      "new-revision-cursor",
+    ]);
+    assert.equal(
+      (
+        await harness.database.provider_cursor_checkpoints.findUniqueOrThrow({
+          where: { config_revision_id: secondRevision },
+          select: { cursor: true },
+        })
+      ).cursor,
+      "new-revision-cursor",
     );
   } finally {
     await harness.close();
@@ -548,9 +976,12 @@ test("the shared import workflow claims and executes a queued manual run", async
       assert.equal(executed.run.state, "succeeded");
       assert.equal(executed.run.reachedProviderHead, true);
     }
-    assert.deepEqual(await harness.service.executeNextImport({
-      workerId: "manual-queue-worker",
-    }), { kind: "idle" });
+    assert.deepEqual(
+      await harness.service.executeNextImport({
+        workerId: "manual-queue-worker",
+      }),
+      { kind: "idle" },
+    );
   } finally {
     await harness.close();
   }
@@ -615,7 +1046,10 @@ test("a crash after atomic page commit resumes from the durable opaque cursor wi
       state: interruptedRecord.state,
       cursor: interruptedRecord.final_cursor,
     };
-    assert.deepEqual(interrupted, { state: "running", cursor: "opaque-resume" });
+    assert.deepEqual(interrupted, {
+      state: "running",
+      cursor: "opaque-resume",
+    });
     harness.clock.advance(20_001);
     const finished = await harness.service.executeImport({
       organizationId: ids.organization,
@@ -641,27 +1075,30 @@ test("a crash after atomic page commit resumes from the durable opaque cursor wi
 
 test("a reclaimed run finishes an already-committed terminal page without another provider request", async () => {
   let simulateCrash = true;
-  const harness = await createHarness(new Map([
-    [
-      null,
-      {
-        records: [catalog("terminal-before-crash")],
-        nextCursor: "opaque-terminal-head",
-        hasMore: false,
-      },
-    ],
-  ]), {
-    pageRepository: (repository) => ({
-      commitPage: async (input) => {
-        const result = await repository.commitPage(input);
-        if (simulateCrash) {
-          simulateCrash = false;
-          throw { code: "RUN_OWNERSHIP_LOST" };
-        }
-        return result;
-      },
-    }),
-  });
+  const harness = await createHarness(
+    new Map([
+      [
+        null,
+        {
+          records: [catalog("terminal-before-crash")],
+          nextCursor: "opaque-terminal-head",
+          hasMore: false,
+        },
+      ],
+    ]),
+    {
+      pageRepository: (repository) => ({
+        commitPage: async (input) => {
+          const result = await repository.commitPage(input);
+          if (simulateCrash) {
+            simulateCrash = false;
+            throw { code: "RUN_OWNERSHIP_LOST" };
+          }
+          return result;
+        },
+      }),
+    },
+  );
   try {
     const requested = await harness.service.requestImport({
       trigger: "scheduled",
@@ -700,41 +1137,44 @@ test("a reclaimed run finishes an already-committed terminal page without anothe
 
 test("a reclaimed run rejects a terminal response that returns to an earlier committed cursor", async () => {
   let commitCount = 0;
-  const harness = await createHarness(new Map([
-    [
-      null,
-      {
-        records: [catalog("cycle-page-1")],
-        nextCursor: "opaque-cycle-1",
-        hasMore: true,
-      },
-    ],
-    [
-      "opaque-cycle-1",
-      {
-        records: [catalog("cycle-page-2")],
-        nextCursor: "opaque-cycle-2",
-        hasMore: true,
-      },
-    ],
-    [
-      "opaque-cycle-2",
-      {
-        records: [],
-        nextCursor: "opaque-cycle-1",
-        hasMore: false,
-      },
-    ],
-  ]), {
-    pageRepository: (repository) => ({
-      commitPage: async (input) => {
-        const result = await repository.commitPage(input);
-        commitCount += 1;
-        if (commitCount === 2) throw { code: "RUN_OWNERSHIP_LOST" };
-        return result;
-      },
-    }),
-  });
+  const harness = await createHarness(
+    new Map([
+      [
+        null,
+        {
+          records: [catalog("cycle-page-1")],
+          nextCursor: "opaque-cycle-1",
+          hasMore: true,
+        },
+      ],
+      [
+        "opaque-cycle-1",
+        {
+          records: [catalog("cycle-page-2")],
+          nextCursor: "opaque-cycle-2",
+          hasMore: true,
+        },
+      ],
+      [
+        "opaque-cycle-2",
+        {
+          records: [],
+          nextCursor: "opaque-cycle-1",
+          hasMore: false,
+        },
+      ],
+    ]),
+    {
+      pageRepository: (repository) => ({
+        commitPage: async (input) => {
+          const result = await repository.commitPage(input);
+          commitCount += 1;
+          if (commitCount === 2) throw { code: "RUN_OWNERSHIP_LOST" };
+          return result;
+        },
+      }),
+    },
+  );
   try {
     const requested = await harness.service.requestImport({
       trigger: "scheduled",
@@ -768,10 +1208,12 @@ test("a reclaimed run rejects a terminal response that returns to an earlier com
     ]);
     assert.equal(await harness.database.import_pages.count(), 2);
     assert.equal(
-      (await harness.database.provider_cursor_checkpoints.findUnique({
-        where: { config_revision_id: ids.revision },
-        select: { cursor: true },
-      }))?.cursor,
+      (
+        await harness.database.provider_cursor_checkpoints.findUnique({
+          where: { config_revision_id: ids.revision },
+          select: { cursor: true },
+        })
+      )?.cursor,
       "opaque-cycle-2",
     );
   } finally {
@@ -852,9 +1294,14 @@ test("transport failures retain distinct sanitized terminal codes and retry only
         failed.counters.transientRetries,
         Math.max(0, scenario.attempts - 1),
       );
-      assert.equal(failed.failureSummary?.includes("secret.response.body"), false);
+      assert.equal(
+        failed.failureSummary?.includes("secret.response.body"),
+        false,
+      );
     }
-    const audits = JSON.stringify(await harness.database.audit_events.findMany());
+    const audits = JSON.stringify(
+      await harness.database.audit_events.findMany(),
+    );
     assert.equal(audits.includes("secret.response.body"), false);
   } finally {
     await harness.close();
@@ -898,13 +1345,16 @@ test("a page persistence failure leaves the checkpoint untouched and records onl
     assert.equal(failed.failureCode, "IMPORT_PERSISTENCE_FAILED");
     assert.equal(failed.failureSummary?.includes(rawFailure), false);
     assert.equal(await harness.database.import_pages.count(), 0);
-    const checkpoint = await harness.database.provider_cursor_checkpoints.findUnique({
-      where: { config_revision_id: ids.revision },
-      select: { cursor: true },
-    });
+    const checkpoint =
+      await harness.database.provider_cursor_checkpoints.findUnique({
+        where: { config_revision_id: ids.revision },
+        select: { cursor: true },
+      });
     assert.equal(checkpoint?.cursor, null);
     assert.equal(
-      JSON.stringify(await harness.database.audit_events.findMany()).includes(rawFailure),
+      JSON.stringify(await harness.database.audit_events.findMany()).includes(
+        rawFailure,
+      ),
       false,
     );
   } finally {

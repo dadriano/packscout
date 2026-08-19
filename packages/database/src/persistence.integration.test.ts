@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { CatalogRecordV2, PullRecordV2 } from "@packscout/contracts";
+import type {
+  CatalogRecordV2,
+  PullRecordV2,
+  TradeRecordV2,
+} from "@packscout/contracts";
 import {
   PrismaAuthAuditSink,
   PrismaAuthRepository,
@@ -128,6 +132,23 @@ function pullRecord(recordId: string): PullRecordV2 {
     occurred_at: sourceTime.toISOString(),
     collected_at: collectedAt.toISOString(),
     data: { wallet_address: "0xraw-wallet" },
+  };
+}
+
+function tradeRecord(recordId: string): TradeRecordV2 {
+  return {
+    stream: "trades",
+    platform: "beezie",
+    record_id: recordId,
+    card_id: `card-${recordId}`,
+    event_type: "sale",
+    amount: 25,
+    currency: "USD",
+    payment_method: null,
+    tx_hash: `tx-${recordId}`,
+    occurred_at: sourceTime.toISOString(),
+    collected_at: collectedAt.toISOString(),
+    data: { fixture: recordId },
   };
 }
 
@@ -341,6 +362,55 @@ test("unchanged replay is a no-op while changed content advances one current rev
   try {
     const first = await harness.ingestion.commitPage(initialPage());
     assert.equal(first.newCanonicalRevisions, 3);
+    const pullRelationship =
+      await harness.database.canonical_relationships.findFirstOrThrow({
+        where: {
+          organization_id: ids.organization,
+          relationship_kind: "opened_from_pack",
+        },
+        select: { created_public_change_sequence: true },
+      });
+    const pullRelationshipImpact =
+      await harness.database.public_change_catalog_impacts.findUniqueOrThrow({
+        where: {
+          organization_id_cause_sequence: {
+            organization_id: ids.organization,
+            cause_sequence: pullRelationship.created_public_change_sequence,
+          },
+        },
+        select: { provider_platform_keys: true },
+      });
+    assert.deepEqual(
+      pullRelationshipImpact.provider_platform_keys,
+      [],
+      "pull relationships must not advance public catalog settlement",
+    );
+    const packEntityIds = await harness.database.canonical_entities.findMany({
+      where: { organization_id: ids.organization, record_kind: "pack" },
+      select: { id: true },
+    });
+    const catalogRevisionSequences =
+      await harness.database.canonical_revisions.findMany({
+        where: {
+          organization_id: ids.organization,
+          entity_id: { in: packEntityIds.map(({ id }) => id) },
+        },
+        select: { public_change_sequence: true },
+        orderBy: { public_change_sequence: "asc" },
+      });
+    const catalogCheckpoint =
+      await harness.database.provider_catalog_checkpoints.findUniqueOrThrow({
+        where: {
+          organization_id_platform_key: {
+            organization_id: ids.organization,
+            platform_key: "beezie",
+          },
+        },
+      });
+    assert.equal(
+      catalogCheckpoint.source_head_sequence,
+      catalogRevisionSequences.at(-1)?.public_change_sequence,
+    );
     await addRun(harness.setup, ids.secondRun);
     const replay = await harness.ingestion.commitPage(
       initialPage({ runId: ids.secondRun, committedAt: new Date(committedAt.getTime() + 1_000) }),
@@ -603,6 +673,201 @@ test("large page commits batch writes while preserving evidence, projections, an
   }
 });
 
+test("a page with more than one thousand projections keeps causes and cursor atomic", async () => {
+  const harness = await createPipelineHarness();
+  try {
+    const projectionCount = 1_001;
+    const records: CommitPageInput["records"] = Array.from(
+      { length: projectionCount },
+      (_, index) => {
+        const externalId = `bounded-projection-${index}`;
+        return {
+          recordKind: "catalog" as const,
+          externalId,
+          sourceTime,
+          collectedAt,
+          payload: catalogRecord(externalId, { index }),
+          projections: [{
+            platformKey: "beezie",
+            recordKind: "catalog_asset" as const,
+            externalId,
+            content: {
+              schemaVersion: "catalog-projection-v1",
+              entityType: "catalog_asset",
+              relatedPackExternalId: null,
+              availability: "active",
+              name: `Bounded projection ${index}`,
+            },
+            sourceUpdatedAt: sourceTime,
+            sourceCollectedAt: collectedAt,
+          }],
+        };
+      },
+    );
+    const committed = await harness.ingestion.commitPage(initialPage({
+      records,
+      quarantines: [],
+      payload: { kind: "projection-boundary", projectionCount },
+    }));
+
+    assert.equal(committed.newCanonicalRevisions, projectionCount);
+    assert.equal(await harness.database.canonical_revisions.count(), projectionCount);
+    assert.equal(await harness.database.public_change_causes.count(), projectionCount);
+    assert.equal(
+      await harness.database.canonical_revisions.count({
+        where: { public_change_sequence: { gt: 0n } },
+      }),
+      projectionCount,
+    );
+    assert.equal(
+      (
+        await harness.database.provider_cursor_checkpoints.findUniqueOrThrow({
+          where: { config_revision_id: ids.configuration },
+          select: { cursor: true },
+        })
+      ).cursor,
+      "cursor-1",
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a five-thousand-record mixed live page stays inside batched SQL bounds", async (context) => {
+  const harness = await createPipelineHarness();
+  try {
+    const pullCount = 2_499;
+    const tradeCount = 2_500;
+    const packPayload = catalogRecord("mixed-pack-source", {
+      id: "pack-arrives-later",
+    });
+    const records: Array<CommitPageInput["records"][number]> = [{
+      recordKind: "catalog",
+      externalId: "mixed-pack-source",
+      sourceTime,
+      collectedAt,
+      payload: packPayload,
+      projections: [{
+        platformKey: "beezie",
+        recordKind: "pack",
+        externalId: "pack-arrives-later",
+        content: {
+          schemaVersion: "catalog-projection-v1",
+          entityType: "pack",
+          availability: "active",
+          priceValueMinor: 2_500,
+          priceCurrency: "USD",
+          buybackPercent: 80,
+        },
+        sourceUpdatedAt: sourceTime,
+        sourceCollectedAt: collectedAt,
+      }],
+    }];
+    for (let index = 0; index < pullCount; index += 1) {
+      const externalId = `mixed-pull-${index}`;
+      records.push({
+        recordKind: "pull",
+        externalId,
+        sourceTime,
+        collectedAt,
+        payload: pullRecord(externalId),
+        projections: [{
+          platformKey: "beezie",
+          recordKind: "pull",
+          externalId,
+          content: {
+            eventKind: "pull",
+            occurredAt: sourceTime.toISOString(),
+            collectedAt: collectedAt.toISOString(),
+            packExternalId: "pack-arrives-later",
+            assetExternalId: `card-${externalId}`,
+            value: null,
+            valueSource: "provider-reported",
+            actorKeys: {},
+          },
+          sourceUpdatedAt: sourceTime,
+          sourceCollectedAt: collectedAt,
+          relationships: [
+            {
+              relationshipKind: "opened_from_pack",
+              targetPlatformKey: "beezie",
+              targetRecordKind: "pack",
+              targetExternalId: "pack-arrives-later",
+            },
+            {
+              relationshipKind: "contains_asset",
+              targetPlatformKey: "beezie",
+              targetRecordKind: "catalog_asset",
+              targetExternalId: `card-${externalId}`,
+            },
+          ],
+        }],
+      });
+    }
+    for (let index = 0; index < tradeCount; index += 1) {
+      const externalId = `mixed-trade-${index}`;
+      const payload = tradeRecord(externalId);
+      records.push({
+        recordKind: "trade",
+        externalId,
+        sourceTime,
+        collectedAt,
+        payload,
+        projections: [{
+          platformKey: "beezie",
+          recordKind: "trade",
+          externalId,
+          content: {
+            eventKind: "sale",
+            occurredAt: sourceTime.toISOString(),
+            collectedAt: collectedAt.toISOString(),
+            assetExternalId: payload.card_id,
+            amount: { amountMinor: 2_500, currency: "USD" },
+          },
+          sourceUpdatedAt: sourceTime,
+          sourceCollectedAt: collectedAt,
+          relationships: [{
+            relationshipKind: "transfers_asset",
+            targetPlatformKey: "beezie",
+            targetRecordKind: "catalog_asset",
+            targetExternalId: payload.card_id,
+          }],
+        }],
+      });
+    }
+    assert.equal(records.length, 5_000);
+
+    harness.statementCounter.reset();
+    const committed = await harness.ingestion.commitPage(initialPage({
+      records,
+      quarantines: [],
+      payload: { kind: "live-page-manifest", recordCount: records.length },
+    }));
+    assert.equal(committed.newCanonicalRevisions, records.length);
+    assert.equal(await harness.database.source_records.count(), records.length);
+    assert.equal(await harness.database.canonical_revisions.count(), records.length);
+    assert.equal(
+      await harness.database.canonical_relationships.count(),
+      pullCount * 2 + tradeCount,
+    );
+    assert.equal(
+      await harness.database.public_change_catalog_impacts.count({
+        where: { provider_platform_keys: { isEmpty: false } },
+      }),
+      1,
+    );
+    assert.ok(
+      harness.statementCounter.count < 600,
+      `5,000-record page issued ${harness.statementCounter.count} SQL statements`,
+    );
+    context.diagnostic(
+      `5,000-record mixed page issued ${harness.statementCounter.count} SQL statements`,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 test("unresolved pull relationships persist and reconcile when a pack arrives", async () => {
   const harness = await createPipelineHarness();
   try {
@@ -661,6 +926,118 @@ test("unresolved pull relationships persist and reconcile when a pack arrives", 
       resolvedAt: new Date(committedAt.getTime() + 2_000),
     });
     assert.equal(reconciled, 0);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("more than one thousand event relationships reconcile without catalog churn", async () => {
+  const harness = await createPipelineHarness();
+  try {
+    const relationshipCount = 1_001;
+    const pullRecords: CommitPageInput["records"] = Array.from(
+      { length: relationshipCount },
+      (_, index) => {
+        const externalId = `fanin-pull-${index}`;
+        return {
+          recordKind: "pull" as const,
+          externalId,
+          sourceTime,
+          collectedAt,
+          payload: pullRecord(externalId),
+          projections: [{
+            platformKey: "beezie",
+            recordKind: "pull" as const,
+            externalId,
+            content: { cardExternalId: `fanin-card-${index}` },
+            sourceUpdatedAt: sourceTime,
+            sourceCollectedAt: collectedAt,
+            relationships: [{
+              relationshipKind: "opened_from_pack",
+              targetPlatformKey: "beezie",
+              targetRecordKind: "pack" as const,
+              targetExternalId: "fanin-pack",
+            }],
+          }],
+        };
+      },
+    );
+    await harness.ingestion.commitPage(initialPage({
+      records: pullRecords,
+      quarantines: [],
+      payload: { kind: "relationship-fanin", relationshipCount },
+    }));
+    assert.equal(
+      await harness.database.canonical_relationships.count({
+        where: { target_entity_id: null },
+      }),
+      relationshipCount,
+    );
+    assert.equal(await harness.database.provider_catalog_checkpoints.count(), 0);
+
+    await addRun(harness.setup, ids.secondRun);
+    const packPage = initialPage({
+      runId: ids.secondRun,
+      committedAt: new Date(committedAt.getTime() + 1_000),
+      payload: { kind: "relationship-fanin-target" },
+      records: [{
+        recordKind: "catalog",
+        externalId: "fanin-pack-source",
+        sourceTime,
+        collectedAt,
+        payload: catalogRecord("fanin-pack-source", { id: "fanin-pack" }),
+        projections: [{
+          platformKey: "beezie",
+          recordKind: "pack",
+          externalId: "fanin-pack",
+          content: { name: "Fan-in Pack" },
+          sourceUpdatedAt: sourceTime,
+          sourceCollectedAt: collectedAt,
+        }],
+      }],
+      quarantines: [],
+    });
+    await harness.ingestion.commitPage(packPage);
+
+    assert.equal(
+      await harness.database.canonical_relationships.count({
+        where: { target_entity_id: null },
+      }),
+      0,
+    );
+    assert.equal(
+      await harness.database.canonical_relationships.count({
+        where: { resolved_public_change_sequence: { not: null } },
+      }),
+      relationshipCount,
+    );
+    const packRevision = await harness.database.canonical_revisions.findFirstOrThrow({
+      where: {
+        organization_id: ids.organization,
+        entity_id: {
+          in: (
+            await harness.database.canonical_entities.findMany({
+              where: { external_id: "fanin-pack" },
+              select: { id: true },
+            })
+          ).map(({ id }) => id),
+        },
+      },
+      select: { public_change_sequence: true },
+    });
+    const catalogCheckpoint =
+      await harness.database.provider_catalog_checkpoints.findUniqueOrThrow({
+        where: {
+          organization_id_platform_key: {
+            organization_id: ids.organization,
+            platform_key: "beezie",
+          },
+        },
+      });
+    assert.equal(
+      catalogCheckpoint.source_head_sequence,
+      packRevision.public_change_sequence,
+    );
   } finally {
     await harness.close();
   }

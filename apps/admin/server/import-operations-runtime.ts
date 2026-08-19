@@ -45,9 +45,14 @@ export interface AdminImportOperationsRuntimeInput {
   readonly credentialKey: Uint8Array;
   readonly credentialKeyVersion?: number;
   readonly environment: ProviderRuntimeEnvironment;
-  readonly operational?: ProviderFreshnessOperationalHooks & QuarantineOperationalHooks;
+  readonly operational?: ProviderFreshnessOperationalHooks &
+    QuarantineOperationalHooks;
   /** Empty until a decoder for the observed live API response is supplied. */
   readonly transportAdapters?: ProviderTransportAdapterRegistry;
+}
+
+export interface ControlledImportOperationsRuntime {
+  readonly controlledImports: ImportOperationsRouterDependencies["manualImports"];
 }
 
 export class InvalidOperationCursorError extends Error {
@@ -68,18 +73,26 @@ interface CursorPayload {
   readonly id: string;
 }
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const safeCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
 
 function encodeCursor(kind: CursorKind, value: string, id: string): string {
-  return Buffer.from(JSON.stringify({ version: 1, kind, value, id }), "utf8")
-    .toString("base64url");
+  return Buffer.from(
+    JSON.stringify({ version: 1, kind, value, id }),
+    "utf8",
+  ).toString("base64url");
 }
 
-function decodeCursor(kind: CursorKind, cursor: string | undefined): CursorPayload | undefined {
+function decodeCursor(
+  kind: CursorKind,
+  cursor: string | undefined,
+): CursorPayload | undefined {
   if (cursor === undefined) return undefined;
   try {
-    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Partial<CursorPayload>;
+    const parsed = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    ) as Partial<CursorPayload>;
     if (
       parsed.version !== 1 ||
       parsed.kind !== kind ||
@@ -118,17 +131,27 @@ function actorKeyer(key: Uint8Array): ProviderActorKeyer {
 
 function failureClass(code: string): string {
   if (code.includes("AUTHENTICATION")) return "authentication";
-  if (code.includes("CONFIGURATION") || code.includes("DESTINATION")) return "configuration";
-  if (code.includes("CONTRACT") || code.includes("JSON") || code.includes("CURSOR")) return "contract";
-  if (code.includes("MAPPING") || code.includes("CALCULATION")) return "mapping";
+  if (code.includes("CONFIGURATION") || code.includes("DESTINATION"))
+    return "configuration";
+  if (
+    code.includes("CONTRACT") ||
+    code.includes("JSON") ||
+    code.includes("CURSOR")
+  )
+    return "contract";
+  if (code.includes("MAPPING") || code.includes("CALCULATION"))
+    return "mapping";
   if (code.includes("PERSISTENCE")) return "persistence";
   if (code.includes("RATE_LIMIT")) return "rate_limit";
   if (code.includes("TIMEOUT")) return "timeout";
-  if (code.includes("UNREACHABLE") || code.includes("HTTP")) return "unreachable";
+  if (code.includes("UNREACHABLE") || code.includes("HTTP"))
+    return "unreachable";
   return "unknown";
 }
 
-function quarantineSummary(entry: PersistedQuarantineEntry): QuarantineEntrySummary {
+function quarantineSummary(
+  entry: PersistedQuarantineEntry,
+): QuarantineEntrySummary {
   return {
     id: entry.id,
     providerId: entry.providerId,
@@ -187,12 +210,26 @@ function timeline(run: AdminImportRunRecord): ImportRunDetailView["timeline"] {
     state: AdminImportRunState;
     occurredAt: string;
     summary: string;
-  }> = [{ state: "queued", occurredAt: run.requestedAt.toISOString(), summary: "queued" }];
+  }> = [
+    {
+      state: "queued",
+      occurredAt: run.requestedAt.toISOString(),
+      summary: "queued",
+    },
+  ];
   if (run.startedAt) {
-    events.push({ state: "running", occurredAt: run.startedAt.toISOString(), summary: "running" });
+    events.push({
+      state: "running",
+      occurredAt: run.startedAt.toISOString(),
+      summary: "running",
+    });
   }
   if (run.finishedAt && run.state !== "queued" && run.state !== "running") {
-    events.push({ state: run.state, occurredAt: run.finishedAt.toISOString(), summary: run.state });
+    events.push({
+      state: run.state,
+      occurredAt: run.finishedAt.toISOString(),
+      summary: run.state,
+    });
   }
   return events;
 }
@@ -228,10 +265,16 @@ function toRunDetail(
 
 export function createAdminImportOperationsRuntime(
   input: AdminImportOperationsRuntimeInput,
-): Omit<ImportOperationsRouterDependencies, "auth" | "cookiePolicy" | "sameOrigin"> {
+): Omit<
+  ImportOperationsRouterDependencies,
+  "auth" | "cookiePolicy" | "sameOrigin"
+> &
+  ControlledImportOperationsRuntime {
   const clock = { now: () => new Date() };
   const keyer = actorKeyer(input.actorPseudonymKey);
-  const providerReads = new PrismaAdminProviderOperationRepository(input.database);
+  const providerReads = new PrismaAdminProviderOperationRepository(
+    input.database,
+  );
   const runReads = new PrismaAdminImportRunRepository(input.database);
   const quarantineRepository = new PrismaQuarantineRepository(input.database);
   const health = new ProviderHealthService(
@@ -277,6 +320,37 @@ export function createAdminImportOperationsRuntime(
     ids: { id: randomUUID },
     operational: input.operational,
   });
+
+  const requestManualImport = async (
+    request: Parameters<
+      ImportOperationsRouterDependencies["manualImports"]["request"]
+    >[0],
+    workerLane: "general" | "controlled",
+  ) => {
+    const result = await imports.requestImport(
+      {
+        trigger: "manual",
+        actor: request.actor,
+        providerId: request.providerId,
+        expectedConfigurationRevisionId:
+          request.expectedConfigurationRevisionId,
+      },
+      { workerLane },
+    );
+    if (result.run.trigger !== "manual") {
+      throw new Error("Manual import returned a non-manual run.");
+    }
+    return {
+      run: {
+        id: result.run.id,
+        providerId: result.run.providerId,
+        configurationRevisionId: result.run.configRevisionId,
+        trigger: result.run.trigger,
+        state: result.run.state,
+      },
+      deduplicated: result.coalesced,
+    };
+  };
 
   return {
     reads: {
@@ -390,34 +464,20 @@ export function createAdminImportOperationsRuntime(
           items: page.items.map(quarantineSummary),
           nextCursor:
             page.hasMore && last
-              ? encodeCursor("quarantine", last.createdAt.toISOString(), last.id)
+              ? encodeCursor(
+                  "quarantine",
+                  last.createdAt.toISOString(),
+                  last.id,
+                )
               : null,
         };
       },
     },
     manualImports: {
-      async request(request) {
-        const result = await imports.requestImport({
-          trigger: "manual",
-          actor: request.actor,
-          providerId: request.providerId,
-          expectedConfigurationRevisionId:
-            request.expectedConfigurationRevisionId,
-        });
-        if (result.run.trigger !== "manual") {
-          throw new Error("Manual import returned a non-manual run.");
-        }
-        return {
-          run: {
-            id: result.run.id,
-            providerId: result.run.providerId,
-            configurationRevisionId: result.run.configRevisionId,
-            trigger: result.run.trigger,
-            state: result.run.state,
-          },
-          deduplicated: result.coalesced,
-        };
-      },
+      request: (request) => requestManualImport(request, "general"),
+    },
+    controlledImports: {
+      request: (request) => requestManualImport(request, "controlled"),
     },
     quarantine,
   };

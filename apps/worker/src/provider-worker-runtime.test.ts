@@ -313,7 +313,9 @@ test("scheduler failures stop the cycle without exposing thrown details", async 
   const runtime = new ProviderWorkerRuntime({
     scheduler: {
       async runOnce(): Promise<never> {
-        throw new Error("postgresql://operator:super-secret-token@db.test/data");
+        throw new Error(
+          "postgresql://operator:super-secret-token@db.test/data",
+        );
       },
     },
     imports: {
@@ -429,6 +431,84 @@ test("a cycle drains only its configured bounded claim count", async () => {
   assert.equal(schedulerCalls, 2);
 });
 
+test("one-shot mode executes only the exact bounded claim and exits without polling other work", async () => {
+  const calls: string[] = [];
+  const events: ProviderWorkerLogEvent[] = [];
+  const runtime = new ProviderWorkerRuntime({
+    scheduler: {
+      async runOnce(): Promise<never> {
+        calls.push("schedule");
+        throw new Error("must not poll schedules");
+      },
+    },
+    imports: {
+      async executeImport(input) {
+        calls.push(
+          `exact:${input.organizationId}:${input.runId}:${input.workerLane}`,
+        );
+        return terminalRun({
+          state: "queued",
+          finishedAt: null,
+          reachedProviderHead: false,
+          failureCode: null,
+          failureSummary: null,
+        });
+      },
+      async executeNextImport(): Promise<never> {
+        calls.push("queue");
+        throw new Error("must not poll the shared queue");
+      },
+    },
+    estimatedEv: {
+      async runCycle(): Promise<never> {
+        calls.push("estimated-ev");
+        throw new Error("must not process side work");
+      },
+    },
+    retention: {
+      async runCycle(): Promise<never> {
+        calls.push("retention");
+        throw new Error("must not process side work");
+      },
+    },
+    logger: capturingLogger(events),
+    workerId: "worker:one-shot",
+  });
+
+  const result = await runtime.runOneShot({
+    organizationId: "organization-1",
+    runId: "run-1",
+  });
+
+  assert.deepEqual(result, {
+    claims: 1,
+    executions: 1,
+    contentions: 0,
+    failures: 0,
+    reason: "claim_limit",
+  });
+  assert.deepEqual(calls, ["exact:organization-1:run-1:controlled"]);
+  assert.deepEqual(
+    events.map(({ event }) => event),
+    [
+      "provider_worker_started",
+      "provider_import_yielded",
+      "provider_worker_stopped",
+    ],
+  );
+  assert.equal(
+    events.some(({ event }) =>
+      [
+        "provider_import_finished",
+        "provider_import_failed",
+        "provider_retention_cycle_finished",
+        "provider_estimated_ev_cycle_finished",
+      ].includes(event),
+    ),
+    false,
+  );
+});
+
 test("retention runs after imports and failures never poison later polling", async () => {
   const events: ProviderWorkerLogEvent[] = [];
   const calls: string[] = [];
@@ -454,7 +534,9 @@ test("retention runs after imports and failures never poison later polling", asy
         calls.push("retention.run");
         retentionCalls += 1;
         if (retentionCalls === 1) {
-          throw new Error("postgresql://worker:super-secret-token@db.test/data");
+          throw new Error(
+            "postgresql://worker:super-secret-token@db.test/data",
+          );
         }
         return retentionRunner().runCycle();
       },
@@ -485,9 +567,7 @@ test("retention runs after imports and failures never poison later polling", asy
     true,
   );
   assert.equal(
-    events.some(
-      ({ event }) => event === "provider_retention_cycle_finished",
-    ),
+    events.some(({ event }) => event === "provider_retention_cycle_finished"),
     true,
   );
   assert.equal(JSON.stringify(events).includes("super-secret-token"), false);
@@ -532,9 +612,7 @@ test("bounded retention failures are surfaced without changing import counts", a
     reason: "idle",
   });
   assert.deepEqual(
-    events.find(
-      ({ event }) => event === "provider_retention_cycle_finished",
-    ),
+    events.find(({ event }) => event === "provider_retention_cycle_finished"),
     {
       level: "error",
       event: "provider_retention_cycle_finished",
@@ -626,5 +704,8 @@ test("estimated EV work is isolated from import success and recovers on later cy
     ),
     true,
   );
-  assert.equal(JSON.stringify(events).includes("private-provider-payload"), false);
+  assert.equal(
+    JSON.stringify(events).includes("private-provider-payload"),
+    false,
+  );
 });

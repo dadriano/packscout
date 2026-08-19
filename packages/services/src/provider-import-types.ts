@@ -11,12 +11,9 @@ import type {
 import type { EncryptedProviderCredential } from "./provider-credential-cipher.ts";
 
 export type ProviderImportTrigger = "scheduled" | "manual";
+export type ProviderImportWorkerLane = "general" | "controlled";
 export type ProviderImportRunState =
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "incomplete"
-  | "failed";
+  "queued" | "running" | "succeeded" | "incomplete" | "failed";
 
 export interface ProviderImportRunCounters {
   readonly accepted: number;
@@ -64,6 +61,10 @@ export interface ClaimedProviderImportRun extends ProviderImportRunSummary {
 export type ProviderImportRequestPersistenceResult =
   | { readonly kind: "created"; readonly run: ProviderImportRunSummary }
   | { readonly kind: "active"; readonly run: ProviderImportRunSummary }
+  | {
+      readonly kind: "worker_lane_conflict";
+      readonly run: ProviderImportRunSummary;
+    }
   | { readonly kind: "not_found" }
   | { readonly kind: "provider_unavailable" }
   | {
@@ -88,7 +89,19 @@ export type ProviderImportFinishPersistenceResult =
   | { readonly kind: "finished"; readonly run: ProviderImportRunSummary }
   | { readonly kind: "not_found" }
   | { readonly kind: "ownership_lost" }
-  | { readonly kind: "already_terminal"; readonly run: ProviderImportRunSummary };
+  | {
+      readonly kind: "already_terminal";
+      readonly run: ProviderImportRunSummary;
+    };
+
+export type ProviderImportYieldPersistenceResult =
+  | { readonly kind: "yielded"; readonly run: ProviderImportRunSummary }
+  | { readonly kind: "not_found" }
+  | { readonly kind: "ownership_lost" }
+  | {
+      readonly kind: "already_terminal";
+      readonly run: ProviderImportRunSummary;
+    };
 
 export interface ProviderImportRunRepository {
   requestRun(input: {
@@ -96,6 +109,7 @@ export interface ProviderImportRunRepository {
     providerId: string;
     runId: string;
     trigger: ProviderImportTrigger;
+    workerLane: ProviderImportWorkerLane;
     requestedByActorKey: string | null;
     requestedAt: Date;
     expectedConfigurationRevisionId?: string;
@@ -104,6 +118,7 @@ export interface ProviderImportRunRepository {
     organizationId: string;
     runId: string;
     workerId: string;
+    workerLane: ProviderImportWorkerLane;
     claimedAt: Date;
     leaseExpiresAt: Date;
   }): Promise<ProviderImportClaimPersistenceResult>;
@@ -131,6 +146,12 @@ export interface ProviderImportRunRepository {
     workerId: string;
     transientRetry: boolean;
   }): Promise<boolean>;
+  yieldRun(input: {
+    organizationId: string;
+    runId: string;
+    workerId: string;
+    yieldedAt: Date;
+  }): Promise<ProviderImportYieldPersistenceResult>;
   finishRun(input: {
     organizationId: string;
     runId: string;
@@ -293,7 +314,9 @@ export type ProviderArchiveImportRequestPersistenceResult =
   | { readonly kind: "created"; readonly run: ProviderImportRunSummary }
   | { readonly kind: "existing"; readonly run: ProviderImportRunSummary }
   | { readonly kind: "active"; readonly run: ProviderImportRunSummary }
-  | { readonly kind: "not_found" | "provider_unavailable" | "revision_conflict" };
+  | {
+      readonly kind: "not_found" | "provider_unavailable" | "revision_conflict";
+    };
 
 export interface ProviderArchiveImportRepository {
   ensureArchiveRevision(input: {
@@ -373,6 +396,7 @@ export type ProviderImportTerminalFailureCode =
 export type ProviderImportServiceErrorCode =
   | "CONFIG_REVISION_CONFLICT"
   | "IMPORT_TRIGGER_CONFLICT"
+  | "IMPORT_WORKER_LANE_CONFLICT"
   | "IMPORT_RUN_NOT_CLAIMABLE"
   | "IMPORT_RUN_NOT_FOUND"
   | "PROVIDER_NOT_FOUND"

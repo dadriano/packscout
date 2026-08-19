@@ -1,6 +1,7 @@
 import type {
   ProviderImportQueueExecutionResult,
   ProviderImportRunSummary,
+  ProviderImportWorkerLane,
 } from "./provider-import-types.ts";
 import type {
   OperationalEventService,
@@ -12,6 +13,7 @@ export interface ProviderImportExecutionPort {
     organizationId: string;
     runId: string;
     workerId: string;
+    workerLane?: ProviderImportWorkerLane;
   }): Promise<ProviderImportRunSummary>;
 }
 
@@ -57,6 +59,12 @@ export class ProviderImportHealthService {
   protected async recordOutcome(
     run: ProviderImportRunSummary,
   ): Promise<ProviderImportRunSummary> {
+    if (
+      !run.finishedAt &&
+      (run.state === "queued" || run.state === "running")
+    ) {
+      return run;
+    }
     if (!run.finishedAt) {
       throw new Error("Import execution returned a non-terminal run.");
     }
@@ -71,7 +79,9 @@ export class ProviderImportHealthService {
     return run;
   }
 
-  private async reportTerminalRun(run: ProviderImportRunSummary): Promise<void> {
+  private async reportTerminalRun(
+    run: ProviderImportRunSummary,
+  ): Promise<void> {
     if (!this.operational || !run.finishedAt) return;
     const durationMs = run.startedAt
       ? Math.max(0, run.finishedAt.getTime() - run.startedAt.getTime())

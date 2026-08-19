@@ -325,6 +325,16 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       }),
       1,
     );
+    assert.equal(
+      await harness.database.public_change_causes.count({
+        where: {
+          organization_id: organizationId,
+          entity_key: `provider:v1:${providerId}`,
+        },
+      }),
+      1,
+      "concurrent activation must append one lifecycle decision",
+    );
     const active = concurrentActivations[0]!;
     assert.equal(active.state, "active");
     assert.equal(active.activeRevisionId, firstRevisionId);
@@ -344,6 +354,16 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       service.activateRevision(admin, providerId, firstRevisionId),
     );
     assert.equal(failedRetestActivation.code, "PROVIDER_CONNECTION_FAILED");
+    assert.equal(
+      await harness.database.public_change_causes.count({
+        where: {
+          organization_id: organizationId,
+          entity_key: `provider:v1:${providerId}`,
+        },
+      }),
+      1,
+      "a rejected replay must not append lifecycle drift",
+    );
     adapter.failConnection = false;
     await service.testConnection(admin, providerId, firstRevisionId);
     const runId = "00000000-0000-4000-8000-000000000900";
@@ -416,6 +436,11 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
     );
     assert.equal(disabled.state, "disabled");
     assert.equal(disabled.nextRunAt, null);
+    assert.equal(
+      (await service.disableProvider(admin, providerId, secondRevisionId)).state,
+      "disabled",
+      "disable replay remains idempotent",
+    );
     const runningRecord = await harness.database.import_runs.findUnique({
       where: { id: runId },
       select: { state: true, config_revision_id: true },
@@ -434,6 +459,142 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
     );
     assert.equal(archived.state, "archived");
     assert.equal(archived.nextRunAt, null);
+    assert.equal(
+      (await service.archiveProvider(admin, providerId, secondRevisionId)).state,
+      "archived",
+      "archive replay remains idempotent",
+    );
+    const lifecycleCauses = await harness.database.public_change_causes.findMany({
+      where: {
+        organization_id: organizationId,
+        entity_key: `provider:v1:${providerId}`,
+      },
+      orderBy: { sequence: "asc" },
+      select: {
+        sequence: true,
+        change_kind: true,
+        source_key: true,
+        source_revision_key: true,
+        metadata_json: true,
+        public_change_catalog_impacts: {
+          select: {
+            provider_platform_keys: true,
+            lifecycle_platform_key: true,
+            lifecycle_state: true,
+          },
+        },
+      },
+    });
+    assert.deepEqual(
+      lifecycleCauses.map((cause) => ({
+        kind: cause.change_kind,
+        sourceKey: cause.source_key,
+        revisionId: cause.source_revision_key,
+        metadata: cause.metadata_json,
+        providerPlatformKeys:
+          cause.public_change_catalog_impacts?.provider_platform_keys,
+        lifecyclePlatformKey:
+          cause.public_change_catalog_impacts?.lifecycle_platform_key,
+        lifecycleState: cause.public_change_catalog_impacts?.lifecycle_state,
+      })),
+      [
+        {
+          kind: "provider_lifecycle",
+          sourceKey: "beezie",
+          revisionId: firstRevisionId,
+          metadata: {
+            providerId,
+            platformKey: "beezie",
+            state: "active",
+            configurationRevisionId: firstRevisionId,
+          },
+          providerPlatformKeys: ["beezie"],
+          lifecyclePlatformKey: "beezie",
+          lifecycleState: "active",
+        },
+        {
+          kind: "provider_lifecycle",
+          sourceKey: "beezie",
+          revisionId: secondRevisionId,
+          metadata: {
+            providerId,
+            platformKey: "beezie",
+            state: "active",
+            configurationRevisionId: secondRevisionId,
+          },
+          providerPlatformKeys: ["beezie"],
+          lifecyclePlatformKey: "beezie",
+          lifecycleState: "active",
+        },
+        {
+          kind: "provider_lifecycle",
+          sourceKey: "beezie",
+          revisionId: secondRevisionId,
+          metadata: {
+            providerId,
+            platformKey: "beezie",
+            state: "disabled",
+            configurationRevisionId: secondRevisionId,
+          },
+          providerPlatformKeys: [],
+          lifecyclePlatformKey: "beezie",
+          lifecycleState: "disabled",
+        },
+        {
+          kind: "provider_lifecycle",
+          sourceKey: "beezie",
+          revisionId: secondRevisionId,
+          metadata: {
+            providerId,
+            platformKey: "beezie",
+            state: "archived",
+            configurationRevisionId: secondRevisionId,
+          },
+          providerPlatformKeys: [],
+          lifecyclePlatformKey: "beezie",
+          lifecycleState: "archived",
+        },
+      ],
+    );
+    const [providerCheckpoint, manifestCheckpoint, publicWatermark] =
+      await Promise.all([
+        harness.database.provider_catalog_checkpoints.findUniqueOrThrow({
+          where: {
+            organization_id_platform_key: {
+              organization_id: organizationId,
+              platform_key: "beezie",
+            },
+          },
+        }),
+        harness.database.catalog_manifest_lifecycle_checkpoints.findUniqueOrThrow({
+          where: { organization_id: organizationId },
+        }),
+        harness.database.settled_public_watermarks.findUniqueOrThrow({
+          where: { organization_id: organizationId },
+        }),
+      ]);
+    assert.deepEqual(
+      {
+        provider: [
+          providerCheckpoint.settled_sequence,
+          providerCheckpoint.source_head_sequence,
+        ],
+        manifest: [
+          manifestCheckpoint.settled_sequence,
+          manifestCheckpoint.source_head_sequence,
+        ],
+        public: [
+          publicWatermark.settled_sequence,
+          publicWatermark.source_head_sequence,
+        ],
+      },
+      {
+        provider: [2n, 2n],
+        manifest: [4n, 4n],
+        public: [4n, 4n],
+      },
+      "each effective lifecycle transition settles atomically in its affected lanes",
+    );
     const archivedEdit = await captureServiceError(
       service.replaceRevision(admin, providerId, {
         expectedRevisionId: secondRevisionId,
