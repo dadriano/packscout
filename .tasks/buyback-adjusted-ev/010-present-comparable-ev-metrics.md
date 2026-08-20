@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/011, buyback-adjusted-ev/012, buyback-adjusted-ev/013
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including all public surfaces, responsive behavior, accessibility, and browser verification
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 

@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/010, buyback-adjusted-ev/013
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder, including full-path deterministic scenarios, local guards, replay, and cleanup verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -57,8 +57,15 @@ It has no production scheduler, cloud deployment option, provider credential acc
 
 ## Acceptance Criteria
 
-- [ ] Identical controls replay byte-equivalent frames while seed, frame, clock, price, pool, or buyback changes produce the expected new result.
-- [ ] Every approved available, unavailable, confidence, freshness, sold-out, and transition state passes the production contracts.
-- [ ] Simulated inputs traverse normalization, calculation, confidence, persistence, recomputation, publication, and queries; no hard-coded final metric can drift from the formula.
-- [ ] Local, cloud, canonical-release, sequence, hash, lifecycle, interruption, and cleanup guards have behavioral tests.
-- [ ] Raw synthetic observations never enter public results, Convex aggregate storage, logs, or telemetry.
+- [x] Identical controls replay byte-equivalent frames while seed, frame, clock, price, pool, or buyback changes produce the expected new result.
+- [x] Every approved available, unavailable, confidence, freshness, sold-out, and transition state passes the production contracts.
+- [x] Simulated inputs traverse normalization, calculation, confidence, persistence, recomputation, publication, and queries; no hard-coded final metric can drift from the formula.
+- [x] Local, cloud, canonical-release, sequence, hash, lifecycle, interruption, and cleanup guards have behavioral tests.
+- [x] Raw synthetic observations never enter public results, Convex aggregate storage, logs, or telemetry.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — 13 versioned scenarios minting synthetic source revisions in the exact typed shapes of five real provider modules, driven through the unmodified production path (004 -> 002/003 via 006 -> 005 -> 008) with byte-equivalent replay under explicit seed/frame/clock controls, independent-recompute proof that no public metric is hard-coded, simulated labeling inside existing task-007 fields (5eeded UUID namespace, [Simulated] naming, fingerprint-tied run identity), loopback-only write guards with temporary-key cleanup on success/failure/interruption, and a bounded stoppable loop mode.
+- Divergences: (1) no package.json script alias — invocation documented in the script header (write scope); (2) test:convex not run — zero Convex files touched; heat-unavailable-on-v3 pinned at the view layer and live read-back; (3) canonical revisions persist to an in-memory adapter behind the real task-005 store for per-run lifetime — the persistence port is the sanctioned seam and the durable local artifact is the sanitized aggregate release; (4) scenario-map updates recorded here rather than in scenario files (write scope).
+- Verification: 34 focused tests (21 services + 13 script), services suite 563+1, root tests 192+2, root typecheck, lint, ratchet 0 new findings, check:framework — orchestrator re-ran focused suites and ratchet independently. Task file predates a ## Verification anchor; the focused suites are the fallback anchor.
