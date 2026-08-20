@@ -6,7 +6,41 @@ import {
   type LearnSection,
 } from "@/lib/learn-content";
 import { METRIC_TRUST_COPY } from "@/lib/metric-vocabulary";
+import {
+  getPackScoutEvWorkedExample,
+  type PackScoutEvWorkedExample,
+} from "@/lib/packscout-ev-examples";
+import { ResponsiblePlayNotice } from "./ResponsiblePlayNotice";
 import styles from "./Learn.module.css";
+
+function WorkedExample({ example }: { example: PackScoutEvWorkedExample }) {
+  return (
+    <aside aria-label={example.title} className={styles.example}>
+      <p className={styles.calloutLabel}>Worked example</p>
+      <h3>{example.title}</h3>
+      <p>{example.narrative}</p>
+      <p className={styles.exampleGroupLabel}>Platform-documented scenario</p>
+      <dl className={styles.exampleRows}>
+        {example.inputRows.map((row) => (
+          <div key={row.label}>
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className={styles.exampleGroupLabel}>What PackScout shows</p>
+      <dl className={styles.exampleRows}>
+        {example.metricRows.map((row) => (
+          <div key={row.label}>
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p>{example.outcomeNote}</p>
+    </aside>
+  );
+}
 
 function ArticleSection({ section }: { section: LearnSection }) {
   const metricDefinitions = section.metricKeys
@@ -48,24 +82,12 @@ function ArticleSection({ section }: { section: LearnSection }) {
         </ul>
       ) : null}
 
-      {section.example ? (
-        <aside
-          aria-label={section.example.heading}
-          className={styles.example}
-        >
-          <p className={styles.calloutLabel}>Worked example</p>
-          <h3>{section.example.heading}</h3>
-          <dl className={styles.exampleRows}>
-            {section.example.rows.map((row) => (
-              <div key={row.label}>
-                <dt>{row.label}</dt>
-                <dd>{row.value}</dd>
-              </div>
-            ))}
-          </dl>
-          <p>{section.example.explanation}</p>
-        </aside>
-      ) : null}
+      {section.evExampleIds?.map((exampleId) => (
+        <WorkedExample
+          example={getPackScoutEvWorkedExample(exampleId)}
+          key={exampleId}
+        />
+      ))}
 
       {section.callout ? (
         <aside
@@ -122,6 +144,8 @@ export function ArticleLayout({ guide }: { guide: LearnGuide }) {
           <ArticleSection key={section.heading} section={section} />
         ))}
       </div>
+
+      <ResponsiblePlayNotice />
 
       <footer className={styles.relatedPanel}>
         <p className={styles.calloutLabel}>Continue on Dashboard</p>

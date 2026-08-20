@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/013
 **Estimated scope:** medium
 **Estimated effort:** 1–2 days for one builder, including glossary, Learn content, responsible-play review, and content verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -57,8 +57,16 @@ The content registry exposes one canonical definition for every EV term and one 
 
 ## Acceptance Criteria
 
-- [ ] Glossary and Learn accurately explain all four metrics, buyback application, break-even, evidence priority, confidence, freshness, and unavailable behavior.
-- [ ] Positive, neutral, negative, zero, unavailable, and `$100 / 85%` examples match the shared presentation values exactly.
-- [ ] Platform provenance, vendor-EV separation, non-predictive pulls, excluded costs, and model non-goals are explicit.
-- [ ] Responsible-play and disclaimer copy use the verified current official resource and pass content-owner review.
-- [ ] Content tests prevent terminology, example, reason, link, and accessible-help drift across public surfaces.
+- [x] Glossary and Learn accurately explain all four metrics, buyback application, break-even, evidence priority, confidence, freshness, and unavailable behavior.
+- [x] Positive, neutral, negative, zero, unavailable, and `$100 / 85%` examples match the shared presentation values exactly.
+- [x] Platform provenance, vendor-EV separation, non-predictive pulls, excluded costs, and model non-goals are explicit.
+- [x] Responsible-play and disclaimer copy use the verified current official resource and pass content-owner review.
+- [x] Content tests prevent terminology, example, reason, link, and accessible-help drift across public surfaces.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — Learn/glossary rewritten to the buyback-adjusted method with a canonical example registry whose six worked examples (positive, neutral, negative, valid-zero, unavailable, $100 x 85% = $85) are contract-parsed estimates rendered through the shared task-010 presentation boundary (no typed final numbers); evidence priority, confidence/freshness/unavailable semantics, vendor separation, non-predictive pulls, and excluded costs all taught with drift-prevention tests (definition identity between glossary and Learn, verbatim limitation vocabulary, pinned example strings).
+- Divergences: (1) the no-recalculation source guard now allowlists the example registry as a second approved raw-numerics constructor (contract-parsed, boundary-rendered — invariant unchanged); (2) responsible-play contact is 1-800-MY-RESET / 1800myreset.org verified 2026-08-19 against official NCPG pages — the methodology docx's 1-800-522-4700 and the older 1-800-GAMBLER are stale (NCPG lost 1-800-GAMBLER by court order 2025-09-29); sources and verification date recorded in lib/responsible-play.ts and its release-check test; (3) corrected the what-is-a-repack Buyback % paragraph and a method point that contradicted the fail-closed policy; removed the stale hard-coded $108 example.
+- OPEN FOR RELEASE GATE: content-owner review of terminology, examples, and the responsible-play block is a human sign-off recorded at task 013 — not self-certified here.
+- Verification: npm run test:frontend (219 pass), typecheck:frontend, root typecheck, lint:frontend, ratchet 0 new findings, plus a live dev-server smoke of all four Learn routes at desktop and 375px — frontend suite and ratchet independently re-run by the orchestrator. Task file predates a ## Verification anchor; the frontend suite is the fallback anchor.

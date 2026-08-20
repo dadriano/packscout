@@ -50,7 +50,15 @@ test("only the presentation boundary consumes raw public EV numerics", () => {
     .map(relative)
     .sort();
 
-  assert.deepEqual(consumers, ["lib/packscout-ev-presentation.ts"]);
+  // Exactly two approved modules: the presentation boundary (task 010), and
+  // the Learn worked-example registry (task 011), which constructs
+  // contract-parsed example estimates from raw numerics and renders every
+  // displayed string exclusively through that same boundary. Components and
+  // routes still never touch raw EV numerics.
+  assert.deepEqual(consumers, [
+    "lib/packscout-ev-examples.ts",
+    "lib/packscout-ev-presentation.ts",
+  ]);
 });
 
 test("no component imports the calculator or the contract consistency helper", () => {

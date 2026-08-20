@@ -4,7 +4,7 @@
 
 Open `buyback-adjusted-ev/001`, encode the approved formulas and fail-closed evidence rules as one versioned calculation contract, and finish with the `$100 outcome EV / 85% buyback / $100 price` example producing `$85`, `85%`, `-$15`, and `-15%`.
 
-**Progress:** 11/13 tasks complete
+**Progress:** 12/13 tasks complete
 
 ## Context
 
@@ -122,7 +122,7 @@ No other V1 penalty is permitted. Missing essential evidence does not reduce con
 | 008 | Publish one coherent public release | large | 4–6 days | done | 006, 007 |
 | 009 | Simulate production-faithful EV changes | medium | 2–3 days | done | 006, 008 |
 | 010 | Present comparable EV metrics | large | 3–5 days | done | 008, 009 |
-| 011 | Teach the methodology and limitations | medium | 1–2 days | in_progress | 010 |
+| 011 | Teach the methodology and limitations | medium | 1–2 days | done | 010 |
 | 012 | Prove backfill and operational readiness | medium | 2–4 days | done | 006, 008, 010 |
 | 013 | Certify the complete launch flow | medium | 2–4 days | todo | 009, 010, 011, 012 |
 

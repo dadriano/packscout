@@ -493,6 +493,46 @@
   margin-top: 1.15rem;
 }
 
+.exampleGroupLabel {
+  margin: 1.1rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  font-weight: 640;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.responsiblePlay {
+  margin-top: 2.2rem;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-action);
+  border-radius: 0.35rem;
+  background: var(--color-surface);
+  padding: 1.15rem 1.25rem;
+}
+
+.responsiblePlay p:not(.calloutLabel) {
+  margin: 0.65rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.responsiblePlay .responsibleContact a {
+  color: var(--color-text);
+  font-weight: 640;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.responsiblePlay .responsibleContact a:hover {
+  color: var(--color-action);
+}
+
+.responsiblePlay .responsibleMeta {
+  font-size: 0.78rem;
+}
+
 @media (max-width: 800px) {
   .guideGrid {
     grid-template-columns: 1fr;

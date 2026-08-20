@@ -5,6 +5,7 @@ import {
   type LearnGuide,
 } from "@/lib/learn-content";
 import { METRIC_TRUST_COPY } from "@/lib/metric-vocabulary";
+import { ResponsiblePlayNotice } from "./ResponsiblePlayNotice";
 import styles from "./Learn.module.css";
 
 export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
@@ -87,6 +88,8 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
           </li>
         ))}
       </ol>
+
+      <ResponsiblePlayNotice />
 
       <p className={styles.indexNote}>
         PackScout education is vendor-neutral and stays available while
