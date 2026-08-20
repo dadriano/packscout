@@ -6,6 +6,12 @@ import {
   type PackScoutV3DeploymentPort,
   type PackScoutV3MaintenanceGatePort,
 } from "./buyback-adjusted-ev-cutover-runbook.ts";
+import {
+  composePackScoutBuybackEvReadinessLedgerV1,
+  evaluatePackScoutBuybackEvReadinessV1,
+  type PackScoutBuybackEvReadinessEvidenceV1,
+} from "./buyback-adjusted-ev-readiness-ledger.ts";
+import type { PackScoutBuybackEvBackfillLedgerV1 } from "./buyback-adjusted-ev-backfill-reconciliation.ts";
 import { DataReleaseV3ReleaseAssembler } from "./buyback-adjusted-ev-release-assembler.ts";
 import { DataReleaseV3ReleasePublisher } from "./buyback-adjusted-ev-release-publisher.ts";
 import {
@@ -187,6 +193,197 @@ test("a failure after activation restores V2, rolls the pointer back, then reope
     "rollback_v3_release",
     "reopen_after_failure",
   ]);
+});
+
+test("one maintenance-gated rollback drill restores the prior code and pointer and records into the readiness ledger", async () => {
+  const port = new InMemoryDataReleaseV3Port();
+  const gate = new RecordingGate();
+  // Seed the retained prior release so the drill has a coherent predecessor.
+  const seedPublisher = new DataReleaseV3ReleasePublisher(port);
+  const seedPlan = await assembler([REPACK_A]).assemble({
+    readAt: RELEASE_READ_AT,
+  });
+  if (seedPlan.classification !== "publish") throw new Error("unexpected");
+  await seedPublisher.publish(seedPlan);
+
+  const deployment = new StubDeployment();
+  deployment.failApplicationDeploy = true;
+  const drillTimes: string[] = [];
+  const timedGate: PackScoutV3MaintenanceGatePort = {
+    async gatePublicTraffic() {
+      drillTimes.push(new Date().toISOString());
+      await gate.gatePublicTraffic();
+    },
+    async openPublicTraffic() {
+      drillTimes.push(new Date(Date.now() + 1_000).toISOString());
+      await gate.openPublicTraffic();
+    },
+  };
+  const runbook = new PackScoutV3CutoverRunbook(
+    assembler([REPACK_A, REPACK_B], 11_000),
+    port,
+    timedGate,
+    deployment,
+  );
+  const result = await runbook.execute({ readAt: RELEASE_READ_AT });
+  assert.equal(result.outcome, "rolled_back");
+  if (result.outcome !== "rolled_back") return;
+  assert.equal(deployment.restored, true);
+  assert.equal(
+    port.state.activeRelease?.publicReleaseId,
+    seedPlan.publicReleaseId,
+    "the retained prior pointer is active again before traffic resumes",
+  );
+  assert.deepEqual(gate.transitions, ["gate", "open"]);
+
+  // The drill lands in the typed readiness ledger as reproducible evidence.
+  const backfill: PackScoutBuybackEvBackfillLedgerV1 = {
+    schemaVersion: "packscout-buyback-ev-backfill-reconciliation-v1",
+    organizationId: "42000000-0000-4000-8000-000000000001",
+    readAt: RELEASE_READ_AT,
+    classification: "ready",
+    methodVersions: ["packscout-buyback-adjusted-ev-v1"],
+    confidencePolicyVersions: ["packscout-buyback-adjusted-ev-confidence-v1"],
+    counts: {
+      total: 2,
+      recomputedAvailable: 2,
+      deterministicUnavailable: 0,
+      soldOutHistorical: 0,
+      byPublicReason: {},
+      byConfidenceBand: { low: 0, medium: 0, high: 2 },
+      bySourceAge: {
+        fresh_within_15_minutes: 2,
+        delayed_over_15_through_30_minutes: 0,
+        delayed_over_30_through_60_minutes: 0,
+        stale_or_expired: 0,
+        unknown_source_time: 0,
+      },
+    },
+    recomputation: {
+      created: 2,
+      unchanged: 0,
+      superseded: 0,
+      rejected: 0,
+      unbindable: 0,
+      skippedNoEvidence: 0,
+    },
+    staging: {
+      staged: true,
+      publicReleaseId: seedPlan.publicReleaseId,
+      releaseFingerprint: seedPlan.releaseFingerprint,
+      lifecycle: "complete",
+      priorActivePublicReleaseId: null,
+      activePointerMoved: false,
+    },
+    rows: [REPACK_A, REPACK_B].map((publicRepackId, index) => ({
+      platformKey: "collector_example",
+      productKey: `product-${publicRepackId}`,
+      publicRepackId,
+      availability: "active" as const,
+      classification: "recomputed_available" as const,
+      publicReason: null,
+      recomputationOutcome: "created" as const,
+      revisionId: `40000000-0000-4000-8000-00000000000${index + 1}`,
+      revisionNumber: 1,
+      methodVersion: "packscout-buyback-adjusted-ev-v1",
+      confidencePolicyVersion: "packscout-buyback-adjusted-ev-confidence-v1",
+      confidenceBand: "high" as const,
+      sourceAgeBucket: "fresh_within_15_minutes" as const,
+      calculatedAt: RELEASE_READ_AT,
+    })),
+    blockedReasons: [],
+  };
+  const evidence: PackScoutBuybackEvReadinessEvidenceV1 = {
+    generatedAt: new Date().toISOString(),
+    applicationCommit: "fd16dc0aa11bb22cc33dd44ee55ff6677889900a",
+    configurationFingerprintSha256: "c".repeat(64),
+    candidate: {
+      publicReleaseId: seedPlan.publicReleaseId,
+      releaseFingerprint: seedPlan.releaseFingerprint,
+      dataAsOf: RELEASE_READ_AT,
+    },
+    prior: null,
+    backfill,
+    maintenance: { gatedAt: drillTimes[0]!, reopenedAt: drillTimes[1]! },
+    verificationCommands: [
+      {
+        command: "node --import tsx --test src/buyback-adjusted-ev-cutover-runbook.test.ts",
+        exitCode: 0,
+        completedAt: new Date().toISOString(),
+      },
+    ],
+    alerts: [
+      {
+        condition: "recomputation_backlog",
+        kind: "provider_stale",
+        dedupeKey: "buyback-ev:backlog:42000000-0000-4000-8000-000000000002",
+        status: "accepted",
+      },
+      {
+        condition: "method_mismatch",
+        kind: "run_failed",
+        dedupeKey:
+          "buyback-ev:method-mismatch:42000000-0000-4000-8000-000000000001",
+        status: "accepted",
+      },
+      {
+        condition: "publication_rejected",
+        kind: "run_failed",
+        dedupeKey:
+          "buyback-ev:publication:42000000-0000-4000-8000-000000000001",
+        status: "accepted",
+      },
+      {
+        condition: "freshness_expired",
+        kind: "provider_stale",
+        dedupeKey: "buyback-ev:freshness:42000000-0000-4000-8000-000000000002",
+        status: "accepted",
+      },
+    ],
+    promotion: {
+      outcome: "rolled_back",
+      publicReleaseId: null,
+      failedStep: result.failedStep,
+      steps: result.steps,
+    },
+    rollbackDrill: {
+      executed: true,
+      failedStep: result.failedStep,
+      steps: result.steps,
+      restoredActivePublicReleaseId:
+        port.state.activeRelease?.publicReleaseId ?? null,
+    },
+  };
+  const ledger = composePackScoutBuybackEvReadinessLedgerV1(evidence);
+  assert.equal(
+    ledger.criteria.find(
+      ({ criterion }) => criterion === "rollback_drill_recorded",
+    )?.status,
+    "pass",
+  );
+  assert.equal(ledger.readiness, "pass");
+  assert.equal(ledger.rollbackDrill.failedStep, "deploy_v3_application");
+  assert.deepEqual(ledger.rollbackDrill.steps.slice(-3), [
+    "restore_v2_application",
+    "rollback_v3_release",
+    "reopen_after_failure",
+  ]);
+  assert.equal(
+    ledger.rollbackDrill.restoredActivePublicReleaseId,
+    seedPlan.publicReleaseId,
+  );
+
+  // Without the drill the same evidence is strictly blocked — no waiver.
+  const withoutDrill = evaluatePackScoutBuybackEvReadinessV1({
+    ...evidence,
+    rollbackDrill: {
+      executed: false,
+      failedStep: null,
+      steps: [],
+      restoredActivePublicReleaseId: null,
+    },
+  });
+  assert.equal(withoutDrill.readiness, "blocked");
 });
 
 test("a divergent candidate origin never reopens against mismatched contracts", async () => {
