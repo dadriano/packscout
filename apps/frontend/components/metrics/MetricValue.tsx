@@ -1,11 +1,13 @@
 import { GlossaryHint } from "./GlossaryHint.client";
 import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
+import type { GlossaryDefinition } from "@/lib/metric-vocabulary";
 import styles from "./MetricValue.module.css";
 
 type MetricValueProps = Readonly<{
   metric: MetricValuePresentation;
   compact?: boolean;
   glossaryAlign?: "start" | "end";
+  glossaryContent?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
   showGlossary?: boolean;
   showLabel?: boolean;
   showReason?: boolean;
@@ -16,6 +18,7 @@ export function MetricValue({
   metric,
   compact = false,
   glossaryAlign = "start",
+  glossaryContent,
   showGlossary = true,
   showLabel = true,
   showReason = true,
@@ -36,7 +39,11 @@ export function MetricValue({
         <div className={styles.labelRow}>
           {showLabel ? <span className={styles.label}>{metric.label}</span> : null}
           {showGlossary ? (
-            <GlossaryHint align={glossaryAlign} field={metric.glossaryKey} />
+            <GlossaryHint
+              align={glossaryAlign}
+              content={glossaryContent}
+              field={metric.glossaryKey}
+            />
           ) : null}
         </div>
       ) : null}

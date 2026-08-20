@@ -18,6 +18,8 @@
 }
 
 .heading {
+  display: inline-flex;
+  align-items: center;
   margin: 0;
   font-size: 0.94rem;
   font-weight: 780;
@@ -68,6 +70,11 @@
   padding: 0.55rem 0.7rem;
   color: var(--color-text-muted);
   font-size: 0.72rem;
+}
+
+.confidenceLabel {
+  display: inline-flex;
+  align-items: center;
 }
 
 .confidence strong {

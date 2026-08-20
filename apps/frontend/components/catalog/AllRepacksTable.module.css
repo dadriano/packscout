@@ -21,6 +21,10 @@
   font-size: 0.75rem;
 }
 
+.headingActions {
+  min-width: 0;
+}
+
 .eyebrow {
   margin-bottom: 0.2rem;
   font-weight: 700;
@@ -238,6 +242,10 @@
 
   .table {
     min-width: 1680px;
+  }
+
+  .headingActions {
+    width: 100%;
   }
 }
 

@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DashboardDisclaimer } from "@/components/shell/DashboardDisclaimer";
 import { DashboardPageHeader } from "@/components/shell/DashboardPageHeader";
 import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
 import { CatalogRouteRecovery, EmptyCatalog } from "@/components/catalog-state";
 import { parseAllRepacksRouteQuery, type NextSearchParams } from "@/lib/catalog-route-state.server";
+import { parseCatalogViewLayout } from "@/lib/catalog-query-state.client";
+import { toUrlSearchParams } from "@/lib/catalog-route-state.server";
 import { readPublicRepacks } from "@/lib/public-repacks.server";
 import { allRepacksCatalogIsEmpty } from "@/lib/public-repacks-v3";
 import { dataReleaseStatusFromRelease } from "@/lib/public-release-status";
@@ -16,7 +19,8 @@ export const metadata: Metadata = {
 export default async function AllRepacksPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<NextSearchParams> }>) {
-  const parsed = parseAllRepacksRouteQuery(await searchParams);
+  const resolvedSearchParams = await searchParams;
+  const parsed = parseAllRepacksRouteQuery(resolvedSearchParams);
   if (!parsed.ok) {
     return (
       <>
@@ -46,21 +50,36 @@ export default async function AllRepacksPage({
   }
 
   const status = dataReleaseStatusFromRelease(result.data.release);
+  const layout = parseCatalogViewLayout(
+    toUrlSearchParams(resolvedSearchParams).get("view"),
+  );
+  if (layout === null) {
+    throw new Error("A validated catalog view must resolve to a layout.");
+  }
 
   return (
     <>
       <DataReleaseStatusReporter status={status} />
-      <DashboardPageHeader activeView="all-repacks" />
+      <DashboardPageHeader
+        activeView="all-repacks"
+        desiredChase={{
+          query: parsed.query,
+          selected: result.data.desiredCollectible,
+          layout,
+        }}
+      />
       {allRepacksCatalogIsEmpty(result.data) ? (
         <EmptyCatalog />
       ) : (
         <AllRepacksClient
           details={result.data.details}
           key={`${result.data.release.publicReleaseId}:${result.data.range.start}:${result.data.queryFingerprint}`}
+          initialLayout={layout}
           page={result.data}
           query={parsed.query}
         />
       )}
+      <DashboardDisclaimer />
     </>
   );
 }

@@ -4,6 +4,44 @@
   position: relative;
 }
 
+.root[data-variant="heading"] {
+  width: clamp(17rem, 25vw, 23rem);
+  gap: 0.28rem;
+}
+
+.root[data-variant="heading"] .label {
+  font-size: 0.65rem;
+  font-weight: 720;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.root[data-variant="heading"] .control {
+  min-height: 2.35rem;
+  border-radius: 0.55rem;
+  padding: 0.2rem 0.42rem 0.2rem 0.65rem;
+}
+
+.root[data-variant="heading"] .control input {
+  min-width: 0;
+  padding: 0.32rem 0;
+  font-size: 0.8rem;
+}
+
+.root[data-variant="heading"] .status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.root[data-variant="heading"] .saveAction {
+  margin-top: 0.22rem;
+}
+
 .label {
   color: var(--color-text);
   font-size: 0.86rem;
@@ -102,4 +140,10 @@
   color: var(--color-text-muted);
   font-size: 0.72rem;
   text-transform: capitalize;
+}
+
+@media (max-width: 620px) {
+  .root[data-variant="heading"] {
+    width: min(100%, 28rem);
+  }
 }

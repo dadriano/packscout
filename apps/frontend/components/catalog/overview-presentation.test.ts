@@ -36,12 +36,19 @@ test("always presents four overview KPIs with buyback-adjusted meaning", () => {
     presentation.map(({ value }) => value),
     ["1,248", "612", "+1.80%", "Unavailable"],
   );
-  assert.match(presentation[1]?.helper ?? "", /EV \$ above zero/);
+  assert.equal(presentation[1]?.helper, "Active repacks with EV $ above zero");
   assert.match(
     presentation[1]?.accessibleLabel ?? "",
     /Excludes unavailable, expired, and sold-out repacks/,
   );
-  assert.match(presentation[2]?.helper ?? "", /high confidence/i);
+  assert.equal(
+    presentation[2]?.helper,
+    "Median EV % · 500 high confidence",
+  );
+  assert.equal(
+    presentation[2]?.accessibleLabel,
+    "Median EV %: +1.80%. Positive.",
+  );
   assert.equal(presentation[3]?.reasonCopy, "Collectible value unavailable.");
 });
 

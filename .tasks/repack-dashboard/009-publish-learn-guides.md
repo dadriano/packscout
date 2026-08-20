@@ -1,4 +1,4 @@
-# Task: Publish the Learn Guides
+# Task: Publish the Learn Articles
 
 **ID:** repack-dashboard/009
 **Depends on:** repack-dashboard/004, repack-dashboard/005
@@ -9,89 +9,87 @@
 
 ## Start Here
 
-Publish the Learn index with the three approved article titles and open “What is Expected Value (EV)?” from both its card and an EV glossary link.
+Publish the Learn index with four source-backed articles. Every condensed index summary must link to its complete article, and EV glossary help must continue to open the EV article.
 
 ## Objective
 
-Give first-time buyers a concise, trustworthy explanation of repacks, PackScout Estimated EV, and common red flags before they follow a provider link.
+Give buyers complete, readable explanations of repacks, expected value, buyer red flags, and PackScout's data methodology before they follow a vendor listing.
 
 ## Context
 
-V1 has exactly three maintained guides and no content-management system. Learn shares the public PackScout shell and theme. Pack search remains limited to packs, platforms, and categories; it does not index articles.
+Learn uses four version-controlled articles and no content-management system. The user-supplied DOCX articles are the controlling editorial sources for this revision. Learn shares the public PackScout shell and theme. Catalog search remains limited to repacks, vendors, and categories; it does not index articles.
 
 ## Requirements
 
 ### Learn Index
 
-- List exactly “What is a repack?”, “What is Expected Value (EV)?”, and “Repack Red Flags.”
-- Give each article a concise description, reading-time estimate, and clear link.
+- Feature `PackScout Methodology`, followed by `What Is a Repack?`, `What Is EV (Expected Value)?`, and `Repack Red Flags`.
+- Give each article an accurate summary, reviewed reading-time estimate, and descriptive link to the complete article.
 - Keep article order fixed in the sequence above.
 - Use the Dashboard/Learn header navigation and shared theme.
-- Avoid account, newsletter, or personalization prompts.
+- Avoid account, newsletter, personalization, or vendor-promotion prompts.
 
-### Article Content
+### Full Article Content
 
-- “What is a repack?” explains price, randomized contents, chase items, buyback, and provider differences in plain language.
-- “What is Expected Value (EV)?” explains Gross EV, EV $, signed EV %, coverage, limitations, and individual-outcome uncertainty.
-- “Repack Red Flags” covers missing odds, unclear inventory, unsupported values, stale listings, and pressure-driven claims without attacking named partners.
-- Keep “Estimated EV · Not financial advice.” visible in EV-related content.
-- Distinguish provider-reported values from PackScout estimates.
+- `PackScout Methodology` explains platform-provided data, standardization, Gross EV, buyback, price, inventory, odds, chases, pulls, dynamic data, unavailable values, data sources, limitations, financial caveats, and responsible play.
+- `What Is a Repack?` retains the source article's definition, history, seller landscape, curation, popularity, controversy, common formats, buyer checks, and conclusion.
+- `What Is EV (Expected Value)?` retains the general and net-EV formulas, coin-flip, roulette, insurance, poker, variance, repack-specific formula, worked tier table, input limitations, buyer uses, and conclusion.
+- `Repack Red Flags` retains all eight source warning signs, the positive description of a trustworthy operator, the eight-item pre-purchase checklist, and its conclusion.
+- Preserve source caveats that EV is a long-run average rather than an individual-outcome prediction and that repack purchases can result in financial loss.
+- Keep the visible shared EV disclaimer near EV-related article content.
 
 ### Navigation and References
 
-- Use `/learn/what-is-a-repack`, `/learn/expected-value`, and `/learn/repack-red-flags` as the three stable article addresses.
-- Link EV glossary help to the EV article and relevant article terms back to Dashboard destinations.
-- Link the repack and red-flags articles to `/packs`; link the EV article to `/` with descriptive destination copy and no fabricated filters.
-
-### Route Continuity
-
+- Use `/learn/packscout-methodology`, `/learn/what-is-a-repack`, `/learn/expected-value`, and `/learn/repack-red-flags` as the four stable article addresses.
+- Link EV glossary help to `/learn/expected-value`.
+- Link methodology and EV articles to `/`; link the repack and red-flags articles to `/packs` with descriptive destination copy.
 - Preserve theme and header context while moving between Dashboard and Learn.
 - Return not-found for any unrecognized article address.
-- Provide a visible route back to the Learn index from an article.
+- Provide a visible route back to the Learn index from every article.
 
 ### Content Accessibility
 
-- Use descriptive headings in a logical hierarchy.
+- Use one page-level heading followed by a logical article heading hierarchy.
 - Explain abbreviations and specialized terms at first use.
-- Keep paragraphs and examples scannable without sacrificing the financial caveats.
+- Render lists as semantic lists, formulas as readable text, and the worked EV data as a captioned table.
+- Keep wide tables inside their own keyboard-focusable scroll region at narrow widths.
 - Give meaningful text to every internal link.
-- Use tables or callouts only when their reading order remains clear on narrow screens.
 
 ## User-Facing Behavior
 
-Users can browse the three guides, enter from an EV tooltip, move back to the index, and return to Dashboard. Unknown article links show not-found rather than a generic error.
+Users can scan four summaries, open every complete article, enter from an EV tooltip, move back to the index, and return to Dashboard. Unknown article links show not-found rather than a generic error.
 
 ## Interface Contract
 
-The Learn content registry exposes exactly three records with stable slug, title, description, reading time, ordered sections, and related Dashboard links. The registry is public, version-controlled content and contains no remote CMS dependency.
+The Learn content registry exposes exactly four records with stable slug, card title, full title, summary, reading time, introduction, ordered semantic sections, and a related Dashboard link. Full article prose is split into typed, version-controlled modules with no remote CMS dependency or HTML-string rendering.
 
 ## Acceptance Criteria
 
 ### Content and Navigation
 
-- [x] The Learn index lists exactly the three approved articles in the approved order.
-- [x] Every article has a stable address, title, description, reading time, and index return link.
-- [x] EV glossary links open the EV article and relevant article links return to Dashboard.
-- [x] Unknown article addresses produce not-found.
-- [x] Search continues to target packs rather than Learn content.
+- [ ] The Learn index exposes exactly four source-backed articles in the approved order.
+- [ ] Every summary has a descriptive link to its complete article.
+- [ ] Every article has a stable address, full title, reviewed reading time, index return link, and related Dashboard link.
+- [ ] EV glossary links open the EV article.
+- [ ] Unknown article addresses produce not-found.
+- [ ] Catalog search continues to target repacks rather than Learn content.
 
 ### Trust and Accessibility
 
-- [x] EV content uses the same Gross EV, EV $, signed EV %, and unavailable vocabulary as Dashboard.
-- [x] Articles distinguish long-run estimates from individual outcomes and include the disclaimer.
-- [x] Red-flag guidance remains provider-neutral and evidence-focused.
-- [x] Heading hierarchy, link names, tables, and callouts remain accessible at desktop and mobile widths.
-- [x] No CMS, account, newsletter, or personalization dependency is introduced.
+- [ ] All four full articles retain their controlling source sections and material examples.
+- [ ] EV content distinguishes long-run averages from individual outcomes and includes a visible disclaimer.
+- [ ] Red-flag guidance includes all eight checks and makes clear that one flag alone does not prove a scam.
+- [ ] Heading hierarchy, lists, formulas, links, and the worked table remain accessible at desktop and mobile widths.
+- [ ] No CMS, account, newsletter, personalization, or vendor-promotion dependency is introduced.
 
 ## Build Status
 
-- Implemented: a typed, version-controlled three-guide registry; Learn index; all three stable article routes; shared-shell status; glossary-to-EV and article-to-Dashboard links; and shared-shell not-found behavior.
-- Verified: content/route tests prove exact titles, order, slugs, shared metric vocabulary, provider-neutral guidance, and unknown-slug behavior; desktop/mobile browser review confirms readable article/index layouts and navigation.
+- Implemented: typed per-article modules, a four-record registry, linked index summaries, four stable article routes, semantic lists/formulas/table rendering, shared-shell status, glossary-to-EV links, article-to-Dashboard links, and shared-shell not-found behavior.
+- Verification: pending focused content, route, type, lint, build, and desktop/mobile browser checks for this revision.
 - Blocked: dependency task `005` remains blocked on the live public-read contract, so this locally complete slice cannot be marked done under the canonical dependency graph.
 
 ## Spec Compliance
 
 - Related specs reviewed: repack-dashboard/tech-003, repack-dashboard/tech-004, repack-dashboard/ux-001, repack-dashboard/ux-004, repack-dashboard/ux-005
-- Alignment: implemented the exact local registry, routes, shared vocabulary, provider-neutral trust copy, navigation, responsive article layout, and no-CMS boundary as specified.
-- Divergences: none in the Learn slice; task status remains blocked only because its metric-contract dependency is not complete.
-- Verification: Learn content/routes, metric vocabulary, frontend typecheck/lint/build, and desktop/mobile browser navigation checks recorded green.
+- Alignment: the revision keeps a local typed registry, stable routes, shared navigation, responsive article layout, source-backed financial caveats, and the no-CMS boundary.
+- Intentional revision: the prior three-guide summaries are replaced by four complete DOCX-backed articles, and the methodology summary now opens its own full article.

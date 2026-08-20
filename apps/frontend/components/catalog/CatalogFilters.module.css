@@ -114,8 +114,8 @@
 
 .priceGroup {
   display: grid;
-  gap: 0.2rem;
-  padding: 0.35rem 0.7rem 0.45rem;
+  gap: 0.05rem;
+  padding: 0.25rem 0.7rem 0.3rem;
 }
 
 .priceGroup legend {
@@ -124,9 +124,14 @@
 
 .sliderRow {
   display: grid;
-  grid-template-columns: minmax(3.6rem, auto) minmax(0, 1fr) minmax(3.6rem, auto);
+  gap: 0.3rem;
+}
+
+.priceFields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.6rem;
 }
 
 .priceField {
@@ -136,6 +141,10 @@
   min-width: 0;
   color: var(--color-text-muted);
   font-size: 0.78rem;
+}
+
+.priceField:last-child {
+  justify-self: end;
 }
 
 .priceField input {
@@ -151,7 +160,7 @@
 
 .slider {
   position: relative;
-  height: 1.4rem;
+  height: 1rem;
   touch-action: none;
 }
 
@@ -290,6 +299,11 @@
 
 .reset:hover:not(:disabled) {
   color: var(--color-text);
+}
+
+.reset[data-has-filters="true"] {
+  border-color: color-mix(in srgb, var(--color-negative) 42%, var(--color-border));
+  color: color-mix(in srgb, var(--color-negative) 78%, var(--color-text));
 }
 
 .apply:focus-visible,

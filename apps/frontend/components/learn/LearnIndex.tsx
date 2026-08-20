@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   formatReadingTime,
+  learnGuideHref,
   PACKSCOUT_EV_METHOD,
   type LearnGuide,
 } from "@/lib/learn-content";
@@ -9,6 +10,8 @@ import { ResponsiblePlayNotice } from "./ResponsiblePlayNotice";
 import styles from "./Learn.module.css";
 
 export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
+  const [methodology, ...articles] = guides;
+
   return (
     <section className={styles.indexPage} aria-labelledby="learn-heading">
       <header className={styles.indexHeader}>
@@ -19,13 +22,39 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
           id="learn-heading"
           tabIndex={-1}
         >
-          Know before you Rip
+          Know before you rip
         </h1>
         <p className={styles.indexIntro}>
-          Three practical guides to repacks, long-run value estimates, and the
-          evidence worth checking before you follow a vendor listing.
+          Four complete articles explain how repacks work, how to read expected
+          value, which warning signs deserve a closer look, and where
+          PackScout&apos;s data comes from.
         </p>
       </header>
+
+      {methodology ? (
+        <article
+          aria-labelledby="featured-methodology-heading"
+          className={styles.methodSection}
+        >
+          <div className={styles.featuredMeta}>
+            <span>{formatReadingTime(methodology.readingTimeMinutes)}</span>
+          </div>
+          <h2
+            className={styles.methodHeading}
+            id="featured-methodology-heading"
+          >
+            {methodology.cardTitle}
+          </h2>
+          <p className={styles.methodSummary}>{methodology.summary}</p>
+          <Link
+            className={styles.methodLink}
+            href={learnGuideHref(methodology.slug)}
+          >
+            Read the full methodology
+            <span aria-hidden="true">→</span>
+          </Link>
+        </article>
+      ) : null}
 
       <section
         aria-labelledby="packscout-ev-method-heading"
@@ -65,23 +94,31 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
         </Link>
       </section>
 
-      <ol className={styles.guideGrid} aria-label="PackScout guides">
-        {guides.map((guide, index) => (
+      <ol className={styles.guideGrid} aria-label="PackScout articles">
+        {articles.map((guide, index) => (
           <li className={styles.guideItem} key={guide.slug}>
-            <article className={styles.guideCard}>
+            <article
+              aria-labelledby={`learn-guide-${guide.slug}-heading`}
+              className={styles.guideCard}
+            >
               <div className={styles.guideMeta}>
                 <span aria-hidden="true" className={styles.guideNumber}>
                   {String(index + 1).padStart(2, "0")}
                 </span>
                 <span>{formatReadingTime(guide.readingTimeMinutes)}</span>
               </div>
-              <h2 className={styles.guideTitle}>{guide.title}</h2>
-              <p className={styles.guideDescription}>{guide.description}</p>
+              <h2
+                className={styles.guideTitle}
+                id={`learn-guide-${guide.slug}-heading`}
+              >
+                {guide.cardTitle}
+              </h2>
+              <p className={styles.guideDescription}>{guide.summary}</p>
               <Link
                 className={styles.guideAction}
-                href={`/learn/${guide.slug}`}
+                href={learnGuideHref(guide.slug)}
               >
-                Read {guide.title}
+                Read full article: {guide.cardTitle}
                 <span aria-hidden="true">↗</span>
               </Link>
             </article>
@@ -92,8 +129,8 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
       <ResponsiblePlayNotice />
 
       <p className={styles.indexNote}>
-        PackScout education is vendor-neutral and stays available while
-        catalog data is loading or unavailable.
+        Educational content only. PackScout education is vendor-neutral and
+        stays available while catalog data is loading or unavailable.
       </p>
     </section>
   );

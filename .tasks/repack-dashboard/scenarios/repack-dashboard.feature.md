@@ -161,10 +161,11 @@ Coverage: Automated local coverage — Convex query/filter tests and no-match st
 
 Given the public Learn section
 When the buyer opens it or follows an EV glossary link
-Then exactly “What is a repack?”, “What is Expected Value (EV)?”, and “Repack Red Flags” are available
+Then “PackScout Methodology,” “What Is a Repack?,” “What Is EV (Expected Value)?,” and “Repack Red Flags” are available
+And every index summary links to its complete source-backed article
 And an unknown article address returns not-found
 
-Coverage: Automated plus browser coverage — Learn registry/content/route tests prove exactly the three approved guides, shared metric vocabulary, stable slugs, links, and unknown-slug handling; desktop/mobile browser navigation is green.
+Coverage: Automated plus browser coverage — Learn registry/content/route tests prove exactly four source-backed articles, stable slugs, summary-to-full-article links, complete methodology/repack/EV/red-flag content, and unknown-slug handling; desktop/mobile browser verification covers the index, all four articles, the EV table, and return navigation.
 
 ## Scenario: Theme initializes without a wrong-theme flash
 

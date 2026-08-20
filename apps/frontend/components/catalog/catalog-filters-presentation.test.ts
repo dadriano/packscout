@@ -9,6 +9,7 @@ import {
   closerPriceThumb,
   formatFilterPrice,
   nestCategoryFacets,
+  roundPriceFilterDollars,
   sliderValueFromPointer,
 } from "./catalog-filters-presentation";
 
@@ -86,8 +87,14 @@ test("price slider labels and clamps stay on the $10–$12,000 range", () => {
   assert.equal(PRICE_FILTER_MAX_DOLLARS, 12_000);
   assert.equal(formatFilterPrice(10), "$10");
   assert.equal(formatFilterPrice(12_000), "$12,000");
+  assert.equal(formatFilterPrice(613.28), "$613");
+  assert.equal(roundPriceFilterDollars(613.28), 613);
+  assert.equal(roundPriceFilterDollars(613.5), 614);
+  assert.equal(roundPriceFilterDollars(3_153.75), 3_154);
+  assert.equal(Number.isNaN(roundPriceFilterDollars(Number.NaN)), true);
   assert.equal(clampPriceFilter(5, "min", 100), 10);
   assert.equal(clampPriceFilter(20_000, "max", 50), 12_000);
+  assert.equal(clampPriceFilter(613.78, "min", 1_000), 614);
   assert.equal(clampPriceFilter(80, "min", 40), 40);
   assert.equal(clampPriceFilter(20, "max", 40), 40);
 });

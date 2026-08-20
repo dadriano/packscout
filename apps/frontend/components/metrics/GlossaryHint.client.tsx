@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   type FocusEvent,
   type KeyboardEvent,
+  type ReactNode,
   useEffect,
   useId,
   useLayoutEffect,
@@ -18,6 +19,7 @@ import {
 } from "@/lib/glossary-hint.client";
 import {
   getGlossaryDefinition,
+  type GlossaryDefinition,
   type GlossaryFieldKey,
 } from "@/lib/metric-vocabulary";
 import styles from "./GlossaryHint.module.css";
@@ -25,13 +27,21 @@ import styles from "./GlossaryHint.module.css";
 type GlossaryHintProps = Readonly<{
   field: GlossaryFieldKey;
   align?: "start" | "end";
+  content?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
+  trigger?: ReactNode;
+  triggerAriaLabel?: string;
+  triggerClassName?: string;
 }>;
 
 export function GlossaryHint({
   field,
   align = "start",
+  content,
+  trigger,
+  triggerAriaLabel,
+  triggerClassName,
 }: GlossaryHintProps) {
-  const definition = getGlossaryDefinition(field);
+  const definition = content ?? getGlossaryDefinition(field);
   const reactId = useId();
   const instanceId = `glossary-${reactId.replaceAll(":", "")}`;
   const panelId = `${instanceId}-definition`;
@@ -128,13 +138,13 @@ export function GlossaryHint({
         aria-controls={panelId}
         aria-describedby={state.open ? panelId : undefined}
         aria-expanded={state.open}
-        aria-label={`About ${definition.label}`}
-        className={styles.trigger}
+        aria-label={triggerAriaLabel ?? `About ${definition.label}`}
+        className={triggerClassName ?? styles.trigger}
         onClick={() => dispatch({ type: "toggle_pin" })}
         ref={triggerRef}
         type="button"
       >
-        i
+        {trigger ?? "i"}
       </button>
 
       {state.open ? (
@@ -148,7 +158,7 @@ export function GlossaryHint({
           <span className={styles.definition}>{definition.definition}</span>
           {definition.learnHref ? (
             <Link className={styles.learnLink} href={definition.learnHref}>
-              Learn how PackScout estimates EV
+              Learn how EV is estimated
               <span aria-hidden="true"> →</span>
             </Link>
           ) : null}

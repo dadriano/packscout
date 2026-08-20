@@ -14,6 +14,7 @@ import {
   clampPriceFilter,
   closerPriceThumb,
   formatFilterPrice,
+  roundPriceFilterDollars,
   sliderValueFromPointer,
 } from "./catalog-filters-presentation";
 import styles from "./CatalogFilters.module.css";
@@ -22,12 +23,13 @@ type CatalogFiltersProps = Readonly<{
   accepted: PublicRepackFilters;
   facets: ContextualRepackFacets;
   pending?: boolean;
+  showAvailabilityToggle?: boolean;
   onApply: (filters: PublicRepackFilters) => void;
   onReset: () => void;
 }>;
 
 function dollars(minorUnits: number): number {
-  return minorUnits / 100;
+  return roundPriceFilterDollars(minorUnits / 100);
 }
 
 function selectionSummary(values: readonly string[], fallback: string): string {
@@ -64,6 +66,30 @@ function ResetIcon() {
   );
 }
 
+function ClearFiltersIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="14" viewBox="0 0 16 16" width="14">
+      <path
+        d="M3.2 4.3h9.6M6.2 2.5h3.6M5.1 6.2v5.1M8 6.2v5.1M10.9 6.2v5.1M4.3 4.3l.6 8.5h6.2l.6-8.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
+function hasChosenFilters(filters: PublicRepackFilters): boolean {
+  return (
+    filters.vendors.length > 0 ||
+    filters.categories.length > 0 ||
+    filters.collectibleTypes.length > 0 ||
+    filters.availability === "all" ||
+    filters.price.mode === "narrowed"
+  );
+}
+
 function draftStatusMessage(
   valid: boolean,
   changed: boolean,
@@ -81,6 +107,7 @@ function CatalogFiltersDraft({
   accepted,
   facets,
   pending = false,
+  showAvailabilityToggle = true,
   onApply,
   onReset,
 }: CatalogFiltersProps) {
@@ -150,6 +177,7 @@ function CatalogFiltersDraft({
     maximum <= PUBLIC_REPACK_PRICE_MAX_MINOR / 100 &&
     minimum <= maximum;
   const changed = JSON.stringify(draft) !== JSON.stringify(accepted);
+  const hasFilters = hasChosenFilters(draft);
   const statusMessage = draftStatusMessage(valid, changed, accepted);
   const nestedCategories = useMemo(
     () => categoryFacetRows(facets.categories),
@@ -266,19 +294,6 @@ function CatalogFiltersDraft({
         >
           <legend className={styles.label}>Repack Price</legend>
           <div className={styles.sliderRow}>
-            <label className={styles.priceField}>
-              <span className="sr-only">Minimum repack price in dollars</span>
-              <span aria-hidden="true">$</span>
-              <input
-                inputMode="decimal"
-                max={PRICE_FILTER_MAX_DOLLARS}
-                min={PRICE_FILTER_MIN_DOLLARS}
-                onChange={(event) => setMinimum(event.currentTarget.valueAsNumber)}
-                step="0.01"
-                type="number"
-                value={Number.isFinite(minimum) ? minimum : ""}
-              />
-            </label>
             <div
               className={styles.slider}
               onPointerDown={handleSliderPointerDown}
@@ -318,20 +333,39 @@ function CatalogFiltersDraft({
                 value={Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS}
               />
             </div>
-            <label className={styles.priceField}>
-              <span className="sr-only">Maximum repack price in dollars</span>
-              <span aria-hidden="true">$</span>
-              <input
-                aria-invalid={!valid}
-                inputMode="decimal"
-                max={PRICE_FILTER_MAX_DOLLARS}
-                min={PRICE_FILTER_MIN_DOLLARS}
-                onChange={(event) => setMaximum(event.currentTarget.valueAsNumber)}
-                step="0.01"
-                type="number"
-                value={Number.isFinite(maximum) ? maximum : ""}
-              />
-            </label>
+            <div className={styles.priceFields}>
+              <label className={styles.priceField}>
+                <span className="sr-only">Minimum repack price in dollars</span>
+                <span aria-hidden="true">$</span>
+                <input
+                  inputMode="numeric"
+                  max={PRICE_FILTER_MAX_DOLLARS}
+                  min={PRICE_FILTER_MIN_DOLLARS}
+                  onChange={(event) =>
+                    setMinimum(roundPriceFilterDollars(event.currentTarget.valueAsNumber))
+                  }
+                  step="1"
+                  type="number"
+                  value={Number.isFinite(minimum) ? minimum : ""}
+                />
+              </label>
+              <label className={styles.priceField}>
+                <span className="sr-only">Maximum repack price in dollars</span>
+                <span aria-hidden="true">$</span>
+                <input
+                  aria-invalid={!valid}
+                  inputMode="numeric"
+                  max={PRICE_FILTER_MAX_DOLLARS}
+                  min={PRICE_FILTER_MIN_DOLLARS}
+                  onChange={(event) =>
+                    setMaximum(roundPriceFilterDollars(event.currentTarget.valueAsNumber))
+                  }
+                  step="1"
+                  type="number"
+                  value={Number.isFinite(maximum) ? maximum : ""}
+                />
+              </label>
+            </div>
           </div>
         </fieldset>
 
@@ -347,29 +381,41 @@ function CatalogFiltersDraft({
             <ApplyIcon />
           </button>
           <button
-            aria-label="Reset filters"
+            aria-label={hasFilters ? "Clear selected filters" : "Reset filters"}
             className={styles.reset}
+            data-has-filters={hasFilters ? "true" : undefined}
             disabled={pending}
             onClick={onReset}
-            title="Reset filters"
+            title={hasFilters ? "Clear selected filters" : "Reset filters"}
             type="button"
           >
-            <ResetIcon />
+            {hasFilters ? <ClearFiltersIcon /> : <ResetIcon />}
           </button>
         </div>
       </div>
 
-      <div className={styles.footerRow}>
-        <label className={styles.availabilityToggle}>
-          <input
-            checked={availability === "all"}
-            onChange={(event) =>
-              setAvailability(event.currentTarget.checked ? "all" : "active")
-            }
-            type="checkbox"
-          />
-          <span>Include sold out</span>
-        </label>
+      {showAvailabilityToggle ? (
+        <div className={styles.footerRow}>
+          <label className={styles.availabilityToggle}>
+            <input
+              checked={availability === "all"}
+              onChange={(event) =>
+                setAvailability(event.currentTarget.checked ? "all" : "active")
+              }
+              type="checkbox"
+            />
+            <span>Include sold out</span>
+          </label>
+          <p
+            aria-live="polite"
+            className={!valid || changed ? styles.draftStatus : "sr-only"}
+            id="catalog-filter-status"
+            role="status"
+          >
+            {statusMessage}
+          </p>
+        </div>
+      ) : (
         <p
           aria-live="polite"
           className={!valid || changed ? styles.draftStatus : "sr-only"}
@@ -378,7 +424,7 @@ function CatalogFiltersDraft({
         >
           {statusMessage}
         </p>
-      </div>
+      )}
     </section>
   );
 }

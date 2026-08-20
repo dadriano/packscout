@@ -1,4 +1,10 @@
 import type { PackScoutEvV3Presentation } from "@/lib/packscout-ev-presentation";
+import {
+  EXPECTED_VALUE_ARTICLE_HREF,
+  METRIC_TRUST_COPY,
+  type GlossaryDefinition,
+} from "@/lib/metric-vocabulary";
+import { GlossaryHint } from "./GlossaryHint.client";
 import { MetricValue } from "./MetricValue";
 import styles from "./PackScoutEvMetrics.module.css";
 
@@ -6,6 +12,9 @@ type PackScoutEvMetricsProps = Readonly<{
   presentation: PackScoutEvV3Presentation;
   compact?: boolean;
   showFreshness?: boolean;
+  showRepackPrice?: boolean;
+  showProvenance?: boolean;
+  headingHint?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
 }>;
 
 /**
@@ -18,6 +27,13 @@ export function PackScoutEvMetrics({
   presentation,
   compact = false,
   showFreshness = true,
+  showRepackPrice = true,
+  showProvenance = true,
+  headingHint = {
+    label: METRIC_TRUST_COPY.estimateLabel,
+    definition: METRIC_TRUST_COPY.longRunExplanation,
+    learnHref: EXPECTED_VALUE_ARTICLE_HREF,
+  },
 }: PackScoutEvMetricsProps) {
   const { freshness } = presentation;
   return (
@@ -28,7 +44,10 @@ export function PackScoutEvMetrics({
       data-status={presentation.status}
     >
       <div className={styles.header}>
-        <h3 className={styles.heading}>PackScout Gross EV</h3>
+        <h3 className={styles.heading}>
+          {METRIC_TRUST_COPY.estimateLabel}
+          <GlossaryHint content={headingHint} field="evPercent" />
+        </h3>
         <span className={styles.statusChip} data-status={presentation.status}>
           {presentation.statusLabel}
         </span>
@@ -44,7 +63,17 @@ export function PackScoutEvMetrics({
         className={styles.confidence}
         data-band={presentation.confidence.band ?? "unavailable"}
       >
-        <span>EV confidence</span>
+        <span className={styles.confidenceLabel}>
+          EV confidence
+          <GlossaryHint
+            content={{
+              label: "EV confidence",
+              definition: METRIC_TRUST_COPY.confidenceExplanation,
+              learnHref: EXPECTED_VALUE_ARTICLE_HREF,
+            }}
+            field="evConfidence"
+          />
+        </span>
         <strong>{presentation.confidence.displayValue}</strong>
       </div>
 
@@ -72,12 +101,14 @@ export function PackScoutEvMetrics({
           showReason={false}
           showSemanticState={false}
         />
-        <MetricValue
-          compact={compact}
-          metric={presentation.packPrice}
-          showReason={false}
-          showSemanticState={false}
-        />
+        {showRepackPrice ? (
+          <MetricValue
+            compact={compact}
+            metric={presentation.packPrice}
+            showReason={false}
+            showSemanticState={false}
+          />
+        ) : null}
       </div>
 
       {presentation.zeroPayoutNote ? (
@@ -112,10 +143,12 @@ export function PackScoutEvMetrics({
         </div>
       ) : null}
 
-      <div className={styles.provenance}>
-        <p>{presentation.sourceLine}</p>
-        <p>{presentation.adviceLine}</p>
-      </div>
+      {showProvenance ? (
+        <div className={styles.provenance}>
+          <p>{presentation.sourceLine}</p>
+          <p>{presentation.adviceLine}</p>
+        </div>
+      ) : null}
     </section>
   );
 }

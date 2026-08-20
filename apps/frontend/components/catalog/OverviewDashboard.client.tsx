@@ -79,10 +79,12 @@ export function OverviewDashboard({
         />
         <div className={styles.summaryGrid}>
           <CatalogSummaries
+            activeFilters={bundle.activeFilters}
             summaries={bundle.vendorSummaries}
             title="By vendor"
           />
           <CatalogSummaries
+            activeFilters={bundle.activeFilters}
             summaries={bundle.categorySummaries}
             title="By category"
           />

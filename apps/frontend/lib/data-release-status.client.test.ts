@@ -86,4 +86,5 @@ test("release relative time is bounded and never reports future age", () => {
   assert.equal(formatRelativeReleaseTime("2026-08-11T19:00:10.000Z", NOW), "0s ago");
   assert.equal(formatRelativeReleaseTime("not-a-date", NOW), "recently");
   assert.equal(formatRelativeReleaseTime("2026-08-10T18:00:00.000Z", NOW), "1d ago");
+  assert.equal(formatRelativeReleaseTime("2026-08-06T18:00:00.000Z", NOW), "1d ago");
 });

@@ -15,6 +15,10 @@ import {
 } from "@/lib/catalog-query-state.client";
 import { useNarrowCatalogInspector } from "@/lib/catalog-viewport.client";
 import {
+  dashboardHrefFor,
+  type DashboardProvider,
+} from "@/lib/provider-banner";
+import {
   createDashboardViewEvent,
   createFiltersAppliedEvent,
   createPromoCopiedEvent,
@@ -26,6 +30,7 @@ import styles from "./DashboardOverviewClient.module.css";
 type DashboardOverviewClientProps = Readonly<{
   bundle: DashboardBundleV3;
   details: readonly PublicRepackViewDetailV3[];
+  provider: DashboardProvider | null;
 }>;
 
 function actionMessage(outcome: InspectorActionOutcome): string {
@@ -49,6 +54,7 @@ function activeFilterCount(
 export function DashboardOverviewClient({
   bundle,
   details,
+  provider,
 }: DashboardOverviewClientProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -76,7 +82,9 @@ export function DashboardOverviewClient({
   );
 
   function navigate(filters: PublicRepackFilters) {
-    startTransition(() => router.push(serializeDashboardFilters(filters)));
+    startTransition(() =>
+      router.push(serializeDashboardFilters(filters, provider ?? undefined)),
+    );
   }
 
   useEffect(() => {
@@ -134,8 +142,11 @@ export function DashboardOverviewClient({
             accepted={bundle.activeFilters}
             facets={bundle.facets}
             onApply={navigate}
-            onReset={() => startTransition(() => router.push("/"))}
+            onReset={() =>
+              startTransition(() => router.push(dashboardHrefFor(provider)))
+            }
             pending={pending}
+            showAvailabilityToggle={false}
           />
         }
         inspectorOpen={narrowInspector ? sheetOpen : !sideInspectorDismissed}

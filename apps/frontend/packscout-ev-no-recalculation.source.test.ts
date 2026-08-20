@@ -98,6 +98,7 @@ test("public surfaces resolve deadlines through the shared client store only", (
   for (const name of [
     "components/catalog/OpportunityTable.client.tsx",
     "components/catalog/AllRepacksTable.client.tsx",
+    "components/catalog/AllRepacksCards.client.tsx",
     "components/catalog/PackInspector.client.tsx",
   ]) {
     const source = readFileSync(path.join(frontendRoot, name), "utf8");
