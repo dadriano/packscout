@@ -27,12 +27,24 @@ test("All Repacks accepts search while Overview accepts compatible filters only"
   if (allRepacks.ok) assert.equal(allRepacks.query.search, "mythic pokemon");
 
   const dashboard = parseDashboardRouteQuery({
+    underdog: "",
     vendor: "courtyard",
     minPrice: "25",
     maxPrice: "1000",
   });
   assert.equal(dashboard.ok, true);
-  if (dashboard.ok) assert.deepEqual(dashboard.query.filters.vendors, ["courtyard"]);
+  if (dashboard.ok) {
+    assert.equal(dashboard.provider, "underdog");
+    assert.deepEqual(dashboard.query.filters.vendors, ["courtyard"]);
+  }
+  const collector = parseDashboardRouteQuery({ collector: "" });
+  assert.equal(collector.ok, true);
+  if (collector.ok) assert.equal(collector.provider, "collector");
+  assert.equal(parseDashboardRouteQuery({ underdog: "promoted" }).ok, false);
+  assert.equal(
+    parseDashboardRouteQuery({ underdog: "", collector: "" }).ok,
+    false,
+  );
   assert.equal(parseDashboardRouteQuery({ q: "pokemon" }).ok, false);
   assert.equal(
     parseDashboardRouteQuery({

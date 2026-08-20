@@ -180,6 +180,20 @@ test("Overview serializes only compatible accepted filters", () => {
     }),
     "/?vendor=courtyard",
   );
+  assert.equal(
+    serializeDashboardFilters(DEFAULT_CATALOG_QUERY.filters, "underdog"),
+    "/?underdog",
+  );
+  assert.equal(
+    serializeDashboardFilters(
+      {
+        ...DEFAULT_CATALOG_QUERY.filters,
+        vendors: ["collector_crypt"],
+      },
+      "collector",
+    ),
+    "/?collector&vendor=collector_crypt",
+  );
 });
 
 test("the all-repacks sheet stays closed unless the query asked for a specific pack", () => {

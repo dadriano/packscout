@@ -14,6 +14,7 @@ import {
   clampPriceFilter,
   closerPriceThumb,
   formatFilterPrice,
+  roundPriceFilterDollars,
   sliderValueFromPointer,
 } from "./catalog-filters-presentation";
 import styles from "./CatalogFilters.module.css";
@@ -22,12 +23,13 @@ type CatalogFiltersProps = Readonly<{
   accepted: PublicRepackFilters;
   facets: ContextualRepackFacets;
   pending?: boolean;
+  showAvailabilityToggle?: boolean;
   onApply: (filters: PublicRepackFilters) => void;
   onReset: () => void;
 }>;
 
 function dollars(minorUnits: number): number {
-  return minorUnits / 100;
+  return roundPriceFilterDollars(minorUnits / 100);
 }
 
 function selectionSummary(values: readonly string[], fallback: string): string {
@@ -81,6 +83,7 @@ function CatalogFiltersDraft({
   accepted,
   facets,
   pending = false,
+  showAvailabilityToggle = true,
   onApply,
   onReset,
 }: CatalogFiltersProps) {
@@ -310,11 +313,13 @@ function CatalogFiltersDraft({
                 <span className="sr-only">Minimum repack price in dollars</span>
                 <span aria-hidden="true">$</span>
                 <input
-                  inputMode="decimal"
+                  inputMode="numeric"
                   max={PRICE_FILTER_MAX_DOLLARS}
                   min={PRICE_FILTER_MIN_DOLLARS}
-                  onChange={(event) => setMinimum(event.currentTarget.valueAsNumber)}
-                  step="0.01"
+                  onChange={(event) =>
+                    setMinimum(roundPriceFilterDollars(event.currentTarget.valueAsNumber))
+                  }
+                  step="1"
                   type="number"
                   value={Number.isFinite(minimum) ? minimum : ""}
                 />
@@ -324,11 +329,13 @@ function CatalogFiltersDraft({
                 <span aria-hidden="true">$</span>
                 <input
                   aria-invalid={!valid}
-                  inputMode="decimal"
+                  inputMode="numeric"
                   max={PRICE_FILTER_MAX_DOLLARS}
                   min={PRICE_FILTER_MIN_DOLLARS}
-                  onChange={(event) => setMaximum(event.currentTarget.valueAsNumber)}
-                  step="0.01"
+                  onChange={(event) =>
+                    setMaximum(roundPriceFilterDollars(event.currentTarget.valueAsNumber))
+                  }
+                  step="1"
                   type="number"
                   value={Number.isFinite(maximum) ? maximum : ""}
                 />
@@ -361,17 +368,28 @@ function CatalogFiltersDraft({
         </div>
       </div>
 
-      <div className={styles.footerRow}>
-        <label className={styles.availabilityToggle}>
-          <input
-            checked={availability === "all"}
-            onChange={(event) =>
-              setAvailability(event.currentTarget.checked ? "all" : "active")
-            }
-            type="checkbox"
-          />
-          <span>Include sold out</span>
-        </label>
+      {showAvailabilityToggle ? (
+        <div className={styles.footerRow}>
+          <label className={styles.availabilityToggle}>
+            <input
+              checked={availability === "all"}
+              onChange={(event) =>
+                setAvailability(event.currentTarget.checked ? "all" : "active")
+              }
+              type="checkbox"
+            />
+            <span>Include sold out</span>
+          </label>
+          <p
+            aria-live="polite"
+            className={!valid || changed ? styles.draftStatus : "sr-only"}
+            id="catalog-filter-status"
+            role="status"
+          >
+            {statusMessage}
+          </p>
+        </div>
+      ) : (
         <p
           aria-live="polite"
           className={!valid || changed ? styles.draftStatus : "sr-only"}
@@ -380,7 +398,7 @@ function CatalogFiltersDraft({
         >
           {statusMessage}
         </p>
-      </div>
+      )}
     </section>
   );
 }

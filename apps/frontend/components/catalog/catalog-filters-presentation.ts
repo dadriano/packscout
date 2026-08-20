@@ -53,13 +53,16 @@ export function categoryFacetRows(
 
 export function formatFilterPrice(dollars: number): string {
   if (!Number.isFinite(dollars)) return "";
-  const wholeDollars = dollars % 1 === 0;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: wholeDollars ? 0 : 2,
-    maximumFractionDigits: wholeDollars ? 0 : 2,
-  }).format(dollars);
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(roundPriceFilterDollars(dollars));
+}
+
+export function roundPriceFilterDollars(value: number): number {
+  return Number.isFinite(value) ? Math.round(value) : Number.NaN;
 }
 
 export function closerPriceThumb(
@@ -85,9 +88,10 @@ export function sliderValueFromPointer(
 
 export function clampPriceFilter(value: number, bound: "min" | "max", other: number): number {
   if (!Number.isFinite(value)) return bound === "min" ? PRICE_FILTER_MIN_DOLLARS : PRICE_FILTER_MAX_DOLLARS;
+  const rounded = roundPriceFilterDollars(value);
   const clamped = Math.min(
     PRICE_FILTER_MAX_DOLLARS,
-    Math.max(PRICE_FILTER_MIN_DOLLARS, value),
+    Math.max(PRICE_FILTER_MIN_DOLLARS, rounded),
   );
   return bound === "min" ? Math.min(clamped, other) : Math.max(clamped, other);
 }

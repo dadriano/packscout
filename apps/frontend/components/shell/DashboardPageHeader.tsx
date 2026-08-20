@@ -1,9 +1,13 @@
 import Link from "next/link";
+import { METRIC_TRUST_COPY } from "@/lib/metric-vocabulary";
+import type { DashboardHref } from "@/lib/provider-banner";
 
 export function DashboardPageHeader({
   activeView,
+  overviewHref = "/",
 }: {
   activeView: "overview" | "all-repacks";
+  overviewHref?: DashboardHref;
 }) {
   return (
     <div className="page-heading-row">
@@ -16,7 +20,7 @@ export function DashboardPageHeader({
             aria-current={activeView === "overview" ? "page" : undefined}
             aria-selected={activeView === "overview"}
             className="dashboard-tabs__tab"
-            href="/"
+            href={overviewHref}
             role="tab"
           >
             Overview
@@ -32,7 +36,7 @@ export function DashboardPageHeader({
           </Link>
         </nav>
       </div>
-      <p className="dashboard-disclaimer">PackScout EV · Estimated · Not financial advice.</p>
+      <p className="dashboard-disclaimer">{METRIC_TRUST_COPY.dashboardDisclaimer}</p>
     </div>
   );
 }

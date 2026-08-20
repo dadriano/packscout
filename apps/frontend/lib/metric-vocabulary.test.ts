@@ -19,21 +19,21 @@ const expectedGlossary = [
     "A timing signal comparing recent activity with this repack’s own baseline. Heat does not mean profit, positive EV, or a predicted outcome.",
   ],
   ["repackPrice", "Repack Price", "The amount charged to open or buy the repack"],
-  ["evDollars", "EV $", "PackScout Gross EV minus Repack Price"],
+  ["evDollars", "EV $", "Gross EV minus Repack Price"],
   [
     "evPercent",
     "EV %",
-    "The percentage PackScout Gross EV is above or below Repack Price",
+    "The difference between Gross EV and Repack Price, shown as a percentage of Repack Price",
   ],
   [
     "evConfidence",
     "EV Confidence",
-    "How reliable PackScout considers its EV estimate based on supported evidence; it does not indicate whether EV is positive",
+    "How reliable the EV estimate is based on supported evidence; it does not indicate whether EV is positive",
   ],
   [
     "vendorReportedEv",
     "Vendor-reported EV",
-    "An EV estimate reported by the vendor and kept separate from PackScout EV",
+    "An EV estimate reported by the vendor and kept separate from estimated EV",
   ],
   [
     "buybackPercent",
@@ -43,7 +43,7 @@ const expectedGlossary = [
   [
     "grossEv",
     "Gross EV",
-    "PackScout’s estimated value of contents before fees and shipping",
+    "Estimated value of contents before fees and shipping",
   ],
   [
     "topChase",
@@ -112,16 +112,16 @@ test("maps V2 reason codes to bounded public copy", () => {
 
 test("keeps the metric trust language canonical for Dashboard and Learn", () => {
   assert.deepEqual(METRIC_TRUST_COPY, {
-    dashboardDisclaimer: "PackScout EV · Estimated · Not financial advice.",
-    estimateLabel: "PackScout EV",
+    dashboardDisclaimer: "EV · Estimated · Not financial advice.",
+    estimateLabel: "Estimated EV",
     financialDisclaimer: "Not financial advice.",
     longRunExplanation:
       "EV is a long-run estimate. It does not predict the contents or outcome of one repack.",
     sourceExplanation:
-      "Vendor-reported EV and PackScout EV are separate estimates and are never averaged.",
+      "Vendor-reported EV and estimated EV are separate estimates and are never averaged.",
     confidenceExplanation:
-      "Confidence describes the reliability of PackScout's estimate, not whether its EV is positive or negative.",
+      "Confidence describes the reliability of the estimate, not whether its EV is positive or negative.",
     unavailableExplanation:
-      "Unavailable means PackScout does not have enough supported evidence to show the value.",
+      "Unavailable means there is not enough supported evidence to show the value.",
   });
 });
