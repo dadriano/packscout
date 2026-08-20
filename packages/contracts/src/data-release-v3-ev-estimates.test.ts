@@ -518,6 +518,34 @@ test("protected, raw-like, and unknown fields are rejected at every nesting leve
         },
       };
     },
+    // The task-005 revision layer persists the same protected values under
+    // different spellings; both must be caught anywhere in a payload.
+    (value) => {
+      const packScout = structuredClone(value.packScout);
+      if (packScout.status !== "current") throw new Error("unexpected");
+      return {
+        ...value,
+        packScout: {
+          ...packScout,
+          metrics: {
+            ...packScout.metrics,
+            underlyingOutcomeEvMinorUnits: 1,
+          },
+        },
+      };
+    },
+    (value) => {
+      const packScout = structuredClone(value.packScout);
+      if (packScout.status !== "current") throw new Error("unexpected");
+      return {
+        ...value,
+        packScout: {
+          ...packScout,
+          metrics: { ...packScout.metrics, drawMultiplier: 2 },
+        },
+      };
+    },
+    (value) => ({ ...value, drawMultiplier: 2 }),
     (value) => ({
       ...value,
       vendorReported: { ...value.vendorReported, rawProviderPayload: {} },
@@ -559,6 +587,30 @@ test("protected, raw-like, and unknown fields are rejected at every nesting leve
       );
     }
   }
+  // The revision-layer spellings of the protected values are part of the
+  // scan vocabulary; the public pack price spelling deliberately is not.
+  assert.equal(
+    DATA_RELEASE_V3_PROTECTED_EV_FIELD_KEYS.has("underlyingoutcomeevminorunits"),
+    true,
+  );
+  assert.equal(
+    DATA_RELEASE_V3_PROTECTED_EV_FIELD_KEYS.has("drawmultiplier"),
+    true,
+  );
+  assert.equal(
+    DATA_RELEASE_V3_PROTECTED_EV_FIELD_KEYS.has("packpriceminorunits"),
+    false,
+  );
+  assert.equal(
+    containsProtectedEvPublicationKeyV3({
+      metrics: { underlyingOutcomeEvMinorUnits: 10_000 },
+    }),
+    true,
+  );
+  assert.equal(
+    containsProtectedEvPublicationKeyV3({ drawMultiplier: 1 }),
+    true,
+  );
 
   const guarded = safeParsePackScoutPublicEvV3(
     { ...buildPackScoutPublicEvNegativeV3(), provenance: {} },

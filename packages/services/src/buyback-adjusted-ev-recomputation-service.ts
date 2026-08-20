@@ -196,6 +196,19 @@ export class PackScoutBuybackAdjustedEvRecomputationService {
       effectiveFingerprint,
       sourceRevisions: this.sourceRevisionsFor(command, binding),
     });
+    if (persisted.outcome === "superseded") {
+      // The persistence boundary re-proved ordering inside its transaction:
+      // a concurrent recomputation completed strictly newer essential source
+      // evidence between this service's read-check and the write. The store
+      // refusal maps to the same bounded `superseded` outcome as the
+      // read-time check, so older evidence never becomes current.
+      this.log("BUYBACK_EV_RECOMPUTATION_SUPERSEDED", "info", command);
+      return {
+        outcome: "superseded",
+        currentRevision: persisted.revision,
+        status: statusFromProjection(persisted.projection),
+      };
+    }
     if (persisted.outcome === "rejected") {
       return {
         outcome: "rejected",

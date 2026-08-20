@@ -224,6 +224,25 @@ describe("data_release_v3 lifecycle", () => {
       }),
       "PUBLICATION_PROTECTED_FIELD",
     );
+    // The revision-layer spellings of the protected underlying-outcome EV
+    // values are refused as protected fields, not as generic parse failures.
+    for (const protectedSpelling of [
+      { underlyingOutcomeEvMinorUnits: 10_000 },
+      { drawMultiplier: 1 },
+    ]) {
+      await expectRefusal(
+        run(t, internal.dataReleaseV3Lifecycle.applyBatch, {
+          ...v3BatchRequest(plan, categoriesBatch),
+          records: [
+            {
+              ...(categoriesBatch.records[0] as Record<string, unknown>),
+              ...protectedSpelling,
+            },
+          ],
+        }),
+        "PUBLICATION_PROTECTED_FIELD",
+      );
+    }
 
     // Stage everything, then finalize against tampered expectations.
     for (const batch of plan.batches) {
@@ -374,6 +393,65 @@ describe("data_release_v3 lifecycle", () => {
       }),
       "PUBLICATION_REQUEST_INVALID",
     );
+  });
+
+  test("activation refuses a dataAsOf regression unless explicitly overridden", async () => {
+    const t = convexTest(schema, modules);
+    const newerPlan = await buildV3FixturePlan({
+      publicReleaseId: RELEASE_ID_1,
+      details: threeRepackPlanDetails(),
+    });
+    const olderPlan = await buildV3FixturePlan({
+      publicReleaseId: RELEASE_ID_2,
+      dataAsOf: new Date(
+        Date.parse(newerPlan.manifest.dataAsOf) - 10 * 60_000,
+      ).toISOString(),
+      details: threeRepackPlanDetails(),
+    });
+    await stageComplete(t, newerPlan);
+    await stageComplete(t, olderPlan);
+    await activate(t, newerPlan, null);
+
+    // Replaying the older complete plan against the matching predecessor can
+    // never move the public catalog backward in time.
+    await expectRefusal(
+      activate(t, olderPlan, RELEASE_ID_1),
+      "PUBLICATION_DATA_REGRESSION",
+    );
+    const unchanged = (await t.query(internal.dataReleaseV3Lifecycle.activeState, {})) as {
+      generation: number;
+      activeRelease: { publicReleaseId: string } | null;
+    };
+    expect(unchanged.generation).toBe(1);
+    expect(unchanged.activeRelease?.publicReleaseId).toBe(RELEASE_ID_1);
+
+    // The documented operator override rolls forward to older data on purpose.
+    const overridden = await run(t, internal.dataReleaseV3Lifecycle.activate, {
+      ...v3ActivateRequest(olderPlan, RELEASE_ID_1),
+      operationId: `${olderPlan.publicReleaseId}:activate:${RELEASE_ID_1}:override`,
+      idempotencyKey: `${olderPlan.publicReleaseId}:activate:${RELEASE_ID_1}:override`,
+      allowDataAsOfRegression: true,
+    });
+    expect(overridden.result).toBe("activated");
+    const afterOverride = (await t.query(internal.dataReleaseV3Lifecycle.activeState, {})) as {
+      generation: number;
+      activeRelease: { publicReleaseId: string } | null;
+      previousRelease: { publicReleaseId: string } | null;
+    };
+    expect(afterOverride.generation).toBe(2);
+    expect(afterOverride.activeRelease?.publicReleaseId).toBe(RELEASE_ID_2);
+    expect(afterOverride.previousRelease?.publicReleaseId).toBe(RELEASE_ID_1);
+
+    // The sanctioned rollback path stays intact regardless of watermarks.
+    await run(
+      t,
+      internal.dataReleaseV3Lifecycle.rollback,
+      v3RollbackRequest(RELEASE_ID_2, RELEASE_ID_1),
+    );
+    const rolledBack = (await t.query(internal.dataReleaseV3Lifecycle.activeState, {})) as {
+      activeRelease: { publicReleaseId: string } | null;
+    };
+    expect(rolledBack.activeRelease?.publicReleaseId).toBe(RELEASE_ID_1);
   });
 
   test("activation retains the previous release and rollback restores it exactly", async () => {

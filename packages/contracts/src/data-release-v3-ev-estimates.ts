@@ -27,17 +27,37 @@ const safeIntegerSchema = z.number().int().safe();
 const nonNegativeSafeIntegerSchema = safeIntegerSchema.min(0);
 
 /**
+ * Revision-layer spellings of the task-001 protected values. The task-005
+ * revision store persists the protected underlying-outcome EV number as
+ * `underlyingOutcomeEvMinorUnits` and the protected draw semantics as
+ * `drawMultiplier` (see `PackScoutBuybackEvRevisionMetricsV1`), so a payload
+ * carrying either spelling leaks the same protected evidence as
+ * `protectedEvidence.underlyingOutcomeEvMoney` and must be rejected
+ * identically. `packPriceMinorUnits` is deliberately absent: the pack price
+ * is public (`price` on every repack projection) and the spelling appears in
+ * the legitimate in-memory metric-invariant shape.
+ */
+const DATA_RELEASE_V3_PROTECTED_EV_REVISION_SPELLINGS = [
+  "underlyingOutcomeEvMinorUnits",
+  "drawMultiplier",
+] as const;
+
+/**
  * Public keys that must never appear anywhere inside a data_release_v3
  * payload. Every leaf segment of the task-001 protected field names is
- * included, and the shared publication-fragment scan additionally rejects
- * raw-like provider keys (rawPayload, providerResponse, and similar).
+ * included, plus the revision-layer spellings of the same protected values,
+ * and the shared publication-fragment scan additionally rejects raw-like
+ * provider keys (rawPayload, providerResponse, and similar).
  */
 export const DATA_RELEASE_V3_PROTECTED_EV_FIELD_KEYS: ReadonlySet<string> =
-  new Set(
-    PACKSCOUT_BUYBACK_EV_PROTECTED_FIELD_NAMES_V1.flatMap((path) =>
+  new Set([
+    ...PACKSCOUT_BUYBACK_EV_PROTECTED_FIELD_NAMES_V1.flatMap((path) =>
       path.split(".").map(normalizeProtectedPublicationFieldKey),
     ),
-  );
+    ...DATA_RELEASE_V3_PROTECTED_EV_REVISION_SPELLINGS.map(
+      normalizeProtectedPublicationFieldKey,
+    ),
+  ]);
 
 export function containsProtectedEvPublicationKeyV3(value: unknown): boolean {
   return containsNormalizedProtectedPublicationField(

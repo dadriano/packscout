@@ -163,7 +163,18 @@ export type PersistBuybackEvRevisionRowResult =
   | Readonly<{ outcome: "created"; row: BuybackEvRevisionRecord }>
   | Readonly<{ outcome: "unchanged"; row: BuybackEvRevisionRecord }>
   | Readonly<{ outcome: "identity_conflict" }>
-  | Readonly<{ outcome: "result_conflict" }>;
+  | Readonly<{ outcome: "result_conflict" }>
+  | Readonly<{
+      /**
+       * The completed current revision for the same product and method was
+       * calculated from strictly newer essential source evidence (or the
+       * incoming evidence has no provable source time while ordered evidence
+       * is current), so this write is refused inside the persistence
+       * transaction and the governing current row is returned instead.
+       */
+      outcome: "superseded";
+      row: BuybackEvRevisionRecord;
+    }>;
 
 export interface RecordBuybackEvPersistenceFailureInput {
   readonly organizationId: string;
@@ -520,14 +531,38 @@ export class BuybackEvRevisionRepository {
     if (fingerprintOwner) {
       return { outcome: "identity_conflict" };
     }
-    const latest = await transaction.buyback_ev_revisions.aggregate({
-      _max: { revision_number: true },
+    // One read resolves both the next revision number and the ordering
+    // guard's comparison row from the same statement snapshot. Ordering is
+    // enforced here, inside the transaction that assigns currency: a
+    // completed current revision whose known essential source time is
+    // strictly newer than the incoming evidence (or any known-time current
+    // revision when the incoming source time is unknown) refuses the write
+    // as `superseded`, so older evidence can never become current. A
+    // concurrent writer this read cannot see yet collides on the
+    // `buyback_ev_revisions_product_number_unique` constraint instead, and
+    // the bounded retry re-runs this check against the committed row —
+    // read-check-act interleavings therefore cannot regress currency.
+    const currentRow = await transaction.buyback_ev_revisions.findFirst({
       where: {
         organization_id: input.organizationId,
         platform_key: input.platformKey,
         product_key: input.productKey,
+        lifecycle: "completed",
       },
+      orderBy: { revision_number: "desc" },
     });
+    if (currentRow !== null && currentRow.data_observed_at !== null) {
+      const incomingObservedAtMilliseconds =
+        input.dataAsOf.state === "known"
+          ? Date.parse(input.dataAsOf.observedAt)
+          : null;
+      if (
+        incomingObservedAtMilliseconds === null ||
+        incomingObservedAtMilliseconds < currentRow.data_observed_at.getTime()
+      ) {
+        return { outcome: "superseded", row: rowToRecord(currentRow, true) };
+      }
+    }
     const created = await transaction.buyback_ev_revisions.create({
       data: {
         organization_id: input.organizationId,
@@ -541,7 +576,7 @@ export class BuybackEvRevisionRepository {
           PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
         lifecycle: "completed",
         status: input.status,
-        revision_number: (latest._max.revision_number ?? 0) + 1,
+        revision_number: (currentRow?.revision_number ?? 0) + 1,
         calculation_key: input.calculationKey,
         effective_fingerprint: input.effectiveFingerprint,
         result_hash: input.resultHash,

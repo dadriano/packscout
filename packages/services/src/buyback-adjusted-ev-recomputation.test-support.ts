@@ -156,15 +156,33 @@ implements PackScoutBuybackEvRevisionPersistencePortV1 {
     if (fingerprintOwner) {
       return { outcome: "identity_conflict" as const };
     }
-    const revisionNumber =
-      this.rows
-        .filter(
-          (row) =>
-            row.organizationId === input.organizationId &&
-            row.platformKey === input.platformKey &&
-            row.productKey === input.productKey,
-        )
-        .reduce((maximum, row) => Math.max(maximum, row.revisionNumber), 0) + 1;
+    const productRows = this.rows
+      .filter(
+        (row) =>
+          row.organizationId === input.organizationId &&
+          row.platformKey === input.platformKey &&
+          row.productKey === input.productKey,
+      )
+      .sort((left, right) => right.revisionNumber - left.revisionNumber);
+    const currentRow = productRows[0] ?? null;
+    // Mirror of the repository's in-transaction ordering guard: a completed
+    // current revision with strictly newer known essential source time (or
+    // any known-time current revision when the incoming source time is
+    // unknown) refuses the write as superseded.
+    if (currentRow !== null && currentRow.dataAsOf.observedAt !== null) {
+      const incomingObservedAtMilliseconds =
+        input.dataAsOf.state === "known"
+          ? Date.parse(input.dataAsOf.observedAt)
+          : null;
+      if (
+        incomingObservedAtMilliseconds === null ||
+        incomingObservedAtMilliseconds <
+          Date.parse(currentRow.dataAsOf.observedAt)
+      ) {
+        return { outcome: "superseded" as const, row: currentRow };
+      }
+    }
+    const revisionNumber = (currentRow?.revisionNumber ?? 0) + 1;
     this.#revisionSequence += 1;
     const row: PackScoutBuybackEvRevisionRecordV1 = {
       revisionId: `41000000-0000-4000-8000-${String(this.#revisionSequence).padStart(12, "0")}`,

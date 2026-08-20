@@ -8,6 +8,7 @@ import {
   type PackScoutBuybackEvInputV1,
 } from "@packscout/contracts";
 import {
+  assertPackScoutBuybackEvProjectionLeaksNoProtectedFieldV1,
   computePackScoutBuybackEvCalculationIdentityKeyV1,
   computePackScoutBuybackEvEffectiveFingerprintV1,
   computePackScoutBuybackEvFailureKeyV1,
@@ -416,4 +417,46 @@ test("corrupted stored metrics or confidence fail projection validation", () => 
       error instanceof PackScoutBuybackEvRevisionProjectionError &&
       error.code === "ROW_INVALID",
   );
+});
+
+test("a projection carrying any protected spelling fails closed as PROTECTED_FIELD_LEAKED", () => {
+  const sanitized = sanitizePackScoutBuybackEvRevisionForPublicationV1(
+    availableRecord(),
+  );
+  assert.doesNotThrow(() =>
+    assertPackScoutBuybackEvProjectionLeaksNoProtectedFieldV1(sanitized),
+  );
+  assert.equal(sanitized.status, "available");
+  if (sanitized.status !== "available") return;
+  // Drifted projections that re-expose the protected value under the
+  // task-001 spelling or either revision-layer spelling must fail closed.
+  const driftedProjections: readonly Record<string, unknown>[] = [
+    {
+      ...sanitized,
+      metrics: { ...sanitized.metrics, underlyingOutcomeEvMinorUnits: 10_000 },
+    },
+    { ...sanitized, metrics: { ...sanitized.metrics, drawMultiplier: 1 } },
+    {
+      ...sanitized,
+      metrics: {
+        ...sanitized.metrics,
+        underlyingOutcomeEvMoney: { minorUnits: 10_000, currency: "USD" },
+      },
+    },
+    { ...sanitized, protectedEvidence: { payoutFormula: "leak" } },
+  ];
+  for (const drifted of driftedProjections) {
+    assert.throws(
+      () =>
+        assertPackScoutBuybackEvProjectionLeaksNoProtectedFieldV1(
+          drifted as Parameters<
+            typeof assertPackScoutBuybackEvProjectionLeaksNoProtectedFieldV1
+          >[0],
+        ),
+      (error: unknown) =>
+        error instanceof PackScoutBuybackEvRevisionProjectionError &&
+        error.code === "PROTECTED_FIELD_LEAKED",
+      JSON.stringify(Object.keys(drifted)),
+    );
+  }
 });

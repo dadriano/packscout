@@ -93,6 +93,17 @@ export interface PackScoutBuybackEvRevisionPersistencePortV1 {
     | Readonly<{ outcome: "unchanged"; row: PackScoutBuybackEvRevisionRecordV1 }>
     | Readonly<{ outcome: "identity_conflict" }>
     | Readonly<{ outcome: "result_conflict" }>
+    | Readonly<{
+        /**
+         * Refused inside the persistence transaction because the completed
+         * current revision for the same product was calculated from strictly
+         * newer essential source evidence (or the incoming source time is
+         * unknown while ordered evidence is current). `row` is the governing
+         * current revision.
+         */
+        outcome: "superseded";
+        row: PackScoutBuybackEvRevisionRecordV1;
+      }>
   >;
   recordPersistenceFailure(input: {
     readonly organizationId: string;
@@ -142,6 +153,17 @@ export interface PersistPackScoutBuybackEvRevisionCommandV1 {
 export type PersistPackScoutBuybackEvRevisionResultV1 =
   | Readonly<{
       outcome: "created" | "unchanged";
+      revision: PackScoutBuybackEvRevisionIdentityRecordV1;
+      projection: PackScoutBuybackEvRevisionPublicationProjectionV1;
+    }>
+  | Readonly<{
+      /**
+       * The persistence boundary refused the write because the completed
+       * current revision carries strictly newer essential source evidence.
+       * `revision` and `projection` describe that governing current
+       * revision, never the refused work.
+       */
+      outcome: "superseded";
       revision: PackScoutBuybackEvRevisionIdentityRecordV1;
       projection: PackScoutBuybackEvRevisionPublicationProjectionV1;
     }>
@@ -550,6 +572,37 @@ export class PackScoutBuybackEvRevisionStore {
         effectiveFingerprint: command.effectiveFingerprint,
         calculatedAt: calculation.calculatedAt,
       });
+    }
+    if (persisted.outcome === "superseded") {
+      // The persistence transaction is the ordering authority: the completed
+      // current revision carries strictly newer essential source evidence,
+      // so this work is deterministically out of order and never becomes
+      // current. Superseded work is an ordered outcome, not a failure.
+      this.report({
+        organizationId,
+        providerId,
+        code: "BUYBACK_EV_REVISION_SUPERSEDED",
+        level: "info",
+        occurredAt: calculation.calculatedAt,
+        availability: null,
+      });
+      return {
+        outcome: "superseded",
+        revision: {
+          revisionId: persisted.row.revisionId,
+          revisionNumber: persisted.row.revisionNumber,
+          status: persisted.row.status,
+          methodVersion: persisted.row.methodVersion,
+          confidencePolicyVersion: persisted.row.confidencePolicyVersion,
+          calculationKey: persisted.row.calculationKey,
+          effectiveFingerprint: persisted.row.effectiveFingerprint,
+          resultHash: persisted.row.resultHash,
+          calculatedAt: persisted.row.calculatedAt,
+        },
+        projection: sanitizePackScoutBuybackEvRevisionForPublicationV1(
+          persisted.row,
+        ),
+      };
     }
     const projection = sanitizePackScoutBuybackEvRevisionForPublicationV1(
       persisted.row,

@@ -96,8 +96,9 @@ function runFailure(
 /**
  * Local ephemeral persistence adapter behind the real task-005 revision
  * store: identical replay, identity-conflict, result-conflict, failure-ledger
- * dedupe, and completed-current selection semantics, with deterministic
- * revision identities minted in the simulated namespace.
+ * dedupe, the in-transaction essential-source ordering guard, and
+ * completed-current selection semantics, with deterministic revision
+ * identities minted in the simulated namespace.
  */
 export class PackScoutBuybackEvSimulationRevisionMemoryPortV1
 implements PackScoutBuybackEvRevisionPersistencePortV1 {
@@ -131,15 +132,31 @@ implements PackScoutBuybackEvRevisionPersistencePortV1 {
     if (fingerprintOwned) {
       return { outcome: "identity_conflict" as const };
     }
-    const revisionNumber =
-      this.rows
-        .filter(
-          (row) =>
-            row.organizationId === input.organizationId &&
-            row.platformKey === input.platformKey &&
-            row.productKey === input.productKey,
-        )
-        .reduce((maximum, row) => Math.max(maximum, row.revisionNumber), 0) + 1;
+    const productRows = this.rows
+      .filter(
+        (row) =>
+          row.organizationId === input.organizationId &&
+          row.platformKey === input.platformKey &&
+          row.productKey === input.productKey,
+      )
+      .sort((left, right) => right.revisionNumber - left.revisionNumber);
+    const currentRow = productRows[0] ?? null;
+    // Mirror of the repository's in-transaction ordering guard: strictly
+    // older (or unprovable) essential source evidence never becomes current.
+    if (currentRow !== null && currentRow.dataAsOf.observedAt !== null) {
+      const incomingObservedAtMilliseconds =
+        input.dataAsOf.state === "known"
+          ? Date.parse(input.dataAsOf.observedAt)
+          : null;
+      if (
+        incomingObservedAtMilliseconds === null ||
+        incomingObservedAtMilliseconds <
+          Date.parse(currentRow.dataAsOf.observedAt)
+      ) {
+        return { outcome: "superseded" as const, row: currentRow };
+      }
+    }
+    const revisionNumber = (currentRow?.revisionNumber ?? 0) + 1;
     this.#sequence += 1;
     const row: PackScoutBuybackEvRevisionRecordV1 = {
       revisionId: packScoutBuybackEvSimulatedUuidV1("revision", {

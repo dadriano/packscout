@@ -136,6 +136,12 @@ export type DataReleaseV3ActivateRequest = DataReleaseV3OperationEnvelope &
     publicReleaseId: string;
     releaseFingerprint: string;
     expectedActivePublicReleaseId: string | null;
+    /**
+     * Operator-intentional override for the server-side dataAsOf
+     * monotonicity guard (`PUBLICATION_DATA_REGRESSION`). Absent on every
+     * normal forward publish; pointer reversal belongs to `rollback`.
+     */
+    allowDataAsOfRegression?: true;
   }>;
 
 export type DataReleaseV3RollbackRequest = DataReleaseV3OperationEnvelope &

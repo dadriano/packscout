@@ -30,7 +30,10 @@ import {
   recomputationCommand,
   unavailableEvidenceOutcome,
 } from "./buyback-adjusted-ev-recomputation.test-support.ts";
-import { PackScoutBuybackEvRevisionStore } from "./buyback-adjusted-ev-revision-store.ts";
+import {
+  PackScoutBuybackEvRevisionStore,
+  type PackScoutBuybackEvRevisionPersistencePortV1,
+} from "./buyback-adjusted-ev-revision-store.ts";
 import type {
   OperationalLog,
   OperationalMetric,
@@ -580,6 +583,82 @@ test("out-of-order rapid changes resolve by essential source order, never arriva
     ),
   );
   assert.equal(newest.outcome, "created");
+  assert.equal(port.rows.length, 2);
+  assert.equal(port.rows[1]!.revisionNumber, 2);
+});
+
+test("a concurrent read-check-act interleaving cannot make older evidence current", async () => {
+  const { port, service } = harness();
+  const newer = await service.recompute(
+    recomputationCommand(
+      completeEvidenceOutcome({
+        packPrice: buildUsdEvidence(12_000),
+        observation: observation({
+          sourceRevisionId: "catalog-revision-310",
+          observedAt: "2026-08-19T18:10:00.000Z",
+        }),
+      }),
+      "2026-08-19T18:11:00.000Z",
+    ),
+  );
+  assert.equal(newer.outcome, "created");
+  if (newer.outcome !== "created") return;
+
+  // A concurrent recomputation for the same product performed its read-time
+  // supersede check BEFORE the newer revision committed, so that check saw
+  // no current revision at all (the write-skew window). The persistence
+  // boundary must still refuse the older evidence inside the write.
+  const staleReadPort: PackScoutBuybackEvRevisionPersistencePortV1 = {
+    persistCompletedRevision: (input) => port.persistCompletedRevision(input),
+    recordPersistenceFailure: (input) => port.recordPersistenceFailure(input),
+    getCurrentCompletedRevision: async () => null,
+    getRevisionTrace: async () => null,
+  };
+  const racingService = new PackScoutBuybackAdjustedEvRecomputationService(
+    new PackScoutBuybackEvRevisionStore(staleReadPort),
+  );
+  const older = await racingService.recompute(
+    recomputationCommand(completeEvidenceOutcome(), "2026-08-19T18:12:00.000Z"),
+  );
+  assert.equal(older.outcome, "superseded");
+  if (older.outcome !== "superseded") return;
+  assert.equal(older.currentRevision.revisionId, newer.revision.revisionId);
+  assert.equal(
+    port.rows.length,
+    1,
+    "older evidence must never occupy a revision through a stale read",
+  );
+  assert.equal(port.failures.size, 0, "superseded work is ordered, not failed");
+
+  // Unknown-source-time evidence racing the same window is refused too.
+  const unknownTime = await racingService.recompute(
+    recomputationCommand(
+      unavailableEvidenceOutcome({
+        internalReasons: ["MISSING_SOURCE_TIME"],
+        sourceRevisionId: "catalog-revision-320",
+        observedAt: null,
+      }),
+      "2026-08-19T18:13:00.000Z",
+    ),
+  );
+  assert.equal(unknownTime.outcome, "superseded");
+  assert.equal(port.rows.length, 1);
+
+  // Equal essential source time is not a regression: it falls through to
+  // the identity rules and may occupy the next revision.
+  const equalTime = await racingService.recompute(
+    recomputationCommand(
+      completeEvidenceOutcome({
+        packPrice: buildUsdEvidence(11_000),
+        observation: observation({
+          sourceRevisionId: "catalog-revision-330",
+          observedAt: "2026-08-19T18:10:00.000Z",
+        }),
+      }),
+      "2026-08-19T18:14:00.000Z",
+    ),
+  );
+  assert.equal(equalTime.outcome, "created");
   assert.equal(port.rows.length, 2);
   assert.equal(port.rows[1]!.revisionNumber, 2);
 });

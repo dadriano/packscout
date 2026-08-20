@@ -227,6 +227,16 @@ export const dataReleaseV3ActivateRequestSchema = z
     publicReleaseId: z.uuid(),
     releaseFingerprint: sha256Schema,
     expectedActivePublicReleaseId: z.uuid().nullable(),
+    /**
+     * Operator-intentional override for the dataAsOf monotonicity guard.
+     * Activation normally refuses (`PUBLICATION_DATA_REGRESSION`) when the
+     * candidate release's canonical dataAsOf watermark is strictly older
+     * than the active release's, so replaying an old complete plan can
+     * never silently move the public catalog backward in time. Passing
+     * `true` documents a deliberate roll-forward to older data when the
+     * retained-predecessor `rollback` mutation cannot reach the target.
+     */
+    allowDataAsOfRegression: z.literal(true).optional(),
   })
   .strict();
 
@@ -1070,6 +1080,21 @@ export const activate = internalMutation({
     }
     if (activePublicReleaseId === request.publicReleaseId) {
       refuse("PUBLICATION_PREDECESSOR_CONFLICT");
+    }
+    // dataAsOf monotonicity: the candidate's canonical watermark (stamped by
+    // the assembler as the release read clock) must not be strictly older
+    // than the active release's, so replaying an older complete plan whose
+    // predecessor expectation happens to match can never move the public
+    // catalog backward in time. Pointer reversal remains the job of the
+    // `rollback` mutation; the explicit request override documents the rare
+    // operator-intentional roll-forward to older data.
+    if (
+      request.allowDataAsOfRegression !== true &&
+      state !== null &&
+      state.activeRelease !== null &&
+      Date.parse(release.dataAsOf) < Date.parse(state.activeRelease.dataAsOf)
+    ) {
+      refuse("PUBLICATION_DATA_REGRESSION");
     }
     const serverTime = new Date().toISOString();
     const pointer = releasePointer(release);

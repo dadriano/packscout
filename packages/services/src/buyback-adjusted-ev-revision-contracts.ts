@@ -288,6 +288,22 @@ export class PackScoutBuybackEvRevisionProjectionError extends Error {
 }
 
 /**
+ * Final tripwire before a projection leaves the service boundary: any
+ * protected task-001 spelling or revision-layer spelling
+ * (`underlyingOutcomeEvMinorUnits`, `drawMultiplier`, ...) anywhere in the
+ * projection fails closed as `PROTECTED_FIELD_LEAKED`. The sanitizer's
+ * field-by-field construction makes this unreachable today; the guard exists
+ * so any future drift in the projection shape can never leak silently.
+ */
+export function assertPackScoutBuybackEvProjectionLeaksNoProtectedFieldV1(
+  projection: PackScoutBuybackEvRevisionPublicationProjectionV1,
+): void {
+  if (containsProtectedEvPublicationKeyV3(projection)) {
+    throw new PackScoutBuybackEvRevisionProjectionError("PROTECTED_FIELD_LEAKED");
+  }
+}
+
+/**
  * Projects one stored revision into its sanitized publication shape. The
  * projection exposes only the approved public allowlist: four metrics,
  * confidence, versions, timestamps, source age, expiry, and one bounded
@@ -371,9 +387,7 @@ export function sanitizePackScoutBuybackEvRevisionForPublicationV1(
       publicReason: record.publicPrimaryReason,
     };
   }
-  if (containsProtectedEvPublicationKeyV3(projection)) {
-    throw new PackScoutBuybackEvRevisionProjectionError("PROTECTED_FIELD_LEAKED");
-  }
+  assertPackScoutBuybackEvProjectionLeaksNoProtectedFieldV1(projection);
   return projection;
 }
 

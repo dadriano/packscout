@@ -600,6 +600,15 @@ export class InMemoryDataReleaseV3Port implements DataReleaseV3PublicationPort {
       if (active !== request.expectedActivePublicReleaseId) {
         throw new Error("PUBLICATION_PREDECESSOR_CONFLICT");
       }
+      // Mirror of the Convex dataAsOf monotonicity guard on activation.
+      if (
+        request.allowDataAsOfRegression !== true &&
+        this.state.activeRelease !== null &&
+        Date.parse(release.request.manifest.dataAsOf) <
+          Date.parse(this.state.activeRelease.dataAsOf)
+      ) {
+        throw new Error("PUBLICATION_DATA_REGRESSION");
+      }
       this.state = {
         generation: this.state.generation + 1,
         activeRelease: this.pointer(request.publicReleaseId),

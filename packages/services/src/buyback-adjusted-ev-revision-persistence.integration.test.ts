@@ -503,6 +503,114 @@ test("buyback EV revisions persist immutably with replay, conflict, failure, and
   }
 });
 
+test("the persistence transaction refuses older essential source evidence even after a stale read-check", async () => {
+  const harness = await setupHarness();
+  const observationFor = (revision: string, observedAt: string) => ({
+    coherenceKind: "provider_revision" as const,
+    providerKey: PLATFORM_KEY,
+    sourceRevisionId: revision,
+    sourceManifestSha256: "4".repeat(64),
+    observedAt,
+  });
+  try {
+    const newer = await harness.store.persistCompletedCalculation(
+      commandFor(
+        buildBuybackEvInput({
+          observation: observationFor(
+            "catalog-revision-410",
+            "2026-08-19T18:10:00.000Z",
+          ),
+        }),
+        "2026-08-19T18:11:00.000Z",
+      ),
+    );
+    assert.equal(newer.outcome, "created");
+    if (newer.outcome !== "created") return;
+
+    // A raced recomputation whose read-time supersede check ran before the
+    // newer revision committed writes its older evidence afterwards: the
+    // transaction that assigns currency must refuse it as superseded.
+    const older = await harness.store.persistCompletedCalculation(
+      commandFor(buildBuybackEvInput(), "2026-08-19T18:12:00.000Z"),
+    );
+    assert.equal(older.outcome, "superseded");
+    if (older.outcome !== "superseded") return;
+    assert.equal(older.revision.revisionId, newer.revision.revisionId);
+    assert.equal(
+      await harness.database.buyback_ev_revisions.count(),
+      1,
+      "older evidence must never occupy a revision",
+    );
+    assert.equal(
+      await harness.database.buyback_ev_persistence_failures.count(),
+      0,
+      "superseded work is an ordered outcome, never a ledgered failure",
+    );
+
+    // Equal essential source time is not a regression: identity rules own it.
+    const equalTime = await harness.store.persistCompletedCalculation(
+      commandFor(
+        buildBuybackEvInput({
+          observation: observationFor(
+            "catalog-revision-420",
+            "2026-08-19T18:10:00.000Z",
+          ),
+        }),
+        "2026-08-19T18:13:00.000Z",
+      ),
+    );
+    assert.equal(equalTime.outcome, "created");
+
+    // Two interleaved writers for the same product: whichever interleaving
+    // the scheduler produces, the newest essential source time ends current.
+    const [olderWriter, newerWriter] = await Promise.all([
+      harness.store.persistCompletedCalculation(
+        commandFor(
+          buildBuybackEvInput({
+            observation: observationFor(
+              "catalog-revision-430",
+              "2026-08-19T18:20:00.000Z",
+            ),
+          }),
+          "2026-08-19T18:31:00.000Z",
+        ),
+      ),
+      harness.store.persistCompletedCalculation(
+        commandFor(
+          buildBuybackEvInput({
+            observation: observationFor(
+              "catalog-revision-440",
+              "2026-08-19T18:30:00.000Z",
+            ),
+          }),
+          "2026-08-19T18:31:00.000Z",
+        ),
+      ),
+    ]);
+    assert.equal(newerWriter.outcome, "created");
+    if (newerWriter.outcome !== "created") return;
+    assert.ok(
+      olderWriter.outcome === "created" || olderWriter.outcome === "superseded",
+      `unexpected racing outcome: ${olderWriter.outcome}`,
+    );
+    const current = await harness.store.getCurrentPublication({
+      organizationId: ids.organization,
+      platformKey: PLATFORM_KEY,
+      productKey: PRODUCT_KEY,
+    });
+    assert.equal(current?.revision.revisionId, newerWriter.revision.revisionId);
+    assert.equal(
+      current?.projection.status === "available"
+        ? current.projection.dataAsOf.observedAt
+        : null,
+      "2026-08-19T18:30:00.000Z",
+      "the completed current revision must carry the newest source time",
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 function oldMethodSource(
   externalId: string,
   sourceTimestamp: string,
