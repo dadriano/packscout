@@ -125,3 +125,110 @@ unticked deliberately:
   Postgres service, the environment, and the final `verify:framework` step all
   confirmed present after the edit.
 - `npm run check:framework` — exit 0 with the revised workflow in place.
+
+## Post-merge CI evidence: the cache restores but delivers nothing
+
+Two CI runs now exist, and together they settle both open criteria — one
+positively, one negatively.
+
+### The cache does save and restore (criterion met)
+
+Run 32391979167 was cold and missed at every key level. Run 32393563155 hit:
+
+```
+Restore build caches  Cache hit for restore-key: build-Linux-node22-442b14f1...-d310974a...-568037b2...
+Restore build caches  Cache Size: ~58 MB (60594994 B)
+Restore build caches  Cache restored successfully
+```
+
+The `restore-keys` ladder works as designed. The primary key embeds
+`github.sha` deliberately: `actions/cache` only saves when the primary key
+misses, so a per-commit key is the standard idiom for a cache that must refresh
+every run, with `restore-keys` doing the actual restoring by prefix.
+
+### But it buys nothing, and the reason is the build script
+
+| Run | Verify step | Job total |
+|---|---|---|
+| 32391979167 (cold cache) | 5m09s (309s) | 7m42s |
+| 32393563155 (warm cache) | **5m03s (303s)** | 7m36s |
+
+Six seconds. Within noise.
+
+The cause was confirmed by experiment rather than inference. A marker file was
+planted in `apps/frontend/.next-build/cache`, `npm run build:frontend` was run,
+and the marker was gone afterwards.
+
+The frontend build script is:
+
+```
+rm -rf .next-build && NEXT_DIST_DIR=.next-build next build --webpack
+```
+
+It deletes its entire output directory — including `cache/`, which is where
+webpack's incremental cache lives — before the build starts. The restored cache
+is removed moments after being restored. The 58 MB that CI saves is whatever the
+build regenerated *after* wiping, which the next run then wipes again.
+
+So the second acceptance criterion, that a repeat run is measurably faster from
+cache reuse, is **not met**, and the reason is not the cache configuration.
+
+### The fix, and why it was not made here
+
+Preserving only `cache/` across the clean is safe: webpack's cache is
+content-addressed and cannot produce stale build output, and persisting
+`<distDir>/cache` is what Next.js documents for CI. Everything else in the
+directory would still be removed, keeping the clean-build guarantee the `rm -rf`
+exists to provide.
+
+This was left undone deliberately. It modifies the production build script,
+which is outside this task's stated scope, and it deserves its own verification
+cycle — a cold-versus-warm frontend build measurement proving the preserved
+cache is actually consumed. Shipping it untested at the end of this branch would
+repeat the mistake this task file already documents once: reporting a saving
+that measurement had not established.
+
+Until it is fixed, the caching in this workflow is honest infrastructure that is
+not yet paying for itself. It costs 26s to restore and 42s to save per run,
+which is currently a net loss of roughly a minute.
+
+### Correction: the fix is worth less than the section above implies
+
+A step-level breakdown of run 32393563155 bounds the upside, and it is smaller
+than "the build wipes its cache" suggests on its own. Within the 303s verify
+step:
+
+```
+contracts     start 16:46:12
+database      16:46:17 -> 16:46:45
+services      16:46:46 -> 16:47:57
+Next build    16:48:46 -> 16:49:41   (~55s)
+```
+
+The build is roughly **55s of 303s**. The verify step is dominated by the test
+lanes, not by bundling. So even a perfectly working webpack cache caps out
+somewhere under 40s of savings, against a 68s cost to restore and save
+(26s + 42s). Fixing the `rm -rf` would move the caching from a net loss to
+roughly break-even, not to a large win.
+
+Both facts are true and neither alone is the whole picture:
+
+- The restored cache is deleted before webpack can read it — proven by planting
+  a marker file, running the build, and finding it gone.
+- Even intact, it would not have transformed the run, because the bundler is not
+  where this gate spends its time.
+
+The second point is the one that should drive the decision. Reported Next
+compile times were 49s cold and 47s warm, consistent with the cache being wiped
+in both runs and the 2s being noise.
+
+**Recommendation:** treat the build cache as provisional. Either fix the `rm -rf`
+and re-measure to confirm it clears its own overhead, or drop the cache step
+entirely and reclaim the 68s it currently costs. Keeping it unfixed is the worst
+of the three options. `*.tsbuildinfo` is worth keeping in the cache either way,
+since it is nearly free to store and typecheck runs on every gate.
+
+This also revises a claim made earlier in this feature: task 004 restoring
+incremental compilation was said to have "no effect in CI without this caching".
+That remains true in principle, but the effect is small in practice, because
+typecheck is around 13s of the gate.
