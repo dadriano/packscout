@@ -949,7 +949,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/learn-content.test.ts",
           testName:
-            "the Expected Value guide teaches the buyback formula through shared values",
+            "the EV article teaches the buyback formula through shared values",
         },
         {
           file: "apps/frontend/lib/confidence-limitations.test.ts",
