@@ -3,6 +3,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isIgnoredDirectoryName } from "./ignored-directories.mjs";
 
 function readOption(name) {
   const index = process.argv.indexOf(name);
@@ -55,17 +56,6 @@ const environmentQualifiers = new Set([
   "prod",
   "ci",
 ]);
-const skipDirectories = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  "build",
-  ".next",
-  ".next-dev",
-  ".next-build",
-  ".turbo",
-]);
-
 function isEnvironmentScoped(name) {
   return name
     .split(":")
@@ -81,7 +71,8 @@ async function* findPackageFiles(directory) {
   }
 
   for (const entry of entries) {
-    if (entry.name.startsWith(".") || skipDirectories.has(entry.name)) continue;
+    if (entry.name.startsWith(".") || isIgnoredDirectoryName(entry.name))
+      continue;
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       yield* findPackageFiles(entryPath);

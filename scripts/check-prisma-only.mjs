@@ -3,6 +3,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createDirectorySkipPredicate } from "./ignored-directories.mjs";
 
 function readOption(name) {
   const index = process.argv.indexOf(name);
@@ -29,19 +30,7 @@ const checkedExtensions = new Set([
   ".yaml",
   ".yml",
 ]);
-const skippedDirectories = new Set([
-  ".git",
-  ".next",
-  ".next-build",
-  ".next-dev",
-  ".tasks",
-  ".worktrees",
-  "build",
-  "coverage",
-  "dist",
-  "docs",
-  "node_modules",
-]);
+const shouldSkipDirectory = createDirectorySkipPredicate([".tasks", "docs"]);
 const forbiddenFragments = [
   ["driz", "zle"].join(""),
   ["pgl", "ite"].join(""),
@@ -67,7 +56,7 @@ async function walk(directory, files = []) {
   }
 
   for (const entry of entries) {
-    if (entry.isDirectory() && skippedDirectories.has(entry.name)) continue;
+    if (entry.isDirectory() && shouldSkipDirectory(entry.name)) continue;
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       await walk(entryPath, files);
