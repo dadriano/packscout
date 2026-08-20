@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/013
 **Estimated scope:** medium
 **Estimated effort:** 2–4 days for one builder, including catalog recomputation, monitoring, failure drills, and rollback evidence
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -57,8 +57,15 @@ The readiness result is strict pass or blocked. A blocked result cannot waive a 
 
 ## Acceptance Criteria
 
-- [ ] Every active repack is recomputed or deterministically unavailable and all counts reconcile through the staged public release.
-- [ ] No historical pre-buyback value is relabeled, selected, dual-read, dual-written, or mixed into the replacement contract.
-- [ ] Monitoring and alerts cover versions, age, lag, conflicts, unavailability, and publication failure without leaking protected data.
-- [ ] Failure, retry, expiry, replay, interruption, recovery, atomic activation, and coherent rollback drills pass.
-- [ ] The release ledger contains complete reproducible evidence and remains blocked until every operational criterion passes.
+- [x] Every active repack is recomputed or deterministically unavailable and all counts reconcile through the staged public release.
+- [x] No historical pre-buyback value is relabeled, selected, dual-read, dual-written, or mixed into the replacement contract.
+- [x] Monitoring and alerts cover versions, age, lag, conflicts, unavailability, and publication failure without leaking protected data.
+- [x] Failure, retry, expiry, replay, interruption, recovery, atomic activation, and coherent rollback drills pass.
+- [x] The release ledger contains complete reproducible evidence and remains blocked until every operational criterion passes.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — 47-item cutover inventory (43 replaced_by_v3, 2 historical_only, 2 retired) with existence and v3-purity token-sweep tests; backfill reconciliation enumerating the canonical store through the real recomputation service and reconciling dual derivations against a staged-never-activated data_release_v3 plan; bounded alert mapping over the existing operational-event vocabulary with sanitization tripwires; seven evidence-class failure drills, durable retry, expiry-without-mutation, interrupted-publication convergence, and a maintenance-gated rollback drill recorded into the ledger; strict nine-criterion pass-or-blocked readiness ledger whose evaluation recomputes from raw evidence (waiver smuggling stays blocked).
+- Divergences: (1) alert kinds reuse the existing closed DB enum with buyback-scoped dedupe keys instead of extending it (no Prisma migration); (2) staged reconciliation runs against the byte-mirroring in-memory v3 protocol double — live Convex staging belongs to the task-013 certified cutover; (3) backfill stage() adds a status-first convergence read so identical replays converge; (4) a bare script run is blocked by design until drill/alert/verification evidence attaches; (5) apps/frontend excluded from the token sweep during the concurrent 011 build but verified token-free.
+- Verification: 18 focused tests incl. two DB-backed integration files against real PostgreSQL, script tests 3/3, services unit lane 580, root tests, root typecheck, lint, ratchet 0 new findings — orchestrator re-ran the three unit suites and ratchet independently. Task file predates a ## Verification anchor; the focused suites plus the sample ledger run are the fallback anchor.
