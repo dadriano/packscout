@@ -3,6 +3,7 @@ export * from "./buyback-adjusted-ev-backfill-reconciliation.ts";
 export * from "./buyback-adjusted-ev-calculator.ts";
 export * from "./buyback-adjusted-ev-confidence.ts";
 export * from "./buyback-adjusted-ev-cutover-inventory.ts";
+export * from "./buyback-adjusted-ev-launch-certification.ts";
 export * from "./buyback-adjusted-ev-operational-monitor.ts";
 export * from "./buyback-adjusted-ev-readiness-ledger.ts";
 export * from "./buyback-adjusted-ev-recomputation-contracts.ts";
