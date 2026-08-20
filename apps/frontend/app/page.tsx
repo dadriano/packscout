@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CatalogRouteRecovery, EmptyCatalog } from "@/components/catalog-state";
 import { ProviderBanner } from "@/components/dashboard/ProviderBanner";
+import { DashboardDisclaimer } from "@/components/shell/DashboardDisclaimer";
 import { DashboardPageHeader } from "@/components/shell/DashboardPageHeader";
 import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
 import {
@@ -71,6 +72,7 @@ export default async function DashboardOverviewPage({
           provider={provider}
         />
       )}
+      <DashboardDisclaimer />
     </>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import type { ReactNode } from "react";
 import type {
   ListPublicRepacksPage,
   PublicRepackChase,
@@ -34,6 +35,7 @@ type AllRepacksTableProps = Readonly<{
   onSort: (sort: PublicRepackSort, direction: CatalogSortDirection) => void;
   onCopyPromo: (publicRepackId: string) => void;
   onOpenRepack: (publicRepackId: string) => void;
+  controls?: ReactNode;
 }>;
 
 function RepackImage({ repack }: { readonly repack: PublicRepackViewSummary }) {
@@ -198,6 +200,7 @@ export function AllRepacksTable({
   onSort,
   onCopyPromo,
   onOpenRepack,
+  controls,
 }: AllRepacksTableProps) {
   const { activeQuery } = page;
   const desiredChaseByRepackId = new Map(
@@ -229,13 +232,16 @@ export function AllRepacksTable({
           </p>
           <h2 className={styles.title} id="all-repacks-table-title">All repacks</h2>
         </div>
+        <div className={styles.headingActions}>{controls}</div>
+      </div>
+
+      {controls ? null : (
         <p aria-live="polite" className={styles.orderStatus}>
           {activeQuery.search
             ? "Ordered by relevance"
             : `Sorted by ${ALL_REPACKS_HEADERS.find(({ sort }) => sort === activeQuery.sort)?.label ?? "EV $"}, ${activeQuery.direction === "asc" ? "ascending" : "descending"}`}
         </p>
-      </div>
-
+      )}
       <div
         aria-label="All Repacks comparison table. Scroll horizontally for all fields."
         className={styles.scroller}

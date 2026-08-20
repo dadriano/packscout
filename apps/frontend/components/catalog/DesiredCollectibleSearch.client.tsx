@@ -28,6 +28,7 @@ type DesiredCollectibleSearchProps = Readonly<{
   selected: PublicCollectible | null;
   pending?: boolean;
   onSelect: (publicCollectibleId: string | null) => void;
+  variant?: "section" | "heading";
 }>;
 
 function readOptions(input: unknown): readonly CollectibleOption[] | null {
@@ -87,6 +88,7 @@ export function DesiredCollectibleSearch({
   selected,
   pending = false,
   onSelect,
+  variant = "section",
 }: DesiredCollectibleSearchProps) {
   const id = useId();
   const listboxId = `${id}-listbox`;
@@ -222,9 +224,9 @@ export function DesiredCollectibleSearch({
           : "Choose an exact collectible from the results.";
 
   return (
-    <div className={styles.root} ref={rootRef}>
+    <div className={styles.root} data-variant={variant} ref={rootRef}>
       <label className={styles.label} htmlFor={`${id}-input`}>
-        Desired chase collectible
+        {variant === "heading" ? "Desired chase" : "Desired chase collectible"}
       </label>
       <div className={styles.control}>
         <input
@@ -257,7 +259,11 @@ export function DesiredCollectibleSearch({
               closeOptions();
             }
           }}
-          placeholder="Search a card, watch, coin, or collectible"
+          placeholder={
+            variant === "heading"
+              ? "Search a collectible"
+              : "Search a card, watch, coin, or collectible"
+          }
           role="combobox"
           type="search"
           value={search}

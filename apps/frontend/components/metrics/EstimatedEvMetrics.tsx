@@ -1,18 +1,31 @@
 import type { PackScoutEvPresentation } from "@/lib/metric-presentation";
-import { METRIC_TRUST_COPY } from "@/lib/metric-vocabulary";
+import {
+  EXPECTED_VALUE_ARTICLE_HREF,
+  METRIC_TRUST_COPY,
+  type GlossaryDefinition,
+} from "@/lib/metric-vocabulary";
+import { GlossaryHint } from "./GlossaryHint.client";
 import { MetricValue } from "./MetricValue";
 import styles from "./EstimatedEvMetrics.module.css";
 
 type EstimatedEvMetricsProps = Readonly<{
   presentation: PackScoutEvPresentation;
   compact?: boolean;
-  showLongRunExplanation?: boolean;
+  showFinancialDisclaimer?: boolean;
+  showRepackPrice?: boolean;
+  headingHint?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
 }>;
 
 export function EstimatedEvMetrics({
   presentation,
   compact = false,
-  showLongRunExplanation = true,
+  showFinancialDisclaimer = true,
+  showRepackPrice = true,
+  headingHint = {
+    label: METRIC_TRUST_COPY.estimateLabel,
+    definition: METRIC_TRUST_COPY.longRunExplanation,
+    learnHref: EXPECTED_VALUE_ARTICLE_HREF,
+  },
 }: EstimatedEvMetricsProps) {
   return (
     <section
@@ -21,10 +34,15 @@ export function EstimatedEvMetrics({
       data-state={presentation.semanticState}
     >
       <div className={styles.header}>
-        <h3 className={styles.heading}>{METRIC_TRUST_COPY.estimateLabel}</h3>
-        <span className={styles.disclaimer}>
-          {METRIC_TRUST_COPY.financialDisclaimer}
-        </span>
+        <h3 className={styles.heading}>
+          {METRIC_TRUST_COPY.estimateLabel}
+          <GlossaryHint content={headingHint} field="evPercent" />
+        </h3>
+        {showFinancialDisclaimer ? (
+          <span className={styles.disclaimer}>
+            {METRIC_TRUST_COPY.financialDisclaimer}
+          </span>
+        ) : null}
       </div>
 
       <div
@@ -32,7 +50,17 @@ export function EstimatedEvMetrics({
         className={styles.confidence}
         data-band={presentation.confidence.band ?? "unavailable"}
       >
-        <span>EV confidence</span>
+        <span className={styles.confidenceLabel}>
+          EV confidence
+          <GlossaryHint
+            content={{
+              label: "EV confidence",
+              definition: METRIC_TRUST_COPY.confidenceExplanation,
+              learnHref: EXPECTED_VALUE_ARTICLE_HREF,
+            }}
+            field="evConfidence"
+          />
+        </span>
         <strong>{presentation.confidence.displayValue}</strong>
       </div>
 
@@ -54,22 +82,18 @@ export function EstimatedEvMetrics({
           showReason={false}
           showSemanticState={false}
         />
-        <MetricValue
-          compact={compact}
-          metric={presentation.repackPrice}
-          showReason={false}
-          showSemanticState={false}
-        />
+        {showRepackPrice ? (
+          <MetricValue
+            compact={compact}
+            metric={presentation.repackPrice}
+            showReason={false}
+            showSemanticState={false}
+          />
+        ) : null}
       </div>
 
       {presentation.reasonCopy ? (
         <p className={styles.reason}>{presentation.reasonCopy}</p>
-      ) : null}
-      {showLongRunExplanation ? (
-        <div className={styles.explanation}>
-          <p>{METRIC_TRUST_COPY.confidenceExplanation}</p>
-          <p>{METRIC_TRUST_COPY.longRunExplanation}</p>
-        </div>
       ) : null}
     </section>
   );
