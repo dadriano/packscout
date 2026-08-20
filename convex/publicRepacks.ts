@@ -94,7 +94,11 @@ export const getDashboardBundle = query({
     const active = await loadActivePublicCatalogManifest(ctx);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
     const allRows = active.catalog.rows;
-    if (!selectionsAreKnown(allRows, request.value.filters)) {
+    if (!selectionsAreKnown(
+      allRows,
+      request.value.filters,
+      active.catalog.categoryByPublicId,
+    )) {
       return publicReadError("INVALID_QUERY");
     }
 
@@ -102,6 +106,7 @@ export const getDashboardBundle = query({
       allRows,
       request.value.filters,
       "",
+      active.catalog.categoryByPublicId,
     );
     // Opportunities are actionable buys, so they stay active-only even when the
     // caller opted into seeing sold-out repacks in the counts and summaries.
@@ -180,7 +185,11 @@ export const listPublicRepacks = query({
     const active = await loadActivePublicCatalogManifest(ctx);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
     const allRows = active.catalog.rows;
-    if (!selectionsAreKnown(allRows, request.value.filters)) {
+    if (!selectionsAreKnown(
+      allRows,
+      request.value.filters,
+      active.catalog.categoryByPublicId,
+    )) {
       return publicReadError("INVALID_QUERY");
     }
 
@@ -229,6 +238,7 @@ export const listPublicRepacks = query({
       eligibleRows,
       request.value.filters,
       request.value.search,
+      active.catalog.categoryByPublicId,
     ).sort((left, right) => compareRepackRows(left, right, request.value));
     if (pagination.offset > matchingRows.length) {
       return publicReadError("INVALID_QUERY");
@@ -447,7 +457,9 @@ async function desiredCollectibleMatches(
   const matchingRows = rows.filter(
     (row) =>
       desiredChases.has(row.publicRepackId) &&
-      rowMatchesFilters(row, input.filters),
+      rowMatchesFilters(row, input.filters, {
+        categoryHierarchy: active.catalog.categoryByPublicId,
+      }),
   ).sort((left, right) =>
     compareDesiredRows(left, right, desiredChases, input)
   );
@@ -504,7 +516,11 @@ export const findRepacksByDesiredCollectible = query({
     }
     const collectible = collectibleLookup.collectible;
     const rows = active.catalog.rows;
-    if (!selectionsAreKnown(rows, request.data.filters)) {
+    if (!selectionsAreKnown(
+      rows,
+      request.data.filters,
+      active.catalog.categoryByPublicId,
+    )) {
       return publicReadError("INVALID_QUERY");
     }
     const matchResult = await desiredCollectibleMatches(

@@ -363,13 +363,40 @@ export function compareRepackRows(
   );
 }
 
+/**
+ * Parent/depth/name for the active catalog. Callers pass
+ * `categoryByPublicId` straight through.
+ */
+export type CategoryHierarchy = ReadonlyMap<
+  string,
+  Readonly<{ parentPublicCategoryId: string | null; depth: number; name: string }>
+>;
+
+export function coveredCategoryIds(
+  publicCategoryIds: readonly string[],
+  hierarchy: CategoryHierarchy,
+): ReadonlySet<string> {
+  const covered = new Set<string>();
+  for (const id of publicCategoryIds) {
+    covered.add(id);
+    let current = hierarchy.get(id)?.parentPublicCategoryId ?? null;
+    while (current !== null && !covered.has(current)) {
+      if (!hierarchy.has(current)) break;
+      covered.add(current);
+      current = hierarchy.get(current)?.parentPublicCategoryId ?? null;
+    }
+  }
+  return covered;
+}
+
 export function rowMatchesFilters(
   row: RepackSearchRow,
   filters: PublicRepackFilters,
   options: {
+    readonly categoryHierarchy: CategoryHierarchy;
     readonly ignoreVendors?: boolean;
     readonly ignoreCategories?: boolean;
-  } = {},
+  },
 ): boolean {
   if (filters.availability === "active" && row.availability !== "active") {
     return false;
@@ -383,12 +410,15 @@ export function rowMatchesFilters(
   }
   if (
     !options.ignoreCategories &&
-    filters.categories.length > 0 &&
-    !filters.categories.some((publicCategoryId) =>
-      row.publicCategoryIds.includes(publicCategoryId),
-    )
+    filters.categories.length > 0
   ) {
-    return false;
+    const covered = coveredCategoryIds(
+      row.publicCategoryIds,
+      options.categoryHierarchy,
+    );
+    if (!filters.categories.some((publicCategoryId) => covered.has(publicCategoryId))) {
+      return false;
+    }
   }
   if (
     filters.collectibleTypes.length > 0 &&
