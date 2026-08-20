@@ -17,11 +17,22 @@ export const POLL_INTERVAL_MS = Object.freeze({
   fallback: 1_000,
 });
 
+/**
+ * Tailing ticks faster than discovery: a developer watching output notices a
+ * second of latency, while a directory listing every second is plenty.
+ */
+export const TAIL_INTERVAL_MS = Object.freeze({
+  minimum: 50,
+  maximum: 2_000,
+  fallback: 200,
+});
+
 export interface OpsPanelRuntimeConfiguration {
   host: string;
   port: number;
   hmrPort: number;
   pollIntervalMs: number;
+  tailIntervalMs: number;
 }
 
 export function readReservedPort(
@@ -59,22 +70,37 @@ export function readLoopbackBindHost(
   return candidate;
 }
 
+function readBoundedIntervalMs(
+  value: string | undefined,
+  variableName: string,
+  bounds: { minimum: number; maximum: number; fallback: number },
+): number {
+  if (value === undefined || value.trim() === "") return bounds.fallback;
+  const candidate = Number(value);
+  if (
+    !Number.isInteger(candidate) ||
+    candidate < bounds.minimum ||
+    candidate > bounds.maximum
+  ) {
+    throw new Error(
+      `${variableName} must be an integer between ${bounds.minimum} and ${bounds.maximum} milliseconds.`,
+    );
+  }
+  return candidate;
+}
+
 export function readPollIntervalMs(
   value: string | undefined,
   variableName: string,
 ): number {
-  if (value === undefined || value.trim() === "") return POLL_INTERVAL_MS.fallback;
-  const candidate = Number(value);
-  if (
-    !Number.isInteger(candidate) ||
-    candidate < POLL_INTERVAL_MS.minimum ||
-    candidate > POLL_INTERVAL_MS.maximum
-  ) {
-    throw new Error(
-      `${variableName} must be an integer between ${POLL_INTERVAL_MS.minimum} and ${POLL_INTERVAL_MS.maximum} milliseconds.`,
-    );
-  }
-  return candidate;
+  return readBoundedIntervalMs(value, variableName, POLL_INTERVAL_MS);
+}
+
+export function readTailIntervalMs(
+  value: string | undefined,
+  variableName: string,
+): number {
+  return readBoundedIntervalMs(value, variableName, TAIL_INTERVAL_MS);
 }
 
 export function readOpsPanelConfiguration(
@@ -101,6 +127,10 @@ export function readOpsPanelConfiguration(
     pollIntervalMs: readPollIntervalMs(
       env.PACKSCOUT_OPS_PANEL_POLL_MS,
       "PACKSCOUT_OPS_PANEL_POLL_MS",
+    ),
+    tailIntervalMs: readTailIntervalMs(
+      env.PACKSCOUT_OPS_PANEL_TAIL_MS,
+      "PACKSCOUT_OPS_PANEL_TAIL_MS",
     ),
   };
 }

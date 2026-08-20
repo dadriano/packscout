@@ -25,6 +25,10 @@ import {
   createBackgroundWorkRouter,
   type BackgroundWorkRouterDependencies,
 } from "./routes/background-work.ts";
+import {
+  createProductUsersRouter,
+  type ProductUsersRouterDependencies,
+} from "./routes/product-users.ts";
 
 export interface AdminAuthHttpDependencies {
   service: AuthService;
@@ -53,6 +57,10 @@ export interface AdminAppDependencies {
   >;
   backgroundWork?: Omit<
     BackgroundWorkRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  productUsers?: Omit<
+    ProductUsersRouterDependencies,
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
 }
@@ -161,6 +169,17 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         "/api/background-work",
         createBackgroundWorkRouter({
           ...dependencies.backgroundWork,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.productUsers) {
+      app.use(
+        "/api/product-users",
+        createProductUsersRouter({
+          ...dependencies.productUsers,
           auth: service,
           cookiePolicy,
           sameOrigin,

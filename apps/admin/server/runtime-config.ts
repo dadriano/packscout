@@ -102,6 +102,45 @@ export function readBase64Key(
   return decoded;
 }
 
+/** Shortest accepted product-backend integration secret. */
+const MINIMUM_DIRECTORY_TOKEN_LENGTH = 32;
+
+export interface ProductUserDirectoryConfig {
+  /** Origin of the product backend's server-to-server admin surface. */
+  readonly baseUrl: string;
+  /** Bearer secret for that surface. Server-side only, never serialized. */
+  readonly token: string;
+}
+
+/**
+ * Reads the product-user directory integration configuration.
+ *
+ * Unlike the admin's own secrets, this pair is deliberately optional and never
+ * throws: the admin must stay operable for every pipeline workflow when the
+ * product-backend integration is absent or mis-set. An unusable pair yields
+ * `null`, and the directory route degrades to a bounded "unconfigured" state
+ * instead of taking the service down. The token is only ever compared and
+ * forwarded as a header; it is never returned in an error message.
+ */
+export function readProductUserDirectoryConfig(input: {
+  baseUrl: string | undefined;
+  token: string | undefined;
+}): ProductUserDirectoryConfig | null {
+  const token = input.token?.trim() ?? "";
+  const candidate = input.baseUrl?.trim() ?? "";
+  if (token.length < MINIMUM_DIRECTORY_TOKEN_LENGTH || candidate.length === 0) {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  return { baseUrl: parsed.origin, token };
+}
+
 export function readPositiveDuration(
   value: string | undefined,
   fallbackMs: number,

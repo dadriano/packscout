@@ -1,0 +1,76 @@
+/* Product-user directory surfaces, on the shared admin template. */
+
+.product-users__search {
+  flex: 1 1 22rem;
+  min-width: 0;
+}
+
+.product-users__label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-users__identity {
+  overflow-wrap: anywhere;
+  font-family: var(--admin-font-mono);
+  font-size: 0.78rem;
+}
+
+.product-users__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0.75rem 0 0;
+}
+
+.product-users__facts div {
+  min-width: 0;
+}
+
+.product-users__facts dt {
+  color: var(--admin-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.product-users__facts dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  color: var(--admin-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.product-users__note {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--admin-warning-border);
+  border-radius: 1rem;
+  background: var(--admin-warning-bg-light);
+  color: var(--admin-warning-text);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 620px) {
+  .admin-ledger__rows article:has(.product-users__facts) {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .admin-ledger__rows article:has(.product-users__facts) > .admin-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .product-users__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .product-users__search {
+    flex-basis: 100%;
+  }
+}

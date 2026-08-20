@@ -17,12 +17,14 @@ import { createAdminAuthRuntime } from "./auth/runtime.ts";
 import { createAdminBackgroundWorkRuntime } from "./background-work-runtime.ts";
 import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
 import { createAdminOperationalRuntime } from "./operational-runtime.ts";
+import { createProductUserDirectoryReader } from "./product-user-directory.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
 import {
   adminDevelopmentAllowedOrigins,
   adminDevelopmentServerNetwork,
   readAllowedOrigins,
   readBase64Key,
+  readProductUserDirectoryConfig,
   readServiceHost,
   readPort,
   readPositiveDuration,
@@ -90,6 +92,15 @@ const trustedProxies = readTrustedProxies(
   process.env.PACKSCOUT_ADMIN_TRUSTED_PROXIES,
   "PACKSCOUT_ADMIN_TRUSTED_PROXIES",
 );
+/**
+ * The product backend's admin surface. Absent or unusable configuration leaves
+ * the directory unconfigured rather than stopping the admin: every pipeline
+ * workflow stays available and the users page explains the missing integration.
+ */
+const productUserDirectoryConfig = readProductUserDirectoryConfig({
+  baseUrl: process.env.PACKSCOUT_ADMIN_DIRECTORY_URL,
+  token: process.env.PACKSCOUT_ADMIN_DIRECTORY_TOKEN,
+});
 
 function waitForListening(server: Server): Promise<void> {
   if (server.listening) return Promise.resolve();
@@ -163,6 +174,11 @@ try {
       database,
       actorPseudonymKey: providerActorKey,
     }),
+    productUsers: {
+      directory: createProductUserDirectoryReader({
+        config: productUserDirectoryConfig,
+      }),
+    },
     operationalAlerts: { alerts: operational.alerts },
     operationalHealth: { health: operational.health },
   });
@@ -194,6 +210,12 @@ try {
   process.once("SIGINT", handleShutdownSignal);
   process.once("SIGTERM", handleShutdownSignal);
   console.log(`Packscout Admin is available at ${serviceHttpOrigin(host, port)}`);
+  if (productUserDirectoryConfig === null) {
+    // Names the missing capability, never any configuration value.
+    console.log(
+      "Packscout Admin: the product-user directory integration is not configured.",
+    );
+  }
 } catch (error) {
   await closeHttpServer(server).catch(() => undefined);
   await developmentServer?.close().catch(() => undefined);

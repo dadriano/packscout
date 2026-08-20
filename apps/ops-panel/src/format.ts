@@ -28,6 +28,18 @@ export function formatTimestamp(value: string): string {
   });
 }
 
+/** Wall-clock time to the second: dense enough for a log gutter. */
+export function formatClockTime(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return "--:--:--";
+  return new Date(parsed).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
 /** A short, screen-reader-friendly age such as "12s ago" or "3m ago". */
 export function formatAge(value: string, now: number = Date.now()): string {
   const parsed = Date.parse(value);

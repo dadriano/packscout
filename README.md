@@ -261,6 +261,33 @@ to verify email OTP, Google OAuth, logout, session expiry, mobile and keyboard
 flows, exact-origin rejection, and a browser console with no CSP violations.
 Do not infer live readiness from an environment-neutral build.
 
+### Optional product-user directory in the admin
+
+The admin's Users page lists people who signed up for the product. That data
+lives in Convex, so the admin server reads it through a server-to-server
+surface rather than querying Convex from the browser. Two server-only values
+configure it:
+
+```dotenv
+PACKSCOUT_ADMIN_DIRECTORY_URL=<convex-site-url>
+PACKSCOUT_ADMIN_DIRECTORY_TOKEN=<shared-secret-at-least-32-chars>
+```
+
+Set the same secret on the Convex deployment
+(`npx convex env set PACKSCOUT_ADMIN_DIRECTORY_TOKEN <value>` against the
+confirmed deployment). The Convex side fails closed: an absent or too-short
+secret refuses every request, so the directory is unreachable until both sides
+are configured.
+
+Neither value belongs in a `NEXT_PUBLIC_` or otherwise browser-visible
+variable — the token authorizes reading personal data (email addresses and
+wallet-linked identities). The admin never sends it to the browser.
+
+Leaving these unset is safe and supported: the admin still boots and the Users
+page shows a bounded "not connected" state instead of failing. Only operators
+holding the `product_users:view` permission (administrators) see the page at
+all.
+
 ## Verification
 
 ```bash

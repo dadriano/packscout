@@ -28,7 +28,7 @@ The user-administration and operations-panel designs port the approved reference
 |---|---|---|---|---|
 | 001 | Extend operator access control for user administration | small | done | none |
 | 002 | Record product-user sign-ups | medium | done | none |
-| 003 | Browse product users in the admin | medium | todo | 001, 002 |
+| 003 | Browse product users in the admin | medium | done | 001, 002 |
 | 004 | Inspect what a user has | medium | todo | 001, 003 |
 | 005 | Suspend and reinstate product users | medium | todo | 001, 002, 003 |
 
@@ -46,7 +46,7 @@ The user-administration and operations-panel designs port the approved reference
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
 | 010 | Establish the local operations panel | medium | done | none |
-| 011 | Stream live logs with faithful tailing | large | todo | 010 |
+| 011 | Stream live logs with faithful tailing | large | done | 010 |
 | 012 | Browse log history and search the past | medium | todo | 011, 013 |
 | 013 | Filter logs with intelligence | large | todo | 011 |
 | 014 | Inspect the database safely | medium | todo | 010 |

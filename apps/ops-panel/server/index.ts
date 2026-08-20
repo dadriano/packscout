@@ -7,6 +7,8 @@ import { createOpsPanelApp } from "./app.ts";
 import { createFileAuditTrailStore, AUDIT_FILE_NAME } from "./audit-file-store.ts";
 import { createAuditTrail } from "./core/audit-trail.ts";
 import { createLogSourceRegistry } from "./core/log-sources.ts";
+import { createLogStreamHub } from "./core/log-stream-hub.ts";
+import { createLogTailReader } from "./log-tail-reader.ts";
 import {
   describeStartupFailure,
   panelOrigin,
@@ -81,6 +83,15 @@ const poller = createLogSourcePoller({
   onError: (error) =>
     console.error("PackScout operations panel log discovery failed:", error),
 });
+const hub = createLogStreamHub();
+const reader = createLogTailReader({
+  directory: logDirectory,
+  registry,
+  hub,
+  intervalMs: configuration.tailIntervalMs,
+  onError: (error) =>
+    console.error("PackScout operations panel log tailing failed:", error),
+});
 
 try {
   const audit = await createAuditTrail({
@@ -91,6 +102,8 @@ try {
   const app = createOpsPanelApp({
     audit,
     registry,
+    hub,
+    reader,
     logDirectory,
     pollIntervalMs: configuration.pollIntervalMs,
   });
@@ -111,6 +124,7 @@ try {
   });
   app.use(developmentServer.middlewares);
   poller.start();
+  reader.start();
 
   process.once("SIGINT", handleShutdownSignal);
   process.once("SIGTERM", handleShutdownSignal);
@@ -127,6 +141,7 @@ try {
     }),
   );
   poller.stop();
+  reader.stop();
   await closeHttpServer(server);
   await developmentServer?.close().catch(() => undefined);
   process.exit(1);
@@ -135,6 +150,7 @@ try {
 function shutDown(): Promise<void> {
   shutdownPromise ??= (async () => {
     poller.stop();
+    reader.stop();
     await closeHttpServer(server);
     await developmentServer?.close().catch(() => undefined);
   })();

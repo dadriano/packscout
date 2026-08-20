@@ -8,6 +8,8 @@ import {
 } from "./core/access.ts";
 import { createAuditTrail, type AuditEntry } from "./core/audit-trail.ts";
 import { createLogSourceRegistry, type LogSource } from "./core/log-sources.ts";
+import { createLogStreamHub } from "./core/log-stream-hub.ts";
+import { createLogTailReader } from "./log-tail-reader.ts";
 
 function source(service: string): LogSource {
   return {
@@ -59,9 +61,20 @@ async function panel() {
     },
   });
   const registry = createLogSourceRegistry([source("frontend")]);
+  const hub = createLogStreamHub();
+  const reader = createLogTailReader({
+    directory: "/tmp/packscout-logs",
+    registry,
+    hub,
+    intervalMs: 60_000,
+    // The panel's own log directory does not exist under test; a missing file
+    // is a state the tail already models, so no stubbing is required.
+  });
   const app = createOpsPanelApp({
     audit,
     registry,
+    hub,
+    reader,
     logDirectory: "/tmp/packscout-logs",
     pollIntervalMs: 1_000,
   });
@@ -73,6 +86,7 @@ async function panel() {
   return {
     audit,
     registry,
+    hub,
     saved,
     port,
     origin: `http://127.0.0.1:${port}`,
@@ -281,6 +295,103 @@ test("the activity view lists recent privileged attempts newest first", async (t
     payload.entries.map((entry: AuditEntry) => entry.route),
     ["/api/database/seed", "/api/database/migrate"],
   );
+});
+
+test("the live log stream is a sensitive read behind the loopback host guard", async (t) => {
+  const harness = await panel();
+  t.after(() => harness.close());
+
+  const result = await rawRequest(harness.port, {
+    method: "GET",
+    path: "/api/logs/stream",
+    headers: { Host: "panel.attacker.example" },
+  });
+  assert.equal(result.status, 403);
+  assert.equal(JSON.parse(result.body).code, "ops_panel_non_loopback_host");
+});
+
+test("the log stream opens immediately so the client can stop saying connecting", async (t) => {
+  const harness = await panel();
+  t.after(() => harness.close());
+
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const response = await fetch(`${harness.origin}/api/logs/stream`, {
+    signal: controller.signal,
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/);
+
+  const reader = response.body?.getReader();
+  assert.ok(reader);
+  const decoder = new TextDecoder();
+  let received = "";
+  while (!received.includes("event: logs")) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    received += decoder.decode(chunk.value, { stream: true });
+  }
+  assert.match(received, /^retry: 3000\n\n/);
+  assert.match(received, /event: logs\ndata: \{/);
+  await reader.cancel();
+});
+
+test("a window read reports every discovered service, even an absent one", async (t) => {
+  const harness = await panel();
+  t.after(() => harness.close());
+
+  const response = await fetch(`${harness.origin}/api/logs/window?lines=50`);
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.requestedLines, 50);
+  assert.deepEqual(
+    payload.windows.map((entry: { service: string; present: boolean }) => [
+      entry.service,
+      entry.present,
+    ]),
+    [["frontend", false]],
+    "a service whose file is missing is reported as absent, not omitted",
+  );
+});
+
+test("a window read refuses a service name outside the log convention", async (t) => {
+  const harness = await panel();
+  t.after(() => harness.close());
+
+  const response = await fetch(
+    `${harness.origin}/api/logs/window?service=${encodeURIComponent("../etc/passwd")}`,
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, "ops_panel_unknown_service");
+});
+
+test("a window request is clamped rather than trusted", async (t) => {
+  const harness = await panel();
+  t.after(() => harness.close());
+
+  const response = await fetch(`${harness.origin}/api/logs/window?lines=999999`);
+  assert.equal((await response.json()).requestedLines, 5_000);
+});
+
+test("closing a log stream releases every tail it was holding", async (t) => {
+  const harness = await panel();
+  t.after(() => harness.close());
+
+  const controller = new AbortController();
+  const response = await fetch(`${harness.origin}/api/logs/stream`, {
+    signal: controller.signal,
+  });
+  const reader = response.body?.getReader();
+  assert.ok(reader);
+  await reader.read();
+  assert.equal(harness.hub.viewerCount(), 1);
+
+  controller.abort();
+  const deadline = Date.now() + 2_000;
+  while (harness.hub.viewerCount() > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(harness.hub.viewerCount(), 0, "the tail fleet went passive again");
 });
 
 test("unknown api routes answer with the panel error shape", async (t) => {

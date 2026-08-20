@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/001, admin-tools/002
 **Blocks:** admin-tools/004, admin-tools/005
 **Estimated scope:** medium
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -41,12 +41,20 @@ An administrator clicks Users in the admin navigation and sees a ledger of sign-
 
 ## Acceptance Criteria
 
-- [ ] An administrator can list, search, and page through all signed-up users with accurate identity, standing, timestamps, and saved-item counts.
-- [ ] Anonymous and data-operator requests to the listing endpoint receive the standard unauthenticated/forbidden errors, and the data-operator UI shows no Users navigation.
-- [ ] Records missing email and wallet render usable rows keyed on the subject identity.
-- [ ] Loading, empty, no-match, integration-failure, and forbidden states render accessibly at desktop and narrow widths without page-level overflow.
-- [ ] No product-backend integration credential or raw backend error body reaches the browser.
+- [x] An administrator can list, search, and page through all signed-up users with accurate identity, standing, timestamps, and saved-item counts.
+- [x] Anonymous and data-operator requests to the listing endpoint receive the standard unauthenticated/forbidden errors, and the data-operator UI shows no Users navigation.
+- [x] Records missing email and wallet render usable rows keyed on the subject identity.
+- [x] Loading, empty, no-match, integration-failure, and forbidden states render accessibly at desktop and narrow widths without page-level overflow.
+- [x] No product-backend integration credential or raw backend error body reaches the browser.
 
 ## Verification
 
 Admin route behavior tests prove the authorization matrix (anonymous, data operator, administrator), pagination bounds, search filtering, and sanitized failure mapping for the user-listing endpoint; page-level tests cover the empty/no-match/forbidden states. The admin lint, typecheck, test, and build commands exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Follow-up closed after review: the two server-only integration variables (`PACKSCOUT_ADMIN_DIRECTORY_URL`, `PACKSCOUT_ADMIN_DIRECTORY_TOKEN`) are now documented in `README.md`, including that the secret must match the Convex deployment, that neither belongs in a browser-visible variable, and that leaving both unset degrades to the bounded "not connected" state. `npm run check:docs` passes.
+- Alignment: Ported the reference users ledger onto the admin's own template and paginated-read conventions, with the product backend reached only through a server-side integration whose bearer secret stays in server configuration.
+- Divergences: The listing endpoint is `POST /api/product-users/list` rather than a GET with a query string, because search terms and subject keys are personal data and must not travel in URLs, browser history, or access logs — this matches the product backend's own POST-only admin surface; the cursor/limit/nextCursor contract is otherwise the admin's usual one. Rows do not yet link to a detail view, since that route arrives with admin-tools/004; each row carries its stable subject so the link can be added there. Integration configuration is optional and never throws at startup, so an absent or unusable pair degrades to a bounded "not connected" state instead of taking the admin down. The integration was exercised against the documented `convex/http.ts` request/response contract with a stubbed transport; no live deployment was contacted.
+- Verification: `npm run lint:admin && npm run typecheck:admin && npm run test:admin && npm run build:admin` exit 0 (102 admin tests pass, 21 of them new/updated for this task); `npm run scan:framework-standards:ratchet` reports 0 findings and 0 new findings; `npm run check:framework` passes; `npm run lint:contracts`, `npm run typecheck:contracts`, and `npm run test:contracts` pass (61 tests). A static render of the real page components with the real admin stylesheets was checked in the browser at 1280px, 1100px (dark theme), and 375px: `document.documentElement.scrollWidth` equals `clientWidth` at every width, with no overflowing elements.

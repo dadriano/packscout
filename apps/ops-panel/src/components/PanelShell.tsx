@@ -3,9 +3,10 @@ import { NavLink } from "react-router-dom";
 
 /** Surfaces the panel owns. Later tasks fill in the stubs listed here. */
 export const PANEL_NAVIGATION = [
-  { to: "/logs", label: "Log sources" },
-  { to: "/database", label: "Database" },
-  { to: "/activity", label: "Activity" },
+  { to: "/logs", label: "Live logs", end: true },
+  { to: "/logs/sources", label: "Log sources", end: false },
+  { to: "/database", label: "Database", end: false },
+  { to: "/activity", label: "Activity", end: false },
 ] as const;
 
 export function PanelShell({ children }: { children: ReactNode }) {
@@ -19,7 +20,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
         <p className="panel-brand-note">Local tool. Loopback only.</p>
         <nav className="panel-nav" aria-label="Panel surfaces">
           {PANEL_NAVIGATION.map((item) => (
-            <NavLink key={item.to} to={item.to}>
+            <NavLink key={item.to} to={item.to} end={item.end}>
               {item.label}
             </NavLink>
           ))}

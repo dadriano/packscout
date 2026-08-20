@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/010
 **Blocks:** admin-tools/012, admin-tools/013
 **Estimated scope:** large
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -43,12 +43,19 @@ An operator opens Logs and watches all services stream in one interleaved view, 
 
 ## Acceptance Criteria
 
-- [ ] Live output appears across truncation, rotation/replacement, and disappear/reappear with the correct inline markers and no duplicated or silently dropped lines (verified by identity).
-- [ ] Initial window plus live stream merge without duplicates; reconnect resets, refetches, and marks the seam.
-- [ ] Pause honors its buffering bound and reports skips; follow/pill/status behaviors match the states described above.
-- [ ] Rendering stays virtualized and responsive with a full buffer in both wrap modes; ANSI-styled lines render correctly and copy as plain text.
-- [ ] With no viewer attached, tailers do not read file content (passive mode), and viewer disconnect releases resources.
+- [x] Live output appears across truncation, rotation/replacement, and disappear/reappear with the correct inline markers and no duplicated or silently dropped lines (verified by identity).
+- [x] Initial window plus live stream merge without duplicates; reconnect resets, refetches, and marks the seam.
+- [x] Pause honors its buffering bound and reports skips; follow/pill/status behaviors match the states described above.
+- [x] Rendering stays virtualized and responsive with a full buffer in both wrap modes; ANSI-styled lines render correctly and copy as plain text.
+- [x] With no viewer attached, tailers do not read file content (passive mode), and viewer disconnect releases resources.
 
 ## Verification
 
 Pure-logic test suites prove the tail engine's truncate/rotate/reappear/unterminated-line/alignment behaviors and the buffer's dedupe, two-tier eviction, and pause-skip accounting; the panel test suite and workspace typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: Ports the reference panel's live-log core as specified — one SSE connection for all services with local visibility filtering, a byte-derived line identity shared by the initial-window read and the live tail, inline markers for every discontinuity, bounded IO with reference-counted passive tailing, and a two-tier client buffer behind bottom-anchored virtualized rendering.
+- Divergences: none in behavior. Two design decisions worth recording for admin-tools/012 and /013: (1) the initial window is defined to end exactly at the tail cursor, which the server aligns when the first viewer attaches, so window and live output abut rather than overlap — deduplication by identity remains the safety net for reconnects and history merges; (2) a truncation is detected by the file shrinking, so a process that truncates and then writes past its previous size between two ticks is not detectable — this bound is documented in `server/core/log-tail.ts` rather than papered over. No dependency was added; virtualization is implemented in-repo (`src/logs/virtual-window.ts`).
+- Verification: `npm run test:ops-panel` exit 0 (169 tests, 169 pass), `npm run typecheck` exit 0, `npm run lint` exit 0, `npm run scan:framework-standards:ratchet` exit 0 (0 current findings, 0 new, 0 grown modules; largest new module 314 lines). Browser smoke pass against a temporary log directory confirmed: truncate, rotate, disappear and reappear each rendering their marker inline and in order; ANSI colour rendering; a service toggle hiding output with no new `/api/logs/stream` or `/api/logs/window` request; the status chip moving live -> reconnecting -> live across a server restart; 501 buffered rows rendering 37 mounted DOM rows over a 10020px canvas; scrolling back holding `scrollTop` and the top row fixed while a "7 new lines — jump to live" pill counted arrivals; the pill returning to live at the newest line; and wrap mode measuring rows at 60px with no horizontal overflow and the preference persisted to `localStorage`. The reconnect seam decision (reset, refetch, mark) is proved by `src/logs/stream-session.test.ts` rather than in the browser, because the Vite dev server forces a full page reload when it restarts, which produces a fresh mount instead of a pure EventSource reconnect.

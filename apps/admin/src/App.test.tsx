@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { AuthSessionResponse } from "@packscout/contracts";
+import {
+  permissionsForOperatorRole,
+  type AuthSessionResponse,
+} from "@packscout/contracts";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Routes } from "react-router-dom";
@@ -23,10 +26,9 @@ function session(role: "admin" | "data_operator"): AuthSessionResponse {
       organizationName: "PackScout",
       role,
     },
-    permissions:
-      role === "admin"
-        ? ["operators:manage", "providers:view", "providers:manage"]
-        : ["providers:view", "imports:start", "imports:retry"],
+    // The authoritative role grant, so navigation is tested against the
+    // permissions the service actually issues.
+    permissions: permissionsForOperatorRole(role),
     csrfToken: "csrf-test-token",
   };
 }
@@ -65,8 +67,17 @@ test("data operators do not receive administrator navigation", () => {
 
   assert.match(html, /Data operator/);
   assert.doesNotMatch(html, /href="\/operators"/);
+  assert.doesNotMatch(html, /href="\/users"/);
   assert.match(html, /href="\/providers"/);
   assert.match(html, /aria-label="Admin navigation"/);
+});
+
+test("administrators reach the product-user directory from the workspace navigation", () => {
+  const html = renderRoute("/users", session("admin"));
+
+  assert.match(html, /href="\/users"/);
+  assert.match(html, /Product users/);
+  assert.match(html, /Search email, wallet address, or subject key/);
 });
 
 test("data operators can open provider health without receiving mutation controls", () => {

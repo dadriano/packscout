@@ -49,13 +49,37 @@ test("configuration reads defaults and overrides together", () => {
     port: 5110,
     hmrPort: 5111,
     pollIntervalMs: 1_000,
+    tailIntervalMs: 200,
   });
   assert.deepEqual(
     readOpsPanelConfiguration({
       PACKSCOUT_OPS_PANEL_PORT: "5120",
       PACKSCOUT_OPS_PANEL_POLL_MS: "2000",
+      PACKSCOUT_OPS_PANEL_TAIL_MS: "500",
     }),
-    { host: "127.0.0.1", port: 5120, hmrPort: 5121, pollIntervalMs: 2_000 },
+    {
+      host: "127.0.0.1",
+      port: 5120,
+      hmrPort: 5121,
+      pollIntervalMs: 2_000,
+      tailIntervalMs: 500,
+    },
+  );
+});
+
+test("the tail interval is bounded on both sides", () => {
+  assert.equal(
+    readOpsPanelConfiguration({ PACKSCOUT_OPS_PANEL_TAIL_MS: "50" })
+      .tailIntervalMs,
+    50,
+  );
+  assert.throws(
+    () => readOpsPanelConfiguration({ PACKSCOUT_OPS_PANEL_TAIL_MS: "10" }),
+    /between 50 and 2000 milliseconds/,
+  );
+  assert.throws(
+    () => readOpsPanelConfiguration({ PACKSCOUT_OPS_PANEL_TAIL_MS: "60000" }),
+    /between 50 and 2000 milliseconds/,
   );
 });
 

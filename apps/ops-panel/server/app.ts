@@ -1,14 +1,19 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { AuditTrail } from "./core/audit-trail.ts";
 import type { LogSourceRegistry } from "./core/log-sources.ts";
+import type { LogStreamHub } from "./core/log-stream-hub.ts";
 import { createPanelAccessMiddleware } from "./express/panel-access.ts";
+import type { LogTailReader } from "./log-tail-reader.ts";
 import { createActivityRouter } from "./routes/activity.ts";
 import { createHealthRouter } from "./routes/health.ts";
+import { createLogsRouter } from "./routes/logs.ts";
 import { createLogSourcesRouter } from "./routes/log-sources.ts";
 
 export interface OpsPanelAppOptions {
   audit: AuditTrail;
   registry: LogSourceRegistry;
+  hub: LogStreamHub;
+  reader: LogTailReader;
   logDirectory: string;
   pollIntervalMs: number;
   onAuditError?: (error: unknown) => void;
@@ -26,6 +31,8 @@ export interface OpsPanelAppOptions {
 export function createOpsPanelApp({
   audit,
   registry,
+  hub,
+  reader,
   logDirectory,
   pollIntervalMs,
   onAuditError,
@@ -44,6 +51,7 @@ export function createOpsPanelApp({
     "/api/logs/sources",
     createLogSourcesRouter({ registry, logDirectory, pollIntervalMs }),
   );
+  app.use("/api/logs", createLogsRouter({ hub, reader }));
   app.use("/api/activity", createActivityRouter({ audit }));
 
   // Unknown API routes answer with the panel's stable error shape rather than
