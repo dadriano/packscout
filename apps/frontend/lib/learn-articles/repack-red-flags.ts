@@ -1,3 +1,4 @@
+import { METRIC_TRUST_COPY } from "../metric-vocabulary";
 import type { LearnGuide } from "./types";
 
 export const REPACK_RED_FLAGS_GUIDE = {
@@ -165,6 +166,23 @@ export const REPACK_RED_FLAGS_GUIDE = {
           text: "A seller who clears most of these isn't guaranteed to give you a good pull, since variance is the nature of the product. But they're giving you a fair, informed shot at one, which is really all due diligence can promise in a category built around chance.",
         },
       ],
+    },
+    {
+      id: "how-packscout-handles-evidence-gaps",
+      heading: "How PackScout Handles Evidence Gaps",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "PackScout shows Unavailable when supported evidence is not sufficient for a trustworthy value. It does not treat a missing estimate as zero, assume undocumented buyback terms, or manufacture a comparison from unsupported claims.",
+        },
+      ],
+      callout: {
+        label: "Source check",
+        paragraphs: [
+          METRIC_TRUST_COPY.sourceExplanation,
+          METRIC_TRUST_COPY.unavailableExplanation,
+        ],
+      },
     },
     {
       id: "bottom-line",

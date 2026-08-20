@@ -19,6 +19,7 @@ export type CatalogManifestKeyRole =
   (typeof CATALOG_MANIFEST_KEY_ROLES)[number];
 
 const MAX_CATALOG_MANIFEST_KEYS = 16;
+const MAX_DATA_RELEASE_V3_PUBLICATION_KEYS = 4;
 const MAX_HEAT_PUBLICATION_KEYS = 4;
 const MAX_PROVIDER_PUBLICATION_KEYS = 16;
 const MAX_PRODUCTION_PUBLICATION_KEYS = 64;
@@ -137,15 +138,17 @@ function configuredProviderPublicationKeyIds(): ReadonlySet<string> | null {
   }
 }
 
-function configuredHeatPublicationKeyIds(): ReadonlySet<string> | null {
-  const raw = env.PACKSCOUT_HEAT_PUBLICATION_KEY_IDS;
+function configuredCanonicalKeyIdList(
+  raw: string | undefined,
+  maximumKeys: number,
+): ReadonlySet<string> | null {
   if (raw === undefined) return null;
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (
       !Array.isArray(parsed) ||
       parsed.length === 0 ||
-      parsed.length > MAX_HEAT_PUBLICATION_KEYS ||
+      parsed.length > maximumKeys ||
       parsed.some((keyId) =>
         typeof keyId !== "string" ||
         !PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId) ||
@@ -162,6 +165,20 @@ function configuredHeatPublicationKeyIds(): ReadonlySet<string> | null {
   } catch {
     return null;
   }
+}
+
+function configuredHeatPublicationKeyIds(): ReadonlySet<string> | null {
+  return configuredCanonicalKeyIdList(
+    env.PACKSCOUT_HEAT_PUBLICATION_KEY_IDS,
+    MAX_HEAT_PUBLICATION_KEYS,
+  );
+}
+
+function configuredDataReleaseV3PublicationKeyIds(): ReadonlySet<string> | null {
+  return configuredCanonicalKeyIdList(
+    env.PACKSCOUT_DATA_RELEASE_V3_PUBLICATION_KEY_IDS,
+    MAX_DATA_RELEASE_V3_PUBLICATION_KEYS,
+  );
 }
 
 function equalSecret(left: Uint8Array, right: Uint8Array): boolean {
@@ -183,6 +200,10 @@ export function publicationAuthorityConfigurationIsIsolated(): boolean {
   const heatKeyIds = env.PACKSCOUT_HEAT_PUBLICATION_KEY_IDS === undefined
     ? new Set<string>()
     : configuredHeatPublicationKeyIds();
+  const dataReleaseV3KeyIds =
+    env.PACKSCOUT_DATA_RELEASE_V3_PUBLICATION_KEY_IDS === undefined
+      ? new Set<string>()
+      : configuredDataReleaseV3PublicationKeyIds();
   const providerKeyIds = configuredProviderPublicationKeyIds();
   const manifestRoleMap = env.PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES === undefined
     ? {}
@@ -190,6 +211,7 @@ export function publicationAuthorityConfigurationIsIsolated(): boolean {
   if (
     publicationKeys === null ||
     heatKeyIds === null ||
+    dataReleaseV3KeyIds === null ||
     providerKeyIds === null ||
     manifestRoleMap === null
   ) {
@@ -197,6 +219,10 @@ export function publicationAuthorityConfigurationIsIsolated(): boolean {
   }
   const authorities = [
     ...[...heatKeyIds].map((keyId) => ({ keyId, surface: "heat" })),
+    ...[...dataReleaseV3KeyIds].map((keyId) => ({
+      keyId,
+      surface: "dataReleaseV3",
+    })),
     ...[...providerKeyIds].map((keyId) => ({ keyId, surface: "provider" })),
     ...Object.keys(manifestRoleMap).map((keyId) => ({
       keyId,
@@ -235,4 +261,10 @@ export function heatPublicationKeyIsAuthorized(keyId: string): boolean {
   if (!PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId)) return false;
   return publicationAuthorityConfigurationIsIsolated() &&
     configuredHeatPublicationKeyIds()?.has(keyId) === true;
+}
+
+export function dataReleaseV3PublicationKeyIsAuthorized(keyId: string): boolean {
+  if (!PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId)) return false;
+  return publicationAuthorityConfigurationIsIsolated() &&
+    configuredDataReleaseV3PublicationKeyIds()?.has(keyId) === true;
 }

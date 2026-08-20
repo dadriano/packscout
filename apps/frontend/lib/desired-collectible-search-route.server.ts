@@ -1,12 +1,10 @@
-import type {
-  SearchPublicCollectiblesInput,
-  SearchPublicCollectiblesResult,
-} from "@packscout/contracts";
+import type { SearchPublicCollectiblesInput } from "@packscout/contracts";
 import { parseDesiredCollectibleSearchRequest } from "./desired-collectible-search";
+import type { SearchPublicCollectiblesV3Result } from "./public-repacks-v3";
 
 type SearchPublicCollectibles = (
   input: SearchPublicCollectiblesInput,
-) => Promise<SearchPublicCollectiblesResult>;
+) => Promise<SearchPublicCollectiblesV3Result>;
 
 function json(body: unknown, status: number): Response {
   return Response.json(body, {

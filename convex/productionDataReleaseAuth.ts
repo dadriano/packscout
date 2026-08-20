@@ -4,6 +4,7 @@ import {
   MAX_PRODUCTION_HTTP_BODY_BYTES,
   MAX_CATALOG_MANIFEST_PUBLICATION_BODY_BYTES,
   MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES,
   PRODUCTION_AUTH_HEADER_NAMES,
   PRODUCTION_AUTH_KEY_ID_PATTERN,
   PRODUCTION_AUTH_NONCE_HASH_DOMAIN,
@@ -45,6 +46,7 @@ import {
 import {
   catalogRetentionKeyIsAuthorized,
   configuredPublicationKeySecret,
+  dataReleaseV3PublicationKeyIsAuthorized,
   heatPublicationKeyIsAuthorized,
   publicationAuthorityConfigurationIsIsolated,
 } from "./productionPublicationKeyConfig";
@@ -99,13 +101,28 @@ type PublicationErrorCode =
   | ProviderReleaseErrorCode
   | CatalogManifestErrorCode
   | CatalogRetentionErrorCode;
-type PublicationSurface = "legacy" | "provider" | "manifest" | "retention";
+type PublicationSurface =
+  | "legacy"
+  | "dataReleaseV3"
+  | "provider"
+  | "manifest"
+  | "retention";
+
+/**
+ * data_release_v3 shares the legacy PUBLICATION_* error codes, the legacy
+ * `{bodyJson, requestDigest}` execution arguments, and the legacy
+ * whole-receipt response hash; it differs only in its key authority and its
+ * larger deterministic-batch body limit.
+ */
+function usesLegacyProtocol(surface: PublicationSurface): boolean {
+  return surface === "legacy" || surface === "dataReleaseV3";
+}
 
 function surfaceCode(
   surface: PublicationSurface,
   legacyCode: ProductionDataReleaseErrorCode,
 ): PublicationErrorCode {
-  if (surface === "legacy") return legacyCode;
+  if (usesLegacyProtocol(surface)) return legacyCode;
   const prefix = surface === "provider"
     ? "PROVIDER_RELEASE_"
     : surface === "manifest"
@@ -129,6 +146,7 @@ function surfaceCode(
 function maximumBodyBytes(surface: PublicationSurface): number {
   if (surface === "manifest") return MAX_CATALOG_MANIFEST_PUBLICATION_BODY_BYTES;
   if (surface === "retention") return MAX_CATALOG_RETENTION_HTTP_BODY_BYTES;
+  if (surface === "dataReleaseV3") return MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES;
   return MAX_PRODUCTION_HTTP_BODY_BYTES;
 }
 
@@ -323,7 +341,7 @@ async function signReceipt(
     ? receipt.receiptDigest
     : undefined;
   if (
-    surface !== "legacy" &&
+    !usesLegacyProtocol(surface) &&
     (exactDigestField === undefined ||
       (exactDigestField !== null &&
         typeof exactDigestField !== "string"))
@@ -348,7 +366,7 @@ async function signReceipt(
     : surface === "retention"
     ? await catalogRetentionReceiptDigest(receipt)
     : null;
-  if (surface !== "legacy") {
+  if (!usesLegacyProtocol(surface)) {
     if (
       storedExactDigest !== null &&
       storedExactDigest !== computedExactDigest
@@ -364,7 +382,7 @@ async function signReceipt(
       );
     }
   }
-  const receiptDigest = surface !== "legacy"
+  const receiptDigest = !usesLegacyProtocol(surface)
     ? computedExactDigest ??
       (surface === "provider"
         ? refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT")
@@ -424,7 +442,7 @@ async function handleAuthenticatedRequest(
       surface,
       authorizeKeyId,
     );
-    const receipt = surface !== "legacy"
+    const receipt = !usesLegacyProtocol(surface)
       ? await ctx.runMutation(operation as ProviderExecutionReference, {
         bodyJson: authenticated.bodyJson,
         requestDigest: authenticated.bodyDigest,
@@ -496,6 +514,20 @@ export function handleAuthenticatedHeatPublicationRequest(
     operation,
     "legacy",
     heatPublicationKeyIsAuthorized,
+  );
+}
+
+export function handleAuthenticatedDataReleaseV3Request(
+  ctx: ActionCtx,
+  request: Request,
+  operation: LegacyExecutionReference,
+): Promise<Response> {
+  return handleAuthenticatedRequest(
+    ctx,
+    request,
+    operation,
+    "dataReleaseV3",
+    dataReleaseV3PublicationKeyIsAuthorized,
   );
 }
 

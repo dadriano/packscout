@@ -1,3 +1,4 @@
+import { RESPONSIBLE_PLAY_RESOURCE } from "../responsible-play";
 import type { LearnGuide } from "./types";
 
 export const PACKSCOUT_METHODOLOGY_GUIDE = {
@@ -267,14 +268,17 @@ export const PACKSCOUT_METHODOLOGY_GUIDE = {
     {
       id: "responsible-play",
       heading: "Responsible Play",
+      // The helpline contact renders exclusively from the verified
+      // responsible-play registry, so this article can never drift from the
+      // pinned official NCPG contact.
       blocks: [
+        ...RESPONSIBLE_PLAY_RESOURCE.paragraphs.map((text) => ({
+          type: "paragraph" as const,
+          text,
+        })),
         {
           type: "paragraph",
-          text: "Opening a repack involves risk and can result in financial loss. Even a favorable Gross EV reflects an average across many outcomes — any individual pack can lose money, and past outcomes do not guarantee future results.",
-        },
-        {
-          type: "paragraph",
-          text: "If you or someone you know has a gambling problem, help is available 24/7. Call or text 1-800-522-4700, or visit ncpgambling.org.",
+          text: `${RESPONSIBLE_PLAY_RESOURCE.helpline.callLabel} · ${RESPONSIBLE_PLAY_RESOURCE.helpline.textLabel} · ${RESPONSIBLE_PLAY_RESOURCE.helpline.chatLabel}. ${RESPONSIBLE_PLAY_RESOURCE.helpline.name} — ${RESPONSIBLE_PLAY_RESOURCE.helpline.organization}.`,
         },
       ],
     },

@@ -10,7 +10,8 @@ import {
 } from "@/lib/catalog-route-state.server";
 import { dashboardHrefFor } from "@/lib/provider-banner";
 import { readDashboardBundle } from "@/lib/public-repacks.server";
-import { dataReleaseStatusFromMetadata } from "@/lib/public-release-status";
+import { dashboardCatalogIsEmpty } from "@/lib/public-repacks-v3";
+import { dataReleaseStatusFromRelease } from "@/lib/public-release-status";
 import { DashboardOverviewClient } from "./DashboardOverviewClient.client";
 
 export default async function DashboardOverviewPage({
@@ -55,20 +56,20 @@ export default async function DashboardOverviewPage({
     );
   }
 
-  const status = dataReleaseStatusFromMetadata(result.data.metadata);
+  const status = dataReleaseStatusFromRelease(result.data.release);
 
   return (
     <>
       <DataReleaseStatusReporter status={status} />
       {providerBanner}
       <DashboardPageHeader activeView="overview" overviewHref={dashboardHref} />
-      {result.data.metadata.repackCount === 0 ? (
+      {dashboardCatalogIsEmpty(result.data) ? (
         <EmptyCatalog />
       ) : (
         <DashboardOverviewClient
           bundle={result.data}
           details={result.data.details}
-          key={`${dashboardHref}:${result.data.metadata.publicReleaseId}:${JSON.stringify(result.data.activeFilters)}`}
+          key={`${dashboardHref}:${result.data.release.publicReleaseId}:${JSON.stringify(result.data.activeFilters)}`}
           provider={provider}
         />
       )}

@@ -11,12 +11,17 @@ import {
 } from "@packscout/contracts";
 import type { DashboardProvider } from "./provider-banner";
 
+/**
+ * Sorts the data_release_v3 read boundary can honor. The pre-buyback
+ * `vendor_reported_ev_percent` sort is deliberately absent: vendor-reported
+ * EV carries no percent projection in v3, so links that depended on it reset
+ * through the invalid-link recovery instead of silently reinterpreting.
+ */
 const SORT_KEYS = new Set<PublicRepackSort>([
   "repack",
   "repack_price",
   "packscout_ev_dollars",
   "packscout_ev_percent",
-  "vendor_reported_ev_percent",
   "buyback_percent",
   "packscout_gross_ev",
   "top_chase_value",

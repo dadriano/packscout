@@ -2,23 +2,24 @@
 
 import type { ReactNode } from "react";
 import type {
-  ListPublicRepacksPage,
   PublicRepackChase,
-  PublicRepackViewSummary,
+  PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import { CatalogImage } from "@/components/catalog/CatalogImage.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
-  formatMoneyMinorUnits,
-  presentBuyback,
-  presentPackScoutEv,
+  presentBuybackSummaryV3,
+  presentPackScoutEvV3,
+  presentRepackPrice,
   presentTopChaseValue,
-} from "@/lib/metric-presentation";
+} from "@/lib/packscout-ev-presentation";
+import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
+import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import styles from "./AllRepacksCards.module.css";
 
 type AllRepacksCardsProps = Readonly<{
-  page: ListPublicRepacksPage;
+  page: ListPublicRepacksPageV3;
   selectedPublicRepackId: string | null;
   controls: ReactNode;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
@@ -31,26 +32,26 @@ function RepackCard({
   desiredSearchActive,
   onSelect,
 }: Readonly<{
-  repack: PublicRepackViewSummary;
+  repack: PublicRepackViewSummaryV3;
   selected: boolean;
   desiredChase: PublicRepackChase | null;
   desiredSearchActive: boolean;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
 }>) {
-  const estimate = presentPackScoutEv({
-    repackPrice: repack.price.usdComparison,
-    estimate: repack.evEstimates.packScout,
+  const boundEstimate = useDeadlineBoundPackScoutEv(repack.evEstimates.packScout);
+  const estimate = presentPackScoutEvV3({
+    estimate: boundEstimate,
+    price: repack.price,
+    availability: repack.availability,
+    repackName: repack.name,
   });
-  const buyback = presentBuyback(repack.buyback);
+  const buyback = presentBuybackSummaryV3(repack.buyback);
+  const price = presentRepackPrice(repack.price);
   const displayedChase = desiredSearchActive ? desiredChase : repack.topChase;
   const displayedChaseValue = presentTopChaseValue(
     displayedChase,
     desiredSearchActive ? "Desired Chase Value" : "Top Chase Value",
   );
-  const displayPrice = repack.price.displayMoney ??
-    (repack.price.usdComparison.status === "available"
-      ? repack.price.usdComparison.value
-      : null);
 
   return (
     <article className={styles.card} data-selected={selected ? "true" : "false"}>
@@ -73,7 +74,8 @@ function RepackCard({
           </span>
         </span>
         <span className={styles.price}>
-          {displayPrice ? formatMoneyMinorUnits(displayPrice) : "Price unavailable"}
+          <span aria-hidden="true">{price.displayValue}</span>
+          <span className="sr-only">{price.accessibleLabel}</span>
         </span>
       </button>
 

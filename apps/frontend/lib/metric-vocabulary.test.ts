@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  BUYBACK_SUMMARY_COPY,
   COMPARISON_GLOSSARY,
+  ESTIMATE_STATUS_COPY,
   EXPECTED_VALUE_ARTICLE_HREF,
   getGlossaryDefinition,
   getPublicReasonCopy,
@@ -9,67 +11,61 @@ import {
   PUBLIC_REASON_COPY,
 } from "./metric-vocabulary";
 
-const expectedGlossary = [
-  ["vendor", "Vendor", "The vendor offering the repack"],
-  ["category", "Category", "A subject branch represented by the repack"],
-  ["repack", "Repack", "The vendor’s public repack or gacha listing name"],
-  [
-    "heat",
-    "Heat",
-    "A timing signal comparing recent activity with this repack’s own baseline. Heat does not mean profit, positive EV, or a predicted outcome.",
-  ],
-  ["repackPrice", "Repack Price", "The amount charged to open or buy the repack"],
-  ["evDollars", "EV $", "Gross EV minus Repack Price"],
-  [
-    "evPercent",
-    "EV %",
-    "The difference between Gross EV and Repack Price, shown as a percentage of Repack Price",
-  ],
-  [
-    "evConfidence",
-    "EV Confidence",
-    "How reliable the EV estimate is based on supported evidence; it does not indicate whether EV is positive",
-  ],
-  [
-    "vendorReportedEv",
-    "Vendor-reported EV",
-    "An EV estimate reported by the vendor and kept separate from estimated EV",
-  ],
-  [
-    "buybackPercent",
-    "Buyback %",
-    "Vendor-supported buyback coverage relative to Repack Price, reported directly or derived by PackScout from documented terms",
-  ],
-  [
-    "grossEv",
-    "Gross EV",
-    "Estimated value of contents before fees and shipping",
-  ],
-  [
-    "topChase",
-    "Top Chase",
-    "The highest-valued eligible related collectible currently identified",
-  ],
-  [
-    "topChaseValue",
-    "Top Chase Value",
-    "The supported canonical representative value attached to that collectible",
-  ],
-  ["promoCode", "Promo Code", "A public vendor-approved code available to copy"],
-  ["repackLink", "Repack Link", "The tracked outbound link to the vendor listing"],
-] as const;
-
-test("defines all repack comparison fields with canonical shared wording", () => {
-  assert.equal(COMPARISON_GLOSSARY.length, 15);
+test("defines all repack comparison fields with buyback-adjusted wording", () => {
+  assert.equal(COMPARISON_GLOSSARY.length, 16);
   assert.deepEqual(
-    COMPARISON_GLOSSARY.map(({ key, label, definition }) => [
-      key,
-      label,
-      definition,
-    ]),
-    expectedGlossary,
+    COMPARISON_GLOSSARY.map(({ key, label }) => [key, label]),
+    [
+      ["vendor", "Vendor"],
+      ["category", "Category"],
+      ["repack", "Repack"],
+      ["heat", "Heat"],
+      ["repackPrice", "Pack Price"],
+      ["grossEv", "Gross EV $"],
+      ["grossEvPercent", "Gross EV %"],
+      ["evDollars", "EV $"],
+      ["evPercent", "EV %"],
+      ["evConfidence", "EV Confidence"],
+      ["vendorReportedEv", "Vendor-reported EV"],
+      ["buybackPercent", "Buyback %"],
+      ["topChase", "Top Chase"],
+      ["topChaseValue", "Top Chase Value"],
+      ["promoCode", "Promo Code"],
+      ["repackLink", "Repack Link"],
+    ],
   );
   assert.ok(COMPARISON_GLOSSARY.every(({ enabledByDefault }) => enabledByDefault));
+});
+
+test("gross EV is defined as the expected guaranteed buyback payout", () => {
+  assert.match(
+    getGlossaryDefinition("grossEv").definition,
+    /expected guaranteed buyback payout/,
+  );
+  assert.match(
+    getGlossaryDefinition("grossEvPercent").definition,
+    /divided by the public Pack Price/,
+  );
+  assert.match(
+    getGlossaryDefinition("evDollars").definition,
+    /Gross EV \$ minus Pack Price/,
+  );
+  assert.match(
+    getGlossaryDefinition("evPercent").definition,
+    /minus 100 percentage points/,
+  );
+  assert.match(
+    getGlossaryDefinition("evConfidence").definition,
+    /never describes profit likelihood/,
+  );
+  assert.match(
+    getGlossaryDefinition("vendorReportedEv").definition,
+    /never merged with or substituted/,
+  );
+  assert.match(
+    getGlossaryDefinition("buybackPercent").definition,
+    /uniform buyback rate/,
+  );
 });
 
 test("links both EV sources and confidence to the approved Learn article", () => {
@@ -79,49 +75,65 @@ test("links both EV sources and confidence to the approved Learn article", () =>
       (entry) => "learnHref" in entry,
     ).map((entry) => entry.key),
     [
+      "grossEv",
+      "grossEvPercent",
       "evDollars",
       "evPercent",
       "evConfidence",
       "vendorReportedEv",
-      "grossEv",
     ],
   );
   assert.equal(getGlossaryDefinition("evConfidence").label, "EV Confidence");
 });
 
-test("maps V2 reason codes to bounded public copy", () => {
-  assert.deepEqual(PUBLIC_REASON_COPY, {
-    ESTIMATE_INPUT_INCOMPLETE:
-      "Estimate unavailable: supported evidence is incomplete.",
-    PRICE_UNAVAILABLE: "Estimate unavailable: repack price is unavailable.",
-    CURRENCY_UNSUPPORTED: "Estimate unavailable: currency is not supported.",
-    ESTIMATE_UNAVAILABLE: "Estimate unavailable.",
-    BUYBACK_UNAVAILABLE:
-      "Buyback unavailable: supported coverage is not available.",
-    VALUATION_UNAVAILABLE: "Collectible value unavailable.",
-    NOT_REPORTED: "The vendor has not reported an EV estimate.",
-  });
+test("maps the bounded v3 reason vocabulary to stable public copy", () => {
+  assert.deepEqual(Object.keys(PUBLIC_REASON_COPY).sort(), [
+    "BUYBACK_UNAVAILABLE",
+    "CALCULATION_UNAVAILABLE",
+    "CURRENCY_UNSUPPORTED",
+    "ESTIMATE_UNAVAILABLE",
+    "NOT_REPORTED",
+    "ODDS_UNAVAILABLE",
+    "PRICE_UNAVAILABLE",
+    "SOURCE_DATA_STALE",
+    "SOURCE_EVIDENCE_UNAVAILABLE",
+    "VALUATION_UNAVAILABLE",
+    "VALUE_UNAVAILABLE",
+  ]);
   assert.equal(
-    getPublicReasonCopy("CURRENCY_UNSUPPORTED"),
-    "Estimate unavailable: currency is not supported.",
+    getPublicReasonCopy("BUYBACK_UNAVAILABLE"),
+    "Unavailable: documented buyback terms are unavailable.",
+  );
+  assert.equal(
+    getPublicReasonCopy("SOURCE_DATA_STALE"),
+    "Expired: source data is older than 60 minutes.",
   );
   for (const [reason, copy] of Object.entries(PUBLIC_REASON_COPY)) {
     assert.doesNotMatch(copy, new RegExp(reason, "i"));
   }
 });
 
-test("keeps the metric trust language canonical for Dashboard and Learn", () => {
-  assert.deepEqual(METRIC_TRUST_COPY, {
-    dashboardDisclaimer: "EV · Estimated · Not financial advice.",
-    estimateLabel: "Estimated EV",
-    financialDisclaimer: "Not financial advice.",
-    longRunExplanation:
-      "EV is a long-run estimate. It does not predict the contents or outcome of one repack.",
-    sourceExplanation:
-      "Vendor-reported EV and estimated EV are separate estimates and are never averaged.",
-    confidenceExplanation:
-      "Confidence describes the reliability of the estimate, not whether its EV is positive or negative.",
-    unavailableExplanation:
-      "Unavailable means there is not enough supported evidence to show the value.",
+test("keeps the required source, advice, and bounded-summary language canonical", () => {
+  assert.equal(
+    METRIC_TRUST_COPY.sourceLine,
+    "PackScout Gross EV — calculated from platform-provided data",
+  );
+  assert.equal(METRIC_TRUST_COPY.adviceLine, "Not financial or gambling advice");
+  assert.equal(METRIC_TRUST_COPY.estimateLabel, "PackScout Gross EV");
+  assert.match(METRIC_TRUST_COPY.longRunExplanation, /guaranteed buyback payout/);
+  assert.match(METRIC_TRUST_COPY.sourceExplanation, /never averaged or substituted/);
+  assert.match(METRIC_TRUST_COPY.confidenceExplanation, /not profit likelihood/);
+  assert.match(
+    METRIC_TRUST_COPY.unavailableExplanation,
+    /never assumes missing buyback terms/,
+  );
+  assert.deepEqual(BUYBACK_SUMMARY_COPY, {
+    varies_by_outcome: "Varies by outcome",
+    fixed_or_final_payout: "Fixed/final payout",
+    not_documented: "Not documented",
+    unavailable: "Unavailable",
   });
+  assert.equal(ESTIMATE_STATUS_COPY.sold_out_historical, "Sold out · historical estimate");
+  assert.equal(ESTIMATE_STATUS_COPY.expired, "Expired");
+  assert.equal(ESTIMATE_STATUS_COPY.simulated, "Simulated data");
 });

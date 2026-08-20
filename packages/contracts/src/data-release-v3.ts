@@ -1,0 +1,319 @@
+import { z } from "zod";
+import {
+  packScoutBuybackEvConfidencePolicyVersionV1Schema,
+  packScoutBuybackEvMethodVersionV1Schema,
+  packScoutBuybackEvTimestampV1Schema,
+} from "./buyback-adjusted-ev-v1-common.ts";
+import {
+  publicCollectibleDisplaySchema,
+  publicRepackChaseSchema,
+} from "./data-release-v2-entities.ts";
+import { publicRepackIdSchema } from "./data-release-v2-values.ts";
+import {
+  publicRepackHeatSchema,
+  type PublicRepackHeat,
+} from "./repack-heat.ts";
+import { DATA_RELEASE_V3_SCHEMA_VERSION } from "./data-release-v3-ev-estimates.ts";
+import {
+  packScoutEvProjectionsAreByteEquivalentV3,
+  publicRepackDetailV3Schema,
+  publicRepackSummaryV3FromDetail,
+  publicRepackSummaryV3Schema,
+  type PublicRepackDetailV3,
+  type PublicRepackSummaryV3,
+} from "./data-release-v3-entities.ts";
+
+export * from "./data-release-v3-ev-estimates.ts";
+export * from "./data-release-v3-entities.ts";
+export * from "./data-release-v3-search.ts";
+
+/**
+ * The active release identity carried by every data_release_v3 result
+ * envelope. The exact buyback-adjusted calculation and confidence-policy
+ * versions are required; no other EV interpretation can enter this release.
+ */
+export const dataReleaseV3IdentitySchema = z
+  .object({
+    schemaVersion: z.literal(DATA_RELEASE_V3_SCHEMA_VERSION),
+    publicReleaseId: z.uuid(),
+    methodVersion: packScoutBuybackEvMethodVersionV1Schema,
+    confidencePolicyVersion: packScoutBuybackEvConfidencePolicyVersionV1Schema,
+    dataAsOf: packScoutBuybackEvTimestampV1Schema,
+    completedAt: packScoutBuybackEvTimestampV1Schema,
+  })
+  .strict()
+  .refine(
+    ({ dataAsOf, completedAt }) =>
+      Date.parse(dataAsOf) <= Date.parse(completedAt),
+    { path: ["dataAsOf"], message: "data_release_v3.data_after_completion" },
+  );
+
+export type DataReleaseV3Identity = z.infer<typeof dataReleaseV3IdentitySchema>;
+
+export type PublicRepackViewSummaryV3 = PublicRepackSummaryV3 &
+  Readonly<{ heat: PublicRepackHeat }>;
+export type PublicRepackViewDetailV3 = PublicRepackDetailV3 &
+  Readonly<{ heat: PublicRepackHeat }>;
+
+/**
+ * Heat travels beside EV and stays independent of EV confidence: any heat
+ * state may pair with any PackScout EV state.
+ */
+export const publicRepackViewSummaryV3Schema: z.ZodType<PublicRepackViewSummaryV3> =
+  publicRepackSummaryV3Schema.safeExtend({ heat: publicRepackHeatSchema });
+export const publicRepackViewDetailV3Schema: z.ZodType<PublicRepackViewDetailV3> =
+  publicRepackDetailV3Schema.safeExtend({ heat: publicRepackHeatSchema });
+
+export function publicRepackViewSummaryV3FromDetail(
+  detail: PublicRepackViewDetailV3,
+): PublicRepackViewSummaryV3 {
+  const { heat, ...baseDetail } = detail;
+  return publicRepackViewSummaryV3Schema.parse({
+    ...publicRepackSummaryV3FromDetail(baseDetail),
+    heat,
+  });
+}
+
+function summaryMatchesDetailV3(
+  summary: PublicRepackViewSummaryV3,
+  detail: PublicRepackViewDetailV3 | undefined,
+): boolean {
+  return (
+    detail !== undefined &&
+    JSON.stringify(summary) ===
+      JSON.stringify(publicRepackViewSummaryV3FromDetail(detail))
+  );
+}
+
+function validateSummaryDetailPairsV3(
+  summaries: readonly PublicRepackViewSummaryV3[],
+  details: readonly PublicRepackViewDetailV3[],
+  context: z.RefinementCtx,
+): void {
+  if (
+    summaries.length !== details.length ||
+    summaries.some(
+      (summary, index) => !summaryMatchesDetailV3(summary, details[index]),
+    )
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["details"],
+      message: "data_release_v3.summary_detail_divergence",
+    });
+  }
+}
+
+function validateSelectedRepackV3(
+  selectedRepack: PublicRepackViewDetailV3 | null,
+  details: readonly PublicRepackViewDetailV3[],
+  context: z.RefinementCtx,
+): void {
+  if (selectedRepack === null) return;
+  const matching = details.find(
+    ({ publicRepackId }) => publicRepackId === selectedRepack.publicRepackId,
+  );
+  if (
+    matching === undefined ||
+    !packScoutEvProjectionsAreByteEquivalentV3(selectedRepack, matching)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["selectedRepack"],
+      message: "data_release_v3.selected_item_divergence",
+    });
+  }
+}
+
+/**
+ * The dashboard opportunity projection. Opportunities carry the byte-
+ * equivalent PackScout projection of their details, admit only active
+ * repacks with a current estimate, and rank by signed EV dollars.
+ */
+export const publicDashboardBundleV3Schema = z
+  .object({
+    release: dataReleaseV3IdentitySchema,
+    opportunities: z.array(publicRepackViewSummaryV3Schema).max(6),
+    details: z.array(publicRepackViewDetailV3Schema).max(6),
+    selectedRepack: publicRepackViewDetailV3Schema.nullable(),
+  })
+  .strict()
+  .superRefine((bundle, context) => {
+    validateSummaryDetailPairsV3(bundle.opportunities, bundle.details, context);
+    bundle.opportunities.forEach((repack, index) => {
+      if (
+        repack.availability !== "active" ||
+        repack.evEstimates.packScout.status !== "current"
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["opportunities", index],
+          message: "data_release_v3.opportunity_ineligible",
+        });
+      }
+      const previous = bundle.opportunities[index - 1];
+      if (
+        previous !== undefined &&
+        previous.evEstimates.packScout.status === "current" &&
+        repack.evEstimates.packScout.status === "current" &&
+        (previous.evEstimates.packScout.metrics.evDollars.minorUnits <
+          repack.evEstimates.packScout.metrics.evDollars.minorUnits ||
+          (previous.evEstimates.packScout.metrics.evDollars.minorUnits ===
+            repack.evEstimates.packScout.metrics.evDollars.minorUnits &&
+            previous.publicRepackId >= repack.publicRepackId))
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["opportunities", index],
+          message: "data_release_v3.opportunities_not_ranked_by_ev_dollars",
+        });
+      }
+    });
+    if ((bundle.opportunities.length === 0) !== (bundle.selectedRepack === null)) {
+      context.addIssue({
+        code: "custom",
+        path: ["selectedRepack"],
+        message: "data_release_v3.selection_mismatch",
+      });
+    }
+    validateSelectedRepackV3(bundle.selectedRepack, bundle.details, context);
+  });
+
+export const desiredChasePageMatchV3Schema = z
+  .object({
+    publicRepackId: publicRepackIdSchema,
+    chase: publicRepackChaseSchema,
+  })
+  .strict()
+  .refine(
+    ({ publicRepackId, chase }) => publicRepackId === chase.publicRepackId,
+    { path: ["chase"], message: "data_release_v3.desired_chase_repack_mismatch" },
+  );
+
+/**
+ * The list projection for All Repacks. Rows and details carry byte-
+ * equivalent PackScout projections; a desired-collectible filter binds
+ * every row to a chase match for the same collectible identity.
+ */
+export const publicRepackListPageV3Schema = z
+  .object({
+    release: dataReleaseV3IdentitySchema,
+    rows: z.array(publicRepackViewSummaryV3Schema).max(50),
+    details: z.array(publicRepackViewDetailV3Schema).max(50),
+    selectedRepack: publicRepackViewDetailV3Schema.nullable(),
+    selectedRepackEligible: z.boolean(),
+    desiredCollectible: publicCollectibleDisplaySchema.nullable(),
+    desiredChaseMatches: z.array(desiredChasePageMatchV3Schema).max(50),
+  })
+  .strict()
+  .superRefine((page, context) => {
+    validateSummaryDetailPairsV3(page.rows, page.details, context);
+    if (
+      page.selectedRepackEligible !== (page.selectedRepack !== null) ||
+      (page.selectedRepack !== null &&
+        !page.rows.some(
+          ({ publicRepackId }) =>
+            publicRepackId === page.selectedRepack?.publicRepackId,
+        ))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["selectedRepackEligible"],
+        message: "data_release_v3.selection_mismatch",
+      });
+    }
+    validateSelectedRepackV3(page.selectedRepack, page.details, context);
+    if (page.desiredCollectible === null) {
+      if (page.desiredChaseMatches.length !== 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["desiredChaseMatches"],
+          message: "data_release_v3.inactive_desired_has_matches",
+        });
+      }
+      return;
+    }
+    const desiredId = page.desiredCollectible.publicCollectibleId;
+    const desiredBytes = JSON.stringify(page.desiredCollectible);
+    const rowIds = page.rows.map(({ publicRepackId }) => publicRepackId);
+    const matchIds = page.desiredChaseMatches.map(
+      ({ publicRepackId }) => publicRepackId,
+    );
+    if (
+      !page.desiredChaseMatches.every(
+        ({ chase }) =>
+          chase.publicCollectibleId === desiredId &&
+          JSON.stringify(chase.collectible) === desiredBytes,
+      ) ||
+      new Set(matchIds).size !== matchIds.length ||
+      rowIds.length !== matchIds.length ||
+      rowIds.some((rowId) => !matchIds.includes(rowId))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["desiredChaseMatches"],
+        message: "data_release_v3.desired_matches_incomplete",
+      });
+    }
+  });
+
+export const desiredCollectibleRepackMatchV3Schema = z
+  .object({
+    repack: publicRepackViewSummaryV3Schema,
+    chase: publicRepackChaseSchema,
+  })
+  .strict()
+  .refine(
+    ({ repack, chase }) => repack.publicRepackId === chase.publicRepackId,
+    { path: ["chase"], message: "data_release_v3.desired_match_repack_mismatch" },
+  );
+
+/** The desired-collectible projection carrying the same repack EV shape. */
+export const desiredCollectibleRepackResultsV3Schema = z
+  .object({
+    release: dataReleaseV3IdentitySchema,
+    desiredCollectible: publicCollectibleDisplaySchema,
+    matches: z.array(desiredCollectibleRepackMatchV3Schema).max(50),
+    total: z.number().int().safe().min(0),
+  })
+  .strict()
+  .superRefine((result, context) => {
+    if (result.total < result.matches.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["total"],
+        message: "data_release_v3.total_invalid",
+      });
+    }
+    const desiredBytes = JSON.stringify(result.desiredCollectible);
+    if (
+      result.matches.some(
+        ({ chase }) =>
+          chase.publicCollectibleId !==
+            result.desiredCollectible.publicCollectibleId ||
+          JSON.stringify(chase.collectible) !== desiredBytes,
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["matches"],
+        message: "data_release_v3.desired_identity_mismatch",
+      });
+    }
+  });
+
+export type PublicDashboardBundleV3 = z.infer<
+  typeof publicDashboardBundleV3Schema
+>;
+export type PublicRepackListPageV3 = z.infer<
+  typeof publicRepackListPageV3Schema
+>;
+export type DesiredChasePageMatchV3 = z.infer<
+  typeof desiredChasePageMatchV3Schema
+>;
+export type DesiredCollectibleRepackMatchV3 = z.infer<
+  typeof desiredCollectibleRepackMatchV3Schema
+>;
+export type DesiredCollectibleRepackResultsV3 = z.infer<
+  typeof desiredCollectibleRepackResultsV3Schema
+>;
