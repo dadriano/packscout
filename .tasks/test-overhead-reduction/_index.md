@@ -20,15 +20,15 @@ An audit of this repository measured the full verification gate end to end and f
 |---|---|---|---|---|
 | 001 | Capture a repeatable gate timing baseline | small | none | done |
 | 002 | Stop running the same compilation twice | small | 001 | done |
-| 003 | Stop the frontend bundler from re-running type checking | small | 001 | in_progress |
+| 003 | Stop the frontend bundler from re-running type checking | small | 001 | done |
 | 004 | Restore incremental TypeScript compilation | small | 001 | done |
 | 005 | Make every gate tool agree on what to ignore | medium | none | done |
-| 006 | Clone the test database instead of migrating it every time | medium | 001 | in_progress |
-| 007 | Run independent gate phases concurrently | medium | 002, 003, 004 | todo |
-| 008 | Stop CI running the same verification twice | medium | 004 | todo |
+| 006 | Clone the test database instead of migrating it every time | medium | 001 | done |
+| 007 | Run independent gate phases concurrently | medium | 002, 003, 004 | done |
+| 008 | Stop CI running the same verification twice | medium | 004 | **blocked** |
 | 009 | Add a fast verification lane for the inner loop | medium | 006, 007 | todo |
 | 010 | Replace mirror tests with invariant assertions | medium | none | done |
-| 011 | Separate tooling self-tests from the product test gate | small | 005 | in_progress |
+| 011 | Separate tooling self-tests from the product test gate | small | 005 | done |
 | 012 | Codify what the audit learned in the testing standard | medium | 010, 011 | todo |
 | 013 | Consolidate the rejection matrix into table-driven coverage | large | 012 | todo |
 
@@ -59,6 +59,45 @@ These apply to every task in this feature and override any local optimization:
 - Security-sensitive boundary coverage is untouchable: authentication, sessions and cookies, authorization and tenant isolation, request validation, secrets and tokens, destructive actions, rate limiting, external writes, and audit behavior.
 - Per-test database isolation is a correctness property, not a performance detail. Task 006 must preserve it exactly.
 - No task deletes a test to make a lane faster. Tasks 010 and 013 change how coverage is expressed; task 011 changes when a lane runs. The set of proven behaviors does not shrink.
+
+## Build Status
+
+Ten of thirteen tasks are complete, one is blocked on a repository setting, and
+two remain deliberately unstarted.
+
+Measured against the committed baseline in `docs/gate-timing-baseline.json`:
+
+| Phase | Baseline | Now |
+|---|---|---|
+| lint | 13.3s | 8.4s |
+| typecheck | 28.1s | 13.1s |
+| test (product lanes) | 94.3s incl. tooling | 21.4s |
+| test:tooling | — | 40.6s, on demand |
+| build | 65.8s | ~54.5s |
+
+`npm run verify:framework` passes end to end.
+
+**Task 008 is blocked, not deferred.** `main` has no branch protection, so the
+push-to-main workflow run is the only thing verifying `main`. Removing it to
+deduplicate would delete verification rather than halve it. Caching and
+run-cancellation shipped; the deduplication needs branch protection enabled
+first. The task file records the exact two-step sequence.
+
+**Tasks 009, 012, and 013 are not started.** 012 rewrites the canonical testing
+standard and 013 is the large consolidation that begins with a survey that does
+not exist yet. Both were held back rather than rushed.
+
+Three findings from the build worth carrying forward:
+
+- **Parallelising the test lanes made them four times slower** (21.4s to 88.2s).
+  `node --test` already runs a process per file, so the lanes are internally
+  parallel and stacking them thrashes. Task 009 should narrow which lanes run,
+  not run more at once.
+- **A single timing number against a stored baseline can mislead.** Task 003
+  first appeared to make the build slower; a controlled A/B showed a 13.4s
+  saving. The apparent regression was machine contention.
+- **The line-saving estimate for task 010 was wrong** — 262 lines became 281, not
+  the predicted 60. The win was decoupling tests from copy, not volume.
 
 ## Next Steps
 
