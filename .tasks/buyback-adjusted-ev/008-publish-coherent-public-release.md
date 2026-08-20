@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/009, buyback-adjusted-ev/010, buyback-adjusted-ev/012
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including canonical publication, read-model replacement, ranking, and failure verification
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 

@@ -28,6 +28,8 @@ import type * as catalogRetentionRequests from "../catalogRetentionRequests.js";
 import type * as catalogRetentionState from "../catalogRetentionState.js";
 import type * as crons from "../crons.js";
 import type * as dataReleaseCanonicalHash from "../dataReleaseCanonicalHash.js";
+import type * as dataReleaseV3Lifecycle from "../dataReleaseV3Lifecycle.js";
+import type * as dataReleaseV3Search from "../dataReleaseV3Search.js";
 import type * as http from "../http.js";
 import type * as mockCatalogManifestSeed from "../mockCatalogManifestSeed.js";
 import type * as mockDataReleaseFixture from "../mockDataReleaseFixture.js";
@@ -66,6 +68,7 @@ import type * as publicProviderCatalogReadModel from "../publicProviderCatalogRe
 import type * as publicRepackAggregates from "../publicRepackAggregates.js";
 import type * as publicRepackValidation from "../publicRepackValidation.js";
 import type * as publicRepacks from "../publicRepacks.js";
+import type * as publicRepacksV3 from "../publicRepacksV3.js";
 import type * as repackHeatReadModel from "../repackHeatReadModel.js";
 import type * as repackHeatTestCatalog from "../repackHeatTestCatalog.js";
 import type * as savedItems from "../savedItems.js";
@@ -97,6 +100,8 @@ declare const fullApi: ApiFromModules<{
   catalogRetentionState: typeof catalogRetentionState;
   crons: typeof crons;
   dataReleaseCanonicalHash: typeof dataReleaseCanonicalHash;
+  dataReleaseV3Lifecycle: typeof dataReleaseV3Lifecycle;
+  dataReleaseV3Search: typeof dataReleaseV3Search;
   http: typeof http;
   mockCatalogManifestSeed: typeof mockCatalogManifestSeed;
   mockDataReleaseFixture: typeof mockDataReleaseFixture;
@@ -135,6 +140,7 @@ declare const fullApi: ApiFromModules<{
   publicRepackAggregates: typeof publicRepackAggregates;
   publicRepackValidation: typeof publicRepackValidation;
   publicRepacks: typeof publicRepacks;
+  publicRepacksV3: typeof publicRepacksV3;
   repackHeatReadModel: typeof repackHeatReadModel;
   repackHeatTestCatalog: typeof repackHeatTestCatalog;
   savedItems: typeof savedItems;

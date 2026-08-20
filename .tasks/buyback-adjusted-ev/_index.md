@@ -119,7 +119,7 @@ No other V1 penalty is permitted. Missing essential evidence does not reduce con
 | 005 | Preserve immutable EV revisions | medium | 2–3 days | done | 002, 003 |
 | 006 | Recompute when pack economics change | medium | 2–3 days | done | 004, 005 |
 | 007 | Define the replacement public EV contract | medium | 2–3 days | done | 001, 003 |
-| 008 | Publish one coherent public release | large | 4–6 days | todo | 006, 007 |
+| 008 | Publish one coherent public release | large | 4–6 days | in_progress | 006, 007 |
 | 009 | Simulate production-faithful EV changes | medium | 2–3 days | todo | 006, 008 |
 | 010 | Present comparable EV metrics | large | 3–5 days | todo | 008, 009 |
 | 011 | Teach the methodology and limitations | medium | 1–2 days | todo | 010 |
