@@ -29,15 +29,15 @@ export const PACKSCOUT_TRANSACTION_OPTIONS = Object.freeze({
 
 const EXPECTED_MIGRATIONS = Object.freeze([
   Object.freeze({
-    name: "20260812000000_clean_baseline",
-    checksum: "41576f412f2ff33b12db7d6dcffb19fa88a6c40a09a9ed7200b9904377428a10",
+    name: "20260816040000_catalog_promotion_retention",
+    checksum: "98e762ab1ec5d877b418a5bebd8f9d605f557e5a8cf6d386a56a0d269ad3a865",
   }),
   Object.freeze({
     name: "20260819000000_worker_presence",
     checksum: "25dd46c5d182320654c3e5382b39f81fb82ce194717a3237e6dcfa7dc33d3608",
   }),
 ]);
-const EXPECTED_TABLE_COUNT = 29;
+const EXPECTED_TABLE_COUNT = 57;
 
 interface MigrationReadinessRow {
   migrationName: string;

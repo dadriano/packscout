@@ -59,6 +59,28 @@ model audit_events {
   @@index([organization_id, occurred_at], map: "audit_events_organization_occurred_idx")
 }
 
+/// Immutable, causally ordered approval for one public catalog policy.
+model approved_public_catalog_configurations {
+  id                              String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                 String                            @db.Uuid
+  configuration_key               String
+  revision                        Int
+  configuration_json              Json
+  configuration_hash              String
+  approved_at                     DateTime                          @db.Timestamptz(6)
+  public_change_sequence          BigInt
+  created_at                      DateTime                          @default(now()) @db.Timestamptz(6)
+  organizations                   organizations                     @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "approved_public_catalog_configurations_organization_fk")
+  public_change_causes            public_change_causes              @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "approved_public_catalog_configurations_public_change_fk")
+  public_repack_identity_mappings public_repack_identity_mappings[]
+
+  @@unique([organization_id, configuration_key], map: "approved_public_catalog_configurations_key_unique")
+  @@unique([organization_id, revision], map: "approved_public_catalog_configurations_revision_unique")
+  @@unique([organization_id, configuration_hash], map: "approved_public_catalog_configurations_hash_unique")
+  @@unique([organization_id, configuration_key, public_change_sequence], map: "approved_public_catalog_configurations_mapping_source_unique")
+  @@index([organization_id, public_change_sequence], map: "approved_public_catalog_configurations_change_idx")
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model auth_rate_limits {
   bucket_key        String    @id
@@ -101,6 +123,8 @@ model canonical_relationships {
   target_record_kind                                                                              canonical_record_kind
   target_external_id                                                                              String?
   target_entity_id                                                                                String?               @db.Uuid
+  created_public_change_sequence                                                                  BigInt
+  resolved_public_change_sequence                                                                 BigInt?
   created_at                                                                                      DateTime              @default(now()) @db.Timestamptz(6)
   resolved_at                                                                                     DateTime?             @db.Timestamptz(6)
   organizations                                                                                   organizations         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_relationships_organization_id_organizations_id_fk")
@@ -108,6 +132,8 @@ model canonical_relationships {
   canonical_entities_canonical_relationships_source_entity_id_organization_idTocanonical_entities canonical_entities    @relation("canonical_relationships_source_entity_id_organization_idTocanonical_entities", fields: [source_entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_relationships_source_tenant_fk")
   canonical_entities_canonical_relationships_target_entity_idTocanonical_entities                 canonical_entities?   @relation("canonical_relationships_target_entity_idTocanonical_entities", fields: [target_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "canonical_relationships_target_entity_id_canonical_entities_id_")
   canonical_entities_canonical_relationships_target_entity_id_organization_idTocanonical_entities canonical_entities?   @relation("canonical_relationships_target_entity_id_organization_idTocanonical_entities", fields: [target_entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_relationships_target_tenant_fk")
+  public_change_causes_created                                                                    public_change_causes  @relation("canonical_relationships_created_change", fields: [organization_id, created_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "canonical_relationships_created_change_fk")
+  public_change_causes_resolved                                                                   public_change_causes? @relation("canonical_relationships_resolved_change", fields: [organization_id, resolved_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "canonical_relationships_resolved_change_fk")
 
   @@unique([source_entity_id, relationship_kind, target_platform_key, target_record_kind, target_external_id], map: "canonical_relationships_source_kind_target_unique")
   @@index([organization_id, target_platform_key, target_record_kind, target_external_id, resolved_at], map: "canonical_relationships_unresolved_lookup_idx")
@@ -115,39 +141,45 @@ model canonical_relationships {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model canonical_revisions {
-  id                                                                                                                                   String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organization_id                                                                                                                      String                                @db.Uuid
-  entity_id                                                                                                                            String                                @db.Uuid
+  id                                                                                                                                   String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                                                                      String                                 @db.Uuid
+  entity_id                                                                                                                            String                                 @db.Uuid
   revision_number                                                                                                                      Int
-  source_record_id                                                                                                                     String                                @db.Uuid
+  source_record_id                                                                                                                     String                                 @db.Uuid
   content_json                                                                                                                         Json
   content_hash                                                                                                                         String
   provenance_json                                                                                                                      Json
   provenance_hash                                                                                                                      String
   actor_key                                                                                                                            String?
-  source_updated_at                                                                                                                    DateTime                              @db.Timestamptz(6)
-  source_collected_at                                                                                                                  DateTime                              @db.Timestamptz(6)
-  accepted_at                                                                                                                          DateTime                              @default(now()) @db.Timestamptz(6)
-  canonical_entities_canonical_entities_current_revision_idTocanonical_revisions                                                       canonical_entities[]                  @relation("canonical_entities_current_revision_idTocanonical_revisions")
-  canonical_entities_canonical_revisions_entity_idTocanonical_entities                                                                 canonical_entities                    @relation("canonical_revisions_entity_idTocanonical_entities", fields: [entity_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_entity_id_canonical_entities_id_fk")
-  canonical_entities_canonical_revisions_entity_id_organization_idTocanonical_entities                                                 canonical_entities                    @relation("canonical_revisions_entity_id_organization_idTocanonical_entities", fields: [entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_entity_tenant_fk")
-  organizations                                                                                                                        organizations                         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_organization_id_organizations_id_fk")
-  source_records_canonical_revisions_source_record_idTosource_records                                                                  source_records                        @relation("canonical_revisions_source_record_idTosource_records", fields: [source_record_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_source_record_id_source_records_id_fk")
-  source_records_canonical_revisions_source_record_id_organization_idTosource_records                                                  source_records                        @relation("canonical_revisions_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_source_tenant_fk")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions    estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions        estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions                 estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions                    estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions")
-  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                        estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions")
-  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_idTocanonical_revisions                     source_record_projection_revisions[]  @relation("source_record_projection_revisions_canonical_revision_idTocanonical_revisions")
-  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions     source_record_projection_revisions[]  @relation("source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions")
+  source_updated_at                                                                                                                    DateTime                               @db.Timestamptz(6)
+  source_collected_at                                                                                                                  DateTime                               @db.Timestamptz(6)
+  accepted_at                                                                                                                          DateTime                               @default(now()) @db.Timestamptz(6)
+  public_change_sequence                                                                                                               BigInt
+  canonical_entities_canonical_entities_current_revision_idTocanonical_revisions                                                       canonical_entities[]                   @relation("canonical_entities_current_revision_idTocanonical_revisions")
+  canonical_entities_canonical_revisions_entity_idTocanonical_entities                                                                 canonical_entities                     @relation("canonical_revisions_entity_idTocanonical_entities", fields: [entity_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_entity_id_canonical_entities_id_fk")
+  canonical_entities_canonical_revisions_entity_id_organization_idTocanonical_entities                                                 canonical_entities                     @relation("canonical_revisions_entity_id_organization_idTocanonical_entities", fields: [entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_entity_tenant_fk")
+  organizations                                                                                                                        organizations                          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_organization_id_organizations_id_fk")
+  source_records_canonical_revisions_source_record_idTosource_records                                                                  source_records                         @relation("canonical_revisions_source_record_idTosource_records", fields: [source_record_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_source_record_id_source_records_id_fk")
+  source_records_canonical_revisions_source_record_id_organization_idTosource_records                                                  source_records                         @relation("canonical_revisions_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_source_tenant_fk")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions    estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions        estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions                 estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions                    estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions")
+  estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                        estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions")
+  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_idTocanonical_revisions                     source_record_projection_revisions[]   @relation("source_record_projection_revisions_canonical_revision_idTocanonical_revisions")
+  source_record_projection_revisions_source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions     source_record_projection_revisions[]   @relation("source_record_projection_revisions_canonical_revision_id_organization_idTocanonical_revisions")
+  public_change_causes                                                                                                                 public_change_causes                   @relation(fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "canonical_revisions_public_change_fk")
+  normalized_heat_observations                                                                                                         normalized_heat_observations[]
+  normalized_heat_observation_outcomes                                                                                                 normalized_heat_observation_outcomes[]
 
   @@unique([entity_id, content_hash, provenance_hash], map: "canonical_revisions_content_provenance_unique")
   @@unique([entity_id, revision_number], map: "canonical_revisions_entity_number_unique")
   @@unique([id, entity_id, organization_id], map: "canonical_revisions_id_entity_organization_unique")
   @@unique([id, organization_id], map: "canonical_revisions_id_organization_unique")
+  @@unique([id, organization_id, public_change_sequence], map: "canonical_revisions_heat_source_unique")
   @@index([organization_id, accepted_at], map: "canonical_revisions_organization_accepted_idx")
+  @@index([organization_id, public_change_sequence], map: "canonical_revisions_public_change_idx")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -174,6 +206,7 @@ model estimated_ev_recomputation_requests {
   created_at                                                                                                                                     DateTime                           @default(now()) @db.Timestamptz(6)
   updated_at                                                                                                                                     DateTime                           @default(now()) @db.Timestamptz(6)
   completed_at                                                                                                                                   DateTime?                          @db.Timestamptz(6)
+  originating_public_change_sequence                                                                                                             BigInt
   canonical_revisions_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions                           canonical_revisions?               @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions", fields: [calculation_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_calculation_revision_tenant_fk")
   provider_config_revisions_estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions provider_config_revisions          @relation("estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions", fields: [configuration_revision_id, provider_id, organization_id], references: [id, provider_id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_config_tenant_fk")
   canonical_revisions_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions                              canonical_revisions?               @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions", fields: [ev_input_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_input_revision_tenant_fk")
@@ -185,9 +218,128 @@ model estimated_ev_recomputation_requests {
   organizations                                                                                                                                  organizations                      @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_organization_id_organizatio")
   canonical_revisions_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                                                  canonical_revisions?               @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions", fields: [pack_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "estimated_ev_recomputation_requests_pack_revision_id_canonical_")
   provider_sources_estimated_ev_recomputation_requests_provider_idToprovider_sources                                                             provider_sources                   @relation("estimated_ev_recomputation_requests_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_provider_id_provider_source")
+  public_change_causes                                                                                                                           public_change_causes               @relation(fields: [organization_id, originating_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "estimated_ev_recomputation_originating_change_fk")
 
   @@index([state, available_at, created_at, id], map: "estimated_ev_recomputation_claim_idx")
+  @@index([organization_id, originating_public_change_sequence], map: "estimated_ev_recomputation_originating_change_idx")
   @@index([organization_id, platform_key, pack_external_id, created_at], map: "estimated_ev_recomputation_tenant_pack_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model public_change_causes {
+  organization_id                              String                                   @db.Uuid
+  sequence                                     BigInt
+  change_kind                                  public_change_kind
+  entity_key                                   String
+  source_key                                   String?
+  source_revision_key                          String?
+  metadata_json                                Json                                     @default("{}")
+  occurred_at                                  DateTime                                 @db.Timestamptz(6)
+  authoritative_transaction_id                 String
+  created_at                                   DateTime                                 @default(now()) @db.Timestamptz(6)
+  organizations                                organizations                            @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_change_causes_organization_id_organizations_id_fk")
+  estimated_ev_recomputation_requests          estimated_ev_recomputation_requests[]
+  canonical_revisions                          canonical_revisions[]
+  canonical_relationships_created              canonical_relationships[]                @relation("canonical_relationships_created_change")
+  canonical_relationships_resolved             canonical_relationships[]                @relation("canonical_relationships_resolved_change")
+  public_derivation_obligations                public_derivation_obligations[]          @relation("public_derivation_obligations_cause")
+  public_repack_identity_mappings              public_repack_identity_mappings[]        @relation("public_repack_identity_mapping_change")
+  normalized_heat_observations_source          normalized_heat_observations[]           @relation("normalized_heat_observation_source_change")
+  normalized_heat_observations_mapping         normalized_heat_observations[]           @relation("normalized_heat_observation_mapping_change")
+  normalized_heat_observation_outcomes_source  normalized_heat_observation_outcomes[]   @relation("normalized_heat_observation_outcome_source_change")
+  normalized_heat_observation_outcomes_mapping normalized_heat_observation_outcomes[]   @relation("normalized_heat_observation_outcome_mapping_change")
+  approved_public_catalog_configurations       approved_public_catalog_configurations[]
+  public_change_catalog_impacts                public_change_catalog_impacts?
+
+  @@id([organization_id, sequence], map: "public_change_causes_pkey")
+  @@index([organization_id, occurred_at, sequence], map: "public_change_causes_organization_occurred_idx")
+  @@index([organization_id, source_key, sequence], map: "public_change_causes_source_head_idx")
+}
+
+/// Immutable, explicit catalog impact attached one-to-one to every public cause.
+/// Canonical array, epoch, lifecycle, and immutability constraints live in the migration.
+model public_change_catalog_impacts {
+  organization_id               String               @db.Uuid
+  cause_sequence                BigInt
+  provider_platform_keys        String[]             @default([])
+  shared_configuration_key      String?
+  shared_configuration_revision Int?
+  shared_configuration_hash     String?
+  lifecycle_platform_key        String?
+  lifecycle_state               provider_state?
+  created_at                    DateTime             @default(now()) @db.Timestamptz(6)
+  organizations                 organizations        @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_change_catalog_impacts_organization_fk")
+  public_change_causes          public_change_causes @relation(fields: [organization_id, cause_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "public_change_catalog_impacts_cause_fk")
+  lifecycle_provider            provider_sources?    @relation("public_change_catalog_impacts_lifecycle_provider", fields: [organization_id, lifecycle_platform_key], references: [organization_id, platform_key], onUpdate: NoAction, map: "public_change_catalog_impacts_lifecycle_provider_fk")
+
+  @@id([organization_id, cause_sequence], map: "public_change_catalog_impacts_pkey")
+  @@index([organization_id, shared_configuration_hash, cause_sequence], map: "public_change_catalog_impacts_shared_epoch_idx")
+  @@index([organization_id, lifecycle_platform_key, cause_sequence], map: "public_change_catalog_impacts_lifecycle_idx")
+}
+
+/// Materialized provider-specific causal head. It never replaces the global Heat/audit watermark.
+/// Sequence and timestamp consistency constraints live in the migration.
+model provider_catalog_checkpoints {
+  organization_id      String           @db.Uuid
+  platform_key         String
+  settled_sequence     BigInt           @default(0)
+  source_head_sequence BigInt           @default(0)
+  settled_at           DateTime?        @db.Timestamptz(6)
+  source_head_at       DateTime?        @db.Timestamptz(6)
+  updated_at           DateTime         @default(now()) @db.Timestamptz(6)
+  organizations        organizations    @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "provider_catalog_checkpoints_organization_fk")
+  provider_sources     provider_sources @relation("provider_catalog_checkpoints_provider", fields: [organization_id, platform_key], references: [organization_id, platform_key], onUpdate: NoAction, map: "provider_catalog_checkpoints_provider_fk")
+
+  @@id([organization_id, platform_key], map: "provider_catalog_checkpoints_pkey")
+}
+
+/// Independent causal head for approved shared epochs and provider lifecycle decisions.
+/// This lane makes removal manifest-eligible without minting a removed-provider release.
+model catalog_manifest_lifecycle_checkpoints {
+  organization_id      String        @id @db.Uuid
+  settled_sequence     BigInt        @default(0)
+  source_head_sequence BigInt        @default(0)
+  settled_at           DateTime?     @db.Timestamptz(6)
+  source_head_at       DateTime?     @db.Timestamptz(6)
+  updated_at           DateTime      @default(now()) @db.Timestamptz(6)
+  organizations        organizations @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "catalog_manifest_lifecycle_checkpoints_organization_fk")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model public_derivation_obligations {
+  id                       String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id          String                     @db.Uuid
+  cause_sequence           BigInt
+  derivation_kind          public_derivation_kind
+  derivation_key           String
+  state                    public_derivation_state    @default(pending)
+  claimed_by               String?
+  claim_token              String?                    @db.Uuid
+  claim_expires_at         DateTime?                  @db.Timestamptz(6)
+  outcome_classification   public_derivation_outcome?
+  outcome_reason_code      String?
+  acknowledged_claim_token String?                    @db.Uuid
+  created_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  outcome_at               DateTime?                  @db.Timestamptz(6)
+  organizations            organizations              @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_derivation_obligations_organization_fk")
+  public_change_causes     public_change_causes       @relation("public_derivation_obligations_cause", fields: [organization_id, cause_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "public_derivation_obligations_cause_tenant_fk")
+
+  @@unique([organization_id, cause_sequence, derivation_kind, derivation_key], map: "public_derivation_obligations_cause_derivation_unique")
+  @@index([organization_id, state, claim_expires_at, created_at, id], map: "public_derivation_obligations_claim_idx")
+  @@index([organization_id, derivation_kind, derivation_key], map: "public_derivation_obligations_derivation_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model settled_public_watermarks {
+  organization_id      String        @id @db.Uuid
+  next_sequence        BigInt        @default(1)
+  settled_sequence     BigInt        @default(0)
+  source_head_sequence BigInt        @default(0)
+  settled_at           DateTime?     @db.Timestamptz(6)
+  source_head_at       DateTime?     @db.Timestamptz(6)
+  updated_at           DateTime      @default(now()) @db.Timestamptz(6)
+  organizations        organizations @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "settled_public_watermarks_organization_id_organizations_id_fk")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -350,35 +502,641 @@ model operators {
 }
 
 model organizations {
-  id                                  String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  slug                                String                                @unique(map: "organizations_slug_unique")
-  name                                String
-  created_at                          DateTime                              @default(now()) @db.Timestamptz(6)
-  admin_alerts                        admin_alerts[]
-  audit_events                        audit_events[]
-  canonical_entities                  canonical_entities[]
-  canonical_relationships             canonical_relationships[]
-  canonical_revisions                 canonical_revisions[]
-  estimated_ev_recomputation_requests estimated_ev_recomputation_requests[]
-  import_pages                        import_pages[]
-  import_runs                         import_runs[]
-  operational_events                  operational_events[]
-  operator_memberships                operator_memberships[]
-  operator_sessions                   operator_sessions[]
-  provider_config_revisions           provider_config_revisions[]
-  provider_connection_tests           provider_connection_tests[]
-  provider_cursor_checkpoints         provider_cursor_checkpoints[]
-  provider_health_states              provider_health_states[]
-  provider_schedules                  provider_schedules[]
-  provider_secret_versions            provider_secret_versions[]
-  provider_sources                    provider_sources[]
-  quarantine_attempts                 quarantine_attempts[]
-  quarantine_records                  quarantine_records[]
-  retention_executions                retention_executions[]
-  source_record_observations          source_record_observations[]
-  source_record_outcomes              source_record_outcomes[]
-  source_record_projection_revisions  source_record_projection_revisions[]
-  source_records                      source_records[]
+  id                                     String                                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug                                   String                                   @unique(map: "organizations_slug_unique")
+  name                                   String
+  created_at                             DateTime                                 @default(now()) @db.Timestamptz(6)
+  admin_alerts                           admin_alerts[]
+  audit_events                           audit_events[]
+  canonical_entities                     canonical_entities[]
+  canonical_relationships                canonical_relationships[]
+  canonical_revisions                    canonical_revisions[]
+  estimated_ev_recomputation_requests    estimated_ev_recomputation_requests[]
+  import_pages                           import_pages[]
+  import_runs                            import_runs[]
+  operational_events                     operational_events[]
+  operator_memberships                   operator_memberships[]
+  operator_sessions                      operator_sessions[]
+  provider_config_revisions              provider_config_revisions[]
+  provider_connection_tests              provider_connection_tests[]
+  provider_cursor_checkpoints            provider_cursor_checkpoints[]
+  provider_health_states                 provider_health_states[]
+  provider_schedules                     provider_schedules[]
+  provider_secret_versions               provider_secret_versions[]
+  provider_sources                       provider_sources[]
+  public_change_causes                   public_change_causes[]
+  public_derivation_obligations          public_derivation_obligations[]
+  quarantine_attempts                    quarantine_attempts[]
+  quarantine_records                     quarantine_records[]
+  retention_executions                   retention_executions[]
+  source_record_observations             source_record_observations[]
+  source_record_outcomes                 source_record_outcomes[]
+  source_record_projection_revisions     source_record_projection_revisions[]
+  source_records                         source_records[]
+  settled_public_watermarks              settled_public_watermarks?
+  public_repack_identity_mappings        public_repack_identity_mappings[]
+  normalized_heat_observations           normalized_heat_observations[]
+  normalized_heat_observation_outcomes   normalized_heat_observation_outcomes[]
+  normalized_heat_window_checkpoints     normalized_heat_window_checkpoints?
+  approved_public_catalog_configurations approved_public_catalog_configurations[]
+  promotion_lanes                        promotion_lanes[]
+  public_change_catalog_impacts          public_change_catalog_impacts[]
+  provider_catalog_checkpoints           provider_catalog_checkpoints[]
+  catalog_manifest_lifecycle_checkpoints catalog_manifest_lifecycle_checkpoints?
+  catalog_promotion_retention_barriers   catalog_promotion_retention_barriers[]
+}
+
+/// Governed, immutable bridge from private canonical identity to stable public identity.
+/// This table contains check constraints and an immutability trigger defined in its migration.
+model public_repack_identity_mappings {
+  organization_id                        String                                 @db.Uuid
+  platform_key                           String
+  pack_external_id                       String
+  public_repack_id                       String                                 @db.Uuid
+  approved_configuration_key             String
+  public_change_sequence                 BigInt
+  approved_at                            DateTime                               @db.Timestamptz(6)
+  created_at                             DateTime                               @default(now()) @db.Timestamptz(6)
+  organizations                          organizations                          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "public_repack_identity_mappings_organization_fk")
+  public_change_causes                   public_change_causes                   @relation("public_repack_identity_mapping_change", fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "public_repack_identity_mappings_change_fk")
+  approved_public_catalog_configurations approved_public_catalog_configurations @relation(fields: [organization_id, approved_configuration_key, public_change_sequence], references: [organization_id, configuration_key, public_change_sequence], onUpdate: NoAction, map: "public_repack_identity_mappings_configuration_fk")
+  normalized_heat_observations           normalized_heat_observations[]
+  normalized_heat_observation_outcomes   normalized_heat_observation_outcomes[]
+
+  @@id([organization_id, platform_key, pack_external_id], map: "public_repack_identity_mappings_pkey")
+  @@unique([organization_id, public_repack_id], map: "public_repack_identity_mappings_public_id_unique")
+  @@unique([organization_id, public_repack_id, public_change_sequence], map: "public_repack_identity_mappings_heat_source_unique")
+  @@index([organization_id, public_change_sequence], map: "public_repack_identity_mappings_change_idx")
+}
+
+/// Append-only, public-safe calculator inputs derived from canonical PostgreSQL evidence.
+/// This table contains shape and bounded-retention check constraints defined in its migration.
+model normalized_heat_observations {
+  id                                   String                                 @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                      String                                 @db.Uuid
+  observation_key                      String
+  canonical_revision_id                String                                 @db.Uuid
+  public_change_sequence               BigInt
+  mapping_public_change_sequence       BigInt
+  public_repack_id                     String                                 @db.Uuid
+  observation_kind                     String
+  occurred_at                          DateTime                               @db.Timestamptz(6)
+  catalog_sequence                     Int?
+  realized_return_basis_points         Int?
+  value_multiple_basis_points          Int?
+  available_chase_count                Int?
+  outcome_keys                         String[]                               @default([])
+  retained_until                       DateTime                               @db.Timestamptz(6)
+  created_at                           DateTime                               @default(now()) @db.Timestamptz(6)
+  organizations                        organizations                          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "normalized_heat_observations_organization_fk")
+  canonical_revisions                  canonical_revisions                    @relation(fields: [canonical_revision_id, organization_id, public_change_sequence], references: [id, organization_id, public_change_sequence], onUpdate: NoAction, map: "normalized_heat_observations_revision_fk")
+  public_change_causes_source          public_change_causes                   @relation("normalized_heat_observation_source_change", fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observations_source_change_fk")
+  public_change_causes_mapping         public_change_causes                   @relation("normalized_heat_observation_mapping_change", fields: [organization_id, mapping_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observations_mapping_change_fk")
+  public_repack_identity_mappings      public_repack_identity_mappings        @relation(fields: [organization_id, public_repack_id, mapping_public_change_sequence], references: [organization_id, public_repack_id, public_change_sequence], onUpdate: NoAction, map: "normalized_heat_observations_identity_mapping_fk")
+  normalized_heat_observation_outcomes normalized_heat_observation_outcomes[]
+
+  @@id([id, organization_id], map: "normalized_heat_observations_pkey")
+  @@unique([organization_id, observation_key], map: "normalized_heat_observations_key_unique")
+  @@index([organization_id, public_repack_id, occurred_at, public_change_sequence], map: "normalized_heat_observations_window_idx")
+  @@index([organization_id, retained_until], map: "normalized_heat_observations_retention_idx")
+}
+
+/// Bounded internal normalization disposition; contains no raw/provider evidence.
+/// This table contains status and reason check constraints defined in its migration.
+model normalized_heat_observation_outcomes {
+  organization_id                 String                           @db.Uuid
+  candidate_key                   String
+  canonical_revision_id           String                           @db.Uuid
+  public_change_sequence          BigInt
+  mapping_public_change_sequence  BigInt?
+  public_repack_id                String?                          @db.Uuid
+  occurred_at                     DateTime                         @db.Timestamptz(6)
+  status                          String
+  reason_code                     String
+  observation_id                  String?                          @db.Uuid
+  retained_until                  DateTime                         @db.Timestamptz(6)
+  created_at                      DateTime                         @default(now()) @db.Timestamptz(6)
+  organizations                   organizations                    @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_organization_fk")
+  canonical_revisions             canonical_revisions              @relation(fields: [canonical_revision_id, organization_id, public_change_sequence], references: [id, organization_id, public_change_sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_revision_fk")
+  public_change_causes_source     public_change_causes             @relation("normalized_heat_observation_outcome_source_change", fields: [organization_id, public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_change_fk")
+  public_change_causes_mapping    public_change_causes?            @relation("normalized_heat_observation_outcome_mapping_change", fields: [organization_id, mapping_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_mapping_change_fk")
+  public_repack_identity_mappings public_repack_identity_mappings? @relation(fields: [organization_id, public_repack_id, mapping_public_change_sequence], references: [organization_id, public_repack_id, public_change_sequence], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_identity_mapping_fk")
+  normalized_heat_observations    normalized_heat_observations?    @relation(fields: [observation_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "normalized_heat_observation_outcomes_observation_fk")
+
+  @@id([organization_id, candidate_key], map: "normalized_heat_observation_outcomes_pkey")
+  @@index([organization_id, public_repack_id, occurred_at, public_change_sequence, status], map: "normalized_heat_observation_outcomes_coverage_idx")
+  @@index([organization_id, retained_until], map: "normalized_heat_observation_outcomes_retention_idx")
+}
+
+/// Exclusive event-time boundary for windows whose published Heat must remain immutable.
+/// This table contains monotonicity constraints defined in its migration.
+model normalized_heat_window_checkpoints {
+  organization_id          String        @id @db.Uuid
+  closed_before            DateTime      @default(dbgenerated("'-infinity'::timestamp with time zone")) @db.Timestamptz(6)
+  through_settled_sequence BigInt        @default(0)
+  next_catalog_sequence    BigInt        @default(1)
+  updated_at               DateTime      @default(now()) @db.Timestamptz(6)
+  organizations            organizations @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "normalized_heat_window_checkpoints_organization_fk")
+}
+
+/// One server-bound provider publication lane. Task 011 check constraints and
+/// monotonic triggers are defined by its migration.
+model provider_promotion_lanes {
+  organization_id                        String    @db.Uuid
+  deployment_key                         String
+  platform_key                           String
+  next_evaluation_sequence               BigInt    @default(0)
+  requested_evaluation_sequence          BigInt    @default(0)
+  requested_at                           DateTime? @db.Timestamptz(6)
+  latest_checkpoint_body                 String?
+  latest_checkpoint_sha256               String?
+  settled_checkpoint                     BigInt    @default(0)
+  settled_at                             DateTime? @db.Timestamptz(6)
+  source_head_checkpoint                 BigInt    @default(0)
+  source_head_at                         DateTime? @db.Timestamptz(6)
+  confirmed_evaluation_sequence          BigInt    @default(0)
+  completed_checkpoint                   BigInt    @default(0)
+  completed_at                           DateTime? @db.Timestamptz(6)
+  completed_public_provider_release_id   String?   @db.Uuid
+  completed_provider_release_fingerprint String?
+  completed_head_body                    String?
+  completed_head_sha256                  String?
+  completed_terminal_operation_kind      String?
+  completed_terminal_operation_id        String?
+  completed_terminal_receipt_sha256      String?
+  completed_attempt_id                   String?   @db.Uuid
+  next_retry_at                          DateTime? @db.Timestamptz(6)
+  created_at                             DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                             DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, platform_key], map: "provider_promotion_lanes_pkey")
+}
+
+/// Immutable, deduplicated canonical provider checkpoint evaluation.
+model provider_promotion_evaluations {
+  organization_id        String   @db.Uuid
+  deployment_key         String
+  platform_key           String
+  evaluation_sequence    BigInt
+  checkpoint_body        String
+  checkpoint_sha256      String
+  settled_checkpoint     BigInt
+  source_head_checkpoint BigInt
+  requested_at           DateTime @db.Timestamptz(6)
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, platform_key, evaluation_sequence], map: "provider_promotion_evaluations_pkey")
+  @@index([organization_id, deployment_key, platform_key, checkpoint_sha256, evaluation_sequence(sort: Desc)], map: "provider_promotion_evaluations_digest_idx")
+}
+
+/// Lease-safe publication attempt for one provider evaluation.
+model provider_promotion_attempts {
+  id                             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                String    @db.Uuid
+  deployment_key                 String
+  platform_key                   String
+  evaluation_sequence            BigInt
+  bootstrap_proof_revision       BigInt
+  bootstrap_provider_set_sha256  String
+  target_checkpoint              BigInt
+  state                          String    @default("assembling")
+  prepared_classification        String?
+  prepared_summary_body          String?
+  prepared_summary_sha256        String?
+  public_provider_release_id     String?   @db.Uuid
+  provider_release_fingerprint   String?
+  expected_completed_head_sha256 String?
+  prepared_at                    DateTime? @db.Timestamptz(6)
+  claim_owner                    String?
+  claim_token                    String?   @db.Uuid
+  claim_expires_at               DateTime? @db.Timestamptz(6)
+  last_heartbeat_at              DateTime? @db.Timestamptz(6)
+  claim_count                    Int       @default(0)
+  retry_count                    Int       @default(0)
+  retry_at                       DateTime? @db.Timestamptz(6)
+  failure_class                  String?
+  failure_code                   String?
+  cas_error_body                 String?
+  cas_error_sha256               String?
+  terminal_at                    DateTime? @db.Timestamptz(6)
+  created_at                     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, organization_id, deployment_key, platform_key], map: "provider_promotion_attempts_tenant_unique")
+  @@unique([organization_id, deployment_key, platform_key, evaluation_sequence], map: "provider_promotion_attempts_evaluation_unique")
+  @@index([organization_id, deployment_key, platform_key, retry_at, claim_expires_at], map: "provider_promotion_attempts_claimable_idx")
+}
+
+/// Exact provider publication request and verified receipt evidence.
+model provider_promotion_operations {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attempt_id             String    @db.Uuid
+  organization_id        String    @db.Uuid
+  deployment_key         String
+  platform_key           String
+  operation_index        Int
+  operation_id           String
+  operation_kind         String
+  request_path           String
+  canonical_request_body String
+  request_sha256         String
+  state                  String    @default("pending")
+  send_count             Int       @default(0)
+  last_sent_at           DateTime? @db.Timestamptz(6)
+  acknowledged_at        DateTime? @db.Timestamptz(6)
+  canonical_receipt_body String?
+  receipt_sha256         String?
+  exact_response_body    String?
+  response_sha256        String?
+  created_at             DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([attempt_id, operation_index], map: "provider_promotion_operations_attempt_index_unique")
+  @@unique([attempt_id, operation_id], map: "provider_promotion_operations_attempt_operation_unique")
+  @@unique([organization_id, deployment_key, platform_key, operation_id], map: "provider_promotion_operations_lane_operation_unique")
+  @@index([attempt_id, operation_index], map: "provider_promotion_operations_resume_idx")
+}
+
+/// Immutable release proof pointing to the original publish operations. Entity
+/// batches are intentionally not duplicated here.
+model provider_release_artifacts {
+  organization_id              String   @db.Uuid
+  deployment_key               String
+  platform_key                 String
+  public_provider_release_id   String   @db.Uuid
+  provider_release_fingerprint String
+  immutable_proof_body         String
+  immutable_proof_sha256       String
+  publish_attempt_id           String   @db.Uuid
+  completed_at                 DateTime @db.Timestamptz(6)
+  created_at                   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, platform_key, public_provider_release_id], map: "provider_release_artifacts_pkey")
+  @@unique([organization_id, deployment_key, platform_key, provider_release_fingerprint], map: "provider_release_artifacts_fingerprint_unique")
+  @@unique([publish_attempt_id, organization_id, deployment_key, platform_key], map: "provider_release_artifacts_publish_attempt_unique")
+  @@unique([publish_attempt_id, organization_id, deployment_key, platform_key, public_provider_release_id, provider_release_fingerprint], map: "provider_release_artifacts_exact_identity_unique")
+}
+
+/// Serialized manifest evaluation lane. Convex generation is stored separately
+/// from PostgreSQL evaluation sequencing.
+model manifest_promotion_lanes {
+  organization_id                     String    @db.Uuid
+  deployment_key                      String
+  bootstrap_state                     String    @default("unverified")
+  bootstrap_verified_at               DateTime? @db.Timestamptz(6)
+  bootstrap_provider_set_body         String?
+  bootstrap_provider_set_sha256       String?
+  current_bootstrap_proof_revision    BigInt?
+  next_evaluation_sequence            BigInt    @default(0)
+  requested_evaluation_sequence       BigInt    @default(0)
+  requested_at                        DateTime? @db.Timestamptz(6)
+  confirmed_evaluation_sequence       BigInt    @default(0)
+  active_generation                   BigInt    @default(0)
+  active_state_body                   String?
+  active_state_sha256                 String?
+  active_state_receipt_body           String?
+  active_state_receipt_sha256         String?
+  active_state_response_body          String?
+  active_state_response_sha256        String?
+  active_public_release_id            String?   @db.Uuid
+  active_manifest_fingerprint         String?
+  active_provider_reference_set_hash  String?
+  active_configuration_epoch_sequence BigInt?
+  active_terminal_receipt_sha256      String?
+  delayed_provider_count              Int       @default(0)
+  last_activated_at                   DateTime? @db.Timestamptz(6)
+  last_reconciled_at                  DateTime? @db.Timestamptz(6)
+  next_retry_at                       DateTime? @db.Timestamptz(6)
+  created_at                          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                          DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key], map: "manifest_promotion_lanes_pkey")
+}
+
+/// Idempotent source event assigned a database-monotonic manifest sequence.
+model manifest_promotion_evaluations {
+  organization_id     String   @db.Uuid
+  deployment_key      String
+  evaluation_sequence BigInt
+  cause               String
+  cause_identity      String
+  cause_sha256        String
+  requested_at        DateTime @db.Timestamptz(6)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, evaluation_sequence], map: "manifest_promotion_evaluations_pkey")
+  @@unique([organization_id, deployment_key, cause_sha256], map: "manifest_promotion_evaluations_cause_unique")
+}
+
+/// One serialized manifest selection/CAS attempt.
+model manifest_promotion_attempts {
+  id                            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id               String    @db.Uuid
+  deployment_key                String
+  evaluation_sequence           BigInt
+  bootstrap_proof_revision      BigInt
+  bootstrap_provider_set_sha256 String
+  state                         String    @default("assembling")
+  prepared_operation_kind       String?
+  prepared_summary_body         String?
+  prepared_summary_sha256       String?
+  evaluation_snapshot_body      String?
+  evaluation_snapshot_sha256    String?
+  expected_active_state_sha256  String?
+  public_release_id             String?   @db.Uuid
+  manifest_fingerprint          String?
+  prepared_at                   DateTime? @db.Timestamptz(6)
+  claim_owner                   String?
+  claim_token                   String?   @db.Uuid
+  claim_expires_at              DateTime? @db.Timestamptz(6)
+  last_heartbeat_at             DateTime? @db.Timestamptz(6)
+  claim_count                   Int       @default(0)
+  retry_count                   Int       @default(0)
+  retry_at                      DateTime? @db.Timestamptz(6)
+  failure_class                 String?
+  failure_code                  String?
+  cas_error_body                String?
+  cas_error_sha256              String?
+  terminal_at                   DateTime? @db.Timestamptz(6)
+  created_at                    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, organization_id, deployment_key], map: "manifest_promotion_attempts_tenant_unique")
+  @@unique([organization_id, deployment_key, evaluation_sequence], map: "manifest_promotion_attempts_evaluation_unique")
+}
+
+/// At most one exact Task 010 mutation per manifest attempt.
+model manifest_promotion_operations {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attempt_id             String    @db.Uuid
+  organization_id        String    @db.Uuid
+  deployment_key         String
+  operation_index        Int       @default(0)
+  operation_id           String
+  operation_kind         String
+  request_path           String
+  canonical_request_body String
+  request_sha256         String
+  state                  String    @default("pending")
+  send_count             Int       @default(0)
+  last_sent_at           DateTime? @db.Timestamptz(6)
+  acknowledged_at        DateTime? @db.Timestamptz(6)
+  canonical_receipt_body String?
+  receipt_sha256         String?
+  exact_response_body    String?
+  response_sha256        String?
+  created_at             DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([attempt_id], map: "manifest_promotion_operations_attempt_unique")
+  @@unique([organization_id, deployment_key, operation_id], map: "manifest_promotion_operations_operation_unique")
+}
+
+/// Exact provider selection set derived from the confirmed active manifest.
+model manifest_active_provider_selections {
+  organization_id                  String   @db.Uuid
+  deployment_key                   String
+  platform_key                     String
+  active_generation                BigInt
+  manifest_public_release_id       String   @db.Uuid
+  provider_public_release_id       String   @db.Uuid
+  provider_release_fingerprint     String
+  selected_checkpoint              BigInt
+  selection_body                   String
+  selection_sha256                 String
+  provider_terminal_operation_id   String
+  provider_terminal_receipt_sha256 String
+  publish_artifact_attempt_id      String   @db.Uuid
+  activated_at                     DateTime @db.Timestamptz(6)
+  created_at                       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, platform_key], map: "manifest_active_provider_selections_pkey")
+}
+
+/// Durable startup proof for exact empty or exact active remote state.
+model catalog_promotion_bootstrap_proofs {
+  organization_id                    String   @db.Uuid
+  deployment_key                     String
+  proof_revision                     BigInt
+  proof_kind                         String
+  active_state_request_body          String
+  active_state_request_sha256        String
+  active_state_receipt_body          String
+  active_state_receipt_sha256        String
+  active_state_response_body         String?
+  active_state_response_sha256       String?
+  manifest_definition_request_body   String?
+  manifest_definition_request_sha256 String?
+  manifest_terminal_request_body     String?
+  manifest_terminal_request_sha256   String?
+  manifest_receipt_body              String?
+  manifest_receipt_sha256            String?
+  manifest_response_body             String?
+  manifest_response_sha256           String?
+  active_state_body                  String
+  active_state_sha256                String
+  verified_at                        DateTime @db.Timestamptz(6)
+  created_at                         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, proof_revision], map: "catalog_promotion_bootstrap_proofs_pkey")
+}
+
+/// Ordered provider receipt/artifact graph for an active bootstrap proof.
+model catalog_promotion_bootstrap_provider_proofs {
+  organization_id                              String   @db.Uuid
+  deployment_key                               String
+  proof_revision                               BigInt
+  platform_key                                 String
+  ordinal                                      Int
+  public_provider_release_id                   String?  @db.Uuid
+  provider_release_fingerprint                 String?
+  provider_terminal_operation_id               String?
+  provider_terminal_receipt_body               String?
+  provider_terminal_receipt_sha256             String?
+  provider_terminal_response_body              String?
+  provider_terminal_response_sha256            String?
+  publish_artifact_attempt_id                  String?  @db.Uuid
+  completed_head_request_body                  String
+  completed_head_request_sha256                String
+  completed_head_receipt_body                  String
+  completed_head_receipt_sha256                String
+  completed_head_response_body                 String?
+  completed_head_response_sha256               String?
+  remote_completed_head_body                   String
+  remote_completed_head_sha256                 String
+  local_completed_attempt_id                   String?  @db.Uuid
+  local_completed_public_provider_release_id   String?  @db.Uuid
+  local_completed_provider_release_fingerprint String?
+  local_completed_terminal_receipt_sha256      String?
+  created_at                                   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([organization_id, deployment_key, proof_revision, platform_key], map: "catalog_promotion_bootstrap_provider_proofs_pkey")
+  @@unique([organization_id, deployment_key, proof_revision, ordinal], map: "catalog_promotion_bootstrap_provider_proofs_ordinal_unique")
+}
+
+/// One exclusive org/deployment retention barrier. Its monotonic state and
+/// cross-ledger write guards are defined by the Task 013 migration.
+model catalog_promotion_retention_barriers {
+  organization_id                        String                                   @db.Uuid
+  deployment_key                         String
+  barrier_generation                     BigInt                                   @default(0)
+  barrier_token                          String?                                  @db.Uuid
+  state                                  String                                   @default("inactive")
+  retention_generation                   BigInt                                   @default(0)
+  next_operation_index                   Int                                      @default(0)
+  manifest_phase_complete                Boolean                                  @default(false)
+  snapshot_body                          String?
+  snapshot_digest                        String?
+  activated_at                           DateTime?                                @db.Timestamptz(6)
+  completed_at                           DateTime?                                @db.Timestamptz(6)
+  created_at                             DateTime                                 @default(now()) @db.Timestamptz(6)
+  updated_at                             DateTime                                 @default(now()) @db.Timestamptz(6)
+  organizations                          organizations                            @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "catalog_promotion_retention_barriers_organization_fk")
+  catalog_promotion_retention_operations catalog_promotion_retention_operations[]
+
+  @@id([organization_id, deployment_key], map: "catalog_promotion_retention_barriers_pkey")
+}
+
+/// Byte-exact, restart-safe journal for one bounded Convex retention mutation.
+/// Delivery, receipt, selection, and immutability checks live in its migration.
+model catalog_promotion_retention_operations {
+  id                                    String                               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                       String                               @db.Uuid
+  deployment_key                        String
+  barrier_generation                    BigInt
+  operation_index                       Int
+  operation_id                          String
+  idempotency_key                       String
+  operation_kind                        String
+  phase                                 String
+  platform_key                          String?
+  expected_retention_generation         BigInt
+  canonical_request_body                String
+  request_sha256                        String
+  state                                 String                               @default("pending")
+  send_count                            Int                                  @default(0)
+  last_sent_at                          DateTime?                            @db.Timestamptz(6)
+  acknowledged_at                       DateTime?                            @db.Timestamptz(6)
+  canonical_receipt_body                String?
+  receipt_sha256                        String?
+  exact_response_body                   String?
+  response_sha256                       String?
+  terminal_state                        String?
+  has_more                              Boolean?
+  selected_platform_key                 String?
+  selected_public_provider_release_id   String?                              @db.Uuid
+  selected_provider_release_fingerprint String?
+  postgres_cleanup_complete             Boolean                              @default(false)
+  created_at                            DateTime                             @default(now()) @db.Timestamptz(6)
+  updated_at                            DateTime                             @default(now()) @db.Timestamptz(6)
+  catalog_promotion_retention_barriers  catalog_promotion_retention_barriers @relation(fields: [organization_id, deployment_key], references: [organization_id, deployment_key], onUpdate: NoAction, map: "catalog_promotion_retention_operations_barrier_fk")
+
+  @@unique([organization_id, deployment_key, operation_id], map: "catalog_promotion_retention_operations_scope_unique")
+  @@unique([organization_id, deployment_key, barrier_generation, operation_index], map: "catalog_promotion_retention_operations_index_unique")
+  @@unique([organization_id, deployment_key, expected_retention_generation], map: "catalog_promotion_retention_operations_generation_unique")
+  @@index([organization_id, deployment_key, barrier_generation, operation_index], map: "catalog_promotion_retention_operations_resume_idx")
+}
+
+/// Server-bound, monotonic scheduling and safe health state for one promotion lane.
+/// This table contains bootstrap and watermark check constraints defined in its migration.
+model promotion_lanes {
+  organization_id                String               @db.Uuid
+  deployment_key                 String
+  lane_key                       String
+  bootstrap_state                String               @default("unverified")
+  bootstrap_verified_at          DateTime?            @db.Timestamptz(6)
+  settled_watermark              BigInt               @default(0)
+  settled_at                     DateTime?            @db.Timestamptz(6)
+  requested_watermark            BigInt               @default(0)
+  requested_at                   DateTime?            @db.Timestamptz(6)
+  confirmed_watermark            BigInt               @default(0)
+  confirmed_publication_identity String?
+  confirmed_receipt_sha256       String?
+  last_activated_watermark       BigInt               @default(0)
+  last_activated_at              DateTime?            @db.Timestamptz(6)
+  last_unchanged_watermark       BigInt?
+  last_unchanged_observed_at     DateTime?            @db.Timestamptz(6)
+  next_retry_at                  DateTime?            @db.Timestamptz(6)
+  delayed_vendor_count           Int                  @default(0)
+  created_at                     DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime             @default(now()) @db.Timestamptz(6)
+  organizations                  organizations        @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "promotion_lanes_organization_fk")
+  promotion_attempts             promotion_attempts[]
+
+  @@id([organization_id, deployment_key, lane_key], map: "promotion_lanes_pkey")
+}
+
+/// One recoverable publication attempt at a settled causal watermark.
+/// Its partial active-lane uniqueness and state invariants are defined in the migration.
+model promotion_attempts {
+  id                            String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id               String                 @db.Uuid
+  deployment_key                String
+  lane_key                      String
+  target_watermark              BigInt
+  state                         String                 @default("assembling")
+  content_identity              String?
+  publication_identity          String?
+  expected_predecessor_identity String?
+  prepared_classification       String?
+  observation_sequence          Int?
+  public_config_hash            String?
+  repack_search_index_hash      String?
+  public_vendor_keys            String[]               @default([])
+  prepared_at                   DateTime?              @db.Timestamptz(6)
+  manifest_source_proof_body    String?
+  manifest_source_proof_sha256  String?
+  claim_owner                   String?
+  claim_token                   String?                @db.Uuid
+  claim_expires_at              DateTime?              @db.Timestamptz(6)
+  last_heartbeat_at             DateTime?              @db.Timestamptz(6)
+  claim_count                   Int                    @default(0)
+  retry_count                   Int                    @default(0)
+  retry_at                      DateTime?              @db.Timestamptz(6)
+  delayed_vendor_count          Int                    @default(0)
+  failure_class                 String?
+  failure_code                  String?
+  terminal_receipt_body         String?
+  terminal_receipt_sha256       String?
+  terminal_at                   DateTime?              @db.Timestamptz(6)
+  created_at                    DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime               @default(now()) @db.Timestamptz(6)
+  promotion_lanes               promotion_lanes        @relation(fields: [organization_id, deployment_key, lane_key], references: [organization_id, deployment_key, lane_key], onUpdate: NoAction, map: "promotion_attempts_lane_fk")
+  promotion_operations          promotion_operations[]
+
+  @@unique([id, organization_id, deployment_key, lane_key], map: "promotion_attempts_tenant_unique")
+  @@unique([organization_id, deployment_key, lane_key, target_watermark], map: "promotion_attempts_target_unique")
+  @@unique([organization_id, deployment_key, lane_key, target_watermark, content_identity], map: "promotion_attempts_content_unique")
+}
+
+/// Byte-exact, restart-safe transport operation owned by one promotion attempt.
+/// Its request identity is immutable and its delivery-shape checks live in the migration.
+model promotion_operations {
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attempt_id             String             @db.Uuid
+  organization_id        String             @db.Uuid
+  deployment_key         String
+  lane_key               String
+  operation_index        Int
+  operation_id           String
+  operation_kind         String
+  request_path           String
+  canonical_request_body String
+  request_sha256         String
+  state                  String             @default("pending")
+  send_count             Int                @default(0)
+  last_sent_at           DateTime?          @db.Timestamptz(6)
+  acknowledged_at        DateTime?          @db.Timestamptz(6)
+  receipt_body           String?
+  receipt_sha256         String?
+  created_at             DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime           @default(now()) @db.Timestamptz(6)
+  promotion_attempts     promotion_attempts @relation(fields: [attempt_id, organization_id, deployment_key, lane_key], references: [id, organization_id, deployment_key, lane_key], onUpdate: NoAction, map: "promotion_operations_attempt_fk")
+
+  @@unique([attempt_id, operation_index], map: "promotion_operations_attempt_index_unique")
+  @@unique([attempt_id, operation_id], map: "promotion_operations_attempt_operation_unique")
+  @@unique([organization_id, deployment_key, lane_key, operation_id], map: "promotion_operations_lane_operation_unique")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -550,6 +1308,8 @@ model provider_sources {
   quarantine_records_quarantine_records_provider_idToprovider_sources                                                   quarantine_records[]                  @relation("quarantine_records_provider_idToprovider_sources")
   quarantine_records_quarantine_records_provider_id_organization_idToprovider_sources                                   quarantine_records[]                  @relation("quarantine_records_provider_id_organization_idToprovider_sources")
   source_records                                                                                                        source_records[]
+  public_change_catalog_impacts                                                                                         public_change_catalog_impacts[]       @relation("public_change_catalog_impacts_lifecycle_provider")
+  provider_catalog_checkpoints                                                                                          provider_catalog_checkpoints[]        @relation("provider_catalog_checkpoints_provider")
 
   @@unique([id, organization_id], map: "provider_sources_id_organization_unique")
   @@unique([organization_id, platform_key], map: "provider_sources_organization_platform_unique")
@@ -828,6 +1588,10 @@ enum operational_event_kind {
   quarantine_expired
   retention_failed
   retention_recovered
+  promotion_activation_delayed
+  promotion_settlement_blocked
+  promotion_failed
+  promotion_recovered
 }
 
 enum operational_severity {
@@ -856,6 +1620,34 @@ enum provider_state {
   active
   disabled
   archived
+}
+
+enum public_change_kind {
+  provider_projection
+  quarantine_correction
+  relationship_resolution
+  estimated_ev_outcome
+  public_configuration
+  provider_lifecycle
+  manual_correction
+}
+
+enum public_derivation_kind {
+  estimated_ev
+}
+
+enum public_derivation_state {
+  pending
+  claimed
+  succeeded
+  business_unavailable
+  technical_failure
+}
+
+enum public_derivation_outcome {
+  success
+  business_unavailable
+  technical_failure
 }
 
 enum quarantine_attempt_state {

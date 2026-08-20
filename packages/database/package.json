@@ -9,7 +9,6 @@
     "./test-support": "./src/test-support.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src prisma",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.ts'",

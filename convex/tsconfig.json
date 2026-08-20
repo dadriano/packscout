@@ -5,6 +5,7 @@
    */
   "compilerOptions": {
     /* These settings are not required by Convex and can be modified. */
+    "incremental": true,
     "allowJs": true,
     "strict": true,
     "moduleResolution": "Bundler",

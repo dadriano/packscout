@@ -21,6 +21,10 @@
   font-size: 0.75rem;
 }
 
+.headingActions {
+  min-width: 0;
+}
+
 .eyebrow {
   margin-bottom: 0.2rem;
   font-weight: 700;
@@ -48,7 +52,7 @@
 
 .table {
   width: 100%;
-  min-width: 1840px;
+  min-width: 1760px;
   border-collapse: collapse;
   font-size: 0.78rem;
 }
@@ -76,8 +80,8 @@
   min-width: 248px;
 }
 
-.table th:nth-child(12),
-.table td:nth-child(12) {
+.table th:nth-child(11),
+.table td:nth-child(11) {
   min-width: 250px;
 }
 
@@ -232,7 +236,11 @@
   }
 
   .table {
-    min-width: 1760px;
+    min-width: 1680px;
+  }
+
+  .headingActions {
+    width: 100%;
   }
 }
 

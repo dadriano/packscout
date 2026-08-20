@@ -1,6 +1,8 @@
 import { hostname } from "node:os";
 import type { ProviderRuntimeEnvironment } from "@packscout/services";
 
+const organizationIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const workerHostPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const workerVersionPattern = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/;
@@ -19,6 +21,7 @@ export type ProviderWorkerConfigurationErrorCode =
   | "MAXIMUM_CLAIMS_INVALID"
   | "NODE_ENV_INVALID"
   | "POLL_INTERVAL_INVALID"
+  | "PUBLIC_ORGANIZATION_ID_INVALID"
   | "PRESENCE_RETENTION_DAYS_INVALID"
   | "PRESENCE_STALE_INVALID"
   | "RETENTION_BATCH_SIZE_INVALID"
@@ -49,6 +52,7 @@ export interface ProviderWorkerConfiguration {
   readonly importRunLeaseMilliseconds: number;
   readonly maximumClaimsPerCycle: number;
   readonly pollIntervalMilliseconds: number;
+  readonly publicOrganizationId: string;
   readonly presenceRetentionDays: number;
   readonly presenceStaleAfterMilliseconds: number;
   readonly retentionBatchSize: number;
@@ -127,6 +131,13 @@ function workerIdFor(value: string | undefined, fallback: string): string {
   return resolved;
 }
 
+function publicOrganizationIdFor(value: string | undefined): string {
+  if (!value || !organizationIdPattern.test(value)) {
+    throw new ProviderWorkerConfigurationError(
+      "PUBLIC_ORGANIZATION_ID_INVALID",
+    );
+  }
+  return value.toLowerCase();
 /**
  * Bounded host descriptor for the presence record. An operator-supplied value
  * is validated strictly; the derived hostname is sanitized because it is an
@@ -251,6 +262,9 @@ export function readProviderWorkerConfiguration(
       100,
       60_000,
       "POLL_INTERVAL_INVALID",
+    ),
+    publicOrganizationId: publicOrganizationIdFor(
+      environment.PACKSCOUT_PUBLIC_ORGANIZATION_ID,
     ),
     presenceRetentionDays: boundedInteger(
       environment.PACKSCOUT_WORKER_PRESENCE_RETENTION_DAYS,

@@ -3,6 +3,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createDirectorySkipPredicate } from "./ignored-directories.mjs";
 
 function readOption(name) {
   const index = process.argv.indexOf(name);
@@ -31,15 +32,7 @@ const requiredDocuments = [
 ];
 const documentationRoots = ["docs", "apps", "scripts", ".tasks"];
 const rootDocuments = ["README.md", "AGENTS.md", "CLAUDE.md", "ARCHITECTURE.md"];
-const skipDirectories = new Set([
-  "node_modules",
-  "dist",
-  "build",
-  ".next",
-  ".next-dev",
-  ".next-build",
-  ".turbo",
-  ".git",
+const shouldSkipDirectory = createDirectorySkipPredicate([
   "archive",
   "legacy",
   "_templates",
@@ -61,10 +54,6 @@ function relative(filePath) {
 
 function lineForIndex(content, index) {
   return content.slice(0, index).split(/\r?\n/).length;
-}
-
-function shouldSkipDirectory(name) {
-  return skipDirectories.has(name) || name.startsWith(".next-");
 }
 
 async function walk(directory, files = []) {

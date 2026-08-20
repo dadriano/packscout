@@ -278,9 +278,9 @@ function unavailablePackScoutPresentation(
     semanticState: "unavailable" as const,
     semanticLabel: "Unavailable" as const,
     reasonCopy,
-    evDollars: unavailableMetric("PackScout EV $", "evDollars", metricReason),
-    evPercent: unavailableMetric("PackScout EV %", "evPercent", metricReason),
-    grossEv: unavailableMetric("PackScout Gross EV", "grossEv", metricReason),
+    evDollars: unavailableMetric("EV $", "evDollars", metricReason),
+    evPercent: unavailableMetric("EV %", "evPercent", metricReason),
+    grossEv: unavailableMetric("Gross EV", "grossEv", metricReason),
     repackPrice:
       repackPrice.status === "available"
         ? availableMoneyMetric("Repack Price", "repackPrice", repackPrice.value)
@@ -314,19 +314,19 @@ export function presentPackScoutEv(
   const state = semanticStateForSignedBasisPoints(metrics.evPercentBasisPoints);
   const stateLabel = semanticLabel(state);
   const evDollars = availableMoneyMetric(
-    "PackScout EV $",
+    "EV $",
     "evDollars",
     metrics.evDollars,
     { signed: true, state },
   );
   const evPercent = availableMetric(
-    "PackScout EV %",
+    "EV %",
     formatSignedEvPercent(metrics.evPercentBasisPoints),
     "evPercent",
     state,
   );
   const grossEv = availableMoneyMetric(
-    "PackScout Gross EV",
+    "Gross EV",
     "grossEv",
     metrics.grossEv,
   );
@@ -371,7 +371,7 @@ export function presentPackScoutConfidence(
       availability: "unavailable" as const,
       band: null,
       displayValue: "Unavailable",
-      accessibleLabel: "PackScout EV confidence: Unavailable.",
+      accessibleLabel: "EV confidence: Unavailable.",
       limitations: Object.freeze([]),
     });
   }
@@ -385,7 +385,7 @@ export function presentPackScoutConfidence(
     band,
     displayValue: `${band[0]!.toUpperCase()}${band.slice(1)} · ${score}`,
     accessibleLabel: [
-      `PackScout EV confidence: ${band}, ${score}.`,
+      `EV confidence: ${band}, ${score}.`,
       "Confidence describes reliability, not return.",
       ...(limitations.length > 0
         ? [`Limitations: ${limitations.join(" ")}`]
@@ -470,7 +470,7 @@ export function presentPackScoutEvPercent(
 ): MetricValuePresentation {
   if (estimate.status === "unavailable") {
     return unavailableMetric(
-      "PackScout EV %",
+      "EV %",
       "evPercent",
       estimate.reason,
     );
@@ -479,7 +479,7 @@ export function presentPackScoutEvPercent(
     estimate.metrics.evPercentBasisPoints,
   );
   return availableMetric(
-    "PackScout EV %",
+    "EV %",
     formatSignedEvPercent(estimate.metrics.evPercentBasisPoints),
     "evPercent",
     state,

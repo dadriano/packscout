@@ -11,6 +11,13 @@ import type {
   ProtectedPayloadRetentionCycleResult,
   EstimatedEvRecomputationCycleResult,
 } from "@packscout/services";
+import type { PromotionV2WorkerRuntimePort } from
+  "./promotion-v2-worker-runtime.ts";
+import type {
+  HeatPromotionWorkerRuntimePort,
+} from "./heat-promotion-worker-runtime.ts";
+import type { CatalogRetentionWorkerRuntimePort } from
+  "./catalog-retention-worker-runtime.ts";
 
 const safeLogValuePattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const safeFailureCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
@@ -52,6 +59,9 @@ export interface ProviderWorkerPresencePort {
 
 export type ProviderWorkerLogEventName =
   | "provider_database_pool_failed"
+  | "provider_promotion_v2_runtime_failed"
+  | "provider_heat_promotion_runtime_failed"
+  | "provider_catalog_retention_runtime_failed"
   | "provider_import_contended"
   | "provider_import_failed"
   | "provider_import_finished"
@@ -119,6 +129,9 @@ export interface ProviderWorkerRuntimeDependencies {
   readonly scheduler: ProviderSchedulerPort;
   readonly imports: ProviderWorkerImportPort;
   readonly estimatedEv?: ProviderWorkerEstimatedEvPort;
+  readonly promotion?: PromotionV2WorkerRuntimePort;
+  readonly heatPromotion?: HeatPromotionWorkerRuntimePort;
+  readonly catalogRetention?: CatalogRetentionWorkerRuntimePort;
   readonly retention: ProviderWorkerRetentionPort;
   readonly presence?: ProviderWorkerPresencePort;
   readonly logger: ProviderWorkerLogger;
@@ -228,6 +241,49 @@ export class ProviderWorkerRuntime {
     this.#running = true;
     this.#stopRequested = false;
     this.log({ level: "info", event: "provider_worker_started" });
+    let promotionFailed = false;
+    let promotionFailure: unknown;
+    let signalPromotionFailure!: (error: unknown) => void;
+    const promotionFailureSignal = new Promise<unknown>((resolve) => {
+      signalPromotionFailure = resolve;
+    });
+    const promotionTask = this.dependencies.promotion === undefined
+      ? null
+      : (async () => await this.dependencies.promotion!.start())()
+        .catch((error: unknown) => {
+          promotionFailed = true;
+          promotionFailure = error;
+          signalPromotionFailure(error);
+          this.log({
+            level: "error",
+            event: "provider_promotion_v2_runtime_failed",
+            failureCode: "PROMOTION_V2_RUNTIME_ERROR",
+          });
+          // PromotionV2 absorbs transient failures internally. A rejected
+          // runtime therefore represents a deterministic startup/proof refusal
+          // and must fail the combined production worker closed.
+          this.stop();
+        });
+    const heatTask = this.dependencies.heatPromotion === undefined
+      ? null
+      : (async () => await this.dependencies.heatPromotion!.start())()
+        .catch(() => {
+          this.log({
+            level: "error",
+            event: "provider_heat_promotion_runtime_failed",
+            failureCode: "HEAT_PROMOTION_RUNTIME_ERROR",
+          });
+        });
+    const catalogRetentionTask = this.dependencies.catalogRetention === undefined
+      ? null
+      : (async () => await this.dependencies.catalogRetention!.start())()
+        .catch(() => {
+          this.log({
+            level: "error",
+            event: "provider_catalog_retention_runtime_failed",
+            failureCode: "CATALOG_RETENTION_RUNTIME_ERROR",
+          });
+        });
     // Registration is durable but best-effort: an instance that cannot publish
     // its presence still performs pipeline work.
     try {
@@ -241,7 +297,22 @@ export class ProviderWorkerRuntime {
     }
     try {
       while (!this.#stopRequested) {
-        await this.runCycle();
+        const cycle = this.runCycle();
+        const completion = await Promise.race([
+          cycle.then(() => ({ kind: "cycle" as const })),
+          promotionFailureSignal.then((error) => ({
+            kind: "promotion_failure" as const,
+            error,
+          })),
+        ]);
+        if (completion.kind === "promotion_failure") {
+          // A provider import port predates the abort-aware promotion lanes and
+          // may never resolve. Do not let it mask a fail-closed promotion
+          // startup refusal; retain a rejection handler for a late completion
+          // and leave the stopped cycle to observe #stopRequested if it wakes.
+          void cycle.catch(() => undefined);
+          break;
+        }
         if (this.#stopRequested) break;
         this.reportActivity(IDLE_WORKER_ACTIVITY);
         const controller = new AbortController();
@@ -253,6 +324,21 @@ export class ProviderWorkerRuntime {
         this.#sleepController = null;
       }
     } finally {
+      this.dependencies.promotion?.stop();
+      this.dependencies.heatPromotion?.stop();
+      this.dependencies.catalogRetention?.stop();
+      if (promotionFailed) {
+        // A retained Heat adapter is expected to stop cooperatively, but it
+        // cannot mask a fail-closed Task011 startup refusal. Keep a late
+        // handler attached without joining an abort-ignoring sibling.
+        if (heatTask !== null) void heatTask.then(() => undefined);
+        if (catalogRetentionTask !== null) {
+          void catalogRetentionTask.then(() => undefined);
+        }
+        await promotionTask;
+      } else {
+        await Promise.all([promotionTask, heatTask, catalogRetentionTask]);
+      }
       this.#sleepController = null;
       this.#running = false;
       try {
@@ -266,6 +352,7 @@ export class ProviderWorkerRuntime {
       }
       this.log({ level: "info", event: "provider_worker_stopped" });
     }
+    if (promotionFailed) throw promotionFailure;
   }
 
   /**
@@ -287,6 +374,9 @@ export class ProviderWorkerRuntime {
 
   stop(): void {
     this.#stopRequested = true;
+    this.dependencies.promotion?.stop();
+    this.dependencies.heatPromotion?.stop();
+    this.dependencies.catalogRetention?.stop();
     this.#sleepController?.abort();
   }
 
@@ -555,9 +645,13 @@ export class ProviderWorkerRuntime {
   private log(
     event: Omit<ProviderWorkerLogEvent, "workerId">,
   ): void {
-    this.dependencies.logger.write({
-      ...event,
-      workerId: this.dependencies.workerId,
-    });
+    try {
+      this.dependencies.logger.write({
+        ...event,
+        workerId: this.dependencies.workerId,
+      });
+    } catch {
+      // Best-effort logging never controls worker recovery or shutdown.
+    }
   }
 }

@@ -10,17 +10,17 @@ export type PublicMetricReason =
   | "NOT_REPORTED";
 
 export const METRIC_TRUST_COPY = Object.freeze({
-  dashboardDisclaimer: "PackScout EV · Estimated · Not financial advice.",
-  estimateLabel: "PackScout EV",
+  dashboardDisclaimer: "EV · Estimated · Not financial advice.",
+  estimateLabel: "Estimated EV",
   financialDisclaimer: "Not financial advice.",
   longRunExplanation:
     "EV is a long-run estimate. It does not predict the contents or outcome of one repack.",
   sourceExplanation:
-    "Vendor-reported EV and PackScout EV are separate estimates and are never averaged.",
+    "Vendor-reported EV and estimated EV are separate estimates and are never averaged.",
   confidenceExplanation:
-    "Confidence describes the reliability of PackScout's estimate, not whether its EV is positive or negative.",
+    "Confidence describes the reliability of the estimate, not whether its EV is positive or negative.",
   unavailableExplanation:
-    "Unavailable means PackScout does not have enough supported evidence to show the value.",
+    "Unavailable means there is not enough supported evidence to show the value.",
 });
 
 export const PUBLIC_REASON_COPY = Object.freeze({
@@ -95,7 +95,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
   {
     key: "evDollars",
     label: "EV $",
-    definition: "PackScout Gross EV minus Repack Price",
+    definition: "Gross EV minus Repack Price",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -103,7 +103,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "evPercent",
     label: "EV %",
     definition:
-      "The percentage PackScout Gross EV is above or below Repack Price",
+      "The difference between Gross EV and Repack Price, shown as a percentage of Repack Price",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -111,7 +111,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "evConfidence",
     label: "EV Confidence",
     definition:
-      "How reliable PackScout considers its EV estimate based on supported evidence; it does not indicate whether EV is positive",
+      "How reliable the EV estimate is based on supported evidence; it does not indicate whether EV is positive",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -119,7 +119,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "vendorReportedEv",
     label: "Vendor-reported EV",
     definition:
-      "An EV estimate reported by the vendor and kept separate from PackScout EV",
+      "An EV estimate reported by the vendor and kept separate from estimated EV",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -133,8 +133,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
   {
     key: "grossEv",
     label: "Gross EV",
-    definition:
-      "PackScout’s estimated value of contents before fees and shipping",
+    definition: "Estimated value of contents before fees and shipping",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },

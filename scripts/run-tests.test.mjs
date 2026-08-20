@@ -34,6 +34,14 @@ function runList(root, target) {
   );
 }
 
+function runTarget(root, target) {
+  return spawnSync(
+    process.execPath,
+    [runnerPath, target, "--root", root],
+    { encoding: "utf8" },
+  );
+}
+
 test("discovers root-level frontend tests and excludes the e2e directory", (t) => {
   const root = createFixture(t);
   writeFileSync(
@@ -94,4 +102,29 @@ test("fails when every discovered test in a lane is quarantined", (t) => {
   const result = runList(root, "frontend");
   assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, /every discovered test quarantined/);
+});
+
+test("runs process integration files only after the parallel tooling lane", (t) => {
+  const root = createFixture(t);
+  const markerPath = path.join(root, "parallel-complete");
+  writeFileSync(
+    path.join(root, "scripts", "parallel.test.mjs"),
+    `import { writeFileSync } from "node:fs";\n` +
+      `import test from "node:test";\n` +
+      `test("parallel", () => writeFileSync(${JSON.stringify(markerPath)}, "done"));\n`,
+  );
+  writeFileSync(
+    path.join(root, "scripts", "start-admin-embedded.test.mjs"),
+    `import { existsSync } from "node:fs";\n` +
+      `import assert from "node:assert/strict";\n` +
+      `import test from "node:test";\n` +
+      `test("isolated", () => assert.equal(existsSync(${JSON.stringify(markerPath)}), true));\n`,
+  );
+
+  const result = runTarget(root, "tooling");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(
+    result.stdout,
+    /executing isolated scripts\/start-admin-embedded\.test\.mjs/,
+  );
 });

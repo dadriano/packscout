@@ -18,6 +18,8 @@
 }
 
 .heading {
+  display: inline-flex;
+  align-items: center;
   margin: 0;
   font-size: 0.94rem;
   font-weight: 780;
@@ -51,6 +53,11 @@
   font-size: 0.72rem;
 }
 
+.confidenceLabel {
+  display: inline-flex;
+  align-items: center;
+}
+
 .confidence strong {
   color: var(--color-text);
   font-size: 0.76rem;
@@ -72,18 +79,6 @@
   font-size: 0.76rem;
   line-height: 1.45;
   padding-inline-start: 0.65rem;
-}
-
-.explanation {
-  display: grid;
-  gap: 0.35rem;
-  color: var(--color-text-muted);
-  font-size: 0.72rem;
-  line-height: 1.5;
-}
-
-.explanation p {
-  margin: 0;
 }
 
 @media (max-width: 370px) {

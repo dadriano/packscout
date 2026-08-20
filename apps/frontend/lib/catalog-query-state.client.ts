@@ -6,8 +6,10 @@ import {
   encodePublicCursorStack,
   listPublicRepacksInputSchema,
   type ListPublicRepacksInput,
+  type PublicRepackFilters,
   type PublicRepackSort,
 } from "@packscout/contracts";
+import type { DashboardProvider } from "./provider-banner";
 
 const SORT_KEYS = new Set<PublicRepackSort>([
   "repack",
@@ -27,6 +29,7 @@ export const DEFAULT_CATALOG_QUERY: ListPublicRepacksInput = Object.freeze({
     vendors: Object.freeze([]),
     categories: Object.freeze([]),
     collectibleTypes: Object.freeze([]),
+    availability: "active",
     price: Object.freeze({
       mode: "full",
       minMinor: PUBLIC_REPACK_PRICE_MIN_MINOR,
@@ -42,6 +45,17 @@ export const DEFAULT_CATALOG_QUERY: ListPublicRepacksInput = Object.freeze({
   desiredPublicCollectibleId: null,
   selectedPublicRepackId: null,
 });
+
+export const CATALOG_PAGE_SIZES = [12, 25, 50] as const;
+export type CatalogPageSize = (typeof CATALOG_PAGE_SIZES)[number];
+
+export const DEFAULT_CATALOG_VIEW_LAYOUT = "table" as const;
+export type CatalogViewLayout = "table" | "cards";
+
+const CATALOG_VIEW_LAYOUTS = new Set<CatalogViewLayout>([
+  "table",
+  "cards",
+]);
 
 export type CatalogQueryParseResult =
   | { readonly ok: true; readonly query: ListPublicRepacksInput }
@@ -73,6 +87,7 @@ function onlyKnownKeys(parameters: URLSearchParams): boolean {
     "vendor",
     "category",
     "collectibleType",
+    "availability",
     "minPrice",
     "maxPrice",
     "sort",
@@ -80,6 +95,8 @@ function onlyKnownKeys(parameters: URLSearchParams): boolean {
     "cursor",
     "cursorStack",
     "queryFingerprint",
+    "pageSize",
+    "view",
   ]);
   return [...parameters.keys()].every((key) => knownKeys.has(key));
 }
@@ -88,6 +105,7 @@ function hasDuplicateSingleton(parameters: URLSearchParams): boolean {
   return [
     "q",
     "chase",
+    "availability",
     "minPrice",
     "maxPrice",
     "sort",
@@ -95,7 +113,27 @@ function hasDuplicateSingleton(parameters: URLSearchParams): boolean {
     "cursor",
     "cursorStack",
     "queryFingerprint",
+    "pageSize",
+    "view",
   ].some((key) => parameters.getAll(key).length > 1);
+}
+
+function parseCatalogPageSize(value: string | null): CatalogPageSize | null {
+  if (value === null) return PUBLIC_REPACK_DEFAULT_PAGE_SIZE;
+  if (!/^\d{1,2}$/.test(value)) return null;
+  const pageSize = Number(value);
+  return CATALOG_PAGE_SIZES.includes(pageSize as CatalogPageSize)
+    ? pageSize as CatalogPageSize
+    : null;
+}
+
+export function parseCatalogViewLayout(
+  value: string | null,
+): CatalogViewLayout | null {
+  if (value === null) return DEFAULT_CATALOG_VIEW_LAYOUT;
+  return CATALOG_VIEW_LAYOUTS.has(value as CatalogViewLayout)
+    ? value as CatalogViewLayout
+    : null;
 }
 
 export function parseCatalogQueryState(
@@ -123,6 +161,19 @@ export function parseCatalogQueryState(
     return { ok: false, message: "The catalog sort is invalid." };
   }
 
+  const availabilityRaw = parameters.get("availability");
+  if (availabilityRaw !== null && availabilityRaw !== "all") {
+    return { ok: false, message: "The catalog availability filter is invalid." };
+  }
+
+  const pageSize = parseCatalogPageSize(parameters.get("pageSize"));
+  if (pageSize === null) {
+    return { ok: false, message: "The catalog page size is invalid." };
+  }
+  if (parseCatalogViewLayout(parameters.get("view")) === null) {
+    return { ok: false, message: "The catalog view is invalid." };
+  }
+
   const cursor = parameters.get("cursor");
   const cursorStack = parameters.get("cursorStack");
   const queryFingerprint = parameters.get("queryFingerprint");
@@ -132,6 +183,7 @@ export function parseCatalogQueryState(
       vendors: canonicalValues(parameters.getAll("vendor")),
       categories: canonicalValues(parameters.getAll("category")),
       collectibleTypes: canonicalValues(parameters.getAll("collectibleType")),
+      availability: availabilityRaw === "all" ? "all" : "active",
       price:
         minRaw === null && maxRaw === null
           ? DEFAULT_CATALOG_QUERY.filters.price
@@ -142,7 +194,7 @@ export function parseCatalogQueryState(
     cursor,
     cursorStack,
     queryFingerprint,
-    pageSize: PUBLIC_REPACK_DEFAULT_PAGE_SIZE,
+    pageSize,
     desiredPublicCollectibleId: parameters.get("chase"),
     selectedPublicRepackId: null,
   });
@@ -164,6 +216,9 @@ export function serializeCatalogQueryState(query: ListPublicRepacksInput): strin
   for (const collectibleType of parsed.filters.collectibleTypes) {
     parameters.append("collectibleType", collectibleType);
   }
+  if (parsed.filters.availability !== DEFAULT_CATALOG_QUERY.filters.availability) {
+    parameters.set("availability", parsed.filters.availability);
+  }
   if (parsed.filters.price.mode === "narrowed") {
     parameters.set("minPrice", formatDollarAmount(parsed.filters.price.minMinor));
     parameters.set("maxPrice", formatDollarAmount(parsed.filters.price.maxMinor));
@@ -175,8 +230,33 @@ export function serializeCatalogQueryState(query: ListPublicRepacksInput): strin
   if (parsed.cursor) parameters.set("cursor", parsed.cursor);
   if (parsed.cursorStack) parameters.set("cursorStack", parsed.cursorStack);
   if (parsed.queryFingerprint) parameters.set("queryFingerprint", parsed.queryFingerprint);
+  if (parsed.pageSize !== PUBLIC_REPACK_DEFAULT_PAGE_SIZE) {
+    parameters.set("pageSize", String(parsed.pageSize));
+  }
   const serialized = parameters.toString();
   return serialized ? `/packs?${serialized}` : "/packs";
+}
+
+export function serializeCatalogViewState(
+  query: ListPublicRepacksInput,
+  layout: CatalogViewLayout,
+): string {
+  const href = serializeCatalogQueryState(query);
+  if (layout === DEFAULT_CATALOG_VIEW_LAYOUT) return href;
+  return `${href}${href.includes("?") ? "&" : "?"}view=${layout}`;
+}
+
+export function catalogHrefForSummary(
+  activeFilters: PublicRepackFilters,
+  selection: Readonly<{ type: "vendor" | "category"; key: string }>,
+): string {
+  const filters = selection.type === "vendor"
+    ? { ...activeFilters, vendors: [selection.key] }
+    : { ...activeFilters, categories: [selection.key] };
+  return serializeCatalogQueryState({
+    ...DEFAULT_CATALOG_QUERY,
+    filters,
+  });
 }
 
 export function catalogSheetInspectorInitiallyOpen(
@@ -187,12 +267,16 @@ export function catalogSheetInspectorInitiallyOpen(
 
 export function serializeDashboardFilters(
   filters: ListPublicRepacksInput["filters"],
+  provider?: DashboardProvider,
 ): string {
   const query = listPublicRepacksInputSchema.parse({ filters });
   const allPacksHref = serializeCatalogQueryState(query);
-  return allPacksHref === "/packs"
-    ? "/"
-    : allPacksHref.replace("/packs?", "/?");
+  const filterQuery =
+    allPacksHref === "/packs"
+      ? ""
+      : allPacksHref.slice("/packs?".length);
+  const dashboardQuery = [provider, filterQuery].filter(Boolean).join("&");
+  return dashboardQuery ? `/?${dashboardQuery}` : "/";
 }
 
 export function resetCatalogPagination(
@@ -201,6 +285,7 @@ export function resetCatalogPagination(
     Pick<
       ListPublicRepacksInput,
       "search" | "filters" | "sort" | "direction" | "desiredPublicCollectibleId"
+      | "pageSize"
     >
   >,
 ): ListPublicRepacksInput {

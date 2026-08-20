@@ -16,15 +16,22 @@ import type {
 } from "@packscout/contracts";
 import { SavedRepackButton } from "@/components/auth/SavedItemButton.client";
 import { EstimatedEvMetrics } from "@/components/metrics/EstimatedEvMetrics";
+import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
   presentBuyback,
   presentPackScoutEv,
   presentVendorReportedEv,
 } from "@/lib/metric-presentation";
-import { EXPECTED_VALUE_ARTICLE_HREF } from "@/lib/metric-vocabulary";
+import {
+  DEFAULT_CATALOG_QUERY,
+  catalogHrefForSummary,
+} from "@/lib/catalog-query-state.client";
+import {
+  EXPECTED_VALUE_ARTICLE_HREF,
+  METRIC_TRUST_COPY,
+} from "@/lib/metric-vocabulary";
 import { CatalogImage } from "./CatalogImage.client";
-import { RepackHeatDetails } from "./RepackHeatDetails";
 import {
   buildPublishedRepackHref,
   copyPublicPromoCode,
@@ -69,6 +76,66 @@ type PartnerActionsProps = Pick<
   "clipboardWriter" | "onActionOutcome"
 > & { readonly repack: PublicRepackViewDetail };
 
+type RepackDestinationActionProps = Pick<
+  RepackInspectorProps,
+  "onActionOutcome"
+> & { readonly repack: PublicRepackViewDetail };
+
+function RepackDestinationAction({
+  repack,
+  onActionOutcome,
+}: RepackDestinationActionProps) {
+  const outbound = buildPublishedRepackHref(
+    repack.actions.repackLink,
+    repack.availability,
+  );
+  const vendorCatalogHref = catalogHrefForSummary(
+    {
+      ...DEFAULT_CATALOG_QUERY.filters,
+      availability: repack.availability === "sold_out" ? "all" : "active",
+    },
+    { type: "vendor", key: repack.vendorKey },
+  );
+
+  function reportOutboundOpen() {
+    queueMicrotask(() => {
+      onActionOutcome?.({
+        name: "repack_link_opened",
+        publicRepackId: repack.publicRepackId,
+        vendorKey: repack.vendorKey,
+        outcome: "opened",
+      });
+    });
+  }
+
+  return (
+    <div className={styles.repackDestination}>
+      {outbound.ok ? (
+        <a
+          className={styles.openPack}
+          href={outbound.href}
+          onClick={reportOutboundOpen}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          Visit repack
+          <span aria-hidden="true">↗</span>
+          <span className="sr-only"> in a new tab</span>
+        </a>
+      ) : (
+        <Link className={styles.openPack} href={vendorCatalogHref}>
+          Browse {repack.vendorDisplayName} repacks
+        </Link>
+      )}
+      <p>
+        {outbound.ok
+          ? "Opens the vendor listing in a new tab."
+          : "This listing has no published direct link."}
+      </p>
+    </div>
+  );
+}
+
 function PartnerActions({
   repack,
   clipboardWriter,
@@ -79,10 +146,6 @@ function PartnerActions({
   >("idle");
   const manualCodeRef = useRef<HTMLInputElement>(null);
   const promo = repack.actions.promo;
-  const outbound = buildPublishedRepackHref(
-    repack.actions.repackLink,
-    repack.availability,
-  );
 
   async function copyPromo() {
     if (!promo) return;
@@ -113,18 +176,7 @@ function PartnerActions({
     });
   }
 
-  function reportOutboundOpen() {
-    queueMicrotask(() => {
-      onActionOutcome?.({
-        name: "repack_link_opened",
-        publicRepackId: repack.publicRepackId,
-        vendorKey: repack.vendorKey,
-        outcome: "opened",
-      });
-    });
-  }
-
-  if (!promo && !outbound.ok && outbound.code !== "SOLD_OUT") return null;
+  if (!promo) return null;
 
   return (
     <section aria-labelledby={`partner-actions-${repack.publicRepackId}`} className={styles.actions}>
@@ -154,30 +206,6 @@ function PartnerActions({
               />
             </label>
           ) : null}
-        </div>
-      ) : null}
-
-      {outbound.ok ? (
-        <div className={styles.openPackGroup}>
-          <a
-            className={styles.openPack}
-            href={outbound.href}
-            onClick={reportOutboundOpen}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            Open repack
-            <span aria-hidden="true">↗</span>
-            <span className="sr-only"> in a new tab</span>
-          </a>
-          <p>Opens the vendor listing in a new tab.</p>
-        </div>
-      ) : outbound.code === "SOLD_OUT" ? (
-        <div className={styles.openPackGroup}>
-          <button className={styles.openPack} disabled type="button">
-            Open repack
-          </button>
-          <p>This repack is sold out.</p>
         </div>
       ) : null}
     </section>
@@ -215,7 +243,28 @@ export function RepackInspector({
     showsDesiredChase ? "Desired chase match" : "Top chase",
     chaseValueLabel,
   );
+  const chaseUnavailableReason =
+    chase.reasonCopy ?? METRIC_TRUST_COPY.unavailableExplanation;
   const headingId = `repack-inspector-${placement}-${repack.publicRepackId}`;
+  const vendorLimitations = packScoutEv.confidence.limitations.filter((limitation) =>
+    /vendor/i.test(limitation),
+  );
+  const estimateLimitations = packScoutEv.confidence.limitations.filter(
+    (limitation) => !/vendor/i.test(limitation),
+  );
+  const estimatedEvHint = [
+    METRIC_TRUST_COPY.longRunExplanation,
+    timing.calculatedLabel,
+    timing.releaseLabel,
+    ...estimateLimitations,
+  ].join(" ");
+  const vendorReportedEvHint = [
+    METRIC_TRUST_COPY.sourceExplanation,
+    vendorObservation?.label,
+    ...vendorLimitations,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
     if (placement !== "sheet") return;
@@ -309,11 +358,20 @@ export function RepackInspector({
                 }}
                 variant="vendor"
               />
-            ) : null}
-            <span>Offered by {repack.vendorDisplayName}</span>
+            ) : (
+              <span aria-hidden="true" className={styles.vendorMark}>
+                {repack.vendorDisplayName.trim().slice(0, 1).toUpperCase()}
+              </span>
+            )}
+            <span>
+              Offered by <strong>{repack.vendorDisplayName}</strong>
+            </span>
           </p>
           <p className={styles.price}>
-            <span aria-hidden="true">{price.displayValue}</span>
+            <span className={styles.priceValue}>
+              <span aria-hidden="true">{price.displayValue}</span>
+              <GlossaryHint field="repackPrice" />
+            </span>
             <span className="sr-only">{price.accessibleLabel}</span>
             {price.reasonCopy ? (
               <small aria-hidden="true">{price.reasonCopy}</small>
@@ -325,108 +383,145 @@ export function RepackInspector({
         </div>
       </header>
 
-      <div className={styles.sectionBlock}>
-        <EstimatedEvMetrics compact presentation={packScoutEv} />
-        <div className={styles.vendorEstimate}>
-          <div className={styles.sectionHeading}>
-            <h3>Vendor-reported EV</h3>
-            <span>Reported by vendor</span>
+      <div className={styles.detailsGrid}>
+        <div className={styles.sectionBlock}>
+          <EstimatedEvMetrics
+            compact
+            headingHint={{
+              label: "Estimated EV",
+              definition: estimatedEvHint,
+              learnHref: EXPECTED_VALUE_ARTICLE_HREF,
+            }}
+            presentation={packScoutEv}
+            showFinancialDisclaimer={false}
+            showRepackPrice={false}
+          />
+          <div className={styles.vendorEstimate}>
+            <div className={styles.sectionHeading}>
+              <h3>
+                Vendor-reported EV
+                <GlossaryHint
+                  content={{
+                    label: "Vendor-reported EV",
+                    definition: vendorReportedEvHint,
+                    learnHref: EXPECTED_VALUE_ARTICLE_HREF,
+                  }}
+                  field="vendorReportedEv"
+                />
+              </h3>
+              <span>Reported by vendor</span>
+            </div>
+            <div className={styles.vendorEstimateMetrics}>
+              <MetricValue
+                compact
+                metric={vendorEv.evPercent}
+                showReason={false}
+                showSemanticState={false}
+              />
+              <MetricValue
+                compact
+                metric={vendorEv.reportedGrossEv}
+                showReason={false}
+                showSemanticState={false}
+              />
+            </div>
+            {vendorEv.reasonCopy ? (
+              <p className={styles.vendorEstimateReason}>
+                {vendorEv.reasonCopy}
+              </p>
+            ) : null}
           </div>
-          <div className={styles.vendorEstimateMetrics}>
+          <div className={styles.buybackMetric}>
             <MetricValue
               compact
-              metric={vendorEv.evPercent}
-              showReason={false}
-              showSemanticState={false}
-            />
-            <MetricValue
-              compact
-              metric={vendorEv.reportedGrossEv}
-              showReason={false}
-              showSemanticState={false}
+              glossaryContent={{
+                label: buyback.label,
+                definition: coverage,
+              }}
+              metric={buyback}
             />
           </div>
-          {vendorEv.reasonCopy ? (
-            <p className={styles.vendorEstimateReason}>{vendorEv.reasonCopy}</p>
-          ) : null}
-          {vendorObservation ? (
-            <p className={styles.vendorEstimateContext}>
-              <time dateTime={vendorObservation.observedAt}>
-                {vendorObservation.label}
-              </time>
-            </p>
-          ) : null}
+          <div className={styles.estimateLearnMore}>
+            <Link
+              className={styles.learnLink}
+              href={EXPECTED_VALUE_ARTICLE_HREF}
+            >
+              How this estimate works
+              <span aria-hidden="true"> →</span>
+            </Link>
+            <span className={styles.financialDisclaimer}>
+              {METRIC_TRUST_COPY.financialDisclaimer}
+            </span>
+          </div>
         </div>
-        <div className={styles.buybackMetric}>
-          <MetricValue compact metric={buyback} />
-        </div>
-        <div className={styles.estimateContext}>
-          <p>{coverage}</p>
-          <p>
-            {timing.calculatedAt ? (
-              <time dateTime={timing.calculatedAt}>{timing.calculatedLabel}</time>
+
+        <div className={styles.secondaryDetails}>
+          <section
+            aria-labelledby={`top-chase-${repack.publicRepackId}`}
+            className={styles.chase}
+          >
+            <div className={styles.sectionHeading}>
+              <h3 id={`top-chase-${repack.publicRepackId}`}>
+                {showsDesiredChase ? "Desired chase match" : "Top chase"}
+              </h3>
+              <span>{chaseValueLabel}</span>
+            </div>
+            {chase.availability === "available" ? (
+              <div className={styles.chaseContent}>
+                <span className="sr-only">{chase.accessibleLabel}</span>
+                <CatalogImage
+                  fallback="none"
+                  fallbackAlt={chase.name}
+                  image={chase.image}
+                  variant="chase"
+                />
+                <div>
+                  <p aria-hidden="true" className={styles.chaseName}>{chase.name}</p>
+                  {chase.valueAvailability === "unavailable" ? (
+                    <GlossaryHint
+                      content={{
+                        label: chaseValueLabel,
+                        definition: chaseUnavailableReason,
+                      }}
+                      field="topChaseValue"
+                      trigger={<span aria-hidden="true" className={styles.chaseValueUnavailableGlyph} />}
+                      triggerAriaLabel={`${chaseValueLabel}: ${chase.displayValue}. ${chaseUnavailableReason}`}
+                      triggerClassName={styles.chaseValueUnavailableTrigger}
+                    />
+                  ) : (
+                    <p aria-hidden="true" className={styles.chaseValue}>{chase.displayValue}</p>
+                  )}
+                  <p aria-hidden="true" className={styles.chaseEvidence}>{chase.evidenceLabel}</p>
+                  <p aria-hidden="true" className={styles.chaseEvidence}>
+                    {chase.matchConfidenceLabel}
+                  </p>
+                </div>
+              </div>
             ) : (
-              timing.calculatedLabel
+              <GlossaryHint
+                content={{
+                  label: showsDesiredChase ? "Desired chase match" : "Top chase",
+                  definition: `${chase.name}. ${chaseUnavailableReason}`,
+                }}
+                field="topChase"
+                trigger={
+                  <span aria-hidden="true" className={styles.chaseUnavailableGlyph}>
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                }
+                triggerAriaLabel={chase.accessibleLabel}
+                triggerClassName={styles.chaseUnavailableTrigger}
+              />
             )}
-          </p>
-          <p>
-            <time dateTime={timing.dataAsOf}>{timing.releaseLabel}</time>
-          </p>
-          {packScoutEv.confidence.limitations.length > 0 ? (
-            <ul className={styles.limitations}>
-              {packScoutEv.confidence.limitations.map((limitation) => (
-                <li key={limitation}>{limitation}</li>
-              ))}
-            </ul>
-          ) : null}
-          <Link className={styles.learnLink} href={EXPECTED_VALUE_ARTICLE_HREF}>
-            How this estimate works
-            <span aria-hidden="true"> →</span>
-          </Link>
+          </section>
+          <RepackDestinationAction
+            onActionOutcome={onActionOutcome}
+            repack={repack}
+          />
         </div>
       </div>
-
-      <RepackHeatDetails
-        headingId={`recent-heat-${repack.publicRepackId}`}
-        heat={repack.heat}
-      />
-
-      <section aria-labelledby={`top-chase-${repack.publicRepackId}`} className={styles.chase}>
-        <div className={styles.sectionHeading}>
-          <h3 id={`top-chase-${repack.publicRepackId}`}>
-            {showsDesiredChase ? "Desired chase match" : "Top chase"}
-          </h3>
-          <span>
-            {chaseValueLabel}
-          </span>
-        </div>
-        {chase.availability === "available" ? (
-          <div className={styles.chaseContent}>
-            <span className="sr-only">{chase.accessibleLabel}</span>
-            <CatalogImage
-              fallback="none"
-              fallbackAlt={chase.name}
-              image={chase.image}
-              variant="chase"
-            />
-            <div aria-hidden="true">
-              <p className={styles.chaseName}>{chase.name}</p>
-              <p className={styles.chaseValue}>{chase.displayValue}</p>
-              {chase.valueAvailability === "unavailable" ? (
-                <p className={styles.chaseValueReason}>{chase.reasonCopy}</p>
-              ) : null}
-              <p className={styles.chaseEvidence}>{chase.evidenceLabel}</p>
-              <p className={styles.chaseEvidence}>{chase.matchConfidenceLabel}</p>
-            </div>
-          </div>
-        ) : (
-          <div className={styles.chaseUnavailable}>
-            <span className="sr-only">{chase.accessibleLabel}</span>
-            <span aria-hidden="true">{chase.name}</span>
-            <small aria-hidden="true">{chase.reasonCopy}</small>
-          </div>
-        )}
-      </section>
 
       <PartnerActions
         clipboardWriter={clipboardWriter}

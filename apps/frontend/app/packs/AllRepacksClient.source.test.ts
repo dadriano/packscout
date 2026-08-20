@@ -11,3 +11,16 @@ test("all-repacks opens the sheet only from an explicit query selection", () => 
   );
   assert.equal(source.includes("page.selectedRepack?.publicRepackId !== undefined"), false);
 });
+
+test("all-repacks delegates the desired-chase search to the page heading", () => {
+  assert.equal(source.includes("all-repacks-search"), false);
+  assert.equal(source.includes("Search all repacks"), false);
+  assert.equal(source.includes("<DesiredCollectibleSearch"), false);
+});
+
+test("all-repacks supports persistent result layout and page-size choices", () => {
+  assert.match(source, /<CatalogResultsControls/);
+  assert.match(source, /<AllRepacksCards/);
+  assert.match(source, /serializeCatalogViewState/);
+  assert.match(source, /changePageSize/);
+});

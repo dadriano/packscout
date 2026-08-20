@@ -4,11 +4,31 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { createPrismaClientLifecycle } from "@packscout/database";
-import { createProviderWorkerRuntime } from "./provider-worker-composition.ts";
+import { createProductionWorkerRuntime } from "./production-worker-composition.ts";
 import { JsonConsoleProviderWorkerObservability } from "./provider-worker-observability.ts";
 import {
   JsonConsoleProviderWorkerLogger,
 } from "./provider-worker-runtime.ts";
+import {
+  PromotionV2WorkerConfigurationError,
+  readPromotionV2WorkerConfiguration,
+} from "./promotion-v2-worker-config.ts";
+import { JsonConsolePromotionV2WorkerLogger } from
+  "./promotion-v2-worker-runtime.ts";
+import {
+  HeatPromotionWorkerConfigurationError,
+  readHeatPromotionWorkerConfiguration,
+} from "./heat-promotion-worker-config.ts";
+import {
+  JsonConsoleHeatPromotionWorkerLogger,
+} from "./heat-promotion-worker-runtime.ts";
+import {
+  CatalogRetentionWorkerConfigurationError,
+  assertCatalogRetentionCredentialRoleIsolation,
+  readCatalogRetentionWorkerConfiguration,
+} from "./catalog-retention-worker-config.ts";
+import { JsonConsoleCatalogRetentionWorkerLogger } from
+  "./catalog-retention-worker-runtime.ts";
 import {
   ProviderWorkerConfigurationError,
   readProviderWorkerConfiguration,
@@ -33,7 +53,24 @@ async function runProviderWorker(): Promise<void> {
     process.env,
     fallbackWorkerId(),
   );
+  const promotionConfiguration = readPromotionV2WorkerConfiguration(process.env);
+  const heatConfiguration = readHeatPromotionWorkerConfiguration(
+    process.env,
+    promotionConfiguration,
+  );
+  const retentionConfiguration = readCatalogRetentionWorkerConfiguration(
+    process.env,
+    promotionConfiguration,
+  );
+  assertCatalogRetentionCredentialRoleIsolation({
+    promotion: promotionConfiguration,
+    heat: heatConfiguration,
+    retention: retentionConfiguration,
+  });
   const logger = new JsonConsoleProviderWorkerLogger();
+  const promotionLogger = new JsonConsolePromotionV2WorkerLogger();
+  const heatLogger = new JsonConsoleHeatPromotionWorkerLogger();
+  const retentionLogger = new JsonConsoleCatalogRetentionWorkerLogger();
   const databaseLifecycle = createPrismaClientLifecycle({
     databaseUrl: configuration.databaseUrl,
   });
@@ -42,10 +79,16 @@ async function runProviderWorker(): Promise<void> {
     const observability = new JsonConsoleProviderWorkerObservability(
       configuration.workerId,
     );
-    const runtime = createProviderWorkerRuntime({
-      configuration,
+    const runtime = createProductionWorkerRuntime({
+      provider: configuration,
+      promotion: promotionConfiguration,
+      heat: heatConfiguration,
+      retention: retentionConfiguration,
       database: databaseLifecycle.client,
-      logger,
+      providerLogger: logger,
+      promotionLogger,
+      heatLogger,
+      retentionLogger,
       observability,
     });
     const stop = () => runtime.stop();
@@ -66,6 +109,12 @@ runProviderWorker().catch((error: unknown) => {
   const failureCode =
     error instanceof ProviderWorkerConfigurationError
       ? error.code
+      : error instanceof PromotionV2WorkerConfigurationError
+        ? error.code
+      : error instanceof HeatPromotionWorkerConfigurationError
+        ? error.code
+      : error instanceof CatalogRetentionWorkerConfigurationError
+        ? error.code
       : "PROVIDER_WORKER_FATAL";
   console.error(
     JSON.stringify({

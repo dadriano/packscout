@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DEFAULT_CATALOG_QUERY,
+  catalogHrefForSummary,
   catalogSheetInspectorInitiallyOpen,
   nextCatalogPage,
+  parseCatalogViewLayout,
   parseCatalogQueryState,
   previousCatalogPage,
   resetCatalogPagination,
   serializeCatalogQueryState,
+  serializeCatalogViewState,
   serializeDashboardFilters,
 } from "./catalog-query-state.client";
 
@@ -53,6 +56,37 @@ test("query state is normalized and serialized in canonical order", () => {
   );
 });
 
+test("sold-out repacks stay hidden unless the URL opts into every availability", () => {
+  const parsed = parseCatalogQueryState(new URLSearchParams());
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.query.filters.availability, "active");
+
+  const including = parseCatalogQueryState(new URLSearchParams("availability=all"));
+  assert.equal(including.ok, true);
+  if (!including.ok) return;
+  assert.equal(including.query.filters.availability, "all");
+  assert.equal(
+    serializeCatalogQueryState(including.query),
+    "/packs?availability=all",
+  );
+});
+
+test("catalog page size and view are constrained, canonical URL state", () => {
+  const cards = parseCatalogQueryState(new URLSearchParams("pageSize=50&view=cards"));
+  assert.equal(cards.ok, true);
+  if (!cards.ok) return;
+  assert.equal(cards.query.pageSize, 50);
+  assert.equal(parseCatalogViewLayout("cards"), "cards");
+  assert.equal(
+    serializeCatalogViewState(cards.query, "cards"),
+    "/packs?pageSize=50&view=cards",
+  );
+  assert.equal(parseCatalogViewLayout(null), "table");
+  assert.equal(parseCatalogQueryState(new URLSearchParams("pageSize=13")).ok, false);
+  assert.equal(parseCatalogQueryState(new URLSearchParams("view=list")).ok, false);
+});
+
 test("malformed singleton, partial price, unknown key, and cursor state are rejected", () => {
   for (const query of [
     "q=one&q=two",
@@ -60,6 +94,11 @@ test("malformed singleton, partial price, unknown key, and cursor state are reje
     "surprise=true",
     "cursor=page-two",
     "sort=probability",
+    "availability=active",
+    "availability=sold_out",
+    "availability=all&availability=active",
+    "pageSize=25&pageSize=50",
+    "view=table&view=cards",
   ]) {
     assert.equal(parseCatalogQueryState(new URLSearchParams(query)).ok, false, query);
   }
@@ -78,6 +117,22 @@ test("search, filters, and sorting reset cursor navigation together", () => {
   assert.equal(reset.cursorStack, null);
   assert.equal(reset.queryFingerprint, null);
   assert.equal(reset.selectedPublicRepackId, null);
+});
+
+test("changing page size resets cursor navigation before a new page is read", () => {
+  const reset = resetCatalogPagination(
+    {
+      ...DEFAULT_CATALOG_QUERY,
+      cursor: "page-two",
+      cursorStack: "WyJwYWdlLW9uZSJd",
+      queryFingerprint: "a".repeat(64),
+    },
+    { pageSize: 50 },
+  );
+  assert.equal(reset.pageSize, 50);
+  assert.equal(reset.cursor, null);
+  assert.equal(reset.cursorStack, null);
+  assert.equal(reset.queryFingerprint, null);
 });
 
 test("exact desired chase selection uses a stable collectible ID and resets pagination", () => {
@@ -161,6 +216,45 @@ test("Overview serializes only compatible accepted filters", () => {
     }),
     "/?vendor=courtyard",
   );
+  assert.equal(
+    serializeDashboardFilters(DEFAULT_CATALOG_QUERY.filters, "underdog"),
+    "/?underdog",
+  );
+  assert.equal(
+    serializeDashboardFilters(
+      {
+        ...DEFAULT_CATALOG_QUERY.filters,
+        vendors: ["collector_crypt"],
+      },
+      "collector",
+    ),
+    "/?collector&vendor=collector_crypt",
+  );
+});
+
+test("summary links replace their own dimension and preserve other catalog filters", () => {
+  const activeFilters = {
+    ...DEFAULT_CATALOG_QUERY.filters,
+    vendors: ["collector_crypt"],
+    categories: [CATEGORY_ID],
+    collectibleTypes: ["card"] as const,
+    availability: "all" as const,
+  };
+  const vendor = new URL(catalogHrefForSummary(activeFilters, {
+    type: "vendor",
+    key: "courtyard",
+  }), "https://packscout.test").searchParams;
+  assert.deepEqual(vendor.getAll("vendor"), ["courtyard"]);
+  assert.deepEqual(vendor.getAll("category"), [CATEGORY_ID]);
+  assert.deepEqual(vendor.getAll("collectibleType"), ["card"]);
+  assert.equal(vendor.get("availability"), "all");
+
+  const category = new URL(catalogHrefForSummary(activeFilters, {
+    type: "category",
+    key: "00000000-0000-5000-8000-000000000102",
+  }), "https://packscout.test").searchParams;
+  assert.deepEqual(category.getAll("vendor"), ["collector_crypt"]);
+  assert.deepEqual(category.getAll("category"), ["00000000-0000-5000-8000-000000000102"]);
 });
 
 test("the all-repacks sheet stays closed unless the query asked for a specific pack", () => {

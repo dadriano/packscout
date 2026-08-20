@@ -1,0 +1,237 @@
+{
+  "phases": [
+    {
+      "phase": "check:boundaries",
+      "group": "check",
+      "durationMs": 403,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "check:dependencies",
+      "group": "check",
+      "durationMs": 2892,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "check:docs",
+      "group": "check",
+      "durationMs": 404,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "check:scripts",
+      "group": "check",
+      "durationMs": 596,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "check:prisma-only",
+      "group": "check",
+      "durationMs": 403,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "scan:framework-standards:ratchet",
+      "group": "check",
+      "durationMs": 320,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "lint:contracts",
+      "group": "lint",
+      "durationMs": 1864,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "lint:database",
+      "group": "lint",
+      "durationMs": 1456,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "lint:services",
+      "group": "lint",
+      "durationMs": 1828,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "lint:worker",
+      "group": "lint",
+      "durationMs": 1084,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "lint:frontend",
+      "group": "lint",
+      "durationMs": 3893,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "lint:admin",
+      "group": "lint",
+      "durationMs": 3180,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "typecheck:contracts",
+      "group": "typecheck",
+      "durationMs": 2248,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "typecheck:database",
+      "group": "typecheck",
+      "durationMs": 3536,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "typecheck:services",
+      "group": "typecheck",
+      "durationMs": 3873,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "typecheck:worker",
+      "group": "typecheck",
+      "durationMs": 3755,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "typecheck:convex",
+      "group": "typecheck",
+      "durationMs": 2441,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "typecheck:frontend",
+      "group": "typecheck",
+      "durationMs": 7007,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "typecheck:admin",
+      "group": "typecheck",
+      "durationMs": 5196,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "test:contracts",
+      "group": "test",
+      "durationMs": 1182,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "test:database",
+      "group": "test",
+      "durationMs": 17979,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "test:services",
+      "group": "test",
+      "durationMs": 7069,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "test:worker",
+      "group": "test",
+      "durationMs": 2044,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "test:convex",
+      "group": "test",
+      "durationMs": 1703,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "test:frontend",
+      "group": "test",
+      "durationMs": 2275,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "test:admin",
+      "group": "test",
+      "durationMs": 5493,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "test:root",
+      "group": "test",
+      "durationMs": 56540,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "build:contracts",
+      "group": "build",
+      "durationMs": 2088,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "build:database",
+      "group": "build",
+      "durationMs": 3441,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "build:services",
+      "group": "build",
+      "durationMs": 3712,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "build:worker",
+      "group": "build",
+      "durationMs": 3496,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "build:frontend",
+      "group": "build",
+      "durationMs": 47197,
+      "exitCode": 0,
+      "ok": true
+    },
+    {
+      "phase": "build:admin",
+      "group": "build",
+      "durationMs": 5910,
+      "exitCode": 0,
+      "ok": true
+    }
+  ],
+  "totalMs": 206508,
+  "failingPhases": []
+}

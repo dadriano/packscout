@@ -7,18 +7,29 @@ import {
   type ContextualRepackFacets,
   type PublicRepackFilters,
 } from "@packscout/contracts";
+import {
+  PRICE_FILTER_MAX_DOLLARS,
+  PRICE_FILTER_MIN_DOLLARS,
+  categoryFacetRows,
+  clampPriceFilter,
+  closerPriceThumb,
+  formatFilterPrice,
+  roundPriceFilterDollars,
+  sliderValueFromPointer,
+} from "./catalog-filters-presentation";
 import styles from "./CatalogFilters.module.css";
 
 type CatalogFiltersProps = Readonly<{
   accepted: PublicRepackFilters;
   facets: ContextualRepackFacets;
   pending?: boolean;
+  showAvailabilityToggle?: boolean;
   onApply: (filters: PublicRepackFilters) => void;
   onReset: () => void;
 }>;
 
 function dollars(minorUnits: number): number {
-  return minorUnits / 100;
+  return roundPriceFilterDollars(minorUnits / 100);
 }
 
 function selectionSummary(values: readonly string[], fallback: string): string {
@@ -55,6 +66,30 @@ function ResetIcon() {
   );
 }
 
+function ClearFiltersIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="14" viewBox="0 0 16 16" width="14">
+      <path
+        d="M3.2 4.3h9.6M6.2 2.5h3.6M5.1 6.2v5.1M8 6.2v5.1M10.9 6.2v5.1M4.3 4.3l.6 8.5h6.2l.6-8.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
+function hasChosenFilters(filters: PublicRepackFilters): boolean {
+  return (
+    filters.vendors.length > 0 ||
+    filters.categories.length > 0 ||
+    filters.collectibleTypes.length > 0 ||
+    filters.availability === "all" ||
+    filters.price.mode === "narrowed"
+  );
+}
+
 function draftStatusMessage(
   valid: boolean,
   changed: boolean,
@@ -72,6 +107,7 @@ function CatalogFiltersDraft({
   accepted,
   facets,
   pending = false,
+  showAvailabilityToggle = true,
   onApply,
   onReset,
 }: CatalogFiltersProps) {
@@ -80,8 +116,12 @@ function CatalogFiltersDraft({
   const [collectibleTypes, setCollectibleTypes] = useState<readonly string[]>(
     accepted.collectibleTypes,
   );
+  const [availability, setAvailability] = useState<PublicRepackFilters["availability"]>(
+    accepted.availability,
+  );
   const [minimum, setMinimum] = useState(dollars(accepted.price.minMinor));
   const [maximum, setMaximum] = useState(dollars(accepted.price.maxMinor));
+  const [activeThumb, setActiveThumb] = useState<"min" | "max">("max");
   const rootRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -123,11 +163,12 @@ function CatalogFiltersDraft({
       vendors: [...vendors].sort(),
       categories: [...categories].sort(),
       collectibleTypes: [...collectibleTypes].sort() as PublicRepackFilters["collectibleTypes"],
+      availability,
       price: full
         ? { mode: "full", minMinor, maxMinor }
         : { mode: "narrowed", minMinor, maxMinor },
     };
-  }, [categories, collectibleTypes, maximum, minimum, vendors]);
+  }, [availability, categories, collectibleTypes, maximum, minimum, vendors]);
 
   const valid =
     Number.isFinite(minimum) &&
@@ -136,7 +177,22 @@ function CatalogFiltersDraft({
     maximum <= PUBLIC_REPACK_PRICE_MAX_MINOR / 100 &&
     minimum <= maximum;
   const changed = JSON.stringify(draft) !== JSON.stringify(accepted);
+  const hasFilters = hasChosenFilters(draft);
   const statusMessage = draftStatusMessage(valid, changed, accepted);
+  const nestedCategories = useMemo(
+    () => categoryFacetRows(facets.categories),
+    [facets.categories],
+  );
+  const minPercent = valid
+    ? ((minimum - PRICE_FILTER_MIN_DOLLARS) /
+        (PRICE_FILTER_MAX_DOLLARS - PRICE_FILTER_MIN_DOLLARS)) *
+      100
+    : 0;
+  const maxPercent = valid
+    ? ((maximum - PRICE_FILTER_MIN_DOLLARS) /
+        (PRICE_FILTER_MAX_DOLLARS - PRICE_FILTER_MIN_DOLLARS)) *
+      100
+    : 100;
 
   function toggle(
     key: string,
@@ -147,6 +203,18 @@ function CatalogFiltersDraft({
       selected.includes(key)
         ? selected.filter((value) => value !== key)
         : [...selected, key].sort(),
+    );
+  }
+
+  function handleSliderPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    const track = event.currentTarget.getBoundingClientRect();
+    const pointerValue = sliderValueFromPointer(event.clientX, track.left, track.width);
+    setActiveThumb(
+      closerPriceThumb(
+        pointerValue,
+        Number.isFinite(minimum) ? minimum : PRICE_FILTER_MIN_DOLLARS,
+        Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS,
+      ),
     );
   }
 
@@ -179,17 +247,17 @@ function CatalogFiltersDraft({
             <span><span className={styles.label}>Category</span>{selectionSummary(categories, "All categories")}</span>
             <span aria-hidden="true">⌄</span>
           </summary>
-          <fieldset className={styles.options}>
+          <fieldset className={`${styles.options} ${styles.categoryOptions}`}>
             <legend className="sr-only">Select categories</legend>
-            {facets.categories.map((facet) => (
-              <label key={facet.key}>
+            {nestedCategories.map(({ option, depth }) => (
+              <label data-depth={Math.min(depth, 6)} key={option.key}>
                 <input
-                  checked={categories.includes(facet.key)}
-                  onChange={() => toggle(facet.key, categories, setCategories)}
+                  checked={categories.includes(option.key)}
+                  onChange={() => toggle(option.key, categories, setCategories)}
                   type="checkbox"
                 />
-                <span>{facet.label}</span>
-                <span className={styles.count}>{facet.repackCount}</span>
+                <span>{option.label}</span>
+                <span className={styles.count}>{option.repackCount}</span>
               </label>
             ))}
           </fieldset>
@@ -219,36 +287,86 @@ function CatalogFiltersDraft({
         <fieldset
           aria-describedby="catalog-filter-status"
           className={styles.priceGroup}
+          style={{
+            ["--price-min" as string]: String(minPercent),
+            ["--price-max" as string]: String(maxPercent),
+          }}
         >
           <legend className={styles.label}>Repack Price</legend>
-          <label>
-            <span className="sr-only">Minimum repack price in dollars</span>
-            <span aria-hidden="true">$</span>
-            <input
-              inputMode="decimal"
-              max={PUBLIC_REPACK_PRICE_MAX_MINOR / 100}
-              min={PUBLIC_REPACK_PRICE_MIN_MINOR / 100}
-              onChange={(event) => setMinimum(event.currentTarget.valueAsNumber)}
-              step="0.01"
-              type="number"
-              value={Number.isFinite(minimum) ? minimum : ""}
-            />
-          </label>
-          <span aria-hidden="true">–</span>
-          <label>
-            <span className="sr-only">Maximum repack price in dollars</span>
-            <span aria-hidden="true">$</span>
-            <input
-              aria-invalid={!valid}
-              inputMode="decimal"
-              max={PUBLIC_REPACK_PRICE_MAX_MINOR / 100}
-              min={PUBLIC_REPACK_PRICE_MIN_MINOR / 100}
-              onChange={(event) => setMaximum(event.currentTarget.valueAsNumber)}
-              step="0.01"
-              type="number"
-              value={Number.isFinite(maximum) ? maximum : ""}
-            />
-          </label>
+          <div className={styles.sliderRow}>
+            <div
+              className={styles.slider}
+              onPointerDown={handleSliderPointerDown}
+            >
+              <div aria-hidden="true" className={styles.sliderTrack} />
+              <input
+                aria-label="Minimum repack price"
+                aria-valuetext={formatFilterPrice(minimum)}
+                className={styles.minRange}
+                data-active={activeThumb === "min" ? "true" : undefined}
+                max={PRICE_FILTER_MAX_DOLLARS}
+                min={PRICE_FILTER_MIN_DOLLARS}
+                onPointerDown={() => setActiveThumb("min")}
+                onChange={(event) => {
+                  setActiveThumb("min");
+                  setMinimum(clampPriceFilter(event.currentTarget.valueAsNumber, "min", maximum));
+                }}
+                step="1"
+                type="range"
+                value={Number.isFinite(minimum) ? minimum : PRICE_FILTER_MIN_DOLLARS}
+              />
+              <input
+                aria-invalid={!valid}
+                aria-label="Maximum repack price"
+                aria-valuetext={formatFilterPrice(maximum)}
+                className={styles.maxRange}
+                data-active={activeThumb === "max" ? "true" : undefined}
+                max={PRICE_FILTER_MAX_DOLLARS}
+                min={PRICE_FILTER_MIN_DOLLARS}
+                onPointerDown={() => setActiveThumb("max")}
+                onChange={(event) => {
+                  setActiveThumb("max");
+                  setMaximum(clampPriceFilter(event.currentTarget.valueAsNumber, "max", minimum));
+                }}
+                step="1"
+                type="range"
+                value={Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS}
+              />
+            </div>
+            <div className={styles.priceFields}>
+              <label className={styles.priceField}>
+                <span className="sr-only">Minimum repack price in dollars</span>
+                <span aria-hidden="true">$</span>
+                <input
+                  inputMode="numeric"
+                  max={PRICE_FILTER_MAX_DOLLARS}
+                  min={PRICE_FILTER_MIN_DOLLARS}
+                  onChange={(event) =>
+                    setMinimum(roundPriceFilterDollars(event.currentTarget.valueAsNumber))
+                  }
+                  step="1"
+                  type="number"
+                  value={Number.isFinite(minimum) ? minimum : ""}
+                />
+              </label>
+              <label className={styles.priceField}>
+                <span className="sr-only">Maximum repack price in dollars</span>
+                <span aria-hidden="true">$</span>
+                <input
+                  aria-invalid={!valid}
+                  inputMode="numeric"
+                  max={PRICE_FILTER_MAX_DOLLARS}
+                  min={PRICE_FILTER_MIN_DOLLARS}
+                  onChange={(event) =>
+                    setMaximum(roundPriceFilterDollars(event.currentTarget.valueAsNumber))
+                  }
+                  step="1"
+                  type="number"
+                  value={Number.isFinite(maximum) ? maximum : ""}
+                />
+              </label>
+            </div>
+          </div>
         </fieldset>
 
         <div className={styles.actionGroup}>
@@ -263,26 +381,50 @@ function CatalogFiltersDraft({
             <ApplyIcon />
           </button>
           <button
-            aria-label="Reset filters"
+            aria-label={hasFilters ? "Clear selected filters" : "Reset filters"}
             className={styles.reset}
+            data-has-filters={hasFilters ? "true" : undefined}
             disabled={pending}
             onClick={onReset}
-            title="Reset filters"
+            title={hasFilters ? "Clear selected filters" : "Reset filters"}
             type="button"
           >
-            <ResetIcon />
+            {hasFilters ? <ClearFiltersIcon /> : <ResetIcon />}
           </button>
         </div>
       </div>
 
-      <p
-        aria-live="polite"
-        className={!valid || changed ? styles.draftStatus : "sr-only"}
-        id="catalog-filter-status"
-        role="status"
-      >
-        {statusMessage}
-      </p>
+      {showAvailabilityToggle ? (
+        <div className={styles.footerRow}>
+          <label className={styles.availabilityToggle}>
+            <input
+              checked={availability === "all"}
+              onChange={(event) =>
+                setAvailability(event.currentTarget.checked ? "all" : "active")
+              }
+              type="checkbox"
+            />
+            <span>Include sold out</span>
+          </label>
+          <p
+            aria-live="polite"
+            className={!valid || changed ? styles.draftStatus : "sr-only"}
+            id="catalog-filter-status"
+            role="status"
+          >
+            {statusMessage}
+          </p>
+        </div>
+      ) : (
+        <p
+          aria-live="polite"
+          className={!valid || changed ? styles.draftStatus : "sr-only"}
+          id="catalog-filter-status"
+          role="status"
+        >
+          {statusMessage}
+        </p>
+      )}
     </section>
   );
 }

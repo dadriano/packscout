@@ -1,0 +1,37 @@
+.root {
+  width: 100%;
+  margin-block-end: clamp(1.25rem, 2vw, 1.75rem);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 72%, transparent);
+  border-radius: 0.65rem;
+  background: #05070c;
+  box-shadow: 0 8px 24px rgba(5, 7, 12, 0.12);
+}
+
+.link {
+  display: block;
+  aspect-ratio: 64 / 9;
+  border-radius: inherit;
+}
+
+.link:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: -3px;
+}
+
+.image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .link {
+    transition: filter 140ms ease;
+  }
+
+  .link:hover {
+    filter: brightness(1.035);
+  }
+}

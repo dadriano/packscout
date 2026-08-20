@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isIgnoredDirectoryName } from "./ignored-directories.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -21,17 +22,6 @@ const severityOrder = new Map([
   ["critical", 4],
 ]);
 const advisoryIdPattern = /^GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}$/i;
-const nestedScanSkipDirectories = new Set([
-  "node_modules",
-  ".git",
-  ".worktrees",
-  ".turbo",
-  "build",
-  "coverage",
-  "dist",
-  "playwright-report",
-  "test-results",
-]);
 
 function advisoryId(value) {
   const match = String(value ?? "").match(
@@ -200,11 +190,7 @@ export function evaluateAuditReport(
 
 function findNestedLockfiles(directory, results = []) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (
-      nestedScanSkipDirectories.has(entry.name) ||
-      entry.name.startsWith(".next") ||
-      entry.name.startsWith(".next-")
-    ) {
+    if (isIgnoredDirectoryName(entry.name)) {
       continue;
     }
     const entryPath = path.join(directory, entry.name);

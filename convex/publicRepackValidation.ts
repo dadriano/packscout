@@ -1,5 +1,7 @@
 import {
   MAX_PUBLIC_REPACKS_PER_RELEASE,
+  repackSearchRowFromDetail,
+  repackSearchRowSchema,
   decodePublicCursorStack,
   normalizeDashboardQueryInput,
   normalizeListPublicRepacksInput,
@@ -9,15 +11,17 @@ import {
   type PublicRepackFilters,
   type PublicRepackDetail,
   type PublicRepackSort,
+  type RepackSearchRow,
 } from "@packscout/contracts";
 import { v } from "convex/values";
 import { canonicalJson } from "./dataReleaseCanonicalHash";
 
 export const MAX_PUBLIC_REPACKS = MAX_PUBLIC_REPACKS_PER_RELEASE;
-export const MAX_ROWS_PER_REPACK_SEARCH_SHARD = 32;
-export const MAX_REPACK_SEARCH_SHARDS = Math.ceil(
-  MAX_PUBLIC_REPACKS / MAX_ROWS_PER_REPACK_SEARCH_SHARD,
-);
+export {
+  MAX_REPACK_SEARCH_SHARDS,
+  MAX_ROWS_PER_REPACK_SEARCH_SHARD,
+  type RepackSearchRow,
+} from "@packscout/contracts";
 
 const nullableNumberValidator = v.union(v.number(), v.null());
 const nullRankValidator = v.union(v.literal(0), v.literal(1));
@@ -83,50 +87,6 @@ export const repackSearchRowValidator = v.object({
   ),
 });
 
-export type RepackSearchRow = {
-  readonly publicRepackId: string;
-  readonly publicVendorId: string;
-  readonly vendorKey: string;
-  readonly vendorDisplayName: string;
-  readonly publicCategoryIds: string[];
-  readonly categoryLabels: string[];
-  readonly collectibleTypes: Array<
-    "card" | "watch" | "coin" | "sealed_product" | "memorabilia" | "other"
-  >;
-  readonly contentMode: "focused" | "mixed" | "unknown";
-  readonly name: string;
-  readonly normalizedName: string;
-  readonly normalizedVendor: string;
-  readonly normalizedCategories: string;
-  readonly availability: "active" | "sold_out";
-  readonly priceMinor: number | null;
-  readonly priceNullRank: 0 | 1;
-  readonly vendorReportedGrossEvMinor: number | null;
-  readonly vendorReportedGrossEvNullRank: 0 | 1;
-  readonly vendorReportedEvDollarsMinor: number | null;
-  readonly vendorReportedEvDollarsNullRank: 0 | 1;
-  readonly vendorReportedEvPercentBasisPoints: number | null;
-  readonly vendorReportedEvPercentNullRank: 0 | 1;
-  readonly packScoutGrossEvMinor: number | null;
-  readonly packScoutGrossEvNullRank: 0 | 1;
-  readonly packScoutEvDollarsMinor: number | null;
-  readonly packScoutEvDollarsNullRank: 0 | 1;
-  readonly packScoutEvPercentBasisPoints: number | null;
-  readonly packScoutEvPercentNullRank: 0 | 1;
-  readonly packScoutConfidenceBasisPoints: number | null;
-  readonly packScoutConfidenceNullRank: 0 | 1;
-  readonly packScoutConfidenceBand: "low" | "medium" | "high" | null;
-  readonly buybackBasisPoints: number | null;
-  readonly buybackNullRank: 0 | 1;
-  readonly topChaseValueMinor: number | null;
-  readonly topChaseNullRank: 0 | 1;
-  readonly topChaseReason:
-    | "CURRENCY_UNSUPPORTED"
-    | "CHASE_UNAVAILABLE"
-    | "VALUATION_UNAVAILABLE"
-    | null;
-};
-
 type ValidationResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false };
@@ -160,9 +120,6 @@ type CursorEnvelope = {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const PUBLIC_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const FACET_KEY_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const OPAQUE_CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,2048}$/;
 
@@ -306,110 +263,8 @@ export function rowMatchesSearch(
   );
 }
 
-function validNullableInteger(
-  value: number | null,
-  nullRank: 0 | 1,
-  options: { readonly minimum?: number; readonly maximum?: number } = {},
-): boolean {
-  if (value === null) return nullRank === 1;
-  return (
-    nullRank === 0 &&
-    Number.isSafeInteger(value) &&
-    value >= (options.minimum ?? Number.MIN_SAFE_INTEGER) &&
-    value <= (options.maximum ?? Number.MAX_SAFE_INTEGER)
-  );
-}
-
-function isCanonicalUnique(values: readonly string[]): boolean {
-  return values.every(
-    (value, index) => index === 0 || values[index - 1]! < value,
-  );
-}
-
-function confidenceBandMatches(
-  scoreBasisPoints: number | null,
-  band: RepackSearchRow["packScoutConfidenceBand"],
-): boolean {
-  if (scoreBasisPoints === null) return band === null;
-  if (scoreBasisPoints < 5_000) return band === "low";
-  if (scoreBasisPoints < 8_000) return band === "medium";
-  return band === "high";
-}
-
 export function isValidRepackSearchRow(row: RepackSearchRow): boolean {
-  return (
-    PUBLIC_ID_PATTERN.test(row.publicRepackId) &&
-    PUBLIC_ID_PATTERN.test(row.publicVendorId) &&
-    FACET_KEY_PATTERN.test(row.vendorKey) &&
-    row.vendorDisplayName.length >= 1 &&
-    row.vendorDisplayName.length <= 100 &&
-    row.vendorDisplayName.trim() === row.vendorDisplayName &&
-    row.publicCategoryIds.length <= 32 &&
-    row.publicCategoryIds.every((id) => PUBLIC_ID_PATTERN.test(id)) &&
-    isCanonicalUnique(row.publicCategoryIds) &&
-    row.categoryLabels.every(
-      (label) =>
-        label.length >= 1 &&
-        label.length <= 100 &&
-        label.trim() === label,
-    ) &&
-    row.collectibleTypes.length <= 8 &&
-    isCanonicalUnique(row.collectibleTypes) &&
-    row.publicCategoryIds.length === row.categoryLabels.length &&
-    row.name.length >= 1 &&
-    row.name.length <= 200 &&
-    row.name.trim() === row.name &&
-    row.normalizedName === normalizePublicSearchText(row.name) &&
-    row.normalizedVendor === normalizePublicSearchText(row.vendorDisplayName) &&
-    row.normalizedCategories ===
-      normalizePublicSearchText(row.categoryLabels.join(" ")) &&
-    validNullableInteger(row.priceMinor, row.priceNullRank, { minimum: 0 }) &&
-    validNullableInteger(
-      row.vendorReportedGrossEvMinor,
-      row.vendorReportedGrossEvNullRank,
-      { minimum: 0 },
-    ) &&
-    validNullableInteger(
-      row.vendorReportedEvDollarsMinor,
-      row.vendorReportedEvDollarsNullRank,
-    ) &&
-    validNullableInteger(
-      row.vendorReportedEvPercentBasisPoints,
-      row.vendorReportedEvPercentNullRank,
-    ) &&
-    validNullableInteger(
-      row.packScoutGrossEvMinor,
-      row.packScoutGrossEvNullRank,
-      { minimum: 0 },
-    ) &&
-    validNullableInteger(
-      row.packScoutEvDollarsMinor,
-      row.packScoutEvDollarsNullRank,
-    ) &&
-    validNullableInteger(
-      row.packScoutEvPercentBasisPoints,
-      row.packScoutEvPercentNullRank,
-    ) &&
-    validNullableInteger(
-      row.packScoutConfidenceBasisPoints,
-      row.packScoutConfidenceNullRank,
-      { minimum: 0, maximum: 10_000 },
-    ) &&
-    confidenceBandMatches(
-      row.packScoutConfidenceBasisPoints,
-      row.packScoutConfidenceBand,
-    ) &&
-    validNullableInteger(row.buybackBasisPoints, row.buybackNullRank, {
-      minimum: 0,
-      maximum: 10_000,
-    }) &&
-    validNullableInteger(row.topChaseValueMinor, row.topChaseNullRank, {
-      minimum: 0,
-    }) &&
-    (row.topChaseValueMinor === null
-      ? row.topChaseReason !== null
-      : row.topChaseReason === null)
-  );
+  return repackSearchRowSchema.safeParse(row).success;
 }
 
 function relevance(row: RepackSearchRow, normalizedSearch: string) {
@@ -508,14 +363,44 @@ export function compareRepackRows(
   );
 }
 
+/**
+ * Parent/depth/name for the active catalog. Callers pass
+ * `categoryByPublicId` straight through.
+ */
+export type CategoryHierarchy = ReadonlyMap<
+  string,
+  Readonly<{ parentPublicCategoryId: string | null; depth: number; name: string }>
+>;
+
+export function coveredCategoryIds(
+  publicCategoryIds: readonly string[],
+  hierarchy: CategoryHierarchy,
+): ReadonlySet<string> {
+  const covered = new Set<string>();
+  for (const id of publicCategoryIds) {
+    covered.add(id);
+    let current = hierarchy.get(id)?.parentPublicCategoryId ?? null;
+    while (current !== null && !covered.has(current)) {
+      if (!hierarchy.has(current)) break;
+      covered.add(current);
+      current = hierarchy.get(current)?.parentPublicCategoryId ?? null;
+    }
+  }
+  return covered;
+}
+
 export function rowMatchesFilters(
   row: RepackSearchRow,
   filters: PublicRepackFilters,
   options: {
+    readonly categoryHierarchy: CategoryHierarchy;
     readonly ignoreVendors?: boolean;
     readonly ignoreCategories?: boolean;
-  } = {},
+  },
 ): boolean {
+  if (filters.availability === "active" && row.availability !== "active") {
+    return false;
+  }
   if (
     !options.ignoreVendors &&
     filters.vendors.length > 0 &&
@@ -525,12 +410,15 @@ export function rowMatchesFilters(
   }
   if (
     !options.ignoreCategories &&
-    filters.categories.length > 0 &&
-    !filters.categories.some((publicCategoryId) =>
-      row.publicCategoryIds.includes(publicCategoryId),
-    )
+    filters.categories.length > 0
   ) {
-    return false;
+    const covered = coveredCategoryIds(
+      row.publicCategoryIds,
+      options.categoryHierarchy,
+    );
+    if (!filters.categories.some((publicCategoryId) => covered.has(publicCategoryId))) {
+      return false;
+    }
   }
   if (
     filters.collectibleTypes.length > 0 &&
@@ -548,150 +436,7 @@ export function rowMatchesFilters(
   return true;
 }
 
-type EstimateSortValues = Readonly<{
-  grossEvMinor: number | null;
-  evDollarsMinor: number | null;
-  evPercentBasisPoints: number | null;
-}>;
-
-export function searchRowFromRepack(input: {
-  readonly publicRepackId: string;
-  readonly publicVendorId: string;
-  readonly vendorKey: string;
-  readonly vendorDisplayName: string;
-  readonly publicCategoryIds: readonly string[];
-  readonly categoryLabels: readonly string[];
-  readonly collectibleTypes: ReadonlyArray<
-    RepackSearchRow["collectibleTypes"][number]
-  >;
-  readonly contentMode: RepackSearchRow["contentMode"];
-  readonly name: string;
-  readonly availability: RepackSearchRow["availability"];
-  readonly priceMinor: number | null;
-  readonly vendorReportedEv: EstimateSortValues;
-  readonly packScoutEv: EstimateSortValues;
-  readonly packScoutConfidenceBasisPoints: number | null;
-  readonly packScoutConfidenceBand: RepackSearchRow["packScoutConfidenceBand"];
-  readonly buybackBasisPoints: number | null;
-  readonly topChaseValueMinor: number | null;
-  readonly topChaseReason: RepackSearchRow["topChaseReason"];
-}): RepackSearchRow {
-  return {
-    publicRepackId: input.publicRepackId,
-    publicVendorId: input.publicVendorId,
-    vendorKey: input.vendorKey,
-    vendorDisplayName: input.vendorDisplayName,
-    publicCategoryIds: [...input.publicCategoryIds],
-    categoryLabels: [...input.categoryLabels],
-    collectibleTypes: [...input.collectibleTypes],
-    contentMode: input.contentMode,
-    name: input.name,
-    normalizedName: normalizePublicSearchText(input.name),
-    normalizedVendor: normalizePublicSearchText(input.vendorDisplayName),
-    normalizedCategories: normalizePublicSearchText(input.categoryLabels.join(" ")),
-    availability: input.availability,
-    priceMinor: input.priceMinor,
-    priceNullRank: input.priceMinor === null ? 1 : 0,
-    vendorReportedGrossEvMinor: input.vendorReportedEv.grossEvMinor,
-    vendorReportedGrossEvNullRank:
-      input.vendorReportedEv.grossEvMinor === null ? 1 : 0,
-    vendorReportedEvDollarsMinor: input.vendorReportedEv.evDollarsMinor,
-    vendorReportedEvDollarsNullRank:
-      input.vendorReportedEv.evDollarsMinor === null ? 1 : 0,
-    vendorReportedEvPercentBasisPoints:
-      input.vendorReportedEv.evPercentBasisPoints,
-    vendorReportedEvPercentNullRank:
-      input.vendorReportedEv.evPercentBasisPoints === null ? 1 : 0,
-    packScoutGrossEvMinor: input.packScoutEv.grossEvMinor,
-    packScoutGrossEvNullRank: input.packScoutEv.grossEvMinor === null ? 1 : 0,
-    packScoutEvDollarsMinor: input.packScoutEv.evDollarsMinor,
-    packScoutEvDollarsNullRank:
-      input.packScoutEv.evDollarsMinor === null ? 1 : 0,
-    packScoutEvPercentBasisPoints: input.packScoutEv.evPercentBasisPoints,
-    packScoutEvPercentNullRank:
-      input.packScoutEv.evPercentBasisPoints === null ? 1 : 0,
-    packScoutConfidenceNullRank:
-      input.packScoutConfidenceBasisPoints === null ? 1 : 0,
-    packScoutConfidenceBasisPoints: input.packScoutConfidenceBasisPoints,
-    packScoutConfidenceBand: input.packScoutConfidenceBand,
-    buybackBasisPoints: input.buybackBasisPoints,
-    buybackNullRank: input.buybackBasisPoints === null ? 1 : 0,
-    topChaseValueMinor: input.topChaseValueMinor,
-    topChaseNullRank: input.topChaseValueMinor === null ? 1 : 0,
-    topChaseReason: input.topChaseReason,
-  };
-}
-
-function estimateValues(
-  estimate: PublicRepackDetail["evEstimates"]["vendorReported"] |
-    PublicRepackDetail["evEstimates"]["packScout"],
-): EstimateSortValues {
-  return estimate.status === "available"
-    ? {
-        grossEvMinor: estimate.metrics.grossEv.minorUnits,
-        evDollarsMinor: estimate.metrics.evDollars.minorUnits,
-        evPercentBasisPoints: estimate.metrics.evPercentBasisPoints,
-      }
-    : {
-        grossEvMinor: null,
-        evDollarsMinor: null,
-        evPercentBasisPoints: null,
-      };
-}
-
-export function searchRowFromRepackDetail(
-  detail: PublicRepackDetail,
-): RepackSearchRow {
-  const topChaseValuation = detail.topChase?.collectible.valuation ?? null;
-  const topChaseValueMinor =
-    topChaseValuation?.usdComparison.status === "available"
-      ? topChaseValuation.usdComparison.value.minorUnits
-      : null;
-  const topChaseReason: RepackSearchRow["topChaseReason"] =
-    detail.topChase === null
-      ? "CHASE_UNAVAILABLE"
-      : topChaseValuation === null ||
-          topChaseValuation.usdComparison.status === "unavailable" &&
-            topChaseValuation.usdComparison.reason === "VALUATION_UNAVAILABLE"
-        ? "VALUATION_UNAVAILABLE"
-        : topChaseValuation.usdComparison.status === "unavailable"
-          ? "CURRENCY_UNSUPPORTED"
-          : null;
-  return searchRowFromRepack({
-    publicRepackId: detail.publicRepackId,
-    publicVendorId: detail.publicVendorId,
-    vendorKey: detail.vendorKey,
-    vendorDisplayName: detail.vendorDisplayName,
-    publicCategoryIds: detail.categories.map(
-      ({ publicCategoryId }) => publicCategoryId,
-    ),
-    categoryLabels: detail.categories.map(({ label }) => label),
-    collectibleTypes: detail.collectibleTypes,
-    contentMode: detail.contentMode,
-    name: detail.name,
-    availability: detail.availability,
-    priceMinor:
-      detail.price.usdComparison.status === "available"
-        ? detail.price.usdComparison.value.minorUnits
-        : null,
-    vendorReportedEv: estimateValues(detail.evEstimates.vendorReported),
-    packScoutEv: estimateValues(detail.evEstimates.packScout),
-    packScoutConfidenceBasisPoints:
-      detail.evEstimates.packScout.status === "available"
-        ? detail.evEstimates.packScout.confidence.scoreBasisPoints
-        : null,
-    packScoutConfidenceBand:
-      detail.evEstimates.packScout.status === "available"
-        ? detail.evEstimates.packScout.confidence.band
-        : null,
-    buybackBasisPoints:
-      detail.buyback.status === "available"
-        ? detail.buyback.value.basisPoints
-        : null,
-    topChaseValueMinor,
-    topChaseReason,
-  });
-}
+export const searchRowFromRepackDetail = repackSearchRowFromDetail;
 
 export function repackSearchRowMatchesDetail(
   row: RepackSearchRow,

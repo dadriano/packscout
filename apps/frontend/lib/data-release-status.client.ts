@@ -32,7 +32,7 @@ export function formatRelativeReleaseTime(
   const elapsedHours = Math.floor(elapsedMinutes / 60);
   if (elapsedHours < 24) return `${elapsedHours}h ago`;
 
-  return `${Math.floor(elapsedHours / 24)}d ago`;
+  return `${Math.min(1, Math.floor(elapsedHours / 24))}d ago`;
 }
 
 export function presentDataReleaseStatus(
