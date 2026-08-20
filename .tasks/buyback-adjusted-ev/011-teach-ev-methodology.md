@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/013
 **Estimated scope:** medium
 **Estimated effort:** 1–2 days for one builder, including glossary, Learn content, responsible-play review, and content verification
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 

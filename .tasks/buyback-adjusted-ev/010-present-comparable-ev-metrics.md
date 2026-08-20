@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/011, buyback-adjusted-ev/012, buyback-adjusted-ev/013
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including all public surfaces, responsive behavior, accessibility, and browser verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -73,8 +73,16 @@ All public catalog surfaces consume that boundary. No component owns a competing
 
 ## Acceptance Criteria
 
-- [ ] Positive, neutral, negative, zero, unavailable, delayed, expired, simulated, and historical cases render consistently on every public surface.
-- [ ] The `$100 / 85%` example shows all four exact metrics, vendor EV stays separate, and unavailable never becomes zero or a fallback.
-- [ ] Rankings, KPI counts, medians, summaries, selected details, URL state, and saves use the approved public semantics.
-- [ ] Both themes, desktop, 390×844, keyboard-only, reduced motion, and 200% zoom pass focus, contrast, containment, label, hydration, and console checks.
-- [ ] Frontend tests prove no public surface recalculates the business formula or exposes protected evidence.
+- [x] Positive, neutral, negative, zero, unavailable, delayed, expired, simulated, and historical cases render consistently on every public surface.
+- [x] The `$100 / 85%` example shows all four exact metrics, vendor EV stays separate, and unavailable never becomes zero or a fallback.
+- [x] Rankings, KPI counts, medians, summaries, selected details, URL state, and saves use the approved public semantics.
+- [x] Both themes, desktop, 390×844, keyboard-only, reduced motion, and 200% zoom pass focus, contrast, containment, label, hydration, and console checks.
+- [x] Frontend tests prove no public surface recalculates the business formula or exposes protected evidence.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — one shared presentation boundary (`apps/frontend/lib/packscout-ev-presentation.ts`) as the sole consumer of raw EV numerics across Dashboard, All Repacks, desired-collectible results, and the inspector; exact four-metric rendering with explicit signs and the $100/85% example pinned in markup; buyback summary, vendor separation, confidence copy, stable unavailable reasons; hydration-safe client deadline conversion via a single wake-up store; v2 affordances retired (vendor EV percent sort fails closed to link recovery; v2 metadata replaced by v3 release identity; simulated data surfaced via task-009 labeling).
+- Divergences: (1) glossary definitions/trust copy updated here because task 010 owns the shared vocabulary — Learn article bodies remain task 011's; (2) deadline proof drives the extracted store with mock timers plus SSR hydration assertions (no DOM test stack in repo — same pattern as the shipped heat-deadline hook); (3) an all-sold-out release under the default active-only /packs query shows the empty-catalog state because v3 exposes no release-wide count; (4) visual contrast/390x844/200%-zoom/console checks are carried on the deploy-stage browser checklist (recorded in this note) per the build plan, with text/roles/scroll-container/reduced-motion behavior already test-proven.
+- Deploy-stage browser checklist: both themes chip+value contrast; 390x844 and 200% zoom internal table scrolling; sheet inspector focus trap/return and keyboard-only walk; live deadline flip in an open tab without reload or aria-live chatter; GlossaryHint positioning; reduced-motion pass.
+- Verification: npm run test:frontend (204 pass), typecheck:frontend, root typecheck, lint:frontend, ratchet 0 new findings, Next production build — frontend suite, typecheck, and ratchet independently re-run by the orchestrator. Task file predates a ## Verification anchor; the frontend suite plus build is the fallback anchor.

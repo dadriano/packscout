@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type {
-  DataReleaseMetadata,
+  DataReleaseV3Identity,
   SearchPublicCollectiblesInput,
 } from "@packscout/contracts";
 import { createDesiredCollectibleSearchHandler } from "@/lib/desired-collectible-search-route.server";
@@ -18,10 +18,10 @@ async function responseBody(response: Response) {
 
 test("accepts one strict q and returns no-store collectible matches", async () => {
   const seen: SearchPublicCollectiblesInput[] = [];
-  const metadata = {} as DataReleaseMetadata;
+  const release = {} as DataReleaseV3Identity;
   const handler = createDesiredCollectibleSearchHandler(async (input) => {
     seen.push(input);
-    return { ok: true, data: { metadata, matches: [] } };
+    return { ok: true, data: { release, matches: [] } };
   });
 
   const response = await handler(request("q=%20Charizard%20%20EX%20"));
@@ -34,7 +34,7 @@ test("accepts one strict q and returns no-store collectible matches", async () =
   ]);
   assert.deepEqual(await responseBody(response), {
     ok: true,
-    data: { metadata, matches: [] },
+    data: { release, matches: [] },
   });
 });
 

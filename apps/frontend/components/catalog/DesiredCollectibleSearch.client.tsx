@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { PublicCollectible } from "@packscout/contracts";
+import type {
+  PublicCollectible,
+  PublicCollectibleDisplay,
+} from "@packscout/contracts";
 import { SavedCollectibleButton } from "@/components/auth/SavedItemButton.client";
 import {
   formatCollectibleDescriptor,
@@ -25,7 +28,7 @@ type CollectibleOption = Pick<
 >;
 
 type DesiredCollectibleSearchProps = Readonly<{
-  selected: PublicCollectible | null;
+  selected: PublicCollectibleDisplay | null;
   pending?: boolean;
   onSelect: (publicCollectibleId: string | null) => void;
 }>;

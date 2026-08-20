@@ -1,11 +1,11 @@
 import type { CSSProperties } from "react";
-import type { DashboardBundle } from "@packscout/contracts";
+import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
 import { presentCatalogSummaries } from "./overview-presentation";
 import styles from "./CatalogSummaries.module.css";
 
 type CatalogSummariesProps = Readonly<{
   title: "By vendor" | "By category";
-  summaries: DashboardBundle["vendorSummaries"] | DashboardBundle["categorySummaries"];
+  summaries: readonly RepackSummaryGroupV3[];
 }>;
 
 type SummaryBarStyle = CSSProperties & { "--bar-ratio": number };

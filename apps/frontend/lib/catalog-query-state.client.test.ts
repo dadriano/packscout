@@ -84,6 +84,15 @@ test("malformed singleton, partial price, unknown key, and cursor state are reje
   }
 });
 
+test("saved links using the retired pre-buyback vendor sort reset instead of reinterpreting", () => {
+  const parsed = parseCatalogQueryState(
+    new URLSearchParams("sort=vendor_reported_ev_percent"),
+  );
+  assert.equal(parsed.ok, false);
+  if (parsed.ok) return;
+  assert.equal(parsed.message, "The catalog sort is invalid.");
+});
+
 test("search, filters, and sorting reset cursor navigation together", () => {
   const paged = {
     ...DEFAULT_CATALOG_QUERY,

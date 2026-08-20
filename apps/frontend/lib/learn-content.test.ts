@@ -49,26 +49,27 @@ test("uses the shared Dashboard vocabulary for Expected Value education", () => 
     [
       {
         key: "grossEv",
-        label: "Gross EV",
+        label: "Gross EV $",
         definition:
-          "PackScout’s estimated value of contents before fees and shipping",
+          "The expected guaranteed buyback payout: each supported outcome’s final guaranteed buyback payout weighted by its probability",
       },
       {
         key: "evDollars",
         label: "EV $",
-        definition: "PackScout Gross EV minus Repack Price",
+        definition:
+          "PackScout Gross EV $ minus Pack Price, signed above or below the price",
       },
       {
         key: "evPercent",
         label: "EV %",
         definition:
-          "The percentage PackScout Gross EV is above or below Repack Price",
+          "PackScout Gross EV % minus 100 percentage points, signed above or below Pack Price",
       },
       {
         key: "buybackPercent",
         label: "Buyback %",
         definition:
-          "Vendor-supported buyback coverage relative to Repack Price, reported directly or derived by PackScout from documented terms",
+          "The documented uniform buyback rate when one rate governs every eligible outcome; otherwise a bounded summary such as Varies by outcome",
       },
       {
         key: "topChase",
@@ -82,7 +83,7 @@ test("uses the shared Dashboard vocabulary for Expected Value education", () => 
   const evGuide = findLearnGuide("expected-value");
   assert.ok(evGuide);
   const evCopy = JSON.stringify(evGuide);
-  assert.match(evCopy, /long-run estimate/i);
+  assert.match(evCopy, /guaranteed buyback payout/i);
   assert.ok(evCopy.includes(METRIC_TRUST_COPY.longRunExplanation));
   assert.ok(evCopy.includes(METRIC_TRUST_COPY.sourceExplanation));
   assert.ok(evCopy.includes(METRIC_TRUST_COPY.confidenceExplanation));

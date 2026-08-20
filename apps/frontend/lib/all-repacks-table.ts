@@ -1,6 +1,6 @@
 import type {
   PublicRepackSort,
-  PublicRepackSummary,
+  PublicRepackSummaryV3,
 } from "@packscout/contracts";
 import type { GlossaryFieldKey } from "./metric-vocabulary";
 
@@ -12,17 +12,25 @@ export type AllRepacksHeader = Readonly<{
   sort?: PublicRepackSort;
 }>;
 
+/**
+ * The buyback-adjusted comparison columns. The four PackScout metrics render
+ * together in the approved order (Gross EV $, Gross EV %, EV $, EV %), and
+ * vendor-reported EV stays a separately labeled, unsortable reported value —
+ * the pre-buyback vendor EV percent sort has no honest data_release_v3
+ * counterpart and was retired with it.
+ */
 export const ALL_REPACKS_HEADERS: readonly AllRepacksHeader[] = Object.freeze([
   { key: "vendor", label: "Vendor" },
   { key: "category", label: "Category" },
   { key: "repack", label: "Repack", sort: "repack" },
-  { key: "repackPrice", label: "Repack Price", sort: "repack_price" },
+  { key: "repackPrice", label: "Pack Price", sort: "repack_price" },
+  { key: "grossEv", label: "Gross EV $", sort: "packscout_gross_ev" },
+  { key: "grossEvPercent", label: "Gross EV %" },
   { key: "evDollars", label: "EV $", sort: "packscout_ev_dollars" },
   { key: "evPercent", label: "EV %", sort: "packscout_ev_percent" },
   { key: "evConfidence", label: "EV Confidence", sort: "packscout_confidence" },
-  { key: "vendorReportedEv", label: "Vendor EV %", sort: "vendor_reported_ev_percent" },
   { key: "buybackPercent", label: "Buyback %", sort: "buyback_percent" },
-  { key: "grossEv", label: "Gross EV", sort: "packscout_gross_ev" },
+  { key: "vendorReportedEv", label: "Vendor EV" },
   { key: "topChase", label: "Top Chase" },
   { key: "topChaseValue", label: "Top Chase Value", sort: "top_chase_value" },
   { key: "promoCode", label: "Promo Code" },
@@ -49,7 +57,7 @@ export function catalogHeaderAriaSort(
   return currentDirection === "asc" ? "ascending" : "descending";
 }
 
-export function publicRowActions(repack: PublicRepackSummary): Readonly<{
+export function publicRowActions(repack: PublicRepackSummaryV3): Readonly<{
   promo: boolean;
   repackLink: boolean;
 }> {

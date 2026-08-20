@@ -1,24 +1,12 @@
 import type {
-  DataReleaseMetadata,
-  PackScoutEv,
   PublicRepackChase,
-  PublicRepackSummary,
+  PublicRepackSummaryV3,
 } from "@packscout/contracts";
 import {
   formatBasisPoints,
   formatMoneyMinorUnits,
-} from "@/lib/metric-presentation";
+} from "@/lib/packscout-ev-presentation";
 import { getPublicReasonCopy } from "@/lib/metric-vocabulary";
-
-const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  timeZone: "UTC",
-  timeZoneName: "short",
-});
 
 export type TopChasePresentation =
   | Readonly<{
@@ -42,32 +30,8 @@ export type TopChasePresentation =
       reasonCopy: string;
     }>;
 
-export function formatPublicTimestamp(timestamp: string): string {
-  return DATE_FORMATTER.format(new Date(timestamp));
-}
-
-export function presentEstimateTiming(
-  estimate: PackScoutEv,
-  metadata: DataReleaseMetadata,
-): Readonly<{
-  calculatedLabel: string;
-  calculatedAt: string | null;
-  releaseLabel: string;
-  dataAsOf: string;
-}> {
-  return Object.freeze({
-    calculatedLabel:
-      estimate.calculatedAt === null
-        ? "Estimate date unavailable"
-        : `PackScout EV calculated ${formatPublicTimestamp(estimate.calculatedAt)}`,
-    calculatedAt: estimate.calculatedAt,
-    releaseLabel: `Repack data as of ${formatPublicTimestamp(metadata.dataAsOf)}`,
-    dataAsOf: metadata.dataAsOf,
-  });
-}
-
 export function presentEstimateCoverage(
-  contentSummary: PublicRepackSummary["contentSummary"],
+  contentSummary: PublicRepackSummaryV3["contentSummary"],
 ): string {
   if (contentSummary.probabilityCoverageBasisPoints === null) {
     return contentSummary.evidenceCompleteness === "unknown"
@@ -87,16 +51,11 @@ export function presentEstimateCoverage(
   return `Supported evidence coverage is ${coverageLabel}; completeness is unknown.`;
 }
 
-export function presentVendorReportedObservation(
-  observedAt: string | null,
-): Readonly<{ label: string; observedAt: string }> | null {
-  if (observedAt === null) return null;
-  return Object.freeze({
-    label: `Vendor EV observed ${formatPublicTimestamp(observedAt)}`,
-    observedAt,
-  });
-}
-
+/**
+ * Chase-match confidence is semantically separate from PackScout EV
+ * confidence: it describes how confidently a collectible was matched, never
+ * the reliability or direction of an EV estimate.
+ */
 export function presentChaseMatchEvidence(
   chase: PublicRepackChase,
 ): Readonly<{

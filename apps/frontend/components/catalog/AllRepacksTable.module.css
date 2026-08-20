@@ -78,6 +78,11 @@
 
 .table th:nth-child(11),
 .table td:nth-child(11) {
+  min-width: 190px;
+}
+
+.table th:nth-child(12),
+.table td:nth-child(12) {
   min-width: 250px;
 }
 

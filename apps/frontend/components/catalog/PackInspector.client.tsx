@@ -10,18 +10,21 @@ import {
   useState,
 } from "react";
 import type {
-  DataReleaseMetadata,
+  DataReleaseV3Identity,
   PublicRepackChase,
-  PublicRepackViewDetail,
+  PublicRepackViewDetailV3,
 } from "@packscout/contracts";
 import { SavedRepackButton } from "@/components/auth/SavedItemButton.client";
-import { EstimatedEvMetrics } from "@/components/metrics/EstimatedEvMetrics";
+import { PackScoutEvMetrics } from "@/components/metrics/PackScoutEvMetrics";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
-  presentBuyback,
-  presentPackScoutEv,
-  presentVendorReportedEv,
-} from "@/lib/metric-presentation";
+  presentBuybackSummaryV3,
+  presentPackScoutEvV3,
+  presentReleaseDataAsOf,
+  presentRepackPrice,
+  presentVendorReportedEvV3,
+} from "@/lib/packscout-ev-presentation";
+import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
 import { EXPECTED_VALUE_ARTICLE_HREF } from "@/lib/metric-vocabulary";
 import { CatalogImage } from "./CatalogImage.client";
 import {
@@ -31,11 +34,8 @@ import {
 } from "./pack-actions.client";
 import {
   presentEstimateCoverage,
-  presentEstimateTiming,
   presentTopChase,
-  presentVendorReportedObservation,
 } from "./pack-inspector-presentation";
-import { presentRepackPrice } from "./overview-presentation";
 import styles from "./PackInspector.module.css";
 
 export type InspectorActionOutcome =
@@ -53,8 +53,8 @@ export type InspectorActionOutcome =
     }>;
 
 export type RepackInspectorProps = Readonly<{
-  repack: PublicRepackViewDetail;
-  metadata: DataReleaseMetadata;
+  repack: PublicRepackViewDetailV3;
+  release: DataReleaseV3Identity;
   placement?: "side" | "preview" | "sheet";
   clipboardWriter?: ClipboardWriter | null;
   onActionOutcome?: (outcome: InspectorActionOutcome) => void;
@@ -66,7 +66,7 @@ export type RepackInspectorProps = Readonly<{
 type PartnerActionsProps = Pick<
   RepackInspectorProps,
   "clipboardWriter" | "onActionOutcome"
-> & { readonly repack: PublicRepackViewDetail };
+> & { readonly repack: PublicRepackViewDetailV3 };
 
 function PartnerActions({
   repack,
@@ -185,7 +185,7 @@ function PartnerActions({
 
 export function RepackInspector({
   repack,
-  metadata,
+  release,
   placement = "side",
   clipboardWriter,
   onActionOutcome,
@@ -195,15 +195,17 @@ export function RepackInspector({
 }: RepackInspectorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const boundEstimate = useDeadlineBoundPackScoutEv(repack.evEstimates.packScout);
   const price = presentRepackPrice(repack.price);
-  const packScoutEv = presentPackScoutEv({
-    repackPrice: repack.price.usdComparison,
-    estimate: repack.evEstimates.packScout,
+  const packScoutEv = presentPackScoutEvV3({
+    estimate: boundEstimate,
+    price: repack.price,
+    availability: repack.availability,
+    repackName: repack.name,
   });
-  const vendorEv = presentVendorReportedEv(repack.evEstimates.vendorReported);
-  const vendorObservation = presentVendorReportedObservation(vendorEv.observedAt);
-  const buyback = presentBuyback(repack.buyback);
-  const timing = presentEstimateTiming(repack.evEstimates.packScout, metadata);
+  const vendorEv = presentVendorReportedEvV3(repack.evEstimates.vendorReported);
+  const buyback = presentBuybackSummaryV3(repack.buyback);
+  const releaseDataAsOf = presentReleaseDataAsOf(release);
   const coverage = presentEstimateCoverage(repack.contentSummary);
   const showsDesiredChase = highlightedChase !== undefined;
   const chaseValueLabel = showsDesiredChase
@@ -314,7 +316,7 @@ export function RepackInspector({
           <p className={styles.price}>
             <span aria-hidden="true">{price.displayValue}</span>
             <span className="sr-only">{price.accessibleLabel}</span>
-            {price.reasonCopy ? (
+            {price.availability === "unavailable" ? (
               <small aria-hidden="true">{price.reasonCopy}</small>
             ) : null}
           </p>
@@ -325,22 +327,22 @@ export function RepackInspector({
       </header>
 
       <div className={styles.sectionBlock}>
-        <EstimatedEvMetrics compact presentation={packScoutEv} />
+        <PackScoutEvMetrics compact presentation={packScoutEv} />
         <div className={styles.vendorEstimate}>
           <div className={styles.sectionHeading}>
             <h3>Vendor-reported EV</h3>
-            <span>Reported by vendor</span>
+            <span>{vendorEv.sourceNote}</span>
           </div>
           <div className={styles.vendorEstimateMetrics}>
             <MetricValue
               compact
-              metric={vendorEv.evPercent}
+              metric={vendorEv.reported}
               showReason={false}
               showSemanticState={false}
             />
             <MetricValue
               compact
-              metric={vendorEv.reportedGrossEv}
+              metric={vendorEv.usdComparison}
               showReason={false}
               showSemanticState={false}
             />
@@ -348,10 +350,10 @@ export function RepackInspector({
           {vendorEv.reasonCopy ? (
             <p className={styles.vendorEstimateReason}>{vendorEv.reasonCopy}</p>
           ) : null}
-          {vendorObservation ? (
+          {vendorEv.observedLabel && vendorEv.observedAt ? (
             <p className={styles.vendorEstimateContext}>
-              <time dateTime={vendorObservation.observedAt}>
-                {vendorObservation.label}
+              <time dateTime={vendorEv.observedAt}>
+                {vendorEv.observedLabel}
               </time>
             </p>
           ) : null}
@@ -362,14 +364,9 @@ export function RepackInspector({
         <div className={styles.estimateContext}>
           <p>{coverage}</p>
           <p>
-            {timing.calculatedAt ? (
-              <time dateTime={timing.calculatedAt}>{timing.calculatedLabel}</time>
-            ) : (
-              timing.calculatedLabel
-            )}
-          </p>
-          <p>
-            <time dateTime={timing.dataAsOf}>{timing.releaseLabel}</time>
+            <time dateTime={releaseDataAsOf.dataAsOf}>
+              {releaseDataAsOf.label}
+            </time>
           </p>
           {packScoutEv.confidence.limitations.length > 0 ? (
             <ul className={styles.limitations}>

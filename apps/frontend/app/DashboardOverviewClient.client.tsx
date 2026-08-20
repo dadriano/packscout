@@ -3,10 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type {
-  DashboardBundle,
   PublicRepackFilters,
-  PublicRepackViewDetail,
+  PublicRepackViewDetailV3,
 } from "@packscout/contracts";
+import type { DashboardBundleV3 } from "@/lib/public-repacks-v3";
 import { CatalogFilters } from "@/components/catalog/CatalogFilters.client";
 import { OverviewDashboard } from "@/components/catalog/OverviewDashboard.client";
 import type { InspectorActionOutcome } from "@/components/catalog/PackInspector.client";
@@ -24,8 +24,8 @@ import {
 import styles from "./DashboardOverviewClient.module.css";
 
 type DashboardOverviewClientProps = Readonly<{
-  bundle: DashboardBundle;
-  details: readonly PublicRepackViewDetail[];
+  bundle: DashboardBundleV3;
+  details: readonly PublicRepackViewDetailV3[];
 }>;
 
 function actionMessage(outcome: InspectorActionOutcome): string {
@@ -82,18 +82,18 @@ export function DashboardOverviewClient({
   useEffect(() => {
     queueProductTelemetry(
       createDashboardViewEvent({
-        publicReleaseId: bundle.metadata.publicReleaseId,
+        publicReleaseId: bundle.release.publicReleaseId,
         surface: "overview",
       }),
     );
-  }, [bundle.metadata.publicReleaseId]);
+  }, [bundle.release.publicReleaseId]);
 
   useEffect(() => {
     const count = activeFilterCount(bundle.activeFilters);
     if (count === 0) return;
     queueProductTelemetry(
       createFiltersAppliedEvent({
-        publicReleaseId: bundle.metadata.publicReleaseId,
+        publicReleaseId: bundle.release.publicReleaseId,
         surface: "overview",
         outcome: bundle.kpis.totalRepacks === 0 ? "no_matches" : "results",
         activeFilterCount: count,
@@ -103,7 +103,7 @@ export function DashboardOverviewClient({
   }, [
     bundle.activeFilters,
     bundle.kpis.totalRepacks,
-    bundle.metadata.publicReleaseId,
+    bundle.release.publicReleaseId,
   ]);
 
   function reportInspectorAction(outcome: InspectorActionOutcome) {
@@ -111,13 +111,13 @@ export function DashboardOverviewClient({
     queueProductTelemetry(
       outcome.name === "promo_copied"
         ? createPromoCopiedEvent({
-            publicReleaseId: bundle.metadata.publicReleaseId,
+            publicReleaseId: bundle.release.publicReleaseId,
             publicRepackId: outcome.publicRepackId,
             vendorKey: outcome.vendorKey,
             outcome: outcome.outcome,
           })
         : createRepackLinkOpenedEvent({
-            publicReleaseId: bundle.metadata.publicReleaseId,
+            publicReleaseId: bundle.release.publicReleaseId,
             publicRepackId: outcome.publicRepackId,
             vendorKey: outcome.vendorKey,
             outcome: outcome.outcome,

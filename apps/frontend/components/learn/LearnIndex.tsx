@@ -52,7 +52,7 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
 
         <p className={styles.methodDisclaimer} role="note">
           {PACKSCOUT_EV_METHOD.disclaimer}{" "}
-          {METRIC_TRUST_COPY.financialDisclaimer}
+          {METRIC_TRUST_COPY.adviceLine}.
         </p>
 
         <Link

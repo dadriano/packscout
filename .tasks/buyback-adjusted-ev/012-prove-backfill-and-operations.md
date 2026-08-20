@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/013
 **Estimated scope:** medium
 **Estimated effort:** 2–4 days for one builder, including catalog recomputation, monitoring, failure drills, and rollback evidence
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 

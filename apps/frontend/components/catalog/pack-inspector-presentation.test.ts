@@ -1,59 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type {
-  DataReleaseMetadata,
-  PackScoutEv,
   PublicRepackChase,
-  PublicRepackSummary,
+  PublicRepackSummaryV3,
 } from "@packscout/contracts";
 import {
-  formatPublicTimestamp,
   presentEstimateCoverage,
-  presentEstimateTiming,
   presentTopChase,
-  presentVendorReportedObservation,
 } from "./pack-inspector-presentation";
 
-const metadata = {
-  dataAsOf: "2026-08-11T12:00:00Z",
-} as DataReleaseMetadata;
-
-function estimate(calculatedAt: string | null): PackScoutEv {
-  return calculatedAt === null
-    ? {
-        status: "unavailable",
-        metrics: null,
-        confidence: null,
-        modelVersion: "packscout-ev-v2",
-        confidencePolicyVersion: "confidence-v1",
-        dataAsOf: null,
-        calculatedAt: null,
-        reason: "ESTIMATE_INPUT_INCOMPLETE",
-      }
-    : {
-        status: "available",
-        metrics: {
-          grossEv: { minorUnits: 108_00, currency: "USD" },
-          grossReturnBasisPoints: 10_800,
-          evDollars: { minorUnits: 8_00, currency: "USD" },
-          evPercentBasisPoints: 800,
-        },
-        confidence: {
-          scoreBasisPoints: 8_500,
-          band: "high",
-          limitationCodes: [],
-        },
-        modelVersion: "packscout-ev-v2",
-        confidencePolicyVersion: "confidence-v1",
-        dataAsOf: "2026-08-10T10:00:00Z",
-        calculatedAt,
-      };
-}
-
 function contentSummary(
-  evidenceCompleteness: PublicRepackSummary["contentSummary"]["evidenceCompleteness"],
+  evidenceCompleteness: PublicRepackSummaryV3["contentSummary"]["evidenceCompleteness"],
   probabilityCoverageBasisPoints: number | null,
-): PublicRepackSummary["contentSummary"] {
+): PublicRepackSummaryV3["contentSummary"] {
   return {
     knownCollectibleCount: 10,
     chaseCount: 2,
@@ -93,27 +52,6 @@ function topChase(primaryImage: PublicRepackChase["collectible"]["primaryImage"]
   };
 }
 
-test("keeps PackScout calculation time distinct from release data time", () => {
-  const timing = presentEstimateTiming(
-    estimate("2026-08-10T10:30:00Z"),
-    metadata,
-  );
-
-  assert.equal(
-    timing.calculatedLabel,
-    "PackScout EV calculated Aug 10, 2026, 10:30 AM UTC",
-  );
-  assert.equal(
-    timing.releaseLabel,
-    "Repack data as of Aug 11, 2026, 12:00 PM UTC",
-  );
-  assert.notEqual(timing.calculatedAt, timing.dataAsOf);
-  assert.equal(
-    formatPublicTimestamp("2026-08-11T12:00:00Z"),
-    "Aug 11, 2026, 12:00 PM UTC",
-  );
-});
-
 test("states complete, partial, unquantified, and unknown evidence coverage plainly", () => {
   assert.equal(
     presentEstimateCoverage(contentSummary("complete", 10_000)),
@@ -133,7 +71,7 @@ test("states complete, partial, unquantified, and unknown evidence coverage plai
   );
 });
 
-test("presents chase evidence and chase-match confidence separately", () => {
+test("presents chase evidence and chase-match confidence separately from EV", () => {
   const withImage = topChase({
     url: "https://images.example/celestial-nexus.png",
     alt: "Celestial Nexus collectible",
@@ -148,6 +86,7 @@ test("presents chase evidence and chase-match confidence separately", () => {
   assert.equal(pictured.image?.alt, "Celestial Nexus collectible");
   assert.equal(pictured.evidenceLabel, "Confirmed by vendor evidence");
   assert.equal(pictured.matchConfidenceLabel, "high chase-match confidence");
+  assert.doesNotMatch(pictured.matchConfidenceLabel, /EV/);
   assert.equal(textOnly.image, null);
   assert.equal(textOnly.name, pictured.name);
 });
@@ -195,23 +134,4 @@ test("uses stable unavailable copy and never invents a chase value", () => {
     reasonCopy: "Collectible value unavailable.",
   });
   assert.doesNotMatch(JSON.stringify(presentation), /\$0|0\.00/);
-});
-
-test("names a missing PackScout calculation date without borrowing release time", () => {
-  const timing = presentEstimateTiming(estimate(null), metadata);
-
-  assert.equal(timing.calculatedLabel, "Estimate date unavailable");
-  assert.equal(timing.calculatedAt, null);
-  assert.match(timing.releaseLabel, /^Repack data as of /);
-});
-
-test("labels vendor-reported EV observation time only when supplied", () => {
-  assert.deepEqual(
-    presentVendorReportedObservation("2026-08-11T12:00:00Z"),
-    {
-      label: "Vendor EV observed Aug 11, 2026, 12:00 PM UTC",
-      observedAt: "2026-08-11T12:00:00Z",
-    },
-  );
-  assert.equal(presentVendorReportedObservation(null), null);
 });

@@ -7,18 +7,13 @@ import {
 } from "./confidence-limitations";
 
 const everyLimitationCode: readonly PackScoutConfidenceLimitationCode[] = [
-  "incomplete_outcome_pool",
-  "estimated_value_ranges",
-  "partial_probability_coverage",
-  "sparse_valuation_data",
-  "stale_valuation_data",
-  "unresolved_collectibles",
-  "currency_normalization_applied",
-  "vendor_odds_unverified",
-  "vendor_probability_inputs",
+  "closed_range_midpoint",
+  "platform_published_odds",
+  "source_age_over_15_through_30_minutes",
+  "source_age_over_30_through_60_minutes",
 ];
 
-test("maps every public confidence limitation to buyer-facing copy", () => {
+test("maps the exact confidence-policy V1 limitation vocabulary to copy", () => {
   const copy = presentConfidenceLimitations(everyLimitationCode);
 
   assert.equal(copy.length, everyLimitationCode.length);
@@ -30,4 +25,18 @@ test("maps every public confidence limitation to buyer-facing copy", () => {
   for (const code of everyLimitationCode) {
     assert.doesNotMatch(copy.join(" "), new RegExp(code));
   }
+});
+
+test("limitation copy describes evidence, never profit or predicted outcomes", () => {
+  for (const copy of Object.values(PUBLIC_CONFIDENCE_LIMITATION_COPY)) {
+    assert.doesNotMatch(copy, /profit|return|win|positive/i);
+  }
+  assert.match(
+    PUBLIC_CONFIDENCE_LIMITATION_COPY.platform_published_odds,
+    /Published odds used/,
+  );
+  assert.match(
+    PUBLIC_CONFIDENCE_LIMITATION_COPY.closed_range_midpoint,
+    /Midpoint value ranges/,
+  );
 });
