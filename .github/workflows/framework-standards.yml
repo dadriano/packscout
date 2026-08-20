@@ -1,5 +1,18 @@
 name: Framework Standards
 
+# The gate runs on pull requests and on pushes to main.
+#
+# Those two runs overlap: a pull request verifies its tree, and the resulting
+# merge commit verifies a tree that is usually identical. Removing the push
+# trigger would halve continuous integration cost per merge — but only once
+# `main` has branch protection requiring this check to pass AND requiring
+# branches to be up to date before merging. Without that, nothing forces a pull
+# request to be green before it lands, and this push run is the only thing
+# verifying `main` at all.
+#
+# `main` is currently unprotected, so the push trigger stays. See
+# .tasks/test-overhead-reduction/008-cache-and-deduplicate-ci.md for what to
+# change once protection is enabled.
 on:
   pull_request:
     branches:
@@ -10,6 +23,13 @@ on:
 
 permissions:
   contents: read
+
+# Superseded runs on the same branch are cancelled. Pushing twice to an open
+# pull request now costs one gate run rather than two. Runs on main are never
+# cancelled, since each one verifies a commit that actually landed.
+concurrency:
+  group: framework-standards-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify-framework:
@@ -52,6 +72,24 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The bundler cache and the TypeScript build-info files are what make a
+      # repeat run cheap. Both are keyed on the lockfile and on compiler
+      # configuration, so a dependency or tsconfig change misses the cache
+      # rather than restoring a stale one. Delete the cache entry from the
+      # Actions UI to force a genuinely cold run.
+      - name: Restore build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/frontend/.next/cache
+            apps/frontend/.next-build/cache
+            **/*.tsbuildinfo
+          key: >-
+            build-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}-${{ hashFiles('**/tsconfig.json', 'apps/frontend/next.config.ts') }}-${{ github.sha }}
+          restore-keys: |
+            build-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}-${{ hashFiles('**/tsconfig.json', 'apps/frontend/next.config.ts') }}-
+            build-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}-
 
       - name: Verify framework standards
         run: npm run verify:framework

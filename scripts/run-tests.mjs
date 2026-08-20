@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { escapeGlobPath } from "./glob-escape.mjs";
+import { isIgnoredDirectoryName } from "./ignored-directories.mjs";
 
 function readOption(name) {
   const index = process.argv.indexOf(name);
@@ -21,20 +22,6 @@ const defaultRoot = path.resolve(
   "..",
 );
 const repositoryRoot = path.resolve(readOption("--root") ?? defaultRoot);
-
-const commonSkipDirectories = new Set([
-  "node_modules",
-  "dist",
-  "build",
-  ".git",
-  ".next",
-  ".next-dev",
-  ".next-build",
-  ".worktrees",
-  "playwright-report",
-  "test-results",
-  "coverage",
-]);
 
 const targets = {
   frontend: {
@@ -50,7 +37,11 @@ const targets = {
     testFile: /\.test\.(ts|tsx)$/,
     loader: true,
   },
-  root: {
+  // Self-tests for the repository's own tooling: the policy checkers, the test
+  // runner, and the local developer scripts. This lane covers no product
+  // behavior, so it is deliberately kept out of the product test path and run
+  // by the canonical gate instead. See docs/testing/shift-left-bdd.md.
+  tooling: {
     cwd: ".",
     roots: ["__tests__", "scripts"],
     testFile: /\.test\.mjs$/,
@@ -72,11 +63,7 @@ if (!target) {
 }
 
 function shouldSkipDirectory(name, targetSkipDirectories) {
-  return (
-    commonSkipDirectories.has(name) ||
-    targetSkipDirectories.has(name) ||
-    name.startsWith(".next-")
-  );
+  return isIgnoredDirectoryName(name) || targetSkipDirectories.has(name);
 }
 
 function walk(directory, testFile, targetSkipDirectories, files = []) {
