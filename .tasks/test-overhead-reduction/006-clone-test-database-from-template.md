@@ -113,3 +113,43 @@ Roughly **18s removed** from the database-backed lanes.
 Templates persist between runs by design, and a migration change leaves the
 previous template behind. They are harmless and cheap, but nothing currently
 prunes them. Worth a small cleanup helper if the count grows.
+
+## Post-CI correction: advisory lock could be silently dropped
+
+CI run 32391979167 passed, but a review of the implementation afterwards found a
+latent race that the passing run did not disprove — it simply did not hit it.
+
+`ensureTemplateDatabase` took the advisory lock with `admin.query(...)` on a
+`pg.Pool`. `pg_advisory_lock` is **session-scoped**, and a pool releases an idle
+client after `idleTimeoutMillis`, which defaults to 10 seconds. The `prisma
+migrate deploy` call sits inside the lock scope and leaves that client idle for
+its whole duration.
+
+Capping the pool at `max: 1` was not sufficient protection. If the migration
+outlasts the idle timeout — entirely plausible on a slower runner or as the
+migration history grows — the client is reaped, the session ends, and PostgreSQL
+**releases the advisory lock**. A second process could then build the template
+concurrently, and the eventual `pg_advisory_unlock` would run on a different
+session and warn that it owns no such lock.
+
+The fix checks out one client with `pool.connect()` and holds it for the entire
+lock scope, releasing it in a `finally`. Every query inside the scope uses that
+client rather than the pool: because the pool is capped at one connection,
+reaching for `admin` inside the scope would wait for a client this function is
+itself holding and deadlock.
+
+### Verification of the fix
+
+- `npm run typecheck:database` — exit 0.
+- Cold start with every test database dropped: 118 tests pass, exactly one
+  template created.
+- **The race the fix targets**: `test:database`, `test:services`, and
+  `test:admin` started simultaneously against a dropped template. All three
+  exited 0, exactly **one** template was created, and **zero** scratch databases
+  were left behind.
+
+Worth noting how this was found. The original verification exercised two
+concurrent lanes and passed, and CI passed as well. Neither proved the lock was
+held correctly — both simply had a fast enough migration and low enough
+contention that the idle timeout never elapsed. A green run is evidence that
+nothing went wrong this time, not that the concurrency is sound.

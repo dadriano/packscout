@@ -80,45 +80,60 @@ async function ensureTemplateDatabase(
   adminUrl: URL,
   templateName: string,
 ): Promise<void> {
-  const lockKey = advisoryLockKey(templateName);
-  await admin.query("select pg_advisory_lock($1::bigint)", [
-    lockKey.toString(),
-  ]);
-  try {
-    const existing = await admin.query(
-      "select 1 from pg_database where datname = $1",
-      [templateName],
-    );
-    if (existing.rowCount && existing.rowCount > 0) return;
+  const lockKey = advisoryLockKey(templateName).toString();
 
-    const scratchName = `${templateName}_building_${process.pid}`;
-    await admin.query(`drop database if exists "${scratchName}" with (force)`);
-    await admin.query(`create database "${scratchName}"`);
+  // The lock must be held on one checked-out session for its whole scope.
+  // `pg_advisory_lock` is session-scoped, and a pool releases an idle client
+  // after `idleTimeoutMillis` (10s by default) — which the migration below can
+  // easily exceed. A reaped client ends the session, silently dropping the lock
+  // and letting a second process build the template concurrently.
+  //
+  // Every query inside this scope uses `lockClient` rather than the pool. The
+  // pool is capped at one connection, so reaching for `admin` here would wait
+  // for a client that this function is itself holding, and deadlock.
+  const lockClient = await admin.connect();
+  try {
+    await lockClient.query("select pg_advisory_lock($1::bigint)", [lockKey]);
     try {
-      await execFileAsync(
-        process.execPath,
-        [prismaExecutable, "migrate", "deploy", "--schema", schemaPath],
-        {
-          cwd: packageDirectory,
-          env: {
-            ...process.env,
-            PACKSCOUT_DATABASE_URL: databaseUrlFor(adminUrl, scratchName),
+      const existing = await lockClient.query(
+        "select 1 from pg_database where datname = $1",
+        [templateName],
+      );
+      if (existing.rowCount && existing.rowCount > 0) return;
+
+      const scratchName = `${templateName}_building_${process.pid}`;
+      await lockClient.query(
+        `drop database if exists "${scratchName}" with (force)`,
+      );
+      await lockClient.query(`create database "${scratchName}"`);
+      try {
+        await execFileAsync(
+          process.execPath,
+          [prismaExecutable, "migrate", "deploy", "--schema", schemaPath],
+          {
+            cwd: packageDirectory,
+            env: {
+              ...process.env,
+              PACKSCOUT_DATABASE_URL: databaseUrlFor(adminUrl, scratchName),
+            },
           },
-        },
-      );
-      await admin.query(
-        `alter database "${scratchName}" rename to "${templateName}"`,
-      );
-    } catch (error) {
-      await admin
-        .query(`drop database if exists "${scratchName}" with (force)`)
+        );
+        await lockClient.query(
+          `alter database "${scratchName}" rename to "${templateName}"`,
+        );
+      } catch (error) {
+        await lockClient
+          .query(`drop database if exists "${scratchName}" with (force)`)
+          .catch(() => undefined);
+        throw error;
+      }
+    } finally {
+      await lockClient
+        .query("select pg_advisory_unlock($1::bigint)", [lockKey])
         .catch(() => undefined);
-      throw error;
     }
   } finally {
-    await admin
-      .query("select pg_advisory_unlock($1::bigint)", [lockKey.toString()])
-      .catch(() => undefined);
+    lockClient.release();
   }
 }
 
