@@ -38,7 +38,7 @@ Auth/session, role changes, tenant changes, secrets/tokens, destructive deletes,
 ## Foundation already available
 
 - `src/layouts/AdminLayout.tsx` owns responsive navigation and global chrome.
-- `src/theme.css` and `src/index.css` own light/dark tokens and shared classes.
+- `src/theme.css` owns the light/dark token vocabulary and `src/index.css` owns the shell and shared classes; feature stylesheets (`src/data-providers.css`, `src/operations.css`, `src/alerts.css`) consume those tokens and never declare palette values. See `docs/ui-layout-standard.md` for the template.
 - `src/api/client.ts` owns credentials, JSON encoding, and structured API errors.
 - `src/components/AdminDialog.tsx` owns modal labelling, focus entry/return, focus trapping, and Escape behavior.
 - `src/providers/confirm.tsx` owns destructive tiers, typed acknowledgment, pending state, and action failure feedback.

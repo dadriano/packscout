@@ -14,6 +14,10 @@ const initializedSource = readFileSync(
   new URL("./InitializedPackScoutAuthProvider.client.tsx", import.meta.url),
   "utf8",
 );
+const recorderSource = readFileSync(
+  new URL("./AuthenticatedSignInRecorder.client.tsx", import.meta.url),
+  "utf8",
+);
 const accountSource = readFileSync(
   new URL("./AccountControl.client.tsx", import.meta.url),
   "utf8",
@@ -42,4 +46,32 @@ test("the configured public boundary has no eager Privy or Convex client import"
 test("both account and guest save controls send the same boot intent", () => {
   assert.match(accountSource, /auth\.login\(\)/);
   assert.match(savedButtonSource, /auth\.login\(\)/);
+});
+
+test("an authenticated session reaches the product-user directory", () => {
+  assert.match(
+    initializedSource,
+    /const sessionKey = convexAuthSessionKey\(\{/,
+  );
+  assert.match(
+    initializedSource,
+    /<AuthenticatedSignInRecorder sessionKey=\{sessionKey\}>[\s\S]*<AuthenticatedSavedItemsProvider[\s\S]*<\/AuthenticatedSignInRecorder>/,
+  );
+  assert.match(recorderSource, /api\.productUsers\.recordSignIn/);
+});
+
+test("recording stays invisible and cannot break the provider tree", () => {
+  // The write only leaves on a decision, and only through the helper that
+  // absorbs failures, so nothing here can surface an error to the session.
+  assert.match(recorderSource, /if \(!decision\.record\) return;/);
+  assert.match(
+    recorderSource,
+    /void recordSignInBestEffort\(\(\) => recordSignIn\(\{\}\)\);/,
+  );
+  assert.equal(recorderSource.match(/recordSignIn\(\{\}\)/g)?.length, 1);
+  assert.equal(recorderSource.includes("catch"), false);
+  // Children render unconditionally: the recorder contributes no markup.
+  assert.match(recorderSource, /return <>\{children\}<\/>;/);
+  assert.equal(recorderSource.includes("className"), false);
+  assert.equal(recorderSource.includes("aria-"), false);
 });

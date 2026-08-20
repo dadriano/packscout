@@ -50,6 +50,12 @@ const targets = {
     testFile: /\.test\.(ts|tsx)$/,
     loader: true,
   },
+  "ops-panel": {
+    cwd: "apps/ops-panel",
+    roots: ["server", "src"],
+    testFile: /\.test\.(ts|tsx)$/,
+    loader: true,
+  },
   root: {
     cwd: ".",
     roots: ["__tests__", "scripts"],

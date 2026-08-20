@@ -5,7 +5,15 @@ import { useTheme } from "../hooks/useTheme";
 import { useSession } from "../providers/session";
 import { useToast } from "../providers/toast";
 
-const baseNavigation = [{ to: "/", label: "Overview", index: "01" }];
+const baseNavigation = [{ to: "/", label: "Overview" }];
+
+function CloseIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path d="M5 5l10 10M15 5L5 15" />
+    </svg>
+  );
+}
 
 function ThemeIcon({ dark }: { dark: boolean }) {
   return dark ? (
@@ -42,6 +50,8 @@ export function AdminLayout() {
           ? "Import Runs"
         : location.pathname.startsWith("/quarantine")
           ? "Quarantine"
+        : location.pathname.startsWith("/background-work")
+          ? "Background Work"
         : location.pathname.startsWith("/alerts")
           ? "Operational Alerts"
         : "Not found";
@@ -62,15 +72,18 @@ export function AdminLayout() {
   const canViewProviders = session.permissions.includes("providers:view");
   const workspaceNavigation = [
     ...baseNavigation,
-    ...(canManageOperators ? [{ to: "/operators", label: "Operators", index: "02" }] : []),
+    ...(canManageOperators ? [{ to: "/operators", label: "Operators" }] : []),
   ];
-  const pipelineNavigation = [
-    ...(canViewProviders ? [{ to: "/operations", label: "Status", index: "01" }] : []),
-    ...(canViewProviders ? [{ to: "/providers", label: "Providers", index: "02" }] : []),
-    ...(canViewProviders ? [{ to: "/runs", label: "Import Runs", index: "03" }] : []),
-    ...(canViewProviders ? [{ to: "/quarantine", label: "Quarantine", index: "04" }] : []),
-    ...(canViewProviders ? [{ to: "/alerts", label: "Alerts", index: "05" }] : []),
-  ];
+  const pipelineNavigation = canViewProviders
+    ? [
+        { to: "/operations", label: "Status" },
+        { to: "/providers", label: "Providers" },
+        { to: "/runs", label: "Import Runs" },
+        { to: "/quarantine", label: "Quarantine" },
+        { to: "/background-work", label: "Background Work" },
+        { to: "/alerts", label: "Alerts" },
+      ]
+    : [];
 
   return (
     <div className="admin-layout" data-nav-open={navOpen ? "true" : "false"}>
@@ -90,8 +103,8 @@ export function AdminLayout() {
               PS
             </span>
             <span>
-              <strong>Packscout</strong>
               <small>Operations console</small>
+              <strong>Packscout</strong>
             </span>
           </NavLink>
           <button
@@ -100,7 +113,7 @@ export function AdminLayout() {
             aria-label="Close navigation"
             onClick={() => setNavOpenedAt(null)}
           >
-            <span aria-hidden="true">×</span>
+            <CloseIcon />
           </button>
         </div>
 
@@ -108,18 +121,17 @@ export function AdminLayout() {
           <section className="admin-nav-section">
             <h2>Workspace</h2>
             {workspaceNavigation.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === "/"}
-                  className={({ isActive }) =>
-                    `admin-nav-link${isActive ? " is-active" : ""}`
-                  }
-                  onClick={() => setNavOpenedAt(null)}
-                >
-                  <span aria-hidden="true">{item.index}</span>
-                  {item.label}
-                </NavLink>
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === "/"}
+                className={({ isActive }) =>
+                  `admin-nav-link${isActive ? " is-active" : ""}`
+                }
+                onClick={() => setNavOpenedAt(null)}
+              >
+                {item.label}
+              </NavLink>
             ))}
           </section>
           {pipelineNavigation.length > 0 ? (
@@ -132,7 +144,6 @@ export function AdminLayout() {
                   className={({ isActive }) => `admin-nav-link${isActive ? " is-active" : ""}`}
                   onClick={() => setNavOpenedAt(null)}
                 >
-                  <span aria-hidden="true">{item.index}</span>
                   {item.label}
                 </NavLink>
               ))}

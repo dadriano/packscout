@@ -48,6 +48,7 @@ const surfaces = [
   { name: "frontend", directory: "apps/frontend" },
   { name: "admin", directory: "apps/admin" },
   { name: "worker", directory: "apps/worker" },
+  { name: "ops-panel", directory: "apps/ops-panel" },
   { name: "contracts", directory: "packages/contracts" },
   { name: "database", directory: "packages/database" },
   { name: "services", directory: "packages/services" },

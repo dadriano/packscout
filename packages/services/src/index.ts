@@ -41,3 +41,4 @@ export * from "./providers/stadium-vault/mapper.ts";
 export * from "./providers/trove/mapper.ts";
 export * from "./quarantine-service.ts";
 export * from "./repack-heat-calculator.ts";
+export * from "./worker-presence-service.ts";

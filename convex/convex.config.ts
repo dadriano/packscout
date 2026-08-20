@@ -14,6 +14,9 @@ export default defineApp({
     PACKSCOUT_MOCK_DATA_RELEASE_SEED_ENABLED: v.optional(v.literal("1")),
     PACKSCOUT_MOCK_HEAT_SIMULATION_ENABLED: v.optional(v.literal("1")),
     PACKSCOUT_PUBLIC_ORIGIN_SET_HASH: v.optional(v.string()),
+    // Server-to-server secret for the admin product-user directory integration.
+    // Absent by default: the HTTP surface fails closed until it is configured.
+    PACKSCOUT_ADMIN_DIRECTORY_TOKEN: v.optional(v.string()),
     PRIVY_APP_ID: v.optional(v.string()),
   },
 });

@@ -34,7 +34,10 @@ npm run dev
 # Admin at http://localhost:5101 (HMR uses 5102)
 npm run dev:admin
 
-# Both applications
+# Local operations panel at http://127.0.0.1:5110 (HMR uses 5111)
+npm run dev:ops-panel
+
+# Both applications, each also teeing output to its per-service log file
 npm run dev:all
 ```
 
@@ -49,6 +52,31 @@ PACKSCOUT_ADMIN_PORT=5151 PACKSCOUT_ADMIN_HMR_PORT=5152 npm run dev:admin
 Both development servers bind to `127.0.0.1` by default. In development, the
 admin host accepts only explicit loopback values (`127.0.0.1`, `::1`, or
 `localhost`); production self-hosting retains an explicit configurable bind.
+
+### Local operations panel
+
+`npm run dev:ops-panel` starts a loopback-only developer tool that discovers the
+per-service log files local PackScout processes write, and shows the panel's own
+audit trail of privileged attempts. It shares no authentication or runtime with
+the product and admin apps, so it works when they do not, and it has no
+production deployment target. See `ARCHITECTURE.md` for its access model and the
+per-service log-file convention.
+
+Every locally run service can produce a discoverable log file. The supervised
+launchd workflow already does; the plain development workflow tees through a
+wrapper:
+
+```bash
+npm run dev:frontend:logged:local
+npm run dev:admin:logged:local
+npm run dev:worker:logged:local
+npm run dev:ops-panel:logged:local
+```
+
+`npm run dev:all` uses those wrapped commands, so output still reaches the
+terminal and lands in `<log directory>/<service>.log` at the same time. Set
+`PACKSCOUT_LOG_DIR` to point both the wrapper and the panel at another
+directory.
 
 ### Persistent local services on macOS
 

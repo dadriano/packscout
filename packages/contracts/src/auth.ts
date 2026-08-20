@@ -14,9 +14,43 @@ export const operatorPermissions = [
   "imports:start",
   "imports:retry",
   "resources:archive",
+  "product_users:view",
+  "product_users:manage",
 ] as const;
 
 export type OperatorPermission = (typeof operatorPermissions)[number];
+
+/**
+ * The authoritative role grant. Product-user permissions expose personal data
+ * (email addresses and wallet-linked identities) that the rest of the pipeline
+ * deliberately pseudonymizes, so they are granted to `admin` only.
+ */
+export const operatorRolePermissions: Readonly<
+  Record<OperatorRole, readonly OperatorPermission[]>
+> = Object.freeze({
+  admin: Object.freeze([
+    "operators:manage",
+    "providers:view",
+    "providers:manage",
+    "provider_secrets:manage",
+    "imports:start",
+    "imports:retry",
+    "resources:archive",
+    "product_users:view",
+    "product_users:manage",
+  ] as const),
+  data_operator: Object.freeze([
+    "providers:view",
+    "imports:start",
+    "imports:retry",
+  ] as const),
+});
+
+export function permissionsForOperatorRole(
+  role: OperatorRole,
+): OperatorPermission[] {
+  return [...operatorRolePermissions[role]];
+}
 
 const emailSchema = z
   .string()

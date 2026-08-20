@@ -155,7 +155,14 @@ export interface CanonicalRevisionRecord extends CurrentProjection {
   sourceRecordId: string;
 }
 
+/**
+ * Protected raw evidence is retained for exactly this window. It is a policy
+ * invariant rather than a tunable, so worker instances publish this constant as
+ * their effective retention window instead of a copy that could drift.
+ */
+export const PROTECTED_PAYLOAD_RETENTION_DAYS = 90;
+
 export interface RawEvidencePolicy {
-  retentionDays: 90;
+  retentionDays: typeof PROTECTED_PAYLOAD_RETENTION_DAYS;
   actorPseudonymKey: Uint8Array | string;
 }

@@ -11,7 +11,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 
-const MAX_SAVED_ITEMS_PER_KIND = 250;
+export const MAX_SAVED_ITEMS_PER_KIND = 250;
 
 type SavedItemsErrorCode =
   | "AUTH_REQUIRED"

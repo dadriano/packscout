@@ -62,6 +62,8 @@ function retentionRunner(calls?: string[]) {
         knownRemaining: 0,
         deferredOrganizations: 0,
         capReached: false,
+        prunedRecords: 0,
+        prunedFailures: 0,
       };
     },
   };
@@ -514,6 +516,8 @@ test("bounded retention failures are surfaced without changing import counts", a
           knownRemaining: 5,
           deferredOrganizations: 1,
           capReached: true,
+          prunedRecords: 2,
+          prunedFailures: 0,
         };
       },
     },
@@ -544,6 +548,8 @@ test("bounded retention failures are surfaced without changing import counts", a
       retentionFailures: 1,
       retentionDeferredOrganizations: 1,
       retentionCapReached: true,
+      retentionPruned: 2,
+      retentionPruneFailures: 0,
       failureCode: "RETENTION_BATCH_FAILED",
     },
   );

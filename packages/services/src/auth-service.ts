@@ -1,3 +1,4 @@
+import { permissionsForOperatorRole } from "@packscout/contracts";
 import type {
   AuthSessionResponse,
   ListOperatorsQuery,
@@ -10,22 +11,6 @@ import type {
   OperatorState,
   OperatorSummary,
 } from "@packscout/contracts";
-
-const ADMIN_PERMISSIONS: OperatorPermission[] = [
-  "operators:manage",
-  "providers:view",
-  "providers:manage",
-  "provider_secrets:manage",
-  "imports:start",
-  "imports:retry",
-  "resources:archive",
-];
-
-const DATA_OPERATOR_PERMISSIONS: OperatorPermission[] = [
-  "providers:view",
-  "imports:start",
-  "imports:retry",
-];
 
 export interface Clock {
   now(): Date;
@@ -226,7 +211,8 @@ export interface AuthServiceDependencies {
 }
 
 function permissionsForRole(role: OperatorRole): OperatorPermission[] {
-  return [...(role === "admin" ? ADMIN_PERMISSIONS : DATA_OPERATOR_PERMISSIONS)];
+  // The role grant is contract-owned so every surface reads one vocabulary.
+  return permissionsForOperatorRole(role);
 }
 
 function toSessionResponse(actor: AuthenticatedActor): AuthSessionResponse {

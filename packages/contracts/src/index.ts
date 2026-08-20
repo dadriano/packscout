@@ -1,4 +1,5 @@
 export * from "./auth.ts";
+export * from "./background-work.ts";
 export * from "./data-release-v2.ts";
 export * from "./provider-feed.ts";
 export * from "./provider-stream-contract-v2.ts";
@@ -7,3 +8,4 @@ export * from "./repack-heat.ts";
 export * from "./provider.ts";
 export * from "./quarantine.ts";
 export * from "./operations.ts";
+export * from "./worker-presence.ts";

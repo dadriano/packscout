@@ -19,6 +19,18 @@ export function duration(start: string | null, finish: string | null): string {
   return minutes < 60 ? `${minutes}m ${seconds % 60}s` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+export function age(milliseconds: number | null): string {
+  if (milliseconds === null) return "Not recorded";
+  const seconds = Math.max(0, Math.round(milliseconds / 1_000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24
+    ? `${hours}h ${minutes % 60}m`
+    : `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
 export function interval(seconds: number): string {
   if (seconds % 3_600 === 0) return `${seconds / 3_600}h`;
   if (seconds % 60 === 0) return `${seconds / 60}m`;

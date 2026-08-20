@@ -254,6 +254,31 @@ must treat saved-item rows as durable user data. The Privy app ID is public
 configuration; no Privy app secret or access token belongs in a document, log,
 telemetry event, or client-provided ownership field.
 
+## Product-user directory
+
+`productUsers` is durable, user-owned data with the same protections as the
+saved-item tables: it is outside the release graph and must never be deleted,
+reseeded, or replaced by catalog publication or local mock-release utilities.
+
+Each row records one signed-in identity: the subject key (the same verified
+identity that owns saved items), the authentication source, an optional email
+and wallet address when the provider exposes them, first-seen and last-seen
+times, and an account standing of `active` or `suspended`. Standing is
+authoritative for enforcement — authenticated writes consult it at request time,
+and a subject with no row reads as `active`, so absence never denies access.
+Recording is best-effort: a failed write must not block a sign-in or degrade
+existing saved-item behavior. Rows are keyed one-per-subject and repeat
+sign-ins refresh rather than duplicate them.
+
+The directory holds personal data, so its reads are privileged. Enumeration and
+single-record lookup are Convex internal functions, unreachable by any client;
+the sole external entry point is a POST-only server-to-server HTTP surface that
+authenticates the admin integration against a deployment secret before running
+any query, and fails closed when that secret is absent or too short. A signed-in
+user may read only their own standing. Search terms and subject keys never
+travel in a URL or query string, and backend errors are sanitized before they
+leave the deployment.
+
 ## EV estimates
 
 Each repack keeps two independent estimates:

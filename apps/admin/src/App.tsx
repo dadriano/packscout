@@ -6,6 +6,7 @@ import {
 } from "react-router-dom";
 import * as React from "react";
 import { AdminLayout } from "./layouts/AdminLayout";
+import { BackgroundWorkPage } from "./pages/BackgroundWorkPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OperatorsPage } from "./pages/OperatorsPage";
@@ -87,6 +88,7 @@ export const appRoutes = (
         <Route path="operations" element={<OperationsPage />} />
         <Route path="runs" element={<RunsPage />} />
         <Route path="runs/:runId" element={<RunDetailPage />} />
+        <Route path="background-work" element={<BackgroundWorkPage />} />
         <Route path="quarantine" element={<QuarantinePage />} />
         <Route path="quarantine/:quarantineId" element={<QuarantineDetailPage />} />
         <Route path="alerts" element={<AlertsPage />} />

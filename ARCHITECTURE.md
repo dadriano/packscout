@@ -9,6 +9,7 @@ packscout/
 ├── apps/
 │   ├── frontend/   Next.js user-facing application
 │   ├── admin/      Vite/React admin SPA and Express adapter
+│   ├── ops-panel/  Loopback-only local operations panel (developer tool)
 │   └── worker/     Provider import and operational worker runtime
 ├── packages/
 │   ├── contracts/  Browser-safe schemas and shared contracts
@@ -25,17 +26,20 @@ The repository uses npm workspaces with one root lockfile. Each app owns its fra
 
 ```text
 Browser
-  ├── frontend:5100 -> Next.js routes and frontend API adapters
-  └── admin:5101    -> Express -> admin API routes
-                               -> Vite middleware in development
-                               -> built SPA files in production
+  ├── frontend:5100  -> Next.js routes and frontend API adapters
+  ├── admin:5101     -> Express -> admin API routes
+                                -> Vite middleware in development
+                                -> built SPA files in production
+  └── ops-panel:5110 -> Express -> panel API routes (loopback bind only)
+                                -> Vite middleware; development only
 
 Worker -> provider adapters -> services -> Prisma repositories -> PostgreSQL 16+
 ```
 
 Packscout reserves local ports `5100–5199`. The default admin Vite HMR socket
-uses `5102`; future local services should remain in this range unless an
-external protocol requires a conventional port.
+uses `5102`, and the operations panel uses `5110` with `5111` for its HMR
+socket; future local services should remain in this range unless an external
+protocol requires a conventional port.
 
 The apps expose independent `/api/health` endpoints. The admin also owns a typed
 browser API client and a structured API fallback: malformed JSON and unknown
@@ -58,17 +62,66 @@ The Express boundary authenticates, authorizes, validates, delegates to shared
 services, and maps stable errors. Organization scope and mutation permissions are
 enforced again at the persistence boundary and covered directly by integration tests.
 
+## Local operations panel
+
+`apps/ops-panel` is a developer tool, not a product surface. It is deliberately
+independent of product and admin authentication so it still works when they are
+broken, and it is never deployed to shared or production infrastructure.
+
+- It binds loopback only (`127.0.0.1` by default; a non-loopback bind is a
+  configuration error). Remote use is an SSH tunnel landing on that same bind.
+- Its security model is structural rather than account-based. Mutations and raw
+  log downloads require the `x-packscout-ops-panel` request header, which a
+  cross-origin page cannot set without a preflight the panel never approves.
+  An `Origin` header, when present, must be a loopback origin.
+- Sensitive reads — every path under `/api/logs`, `/api/database`, and
+  `/api/activity` — additionally require a loopback `Host` header, which
+  defeats DNS rebinding.
+- Event-stream endpoints relax the custom header only as far as the browser's
+  `EventSource` client requires; the loopback checks always apply.
+- Every privileged attempt — succeeded, failed, or rejected — lands in a
+  bounded, persisted, reverse-chronological audit trail the panel displays.
+- No endpoint, parameter, or debug path runs a caller-supplied command, path, or
+  SQL statement. This is a permanent design invariant.
+
+Non-trivial panel logic (source discovery, guards, audit, stream framing) lives
+in framework-free modules under `apps/ops-panel/server/core` with colocated
+tests, so behavior is provable without a browser.
+
+## Per-service local log files
+
+Locally run PackScout processes write one append-only file per service into a
+single discoverable directory, which is what the operations panel reads:
+
+- directory: `PACKSCOUT_LOG_DIR` when set, otherwise
+  `~/Library/Logs/PackScout` on macOS and
+  `${XDG_STATE_HOME:-~/.local/state}/packscout/logs` elsewhere;
+- file name: `<service>.log`, where `<service>` is lowercase letters, digits,
+  and inner hyphens (1–64 characters). Names outside that set are ignored
+  rather than guessed at.
+
+The supervised launchd workflow redirects each service's output to these files.
+The plain development workflow reaches the same convention through
+`scripts/local/run-service-with-log.mjs`, which tees a known service's output to
+its file while leaving it on stdout. A new service joins by following the naming
+pattern; nothing needs to register with the panel.
+
 ## Dependency direction
 
 ```text
 frontend UI -> frontend server components/API adapters -> shared services -> persistence/external APIs
 admin UI    -> admin client API helpers -> Express adapters -> shared services -> Prisma repositories -> PostgreSQL
 worker      -> provider adapters -> shared services -> Prisma repositories -> PostgreSQL
+ops-panel UI -> ops-panel client API helpers -> Express adapters -> panel core modules -> local filesystem
 ```
 
 Rules:
 
 - `apps/frontend` and `apps/admin` do not import one another.
+- `apps/ops-panel` imports no other application and no shared workspace package;
+  its independence from the product runtime is the point of the tool.
+- `apps/ops-panel/src` is browser code; `apps/ops-panel/server` is server code,
+  and browser code never imports it.
 - `apps/admin/src` never imports `apps/admin/server`, Express, dotenv, or Node-only modules.
 - frontend client components never import `next/server`, Node-only modules, or server-only packages.
 - Express and Next route handlers adapt transport concerns; shared workflows should move behind a transport-neutral service API when a second caller needs them.

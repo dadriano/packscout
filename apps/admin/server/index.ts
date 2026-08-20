@@ -14,6 +14,7 @@ import {
 } from "@packscout/database";
 import { createAdminApp } from "./app.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
+import { createAdminBackgroundWorkRuntime } from "./background-work-runtime.ts";
 import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
 import { createAdminOperationalRuntime } from "./operational-runtime.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
@@ -157,6 +158,10 @@ try {
       credentialKey: providerCredentialKey,
       environment: isDevelopment ? "local" : "production",
       operational,
+    }),
+    backgroundWork: createAdminBackgroundWorkRuntime({
+      database,
+      actorPseudonymKey: providerActorKey,
     }),
     operationalAlerts: { alerts: operational.alerts },
     operationalHealth: { health: operational.health },
