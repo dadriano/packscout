@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/010, buyback-adjusted-ev/013
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder, including full-path deterministic scenarios, local guards, replay, and cleanup verification
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 

@@ -1,6 +1,7 @@
 export * from "./auth-repository.ts";
 export * from "./buyback-ev-revision-repository.ts";
 export * from "./catalog-release-source-repository.ts";
+export * from "./data-release-v3-canonical-catalog-adapter.ts";
 export * from "./catalog-promotion-repository.ts";
 export * from "./catalog-promotion-bootstrap-proof-repository.ts";
 export * from "./catalog-promotion-retention-repository.ts";

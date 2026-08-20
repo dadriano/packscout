@@ -29,6 +29,7 @@ import type * as catalogRetentionState from "../catalogRetentionState.js";
 import type * as crons from "../crons.js";
 import type * as dataReleaseCanonicalHash from "../dataReleaseCanonicalHash.js";
 import type * as dataReleaseV3Lifecycle from "../dataReleaseV3Lifecycle.js";
+import type * as dataReleaseV3Read from "../dataReleaseV3Read.js";
 import type * as dataReleaseV3Search from "../dataReleaseV3Search.js";
 import type * as http from "../http.js";
 import type * as mockCatalogManifestSeed from "../mockCatalogManifestSeed.js";
@@ -101,6 +102,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   dataReleaseCanonicalHash: typeof dataReleaseCanonicalHash;
   dataReleaseV3Lifecycle: typeof dataReleaseV3Lifecycle;
+  dataReleaseV3Read: typeof dataReleaseV3Read;
   dataReleaseV3Search: typeof dataReleaseV3Search;
   http: typeof http;
   mockCatalogManifestSeed: typeof mockCatalogManifestSeed;

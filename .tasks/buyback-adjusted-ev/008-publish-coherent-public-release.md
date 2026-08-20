@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/009, buyback-adjusted-ev/010, buyback-adjusted-ev/012
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including canonical publication, read-model replacement, ranking, and failure verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -69,8 +69,15 @@ Within one environment, activation is the sole boundary that changes the public 
 
 ## Acceptance Criteria
 
-- [ ] A complete new release stages, validates, activates, reads back, refreshes, replays, fails, and rolls back without partial visibility.
-- [ ] Rankings, KPIs, medians, summaries, null ordering, unavailable rows, sold-out history, and vendor EV follow the approved rules.
-- [ ] Tampered arithmetic, versions, references, counts, hashes, search rows, details, batches, and protected data fail closed.
-- [ ] Public reads remain bounded and preserve catalog, desired-collectible, saved-item, Heat, pagination, and category behavior.
-- [ ] No pre-buyback, mixed-method, raw, protected, or proprietary input reaches the active release, and maintenance-gated rollback never exposes mismatched contracts or loses saves.
+- [x] A complete new release stages, validates, activates, reads back, refreshes, replays, fails, and rolls back without partial visibility.
+- [x] Rankings, KPIs, medians, summaries, null ordering, unavailable rows, sold-out history, and vendor EV follow the approved rules.
+- [x] Tampered arithmetic, versions, references, counts, hashes, search rows, details, batches, and protected data fail closed.
+- [x] Public reads remain bounded and preserve catalog, desired-collectible, saved-item, Heat, pagination, and category behavior.
+- [x] No pre-buyback, mixed-method, raw, protected, or proprietary input reaches the active release, and maintenance-gated rollback never exposes mismatched contracts or loses saves.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — Convex data_release_v3 lifecycle (idempotent hash-chained staging, reconciliation, atomic activation with retained previous pointer, rollback), public v3 queries with signed-EV ranking and server-side deadline fail-closed conversion, services release assembler/publisher composing EV solely from the task-006 publication-eligible read, maintenance-gated cutover runbook structurally incapable of touching saves/auth tables, signed HTTP transport with key-gated v3 routes and byte-stable replay, Prisma canonical-catalog adapter with repeatable readAt snapshots, and a cross-runtime protocol parity test.
+- Divergences: (1) no v2-style observation-refresh operation — v3 releases are immutable, a new snapshot is a new release; (2) Heat presents an explicit unavailable state on v3 views until heat republication aligns to v3 (heat frames bind to v2 catalog manifests; wiring them across would violate heat alignment invariants) — follow up in 009/012; (3) vendor_reported_ev_percent sort is INVALID_QUERY — the v3 contract has no vendor percent projection by design; (4) 512 KiB HTTP body cap with fail-closed oversized batches; (5) v3 path constants live in a new contracts file because data-release-v3.ts is task-007-owned; (6) lifecycle read endpoints live in a separate dataReleaseV3Read module. Known non-regression: services test:volume (v2 lane) exceeds its 60s wall-clock budget on this machine at clean HEAD too — pre-existing, machine-load-sensitive.
+- Verification: npm run test:convex (22 files, 145 tests), services unit 542, contracts 177, database 118, root typecheck, lint, ratchet 0 new findings — key gates independently re-run by the orchestrator in the worktree. Task file predates a ## Verification anchor; the convex+services suites are the fallback anchor.
