@@ -5,7 +5,7 @@
 **Blocks:** buyback-adjusted-ev/008, buyback-adjusted-ev/009, buyback-adjusted-ev/012
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder, including invalidation, concurrency, retry, and lifecycle verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -57,8 +57,15 @@ It returns the completed revision identity, outcome state, and bounded operation
 
 ## Acceptance Criteria
 
-- [ ] Every governing input and policy change recalculates, while display-only changes leave the effective fingerprint unchanged.
-- [ ] Concurrent, repeated, failed, out-of-order, and retried work converges without duplicate or incorrect current revisions.
-- [ ] Restock, depletion, price, buyback, value, odds, source-time, availability, and confidence-boundary transitions behave deterministically.
-- [ ] No incomplete, stale, failed, superseded, or pre-buyback result becomes eligible for publication.
-- [ ] Operations can measure and recover the lifecycle without logging protected evidence or unbounded labels.
+- [x] Every governing input and policy change recalculates, while display-only changes leave the effective fingerprint unchanged.
+- [x] Concurrent, repeated, failed, out-of-order, and retried work converges without duplicate or incorrect current revisions.
+- [x] Restock, depletion, price, buyback, value, odds, source-time, availability, and confidence-boundary transitions behave deterministically.
+- [x] No incomplete, stale, failed, superseded, or pre-buyback result becomes eligible for publication.
+- [x] Operations can measure and recover the lifecycle without logging protected evidence or unbounded labels.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no tech-*/ux-* companion specs exist for this feature)
+- Alignment: implemented as specified — recomputation boundary composing task-004 evidence through the task-002 calculator, task-003 confidence policy, and task-005 immutable store; complete governing-change matrix with display-only exclusions; source-time ordering with superseded rejection; bounded queue processor; deterministic publication-eligible selection for task 008; recovery reprocess with byte-identical history.
+- Divergences: none from the task spec. Notable forced interpretations, documented in module docs: fixed per-work-item calculation clock (required for store replay convergence); staleness of unchanged evidence derived at read time via getPublicationEligibleRevision(readAt) with expired_since_calculation (a stored STALE_EVIDENCE revision is minted only when a new stale observation arrives — consistent with the clock-excluded fingerprint); synthetic protected-internal oddsSource constant for evidence-unavailable provenance; surrogate fingerprints bound repeat-invalid-evidence volume through the deduped ledger; no new schema.
+- Verification: 22 focused tests (DB-backed integration executed against migrated throwaway PostgreSQL), full services package suite, typecheck, lint, ratchet 0 new findings — orchestrator re-ran the focused suites, ratchet, and typecheck independently. Task file predates a ## Verification anchor; the focused suites are the fallback anchor.
