@@ -262,15 +262,11 @@ describe("authenticated saved items", () => {
     });
     await t.run(async (ctx) => {
       const state = await ctx.db
-        .query("dataReleaseState")
+        .query("activeCatalogManifestState")
         .withIndex("by_key", (index) => index.eq("key", "singleton"))
         .unique();
-      if (state?.activeReleaseId === null || state === null) {
-        throw new Error("Expected an active release.");
-      }
-      await ctx.db.patch("dataReleases", state.activeReleaseId, {
-        lifecycle: "retired",
-      });
+      if (state === null) throw new Error("Expected an active manifest.");
+      await ctx.db.delete("activeCatalogManifestState", state._id);
     });
     await expect(
       user.mutation(api.savedItems.setSavedRepack, {
@@ -296,39 +292,24 @@ describe("authenticated saved items", () => {
     const publicCollectibleId = fixture.collectibles[0]!.publicCollectibleId;
 
     await t.run(async (ctx) => {
-      const state = await ctx.db
-        .query("dataReleaseState")
-        .withIndex("by_key", (index) => index.eq("key", "singleton"))
-        .unique();
-      if (state?.activeReleaseId === null || state === null) {
-        throw new Error("Expected a seeded active release.");
-      }
-      const releaseId = state.activeReleaseId;
-      const repack = await ctx.db
-        .query("repacks")
-        .withIndex("by_release_id_and_public_repack_id", (index) =>
-          index.eq("releaseId", releaseId).eq("publicRepackId", publicRepackId),
-        )
-        .first();
-      const collectible = await ctx.db
-        .query("collectibles")
-        .withIndex("by_release_id_and_public_collectible_id", (index) =>
-          index
-            .eq("releaseId", releaseId)
-            .eq("publicCollectibleId", publicCollectibleId),
-        )
-        .first();
-      if (repack === null || collectible === null) {
+      const repack = (await ctx.db.query("providerCatalogRepacks").collect())
+        .find((document) => document.publicRepackId === publicRepackId);
+      const collectible = (
+        await ctx.db.query("providerCatalogCollectibles").collect()
+      ).find(
+        (document) => document.publicCollectibleId === publicCollectibleId,
+      );
+      if (repack === undefined || collectible === undefined) {
         throw new Error("Expected seeded active resources.");
       }
-      await ctx.db.insert("repacks", {
-        releaseId,
+      await ctx.db.insert("providerCatalogRepacks", {
+        releaseId: repack.releaseId,
         publicRepackId,
         vendorId: repack.vendorId,
         detail: repack.detail,
       });
-      await ctx.db.insert("collectibles", {
-        releaseId,
+      await ctx.db.insert("providerCatalogCollectibles", {
+        releaseId: collectible.releaseId,
         publicCollectibleId,
         collectibleType: collectible.collectibleType,
         normalizedName: collectible.normalizedName,
@@ -371,21 +352,13 @@ describe("authenticated saved items", () => {
     );
 
     await t.run(async (ctx) => {
-      const state = await ctx.db
-        .query("dataReleaseState")
-        .withIndex("by_key", (index) => index.eq("key", "singleton"))
-        .unique();
-      const template = await ctx.db.query("repacks").first();
-      if (
-        state?.activeReleaseId === null ||
-        state === null ||
-        template === null
-      ) {
+      const template = await ctx.db.query("providerCatalogRepacks").first();
+      if (template === null) {
         throw new Error("Expected a seeded active repack.");
       }
       for (const publicRepackId of [duplicateId, duplicateId, requestedId]) {
-        await ctx.db.insert("repacks", {
-          releaseId: state.activeReleaseId,
+        await ctx.db.insert("providerCatalogRepacks", {
+          releaseId: template.releaseId,
           publicRepackId,
           vendorId: template.vendorId,
           detail: { ...template.detail, publicRepackId },
@@ -432,20 +405,12 @@ describe("authenticated saved items", () => {
     const requestedId = boundedPublicId("40000000", 0);
 
     await t.run(async (ctx) => {
-      const state = await ctx.db
-        .query("dataReleaseState")
-        .withIndex("by_key", (index) => index.eq("key", "singleton"))
-        .unique();
-      const template = await ctx.db.query("repacks").first();
-      if (
-        state?.activeReleaseId === null ||
-        state === null ||
-        template === null
-      ) {
+      const template = await ctx.db.query("providerCatalogRepacks").first();
+      if (template === null) {
         throw new Error("Expected a seeded active repack.");
       }
-      await ctx.db.insert("repacks", {
-        releaseId: state.activeReleaseId,
+      await ctx.db.insert("providerCatalogRepacks", {
+        releaseId: template.releaseId,
         publicRepackId: activeOldestId,
         vendorId: template.vendorId,
         detail: { ...template.detail, publicRepackId: activeOldestId },
@@ -484,20 +449,12 @@ describe("authenticated saved items", () => {
 
     vi.setSystemTime("2026-08-14T12:00:03.000Z");
     await t.run(async (ctx) => {
-      const state = await ctx.db
-        .query("dataReleaseState")
-        .withIndex("by_key", (index) => index.eq("key", "singleton"))
-        .unique();
-      const template = await ctx.db.query("repacks").first();
-      if (
-        state?.activeReleaseId === null ||
-        state === null ||
-        template === null
-      ) {
+      const template = await ctx.db.query("providerCatalogRepacks").first();
+      if (template === null) {
         throw new Error("Expected a seeded active repack.");
       }
-      await ctx.db.insert("repacks", {
-        releaseId: state.activeReleaseId,
+      await ctx.db.insert("providerCatalogRepacks", {
+        releaseId: template.releaseId,
         publicRepackId: requestedId,
         vendorId: template.vendorId,
         detail: { ...template.detail, publicRepackId: requestedId },
@@ -538,16 +495,10 @@ describe("authenticated saved items", () => {
     const requestedId = boundedPublicId("60000000", 0);
 
     await t.run(async (ctx) => {
-      const state = await ctx.db
-        .query("dataReleaseState")
-        .withIndex("by_key", (index) => index.eq("key", "singleton"))
-        .unique();
-      const template = await ctx.db.query("collectibles").first();
-      if (
-        state?.activeReleaseId === null ||
-        state === null ||
-        template === null
-      ) {
+      const template = await ctx.db
+        .query("providerCatalogCollectibles")
+        .first();
+      if (template === null) {
         throw new Error("Expected a seeded active collectible.");
       }
       for (const publicCollectibleId of staleIds) {
@@ -556,8 +507,8 @@ describe("authenticated saved items", () => {
           publicCollectibleId,
         });
       }
-      await ctx.db.insert("collectibles", {
-        releaseId: state.activeReleaseId,
+      await ctx.db.insert("providerCatalogCollectibles", {
+        releaseId: template.releaseId,
         publicCollectibleId: requestedId,
         collectibleType: template.collectibleType,
         normalizedName: template.normalizedName,
@@ -617,22 +568,18 @@ describe("authenticated saved items", () => {
     );
 
     await t.run(async (ctx) => {
-      const state = await ctx.db
-        .query("dataReleaseState")
-        .withIndex("by_key", (index) => index.eq("key", "singleton"))
-        .unique();
-      if (state?.activeReleaseId === null || state === null) {
-        throw new Error("Expected an active release.");
-      }
-      const releaseId = state.activeReleaseId;
-      const templateRepack = await ctx.db.query("repacks").first();
-      const templateCollectible = await ctx.db.query("collectibles").first();
+      const templateRepack = await ctx.db
+        .query("providerCatalogRepacks")
+        .first();
+      const templateCollectible = await ctx.db
+        .query("providerCatalogCollectibles")
+        .first();
       if (templateRepack === null || templateCollectible === null) {
         throw new Error("Expected seeded resource templates.");
       }
       for (const [index, publicRepackId] of repackIds.entries()) {
-        await ctx.db.insert("repacks", {
-          releaseId,
+        await ctx.db.insert("providerCatalogRepacks", {
+          releaseId: templateRepack.releaseId,
           publicRepackId,
           vendorId: templateRepack.vendorId,
           detail: {
@@ -648,8 +595,8 @@ describe("authenticated saved items", () => {
         }
       }
       for (const [index, publicCollectibleId] of collectibleIds.entries()) {
-        await ctx.db.insert("collectibles", {
-          releaseId,
+        await ctx.db.insert("providerCatalogCollectibles", {
+          releaseId: templateCollectible.releaseId,
           publicCollectibleId,
           collectibleType: templateCollectible.collectibleType,
           normalizedName: templateCollectible.normalizedName,

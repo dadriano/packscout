@@ -15,10 +15,11 @@ export function generateStaticParams() {
 }
 
 export const dynamic = "force-dynamic";
+export const dynamicParams = false;
 
 export async function generateMetadata({ params }: LearnArticleProps): Promise<Metadata> {
   const guide = findLearnGuide((await params).slug);
-  return guide ? { title: guide.title, description: guide.description } : {};
+  return guide ? { title: guide.title, description: guide.summary } : {};
 }
 
 export default async function LearnArticlePage({ params }: LearnArticleProps) {

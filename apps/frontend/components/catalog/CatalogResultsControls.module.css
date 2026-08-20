@@ -1,0 +1,126 @@
+.root {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: end;
+  gap: 0.38rem;
+}
+
+.status {
+  flex-basis: 100%;
+  margin: 0 0 0.08rem;
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  text-align: end;
+}
+
+.field {
+  display: grid;
+  gap: 0.18rem;
+  color: var(--color-text-muted);
+  font-size: 0.56rem;
+  font-weight: 720;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.field select {
+  min-height: 2rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.42rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  padding: 0.18rem 1.65rem 0.18rem 0.46rem;
+  text-transform: none;
+}
+
+.sortControls {
+  display: flex;
+  align-items: end;
+  gap: 0.22rem;
+}
+
+.direction,
+.viewToggle button {
+  min-height: 2rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 720;
+}
+
+.direction {
+  min-width: 2rem;
+  border-radius: 0.42rem;
+}
+
+.viewToggle {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 0.45rem;
+}
+
+.viewToggle button {
+  min-width: 3.8rem;
+  border: 0;
+  border-radius: 0;
+  padding: 0.2rem 0.5rem;
+}
+
+.direction:hover,
+.viewToggle button:hover {
+  border-color: var(--color-action);
+  color: var(--color-text);
+}
+
+.viewToggle button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--color-action) 18%, var(--color-surface));
+  color: var(--color-action-strong);
+}
+
+.direction:focus-visible,
+.viewToggle button:focus-visible,
+.field select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-focus) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.direction:disabled,
+.viewToggle button:disabled,
+.field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 860px) {
+  .root {
+    justify-content: start;
+  }
+
+  .status {
+    text-align: start;
+  }
+}
+
+@media (max-width: 500px) {
+  .root {
+    width: 100%;
+  }
+
+  .sortControls {
+    flex: 1 1 auto;
+  }
+
+  .sortControls .field,
+  .sortControls select {
+    width: 100%;
+  }
+}

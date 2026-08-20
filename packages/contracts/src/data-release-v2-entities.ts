@@ -367,6 +367,22 @@ const repackSummaryShape = {
   sourceUpdatedAt: timestampSchema,
 } as const;
 
+function roundedNonNegativeRatioHalfUp(
+  numerator: number,
+  denominator: number,
+): bigint | null {
+  if (denominator === 0) return null;
+  const scaledNumerator = BigInt(numerator) * BigInt("10000");
+  const exactDenominator = BigInt(denominator);
+  const quotient = scaledNumerator / exactDenominator;
+  const remainder = scaledNumerator % exactDenominator;
+  return quotient + (
+    remainder * BigInt("2") >= exactDenominator
+      ? BigInt("1")
+      : BigInt("0")
+  );
+}
+
 function validateRepackSummary(
   repack: z.infer<z.ZodObject<typeof repackSummaryShape>>,
   context: z.RefinementCtx,
@@ -404,13 +420,14 @@ function validateRepackSummary(
       }
       const priceMinor = repack.price.usdComparison.value.minorUnits;
       const expectedDollars = estimate.metrics.grossEv.minorUnits - priceMinor;
-      const expectedReturn = priceMinor === 0
-        ? null
-        : Math.round((estimate.metrics.grossEv.minorUnits * 10_000) / priceMinor);
+      const expectedReturn = roundedNonNegativeRatioHalfUp(
+        estimate.metrics.grossEv.minorUnits,
+        priceMinor,
+      );
       if (
         estimate.metrics.evDollars.minorUnits !== expectedDollars ||
         expectedReturn === null ||
-        estimate.metrics.grossReturnBasisPoints !== expectedReturn
+        BigInt(estimate.metrics.grossReturnBasisPoints) !== expectedReturn
       ) {
         context.addIssue({
           code: "custom",

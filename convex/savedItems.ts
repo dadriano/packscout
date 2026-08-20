@@ -1,4 +1,5 @@
 import {
+  canonicalJson,
   publicCollectibleIdSchema,
   publicRepackIdSchema,
 } from "@packscout/contracts";
@@ -10,6 +11,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
+import { loadValidatedCatalogManifest } from "./catalogManifestState";
 
 const MAX_SAVED_ITEMS_PER_KIND = 250;
 
@@ -79,66 +81,77 @@ function validatePublicCollectibleId(publicCollectibleId: string): void {
   }
 }
 
-async function activeCompleteReleaseId(
+async function activeProviderReleaseIds(
   ctx: MutationCtx,
-): Promise<Id<"dataReleases">> {
-  const states = await ctx.db
-    .query("dataReleaseState")
-    .withIndex("by_key", (index) => index.eq("key", "singleton"))
-    .take(2);
-  if (states.length !== 1 || states[0]!.activeReleaseId === null) {
+): Promise<readonly Id<"providerCatalogReleases">[]> {
+  const loaded = await loadValidatedCatalogManifest(ctx);
+  if (loaded === null || loaded.providerReleases.length === 0) {
     refuse("SAVED_RESOURCE_UNAVAILABLE");
   }
-  const releaseId = states[0]!.activeReleaseId;
-  const release = await ctx.db.get("dataReleases", releaseId);
-  if (release === null || release.lifecycle !== "complete") {
-    refuse("SAVED_RESOURCE_UNAVAILABLE");
-  }
-  return releaseId;
+  return loaded.providerReleases.map(({ _id }) => _id);
 }
 
 async function activeRepackExists(
   ctx: MutationCtx,
-  releaseId: Id<"dataReleases">,
+  releaseIds: readonly Id<"providerCatalogReleases">[],
   publicRepackId: string,
 ): Promise<boolean> {
-  const matches = await ctx.db
-    .query("repacks")
-    .withIndex("by_release_id_and_public_repack_id", (index) =>
-      index.eq("releaseId", releaseId).eq("publicRepackId", publicRepackId),
-    )
-    .take(2);
-  if (
-    matches.length > 1 ||
-    (matches[0] !== undefined &&
-      matches[0].detail.publicRepackId !== publicRepackId)
-  ) {
-    refuse("SAVED_ITEMS_STATE_CONFLICT");
+  let found = false;
+  for (const releaseId of releaseIds) {
+    const matches = await ctx.db
+      .query("providerCatalogRepacks")
+      .withIndex("by_release_id_and_public_repack_id", (index) =>
+        index.eq("releaseId", releaseId).eq("publicRepackId", publicRepackId),
+      )
+      .take(2);
+    const match = matches[0];
+    if (
+      matches.length > 1 ||
+      (match !== undefined &&
+        (match.releaseId !== releaseId ||
+          match.publicRepackId !== publicRepackId ||
+          match.detail.publicRepackId !== publicRepackId)) ||
+      (found && match !== undefined)
+    ) {
+      refuse("SAVED_ITEMS_STATE_CONFLICT");
+    }
+    found ||= match !== undefined;
   }
-  return matches.length === 1;
+  return found;
 }
 
 async function activeCollectibleExists(
   ctx: MutationCtx,
-  releaseId: Id<"dataReleases">,
+  releaseIds: readonly Id<"providerCatalogReleases">[],
   publicCollectibleId: string,
 ): Promise<boolean> {
-  const matches = await ctx.db
-    .query("collectibles")
-    .withIndex("by_release_id_and_public_collectible_id", (index) =>
-      index
-        .eq("releaseId", releaseId)
-        .eq("publicCollectibleId", publicCollectibleId),
-    )
-    .take(2);
-  if (
-    matches.length > 1 ||
-    (matches[0] !== undefined &&
-      matches[0].detail.publicCollectibleId !== publicCollectibleId)
-  ) {
-    refuse("SAVED_ITEMS_STATE_CONFLICT");
+  let canonicalDetail: string | null = null;
+  for (const releaseId of releaseIds) {
+    const matches = await ctx.db
+      .query("providerCatalogCollectibles")
+      .withIndex("by_release_id_and_public_collectible_id", (index) =>
+        index
+          .eq("releaseId", releaseId)
+          .eq("publicCollectibleId", publicCollectibleId),
+      )
+      .take(2);
+    const match = matches[0];
+    const detail = match === undefined
+      ? null
+      : canonicalJson(match.detail);
+    if (
+      matches.length > 1 ||
+      (match !== undefined &&
+        (match.releaseId !== releaseId ||
+          match.publicCollectibleId !== publicCollectibleId ||
+          match.detail.publicCollectibleId !== publicCollectibleId ||
+          (canonicalDetail !== null && canonicalDetail !== detail)))
+    ) {
+      refuse("SAVED_ITEMS_STATE_CONFLICT");
+    }
+    if (detail !== null) canonicalDetail = detail;
   }
-  return matches.length === 1;
+  return canonicalDetail !== null;
 }
 
 function compareText(left: string, right: string): number {
@@ -159,7 +172,7 @@ export function compareSavedItemCandidateOrder(
 
 async function firstUnavailableSavedRepack(
   ctx: MutationCtx,
-  releaseId: Id<"dataReleases">,
+  releaseIds: readonly Id<"providerCatalogReleases">[],
   savedItems: readonly Doc<"savedRepacks">[],
 ): Promise<Doc<"savedRepacks"> | null> {
   const candidates = [...savedItems].sort((left, right) =>
@@ -171,7 +184,7 @@ async function firstUnavailableSavedRepack(
     ),
   );
   for (const candidate of candidates) {
-    if (!(await activeRepackExists(ctx, releaseId, candidate.publicRepackId))) {
+    if (!(await activeRepackExists(ctx, releaseIds, candidate.publicRepackId))) {
       return candidate;
     }
   }
@@ -180,7 +193,7 @@ async function firstUnavailableSavedRepack(
 
 async function firstUnavailableSavedCollectible(
   ctx: MutationCtx,
-  releaseId: Id<"dataReleases">,
+  releaseIds: readonly Id<"providerCatalogReleases">[],
   savedItems: readonly Doc<"savedCollectibles">[],
 ): Promise<Doc<"savedCollectibles"> | null> {
   const candidates = [...savedItems].sort((left, right) =>
@@ -195,7 +208,7 @@ async function firstUnavailableSavedCollectible(
     if (
       !(await activeCollectibleExists(
         ctx,
-        releaseId,
+        releaseIds,
         candidate.publicCollectibleId,
       ))
     ) {
@@ -268,8 +281,8 @@ export const setSavedRepack = mutation({
       return { saved: false, prunedUnavailable: false };
     }
 
-    const releaseId = await activeCompleteReleaseId(ctx);
-    if (!(await activeRepackExists(ctx, releaseId, args.publicRepackId))) {
+    const releaseIds = await activeProviderReleaseIds(ctx);
+    if (!(await activeRepackExists(ctx, releaseIds, args.publicRepackId))) {
       refuse("SAVED_RESOURCE_UNAVAILABLE");
     }
     if (matches[0] !== undefined) {
@@ -288,7 +301,7 @@ export const setSavedRepack = mutation({
     if (savedItems.length === MAX_SAVED_ITEMS_PER_KIND) {
       const stale = await firstUnavailableSavedRepack(
         ctx,
-        releaseId,
+        releaseIds,
         savedItems,
       );
       if (stale === null) refuse("SAVED_ITEM_LIMIT_REACHED");
@@ -328,9 +341,9 @@ export const setSavedCollectible = mutation({
       return { saved: false, prunedUnavailable: false };
     }
 
-    const releaseId = await activeCompleteReleaseId(ctx);
+    const releaseIds = await activeProviderReleaseIds(ctx);
     if (
-      !(await activeCollectibleExists(ctx, releaseId, args.publicCollectibleId))
+      !(await activeCollectibleExists(ctx, releaseIds, args.publicCollectibleId))
     ) {
       refuse("SAVED_RESOURCE_UNAVAILABLE");
     }
@@ -351,7 +364,7 @@ export const setSavedCollectible = mutation({
     if (savedItems.length === MAX_SAVED_ITEMS_PER_KIND) {
       const stale = await firstUnavailableSavedCollectible(
         ctx,
-        releaseId,
+        releaseIds,
         savedItems,
       );
       if (stale === null) refuse("SAVED_ITEM_LIMIT_REACHED");

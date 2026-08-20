@@ -16,6 +16,9 @@
     "packages/services"
   ],
   "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.0"
+    },
     "axios": "1.18.0",
     "postcss": "8.5.25",
     "sharp": "0.35.3",
@@ -77,6 +80,8 @@
     "test:prisma-setup": "npm run test:prisma-setup --workspace=@packscout/database",
     "convex:ai-files": "convex ai-files status",
     "convex:codegen": "convex codegen --typecheck enable",
+    "cutover:reset:preproduction": "node scripts/preproduction/reset-postgres-convex-promotion-cutover.mjs",
+    "cutover:certify:preproduction": "node scripts/preproduction/certify-provider-manifest-readiness.mjs",
     "seed:mock-data-release:local": "node scripts/local/seed-convex-mock-data-release.mjs",
     "simulate:mock-heat:local": "node --import tsx scripts/local/simulate-convex-repack-heat.mjs",
     "dev:frontend:mock:local": "node scripts/local/start-frontend-with-convex-mock.mjs",

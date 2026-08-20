@@ -4,17 +4,26 @@ import type {
   PublicRepackFilters,
 } from "@packscout/contracts";
 import {
+  coveredCategoryIds,
   rowMatchesFilters,
   rowMatchesSearch,
+  type CategoryHierarchy,
   type RepackSearchRow,
 } from "./publicRepackValidation";
+
+export type { CategoryHierarchy } from "./publicRepackValidation";
 
 export function selectionsAreKnown(
   rows: readonly RepackSearchRow[],
   filters: PublicRepackFilters,
+  categoryHierarchy: CategoryHierarchy,
 ): boolean {
   const vendors = new Set(rows.map((row) => row.vendorKey));
-  const categories = new Set(rows.flatMap((row) => row.publicCategoryIds));
+  const categories = new Set(
+    rows.flatMap((row) => [
+      ...coveredCategoryIds(row.publicCategoryIds, categoryHierarchy),
+    ]),
+  );
   const collectibleTypes = new Set(rows.flatMap((row) => row.collectibleTypes));
   return (
     filters.vendors.every((key) => vendors.has(key)) &&
@@ -27,9 +36,12 @@ export function matchingRepackRows(
   rows: readonly RepackSearchRow[],
   filters: PublicRepackFilters,
   search: string,
+  categoryHierarchy: CategoryHierarchy,
 ): RepackSearchRow[] {
   return rows.filter(
-    (row) => rowMatchesSearch(row, search) && rowMatchesFilters(row, filters),
+    (row) =>
+      rowMatchesSearch(row, search) &&
+      rowMatchesFilters(row, filters, { categoryHierarchy }),
   );
 }
 
@@ -87,6 +99,7 @@ export function contextualFacets(
   countableRows: readonly RepackSearchRow[],
   filters: PublicRepackFilters,
   search: string,
+  categoryHierarchy: CategoryHierarchy,
 ): ContextualRepackFacets {
   const vendorLabels = new Map<string, string>();
   const categoryLabels = new Map<string, string>();
@@ -110,20 +123,25 @@ export function contextualFacets(
   const vendorCounts = new Map<string, number>();
   const categoryCounts = new Map<string, number>();
   const collectibleTypeCounts = new Map<string, number>();
+  const matchOptions = { categoryHierarchy };
   for (const row of searched) {
-    if (rowMatchesFilters(row, filters, { ignoreVendors: true })) {
+    if (rowMatchesFilters(row, filters, { ...matchOptions, ignoreVendors: true })) {
       vendorCounts.set(row.vendorKey, (vendorCounts.get(row.vendorKey) ?? 0) + 1);
     }
-    if (rowMatchesFilters(row, filters, { ignoreCategories: true })) {
-      for (const id of row.publicCategoryIds) {
+    if (rowMatchesFilters(row, filters, { ...matchOptions, ignoreCategories: true })) {
+      for (const id of coveredCategoryIds(row.publicCategoryIds, categoryHierarchy)) {
         categoryCounts.set(id, (categoryCounts.get(id) ?? 0) + 1);
+        if (!categoryLabels.has(id)) {
+          const node = categoryHierarchy.get(id);
+          if (node !== undefined) categoryLabels.set(id, node.name);
+        }
       }
     }
     const withoutTypes = {
       ...filters,
       collectibleTypes: [] as typeof filters.collectibleTypes,
     };
-    if (rowMatchesFilters(row, withoutTypes)) {
+    if (rowMatchesFilters(row, withoutTypes, matchOptions)) {
       for (const type of row.collectibleTypes) {
         collectibleTypeCounts.set(
           type,
@@ -147,9 +165,29 @@ export function contextualFacets(
       .filter((option) => option.repackCount > 0 || option.selected)
       .sort((left, right) => left.key.localeCompare(right.key));
 
+  for (const selectedId of filters.categories) {
+    if (categoryLabels.has(selectedId)) continue;
+    const node = categoryHierarchy.get(selectedId);
+    if (node !== undefined) categoryLabels.set(selectedId, node.name);
+  }
+  const categories = [...categoryLabels]
+    .map(([key, label]) => {
+      const node = categoryHierarchy.get(key);
+      return {
+        key,
+        label,
+        repackCount: categoryCounts.get(key) ?? 0,
+        selected: filters.categories.includes(key),
+        parentKey: node?.parentPublicCategoryId ?? null,
+        depth: node?.depth ?? 0,
+      };
+    })
+    .filter((option) => option.repackCount > 0 || option.selected)
+    .sort((left, right) => left.key.localeCompare(right.key));
+
   return {
     vendors: options(vendorLabels, vendorCounts, filters.vendors),
-    categories: options(categoryLabels, categoryCounts, filters.categories),
+    categories,
     collectibleTypes: options(
       collectibleTypeLabels,
       collectibleTypeCounts,

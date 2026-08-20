@@ -122,17 +122,33 @@ test("metric trust language is complete and carries the disclaimer", () => {
   }
 
   // The dashboard label must carry the financial disclaimer verbatim, so the two
-  // cannot drift apart into a compliant label and a non-compliant surface.
+  // cannot drift apart into a compliant label and a non-compliant surface. This
+  // one is genuinely a containment rule: the disclaimer text is the compliance
+  // artifact, not a paraphrase of it.
   assert.ok(
     METRIC_TRUST_COPY.dashboardDisclaimer.includes(
       METRIC_TRUST_COPY.financialDisclaimer,
     ),
     "the dashboard disclaimer must contain the financial disclaimer",
   );
-  assert.ok(
-    METRIC_TRUST_COPY.dashboardDisclaimer.includes(
-      METRIC_TRUST_COPY.estimateLabel,
-    ),
-    "the dashboard disclaimer must name the estimate it qualifies",
+
+  // The disclaimer has to say what it is qualifying and that the figure is an
+  // estimate. Asserting it contains `estimateLabel` verbatim would be a copy
+  // assertion wearing an invariant's clothes — it breaks when the label is
+  // reworded from "Estimated EV" to "EV · Estimated" with identical meaning.
+  assert.match(
+    METRIC_TRUST_COPY.dashboardDisclaimer,
+    /\bEV\b/,
+    "the dashboard disclaimer must name the metric it qualifies",
+  );
+  assert.match(
+    METRIC_TRUST_COPY.dashboardDisclaimer,
+    /estimat/i,
+    "the dashboard disclaimer must signal that the figure is an estimate",
+  );
+  assert.match(
+    METRIC_TRUST_COPY.estimateLabel,
+    /\bEV\b/,
+    "the estimate label must name the metric",
   );
 });

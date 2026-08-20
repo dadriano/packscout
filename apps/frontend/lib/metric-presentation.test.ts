@@ -110,7 +110,10 @@ test("presents PackScout EV as the primary signed estimate with confidence", () 
   const negative = presentPackScoutEv(availableEstimate(100_00, 92_50, -750));
 
   assert.equal(positive.evPercent.displayValue, "+7.50%");
+  assert.equal(positive.evPercent.label, "EV %");
   assert.equal(positive.evDollars.displayValue, "+$7.50");
+  assert.equal(positive.evDollars.label, "EV $");
+  assert.equal(positive.grossEv.label, "Gross EV");
   assert.equal(positive.semanticState, "positive");
   assert.equal(positive.confidence.displayValue, "Medium · 70%");
   assert.match(positive.confidence.accessibleLabel, /reliability, not return/i);
@@ -146,6 +149,7 @@ test("keeps unavailable PackScout EV distinct from zero and vendor EV", () => {
 
   assert.equal(presentation.semanticLabel, "Unavailable");
   assert.equal(presentation.evPercent.displayValue, "Unavailable");
+  assert.equal(presentation.evPercent.label, "EV %");
   assert.equal(presentation.confidence.displayValue, "Unavailable");
   assert.equal(
     presentation.reasonCopy,
@@ -196,6 +200,7 @@ test("keeps vendor-reported EV separate from PackScout EV", () => {
     "$85.00",
   );
   assert.equal(presentPackScoutEvPercent(packScout).displayValue, "+20.00%");
+  assert.equal(presentPackScoutEvPercent(packScout).label, "EV %");
   assert.doesNotMatch(
     presentVendorReportedEv(vendorEstimate).accessibleLabel,
     /PackScout EV/i,

@@ -103,3 +103,78 @@ real contracts at runtime, so nothing needed restating in the tests:
 - `npm run typecheck:frontend` — exit 0
 - `npm run lint:frontend` — exit 0
 - Source modules confirmed unmodified (`git diff` empty for both)
+
+## Update after merging origin/main
+
+`main` advanced substantially while this branch was in flight (PR #12, "Publish
+source-backed Learn articles"). The merge changed this task's outcome in two
+opposite directions, both worth recording.
+
+### The learn-content half was superseded and must be redone
+
+`learn-content.ts` was rewritten: `LEARN_GUIDE_SLUGS`,
+`EXPECTED_VALUE_METRIC_KEYS`, `getLearnMetricDefinitions`, and
+`PACKSCOUT_EV_METHOD` no longer exist, and the guide shape changed to
+`cardTitle` / `summary` / `intro` / `sections[].blocks` across four articles.
+
+The invariant rewrite of `learn-content.test.ts` referenced four deleted exports,
+so `main`'s version was taken wholesale rather than guessed at. That version
+carries real, load-bearing coverage this branch must not weaken — source-fidelity
+checks, minimum word counts, and required regulatory phrases including the
+problem-gambling helpline. It also still contains a mirror block
+(`assert.deepEqual` over slug, `cardTitle`, and `readingTimeMinutes`).
+
+**Re-applying the invariant treatment to the new `learn-content.test.ts` is
+outstanding work**, and should be folded into task 012's scope or a follow-up.
+It was not attempted here because inventing content requirements for articles
+this branch did not author would be guesswork.
+
+### The metric-vocabulary half survived, and `main` proved the point
+
+Every contract that rewrite depends on — `COMPARISON_GLOSSARY`,
+`PUBLIC_REASON_COPY`, `METRIC_TRUST_COPY`, `getGlossaryDefinition`,
+`ALL_REPACKS_HEADERS` — still exists, so the invariant tests were kept.
+
+More usefully, `main`'s own change to the old `metric-vocabulary.test.ts` is a
+textbook demonstration of the problem: **10 insertions and 10 deletions, every
+one a copy edit transcribed into the test.** Someone reworded
+`"PackScout Gross EV minus Repack Price"` to `"Gross EV minus Repack Price"` in
+the source and had to make the identical edit in the test. That is the coupling
+this task removes, evidenced from the repository's own history rather than
+argued from principle.
+
+### A correction to my own work
+
+The merge exposed an over-strict assertion I had written:
+
+```
+dashboardDisclaimer.includes(estimateLabel)
+```
+
+`main` changed the label to `"Estimated EV"` and the disclaimer to
+`"EV · Estimated · Not financial advice."`. Both still express the same thing,
+but the label is no longer a contiguous substring, so the assertion failed. It
+was a copy assertion wearing an invariant's clothes — precisely the mistake this
+task exists to prevent, committed while fixing it. It now asserts that both
+strings name the metric and that the disclaimer signals estimation, which is the
+property that actually matters.
+
+### The deliberate exception: compliance copy stays pinned
+
+One containment assertion was kept strict on purpose: the dashboard disclaimer
+must contain `financialDisclaimer` verbatim. That is compliance text, not
+product prose, and pinning one short legally-meaningful string is worth the
+friction — rewording it should require a deliberate test change.
+
+The resulting policy is coherent and verified:
+
+- Editing **content** copy — three glossary definitions reworded — passes 175/175.
+- Editing **compliance** copy — the financial disclaimer — fails, by design.
+- Deleting a glossary entry the comparison table depends on still fails.
+
+### Verification after merge
+
+- `npm run test:frontend` — 49 files, 175 tests, 0 failures.
+- `npm run test:tooling` — 22 files, 194 tests, 0 failures.
+- Content-copy probe passes; compliance-copy and deletion probes fail as intended.
+- Source modules confirmed unmodified after every probe.

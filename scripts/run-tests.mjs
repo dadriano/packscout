@@ -46,6 +46,7 @@ const targets = {
     roots: ["__tests__", "scripts"],
     testFile: /\.test\.mjs$/,
     loader: false,
+    isolatedFiles: ["scripts/start-admin-embedded.test.mjs"],
   },
 };
 
@@ -236,13 +237,43 @@ if (listOnly) {
 const nodeArguments = [
   "--test",
   ...(target.loader ? ["--import", "tsx"] : []),
-  ...runnable.map((file) =>
-    escapeGlobPath(normalizedRelative(targetDirectory, file)),
-  ),
 ];
-const result = spawnSync(process.execPath, nodeArguments, {
-  cwd: targetDirectory,
-  stdio: "inherit",
-});
 
-process.exit(result.status ?? 1);
+function runFiles(files) {
+  return spawnSync(
+    process.execPath,
+    [
+      ...nodeArguments,
+      ...files.map((file) =>
+        escapeGlobPath(normalizedRelative(targetDirectory, file))
+      ),
+    ],
+    {
+      cwd: targetDirectory,
+      stdio: "inherit",
+    },
+  );
+}
+
+const isolatedFileSet = new Set(target.isolatedFiles ?? []);
+const parallelFiles = runnable.filter((file) =>
+  !isolatedFileSet.has(normalizedRelative(targetDirectory, file))
+);
+const isolatedFiles = runnable.filter((file) =>
+  isolatedFileSet.has(normalizedRelative(targetDirectory, file))
+);
+
+if (parallelFiles.length > 0) {
+  const result = runFiles(parallelFiles);
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+for (const file of isolatedFiles) {
+  console.log(
+    `[run-tests] ${targetName}: executing isolated ${normalizedRelative(targetDirectory, file)}`,
+  );
+  const result = runFiles([file]);
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+process.exit(0);

@@ -10,7 +10,9 @@
   "scripts": {
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test 'src/**/*.test.ts'"
+    "test": "npm run test:unit && npm run test:volume",
+    "test:unit": "node --import tsx --test --test-skip-pattern='^protocol-maximum local catalog preparation stays bounded and completes within one minute$' 'src/**/*.test.ts'",
+    "test:volume": "node --import tsx --test src/catalog-release-volume.test.ts"
   },
   "dependencies": {
     "@packscout/contracts": "0.0.0"

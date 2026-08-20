@@ -3,16 +3,14 @@
 Status: active build handoff — local and cloud-development Convex-backed mock frontend/read-model slices implemented; canonical publication and launch evidence blocked
 Owner: product build
 
-## Scenario: A buyer understands recent repack heat without confusing it with EV
+## Scenario: Repack heat remains hidden before launch
 
-Given a complete data release and a current release-bound heat aggregate
-When the buyer compares repacks or inspects one result
-Then PackScout shows Hot, Warm, Normal, Cold, or Insufficient data using text in addition to color
-And the inspector explains recent activity relative to that repack's own baseline, the observation windows, confidence, public drivers, limitations, and expiry
-And simulated development frames are visibly labeled Simulated
-And no heat state is described as EV, profit, certainty, or a recommendation
+Given the public catalog may include a release-bound heat aggregate
+When the buyer opens Dashboard, All Repacks, a repack inspector, or Learn
+Then no Heat label, badge, detail, or educational copy is visible or exposed to assistive technology
+And existing EV, catalog, selection, and action behavior remains available
 
-Coverage: Automated plus local browser coverage under blocked task `repack-dashboard/013` — 50 contract, 148 service, 18 Convex, 125 frontend, and 19 local-script tests prove strict aggregates, release-bound storage, deterministic one-shot/idempotent replay, loop playback through frame 98, and fail-closed shutdown. Light/dark checks at 1536×1024, 1440×1000, and 390×844 prove compact states, the full inspector explanation, internal table scrolling, modal-sheet focus return, frame replacement, and a fresh console with zero warnings or errors. The complete `npm run verify:framework` gate also passes. Real observed heat remains blocked on normalized live observations, aggregate publication ownership, and preproduction evidence.
+Coverage: Automated source-contract, table-header, and Learn-content tests keep Heat disconnected from public compositions while its data contract and dormant implementation remain intact. Desktop and narrow browser coverage verifies Dashboard, All Repacks, the shared inspector, and Learn with mock Heat data present.
 
 ## Scenario: A buyer opens a coherent market overview
 
@@ -55,10 +53,10 @@ Coverage: Automated plus development-browser coverage — Convex relevance/curso
 
 Given active and sold-out public packs between $10 and $12,000
 When the buyer applies multiple platforms, multiple categories, a price range, and an approved metric sort
-Then only matching rows appear with deterministic ordering and all twelve comparison fields
+Then only matching rows appear with deterministic ordering and every enabled comparison field except prelaunch Heat
 And refresh, back, and forward restore the accepted query state
 
-Coverage: Automated plus development-browser coverage — Convex filter/facet/price/sort/cursor tests, URL restoration tests, exact twelve-column table tests, and desktop/mobile search/selection/internal-overflow browser evidence against the local seed are green. Cloud-development search and selection are also green; cloud pagination and reactive replacement evidence remain open.
+Coverage: Automated plus development-browser coverage — Convex filter/facet/price/sort/cursor tests, URL restoration tests, enabled-column table tests, and desktop/mobile search/selection/internal-overflow browser evidence against the local seed are green. Cloud-development search and selection are also green; cloud pagination and reactive replacement evidence remain open.
 
 ## Scenario: Invalid public input fails safely
 
@@ -163,10 +161,11 @@ Coverage: Automated local coverage — Convex query/filter tests and no-match st
 
 Given the public Learn section
 When the buyer opens it or follows an EV glossary link
-Then exactly “What is a repack?”, “What is Expected Value (EV)?”, and “Repack Red Flags” are available
+Then “PackScout Methodology,” “What Is a Repack?,” “What Is EV (Expected Value)?,” and “Repack Red Flags” are available
+And every index summary links to its complete source-backed article
 And an unknown article address returns not-found
 
-Coverage: Automated plus browser coverage — Learn registry/content/route tests prove exactly the three approved guides, shared metric vocabulary, stable slugs, links, and unknown-slug handling; desktop/mobile browser navigation is green.
+Coverage: Automated plus browser coverage — Learn registry/content/route tests prove exactly four source-backed articles, stable slugs, summary-to-full-article links, complete methodology/repack/EV/red-flag content, and unknown-slug handling; desktop/mobile browser verification covers the index, all four articles, the EV table, and return navigation.
 
 ## Scenario: Theme initializes without a wrong-theme flash
 

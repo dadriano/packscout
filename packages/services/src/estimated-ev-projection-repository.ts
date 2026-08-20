@@ -52,7 +52,17 @@ export interface EstimatedEvCanonicalHistoryPort {
     sourceRecordId: string;
     projections: readonly ProviderCanonicalProjectionCommand[];
     acceptedAt: Date;
-  }): Promise<{ canonicalRevisionCount: number }>;
+    recomputation?: Readonly<{
+      requestId: string;
+      claimToken: string;
+      originatingPublicChangeSequence: bigint;
+      resultStatus: "estimated" | "unavailable";
+      outcomeReasonCode?: string;
+    }>;
+  }): Promise<{
+    canonicalRevisionCount: number;
+    derivationAcknowledged?: boolean;
+  }>;
 }
 
 export interface EstimatedEvCalculationInputSet {
@@ -68,6 +78,13 @@ export interface PersistEstimatedEvProjectionInput {
   readonly sourceRecordId: string;
   readonly projection: ProviderCanonicalProjectionCommand;
   readonly acceptedAt: Date;
+  readonly recomputation?: Readonly<{
+    requestId: string;
+    claimToken: string;
+    originatingPublicChangeSequence: bigint;
+    resultStatus: "estimated" | "unavailable";
+    outcomeReasonCode?: string;
+  }>;
 }
 
 export interface EstimatedEvProjectionRepository {
@@ -90,6 +107,7 @@ export interface EstimatedEvProjectionRepository {
   ): Promise<Readonly<{
     created: boolean;
     calculation: EstimatedEvCanonicalProjectionSnapshot;
+    derivationAcknowledged?: boolean;
   }>>;
 }
 
@@ -172,6 +190,7 @@ export class CanonicalEstimatedEvProjectionRepository
       sourceRecordId: input.sourceRecordId,
       projections: [input.projection],
       acceptedAt: input.acceptedAt,
+      recomputation: input.recomputation,
     });
     const calculation = await currentRevision(this.canonical, input.organizationId, {
       platformKey: input.projection.platformKey,
@@ -181,6 +200,10 @@ export class CanonicalEstimatedEvProjectionRepository
     if (!calculation) {
       throw new Error("Estimated EV projection was not persisted.");
     }
-    return { created: result.canonicalRevisionCount > 0, calculation };
+    return {
+      created: result.canonicalRevisionCount > 0,
+      calculation,
+      derivationAcknowledged: result.derivationAcknowledged,
+    };
   }
 }

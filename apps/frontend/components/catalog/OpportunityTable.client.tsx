@@ -8,7 +8,6 @@ import {
   presentOpportunities,
   type DisplayField,
 } from "./overview-presentation";
-import { RepackHeatBadge } from "./RepackHeatBadge";
 import styles from "./OpportunityTable.module.css";
 
 export type OpportunitySelectionHandler = (
@@ -67,7 +66,6 @@ function ColumnLabel({
   children: string;
   field:
     | "repack"
-    | "heat"
     | "vendor"
     | "category"
     | "repackPrice"
@@ -95,7 +93,7 @@ export function OpportunityTable({
     <section aria-labelledby="top-opportunities-heading" className={styles.section}>
       <div className={styles.sectionHeader}>
         <div>
-          <p className={styles.eyebrow}>Ranked by PackScout EV $</p>
+          <p className={styles.eyebrow}>Ranked by EV $</p>
           <h2 className={styles.heading} id="top-opportunities-heading">
             Top opportunities
           </h2>
@@ -119,9 +117,6 @@ export function OpportunityTable({
                 <ColumnLabel field="repack">Repack</ColumnLabel>
               </th>
               <th scope="col">
-                <ColumnLabel field="heat">Heat</ColumnLabel>
-              </th>
-              <th scope="col">
                 <ColumnLabel field="vendor">Vendor</ColumnLabel>
               </th>
               <th scope="col">
@@ -131,7 +126,7 @@ export function OpportunityTable({
                 <ColumnLabel field="repackPrice">Repack price</ColumnLabel>
               </th>
               <th scope="col">
-                <ColumnLabel field="evPercent">PackScout EV %</ColumnLabel>
+                <ColumnLabel field="evPercent">EV %</ColumnLabel>
               </th>
               <th scope="col">
                 <ColumnLabel field="buybackPercent">Buyback %</ColumnLabel>
@@ -171,9 +166,6 @@ export function OpportunityTable({
                         </span>
                       ) : null}
                     </button>
-                  </td>
-                  <td>
-                    <RepackHeatBadge heat={row.heat} variant="icon" />
                   </td>
                   <td>
                     <span className={styles.vendor}>
