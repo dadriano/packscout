@@ -266,19 +266,6 @@ function CatalogFiltersDraft({
         >
           <legend className={styles.label}>Repack Price</legend>
           <div className={styles.sliderRow}>
-            <label className={styles.priceField}>
-              <span className="sr-only">Minimum repack price in dollars</span>
-              <span aria-hidden="true">$</span>
-              <input
-                inputMode="decimal"
-                max={PRICE_FILTER_MAX_DOLLARS}
-                min={PRICE_FILTER_MIN_DOLLARS}
-                onChange={(event) => setMinimum(event.currentTarget.valueAsNumber)}
-                step="0.01"
-                type="number"
-                value={Number.isFinite(minimum) ? minimum : ""}
-              />
-            </label>
             <div
               className={styles.slider}
               onPointerDown={handleSliderPointerDown}
@@ -318,20 +305,35 @@ function CatalogFiltersDraft({
                 value={Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS}
               />
             </div>
-            <label className={styles.priceField}>
-              <span className="sr-only">Maximum repack price in dollars</span>
-              <span aria-hidden="true">$</span>
-              <input
-                aria-invalid={!valid}
-                inputMode="decimal"
-                max={PRICE_FILTER_MAX_DOLLARS}
-                min={PRICE_FILTER_MIN_DOLLARS}
-                onChange={(event) => setMaximum(event.currentTarget.valueAsNumber)}
-                step="0.01"
-                type="number"
-                value={Number.isFinite(maximum) ? maximum : ""}
-              />
-            </label>
+            <div className={styles.priceFields}>
+              <label className={styles.priceField}>
+                <span className="sr-only">Minimum repack price in dollars</span>
+                <span aria-hidden="true">$</span>
+                <input
+                  inputMode="decimal"
+                  max={PRICE_FILTER_MAX_DOLLARS}
+                  min={PRICE_FILTER_MIN_DOLLARS}
+                  onChange={(event) => setMinimum(event.currentTarget.valueAsNumber)}
+                  step="0.01"
+                  type="number"
+                  value={Number.isFinite(minimum) ? minimum : ""}
+                />
+              </label>
+              <label className={styles.priceField}>
+                <span className="sr-only">Maximum repack price in dollars</span>
+                <span aria-hidden="true">$</span>
+                <input
+                  aria-invalid={!valid}
+                  inputMode="decimal"
+                  max={PRICE_FILTER_MAX_DOLLARS}
+                  min={PRICE_FILTER_MIN_DOLLARS}
+                  onChange={(event) => setMaximum(event.currentTarget.valueAsNumber)}
+                  step="0.01"
+                  type="number"
+                  value={Number.isFinite(maximum) ? maximum : ""}
+                />
+              </label>
+            </div>
           </div>
         </fieldset>
 
