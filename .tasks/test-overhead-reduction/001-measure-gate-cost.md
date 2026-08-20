@@ -109,3 +109,55 @@ that task 005 cleared the three failing gates.
 - `node --test scripts/gate-phases.test.mjs` — 9 tests, 9 pass
 - `npm run measure:gate:baseline` — exit 0, wrote the record, all 33 phases timed
 - `npm run check:scripts` — exit 0 with the two new npm script names
+
+## Correction: the baseline was not comparable to a gate run
+
+A later question exposed a methodology error in how this baseline was used.
+
+`docs/gate-timing-baseline.json` records **206.5s**, and that figure was reported
+against `verify:framework` timings as though the two were the same measurement.
+They are not:
+
+- The baseline is the **sum of 33 separately invoked `npm run <phase>` commands**.
+  `verify:framework` is one chained command. Each separate invocation pays npm's
+  own startup cost, so the sum is inflated relative to a chained run.
+- **The catalog omits `check:prisma` entirely.** The gate runs eight top-level
+  steps; the catalog covers `check:prisma-only` but not `check:prisma`, which is
+  `prisma validate` + `generate` + three Prisma test lanes and measures **13.6s**.
+  The baseline was missing real work the gate does.
+
+So the claim "206.5s to 164.6s" was not like-for-like and should not be repeated.
+
+### The measurement that was missing
+
+The correct comparison is `origin/main` (all of main's current code, none of the
+changes in this feature) against this branch (the same code plus the changes),
+both running the actual gate:
+
+| Gate run | Duration |
+|---|---|
+| `origin/main`, cold caches | **348.4s** |
+| this branch, cold caches | **269.3s** |
+| this branch, warm caches | 214.3s |
+
+**79s faster cold, a 23% reduction.** Cold-versus-cold is the conservative
+figure and the one to quote: it understates the benefit of task 004's
+incremental compilation, which by definition only pays on a warm cache, but it
+is the state a fresh CI runner most resembles.
+
+### What still holds
+
+The per-phase numbers reported throughout this feature were measured the same
+way before and after, on the same branch, and remain valid: lint 13.3s to 8.4s,
+typecheck 28.1s to 13.1s, `test:database` 18.0s to ~5.7s, the four removed
+duplicate builds at 12.7s, and the frontend build A/B at 13.4s.
+
+What was wrong was only the gate-level headline, where a sum of parts was
+compared against a whole.
+
+### What this says about the instrument
+
+The catalog should include `check:prisma`, and `measure:gate` should be able to
+time `verify:framework` end to end as its own phase so that a gate-level
+before-and-after is available without hand-assembling one. Both are worth doing
+before the next round of optimisation work leans on these numbers.

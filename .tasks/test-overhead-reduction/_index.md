@@ -75,7 +75,7 @@ Measured against the committed baseline in `docs/gate-timing-baseline.json`:
 | test:tooling | — | 40.6s, on demand |
 | build | 65.8s | ~54.5s |
 
-`npm run verify:framework` passes end to end.
+`npm run verify:framework` passes end to end: 348.4s on `origin/main` versus 269.3s on this branch, cold caches both (a 23% reduction). See the correction in task 001 — the earlier "206.5s to 164.6s" claim compared a sum of 33 separate invocations against one chained run and omitted `check:prisma`.
 
 **Task 008 is blocked, not deferred.** `main` has no branch protection, so the
 push-to-main workflow run is the only thing verifying `main`. Removing it to
