@@ -22,9 +22,13 @@ test("All Repacks accepts search while Overview accepts compatible filters only"
     vendor: ["courtyard", "collector_crypt"],
     sort: "repack_price",
     direction: "asc",
+    pageSize: "50",
   });
   assert.equal(allRepacks.ok, true);
-  if (allRepacks.ok) assert.equal(allRepacks.query.search, "mythic pokemon");
+  if (allRepacks.ok) {
+    assert.equal(allRepacks.query.search, "mythic pokemon");
+    assert.equal(allRepacks.query.pageSize, 50);
+  }
 
   const dashboard = parseDashboardRouteQuery({
     underdog: "",

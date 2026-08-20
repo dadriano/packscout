@@ -23,14 +23,14 @@
 .inspector[data-placement="sheet"] {
   position: fixed;
   z-index: 80;
-  inset: max(0.75rem, env(safe-area-inset-top)) 0.75rem max(0.75rem, env(safe-area-inset-bottom));
-  width: calc(100% - 1.5rem);
-  max-width: 34rem;
+  inset: 50% auto auto 50%;
+  width: min(34rem, calc(100% - 1.5rem));
   max-height: calc(100dvh - 1.5rem);
-  margin: 0 auto;
+  margin: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   box-shadow: 0 28px 90px color-mix(in srgb, #000 46%, transparent);
+  transform: translate(-50%, -50%);
 }
 
 .inspector[data-placement="sheet"]::backdrop {
@@ -121,6 +121,25 @@
   line-height: 1.35;
 }
 
+.vendorMark {
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--color-action) 34%, var(--color-border));
+  border-radius: 0.28rem;
+  background: color-mix(in srgb, var(--color-action) 12%, var(--color-surface-raised));
+  color: var(--color-action-strong);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.vendor strong {
+  color: var(--color-text);
+  font-weight: 720;
+}
+
 .price {
   display: grid;
   gap: 0.18rem;
@@ -130,6 +149,12 @@
   font-variant-numeric: tabular-nums;
   font-weight: 730;
   letter-spacing: -0.03em;
+}
+
+.priceValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
 }
 
 .price small {
@@ -149,6 +174,11 @@
 .detailsGrid,
 .secondaryDetails {
   min-width: 0;
+}
+
+.secondaryDetails {
+  display: flex;
+  flex-direction: column;
 }
 
 .sectionBlock,
@@ -185,36 +215,19 @@
   line-height: 1.45;
 }
 
-.vendorEstimateContext {
-  margin: 0;
-  color: var(--color-text-muted);
-  font-size: 0.64rem;
-  line-height: 1.45;
-}
-
-.estimateContext {
-  display: grid;
-  gap: 0.38rem;
+.estimateLearnMore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   margin-top: 0.95rem;
-  border-inline-start: 2px solid color-mix(in srgb, var(--color-action) 45%, transparent);
-  padding-inline-start: 0.7rem;
 }
 
-.estimateContext p {
-  margin: 0;
+.financialDisclaimer {
   color: var(--color-text-muted);
-  font-size: 0.66rem;
-  line-height: 1.45;
-}
-
-.limitations {
-  display: grid;
-  gap: 0.3rem;
-  margin: 0.15rem 0 0;
-  color: var(--color-text-muted);
-  font-size: 0.64rem;
-  line-height: 1.45;
-  padding-inline-start: 1rem;
+  font-size: 0.58rem;
+  font-weight: 580;
+  text-align: end;
 }
 
 .learnLink {
@@ -240,6 +253,8 @@
 }
 
 .sectionHeading h3 {
+  display: inline-flex;
+  align-items: center;
   margin: 0;
   font-size: 0.86rem;
   font-weight: 750;
@@ -276,11 +291,36 @@
   letter-spacing: -0.025em;
 }
 
-.chaseValueReason {
-  margin: 0.2rem 0 0;
-  color: var(--color-text-muted);
-  font-size: 0.61rem;
-  line-height: 1.4;
+.chaseValueUnavailableTrigger {
+  display: grid;
+  width: 4.1rem;
+  height: 1.65rem;
+  margin-top: 0.38rem;
+  place-items: center;
+  border: 1px dashed color-mix(in srgb, var(--color-border-strong) 78%, transparent);
+  border-radius: 0.32rem;
+  background: var(--color-surface-subtle);
+  color: var(--color-status-neutral);
+  cursor: help;
+}
+
+.chaseValueUnavailableTrigger:hover,
+.chaseValueUnavailableTrigger[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--color-action) 62%, var(--color-border));
+  color: var(--color-action-strong);
+}
+
+.chaseValueUnavailableTrigger:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-focus) 22%, transparent);
+}
+
+.chaseValueUnavailableGlyph {
+  width: 1.65rem;
+  height: 0.32rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.64;
 }
 
 .chaseEvidence {
@@ -291,19 +331,83 @@
   text-transform: capitalize;
 }
 
-.chaseUnavailable {
+.chaseUnavailableTrigger {
   display: grid;
+  width: 100%;
   min-height: 6.7rem;
-  align-content: center;
-  gap: 0.4rem;
-  color: var(--color-status-neutral);
-  font-size: 0.78rem;
+  place-items: center;
+  border: 1px dashed color-mix(in srgb, var(--color-border-strong) 78%, transparent);
+  border-radius: 0.5rem;
+  background:
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--color-action) 9%, transparent), transparent 50%),
+    var(--color-surface-subtle);
+  color: var(--color-action-strong);
+  cursor: help;
 }
 
-.chaseUnavailable small {
+.chaseUnavailableTrigger:hover,
+.chaseUnavailableTrigger[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--color-action) 62%, var(--color-border));
+  background:
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--color-action) 15%, transparent), transparent 56%),
+    var(--color-surface-subtle);
+}
+
+.chaseUnavailableTrigger:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-focus) 22%, transparent);
+}
+
+.chaseUnavailableGlyph {
+  position: relative;
+  display: grid;
+  width: 3.25rem;
+  height: 3rem;
+  place-items: center;
+}
+
+.chaseUnavailableGlyph span {
+  position: absolute;
+  width: 1.52rem;
+  height: 2rem;
+  border: 1px solid currentColor;
+  border-radius: 0.2rem;
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+}
+
+.chaseUnavailableGlyph span:first-child {
+  transform: translate(-0.5rem, 0.16rem) rotate(-12deg);
+  opacity: 0.46;
+}
+
+.chaseUnavailableGlyph span:nth-child(2) {
+  transform: translate(0.5rem, 0.16rem) rotate(12deg);
+  opacity: 0.68;
+}
+
+.chaseUnavailableGlyph span:last-child {
+  width: 0.4rem;
+  height: 0.4rem;
+  border: 0;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 -0.7rem 0 -0.05rem currentColor;
+}
+
+.repackDestination {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: auto;
+  border-top: 1px solid var(--color-border);
+  padding: 1rem;
+}
+
+.repackDestination p {
+  margin: 0;
   color: var(--color-text-muted);
-  font-size: 0.64rem;
-  line-height: 1.45;
+  font-size: 0.58rem;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .actions {
@@ -425,7 +529,7 @@
     display: grid;
     grid-template-columns: 20rem minmax(0, 1fr);
     align-content: start;
-    max-width: 68rem;
+    width: min(68rem, calc(100% - 1.5rem));
   }
 
   .inspector[data-placement="sheet"] .closeButton {
@@ -487,7 +591,8 @@
 
   .sectionBlock,
   .chase,
-  .actions {
+  .actions,
+  .repackDestination {
     padding: 0.85rem;
   }
 

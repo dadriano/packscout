@@ -301,6 +301,11 @@
   color: var(--color-text);
 }
 
+.reset[data-has-filters="true"] {
+  border-color: color-mix(in srgb, var(--color-negative) 42%, var(--color-border));
+  color: color-mix(in srgb, var(--color-negative) 78%, var(--color-text));
+}
+
 .apply:focus-visible,
 .reset:focus-visible {
   outline: 0;

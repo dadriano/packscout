@@ -66,6 +66,30 @@ function ResetIcon() {
   );
 }
 
+function ClearFiltersIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="14" viewBox="0 0 16 16" width="14">
+      <path
+        d="M3.2 4.3h9.6M6.2 2.5h3.6M5.1 6.2v5.1M8 6.2v5.1M10.9 6.2v5.1M4.3 4.3l.6 8.5h6.2l.6-8.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
+function hasChosenFilters(filters: PublicRepackFilters): boolean {
+  return (
+    filters.vendors.length > 0 ||
+    filters.categories.length > 0 ||
+    filters.collectibleTypes.length > 0 ||
+    filters.availability === "all" ||
+    filters.price.mode === "narrowed"
+  );
+}
+
 function draftStatusMessage(
   valid: boolean,
   changed: boolean,
@@ -153,6 +177,7 @@ function CatalogFiltersDraft({
     maximum <= PUBLIC_REPACK_PRICE_MAX_MINOR / 100 &&
     minimum <= maximum;
   const changed = JSON.stringify(draft) !== JSON.stringify(accepted);
+  const hasFilters = hasChosenFilters(draft);
   const statusMessage = draftStatusMessage(valid, changed, accepted);
   const nestedCategories = useMemo(
     () => categoryFacetRows(facets.categories),
@@ -356,14 +381,15 @@ function CatalogFiltersDraft({
             <ApplyIcon />
           </button>
           <button
-            aria-label="Reset filters"
+            aria-label={hasFilters ? "Clear selected filters" : "Reset filters"}
             className={styles.reset}
+            data-has-filters={hasFilters ? "true" : undefined}
             disabled={pending}
             onClick={onReset}
-            title="Reset filters"
+            title={hasFilters ? "Clear selected filters" : "Reset filters"}
             type="button"
           >
-            <ResetIcon />
+            {hasFilters ? <ClearFiltersIcon /> : <ResetIcon />}
           </button>
         </div>
       </div>

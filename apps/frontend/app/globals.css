@@ -444,6 +444,11 @@ a {
   gap: 0.7rem;
 }
 
+.dashboard-desired-chase {
+  align-self: start;
+  padding-top: 0.08rem;
+}
+
 .dashboard-tabs {
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -475,10 +480,10 @@ a {
 }
 
 .dashboard-disclaimer {
-  margin: 0.28rem 0 0;
+  margin: 1.5rem 0 0;
   color: var(--color-text-muted);
   font-size: 0.75rem;
-  white-space: nowrap;
+  text-align: end;
 }
 
 .dashboard-foundation {
@@ -791,9 +796,13 @@ a {
     gap: 0.55rem;
   }
 
+  .dashboard-desired-chase {
+    width: 100%;
+    padding-top: 0;
+  }
+
   .dashboard-disclaimer {
-    grid-row: 2;
-    white-space: normal;
+    text-align: start;
   }
 
   .kpi-foundation,

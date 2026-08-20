@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import {
-  type FormEvent,
   useEffect,
   useMemo,
   useRef,
@@ -17,9 +16,10 @@ import type {
   PublicRepackViewDetail,
 } from "@packscout/contracts";
 import { AllRepacksTable } from "@/components/catalog/AllRepacksTable.client";
+import { AllRepacksCards } from "@/components/catalog/AllRepacksCards.client";
 import { CatalogFilters } from "@/components/catalog/CatalogFilters.client";
+import { CatalogResultsControls } from "@/components/catalog/CatalogResultsControls.client";
 import { CursorPagination } from "@/components/catalog/CursorPagination";
-import { DesiredCollectibleSearch } from "@/components/catalog/DesiredCollectibleSearch.client";
 import {
   RepackInspector,
   type InspectorActionOutcome,
@@ -31,11 +31,13 @@ import {
 import { NoMatches } from "@/components/catalog-state";
 import {
   DEFAULT_CATALOG_QUERY,
+  type CatalogPageSize,
+  type CatalogViewLayout,
   catalogSheetInspectorInitiallyOpen,
   nextCatalogPage,
   previousCatalogPage,
   resetCatalogPagination,
-  serializeCatalogQueryState,
+  serializeCatalogViewState,
 } from "@/lib/catalog-query-state.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import {
@@ -52,6 +54,7 @@ type AllRepacksClientProps = Readonly<{
   page: ListPublicRepacksPage;
   query: ListPublicRepacksInput;
   details: readonly PublicRepackViewDetail[];
+  initialLayout: CatalogViewLayout;
 }>;
 
 function activeConstraints(page: ListPublicRepacksPage) {
@@ -108,10 +111,10 @@ export function AllRepacksClient({
   page,
   query,
   details,
+  initialLayout,
 }: AllRepacksClientProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [search, setSearch] = useState(page.activeQuery.search);
   const [selectedPublicRepackId, setSelectedPublicRepackId] = useState<
     string | null
   >(page.selectedRepack?.publicRepackId ?? null);
@@ -189,13 +192,11 @@ export function AllRepacksClient({
     );
   }
 
-  function navigate(nextQuery: ListPublicRepacksInput) {
-    startTransition(() => router.push(serializeCatalogQueryState(nextQuery)));
-  }
-
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    navigate(resetCatalogPagination(query, { search }));
+  function navigate(
+    nextQuery: ListPublicRepacksInput,
+    layout = initialLayout,
+  ) {
+    startTransition(() => router.push(serializeCatalogViewState(nextQuery, layout)));
   }
 
   function applyFilters(filters: PublicRepackFilters) {
@@ -204,6 +205,10 @@ export function AllRepacksClient({
 
   function sortCatalog(sort: PublicRepackSort, direction: "asc" | "desc") {
     navigate(resetCatalogPagination(query, { sort, direction }));
+  }
+
+  function changePageSize(pageSize: CatalogPageSize) {
+    navigate(resetCatalogPagination(query, { pageSize }));
   }
 
   async function copyPromo(publicRepackId: string) {
@@ -282,47 +287,23 @@ export function AllRepacksClient({
   }
 
   const noMatches = page.range.total === 0;
+  const resultsControls = (
+    <CatalogResultsControls
+      desiredSearchActive={page.desiredCollectible !== null}
+      direction={page.activeQuery.direction}
+      layout={initialLayout}
+      onLayoutChange={(layout) => navigate(query, layout)}
+      onPageSizeChange={changePageSize}
+      onSort={sortCatalog}
+      pageSize={page.activeQuery.pageSize as CatalogPageSize}
+      pending={pending}
+      searchActive={page.activeQuery.search.length > 0}
+      sort={page.activeQuery.sort}
+    />
+  );
 
   return (
     <div className={styles.root}>
-      <form className={styles.search} onSubmit={submitSearch} role="search">
-        <label htmlFor="all-repacks-search">Search all repacks</label>
-        <div className={styles.searchControl}>
-          <input
-            autoComplete="off"
-            id="all-repacks-search"
-            maxLength={120}
-            onChange={(event) => setSearch(event.currentTarget.value)}
-            placeholder="Repack, vendor, or category"
-            type="search"
-            value={search}
-          />
-          <button disabled={pending} type="submit">
-            {pending ? "Searching…" : "Search"}
-          </button>
-        </div>
-        <p>
-          {page.activeQuery.search
-            ? "Results use relevance only. Clear search to restore metric sorting."
-            : "Search is submitted explicitly; current results keep their accepted order."}
-        </p>
-      </form>
-
-      <DesiredCollectibleSearch
-        onSelect={(publicCollectibleId) =>
-          navigate(
-            resetCatalogPagination(query, {
-              desiredPublicCollectibleId: publicCollectibleId,
-              ...(publicCollectibleId !== null && query.sort === "top_chase_value"
-                ? { sort: "packscout_ev_dollars", direction: "desc" }
-                : {}),
-            }),
-          )
-        }
-        pending={pending}
-        selected={page.desiredCollectible}
-      />
-
       <CatalogFilters
         accepted={page.activeQuery.filters}
         facets={page.facets}
@@ -344,18 +325,32 @@ export function AllRepacksClient({
         />
       ) : (
         <>
-          <AllRepacksTable
-            onCopyPromo={copyPromo}
-            onOpenRepack={openRepack}
-            onSelect={(publicRepackId, trigger) => {
-              selectionTriggerRef.current = trigger;
-              setSelectedPublicRepackId(publicRepackId);
-              setInspectorOpen(true);
-            }}
-            onSort={sortCatalog}
-            page={page}
-            selectedPublicRepackId={selectedPublicRepackId}
-          />
+          {initialLayout === "table" ? (
+            <AllRepacksTable
+              controls={resultsControls}
+              onCopyPromo={copyPromo}
+              onOpenRepack={openRepack}
+              onSelect={(publicRepackId, trigger) => {
+                selectionTriggerRef.current = trigger;
+                setSelectedPublicRepackId(publicRepackId);
+                setInspectorOpen(true);
+              }}
+              onSort={sortCatalog}
+              page={page}
+              selectedPublicRepackId={selectedPublicRepackId}
+            />
+          ) : (
+            <AllRepacksCards
+              controls={resultsControls}
+              onSelect={(publicRepackId, trigger) => {
+                selectionTriggerRef.current = trigger;
+                setSelectedPublicRepackId(publicRepackId);
+                setInspectorOpen(true);
+              }}
+              page={page}
+              selectedPublicRepackId={selectedPublicRepackId}
+            />
+          )}
           <CursorPagination
             hasNext={page.nextCursor !== null}
             hasPrevious={page.hasPrevious}
