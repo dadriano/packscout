@@ -219,6 +219,47 @@ export function derivePublicationUrl(configuration) {
   return `${parsed.protocol}//${parsed.hostname}:${port + 1}`;
 }
 
+/**
+ * Key-order-independent serialization for read-back comparison: Convex
+ * normalizes stored object key order, so raw JSON.stringify equality
+ * would report false divergence for semantically identical estimates.
+ */
+export function canonicalReadBackJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalReadBackJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalReadBackJson(value[key])}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Names the first canonical path where two read-back values differ. */
+export function firstReadBackDifference(actual, expected, path = "evEstimates") {
+  if (canonicalReadBackJson(actual) === canonicalReadBackJson(expected)) {
+    return `${path}: no canonical difference`;
+  }
+  if (
+    actual !== null && expected !== null &&
+    typeof actual === "object" && typeof expected === "object" &&
+    Array.isArray(actual) === Array.isArray(expected)
+  ) {
+    const keys = [...new Set([...Object.keys(actual), ...Object.keys(expected)])]
+      .sort();
+    for (const key of keys) {
+      if (
+        canonicalReadBackJson(actual[key]) !== canonicalReadBackJson(expected[key])
+      ) {
+        return firstReadBackDifference(actual[key], expected[key], `${path}.${key}`);
+      }
+    }
+  }
+  return `${path}: read-back ${canonicalReadBackJson(actual)} != published ${canonicalReadBackJson(expected)}`;
+}
+
 /** Verifies one public v3 read-back against the published frame bytes. */
 export function verifyPublicReadBackResult(result, output) {
   let parsed;
@@ -234,10 +275,12 @@ export function verifyPublicReadBackResult(result, output) {
   const view = parsed.data;
   if (
     view.publicRepackId !== detail.publicRepackId ||
-    JSON.stringify(view.evEstimates) !== JSON.stringify(detail.evEstimates)
+    canonicalReadBackJson(view.evEstimates) !==
+      canonicalReadBackJson(detail.evEstimates)
   ) {
     throw new Error(
-      "The public read-back diverged from the published simulated release.",
+      "The public read-back diverged from the published simulated release" +
+        `: ${firstReadBackDifference(view.evEstimates, detail.evEstimates)}`,
     );
   }
   if (view.heat?.status !== "unavailable") {
