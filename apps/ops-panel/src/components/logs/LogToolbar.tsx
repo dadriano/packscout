@@ -4,14 +4,18 @@ import type {
   TextSize,
   TimestampMode,
 } from "../../logs/display-preferences.ts";
-import { serviceBadgeVariables } from "../../logs/service-badge.ts";
 
 /**
  * The controls above the pane.
  *
- * Visibility toggles are a *view* concern and are applied in the browser: the
- * connection carries every service at all times, so hiding a noisy one is
- * instant and turning it back on loses nothing. Nothing here reconnects.
+ * Everything here is a *view* decision applied in the browser: the connection
+ * carries every service at all times, so nothing on this row reconnects, and
+ * turning something back on loses nothing.
+ *
+ * The reset is deliberately two-step rather than a confirm dialog. It throws
+ * away work an operator built up over a session — hidden services, remembered
+ * searches, reading preferences — so it should take a second press, and the
+ * second press should say what it is about to do.
  */
 
 const STATUS_LABEL: Record<LogConnectionStatus | "browsing", string> = {
@@ -37,10 +41,6 @@ const TEXT_SIZE_LABEL: Record<TextSize, string> = {
 export interface LogToolbarProps {
   status: LogConnectionStatus;
   following: boolean;
-  services: string[];
-  hidden: ReadonlySet<string>;
-  onToggleService: (service: string) => void;
-  onFocusService: (service: string | null) => void;
   preferences: LogDisplayPreferences;
   onPreferenceChange: (patch: Partial<LogDisplayPreferences>) => void;
   paused: boolean;
@@ -49,15 +49,14 @@ export interface LogToolbarProps {
   bufferedCount: number;
   onCopyVisible: () => void;
   copyState: "idle" | "copied" | "failed";
+  onShowShortcuts: () => void;
+  resetArmed: boolean;
+  onResetPreferences: () => void;
 }
 
 export function LogToolbar({
   status,
   following,
-  services,
-  hidden,
-  onToggleService,
-  onFocusService,
   preferences,
   onPreferenceChange,
   paused,
@@ -66,6 +65,9 @@ export function LogToolbar({
   bufferedCount,
   onCopyVisible,
   copyState,
+  onShowShortcuts,
+  resetArmed,
+  onResetPreferences,
 }: LogToolbarProps) {
   const viewingState: LogConnectionStatus | "browsing" =
     status === "live" && !following ? "browsing" : status;
@@ -105,58 +107,21 @@ export function LogToolbar({
               : "Copy visible"}
         </button>
 
+        <button type="button" className="panel-button" onClick={onShowShortcuts}>
+          Shortcuts
+        </button>
+
         <span className="panel-log-count">
           {bufferedCount.toLocaleString("en-US")} lines buffered
         </span>
       </div>
-
-      <fieldset className="panel-log-toolbar-row panel-log-fieldset">
-        <legend>Services</legend>
-        {services.length === 0 ? (
-          <span className="panel-log-count">None discovered yet</span>
-        ) : null}
-        {services.map((service) => {
-          const visible = !hidden.has(service);
-          return (
-            <span key={service} className="panel-log-service-toggle">
-              <label style={serviceBadgeVariables(service)}>
-                <input
-                  type="checkbox"
-                  checked={visible}
-                  onChange={() => onToggleService(service)}
-                />
-                <span className="panel-log-service">{service}</span>
-              </label>
-              <button
-                type="button"
-                className="panel-log-focus"
-                onClick={() => onFocusService(service)}
-                title={`Show only ${service}`}
-              >
-                only
-              </button>
-            </span>
-          );
-        })}
-        {services.length > 0 ? (
-          <button
-            type="button"
-            className="panel-button"
-            onClick={() => onFocusService(null)}
-          >
-            Show all
-          </button>
-        ) : null}
-      </fieldset>
 
       <div className="panel-log-toolbar-row">
         <label className="panel-log-control">
           <input
             type="checkbox"
             checked={preferences.wrap}
-            onChange={(event) =>
-              onPreferenceChange({ wrap: event.target.checked })
-            }
+            onChange={(event) => onPreferenceChange({ wrap: event.target.checked })}
           />
           Wrap long lines
         </label>
@@ -165,9 +130,7 @@ export function LogToolbar({
           <input
             type="checkbox"
             checked={preferences.ansi}
-            onChange={(event) =>
-              onPreferenceChange({ ansi: event.target.checked })
-            }
+            onChange={(event) => onPreferenceChange({ ansi: event.target.checked })}
           />
           Terminal colour
         </label>
@@ -177,9 +140,7 @@ export function LogToolbar({
           <select
             value={preferences.timestamps}
             onChange={(event) =>
-              onPreferenceChange({
-                timestamps: event.target.value as TimestampMode,
-              })
+              onPreferenceChange({ timestamps: event.target.value as TimestampMode })
             }
           >
             {(Object.keys(TIMESTAMP_LABEL) as TimestampMode[]).map((mode) => (
@@ -205,6 +166,17 @@ export function LogToolbar({
             ))}
           </select>
         </label>
+
+        <button
+          type="button"
+          className="panel-button"
+          onClick={onResetPreferences}
+          aria-pressed={resetArmed}
+        >
+          {resetArmed
+            ? "Confirm: forget hidden services, searches, and display settings"
+            : "Reset saved settings"}
+        </button>
       </div>
     </div>
   );

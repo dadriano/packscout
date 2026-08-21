@@ -37,7 +37,7 @@ The user-administration and operations-panel designs port the approved reference
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
 | 006 | Track worker liveness | medium | done | none |
-| 007 | Monitor the worker fleet in the admin | large | todo | 006 |
+| 007 | Monitor the worker fleet in the admin | large | done | 006 |
 | 008 | Surface background queues and maintenance runs | medium | done | none |
 | 009 | Alert on worker and backlog problems | medium | todo | 006, 007, 008 |
 
@@ -48,7 +48,7 @@ The user-administration and operations-panel designs port the approved reference
 | 010 | Establish the local operations panel | medium | done | none |
 | 011 | Stream live logs with faithful tailing | large | done | 010 |
 | 012 | Browse log history and search the past | medium | todo | 011, 013 |
-| 013 | Filter logs with intelligence | large | todo | 011 |
+| 013 | Filter logs with intelligence | large | done | 011 |
 | 014 | Inspect the database safely | medium | todo | 010 |
 | 015 | Run guarded database operations | medium | todo | 014 |
 

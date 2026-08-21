@@ -99,3 +99,13 @@ test("data operators receive pipeline status, run, quarantine, and alert navigat
   assert.match(html, /Import runs/);
   assert.doesNotMatch(html, /href="\/operators"/);
 });
+
+test("both operator roles reach the worker fleet under the pipeline view permission", () => {
+  for (const role of ["admin", "data_operator"] as const) {
+    const html = renderRoute("/workers", session(role));
+
+    assert.match(html, /href="\/workers"/);
+    assert.match(html, /Worker fleet/);
+    assert.match(html, /Data pipeline \/ Workers/);
+  }
+});

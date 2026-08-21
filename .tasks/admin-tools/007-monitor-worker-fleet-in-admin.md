@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/006
 **Blocks:** admin-tools/009
 **Estimated scope:** large
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -41,12 +41,19 @@ An operator opens Workers and immediately sees a headline fleet state: healthy (
 
 ## Acceptance Criteria
 
-- [ ] With live workers, the view shows each instance's state, activity, version, and heartbeat age; with none, it states fleet silence explicitly with the silence duration — or the never-reported statement when no presence records exist at all.
-- [ ] A run whose heartbeat exceeds the threshold appears as stalled, attributed to its owning instance, linking to run detail.
-- [ ] A provider past its next-due time (or with an expired claim) appears in schedule health with the overdue amount, linking to provider detail.
-- [ ] Displayed operating settings match the values the worker published (admin-tools/006), not hard-coded admin-side copies.
-- [ ] Anonymous requests get the standard unauthenticated error; both operator roles can view; all listed states render accessibly without page-level overflow at narrow widths.
+- [x] With live workers, the view shows each instance's state, activity, version, and heartbeat age; with none, it states fleet silence explicitly with the silence duration — or the never-reported statement when no presence records exist at all.
+- [x] A run whose heartbeat exceeds the threshold appears as stalled, attributed to its owning instance, linking to run detail.
+- [x] A provider past its next-due time (or with an expired claim) appears in schedule health with the overdue amount, linking to provider detail.
+- [x] Displayed operating settings match the values the worker published (admin-tools/006), not hard-coded admin-side copies.
+- [x] Anonymous requests get the standard unauthenticated error; both operator roles can view; all listed states render accessibly without page-level overflow at narrow widths.
 
 ## Verification
 
 Admin route behavior tests prove the authorization matrix, staleness/overdue derivations at their thresholds (just-under vs just-over), fleet-silence reporting, and pagination bounds; a page-level test covers healthy, degraded, dead-fleet, and forbidden renderings. The admin lint, typecheck, test, and build commands exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: Follows admin-tools/008's shape exactly — shared server-side condition evaluations in `@packscout/contracts`, a bounded read repository in `@packscout/database`, an admin runtime that composes them, a guarded Express router behind `providers:view`, and a page that renders the transported judgement without recomputing a threshold.
+- Divergences: The stall verdict itself stays with `isImportRunStalled` in `@packscout/services` rather than being restated in contracts — contracts cannot import services, and a second copy is exactly the drift this task forbids; `evaluateRunStall` therefore takes that verdict as a fact and adds the shared measures. Fleet-condition counts come from a bounded 200-record scan per workspace rather than a SQL aggregate, because expressing staleness in SQL would duplicate the shared thresholds. Instance listing is bounded rather than cursor-paginated (presence is capped by its retention window); the two growable listings carry keyset cursors. Narrow-width behavior is inherited from the existing responsive `ops-*` template classes with no new styles introduced, and was verified structurally rather than by a live browser smoke pass.
+- Verification: `npm run lint:admin && npm run typecheck:admin && npm run test:admin && npm run build:admin` — exit 0, 123 admin tests pass, 0 fail. `npm run scan:framework-standards:ratchet` — 0 current findings, 0 new findings, 0 grown modules. `npm run typecheck:contracts`, `npm run lint:contracts`, `npm run lint:database` and `npm run test:contracts` (139 pass) also clean. `npm run typecheck:database` fails only in the pre-existing, untouched `background-work-repository.integration.test.ts` (a Prisma create-input field added by the origin/main merge), unrelated to this work.

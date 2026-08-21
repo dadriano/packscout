@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { LogRow } from "../../api/panel-types.ts";
+import { useNow } from "../../hooks/useNow.ts";
 import {
   TEXT_SIZE_ROW_HEIGHT,
   type LogDisplayPreferences,
 } from "../../logs/display-preferences.ts";
+import type { HighlightRange } from "../../logs/highlight.ts";
+import type { FactsLookup, LogDisplayItem } from "../../logs/line-groups.ts";
 import {
   computeFixedWindow,
   computeMeasuredWindow,
@@ -25,40 +27,31 @@ import { LogRowView } from "./LogRowView.tsx";
  * knows which text must not be evicted out from under them.
  */
 
-/**
- * The clock, as a subscription rather than a render-time read.
- *
- * Relative timestamps are only true for an instant, so they advance on their
- * own second rather than whenever the component happens to re-render.
- */
-function useTickingClock(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
-}
-
 export interface LogViewportProps {
-  rows: readonly LogRow[];
+  /** The rendered rows: standalone lines, fold heads, and revealed members. */
+  items: readonly LogDisplayItem[];
   /** Changes whenever the buffer mutates. */
   version: number;
   preferences: LogDisplayPreferences;
   following: boolean;
   onFollowingChange: (following: boolean) => void;
   onAnchorChange: (id: string | null) => void;
+  facts: FactsLookup;
+  highlight: (text: string) => HighlightRange[];
+  onToggleGroup: (groupId: string) => void;
   emptyMessage: string;
 }
 
 export function LogViewport({
-  rows,
+  items,
   version,
   preferences,
   following,
   onFollowingChange,
   onAnchorChange,
+  facts,
+  highlight,
+  onToggleGroup,
   emptyMessage,
 }: LogViewportProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -87,13 +80,13 @@ export function LogViewport({
             scrollTop,
             viewportHeight,
             metrics,
-            rowCount: rows.length,
+            rowCount: items.length,
           })
         : computeFixedWindow({
             scrollTop,
             viewportHeight,
             rowHeight,
-            rowCount: rows.length,
+            rowCount: items.length,
           }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -101,14 +94,14 @@ export function LogViewport({
       metrics,
       preferences.wrap,
       rowHeight,
-      rows.length,
+      items.length,
       scrollTop,
       version,
       viewportHeight,
     ],
   );
 
-  const visible = rows.slice(virtual.startIndex, virtual.endIndex);
+  const visible = items.slice(virtual.startIndex, virtual.endIndex);
 
   const handleScroll = useCallback(() => {
     const scroller = scrollerRef.current;
@@ -128,8 +121,8 @@ export function LogViewport({
       onAnchorChange(null);
       return;
     }
-    onAnchorChange(rows[virtual.startIndex]?.id ?? null);
-  }, [following, onAnchorChange, rows, virtual.startIndex]);
+    onAnchorChange(items[virtual.startIndex]?.row.id ?? null);
+  }, [following, onAnchorChange, items, virtual.startIndex]);
 
   // The pane's own size is an external system: subscribe to it, and let the
   // width feed the measurement identity above.
@@ -170,7 +163,7 @@ export function LogViewport({
     setScrollTop(scroller.scrollTop);
   }, [following, version, viewportHeight, preferences.wrap, preferences.textSize]);
 
-  const now = useTickingClock(preferences.timestamps === "relative");
+  const now = useNow(1_000, preferences.timestamps === "relative");
 
   return (
     <div
@@ -184,7 +177,7 @@ export function LogViewport({
       aria-label="Service output"
       aria-live="off"
     >
-      {rows.length === 0 ? (
+      {items.length === 0 ? (
         <p className="panel-log-empty">{emptyMessage}</p>
       ) : (
         <div
@@ -196,10 +189,13 @@ export function LogViewport({
             ref={sliceRef}
             style={{ transform: `translateY(${virtual.offsetTop}px)` }}
           >
-            {visible.map((row) => (
+            {visible.map((item) => (
               <LogRowView
-                key={row.id}
-                row={row}
+                key={item.id}
+                item={item}
+                facts={facts}
+                highlight={highlight}
+                onToggleGroup={onToggleGroup}
                 timestamps={preferences.timestamps}
                 ansi={preferences.ansi}
                 now={now}

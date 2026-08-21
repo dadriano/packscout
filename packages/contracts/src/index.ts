@@ -20,4 +20,5 @@ export * from "./repack-heat-publication-receipts.ts";
 export * from "./provider.ts";
 export * from "./quarantine.ts";
 export * from "./operations.ts";
+export * from "./worker-fleet.ts";
 export * from "./worker-presence.ts";

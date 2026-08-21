@@ -36,4 +36,5 @@ export * from "./public-repack-identity-mapping-repository.ts";
 export * from "./quarantine-repository.ts";
 export * from "./security.ts";
 export * from "./setup-repository.ts";
+export * from "./worker-fleet-read-repository.ts";
 export * from "./worker-presence-repository.ts";

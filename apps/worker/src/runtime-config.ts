@@ -3,7 +3,7 @@ import type { ProviderRuntimeEnvironment } from "@packscout/services";
 
 const organizationIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
+const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
 const workerHostPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const workerVersionPattern = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/;
 const canonicalBase64Pattern =
@@ -138,6 +138,8 @@ function publicOrganizationIdFor(value: string | undefined): string {
     );
   }
   return value.toLowerCase();
+}
+
 /**
  * Bounded host descriptor for the presence record. An operator-supplied value
  * is validated strictly; the derived hostname is sanitized because it is an

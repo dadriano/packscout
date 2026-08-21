@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/011
 **Blocks:** admin-tools/012
 **Estimated scope:** large
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -40,12 +40,19 @@ An operator types "quarantine" and the stream thins as they type; they commit it
 
 ## Acceptance Criteria
 
-- [ ] Chips, draft term, case/regex/include-exclude toggles, severity facet, and errors preset compose with the documented semantics, with live match counts and correct highlighting.
-- [ ] A catastrophically slow or invalid pattern is rejected inline without degrading the stream.
-- [ ] Stack traces fold into groups with head severity, group-level match visibility, and in-place expansion.
-- [ ] The source rail shows liveness, size, last write, line rate, and error chips, and the error chip jumps to that service's errors view.
-- [ ] A shared URL reproduces surface, focus, and filter; an undecodable filter degrades gracefully; preference reset clears everything persisted; shortcuts work and stay out of text inputs.
+- [x] Chips, draft term, case/regex/include-exclude toggles, severity facet, and errors preset compose with the documented semantics, with live match counts and correct highlighting.
+- [x] A catastrophically slow or invalid pattern is rejected inline without degrading the stream.
+- [x] Stack traces fold into groups with head severity, group-level match visibility, and in-place expansion.
+- [x] The source rail shows liveness, size, last write, line rate, and error chips, and the error chip jumps to that service's errors view.
+- [x] A shared URL reproduces surface, focus, and filter; an undecodable filter degrades gracefully; preference reset clears everything persisted; shortcuts work and stay out of text inputs.
 
 ## Verification
 
 Pure-logic test suites prove filter compilation semantics (include/exclude/case/regex composition), both regex guards, severity/timestamp/continuation classification, group folding and visibility, and the URL state codec round-trip including the undecodable-filter fallback; the panel test suite and workspace typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: Filtering, line intelligence, grouping, the source rail, URL state, and the shortcut registry are framework-free modules in `apps/ops-panel/src/logs/`, with `compileFilter` as the single definition of what matches so admin-tools/012's history search cannot disagree with live tailing.
+- Divergences: The panel has no DOM/component test harness (`node:test` only, no jsdom or Testing Library), so component wiring — the error chip's click, the filter bar's controls, the help dialog — is verified by types, lint, and the unit-tested logic it composes rather than by a rendering test; this matches the task's own Verification section, which asks for pure-logic suites. Match highlighting is applied to include terms only: excludes are vetoes, and a highlight on a line an exclude did not remove would be meaningless. Markers (restart, rotation, skipped output) bypass the filter and always render, because hiding a gap is the one thing a log viewer must never do.
+- Verification: `npm run test:ops-panel` → 295 tests, 295 pass, 0 fail (exit 0). `npm run typecheck --workspace=@packscout/ops-panel` after deleting `tsconfig.tsbuildinfo` → exit 0. `npm run lint --workspace=@packscout/ops-panel` → exit 0. `npm run scan:framework-standards:ratchet` → 0 findings, 0 new, 0 grown modules (exit 0); largest module added is 292 lines. Workspace-wide `npm run typecheck` and `npm run lint` exit 1 on two pre-existing committed syntax errors outside this task's scope — truncated files `convex/http.ts` (breaks the `convex` and `frontend` lanes) and `apps/worker/src/runtime-config.ts` (breaks the `worker` lane) — both introduced by commit `159e441` and untouched here; every other lane (contracts, database, services, admin, ops-panel) exits 0.

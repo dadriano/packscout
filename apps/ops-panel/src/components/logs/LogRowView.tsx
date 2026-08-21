@@ -1,45 +1,30 @@
 import { memo } from "react";
-import type { LogRow } from "../../api/panel-types.ts";
 import { formatAge, formatClockTime } from "../../format.ts";
-import { parseAnsi, type AnsiStyle } from "../../logs/ansi.ts";
 import type { TimestampMode } from "../../logs/display-preferences.ts";
+import type { HighlightRange } from "../../logs/highlight.ts";
+import type { FactsLookup, LogDisplayItem } from "../../logs/line-groups.ts";
 import { serviceBadgeVariables } from "../../logs/service-badge.ts";
+import type { LogSeverity } from "../../logs/severity.ts";
+import { LineText } from "./LineText.tsx";
 
 /**
- * One row: either a line of output or an inline marker.
+ * One row: a line of output, a folded group's head, or an inline marker.
  *
  * Markers render in the flow rather than as a banner, because their meaning is
- * positional — "the log restarted *here*" is the whole point. Severity badges
- * are deliberately absent; classification arrives with admin-tools/013.
+ * positional — "the log restarted *here*" is the whole point.
+ *
+ * A head shows what it is hiding: how many lines it folded, and how many of
+ * them matched. Without the second number, expanding a group would be a guess,
+ * and a search that matched deep inside a trace would look like a false hit.
  */
 
-function styleFor(style: AnsiStyle): React.CSSProperties {
-  return {
-    color: style.inverse ? style.background : style.foreground,
-    background: style.inverse ? style.foreground : style.background,
-    fontWeight: style.bold ? 600 : undefined,
-    opacity: style.dim ? 0.7 : undefined,
-    fontStyle: style.italic ? "italic" : undefined,
-    textDecoration: style.underline ? "underline" : undefined,
-  };
-}
-
-function LineText({ text, ansi }: { text: string; ansi: boolean }) {
-  const parsed = parseAnsi(text);
-  if (!ansi || !parsed.styled) {
-    // The canonical plain form: the same characters copy, filter, and export use.
-    return <span className="panel-log-text">{parsed.plainText}</span>;
-  }
-  return (
-    <span className="panel-log-text">
-      {parsed.spans.map((span, index) => (
-        <span key={index} style={styleFor(span.style)}>
-          {span.text}
-        </span>
-      ))}
-    </span>
-  );
-}
+const SEVERITY_LABEL: Readonly<Record<LogSeverity, string>> = Object.freeze({
+  error: "ERR",
+  warn: "WRN",
+  info: "INF",
+  debug: "DBG",
+  unknown: "",
+});
 
 function timestampText(value: string, mode: TimestampMode, now: number): string {
   if (mode === "absolute") return formatClockTime(value);
@@ -47,13 +32,27 @@ function timestampText(value: string, mode: TimestampMode, now: number): string 
 }
 
 export interface LogRowViewProps {
-  row: LogRow;
+  item: LogDisplayItem;
+  facts: FactsLookup;
+  highlight: (text: string) => HighlightRange[];
   timestamps: TimestampMode;
   ansi: boolean;
   now: number;
+  onToggleGroup: (groupId: string) => void;
 }
 
-function LogRowViewComponent({ row, timestamps, ansi, now }: LogRowViewProps) {
+function LogRowViewComponent({
+  item,
+  facts,
+  highlight,
+  timestamps,
+  ansi,
+  now,
+  onToggleGroup,
+}: LogRowViewProps) {
+  const { row } = item;
+  const { plainText, time } = facts(row);
+
   if (row.type === "marker") {
     return (
       <div className="panel-log-marker" data-kind={row.kind} role="note">
@@ -70,18 +69,66 @@ function LogRowViewComponent({ row, timestamps, ansi, now }: LogRowViewProps) {
     );
   }
 
+  const severityLabel = SEVERITY_LABEL[item.severity];
+
   return (
-    <div className="panel-log-line" style={serviceBadgeVariables(row.service)}>
+    <div
+      className="panel-log-line"
+      data-severity={item.severity}
+      data-role={item.role}
+      data-matched={item.matched ? "yes" : "no"}
+      style={serviceBadgeVariables(row.service)}
+    >
+      {item.role === "head" ? (
+        <button
+          type="button"
+          className="panel-log-fold"
+          aria-expanded={item.expanded}
+          onClick={() => onToggleGroup(item.groupId)}
+          title={
+            item.expanded
+              ? "Collapse this group"
+              : `Expand ${item.memberCount} folded ${item.memberCount === 1 ? "line" : "lines"}`
+          }
+        >
+          <span aria-hidden="true">{item.expanded ? "▾" : "▸"}</span>
+          <span className="panel-log-fold-count">
+            {item.memberCount}
+            {item.matchedMembers > 0 ? `·${item.matchedMembers}` : ""}
+          </span>
+        </button>
+      ) : (
+        <span className="panel-log-fold-spacer" aria-hidden="true" />
+      )}
+
       <span className="panel-log-service" title={`Service: ${row.service}`}>
         {row.service}
       </span>
+
+      <span
+        className="panel-log-severity"
+        data-severity={item.severity}
+        title={`Severity: ${item.severity}`}
+      >
+        {severityLabel}
+      </span>
+
       {timestamps === "off" ? null : (
-        <span className="panel-log-time" title={row.observedAt}>
-          {row.backfilled ? "~" : ""}
-          {timestampText(row.observedAt, timestamps, now)}
+        <span
+          className="panel-log-time"
+          title={
+            time.approximate
+              ? `${time.at} (when the panel read it, not when it was written)`
+              : time.at
+          }
+        >
+          {time.approximate ? "~" : ""}
+          {timestampText(time.at, timestamps, now)}
         </span>
       )}
-      <LineText text={row.text} ansi={ansi} />
+
+      <LineText text={row.text} ansi={ansi} ranges={highlight(plainText)} />
+
       {row.partial ? (
         <span className="panel-log-partial" title="Published before its newline arrived">
           &#8230;

@@ -15,11 +15,13 @@ import {
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { createAdminApp } from "../../apps/admin/server/app.ts";
+import { createAdminBackgroundWorkRuntime } from "../../apps/admin/server/background-work-runtime.ts";
 import { createNodeAuthSecurity } from "../../apps/admin/server/auth/crypto.ts";
 import { createAdminAuthRuntime } from "../../apps/admin/server/auth/runtime.ts";
 import { createAdminImportOperationsRuntime } from "../../apps/admin/server/import-operations-runtime.ts";
 import { createAdminOperationalRuntime } from "../../apps/admin/server/operational-runtime.ts";
 import { createProviderAdminRuntime } from "../../apps/admin/server/provider-runtime.ts";
+import { createAdminWorkerFleetRuntime } from "../../apps/admin/server/worker-fleet-runtime.ts";
 import {
   readPort,
   readRequiredSecret,
@@ -179,6 +181,11 @@ async function main(): Promise<void> {
         environment: "local",
         operational,
       }),
+      backgroundWork: createAdminBackgroundWorkRuntime({
+        database: harness.database,
+        actorPseudonymKey: providerActorKey,
+      }),
+      workerFleet: createAdminWorkerFleetRuntime({ database: harness.database }),
       operationalAlerts: { alerts: operational.alerts },
       operationalHealth: { health: operational.health },
     });

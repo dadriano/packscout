@@ -4,6 +4,7 @@ import {
   LOG_STREAM_EVENT,
   LOG_STREAM_PATH,
   LOG_WINDOW_PATH,
+  type LogLineRecord,
   type LogRow,
   type LogStreamPayload,
   type LogWindowsPayload,
@@ -60,6 +61,14 @@ export interface UseLogStreamOptions {
   followingLimit?: number;
   browsingLimit?: number;
   pauseLimit?: number;
+  /**
+   * Lines delivered by the live stream, as they arrive.
+   *
+   * Deliberately not called for the initial window: those lines were written
+   * before anyone was watching, and a rate or an error count that included them
+   * would be describing history the panel did not observe.
+   */
+  onLines?: (lines: readonly LogLineRecord[]) => void;
 }
 
 export function useLogStream({
@@ -67,6 +76,7 @@ export function useLogStream({
   followingLimit,
   browsingLimit,
   pauseLimit,
+  onLines,
 }: UseLogStreamOptions = {}): LogStreamState {
   const createMarker = useMemo(() => createClientMarkerFactory(), []);
   const buffer = useMemo(
@@ -95,6 +105,12 @@ export function useLogStream({
 
   const followingRef = useRef(true);
   const windowToken = useRef(0);
+  // Held in a ref so a caller's closure can change without tearing down the
+  // connection: one re-subscribe would cost a buffer reset and a seam marker.
+  const onLinesRef = useRef(onLines);
+  useEffect(() => {
+    onLinesRef.current = onLines;
+  }, [onLines]);
 
   const sync = useCallback(() => {
     setVersion(buffer.version());
@@ -163,6 +179,7 @@ export function useLogStream({
       },
       onMessage: (payload) => {
         if (cancelled) return;
+        if (payload.lines.length > 0) onLinesRef.current?.(payload.lines);
         const rows = toLogRows(payload.lines, payload.markers);
         if (rows.length === 0) return;
         const change = buffer.append(rows);

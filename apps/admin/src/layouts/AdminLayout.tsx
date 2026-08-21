@@ -54,6 +54,8 @@ export function AdminLayout() {
           ? "Quarantine"
         : location.pathname.startsWith("/background-work")
           ? "Background Work"
+        : location.pathname.startsWith("/workers")
+          ? "Workers"
         : location.pathname.startsWith("/alerts")
           ? "Operational Alerts"
         : "Not found";
@@ -85,6 +87,7 @@ export function AdminLayout() {
         { to: "/runs", label: "Import Runs" },
         { to: "/quarantine", label: "Quarantine" },
         { to: "/background-work", label: "Background Work" },
+        { to: "/workers", label: "Workers" },
         { to: "/alerts", label: "Alerts" },
       ]
     : [];

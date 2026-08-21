@@ -22,6 +22,7 @@ import { RunDetailPage } from "./pages/RunDetailPage";
 import { RunsPage } from "./pages/RunsPage";
 import { AlertDetailPage } from "./pages/AlertDetailPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { WorkerFleetPage } from "./pages/WorkerFleetPage";
 import { useSession } from "./providers/session";
 
 function SessionLoading() {
@@ -91,6 +92,7 @@ export const appRoutes = (
         <Route path="runs" element={<RunsPage />} />
         <Route path="runs/:runId" element={<RunDetailPage />} />
         <Route path="background-work" element={<BackgroundWorkPage />} />
+        <Route path="workers" element={<WorkerFleetPage />} />
         <Route path="quarantine" element={<QuarantinePage />} />
         <Route path="quarantine/:quarantineId" element={<QuarantineDetailPage />} />
         <Route path="alerts" element={<AlertsPage />} />

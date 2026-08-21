@@ -29,6 +29,10 @@ import {
   createProductUsersRouter,
   type ProductUsersRouterDependencies,
 } from "./routes/product-users.ts";
+import {
+  createWorkerFleetRouter,
+  type WorkerFleetRouterDependencies,
+} from "./routes/worker-fleet.ts";
 
 export interface AdminAuthHttpDependencies {
   service: AuthService;
@@ -63,6 +67,7 @@ export interface AdminAppDependencies {
     ProductUsersRouterDependencies,
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
+  workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
@@ -172,6 +177,16 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
           auth: service,
           cookiePolicy,
           sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.workerFleet) {
+      app.use(
+        "/api/worker-fleet",
+        createWorkerFleetRouter({
+          ...dependencies.workerFleet,
+          auth: service,
+          cookiePolicy,
         }),
       );
     }

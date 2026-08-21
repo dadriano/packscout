@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Prisma } from "@prisma/client";
 import { PrismaBackgroundWorkRepository } from "./background-work-repository.ts";
 import type { PackscoutPrismaClient } from "./database.ts";
 import {
   PrismaEstimatedEvRecomputationRepository,
   estimatedEvRecomputationRequestKey,
 } from "./estimated-ev-recomputation-repository.ts";
+import {
+  allocatePublicChangeCauses,
+  createPublicDerivationObligations,
+} from "./public-change-settlement-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
+
+const ORIGINATING_CHANGE_SEQUENCE = 1n;
 
 const ids = {
   organization: "51000000-0000-4000-8000-000000000001",
@@ -32,6 +39,9 @@ const now = new Date("2026-08-19T12:00:00.000Z");
 const staleClaimToken = "51000000-0000-4000-8000-00000000c001";
 const liveClaimToken = "51000000-0000-4000-8000-00000000c002";
 const racedClaimToken = "51000000-0000-4000-8000-00000000c003";
+// The claim a worker held when it settled an entry before this fixture began.
+// It is released by then, but its acknowledgement survives on the obligation.
+const settledClaimToken = "51000000-0000-4000-8000-00000000c004";
 
 function at(offsetMs: number): Date {
   return new Date(now.getTime() + offsetMs);
@@ -46,6 +56,7 @@ async function seedWorkspace(
     slug: string;
   },
 ): Promise<void> {
+  const platformKey = `${workspace.slug}-platform`;
   const setup = new PipelineSetupRepository(database);
   await setup.createOrganization({
     id: workspace.organization,
@@ -56,7 +67,7 @@ async function seedWorkspace(
   await setup.createProviderSource({
     id: workspace.provider,
     organizationId: workspace.organization,
-    platformKey: `${workspace.slug}-platform`,
+    platformKey,
     displayName: "Fixture Provider",
     createdAt: at(-3_600_000),
   });
@@ -71,57 +82,160 @@ async function seedWorkspace(
     createdByActorKey: "actor:test",
     createdAt: at(-3_600_000),
   });
+  // Recomputation requests carry a required foreign key to the public change
+  // that originated them, and every derivation obligation hangs off that same
+  // cause. Allocating through the settlement seam writes the cause, its
+  // mandatory catalog impact, and the workspace settlement watermark that
+  // obligations are measured against, so the fixture cannot drift from the
+  // shape production settlement produces.
+  await database.$transaction(async (transaction) => {
+    const [cause] = await allocatePublicChangeCauses(transaction, {
+      organizationId: workspace.organization,
+      changes: [
+        {
+          changeKind: "provider_lifecycle",
+          entityKey: `provider:lifecycle:${workspace.slug}`,
+          sourceKey: platformKey,
+          sourceRevisionKey: workspace.slug,
+          occurredAt: at(-3_600_000),
+          catalogImpact: {
+            kind: "catalog",
+            // An `active` lifecycle impact must list its own platform key among
+            // the affected providers; the database enforces that consistency.
+            providerPlatformKeys: [platformKey],
+            manifestLifecycle: { platformKey, state: "active" },
+          },
+        },
+      ],
+    });
+    // Seeded requests and obligations reference this cause by constant.
+    assert.equal(cause?.sequence, ORIGINATING_CHANGE_SEQUENCE);
+  });
+}
+
+interface SeededRequest {
+  id: string;
+  organization?: string;
+  provider?: string;
+  configuration?: string;
+  state: "queued" | "running" | "completed" | "failed";
+  availableAt: Date;
+  createdAt: Date;
+  updatedAt?: Date;
+  attemptCount?: number;
+  claimedBy?: string;
+  claimToken?: string;
+  claimExpiresAt?: Date;
+  failureCode?: string;
+  completedAt?: Date;
+}
+
+// A request and its derivation obligation have to tell the same story: while
+// work runs the obligation carries the worker's claim, and once the request has
+// settled the obligation records the matching outcome under the claim that
+// acknowledged it. Recomputation reads the obligation back through the request
+// key on every completion, failure, and retry, so a request seeded out of step
+// with its obligation reads as corrupted queue state.
+function seededObligationState(
+  input: SeededRequest,
+): Prisma.public_derivation_obligationsUpdateManyMutationInput | null {
+  const settledAt = input.updatedAt ?? input.createdAt;
+  switch (input.state) {
+    case "queued":
+      // Nothing holds the work, which is how the obligation was just written.
+      return null;
+    case "running":
+      if (!input.claimedBy || !input.claimToken || !input.claimExpiresAt) {
+        throw new Error("A running recomputation fixture needs its worker claim.");
+      }
+      return {
+        state: "claimed",
+        claimed_by: input.claimedBy,
+        claim_token: input.claimToken,
+        claim_expires_at: input.claimExpiresAt,
+        updated_at: settledAt,
+      };
+    case "failed":
+      return {
+        state: "technical_failure",
+        outcome_classification: "technical_failure",
+        outcome_reason_code:
+          input.failureCode ?? "ESTIMATED_EV_RECOMPUTATION_FAILED",
+        acknowledged_claim_token: input.claimToken ?? settledClaimToken,
+        outcome_at: settledAt,
+        updated_at: settledAt,
+      };
+    case "completed": {
+      const completedAt = input.completedAt ?? settledAt;
+      return {
+        state: "succeeded",
+        outcome_classification: "success",
+        acknowledged_claim_token: input.claimToken ?? settledClaimToken,
+        outcome_at: completedAt,
+        updated_at: completedAt,
+      };
+    }
+  }
 }
 
 async function seedRequest(
   database: PackscoutPrismaClient,
-  input: {
-    id: string;
-    organization?: string;
-    provider?: string;
-    configuration?: string;
-    state: "queued" | "running" | "completed" | "failed";
-    availableAt: Date;
-    createdAt: Date;
-    updatedAt?: Date;
-    attemptCount?: number;
-    claimedBy?: string;
-    claimToken?: string;
-    claimExpiresAt?: Date;
-    failureCode?: string;
-    completedAt?: Date;
-  },
+  input: SeededRequest,
 ): Promise<void> {
   const organizationId = input.organization ?? ids.organization;
   const packExternalId = `pack-${input.id.slice(-4)}`;
-  await database.estimated_ev_recomputation_requests.create({
-    data: {
-      id: input.id,
-      request_key: estimatedEvRecomputationRequestKey({
-        organizationId,
-        platformKey: "fixture-platform",
-        packExternalId,
-        evInputExternalId: `${packExternalId}:odds`,
-        packRevisionId: null,
-        evInputRevisionId: null,
-      }),
-      organization_id: organizationId,
-      provider_id: input.provider ?? ids.provider,
-      configuration_revision_id: input.configuration ?? ids.configuration,
-      platform_key: "fixture-platform",
-      pack_external_id: packExternalId,
-      ev_input_external_id: `${packExternalId}:odds`,
-      state: input.state,
-      attempt_count: input.attemptCount ?? 0,
-      available_at: input.availableAt,
-      created_at: input.createdAt,
-      updated_at: input.updatedAt ?? input.createdAt,
-      ...(input.claimedBy ? { claimed_by: input.claimedBy } : {}),
-      ...(input.claimToken ? { claim_token: input.claimToken } : {}),
-      ...(input.claimExpiresAt ? { claim_expires_at: input.claimExpiresAt } : {}),
-      ...(input.failureCode ? { failure_code: input.failureCode } : {}),
-      ...(input.completedAt ? { completed_at: input.completedAt } : {}),
-    },
+  const requestKey = estimatedEvRecomputationRequestKey({
+    organizationId,
+    platformKey: "fixture-platform",
+    packExternalId,
+    evInputExternalId: `${packExternalId}:odds`,
+    packRevisionId: null,
+    evInputRevisionId: null,
+  });
+  await database.$transaction(async (transaction) => {
+    await transaction.estimated_ev_recomputation_requests.create({
+      data: {
+        id: input.id,
+        originating_public_change_sequence: ORIGINATING_CHANGE_SEQUENCE,
+        request_key: requestKey,
+        organization_id: organizationId,
+        provider_id: input.provider ?? ids.provider,
+        configuration_revision_id: input.configuration ?? ids.configuration,
+        platform_key: "fixture-platform",
+        pack_external_id: packExternalId,
+        ev_input_external_id: `${packExternalId}:odds`,
+        state: input.state,
+        attempt_count: input.attemptCount ?? 0,
+        available_at: input.availableAt,
+        created_at: input.createdAt,
+        updated_at: input.updatedAt ?? input.createdAt,
+        ...(input.claimedBy ? { claimed_by: input.claimedBy } : {}),
+        ...(input.claimToken ? { claim_token: input.claimToken } : {}),
+        ...(input.claimExpiresAt ? { claim_expires_at: input.claimExpiresAt } : {}),
+        ...(input.failureCode ? { failure_code: input.failureCode } : {}),
+        ...(input.completedAt ? { completed_at: input.completedAt } : {}),
+      },
+    });
+    // Estimated EV settles a request through the obligation that shares its
+    // claim, so the request is only half-seeded until the obligation exists.
+    await createPublicDerivationObligations(transaction, {
+      organizationId,
+      causeSequences: [ORIGINATING_CHANGE_SEQUENCE],
+      derivationKind: "estimated_ev",
+      derivationKey: requestKey,
+      createdAt: input.createdAt,
+    });
+    const obligationState = seededObligationState(input);
+    if (obligationState) {
+      await transaction.public_derivation_obligations.updateMany({
+        where: {
+          organization_id: organizationId,
+          derivation_kind: "estimated_ev",
+          derivation_key: requestKey,
+        },
+        data: obligationState,
+      });
+    }
   });
 }
 

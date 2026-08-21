@@ -490,6 +490,8 @@ http.route({
       internal.productionHeatRetention.retain,
     ),
   ),
+});
+
 // POST rather than GET: search terms and subject keys are personal data and
 // must not travel in a URL or query string.
 http.route({
@@ -501,5 +503,6 @@ http.route({
   path: "/admin/product-users/record",
   method: "POST",
   handler: getProductUser,
+});
 
 export default http;

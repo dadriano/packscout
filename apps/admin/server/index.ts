@@ -19,6 +19,7 @@ import { createAdminImportOperationsRuntime } from "./import-operations-runtime.
 import { createAdminOperationalRuntime } from "./operational-runtime.ts";
 import { createProductUserDirectoryReader } from "./product-user-directory.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
+import { createAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
 import {
   adminDevelopmentAllowedOrigins,
   adminDevelopmentServerNetwork,
@@ -174,6 +175,7 @@ try {
       database,
       actorPseudonymKey: providerActorKey,
     }),
+    workerFleet: createAdminWorkerFleetRuntime({ database }),
     productUsers: {
       directory: createProductUserDirectoryReader({
         config: productUserDirectoryConfig,
