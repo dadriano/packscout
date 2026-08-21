@@ -63,6 +63,7 @@
     "check:docs": "node scripts/check-docs.mjs",
     "check:scripts": "node scripts/check-scripts.mjs",
     "check:framework": "npm run check:boundaries && npm run check:dependencies && npm run check:docs && npm run check:scripts && npm run check:prisma-only",
+    "capture:dataforest-evidence:local": "node scripts/local/capture-dataforest-evidence.mjs",
     "fetch:gacha-top-cards": "node scripts/fetch-gacha-top-cards.mjs",
     "scan:framework-standards": "node scripts/scan-framework-standards.mjs",
     "scan:framework-standards:baseline": "node scripts/scan-framework-standards.mjs --summary --write-baseline docs/framework-standards-scan-baseline.json",
