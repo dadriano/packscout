@@ -11,6 +11,7 @@ import {
   type WorkerFleetEvaluation,
   type WorkerInstanceView,
 } from "@packscout/contracts";
+import { act } from "react";
 import { MemoryRouter } from "react-router-dom";
 import {
   cleanupPage,
@@ -344,6 +345,163 @@ test("losing pipeline access explains the boundary instead of showing stale evid
   assert.match(text, /Your role no longer permits worker operating settings access/);
   assert.doesNotMatch(text, /worker:live:1/);
   assert.doesNotMatch(text, /Operating thresholds in force/);
+});
+
+/**
+ * Drives one bounded refresh without waiting out the live cadence, through the
+ * same visibility path the page uses. A bare jsdom document reports
+ * "prerender", so the tab is first made visible as a real one would be.
+ */
+async function refresh(renderer: Awaited<ReturnType<typeof renderPage>>) {
+  const { document } = renderer.dom.window;
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => "visible",
+  });
+  await act(async () =>
+    document.dispatchEvent(new renderer.dom.window.Event("visibilitychange")),
+  );
+  await settlePage();
+}
+
+/**
+ * A restart is exactly when the effective settings can change, and a
+ * deployment restarts the fleet. A page left open across one must not keep
+ * measuring fresh worker evidence against thresholds no worker is running.
+ */
+test("effective settings are re-read when a restarted fleet publishes different ones", async (context) => {
+  const restarted: WorkerEffectiveSettings = {
+    ...settings,
+    runHeartbeatStaleAfterMs: 900_000,
+  };
+  let published = resolution;
+  let instance = liveInstance;
+  const requests = stubFetch(context, (request) => {
+    const target = path(request);
+    if (target.startsWith("/api/worker-fleet/instances")) {
+      return jsonResponse({
+        instances: [instance],
+        hasMore: false,
+        fleet: evaluateWorkerFleet({
+          now,
+          instances: [{ status: "running", heartbeatAgeMs: 5_000 }],
+          stalledRuns: 0,
+          wedgedSchedules: 0,
+        }),
+        settings: published,
+      });
+    }
+    if (target.startsWith("/api/worker-fleet/stalled-runs")) {
+      return jsonResponse({
+        items: [],
+        nextCursor: null,
+        staleAfterMs: published.settings?.runHeartbeatStaleAfterMs ?? null,
+      });
+    }
+    if (target.startsWith("/api/worker-fleet/schedules")) {
+      return jsonResponse({ items: [], nextCursor: null, overdueAfterMs: null });
+    }
+    return jsonResponse({ settings: published, observedAt: now });
+  });
+
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+  assert.match(pageText(renderer), /Run heartbeat stale after/);
+  assert.match(pageText(renderer), /5m 0s/);
+
+  // The fleet restarts on a deployment and publishes a different threshold.
+  published = resolveWorkerFleetSettings([restarted]);
+  instance = { ...liveInstance, version: "1.5.0", effectiveSettings: restarted };
+  await refresh(renderer);
+
+  const text = pageText(renderer);
+  assert.match(text, /Run heartbeat stale after 15m 0s/);
+  // The superseded threshold is gone everywhere it was quoted, not just here.
+  assert.doesNotMatch(text, /\b5m 0s/);
+  assert.match(text, /beaten inside its 15m 0s window/);
+  assert.match(text, /1\.5\.0/);
+  // The settings section polls on the same cadence as the evidence above it.
+  assert.equal(
+    requests.filter((entry) => path(entry).startsWith("/api/worker-fleet/settings"))
+      .length,
+    2,
+  );
+});
+
+/**
+ * The hooks deliberately keep their last successful values, and the failure
+ * copy promises that prior safe results remain visible. A fifteen-second
+ * refresh hiccup must therefore report itself beside that evidence, not take
+ * it away from the operator who is acting on it.
+ */
+test("a refresh failure is reported beside the evidence it could not refresh", async (context) => {
+  let failing = false;
+  stubFetch(context, (request) => {
+    if (failing) {
+      return jsonResponse(
+        { error: "The admin service is unavailable.", code: "UNAVAILABLE" },
+        503,
+      );
+    }
+    const target = path(request);
+    if (target.startsWith("/api/worker-fleet/instances")) {
+      return jsonResponse({
+        instances: [liveInstance],
+        hasMore: false,
+        fleet: evaluateWorkerFleet({
+          now,
+          instances: [{ status: "running", heartbeatAgeMs: 5_000 }],
+          stalledRuns: 1,
+          wedgedSchedules: 1,
+        }),
+        settings: resolution,
+      });
+    }
+    if (target.startsWith("/api/worker-fleet/stalled-runs")) {
+      return jsonResponse({
+        items: [stalledRun],
+        nextCursor: null,
+        staleAfterMs: settings.runHeartbeatStaleAfterMs,
+      });
+    }
+    if (target.startsWith("/api/worker-fleet/schedules")) {
+      return jsonResponse({
+        items: [wedgedSchedule],
+        nextCursor: null,
+        overdueAfterMs: settings.presenceStaleAfterMs,
+      });
+    }
+    return jsonResponse({ settings: resolution, observedAt: now });
+  });
+
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+  assert.match(pageText(renderer), /worker:live:1/);
+
+  failing = true;
+  await refresh(renderer);
+
+  const text = pageText(renderer);
+  // The failure is stated, once per section, and it is stated truthfully.
+  assert.match(text, /worker fleet status is temporarily unavailable/);
+  assert.match(text, /Prior safe results remain visible/);
+  // And the evidence it could not refresh is exactly where it was.
+  assert.match(text, /Workers are running/);
+  assert.match(text, /worker:live:1/);
+  assert.match(text, /Stalled import runs/);
+  assert.match(text, /Claim expired/);
+  assert.match(text, /Operating thresholds in force/);
+  assert.match(text, /Run heartbeat stale after/);
+  assert.ok(renderer.container.querySelector('[role="alert"]'));
+  // Retrying is still offered for every section that failed.
+  assert.equal(
+    [...renderer.container.querySelectorAll("button")].filter(
+      (button) => button.textContent?.trim() === "Try again",
+    ).length,
+    4,
+  );
 });
 
 test("live status refreshes on a bounded cadence rather than per second", async (context) => {

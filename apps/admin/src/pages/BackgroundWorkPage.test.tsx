@@ -233,6 +233,74 @@ test("a worker that wins the race surfaces as an already-resolved conflict", asy
   assert.doesNotMatch(text, /The action failed/);
 });
 
+/**
+ * A recovery acts on the rows the operator can see. A selection carried across
+ * a page change would keep consuming the bounded selection limit while offering
+ * nothing on screen to act on — the operator would eventually be told the limit
+ * was reached with no selected row anywhere in sight.
+ */
+test("paging drops the previous page's selection instead of carrying invisible ids", async (context) => {
+  const secondPageId = "00000000-0000-4000-8000-000000000052";
+  const secondPageStuck: RecomputationQueueEntry = {
+    ...stuck,
+    id: secondPageId,
+    packReference: "pack:0f0e0d0c0b0a",
+  };
+  const requests = stubFetch(context, (request) => {
+    if (path(request).endsWith("/recoveries")) {
+      return jsonResponse({
+        result: {
+          requestId: secondPageId,
+          outcome: "released",
+          entry: { ...secondPageStuck, state: "pending", claimExpired: false },
+        },
+      });
+    }
+    if (path(request).startsWith("/api/background-work/recomputations")) {
+      return jsonResponse(
+        path(request).includes("cursor=page-two")
+          ? { items: [secondPageStuck], nextCursor: null, backlog }
+          : { items: [stuck], nextCursor: "page-two", backlog },
+      );
+    }
+    return jsonResponse({ items: [execution], nextCursor: null, cadence });
+  });
+
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  const checkbox = () =>
+    renderer.container.querySelector<HTMLInputElement>("input[type=checkbox]");
+  await act(async () => checkbox()?.click());
+  findButton(renderer, "Release stuck claims (1)");
+
+  await act(async () => findButton(renderer, "Next").click());
+  await settlePage();
+
+  // The new page arrives with nothing selected: the previous page's identifier
+  // went with the rows it belonged to.
+  assert.match(pageText(renderer), /pack:0f0e0d0c0b0a/);
+  assert.equal(checkbox()?.checked, false);
+  assert.deepEqual(
+    [...renderer.container.querySelectorAll("button")]
+      .map((button) => button.textContent?.trim() ?? "")
+      .filter((label) => label.startsWith("Release stuck claims")),
+    [],
+  );
+
+  // Selecting on the new page recovers exactly the row that is visible.
+  await act(async () => checkbox()?.click());
+  await act(async () => findButton(renderer, "Release stuck claims (1)").click());
+  await act(async () => findButton(renderer, "Release request").click());
+  await settlePage();
+
+  const recoveries = requests.filter((entry) => path(entry).endsWith("/recoveries"));
+  assert.equal(recoveries.length, 1);
+  assert.match(path(recoveries[0] as RecordedRequest), new RegExp(secondPageId));
+  assert.match(pageText(renderer), /1 returned to the queue/);
+});
+
 test("losing pipeline access explains the boundary instead of showing stale controls", async (context) => {
   stubFetch(context, () =>
     jsonResponse({ error: "Forbidden", code: "FORBIDDEN" }, 403),

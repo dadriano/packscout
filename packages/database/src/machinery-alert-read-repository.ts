@@ -54,18 +54,74 @@ function assertLimit(limit: number): number {
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** Keyset position in the creation-ordered workspace rotation. */
+interface OrganizationRotation {
+  readonly createdAt: Date;
+  readonly id: string;
+}
+
 export class PrismaMachineryAlertReadRepository {
+  /**
+   * Where the next cycle resumes. One repository instance serves the alerting
+   * loop for the life of the process, so the rotation lives with it rather than
+   * being threaded through every caller.
+   */
+  #rotation: OrganizationRotation | null = null;
+
   constructor(private readonly database: PackscoutPrismaClient) {}
 
-  /** Workspaces the cycle evaluates, oldest first so the set stays stable. */
+  /**
+   * Workspaces this cycle evaluates, resuming where the last cycle stopped and
+   * wrapping back to the oldest once the tail runs out.
+   *
+   * One cycle stays a bounded unit of work, but always starting from the oldest
+   * workspace would mean workspace 51 and later never receive a worker,
+   * backlog, schedule, or retention alert at all. Rotating the starting point
+   * keeps the bound and still reaches every workspace within a few cycles.
+   */
   async listOrganizations(input: { limit: number }): Promise<readonly string[]> {
     const limit = assertLimit(input.limit);
-    const rows = await this.database.organizations.findMany({
+    const tail = await this.pageOrganizations(limit, this.#rotation);
+    const rows =
+      tail.length < limit && this.#rotation !== null
+        ? [...tail, ...(await this.pageOrganizations(limit - tail.length, null))]
+        : tail;
+    // Wrapping can revisit the head when a workspace count is below the page
+    // size; one cycle still evaluates each workspace exactly once.
+    const identities: string[] = [];
+    const seen = new Set<string>();
+    let resume: OrganizationRotation | null = null;
+    for (const row of rows) {
+      resume = { createdAt: row.created_at, id: row.id };
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      identities.push(row.id);
+    }
+    // A cycle that found nothing restarts from the oldest workspace rather than
+    // holding a position that no longer exists.
+    this.#rotation = resume;
+    return identities;
+  }
+
+  private pageOrganizations(
+    limit: number,
+    after: OrganizationRotation | null,
+  ): Promise<readonly { id: string; created_at: Date }[]> {
+    return this.database.organizations.findMany({
+      ...(after === null
+        ? {}
+        : {
+            where: {
+              OR: [
+                { created_at: { gt: after.createdAt } },
+                { created_at: after.createdAt, id: { gt: after.id } },
+              ],
+            },
+          }),
       orderBy: [{ created_at: "asc" }, { id: "asc" }],
       take: limit,
-      select: { id: true },
+      select: { id: true, created_at: true },
     });
-    return rows.map((row) => row.id);
   }
 
   async readOpenAlerts(input: {

@@ -74,11 +74,16 @@ test("a composed worker publishes the settings it is actually running with", asy
 
     await runtime.start();
 
-    const record = await presence.getInstance(configuration.workerId);
+    const record = await presence.getInstance(runtime.workerId);
     assert.ok(record, "the starting instance registered durable presence");
 
-    // Identity is the same string the instance stamps as lease/claim owner.
-    assert.equal(record.instanceId, configuration.workerId);
+    // Identity is the same string the instance stamps as lease/claim owner, and
+    // it names this process rather than the deployment every replica shares.
+    assert.equal(record.instanceId, runtime.workerId);
+    assert.match(
+      record.instanceId,
+      /^worker:composed:1:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/,
+    );
     assert.equal(record.version, configuration.workerVersion);
     assert.equal(record.host, configuration.workerHost);
     assert.equal(record.runtimeVersion, process.version);

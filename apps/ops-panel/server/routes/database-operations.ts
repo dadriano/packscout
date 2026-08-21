@@ -84,29 +84,35 @@ export function createDatabaseOperationsRouter({
   router.post(
     "/:operation",
     express.json({ limit: BODY_LIMIT }),
-    (request: Request, response: Response) => {
+    (request: Request, response: Response, next: NextFunction) => {
       const body = (request.body ?? {}) as Record<string, unknown>;
-      const result = runner.start({
-        operation: request.params.operation,
-        acknowledgement: body.acknowledgement,
-        expectedDatabase: body.expectedDatabase,
-      });
+      // Awaited because the supervisor does not spawn until the run's in-flight
+      // marker is durable: answering earlier would tell the operator a run had
+      // started that a crash could still lose without trace.
+      runner
+        .start({
+          operation: request.params.operation,
+          acknowledgement: body.acknowledgement,
+          expectedDatabase: body.expectedDatabase,
+        })
+        .then((result) => {
+          if (!result.ok) {
+            recordPanelOutcome(response, "rejected", result.message);
+            response.status(result.status).json({
+              error: result.message,
+              code: result.code,
+            });
+            return;
+          }
 
-      if (!result.ok) {
-        recordPanelOutcome(response, "rejected", result.message);
-        response.status(result.status).json({
-          error: result.message,
-          code: result.code,
-        });
-        return;
-      }
-
-      recordPanelOutcome(
-        response,
-        "succeeded",
-        `started ${result.run.label.toLowerCase()} against "${result.run.database}" (run ${result.run.runId})`,
-      );
-      response.status(202).json(snapshot());
+          recordPanelOutcome(
+            response,
+            "succeeded",
+            `started ${result.run.label.toLowerCase()} against "${result.run.database}" (run ${result.run.runId})`,
+          );
+          response.status(202).json(snapshot());
+        })
+        .catch(next);
     },
   );
 

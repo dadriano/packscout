@@ -11,6 +11,8 @@ import {
   detectGenerationBreak,
   oldestHeldByService,
   planBackwardReads,
+  planContextRead,
+  planStartRead,
 } from "./history-session.ts";
 
 function line(
@@ -185,6 +187,29 @@ test("a page from another generation cannot move a detached browse", () => {
   const start = advanceDetachedBrowse(beginDetachedBrowse("worker", 4), page());
   const stale = advanceDetachedBrowse(start, page({ generation: 5, endCursor: 9_000 }));
   assert.deepEqual(stale, start);
+});
+
+/**
+ * A search result is a past observation. If the file rotates between the
+ * results coming back and the operator clicking one, an offset on its own gives
+ * the server nothing to refuse with, and the reply would be unrelated bytes
+ * from the replacement file presented as that match's context.
+ */
+test("opening a search result carries the generation the match was found in", () => {
+  const match = line("worker", 4, 900);
+  assert.deepEqual(planContextRead(match), {
+    direction: "around",
+    cursor: 900,
+    generation: 4,
+  });
+});
+
+test("reading from the start names no generation, because there is none yet", () => {
+  assert.deepEqual(planStartRead(), {
+    direction: "forward",
+    cursor: 0,
+    generation: null,
+  });
 });
 
 test("reaching the start of a log is stated rather than left to spin", () => {

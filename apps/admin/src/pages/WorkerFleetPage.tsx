@@ -21,17 +21,27 @@ import {
   type KeysetPage,
 } from "../hooks/worker-fleet/useWorkerFleet";
 
+/**
+ * Live sections keep their last successful reading, which is what makes the
+ * failure copy's promise — that prior safe results remain visible — true. So a
+ * failure that arrives after evidence has been read is reported above that
+ * evidence rather than replacing it: a fifteen-second refresh hiccup must not
+ * take the fleet, run, and schedule facts away from whoever is acting on them.
+ * The replacement state is reserved for a section that has never read at all.
+ */
 function SectionState({
   loading,
   error,
   onRetry,
   loadingLabel,
+  hasEvidence,
   children,
 }: {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
   loadingLabel: string;
+  hasEvidence: boolean;
   children: ReactNode;
 }) {
   if (loading) {
@@ -42,7 +52,7 @@ function SectionState({
     );
   }
   if (error) {
-    return (
+    const notice = (
       <div className="ops-error" role="alert">
         <p>{error}</p>
         <button
@@ -53,6 +63,13 @@ function SectionState({
           Try again
         </button>
       </div>
+    );
+    if (!hasEvidence) return notice;
+    return (
+      <>
+        {notice}
+        {children}
+      </>
     );
   }
   return <>{children}</>;
@@ -91,6 +108,7 @@ export function WorkerFleetPage() {
         error={fleet.error}
         onRetry={fleet.reload}
         loadingLabel="Loading worker presence…"
+        hasEvidence={fleet.loaded}
       >
         {evaluation ? (
           <>
@@ -189,6 +207,7 @@ export function WorkerFleetPage() {
         error={stalled.error}
         onRetry={stalled.reload}
         loadingLabel="Checking run heartbeats…"
+        hasEvidence={stalled.loaded}
       >
         {stalled.items.length === 0 ? (
           <EmptyState
@@ -215,6 +234,7 @@ export function WorkerFleetPage() {
         error={schedules.error}
         onRetry={schedules.reload}
         loadingLabel="Loading schedule health…"
+        hasEvidence={schedules.loaded}
       >
         {schedules.items.length === 0 ? (
           <EmptyState
@@ -233,6 +253,7 @@ export function WorkerFleetPage() {
         error={settings.error}
         onRetry={settings.reload}
         loadingLabel="Loading effective worker settings…"
+        hasEvidence={settings.loaded && settings.settings !== null}
       >
         {settings.settings ? (
           <WorkerSettingsPanel

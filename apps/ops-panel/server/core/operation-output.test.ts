@@ -74,6 +74,43 @@ test("a single monstrous line is cut rather than retained whole", () => {
   assert.ok(line.text.endsWith("…"));
 });
 
+/**
+ * The failure this guards against is a child that never writes a terminator:
+ * before the fragment was capped, nothing in this module counted or bounded it,
+ * so it grew for the whole operation timeout.
+ */
+test("a child that never writes a newline cannot grow the pending fragment", () => {
+  const collector = createOperationOutputCollector({ maxLineLength: 2_000 });
+  const chunk = "y".repeat(64 * 1024);
+  for (let index = 0; index < 200; index += 1) {
+    assert.deepEqual(collector.append(chunk), [], "no line completed yet");
+    assert.ok(
+      collector.pendingLength() <= 2_000,
+      `the unterminated fragment grew to ${collector.pendingLength()} characters`,
+    );
+  }
+  assert.equal(collector.produced(), 0, "nothing was published without a terminator");
+
+  const [line] = collector.flush();
+  assert.ok(line);
+  assert.equal(line.text.length, 2_000);
+  assert.ok(line.text.endsWith("…"), "the line admits that it was cut");
+});
+
+test("a newline-free fragment that is later terminated is published as cut", () => {
+  const collector = createOperationOutputCollector({ maxLineLength: 10 });
+  collector.append("0123456789abcdef");
+  assert.equal(collector.pendingLength(), 10);
+  const [line] = collector.append("ghij\ntail\n");
+  assert.ok(line);
+  assert.equal(line.text, "012345678…");
+  assert.equal(collector.pendingLength(), 0, "the terminator released the fragment");
+  assert.deepEqual(
+    collector.lines().map((entry) => entry.text),
+    ["012345678…", "tail"],
+  );
+});
+
 test("every retained line passes through the caller's redaction first", () => {
   const secret = "postgresql://packscout:hunter2@127.0.0.1:5432/packscout_dev";
   const collector = createOperationOutputCollector({

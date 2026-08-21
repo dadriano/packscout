@@ -21,6 +21,20 @@ const GENERIC_TITLE: Record<DirectoryScope, string> = {
   user: "This user could not be loaded.",
 };
 
+/**
+ * A detail URL carries an opaque handle rather than the person's subject key,
+ * and that handle only means something to the tab that issued it. A link that
+ * arrives any other way — pasted, reloaded, restored from a previous session —
+ * identifies nobody. That is the intended property of the route, not a fault,
+ * so it reads as a direction rather than an error.
+ */
+export const OPAQUE_USER_LINK_FAILURE: DirectoryFailure = {
+  title: "Open this user from the directory.",
+  description:
+    "Product-user links deliberately carry no identifying information, so they only work in the tab that opened them. Nothing has been changed; find the user in the directory to continue.",
+  retryable: false,
+};
+
 export function describeDirectoryFailure(
   error: unknown,
   scope: DirectoryScope = "directory",

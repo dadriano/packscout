@@ -112,6 +112,31 @@ export function BackgroundWorkPage() {
   const failed = selectable.filter((entry) => entry.state === "failed");
   const atLimit = selected.size >= RECOMPUTATION_RECOVERY_SELECTION_LIMIT;
 
+  /**
+   * A recovery acts on the rows the operator is looking at. Paging replaces
+   * those rows, so the selection goes with them: an identifier left selected
+   * from a page that is no longer shown would still consume the selection limit
+   * while offering nothing on screen to release or re-queue.
+   */
+  function clearSelection() {
+    setSelected(new Set());
+    setResults([]);
+  }
+
+  const queuePagination: KeysetPage = {
+    ...queue.pagination,
+    goPrevious() {
+      if (!queue.pagination.hasPrevious) return;
+      clearSelection();
+      queue.pagination.goPrevious();
+    },
+    goNext() {
+      if (!queue.pagination.hasNext) return;
+      clearSelection();
+      queue.pagination.goNext();
+    },
+  };
+
   function toggle(requestId: string, isSelected: boolean) {
     setSelected((current) => {
       const next = new Set(current);
@@ -219,8 +244,7 @@ export function BackgroundWorkPage() {
             id="recomputation-state"
             value={queue.state}
             onChange={(event) => {
-              setSelected(new Set());
-              setResults([]);
+              clearSelection();
               queue.changeState(
                 event.target.value as RecomputationQueueState | "",
               );
@@ -304,7 +328,7 @@ export function BackgroundWorkPage() {
             onSelectionChange={toggle}
           />
         )}
-        <Pagination pagination={queue.pagination} />
+        <Pagination pagination={queuePagination} />
       </SectionState>
 
       {cadence ? (

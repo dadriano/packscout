@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { createLogSourceRegistry, toLogSource } from "./core/log-sources.ts";
 import { createLogStreamHub } from "./core/log-stream-hub.ts";
 import type { LogLineRecord, LogMarkerRecord } from "./core/log-records.ts";
+import { openLogFile } from "./log-file-handle.ts";
 import { createLogTailReader } from "./log-tail-reader.ts";
 
 /**
@@ -21,27 +22,27 @@ async function workspace(t: { after: (fn: () => void | Promise<void>) => void })
   const registry = createLogSourceRegistry();
   const hub = createLogStreamHub();
   const reads: string[] = [];
+  // Runs once, immediately after a file is opened and before anything is read
+  // from it: the moment a rotation would have to happen to be dangerous.
+  let afterOpen: (() => Promise<void>) | null = null;
   const reader = createLogTailReader({
     directory,
     registry,
     hub,
     intervalMs: 10_000,
-    readRange: async (filePath, range) => {
-      reads.push(`${path.basename(filePath)}@${range.offset}+${range.length}`);
-      const { open } = await import("node:fs/promises");
-      const handle = await open(filePath, "r");
-      try {
-        const buffer = new Uint8Array(range.length);
-        const { bytesRead } = await handle.read(
-          buffer,
-          0,
-          range.length,
-          range.offset,
-        );
-        return buffer.subarray(0, bytesRead);
-      } finally {
-        await handle.close();
-      }
+    openFile: async (filePath) => {
+      const file = await openLogFile(filePath);
+      const hook = afterOpen;
+      afterOpen = null;
+      if (hook) await hook();
+      if (file === null) return null;
+      return {
+        ...file,
+        read: async (range) => {
+          reads.push(`${path.basename(filePath)}@${range.offset}+${range.length}`);
+          return file.read(range);
+        },
+      };
     },
   });
 
@@ -70,6 +71,10 @@ async function workspace(t: { after: (fn: () => void | Promise<void>) => void })
     lines,
     markers,
     discover,
+    /** Do this once, after the next open and before that file is read. */
+    onceAfterOpen(hook: () => Promise<void>) {
+      afterOpen = hook;
+    },
     watch() {
       return hub.subscribe((batch) => {
         lines.push(...batch.lines);
@@ -131,6 +136,92 @@ test("the initial window ends exactly where the live stream begins", async (t) =
     ["one", "two", "three", "four"],
     "and nothing between them went missing",
   );
+});
+
+/**
+ * The handoff, in the order a browser actually produces it: the panel has been
+ * polling while nobody watched, a viewer attaches, and the initial window is
+ * read *before* the next tick. The window must leave the tail a cursor at its
+ * own boundary — otherwise the tick aligns against a newer end-of-file and the
+ * bytes written in between belong to neither the window nor the stream.
+ */
+test("a line written between the initial window and the first tick is not skipped", async (t) => {
+  const space = await workspace(t);
+  await writeFile(space.file("worker"), "one\n");
+  await space.discover("worker");
+  // Polled while passive: observed, but with no cursor to continue from.
+  await space.reader.tick();
+
+  const release = space.watch();
+  t.after(release);
+
+  const [window] = await space.reader.readWindows(500);
+  assert.ok(window);
+  assert.deepEqual(
+    window.lines.map((line) => line.text),
+    ["one"],
+  );
+  assert.equal(
+    space.hub.tailer("worker").cursor(),
+    window.endOffset,
+    "the tail continues from exactly where the window stopped",
+  );
+
+  await appendFile(space.file("worker"), "two\n");
+  await space.reader.tick();
+
+  assert.deepEqual(
+    space.lines.map((line) => line.text),
+    ["two"],
+    "the append between the window and the tick was streamed, not skipped",
+  );
+  const merged = [...window.lines, ...space.lines];
+  assert.deepEqual(
+    merged.map((line) => line.text),
+    ["one", "two"],
+    "and the window and the stream still join without a duplicate",
+  );
+});
+
+/**
+ * A plan derived from one file and bytes read from another is how rotation
+ * turns into duplicated, misordered output that looks real. The descriptor is
+ * the anchor: whatever the name points at afterwards, this pass finishes
+ * reading the file it observed.
+ */
+test("bytes come from the file that was observed, not from whatever replaced it", async (t) => {
+  const space = await workspace(t);
+  await writeFile(space.file("worker"), "before\n");
+  await space.discover("worker");
+  const release = space.watch();
+  t.after(release);
+  await space.reader.tick();
+
+  await appendFile(space.file("worker"), "still going\n");
+  space.onceAfterOpen(async () => {
+    // The file is replaced behind its name after this pass opened it.
+    await rm(space.file("worker"));
+    await writeFile(space.file("worker"), "from the replacement file\n");
+  });
+  await space.reader.tick();
+
+  assert.deepEqual(
+    space.lines.map((line) => line.text),
+    ["still going"],
+    "the replacement file's bytes were not published under the old offsets",
+  );
+  assert.equal(space.lines.at(-1)?.generation, 1);
+
+  // The next pass sees the replacement honestly: a new generation, from zero.
+  await space.discover("worker");
+  await space.reader.tick();
+  assert.equal(
+    space.markers.some((marker) => marker.kind === "restarted"),
+    true,
+  );
+  assert.equal(space.lines.at(-1)?.text, "from the replacement file");
+  assert.equal(space.lines.at(-1)?.generation, 2);
+  assert.equal(space.lines.at(-1)?.offset, 0);
 });
 
 test("rotation on disk surfaces a restart marker and fresh identities", async (t) => {

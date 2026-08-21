@@ -14,6 +14,7 @@ import type { ProductUserAuditEvent } from "../product-user-audit.ts";
 import { ProductUserDirectoryError } from "../product-user-directory.ts";
 import {
   createProductUsersRouter,
+  type ProductUserAuditFailure,
   type ProductUsersRouterDependencies,
 } from "./product-users.ts";
 
@@ -186,11 +187,14 @@ function createHarness(
   listProductUsers?: ProductUsersRouterDependencies["directory"]["listProductUsers"],
   getProductUserDetail?: ProductUsersRouterDependencies["directory"]["getProductUserDetail"],
   setProductUserStanding?: ProductUsersRouterDependencies["directory"]["setProductUserStanding"],
+  /** A trail that cannot be written, to separate it from a refused change. */
+  appendAudit?: ProductUsersRouterDependencies["audit"]["append"],
 ) {
   const requests: DirectoryRequest[] = [];
   const detailRequests: { subject: string }[] = [];
   const standingRequests: StandingRequest[] = [];
   const auditEvents: ProductUserAuditEvent[] = [];
+  const auditFailures: ProductUserAuditFailure[] = [];
   const fallbackStanding = createStandingDirectory({
     [emailUser.subject]: "active",
   });
@@ -249,9 +253,11 @@ function createHarness(
       },
       audit: {
         async append(event) {
+          if (appendAudit) return appendAudit(event);
           auditEvents.push(event);
         },
       },
+      onAuditFailure: (auditFailure) => auditFailures.push(auditFailure),
       cookiePolicy,
       sameOrigin: createSameOriginGuard([origin]),
     }),
@@ -263,6 +269,7 @@ function createHarness(
     detailRequests,
     standingRequests,
     auditEvents,
+    auditFailures,
   };
 }
 
@@ -919,6 +926,116 @@ test("a refused standing change is still audited and never leaks the upstream", 
       standing: undefined,
     },
   );
+});
+
+/**
+ * The directory change commits remotely and cannot be rolled back from here.
+ * Recording it is a separate failure domain and must stay one: a trail that
+ * cannot be written must never turn a suspension that happened into a
+ * directory failure, which would leave the operator and the audit outcome both
+ * describing something that is not true.
+ */
+test("a committed standing change is reported as committed even when the audit write fails", async () => {
+  const standings: Record<string, "active" | "suspended"> = {
+    [emailUser.subject]: "active",
+  };
+  const commit = async (
+    request: StandingRequest,
+  ): Promise<ProductUserStandingChange> => {
+    const current = standings[request.subject];
+    if (current === undefined) {
+      throw new ProductUserDirectoryError(
+        "PRODUCT_USER_NOT_FOUND",
+        "That product user is not in the directory.",
+        404,
+      );
+    }
+    const changed = current !== request.standing;
+    standings[request.subject] = request.standing;
+    return { user: { ...emailUser, standing: request.standing }, changed };
+  };
+  const { app, cookiePolicy, standingRequests, auditFailures } = createHarness(
+    undefined,
+    undefined,
+    commit,
+    async () => {
+      throw new Error(`audit sink unavailable with ${integrationToken}`);
+    },
+  );
+
+  await withServer(app, async (baseUrl) => {
+    async function suspend() {
+      const response = await fetch(`${baseUrl}/api/product-users/standing`, {
+        method: "POST",
+        headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+        body: JSON.stringify({
+          subject: emailUser.subject,
+          standing: "suspended",
+        }),
+      });
+      const serialized = await response.text();
+      assertBrowserSafe(serialized);
+      return { status: response.status, payload: JSON.parse(serialized) };
+    }
+
+    const suspended = await suspend();
+    // The account was suspended, so that is what the operator is told — not a
+    // 503 that would have them try again against an already-suspended user.
+    assert.equal(suspended.status, 200);
+    assert.equal(suspended.payload.user.standing, "suspended");
+    assert.equal(suspended.payload.changed, true);
+    assert.deepEqual(Object.keys(suspended.payload).sort(), ["changed", "user"]);
+
+    // The commit really stuck: the directory now holds the new standing, and a
+    // repeat converges instead of claiming a second change.
+    assert.equal(standings[emailUser.subject], "suspended");
+    const again = await suspend();
+    assert.equal(again.status, 200);
+    assert.equal(again.payload.changed, false);
+    assert.equal(again.payload.user.standing, "suspended");
+  });
+
+  assert.equal(standingRequests.length, 2);
+  // The unwritten record is reported in its own terms, with nothing personal
+  // in it, and is marked as having happened after the change committed.
+  assert.deepEqual(auditFailures, [
+    { action: "product_user.suspend", outcome: "success", afterCommit: true },
+    { action: "product_user.suspend", outcome: "success", afterCommit: true },
+  ]);
+});
+
+test("a refused change with an unwritable trail is still refused, and the gap is named", async () => {
+  const { app, cookiePolicy, standingRequests, auditFailures } = createHarness(
+    undefined,
+    undefined,
+    async () => {
+      throw new ProductUserDirectoryError(
+        "PRODUCT_USER_DIRECTORY_UNAVAILABLE",
+        "The product-user directory is temporarily unavailable.",
+        503,
+      );
+    },
+    async () => {
+      throw new Error("audit sink unavailable");
+    },
+  );
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/product-users/standing`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+      body: JSON.stringify({ subject: emailUser.subject, standing: "active" }),
+    });
+    // Nothing committed, so the refusal is still the outcome reported.
+    assert.equal(response.status, 503);
+    assert.equal(
+      (await response.json()).code,
+      "PRODUCT_USER_DIRECTORY_UNAVAILABLE",
+    );
+  });
+  assert.equal(standingRequests.length, 1);
+  assert.deepEqual(auditFailures, [
+    { action: "product_user.reinstate", outcome: "failure", afterCommit: false },
+  ]);
 });
 
 test("an unrecorded subject cannot be given a standing", async () => {

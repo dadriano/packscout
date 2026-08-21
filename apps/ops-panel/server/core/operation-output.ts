@@ -12,6 +12,14 @@
  * Sanitising is injected rather than assumed: child output routinely quotes the
  * connection string back on failure, and every line passes through the caller's
  * redaction before it is retained, streamed, or counted.
+ *
+ * The bound has to hold *before* a terminator arrives, not only after one. A
+ * child that writes a progress bar, or a stack trace with no newline in it, or
+ * simply crashes mid-line, would otherwise let the unterminated fragment grow
+ * for the whole operation timeout — the one place in this module where nothing
+ * is counted yet and nothing has been capped. So the fragment is capped as it
+ * accumulates and remembers that it was cut, which is what lets the line it
+ * eventually becomes carry the same ellipsis a long complete line does.
  */
 
 /** Retained lines per run. Beyond this the run keeps going; the log does not. */
@@ -36,6 +44,11 @@ export interface OperationOutputCollector {
   lines(): readonly OperationOutputLine[];
   /** Lines produced, including the ones the cap dropped. */
   produced(): number;
+  /**
+   * Characters currently held for a line the child has not terminated. Never
+   * more than one line's worth, however much newline-free output arrives.
+   */
+  pendingLength(): number;
   truncated(): boolean;
   describeTruncation(): string | null;
 }
@@ -58,14 +71,17 @@ export function createOperationOutputCollector({
 
   const retained: OperationOutputLine[] = [];
   let pending = "";
+  // Set once the fragment stopped accepting characters, so the line it becomes
+  // is published as cut rather than as a complete line that happens to be short.
+  let pendingCut = false;
   let produced = 0;
 
-  function accept(raw: string): OperationOutputLine | null {
+  function accept(raw: string, cut = false): OperationOutputLine | null {
     produced += 1;
     if (retained.length >= lineLimit) return null;
     const sanitized = sanitize(raw.replace(/\r$/u, ""));
     const text =
-      sanitized.length > maxLineLength
+      cut || sanitized.length > maxLineLength
         ? `${sanitized.slice(0, maxLineLength - 1)}…`
         : sanitized;
     const line = { index: produced, text };
@@ -73,27 +89,58 @@ export function createOperationOutputCollector({
     return line;
   }
 
-  function drain(chunk: string, includeRemainder: boolean): OperationOutputLine[] {
-    const emitted: OperationOutputLine[] = [];
-    pending += chunk;
-    const parts = pending.split("\n");
-    pending = includeRemainder ? "" : (parts.pop() ?? "");
-    for (const part of parts) {
-      const line = accept(part);
-      if (line) emitted.push(line);
+  /** Grow the unterminated fragment, but never past one line's worth. */
+  function hold(text: string): void {
+    if (text.length === 0) return;
+    const room = maxLineLength - pending.length;
+    if (room <= 0) {
+      pendingCut = true;
+      return;
     }
+    if (text.length <= room) {
+      pending += text;
+      return;
+    }
+    pending += text.slice(0, room);
+    pendingCut = true;
+  }
+
+  function takeHeld(): { text: string; cut: boolean } {
+    const held = { text: pending, cut: pendingCut };
+    pending = "";
+    pendingCut = false;
+    return held;
+  }
+
+  /**
+   * Scan the chunk itself for terminators rather than re-splitting everything
+   * held so far: the fragment is bounded above, so the work one chunk costs
+   * stays proportional to that chunk.
+   */
+  function drain(chunk: string): OperationOutputLine[] {
+    const emitted: OperationOutputLine[] = [];
+    let start = 0;
+    for (;;) {
+      const boundary = chunk.indexOf("\n", start);
+      if (boundary === -1) break;
+      hold(chunk.slice(start, boundary));
+      const held = takeHeld();
+      const line = accept(held.text, held.cut);
+      if (line) emitted.push(line);
+      start = boundary + 1;
+    }
+    hold(chunk.slice(start));
     return emitted;
   }
 
   return {
     append(chunk) {
-      return chunk.length === 0 ? [] : drain(chunk, false);
+      return chunk.length === 0 ? [] : drain(chunk);
     },
     flush() {
       if (pending.length === 0) return [];
-      const remainder = pending;
-      pending = "";
-      const line = accept(remainder);
+      const held = takeHeld();
+      const line = accept(held.text, held.cut);
       return line ? [line] : [];
     },
     note(text) {
@@ -102,6 +149,7 @@ export function createOperationOutputCollector({
     },
     lines: () => retained,
     produced: () => produced,
+    pendingLength: () => pending.length,
     truncated: () => produced > retained.length,
     describeTruncation() {
       const dropped = produced - retained.length;

@@ -236,6 +236,15 @@ export class ProviderWorkerRuntime {
     this.#sleeper = dependencies.sleeper ?? defaultSleeper;
   }
 
+  /**
+   * The identity this instance stamps on every schedule claim and import-run
+   * lease. It is the same string the instance publishes as its presence record,
+   * which is how the fleet view attributes a held run to a live worker.
+   */
+  get workerId(): string {
+    return this.dependencies.workerId;
+  }
+
   async start(): Promise<void> {
     if (this.#running) throw new Error("Provider worker is already running.");
     this.#running = true;

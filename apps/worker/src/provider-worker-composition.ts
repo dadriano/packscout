@@ -108,6 +108,12 @@ export function createProviderWorkerRuntime(
   // object the instance publishes, so the fleet view and alerting read the
   // values this process is genuinely running with.
   const effectiveSettings = resolveWorkerEffectiveSettings(input.configuration);
+  // One process identity, resolved once. The presence record, the schedule
+  // claim owner, the import-run lease owner, and the recomputation claim owner
+  // are all this string, so the fleet view can join a stalled run or a wedged
+  // claim back to the instance that is actually holding it.
+  const descriptor = describeWorkerInstance(input.configuration);
+  const instanceId = descriptor.instanceId;
   const presenceRepository = new PrismaWorkerPresenceRepository(input.database);
   const operational = createProviderWorkerOperationalRuntime({
     database: input.database,
@@ -195,7 +201,7 @@ export function createProviderWorkerRuntime(
       canonical: pages,
       reporter: operational.reporter,
       clock,
-      workerId: input.configuration.workerId,
+      workerId: instanceId,
       verifiedUsdStablecoins:
         input.configuration.estimatedEvVerifiedUsdStablecoins,
     }),
@@ -207,7 +213,7 @@ export function createProviderWorkerRuntime(
       service: new WorkerPresenceService({
         store: presenceRepository,
         clock,
-        descriptor: describeWorkerInstance(input.configuration),
+        descriptor,
         effectiveSettings,
         observer: createProviderWorkerPresenceObserver(input.logger),
       }),
@@ -215,7 +221,7 @@ export function createProviderWorkerRuntime(
       ...(input.heartbeatTimer ? { timer: input.heartbeatTimer } : {}),
     }),
     logger: input.logger,
-    workerId: input.configuration.workerId,
+    workerId: instanceId,
     pollIntervalMilliseconds: input.configuration.pollIntervalMilliseconds,
     maximumClaimsPerCycle: input.configuration.maximumClaimsPerCycle,
   });

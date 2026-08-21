@@ -17,7 +17,7 @@ import { OperationalEventService } from "./operational-events.ts";
 /**
  * The durable half of machinery alerting: each condition, run through the real
  * alert store, must produce exactly one active alert while it persists, must
- * not produce a second alert when it is observed again, must resolve when it
+ * publish nothing further while that alert stays open, must resolve when it
  * clears, and must raise a fresh active alert when it comes back.
  *
  * Every condition is exercised, including the two the pipeline cannot detect
@@ -217,8 +217,19 @@ test("every machinery condition raises one alert, deduplicates, resolves, and re
       const persisting = await harness.database.admin_alerts.findMany({ where });
       assert.equal(persisting.length, 1, `${target.kind} keeps one alert`);
       assert.equal(persisting[0]?.state, "active");
-      assert.equal(persisting[0]?.occurrence_count, 2);
+      // The condition is already open, so observing it again publishes nothing:
+      // the alert is not re-raised and no second durable event is written. At
+      // the production cadence the alternative is half a million permanent rows
+      // a year for one condition nobody has resolved yet.
+      assert.equal(persisting[0]?.occurrence_count, 1);
       assert.equal(persisting[0]?.id, raised?.id);
+      assert.equal(
+        await harness.database.operational_events.count({
+          where: { organization_id: organizationId, dedupe_key: target.dedupeKey },
+        }),
+        1,
+        `${target.kind} publishes one event per episode`,
+      );
 
       await service.runCycle();
       const cleared = await harness.database.admin_alerts.findFirst({

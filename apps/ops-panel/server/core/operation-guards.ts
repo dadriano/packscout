@@ -65,6 +65,12 @@ export interface RunningOperationDescriptor {
   readonly operation: DatabaseOperationId;
   readonly label: string;
   readonly startedAt: string;
+  /**
+   * True when the run's record has settled but its process tree is still being
+   * terminated. It holds the lock just as firmly: a script inside its grace
+   * period is still connected to the database.
+   */
+  readonly stopping?: boolean;
 }
 
 export interface OperationStartInput {
@@ -116,7 +122,9 @@ export function decideOperationStart({
       ok: false,
       status: 409,
       code: "ops_panel_operation_busy",
-      message: `${running.label} is already running (started ${running.startedAt}). The panel runs one database operation at a time, so ${definition.label.toLowerCase()} was not started.`,
+      message: running.stopping
+        ? `${running.label} (started ${running.startedAt}) has finished but its workspace script is still being stopped, so it may still be writing to the database. ${definition.label} was not started; try again in a moment.`
+        : `${running.label} is already running (started ${running.startedAt}). The panel runs one database operation at a time, so ${definition.label.toLowerCase()} was not started.`,
     };
   }
 

@@ -18,6 +18,7 @@ import { AuthRestrictedState } from "../components/auth/AuthRestrictedState";
 import { dateTime, humanize } from "../components/operations/OperationStatus";
 import {
   describeDirectoryFailure,
+  OPAQUE_USER_LINK_FAILURE,
   type DirectoryFailure,
 } from "../components/product-users/directory-failure";
 import { ProductUserStandingControl } from "../components/product-users/ProductUserStandingControl";
@@ -25,6 +26,7 @@ import {
   SavedItemCollection,
   type SavedItemRow,
 } from "../components/product-users/SavedItemCollection";
+import { resolveProductUserHandle } from "../components/product-users/subject-handle";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useSession } from "../providers/session";
 
@@ -84,7 +86,13 @@ function collectibleRow(item: ProductUserSavedCollectible): SavedItemRow {
 }
 
 export function ProductUserDetailPage() {
-  const { subject = "" } = useParams();
+  /**
+   * The route names an opaque handle, so the subject key stays out of the URL,
+   * out of history, and out of access logs. It is resolved back here, in
+   * memory, and travels onward only in this page's POST bodies.
+   */
+  const { handle = "" } = useParams();
+  const subject = resolveProductUserHandle(handle);
   const { status } = useSession();
   const canManage =
     status.phase === "authenticated" &&
@@ -98,7 +106,15 @@ export function ProductUserDetailPage() {
     detail === null ? null : describeProductUserIdentity(detail.user);
   useDocumentTitle(identity?.label ?? "Product user");
 
+  /**
+   * A handle this tab never issued names nobody, so nothing is read for it and
+   * nothing about it can be loading. It is a property of the route, decided
+   * while rendering rather than discovered by asking the server.
+   */
+  const opaqueLink = subject === null;
+
   useEffect(() => {
+    if (subject === null) return;
     const controller = new AbortController();
     void getProductUserDetail(subject, controller.signal)
       .then((loaded) => {
@@ -156,7 +172,7 @@ export function ProductUserDetailPage() {
     );
   }
 
-  if (loading) {
+  if (loading && !opaqueLink) {
     return (
       <div className="admin-page">
         <PageHeader
@@ -173,8 +189,9 @@ export function ProductUserDetailPage() {
   }
 
   if (detail === null || identity === null) {
-    const described =
-      failure ?? describeDirectoryFailure(new Error("missing"), "user");
+    const described = opaqueLink
+      ? OPAQUE_USER_LINK_FAILURE
+      : (failure ?? describeDirectoryFailure(new Error("missing"), "user"));
     return (
       <div className="admin-page">
         <PageHeader

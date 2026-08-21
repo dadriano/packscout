@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  CONTEXT_LINES,
   fetchHistoryPage,
   HISTORY_PAGE_LINES,
   isGenerationChanged,
@@ -20,7 +21,10 @@ import {
   detectGenerationBreak,
   oldestHeldByService,
   planBackwardReads,
+  planContextRead,
+  planStartRead,
   type DetachedBrowse,
+  type DetachedRead,
 } from "../logs/history-session.ts";
 import type { LogBuffer } from "../logs/log-buffer.ts";
 
@@ -220,7 +224,7 @@ export function useLogHistory({
   const detach = useCallback(
     async (
       service: string,
-      request: { direction: "forward" | "around"; cursor: number | null },
+      request: DetachedRead,
       notice: string,
       focus: string | null,
     ) => {
@@ -232,7 +236,10 @@ export function useLogHistory({
           service,
           direction: request.direction,
           cursor: request.cursor,
-          lines: request.direction === "around" ? 80 : HISTORY_PAGE_LINES,
+          // Carried, not dropped: without it the server has nothing to refuse
+          // with when the file rotated since this point was chosen.
+          generation: request.generation,
+          lines: request.direction === "around" ? CONTEXT_LINES : HISTORY_PAGE_LINES,
         });
         if (!page.present) {
           setError(`No log file is being written for ${service} right now.`);
@@ -287,7 +294,7 @@ export function useLogHistory({
       }
       void detach(
         service,
-        { direction: "forward", cursor: 0 },
+        planStartRead(),
         `Reading ${service} from the first byte of its log. Live output is held until you return to live.`,
         null,
       );
@@ -299,7 +306,7 @@ export function useLogHistory({
     (line: LogLineRecord) => {
       void detach(
         line.service,
-        { direction: "around", cursor: line.offset },
+        planContextRead(line),
         `Unfiltered context around a search result in ${line.service}. Live output is held until you return to live.`,
         line.id,
       );

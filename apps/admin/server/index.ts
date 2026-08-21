@@ -20,6 +20,7 @@ import { createAdminBackgroundWorkRuntime } from "./background-work-runtime.ts";
 import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
 import {
   createAdminMachineryAlertFactsSource,
+  createAdminMachineryAlertObserver,
   startMachineryAlertLoop,
   type MachineryAlertLoop,
 } from "./machinery-alert-runtime.ts";
@@ -247,12 +248,17 @@ try {
       backlogDepthLimit: recomputationBacklogLimit,
     }),
     operational.events,
+    // Alerting that cannot read its evidence is indistinguishable from a
+    // healthy pipeline, so a degraded or unreadable cycle says so.
+    createAdminMachineryAlertObserver(),
   );
   machineryAlerts = startMachineryAlertLoop({
     cycle: () => machineryAlertService.runCycle(),
     intervalMs: machineryAlertIntervalMs,
     onFailure: () => {
-      // Names the failed capability, never any evidence it was reading.
+      // A cycle that evaluated nothing rejects rather than reporting a quiet
+      // all-zero result, and lands here. Names the failed capability, never
+      // any evidence it was reading.
       console.error(
         JSON.stringify({
           level: "error",

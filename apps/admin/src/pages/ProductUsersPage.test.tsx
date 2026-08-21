@@ -7,6 +7,10 @@ import type {
 } from "@packscout/contracts";
 import { act } from "react";
 import { MemoryRouter } from "react-router-dom";
+import {
+  forgetProductUserHandles,
+  resolveProductUserHandle,
+} from "../components/product-users/subject-handle.ts";
 import { ConfirmProvider } from "../providers/confirm.tsx";
 import { SessionProvider } from "../providers/session.tsx";
 import { ToastProvider } from "../providers/toast.tsx";
@@ -147,6 +151,58 @@ test("the directory lists sign-ups newest first, including records with no email
   assert.equal(String(requests[0]?.input), "/api/product-users/list");
   assert.equal(requests[0]?.init?.method, "POST");
   assert.deepEqual(body(requests[0] as RecordedRequest), { limit: 20 });
+});
+
+/**
+ * The subject key is issuer-qualified personal data, and a URL is written down
+ * in browser history, access logs, same-origin referrers, and the sign-in
+ * returnTo. No rendered link may therefore carry one, in any encoding, while
+ * the row must still open exactly the user it names.
+ */
+test("no rendered link carries a subject key, and the opaque link still opens the user", async (context) => {
+  forgetProductUserHandles();
+  context.after(() => forgetProductUserHandles());
+  stubFetch(context, () =>
+    jsonResponse({
+      items: [emailUser, opaqueUser],
+      nextCursor: null,
+      searchTruncated: false,
+    }),
+  );
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  const links = [...renderer.container.querySelectorAll("a")].map(
+    (anchor) => anchor.getAttribute("href") ?? "",
+  );
+  assert.equal(links.length, 2, "each row links to its own detail view");
+
+  for (const href of links) {
+    // Raw, percent-encoded, and double-encoded forms are all checked, so a
+    // link cannot pass by being escaped differently.
+    for (const rendering of [href, decodeURIComponent(href)]) {
+      for (const row of [emailUser, opaqueUser]) {
+        assert.ok(
+          !rendering.includes(row.subject),
+          `link ${href} carries a subject key`,
+        );
+        assert.ok(!rendering.includes(encodeURIComponent(row.subject)));
+      }
+      // Nor any fragment of an identity: issuer, scheme, or wallet address.
+      assert.doesNotMatch(rendering, /did:|auth\.example\.test|0xWallet|@/);
+    }
+    assert.match(href, /^\/users\/[0-9a-f]{32}$/);
+  }
+
+  // The handle is opaque to everyone but this tab, where it still resolves to
+  // exactly the row that issued it.
+  assert.deepEqual(
+    links.map((href) => resolveProductUserHandle(href.slice("/users/".length))),
+    [emailUser.subject, opaqueUser.subject],
+  );
+  // Two people never share a handle, and a handle is not derived from anyone.
+  assert.notEqual(links[0], links[1]);
 });
 
 test("an empty directory and an empty search read differently", async (context) => {

@@ -9,6 +9,7 @@ import {
   readPort,
   readPositiveCount,
   readPositiveDuration,
+  readProductUserDirectoryConfig,
   readRequiredSecret,
   readTrustedProxies,
   serviceHttpOrigin,
@@ -104,6 +105,76 @@ test("provider credential keys require canonical base64 with exactly 32 bytes", 
   for (const invalid of [undefined, "not base64", Buffer.alloc(31).toString("base64")]) {
     assert.throws(() => readBase64Key(invalid, "PROVIDER_KEY"), /PROVIDER_KEY/);
   }
+});
+
+/**
+ * Every call on this integration carries the bearer secret, and subject keys
+ * and search terms besides. A cleartext remote origin would put a credential
+ * and personal data on the wire, so only HTTPS — or an explicit loopback
+ * origin, which never reaches a network — is usable.
+ */
+test("the product-user directory refuses cleartext remote origins", () => {
+  const token = "product-directory-integration-token-value";
+
+  assert.deepEqual(
+    readProductUserDirectoryConfig({
+      baseUrl: "https://backend.example.test/admin/",
+      token,
+    }),
+    { baseUrl: "https://backend.example.test", token },
+  );
+
+  // The mistyped production origin: accepted before, disclosed both.
+  assert.equal(
+    readProductUserDirectoryConfig({
+      baseUrl: "http://backend.example.test",
+      token,
+    }),
+    null,
+  );
+  for (const baseUrl of [
+    "http://backend.example.test:8080",
+    "http://192.168.1.10:3210",
+    "http://packscout.internal",
+    "http://127.0.0.1.example.test",
+    "ftp://backend.example.test",
+    "backend.example.test",
+  ]) {
+    assert.equal(
+      readProductUserDirectoryConfig({ baseUrl, token }),
+      null,
+      `${baseUrl} must not be usable`,
+    );
+  }
+
+  // The intended local case: a product backend a developer runs on this machine.
+  for (const baseUrl of [
+    "http://localhost:3210",
+    "http://127.0.0.1:3210",
+    "http://[::1]:3210",
+  ]) {
+    assert.deepEqual(readProductUserDirectoryConfig({ baseUrl, token }), {
+      baseUrl: new URL(baseUrl).origin,
+      token,
+    });
+  }
+
+  // An absent or unusable pair still degrades rather than throwing.
+  assert.equal(
+    readProductUserDirectoryConfig({ baseUrl: undefined, token }),
+    null,
+  );
+  assert.equal(
+    readProductUserDirectoryConfig({
+      baseUrl: "https://backend.example.test",
+      token: "too-short",
+    }),
+    null,
+  );
+  assert.equal(
+    readProductUserDirectoryConfig({ baseUrl: "", token: "" }),
+    null,
+  );
 });
 
 test("trusted proxies accept only explicit IP addresses and bounded CIDR ranges", () => {

@@ -33,6 +33,7 @@ import {
 import type {
   MachineryAlertFacts,
   MachineryAlertFactsSource,
+  MachineryAlertObserver,
 } from "@packscout/services";
 import {
   evaluateFleetFrom,
@@ -186,6 +187,58 @@ export function createAdminMachineryAlertFactsSource(
   };
 }
 
+/**
+ * One bounded, non-personal line about the alert cycle's own health. It names
+ * the failed capability and counts — never a workspace identifier, an upstream
+ * message, or any of the evidence the cycle was reading.
+ */
+export interface MachineryAlertReport {
+  readonly event:
+    | "admin_machinery_alert_cycle_degraded"
+    | "admin_machinery_alert_workspace_unreadable";
+  readonly organizations?: number;
+  readonly failedOrganizations?: number;
+  readonly failedPublications?: number;
+}
+
+function logMachineryAlertReport(report: MachineryAlertReport): void {
+  console.error(JSON.stringify({ level: "error", ...report }));
+}
+
+/**
+ * What the admin says out loud about its own alerting.
+ *
+ * Machinery alerting that publishes nothing because the evidence behind it
+ * cannot be read looks exactly like a healthy pipeline from the outside. So a
+ * cycle that could not evaluate everything reports itself, and a workspace that
+ * could not be read reports itself even though the other workspaces keep their
+ * alerting.
+ *
+ * A healthy cycle says nothing at all: at a one-minute cadence a line per cycle
+ * is half a million log lines a year, which is exactly how the one line that
+ * matters gets buried.
+ */
+export function createAdminMachineryAlertObserver(
+  report: (line: MachineryAlertReport) => void = logMachineryAlertReport,
+): MachineryAlertObserver {
+  return {
+    cycleCompleted(result) {
+      if (result.failedOrganizations === 0 && result.failedPublications === 0) {
+        return;
+      }
+      report({
+        event: "admin_machinery_alert_cycle_degraded",
+        organizations: result.organizations,
+        failedOrganizations: result.failedOrganizations,
+        failedPublications: result.failedPublications,
+      });
+    },
+    organizationFailed() {
+      report({ event: "admin_machinery_alert_workspace_unreadable" });
+    },
+  };
+}
+
 export interface MachineryAlertLoop {
   stop(): Promise<void>;
 }
@@ -197,9 +250,16 @@ export interface MachineryAlertLoopInput {
 }
 
 /**
- * Runs one cycle at a time on a fixed cadence. Cycles never overlap — a slow
- * cycle delays the next one instead of stacking — and the timer is unreferenced
- * so it can never hold the process open during shutdown.
+ * Runs one cycle at a time on a fixed cadence.
+ *
+ * The next cycle is timed from the end of the previous one rather than by a
+ * repeating interval, so a slow cycle genuinely delays the next instead of
+ * letting ticks queue behind it. A cycle that outlasts several intervals
+ * therefore costs one delayed cycle, not a growing backlog of callbacks and a
+ * burst of back-to-back cycles reading the same evidence afterwards.
+ *
+ * The timer is unreferenced so it can never hold the process open during
+ * shutdown, and stopping drains the cycle in flight.
  */
 export function startMachineryAlertLoop(
   input: MachineryAlertLoopInput,
@@ -208,11 +268,18 @@ export function startMachineryAlertLoop(
     throw new RangeError("Machinery alert cadence is outside its bounds.");
   }
   let running = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: Promise<void> = Promise.resolve();
-  const run = () => {
+
+  const schedule = () => {
     if (!running) return;
-    pending = pending.then(async () => {
-      if (!running) return;
+    timer = setTimeout(run, input.intervalMs);
+    timer.unref?.();
+  };
+
+  function run(): void {
+    if (!running) return;
+    pending = (async () => {
       try {
         await input.cycle();
       } catch (error) {
@@ -222,14 +289,15 @@ export function startMachineryAlertLoop(
           // Alerting never depends on failure reporting.
         }
       }
-    });
-  };
-  const timer = setInterval(run, input.intervalMs);
-  timer.unref?.();
+      schedule();
+    })();
+  }
+
+  schedule();
   return {
     async stop(): Promise<void> {
       running = false;
-      clearInterval(timer);
+      if (timer !== undefined) clearTimeout(timer);
       await pending;
     },
   };

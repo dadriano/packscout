@@ -8,11 +8,15 @@ import { PRODUCT_USER_SUSPENDED_ERROR_CODE } from "@packscout/contracts";
  * capability. These helpers exist only so the person sees a plain explanation
  * instead of a failed action they cannot account for.
  *
- * There are two arrivals for the same fact. The authenticated self-standing
- * read tells the product at session establishment and stays live afterwards;
- * the refusal a blocked write carries covers the moment in between. Either is
- * enough to explain what is happening, and neither exposes an operator, a
- * reason, or anything about the backend.
+ * There are two arrivals for the same fact, and they are not equal. The
+ * authenticated self-standing read is live: it answers at session
+ * establishment and keeps answering as the record changes. The refusal a
+ * blocked write carries is a single point in time, and it exists only to cover
+ * the gap before that read has said anything. So the live read governs
+ * whenever it has an answer, and the refusal speaks only into its silence —
+ * otherwise one blocked save would go on describing an account long after an
+ * operator reinstated it. Neither exposes an operator, a reason, or anything
+ * about the backend.
  *
  * Public browsing is untouched by all of this by design: a suspended visitor
  * reads the catalogue exactly as a signed-out one does.
@@ -44,9 +48,14 @@ export function isSuspendedAccountRefusal(error: unknown): boolean {
 /**
  * The account-level notice to show, or null when there is nothing to say.
  *
- * Both inputs are positive evidence of suspension, so either raises the
- * notice. A signed-out visitor is never told anything: standing is a fact
- * about an account, and there is no account in view.
+ * The live standing read decides on its own once it has answered, so an
+ * authoritative "active" retires an earlier refusal: reinstatement reaches the
+ * person as soon as the record changes, with no reload and no second save
+ * attempt to prove it. Only while that read is silent does the refusal stand
+ * in for it, which is the moment it was there for.
+ *
+ * A signed-out visitor is never told anything: standing is a fact about an
+ * account, and there is no account in view.
  */
 export function presentAccountStandingNotice(
   input: Readonly<{
@@ -58,7 +67,8 @@ export function presentAccountStandingNotice(
   }>,
 ): string | null {
   if (!input.signedIn) return null;
-  return input.standing === "suspended" || input.refusedAsSuspended
-    ? SUSPENDED_ACCOUNT_NOTICE
-    : null;
+  const suspended = input.standing === "unknown"
+    ? input.refusedAsSuspended
+    : input.standing === "suspended";
+  return suspended ? SUSPENDED_ACCOUNT_NOTICE : null;
 }

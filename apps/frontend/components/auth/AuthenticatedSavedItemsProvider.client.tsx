@@ -48,8 +48,10 @@ export function AuthenticatedSavedItemsProvider({
   );
   /**
    * Set when a write comes back refused as suspended, which covers the moment
-   * between a suspension landing and the standing read catching up. A later
-   * successful write is proof the account is usable again, and clears it.
+   * between a suspension landing and the standing read answering. A later
+   * completed write clears it, and the presenter retires it outright once the
+   * live standing reports the account active again, so a reinstatement is not
+   * left waiting on the person to attempt another save.
    */
   const [refusedAsSuspended, setRefusedAsSuspended] = useState(false);
   const setSavedRepackBase = useMutation(api.savedItems.setSavedRepack);

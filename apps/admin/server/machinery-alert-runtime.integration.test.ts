@@ -109,29 +109,29 @@ test("fleet silence is raised, measured, and resolved with no worker process in 
       observedAt: at(-settings.presenceStaleAfterMs - 1),
       activity: IDLE_WORKER_ACTIVITY,
     });
+    // The condition still holds and its alert is still open, so this cycle
+    // publishes nothing: the operator can already see it, and a durable row per
+    // cycle would be half a million permanent rows a year for one unresolved
+    // condition. The alert itself is untouched.
     const secondCycle = await service.runCycle();
-    assert.equal(secondCycle.raised, 1);
+    assert.equal(secondCycle.raised, 0);
+    assert.equal(secondCycle.cleared, 0);
     const persisting = await harness.database.admin_alerts.findMany({
       where: { organization_id: organizationId, kind: "worker_fleet_silent" },
     });
     assert.equal(persisting.length, 1, "a persisting condition keeps one alert");
     assert.equal(persisting[0]?.id, alert?.id);
-    assert.equal(persisting[0]?.occurrence_count, 2);
-    const measured = await harness.database.operational_events.findFirst({
-      where: {
-        organization_id: organizationId,
-        kind: "worker_fleet_silent",
-      },
-      orderBy: { occurred_at: "desc" },
+    assert.equal(persisting[0]?.state, "active");
+    assert.equal(persisting[0]?.occurrence_count, 1);
+    const stillOne = await harness.database.operational_events.findMany({
+      where: { organization_id: organizationId, kind: "worker_fleet_silent" },
       select: { evidence_json: true },
     });
-    assert.deepEqual(measured?.evidence_json, {
-      outcome: "WORKER_FLEET_SILENT",
-      reasonCode: "FLEET_PRESENCE_WINDOW",
-      durationMs: settings.presenceStaleAfterMs + 1,
-      thresholdMs: settings.presenceStaleAfterMs,
-      count: 1,
-    });
+    assert.equal(
+      stillOne.length,
+      1,
+      "an episode already reported appends no second durable event",
+    );
 
     // A live worker again: the open alert resolves through the existing
     // lifecycle rather than being deleted or left behind.
@@ -156,6 +156,34 @@ test("fleet silence is raised, measured, and resolved with no worker process in 
       [quietCycle.raised, quietCycle.cleared, quietCycle.failedPublications],
       [0, 0, 0],
     );
+
+    // The fleet goes silent a second time. Publishing once per episode is not
+    // publishing once ever: a recurrence after recovery is a new episode and
+    // must raise again, this time with the duration it can now measure.
+    now = at(settings.presenceStaleAfterMs);
+    const recurrence = await service.runCycle();
+    assert.equal(recurrence.raised, 1);
+    const reopened = await harness.database.admin_alerts.findFirst({
+      where: {
+        organization_id: organizationId,
+        kind: "worker_fleet_silent",
+        state: "active",
+      },
+    });
+    assert.ok(reopened, "a recurrence is visible as an open alert again");
+    const republished = await harness.database.operational_events.findMany({
+      where: { organization_id: organizationId, kind: "worker_fleet_silent" },
+      orderBy: { occurred_at: "desc" },
+      select: { evidence_json: true },
+    });
+    assert.equal(republished.length, 2, "the new episode is its own event");
+    assert.deepEqual(republished[0]?.evidence_json, {
+      outcome: "WORKER_FLEET_SILENT",
+      reasonCode: "FLEET_PRESENCE_WINDOW",
+      durationMs: settings.presenceStaleAfterMs + 1_000,
+      thresholdMs: settings.presenceStaleAfterMs,
+      count: 1,
+    });
   } finally {
     await harness.close();
   }

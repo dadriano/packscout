@@ -15,6 +15,7 @@ import {
   describeWorkerInstance,
   ProviderWorkerPresence,
   resolveWorkerEffectiveSettings,
+  resolveWorkerInstanceId,
   type ProviderWorkerHeartbeatTimer,
 } from "./provider-worker-presence.ts";
 import {
@@ -211,12 +212,38 @@ test("effective settings come from configuration and the retention invariant", (
       presenceRetentionDays: 7,
     },
   );
-  assert.deepEqual(describeWorkerInstance(configuration, "v22.11.0"), {
-    instanceId: "worker:alpha:1",
-    version: "3.2.1",
-    host: "worker-host-1",
-    runtimeVersion: "v22.11.0",
-  });
+  const descriptor = describeWorkerInstance(configuration, "v22.11.0");
+  assert.deepEqual(
+    { ...descriptor, instanceId: undefined },
+    {
+      instanceId: undefined,
+      version: "3.2.1",
+      host: "worker-host-1",
+      runtimeVersion: "v22.11.0",
+    },
+  );
+});
+
+test("every process gets its own presence identity under the configured name", () => {
+  const first = describeWorkerInstance(configuration, "v22.11.0");
+  const second = describeWorkerInstance(configuration, "v22.11.0");
+
+  // Replicas of one deployment share PACKSCOUT_WORKER_ID, and a restarted
+  // process inherits it. Using it unchanged would let one instance mark
+  // another stopped and overwrite its restart history, and would leave claims
+  // and leases naming a row two processes both answer to.
+  assert.notEqual(first.instanceId, second.instanceId);
+  const identity = /^worker:alpha:1:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+  assert.match(first.instanceId, identity);
+  assert.match(second.instanceId, identity);
+  // The configured name survives as a prefix, so an operator still recognises
+  // the deployment in the fleet view and in the logs.
+  assert.equal(
+    resolveWorkerInstanceId(configuration.workerId, "0f1e2d3c-4b5a-4968-8776-65544332211a"),
+    "worker:alpha:1:0f1e2d3c-4b5a-4968-8776-65544332211a",
+  );
+  // The presence store accepts the resulting identity unchanged.
+  assert.match(first.instanceId, /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/);
 });
 
 test("the runtime publishes the provider and run it is working", async () => {
@@ -295,7 +322,7 @@ test("a heartbeat write failure does not interrupt import work", async () => {
   assert.ok(degraded.length > 0, "degradation is visible in structured logs");
   assert.equal(degraded[0]?.level, "error");
   assert.equal(degraded[0]?.failureCode, "WORKER_PRESENCE_WRITE_FAILED");
-  assert.equal(degraded[0]?.workerId, "worker:alpha:1");
+  assert.match(degraded[0]?.workerId ?? "", /^worker:alpha:1:/);
   assert.equal(degraded.at(-1)?.presenceFailures, degraded.length);
   // Failures are reported as stable codes, never as raw connection details.
   for (const event of events) {
@@ -324,19 +351,79 @@ test("presence beats on the published cadence and stops cleanly", async () => {
   await presence.stop();
 
   assert.equal(timer.cancellations, 1);
-  assert.deepEqual(calls, [
-    "register",
-    "heartbeat",
-    "heartbeat",
-    "heartbeat",
-    "markStopped",
-  ]);
+  // Three beats were asked for while one write was in flight; they collapse to
+  // that write plus one owed beat carrying the newest activity.
+  assert.deepEqual(calls, ["register", "heartbeat", "heartbeat", "markStopped"]);
   assert.equal(heartbeats.at(-1)?.runId, scheduled.runId);
 
   // A stopped reporter no longer beats, and stopping twice is harmless.
   timer.fire();
   await presence.stop();
   assert.equal(calls.filter((call) => call === "markStopped").length, 1);
+});
+
+/** A store whose writes only complete when the test releases them. */
+function deferredStore() {
+  const heartbeats: WorkerActivity[] = [];
+  const releases: (() => void)[] = [];
+  const store: WorkerPresenceStore = {
+    async register() {
+      return undefined;
+    },
+    heartbeat(input) {
+      heartbeats.push(input.activity);
+      return new Promise<boolean>((resolve) => {
+        releases.push(() => resolve(true));
+      });
+    },
+    async markStopped() {
+      return true;
+    },
+  };
+  return { store, heartbeats, releases };
+}
+
+function settle(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+test("activity transitions coalesce into one owed beat behind a slow write", async () => {
+  const timer = manualTimer();
+  const { store, heartbeats, releases } = deferredStore();
+  const presence = presenceFor(store, timer.timer);
+  await presence.start();
+
+  const transitions = 200;
+  for (let index = 0; index < transitions; index += 1) {
+    presence.activity({
+      kind: "importing",
+      organizationId: scheduled.organizationId,
+      providerId: scheduled.providerId,
+      runId: `7e000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    });
+  }
+
+  // One write is in flight; every transition behind it is the same claim about
+  // what this instance is doing, so only the newest is worth reporting.
+  assert.equal(heartbeats.length, 1);
+
+  // Release writes until the reporter stops asking for more. A chain that grew
+  // per transition would issue one write for each of them.
+  let released = 0;
+  while (released < releases.length) {
+    releases[released]?.();
+    released += 1;
+    await settle();
+  }
+
+  assert.equal(heartbeats.length, 2);
+  assert.equal(
+    heartbeats[1]?.runId,
+    `7e000000-0000-4000-8000-${String(transitions - 1).padStart(12, "0")}`,
+  );
+  // Shutdown waits for what is in flight, never for a backlog behind it.
+  await presence.stop();
+  assert.equal(heartbeats.length, 2);
 });
 
 test("presence cadence outside its bounds is rejected at construction", () => {

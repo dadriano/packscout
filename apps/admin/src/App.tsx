@@ -85,7 +85,9 @@ export const appRoutes = (
         <Route index element={<OverviewPage />} />
         <Route path="operators" element={<OperatorsPage />} />
         <Route path="users" element={<ProductUsersPage />} />
-        <Route path="users/:subject" element={<ProductUserDetailPage />} />
+        {/* An opaque handle, never the person's subject key: this path is
+            written into history, access logs, and the sign-in returnTo. */}
+        <Route path="users/:handle" element={<ProductUserDetailPage />} />
         <Route path="providers" element={<ProvidersPage />} />
         <Route path="providers/new" element={<ProviderFormPage />} />
         <Route path="providers/:providerId" element={<ProviderDetailPage />} />

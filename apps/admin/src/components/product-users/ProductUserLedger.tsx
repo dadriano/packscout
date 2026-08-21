@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 import { StatusBadge } from "../StatusBadge";
 import { dateTime } from "../operations/OperationStatus";
 import { ProductUserStandingControl } from "./ProductUserStandingControl";
+import { productUserHandle } from "./subject-handle";
 
 interface ProductUserLedgerProps {
   users: ProductUserDirectoryRow[];
@@ -29,6 +30,11 @@ function saved(count: number, noun: string): string {
  * Rows are keyed on the subject — the stable identity the product backend
  * assigns — so a user with no email and no wallet address is still a complete,
  * addressable row that opens its own detail view.
+ *
+ * The row's link carries an opaque handle rather than that subject: the subject
+ * is personal data and a URL is written down in history, logs, and referrers.
+ * The subject continues to travel only in the POST bodies the detail view and
+ * the standing control send.
  */
 export function ProductUserLedger({
   users,
@@ -56,12 +62,12 @@ export function ProductUserLedger({
               ? "No email or wallet address recorded for this sign-up."
               : null);
           return (
-            <article key={user.subject} data-subject={user.subject}>
+            <article key={user.subject}>
               <span>{String(startIndex + index).padStart(2, "0")}</span>
               <div>
                 <Link
                   className="product-users__label"
-                  to={`/users/${encodeURIComponent(user.subject)}`}
+                  to={`/users/${productUserHandle(user.subject)}`}
                   title={identity.label}
                 >
                   {identity.label}

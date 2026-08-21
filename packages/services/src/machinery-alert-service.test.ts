@@ -13,9 +13,11 @@ import {
   type WorkerEffectiveSettings,
 } from "@packscout/contracts";
 import {
+  MachineryAlertCycleError,
   MachineryAlertService,
   type MachineryAlertFacts,
   type MachineryAlertFactsSource,
+  type MachineryAlertObserver,
   type OpenMachineryAlert,
 } from "./machinery-alert-service.ts";
 import {
@@ -391,7 +393,7 @@ function serviceFor(script: readonly MachineryAlertFacts[]) {
   };
 }
 
-test("a persisting condition keeps one grouping key, clearance closes it, and a recurrence raises again", async () => {
+test("a condition already open is not published again, clearance closes it, and a recurrence publishes", async () => {
   const silent = fleetFacts([instance(at(-published.presenceStaleAfterMs - 1))]);
   const [condition] = evaluateMachineryConditions(silent);
   assert.ok(condition);
@@ -404,18 +406,21 @@ test("a persisting condition keeps one grouping key, clearance closes it, and a 
   const { publisher, service } = serviceFor([
     // Raised.
     { conditions: [condition], openAlerts: [] },
-    // Still holding: the same key groups onto the alert already open.
+    // Still holding, and already open: republishing would add another durable
+    // event for a situation the operator can already see.
+    { conditions: [condition], openAlerts: [open] },
+    // Still holding after many more cycles: still nothing published.
     { conditions: [condition], openAlerts: [open] },
     // Cleared: the fleet is back, and an alert is open to close.
     { conditions: [], openAlerts: [open] },
     // Quiet: nothing to raise and nothing left open, so nothing is published.
     { conditions: [], openAlerts: [] },
-    // Recurrence.
+    // Recurrence: the condition returns with no alert open, so it publishes.
     { conditions: [condition], openAlerts: [] },
   ]);
 
   const results = [];
-  for (let cycle = 0; cycle < 5; cycle += 1) {
+  for (let cycle = 0; cycle < 6; cycle += 1) {
     results.push(await service.runCycle());
   }
 
@@ -423,7 +428,8 @@ test("a persisting condition keeps one grouping key, clearance closes it, and a 
     results.map((result) => [result.raised, result.cleared]),
     [
       [1, 0],
-      [1, 0],
+      [0, 0],
+      [0, 0],
       [0, 1],
       [0, 0],
       [1, 0],
@@ -431,14 +437,9 @@ test("a persisting condition keeps one grouping key, clearance closes it, and a 
   );
   assert.deepEqual(
     publisher.events.map((event) => event.kind),
-    [
-      "worker_fleet_silent",
-      "worker_fleet_silent",
-      "machinery_recovered",
-      "worker_fleet_silent",
-    ],
+    ["worker_fleet_silent", "machinery_recovered", "worker_fleet_silent"],
   );
-  // One persisting condition means one grouping key, not one key per cycle.
+  // One episode of a condition means one grouping key, not one key per cycle.
   const dedupeKeys = new Set(
     publisher.events
       .filter((event) => event.kind === "worker_fleet_silent")
@@ -447,14 +448,13 @@ test("a persisting condition keeps one grouping key, clearance closes it, and a 
   assert.equal(dedupeKeys.size, 1);
   // The recovery event carries the condition's recovery key, which is what the
   // durable alert lifecycle resolves by.
-  assert.equal(publisher.events[2]?.recoveryKey, condition.recoveryKey);
+  assert.equal(publisher.events[1]?.recoveryKey, condition.recoveryKey);
   assert.equal(publisher.events[0]?.recoveryKey, condition.recoveryKey);
 });
 
-test("a workspace that cannot be read never silences alerting for the rest", async () => {
-  const publisher = new RecordingPublisher();
+function eventsFor(publisher: RecordingPublisher): OperationalEventService {
   let issued = 0;
-  const events = new OperationalEventService(
+  return new OperationalEventService(
     publisher,
     {
       id: () =>
@@ -462,6 +462,11 @@ test("a workspace that cannot be read never silences alerting for the rest", asy
     },
     { now: () => new Date(now.getTime() + issued * 1_000) },
   );
+}
+
+test("a workspace that cannot be read never silences alerting for the rest, and is reported", async () => {
+  const publisher = new RecordingPublisher();
+  const events = eventsFor(publisher);
   const readable = "9a000000-0000-4000-8000-000000000009";
   const [condition] = evaluateMachineryConditions(fleetFacts([]));
   assert.ok(condition);
@@ -472,11 +477,63 @@ test("a workspace that cannot be read never silences alerting for the rest", asy
         ? Promise.reject(new Error("unavailable"))
         : Promise.resolve({ conditions: [condition], openAlerts: [] }),
   };
+  const failed: string[] = [];
+  const observer: MachineryAlertObserver = {
+    cycleCompleted() {},
+    organizationFailed: (event) => void failed.push(event.organizationId),
+  };
 
-  const result = await new MachineryAlertService(source, events).runCycle();
+  const result = await new MachineryAlertService(
+    source,
+    events,
+    observer,
+  ).runCycle();
 
   assert.equal(result.failedOrganizations, 1);
   assert.equal(result.raised, 1);
   assert.equal(publisher.events.length, 1);
   assert.equal(publisher.events[0]?.organizationId, readable);
+  // A degraded tenant is never only a counter the caller discards.
+  assert.deepEqual(failed, [organizationId]);
+});
+
+test("a cycle that could not enumerate its workspaces fails rather than reporting a quiet cycle", async () => {
+  const publisher = new RecordingPublisher();
+  const completed: unknown[] = [];
+  const source: MachineryAlertFactsSource = {
+    listOrganizations: () => Promise.reject(new Error("unavailable")),
+    readFacts: () => Promise.reject(new Error("unreachable")),
+  };
+
+  await assert.rejects(
+    new MachineryAlertService(source, eventsFor(publisher), {
+      cycleCompleted: (result) => void completed.push(result),
+    }).runCycle(),
+    (error: unknown) => {
+      assert.ok(error instanceof MachineryAlertCycleError);
+      assert.equal(error.code, "MACHINERY_ALERT_CYCLE_UNREADABLE");
+      return true;
+    },
+  );
+  // Nothing was evaluated, so no cycle is reported as having completed.
+  assert.deepEqual(completed, []);
+});
+
+test("a facts repository broken for every workspace fails the cycle", async () => {
+  const publisher = new RecordingPublisher();
+  const failed: string[] = [];
+  const readable = "9a000000-0000-4000-8000-000000000009";
+  const source: MachineryAlertFactsSource = {
+    listOrganizations: () => Promise.resolve([organizationId, readable]),
+    readFacts: () => Promise.reject(new Error("unavailable")),
+  };
+
+  await assert.rejects(
+    new MachineryAlertService(source, eventsFor(publisher), {
+      cycleCompleted() {},
+      organizationFailed: (event) => void failed.push(event.organizationId),
+    }).runCycle(),
+    MachineryAlertCycleError,
+  );
+  assert.deepEqual(failed, [organizationId, readable]);
 });

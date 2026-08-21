@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   IDLE_WORKER_ACTIVITY,
   type WorkerActivity,
@@ -49,6 +50,32 @@ export function resolveWorkerEffectiveSettings(
   });
 }
 
+/**
+ * The identity one worker *process* answers to, for its whole lifetime and no
+ * longer.
+ *
+ * `PACKSCOUT_WORKER_ID` is deployment configuration: replicas of the same
+ * deployment share it, and a restarted process inherits the value its
+ * predecessor used. Using it directly would let one replica mark another
+ * stopped, overwrite the other's restart history, and stamp claims and leases
+ * that cannot be traced back to the instance actually holding them. The
+ * configured value is therefore a prefix — it still names the deployment in
+ * logs and in the fleet view — and a per-process UUID makes the identity
+ * distinct.
+ */
+export function resolveWorkerInstanceId(
+  configuredWorkerId: string,
+  processId: string = randomUUID(),
+): string {
+  return `${configuredWorkerId}:${processId}`;
+}
+
+/**
+ * Describes this process to the presence store. Each call mints a new process
+ * identity, so the composition resolves the descriptor once and reuses its
+ * `instanceId` everywhere the same instance has to be recognised — presence,
+ * schedule claims, and import-run leases all name one instance.
+ */
 export function describeWorkerInstance(
   configuration: Pick<
     ProviderWorkerConfiguration,
@@ -57,7 +84,7 @@ export function describeWorkerInstance(
   runtimeVersion: string = process.version,
 ): WorkerInstanceDescriptor {
   return Object.freeze({
-    instanceId: configuration.workerId,
+    instanceId: resolveWorkerInstanceId(configuration.workerId),
     version: configuration.workerVersion,
     host: configuration.workerHost,
     runtimeVersion,
@@ -135,6 +162,8 @@ export class ProviderWorkerPresence implements ProviderWorkerPresencePort {
   #cancel: (() => void) | null = null;
   #pending: Promise<void> = Promise.resolve();
   #activity: WorkerActivity = IDLE_WORKER_ACTIVITY;
+  #reporting = false;
+  #owed = false;
   #running = false;
 
   constructor(
@@ -181,23 +210,50 @@ export class ProviderWorkerPresence implements ProviderWorkerPresencePort {
     this.#running = false;
     this.#cancel?.();
     this.#cancel = null;
-    this.#activity = IDLE_WORKER_ACTIVITY;
+    // A beat already owed still reports the last activity this instance
+    // actually observed, and no further beat can be accepted behind it.
     await this.#pending;
+    this.#activity = IDLE_WORKER_ACTIVITY;
     await this.dependencies.service.stop();
   }
 
+  /**
+   * Records that a beat is owed, while the reporter is still running, so a
+   * shutdown reports the last activity it observed instead of silently dropping
+   * it.
+   *
+   * Only the newest activity is worth reporting, so transitions that arrive
+   * while a write is in flight collapse into a single owed beat rather than
+   * queueing one write each. A worker moving through scheduling, estimated-EV,
+   * retention, and idle every cycle therefore costs at most one extra write per
+   * completed write, and a database that has stopped responding can hold at
+   * most one in-flight beat and one owed beat — never a backlog that shutdown
+   * has to drain.
+   */
   private enqueue(): void {
-    // Whether a beat is owed is decided here, while the reporter is still
-    // running, so a shutdown drains the beats it already accepted instead of
-    // silently dropping the last activity it observed.
     if (!this.#running) return;
-    const activity = this.#activity;
-    const beat = async () => {
-      await this.dependencies.service.heartbeat(activity);
-    };
-    this.#pending = this.#pending.then(beat, beat).then(
-      () => undefined,
-      () => undefined,
-    );
+    if (this.#reporting) {
+      this.#owed = true;
+      return;
+    }
+    this.#reporting = true;
+    this.#pending = this.report();
+  }
+
+  private async report(): Promise<void> {
+    try {
+      for (;;) {
+        this.#owed = false;
+        try {
+          await this.dependencies.service.heartbeat(this.#activity);
+        } catch {
+          // Presence is best-effort: the service already reported the failure,
+          // and import work never depends on a heartbeat landing.
+        }
+        if (!this.#owed) return;
+      }
+    } finally {
+      this.#reporting = false;
+    }
   }
 }

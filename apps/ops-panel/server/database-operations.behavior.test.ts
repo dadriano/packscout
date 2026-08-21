@@ -92,7 +92,12 @@ async function panel(options: { databaseUrl?: string; lineLimit?: number } = {})
     lineLimit: options.lineLimit ?? 2_000,
     spawn: (request) => {
       spawned.push(request);
-      return { kill: () => kills.push(1) };
+      return {
+        kill: () => {
+          kills.push(1);
+          return Promise.resolve();
+        },
+      };
     },
     setTimer: (handler, milliseconds) => {
       const timer = { handler, milliseconds };
@@ -369,7 +374,7 @@ test("a panel that restarted mid-run reports that run's outcome as unknown", asy
       }),
       save: async () => undefined,
     },
-    spawn: () => ({ kill: () => undefined }),
+    spawn: () => ({ kill: () => Promise.resolve() }),
   });
   await restarted.restore();
 

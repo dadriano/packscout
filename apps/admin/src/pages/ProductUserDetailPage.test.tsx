@@ -8,6 +8,7 @@ import type {
 } from "@packscout/contracts";
 import { act } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { productUserHandle } from "../components/product-users/subject-handle.ts";
 import { ConfirmProvider } from "../providers/confirm.tsx";
 import { SessionProvider } from "../providers/session.tsx";
 import { ToastProvider } from "../providers/toast.tsx";
@@ -108,14 +109,21 @@ function session(
   };
 }
 
-function route(permissions: readonly OperatorPermission[] = administrator) {
+/**
+ * Detail views are opened from the directory, which issues an opaque handle
+ * for the row and keeps the subject key out of the URL entirely.
+ */
+function route(
+  permissions: readonly OperatorPermission[] = administrator,
+  entry = `/users/${productUserHandle(subject)}`,
+) {
   return (
     <ToastProvider>
       <ConfirmProvider>
         <SessionProvider initialSession={session(permissions)}>
-          <MemoryRouter initialEntries={[`/users/${encodeURIComponent(subject)}`]}>
+          <MemoryRouter initialEntries={[entry]}>
             <Routes>
-              <Route path="/users/:subject" element={<ProductUserDetailPage />} />
+              <Route path="/users/:handle" element={<ProductUserDetailPage />} />
             </Routes>
           </MemoryRouter>
         </SessionProvider>
@@ -171,6 +179,48 @@ test("a user's identity and both saved collections render, newest save first", a
   assert.equal(String(requests[0]?.input), "/api/product-users/detail");
   assert.equal(requests[0]?.init?.method, "POST");
   assert.deepEqual(body(requests[0] as RecordedRequest), { subject });
+});
+
+test("the detail route addresses the user by an opaque handle, never their subject key", async (context) => {
+  const entry = `/users/${productUserHandle(subject)}`;
+  const requests = stubFetch(context, () => jsonResponse(detail));
+  const renderer = await renderPage(route(administrator, entry));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  // The URL that reaches history, logs, and the sign-in returnTo names nobody.
+  assert.match(entry, /^\/users\/[0-9a-f]{32}$/);
+  assert.ok(!entry.includes(subject));
+  assert.ok(!entry.includes(encodeURIComponent(subject)));
+  assert.doesNotMatch(decodeURIComponent(entry), /did:|auth\.example\.test/);
+
+  // The subject still reaches the server, in the POST body and only there.
+  assert.equal(String(requests[0]?.input), "/api/product-users/detail");
+  assert.deepEqual(body(requests[0] as RecordedRequest), { subject });
+  assert.match(pageText(renderer), /Mythic Pokemon Gacha/);
+});
+
+test("a link this tab never issued identifies nobody and asks nothing of the server", async (context) => {
+  const requests = stubFetch(context, () => jsonResponse(detail));
+  const renderer = await renderPage(
+    route(administrator, "/users/00000000000000000000000000000000"),
+  );
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  const text = pageText(renderer);
+  assert.match(text, /Open this user from the directory/);
+  assert.match(text, /only work in the tab that opened them/);
+  assert.match(text, /Nothing has been changed/);
+  // No guess is made about who was meant, so nothing is read and nothing shown.
+  assert.equal(requests.length, 0);
+  assert.doesNotMatch(text, /ada@example\.test|Mythic Pokemon Gacha/);
+  assert.equal(
+    [...renderer.container.querySelectorAll("a")].some(
+      (link) => link.textContent?.trim() === "Back to users",
+    ),
+    true,
+  );
 });
 
 test("an item the catalog no longer carries stays listed and identified", async (context) => {

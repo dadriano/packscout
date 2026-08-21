@@ -63,6 +63,12 @@ export interface WorkerInstancesView {
   readonly hasMore: boolean;
   readonly loading: boolean;
   readonly error: string | null;
+  /**
+   * True once this section has read successfully at least once, so a later
+   * refresh failure can be reported beside the evidence it could not refresh
+   * rather than replacing it.
+   */
+  readonly loaded: boolean;
   readonly reload: () => void;
 }
 
@@ -73,6 +79,7 @@ export function useWorkerInstances(): WorkerInstancesView {
     useState<WorkerFleetSettingsResolution | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -86,6 +93,7 @@ export function useWorkerInstances(): WorkerInstancesView {
         setSettings(result.settings);
         setHasMore(result.hasMore);
         setError(null);
+        setLoaded(true);
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -108,6 +116,7 @@ export function useWorkerInstances(): WorkerInstancesView {
     settings,
     hasMore,
     loading,
+    loaded,
     error,
     reload: useCallback(() => {
       setLoading(true);
@@ -121,6 +130,8 @@ export interface StalledRunsView {
   readonly staleAfterMs: number | null;
   readonly loading: boolean;
   readonly error: string | null;
+  /** See `WorkerInstancesView.loaded`. */
+  readonly loaded: boolean;
   readonly reload: () => void;
   readonly pagination: KeysetPage;
 }
@@ -132,6 +143,7 @@ export function useStalledRuns(): StalledRunsView {
   const [staleAfterMs, setStaleAfterMs] = useState<number | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -144,6 +156,7 @@ export function useStalledRuns(): StalledRunsView {
         setStaleAfterMs(result.staleAfterMs);
         setNextCursor(result.nextCursor);
         setError(null);
+        setLoaded(true);
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -164,6 +177,7 @@ export function useStalledRuns(): StalledRunsView {
     items,
     staleAfterMs,
     loading,
+    loaded,
     error,
     reload: useCallback(() => {
       setLoading(true);
@@ -193,6 +207,8 @@ export interface ScheduleHealthListView {
   readonly overdueAfterMs: number | null;
   readonly loading: boolean;
   readonly error: string | null;
+  /** See `WorkerInstancesView.loaded`. */
+  readonly loaded: boolean;
   readonly reload: () => void;
   readonly pagination: KeysetPage;
 }
@@ -204,6 +220,7 @@ export function useScheduleHealth(): ScheduleHealthListView {
   const [overdueAfterMs, setOverdueAfterMs] = useState<number | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -216,6 +233,7 @@ export function useScheduleHealth(): ScheduleHealthListView {
         setOverdueAfterMs(result.overdueAfterMs);
         setNextCursor(result.nextCursor);
         setError(null);
+        setLoaded(true);
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -236,6 +254,7 @@ export function useScheduleHealth(): ScheduleHealthListView {
     items,
     overdueAfterMs,
     loading,
+    loaded,
     error,
     reload: useCallback(() => {
       setLoading(true);
@@ -265,18 +284,24 @@ export interface WorkerSettingsPanelView {
   readonly observedAt: string | null;
   readonly loading: boolean;
   readonly error: string | null;
+  /** See `WorkerInstancesView.loaded`. */
+  readonly loaded: boolean;
   readonly reload: () => void;
 }
 
 /**
- * Effective settings change only when a worker restarts, so they are read once
- * per visit rather than polled alongside live status.
+ * Effective settings change when a worker restarts — which is exactly what a
+ * deployment does — so they are refreshed on the same bounded cadence as the
+ * evidence above them. A page left open across a deployment would otherwise
+ * keep measuring fresh worker status against thresholds no worker is running,
+ * indefinitely and without saying so.
  */
 export function useWorkerSettings(): WorkerSettingsPanelView {
   const [settings, setSettings] =
     useState<WorkerFleetSettingsResolution | null>(null);
   const [observedAt, setObservedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -288,6 +313,7 @@ export function useWorkerSettings(): WorkerSettingsPanelView {
         setSettings(result.settings);
         setObservedAt(result.observedAt);
         setError(null);
+        setLoaded(true);
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -301,10 +327,14 @@ export function useWorkerSettings(): WorkerSettingsPanelView {
     };
   }, [attempt]);
 
+  const refresh = useCallback(() => setAttempt((value) => value + 1), []);
+  useBoundedRefresh(refresh);
+
   return {
     settings,
     observedAt,
     loading,
+    loaded,
     error,
     reload: useCallback(() => {
       setLoading(true);

@@ -125,6 +125,41 @@ export function describeGenerationBreak(service: string): string {
 /** Why a detached read was opened; the two read very differently on screen. */
 export type DetachedOrigin = "start" | "context";
 
+/** A detached read to open: one service, one point, one generation. */
+export interface DetachedRead {
+  direction: "forward" | "around";
+  /** Null means the far edge; for a context read it is the match's offset. */
+  cursor: number | null;
+  /**
+   * The generation those offsets belong to, or null when there is none to
+   * name — reading from the first byte of whatever is behind the name now.
+   */
+  generation: number | null;
+}
+
+/**
+ * The read that opens the context around a search result.
+ *
+ * The generation travels with the offset, and it is the more important half. A
+ * search hit is a *past* observation: the file can rotate between the results
+ * coming back and the operator clicking one, and an offset alone gives the
+ * server nothing to refuse with — it would answer with whatever bytes now live
+ * at that position in the replacement file and present them as the context of
+ * the old match. Naming the generation is what turns that into a refusal, and a
+ * refusal is what returns the reader to live with a marker.
+ */
+export function planContextRead(line: {
+  offset: number;
+  generation: number;
+}): DetachedRead {
+  return { direction: "around", cursor: line.offset, generation: line.generation };
+}
+
+/** Reading a service from the first byte of whatever it is writing now. */
+export function planStartRead(): DetachedRead {
+  return { direction: "forward", cursor: 0, generation: null };
+}
+
 /** Forward browsing: detached from the tail, reading one service onwards. */
 export interface DetachedBrowse {
   service: string;

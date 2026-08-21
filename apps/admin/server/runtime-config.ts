@@ -113,6 +113,16 @@ export interface ProductUserDirectoryConfig {
 }
 
 /**
+ * Development origins that may be reached over cleartext. A request to any of
+ * these never leaves the machine, so it cannot be observed on a network.
+ */
+const CLEARTEXT_DIRECTORY_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+function isLoopbackDevelopmentOrigin(parsed: URL): boolean {
+  return CLEARTEXT_DIRECTORY_HOSTS.has(parsed.hostname.toLowerCase());
+}
+
+/**
  * Reads the product-user directory integration configuration.
  *
  * Unlike the admin's own secrets, this pair is deliberately optional and never
@@ -121,6 +131,14 @@ export interface ProductUserDirectoryConfig {
  * `null`, and the directory route degrades to a bounded "unconfigured" state
  * instead of taking the service down. The token is only ever compared and
  * forwarded as a header; it is never returned in an error message.
+ *
+ * A remote origin must be HTTPS. Every call on this integration carries the
+ * bearer secret, and subject keys and search terms besides, so a mistyped
+ * `http://` origin would put a credential and personal data on the wire in
+ * cleartext. Only an explicit loopback origin — the local product backend a
+ * developer runs — is allowed to be cleartext, because it never reaches a
+ * network. Anything else yields `null` and the directory reads as unconfigured
+ * rather than silently disclosing.
  */
 export function readProductUserDirectoryConfig(input: {
   baseUrl: string | undefined;
@@ -137,8 +155,11 @@ export function readProductUserDirectoryConfig(input: {
   } catch {
     return null;
   }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
-  return { baseUrl: parsed.origin, token };
+  if (parsed.protocol === "https:") return { baseUrl: parsed.origin, token };
+  if (parsed.protocol === "http:" && isLoopbackDevelopmentOrigin(parsed)) {
+    return { baseUrl: parsed.origin, token };
+  }
+  return null;
 }
 
 export function readPositiveDuration(

@@ -90,6 +90,38 @@ test("the account notice appears only for a signed-in suspended account", () => 
   }
 });
 
+test("a reinstated account stops being told it is suspended", () => {
+  // The journey a suspended-then-reinstated person actually takes. The
+  // refusal is one blocked write; the standing read is live and keeps
+  // answering, so once it reports the account active the refusal is spent
+  // evidence and must stop speaking for it.
+  const journey = [
+    // A save is blocked before the standing read has said anything.
+    { standing: "unknown", refusedAsSuspended: true },
+    // The read answers and confirms it.
+    { standing: "suspended", refusedAsSuspended: true },
+    // An operator reinstates the account and the live read reports it. The
+    // person is not made to attempt another save to find that out.
+    { standing: "active", refusedAsSuspended: true },
+  ] as const;
+  assert.deepEqual(
+    journey.map((step) =>
+      presentAccountStandingNotice({ signedIn: true, ...step })
+    ),
+    [SUSPENDED_ACCOUNT_NOTICE, SUSPENDED_ACCOUNT_NOTICE, null],
+  );
+
+  // Suspended again afterwards, the live read still governs and says so.
+  assert.equal(
+    presentAccountStandingNotice({
+      signedIn: true,
+      standing: "suspended",
+      refusedAsSuspended: false,
+    }),
+    SUSPENDED_ACCOUNT_NOTICE,
+  );
+});
+
 test("the notice explains the account without exposing anything operational", () => {
   assert.match(SUSPENDED_ACCOUNT_NOTICE, /account is suspended/);
   // It states what is kept and what still works, so nothing looks lost.

@@ -66,7 +66,7 @@ test("recording stays invisible and cannot break the provider tree", () => {
   assert.match(recorderSource, /if \(!decision\.record\) return;/);
   assert.match(
     recorderSource,
-    /void recordSignInBestEffort\(\(\) => recordSignIn\(\{\}\)\);/,
+    /void recordSignInBestEffort\(\(\) => recordSignIn\(\{\}\)\)/,
   );
   assert.equal(recorderSource.match(/recordSignIn\(\{\}\)/g)?.length, 1);
   assert.equal(recorderSource.includes("catch"), false);
@@ -74,4 +74,18 @@ test("recording stays invisible and cannot break the provider tree", () => {
   assert.match(recorderSource, /return <>\{children\}<\/>;/);
   assert.equal(recorderSource.includes("className"), false);
   assert.equal(recorderSource.includes("aria-"), false);
+});
+
+test("a failed sign-in record is retried on a timer the effect owns", () => {
+  // The outcome of the write decides what happens next, so a rejection is no
+  // longer indistinguishable from a completed write.
+  assert.match(recorderSource, /settleSignInRecording\(/);
+  // The retry is scheduled, never spun, and both the budget and the wait come
+  // from the logic module rather than from anything hard-coded here.
+  assert.match(recorderSource, /setTimeout\(attempt, settled\.retryDelayMs\)/);
+  assert.equal(/\bwhile\s*\(|\bfor\s*\(/.test(recorderSource), false);
+  assert.equal(/setTimeout\([^)]*\d/.test(recorderSource), false);
+  // An unmount or a changed session drops the pending retry.
+  assert.match(recorderSource, /clearTimeout\(retryTimer\)/);
+  assert.match(recorderSource, /return \(\) => \{/);
 });

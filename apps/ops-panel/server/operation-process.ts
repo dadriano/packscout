@@ -1,12 +1,16 @@
-import { spawn } from "node:child_process";
 import type { OperationSpawn } from "./core/operation-supervisor.ts";
+import {
+  PROCESS_GROUP_GRACE_MS,
+  spawnProcessGroup,
+  terminateProcessGroup,
+} from "./process-group.ts";
 
 /**
  * The Node adapter that actually runs a workspace script. It is the only module
  * in the operations surface that touches `child_process`; the supervisor above
  * it is framework-free and therefore fully testable.
  *
- * Three properties matter more than anything else here:
+ * Four properties matter more than anything else here:
  *
  *  - **Nothing on the command line comes from a caller.** The argument list is
  *    `run <script>`, and the script name is read from the panel's own registry.
@@ -15,13 +19,18 @@ import type { OperationSpawn } from "./core/operation-supervisor.ts";
  *    argument list is world-readable in a process table; an environment is not.
  *    It is read at spawn time, so a repointed environment is honoured rather
  *    than a value cached at startup.
+ *  - **Termination reaches the whole tree.** `npm run` is a leader with a
+ *    shell, a Node process and a database client beneath it, so the child owns
+ *    a process group and the group is what gets signalled. `kill` resolves only
+ *    once that tree is observed gone or the force-kill has been issued, which
+ *    is what lets the supervisor keep its lock until then.
  *  - **Colour is suppressed at the source.** The pane strips escapes as well,
  *    but a child told plainly not to colour its output produces a cleaner
  *    record than one whose escapes are unpicked afterwards.
  */
 
 /** How long a terminated script has to exit before it is killed outright. */
-export const OPERATION_TERMINATION_GRACE_MS = 5_000;
+export const OPERATION_TERMINATION_GRACE_MS = PROCESS_GROUP_GRACE_MS;
 
 export interface WorkspaceCommand {
   readonly command: string;
@@ -62,7 +71,7 @@ export function createOperationSpawn({
 }: OperationProcessOptions): OperationSpawn {
   return ({ script, onOutput, onExit, onError }) => {
     const { command, args } = resolveWorkspaceCommand(env);
-    const child = spawn(command, [...args, "run", script], {
+    const child = spawnProcessGroup(command, [...args, "run", script], {
       cwd: workspaceRoot,
       env: {
         ...env,
@@ -71,7 +80,6 @@ export function createOperationSpawn({
         FORCE_COLOR: "0",
       },
       stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
     });
 
     child.stdout?.setEncoding("utf8");
@@ -81,21 +89,20 @@ export function createOperationSpawn({
     child.on("error", (error) => onError(error));
     child.on("exit", (code, signal) => onExit({ code, signal }));
 
-    let force: ReturnType<typeof setTimeout> | undefined;
-    child.once("exit", () => {
-      if (force !== undefined) clearTimeout(force);
+    // Resolved rather than rejected: a child that never started still counts as
+    // gone, and the group signal below is harmless in that case.
+    const exited = new Promise<void>((resolve) => {
+      child.once("exit", () => resolve());
+      child.once("error", () => resolve());
     });
 
+    let termination: Promise<void> | undefined;
     return {
       kill() {
-        if (child.exitCode !== null || child.signalCode !== null) return;
-        child.kill("SIGTERM");
-        force ??= setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) {
-            child.kill("SIGKILL");
-          }
-        }, graceMs);
-        force.unref?.();
+        // One termination per child: a second request joins the first rather
+        // than restarting the grace period.
+        termination ??= terminateProcessGroup(child, exited, { graceMs });
+        return termination;
       },
     };
   };

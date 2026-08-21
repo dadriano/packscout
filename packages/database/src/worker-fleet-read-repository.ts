@@ -4,7 +4,7 @@ import type { PackscoutPrismaClient } from "./database.ts";
 /**
  * Read-only access to the durable evidence the admin's worker-fleet view and
  * the pipeline's alerting both judge the machinery by: the import runs a worker
- * currently holds, and every provider's schedule position.
+ * currently holds, and every active provider's schedule position.
  *
  * Every predicate here is a durable fact — a run's state, a workspace, a keyset
  * position. No staleness or overdue threshold is expressed in SQL, because those
@@ -28,6 +28,12 @@ export interface RunningImportRunRecord {
   readonly leaseExpiresAt: Date | null;
 }
 
+/**
+ * One active provider's schedule position, plus whatever claim history a worker
+ * has written for it. A provider that has never been claimed still has a
+ * position — the schedule row is only the record of claims, never the record of
+ * being scheduled.
+ */
 export interface ProviderScheduleRecord {
   readonly providerId: string;
   readonly providerName: string;
@@ -170,8 +176,16 @@ export class PrismaWorkerFleetReadRepository {
   }
 
   /**
-   * Every provider's schedule position, soonest due first, so the schedules
+   * Every scheduled provider's position, soonest due first, so the schedules
    * furthest past due lead the first page.
+   *
+   * The evidence is anchored on the active source and its current revision —
+   * the same rows the scheduler claims from — because that is what "is this
+   * provider scheduled?" means. `provider_schedules` is claim history: it does
+   * not exist until a worker first claims, and it is not cleared when a
+   * provider is disabled or archived. Anchoring here instead would hide a
+   * newly enabled provider no worker ever reached (exactly the outage worth
+   * alerting on) and keep reporting a disabled one forever.
    */
   async listSchedules(input: {
     readonly organizationId: string;
@@ -184,28 +198,36 @@ export class PrismaWorkerFleetReadRepository {
     const keyset = input.before
       ? Prisma.sql`
           and (
-            schedules.next_due_at > ${input.before.at}
-            or (schedules.next_due_at = ${input.before.at}
-                and schedules.provider_id > cast(${input.before.id} as uuid))
+            sources.next_run_at > ${input.before.at}
+            or (sources.next_run_at = ${input.before.at}
+                and sources.id > cast(${input.before.id} as uuid))
           )
         `
       : Prisma.empty;
     const rows = await this.database.$queryRaw<ScheduleRow[]>(Prisma.sql`
       select
-        schedules.provider_id as provider_id,
+        sources.id as provider_id,
         sources.display_name as provider_name,
         sources.platform_key as platform_key,
-        schedules.next_due_at as next_due_at,
+        sources.next_run_at as next_due_at,
         schedules.claim_owner as claim_owner,
         schedules.claim_expires_at as claim_expires_at,
         schedules.last_claimed_at as last_claimed_at,
         schedules.last_outcome as last_outcome,
         schedules.last_run_id as last_run_id
-      from provider_schedules schedules
-      join provider_sources sources on sources.id = schedules.provider_id
-      where schedules.organization_id = cast(${input.organizationId} as uuid)
+      from provider_sources sources
+      join provider_config_revisions revisions
+        on revisions.id = sources.active_revision_id
+       and revisions.organization_id = sources.organization_id
+       and revisions.provider_id = sources.id
+      left join provider_schedules schedules
+        on schedules.provider_id = sources.id
+       and schedules.organization_id = sources.organization_id
+      where sources.organization_id = cast(${input.organizationId} as uuid)
+        and sources.state = 'active'::provider_state
+        and sources.next_run_at is not null
         ${keyset}
-      order by schedules.next_due_at asc, schedules.provider_id asc
+      order by sources.next_run_at asc, sources.id asc
       limit ${limit + 1}
     `);
     return {

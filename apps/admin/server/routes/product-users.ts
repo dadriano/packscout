@@ -15,12 +15,16 @@ import {
   type ProductUserRecord,
   type ProductUserSavedCollectible,
   type ProductUserSavedRepack,
+  type ProductUserStanding,
+  type ProductUserStandingChange,
 } from "@packscout/contracts";
 import type { AuthService } from "@packscout/services";
 import type { SessionCookiePolicy } from "../auth/cookies.ts";
 import { createRequireSession, getAuthenticatedActor } from "../auth/middleware.ts";
 import {
   productUserAuditAction,
+  type ProductUserAuditAction,
+  type ProductUserAuditOutcome,
   type ProductUserAuditSink,
 } from "../product-user-audit.ts";
 import {
@@ -46,12 +50,26 @@ import {
  * route on this surface deletes a product user or edits what they have saved.
  */
 
+/**
+ * A recording that did not happen. The standing change itself may already have
+ * committed, so this can never alter what the browser is told; it names the
+ * gap in the trail with non-personal values so an operator can find it.
+ */
+export interface ProductUserAuditFailure {
+  readonly action: ProductUserAuditAction;
+  readonly outcome: ProductUserAuditOutcome;
+  /** True when the directory change had already committed upstream. */
+  readonly afterCommit: boolean;
+}
+
 export interface ProductUsersRouterDependencies {
   readonly auth: Pick<AuthService, "resolveSession" | "requirePermission">;
   readonly directory: ProductUserDirectoryReader;
   readonly audit: ProductUserAuditSink;
   readonly cookiePolicy: SessionCookiePolicy;
   readonly sameOrigin: RequestHandler;
+  /** Where an unwritable audit record is reported. Defaults to the error log. */
+  readonly onAuditFailure?: (failure: ProductUserAuditFailure) => void;
 }
 
 function bounded(value: string, maximum: number): string {
@@ -173,10 +191,27 @@ function failureReason(error: unknown): string {
     : "PRODUCT_USER_DIRECTORY_UNAVAILABLE";
 }
 
+/**
+ * The default report for an audit write that failed: one bounded line naming
+ * the action and where it failed, and nothing about the person it concerned.
+ */
+function logAuditFailure(failure: ProductUserAuditFailure): void {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      event: "product_user_audit_write_failed",
+      action: failure.action,
+      outcome: failure.outcome,
+      afterCommit: failure.afterCommit,
+    }),
+  );
+}
+
 export function createProductUsersRouter(
   dependencies: ProductUsersRouterDependencies,
 ) {
   const router = Router();
+  const reportAuditFailure = dependencies.onAuditFailure ?? logAuditFailure;
   const read = createRequireSession(dependencies.auth, dependencies.cookiePolicy, {
     permission: "product_users:view",
   });
@@ -248,43 +283,67 @@ export function createProductUsersRouter(
    * administrator who acts on a stale row and the administrator who acts twice
    * both converge on the same authoritative result instead of toggling or
    * failing. The response restates the standing the product backend now holds.
+   *
+   * The directory change and its audit record are separate failure domains and
+   * are kept that way. The change commits remotely and cannot be rolled back
+   * from here, so once it has committed the response reports it — a refused
+   * audit write is reported as an audit failure, never as a directory failure
+   * that would leave the operator and the trail both describing the wrong
+   * outcome.
    */
   router.post("/standing", dependencies.sameOrigin, manage, async (request, response) => {
     const body = setProductUserStandingRequestSchema.safeParse(request.body ?? {});
     if (!body.success) return invalid(response, body.error.flatten().fieldErrors);
     const actor = getAuthenticatedActor(response);
     const { subject, standing } = body.data;
+    const action = productUserAuditAction(standing);
     const event = {
       organizationId: actor.organizationId,
       actorId: actor.operatorId,
-      action: productUserAuditAction(standing),
+      action,
       subject,
       occurredAt: new Date(),
     } as const;
+    /** Records the attempt without letting the recording decide the outcome. */
+    async function record(
+      outcome: ProductUserAuditOutcome,
+      detail: { standing?: ProductUserStanding; reason?: string },
+      afterCommit: boolean,
+    ): Promise<void> {
+      try {
+        await dependencies.audit.append({ ...event, outcome, ...detail });
+      } catch {
+        try {
+          reportAuditFailure({ action, outcome, afterCommit });
+        } catch {
+          // Reporting the gap must not become a third failure domain.
+        }
+      }
+    }
+
+    let change: ProductUserStandingChange;
     try {
-      const change = await dependencies.directory.setProductUserStanding({
+      change = await dependencies.directory.setProductUserStanding({
         subject,
         standing,
       });
-      await dependencies.audit.append({
-        ...event,
-        outcome: "success",
-        standing: change.user.standing,
-      });
-      // Personal data must not be stored by any intermediary or the browser.
-      response.setHeader("Cache-Control", "no-store");
-      response.status(200).json({
-        user: sanitizeRecord(change.user),
-        changed: change.changed,
-      });
     } catch (error) {
-      // An attempt that did not complete is still an attempt on someone's
-      // account, so it is recorded before the refusal is reported.
-      await dependencies.audit
-        .append({ ...event, outcome: "failure", reason: failureReason(error) })
-        .catch(() => undefined);
+      // Nothing committed: this attempt on someone's account is still recorded
+      // before the refusal is reported.
+      await record("failure", { reason: failureReason(error) }, false);
       failure(response, error);
+      return;
     }
+
+    // Past this point the standing has changed upstream, so the response says
+    // so whatever the trail manages to record.
+    await record("success", { standing: change.user.standing }, true);
+    // Personal data must not be stored by any intermediary or the browser.
+    response.setHeader("Cache-Control", "no-store");
+    response.status(200).json({
+      user: sanitizeRecord(change.user),
+      changed: change.changed,
+    });
   });
 
   return router;

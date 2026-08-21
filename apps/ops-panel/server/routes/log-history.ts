@@ -1,9 +1,9 @@
-import { createReadStream } from "node:fs";
 import { Router } from "express";
 import { recordPanelOutcome } from "../express/panel-access.ts";
 import { isSafeServiceName } from "../core/service-logs.ts";
 import {
   LogGenerationChangedError,
+  RawLogUnidentifiedError,
   type LogHistoryDirection,
   type LogHistoryReader,
 } from "../log-history-reader.ts";
@@ -19,7 +19,10 @@ import {
  *
  * The download is streamed rather than read: a log file is exactly the kind of
  * thing that is occasionally a gigabyte, and buffering it would trade a
- * developer's disk for their memory.
+ * developer's disk for their memory. It streams from the descriptor its
+ * `content-length` was measured on, not from the path — re-opening a name
+ * between measuring it and reading it is precisely how a rotation gets to serve
+ * the replacement file's bytes under the original file's length.
  */
 
 const DIRECTIONS: readonly LogHistoryDirection[] = ["backward", "forward", "around"];
@@ -80,13 +83,15 @@ export function createLogHistoryRouter({ reader }: LogHistoryRouterOptions): Rou
         }
         // Refusing is the honest answer: these offsets describe bytes that are
         // no longer behind this name, and answering with the new file's bytes
-        // would present invented history as real.
+        // would present invented history as real. `reason` says which check
+        // caught it — the caller's generation, or the file's own identity.
         response.status(409).json({
           error: error.message,
           code: error.code,
           service: error.service,
           generation: error.currentGeneration,
           requestedGeneration: error.requestedGeneration,
+          reason: error.reason,
         });
       });
   });
@@ -104,8 +109,23 @@ export function createLogHistoryRouter({ reader }: LogHistoryRouterOptions): Rou
     reader
       .describeRawFile(service)
       .then((file) => {
+        // `close()` is idempotent, so every ending below can reach for it
+        // without the endings having to know about each other.
+        const release = (): void => {
+          void file.close().catch(() => undefined);
+        };
+
+        // The client may already be gone: opening the file took a turn, and a
+        // request abandoned during it would otherwise leave the descriptor with
+        // nothing left to close it.
+        if (response.writableEnded || response.destroyed) {
+          release();
+          return;
+        }
+
         // The file as it was when the download began: a length taken now stays
-        // true even if the service keeps writing while the bytes are in flight.
+        // true even if the service keeps writing while the bytes are in flight,
+        // and the stream below reads the descriptor that length came from.
         response.setHeader("content-type", "text/plain; charset=utf-8");
         response.setHeader("content-length", String(file.sizeBytes));
         response.setHeader("x-content-type-options", "nosniff");
@@ -116,15 +136,13 @@ export function createLogHistoryRouter({ reader }: LogHistoryRouterOptions): Rou
         );
 
         if (file.sizeBytes <= 0) {
+          release();
           recordPanelOutcome(response, "succeeded", `${file.fileName} is empty`);
           response.end();
           return;
         }
 
-        const source = createReadStream(file.filePath, {
-          start: 0,
-          end: file.sizeBytes - 1,
-        });
+        const source = file.open();
         source.once("end", () => {
           recordPanelOutcome(
             response,
@@ -132,6 +150,11 @@ export function createLogHistoryRouter({ reader }: LogHistoryRouterOptions): Rou
             `streamed ${file.sizeBytes} bytes of ${file.fileName}`,
           );
         });
+        // `close` is the one event every ending shares — a finished stream, an
+        // abandoned one, and a failed one all arrive here — so the descriptor
+        // is released from exactly one place, after any read still in flight
+        // has settled.
+        source.once("close", release);
         source.once("error", (cause: unknown) => {
           source.destroy();
           if (response.headersSent) {
@@ -143,7 +166,15 @@ export function createLogHistoryRouter({ reader }: LogHistoryRouterOptions): Rou
         response.once("close", () => source.destroy());
         source.pipe(response);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (error instanceof RawLogUnidentifiedError) {
+          response.status(409).json({
+            error: error.message,
+            code: error.code,
+            service: error.service,
+          });
+          return;
+        }
         response.status(404).json({
           error: "No log file is being written for that service.",
           code: "ops_panel_log_file_missing",

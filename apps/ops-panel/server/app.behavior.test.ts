@@ -123,7 +123,7 @@ async function panel(options: { databaseUrl?: string; logDirectory?: string } = 
   const operations = createDatabaseOperationRunner({
     permit: () => requireLocalDatabaseTarget(env),
     markerStore: { load: async () => null, save: async () => undefined },
-    spawn: () => ({ kill: () => undefined }),
+    spawn: () => ({ kill: () => Promise.resolve() }),
     setTimer: () => "timer",
     clearTimer: () => undefined,
   });

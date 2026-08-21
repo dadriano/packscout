@@ -37,6 +37,8 @@ function harness(
     lineLimit?: number;
     marker?: unknown;
     sanitize?: (text: string) => string;
+    /** Hold every termination open until the test releases it. */
+    holdTermination?: boolean;
   } = {},
 ) {
   const env: Record<string, string | undefined> = {
@@ -47,6 +49,8 @@ function harness(
   const settled: OperationRunSnapshot[] = [];
   const timers: FakeTimer[] = [];
   const events: OperationEvent[] = [];
+  const releases: Array<() => void> = [];
+  const terminations: Array<Promise<void>> = [];
   let clock = Date.parse("2026-08-20T09:00:00.000Z");
 
   const runner = createDatabaseOperationRunner({
@@ -67,6 +71,10 @@ function harness(
       return {
         kill: () => {
           child.killed += 1;
+          if (!options.holdTermination) return Promise.resolve();
+          const held = new Promise<void>((resolve) => releases.push(resolve));
+          terminations.push(held);
+          return held;
         },
       };
     },
@@ -104,13 +112,24 @@ function harness(
     repointTo(url: string | undefined) {
       env[DATABASE_URL_VARIABLE] = url;
     },
+    /**
+     * Marker writes are queued, so a store that resolves immediately still
+     * lands a turn later. One macrotask drains every pending promise job.
+     */
+    markersSettled: () => new Promise<void>((resolve) => setImmediate(resolve)),
+    /** Let every held termination finish, and wait for the lock to be released. */
+    async releaseTermination() {
+      for (const release of releases.splice(0)) release();
+      terminations.splice(0);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    },
   };
 }
 
-test("each registered operation spawns exactly its own workspace script", () => {
+test("each registered operation spawns exactly its own workspace script", async () => {
   for (const definition of DATABASE_OPERATIONS) {
     const panel = harness();
-    const result = panel.runner.start({
+    const result = await panel.runner.start({
       operation: definition.id,
       acknowledgement: "packscout_dev",
     });
@@ -120,7 +139,7 @@ test("each registered operation spawns exactly its own workspace script", () => 
   }
 });
 
-test("nothing outside the registry can be invoked", () => {
+test("nothing outside the registry can be invoked", async () => {
   const panel = harness();
   for (const impostor of [
     "drop",
@@ -134,7 +153,7 @@ test("nothing outside the registry can be invoked", () => {
     7,
     { operation: "migrate" },
   ]) {
-    const result = panel.runner.start({
+    const result = await panel.runner.start({
       operation: impostor,
       acknowledgement: "packscout_dev",
     });
@@ -147,12 +166,12 @@ test("nothing outside the registry can be invoked", () => {
   assert.equal(panel.children.length, 0, "no child was spawned for an impostor");
 });
 
-test("one operation at a time: a second request names what is running", () => {
+test("one operation at a time: a second request names what is running", async () => {
   const panel = harness();
-  assert.equal(panel.runner.start({ operation: "migrate" }).ok, true);
+  assert.equal((await panel.runner.start({ operation: "migrate" })).ok, true);
 
   for (const id of ["seed", "reset"] as const) {
-    const refusal = panel.runner.start({
+    const refusal = await panel.runner.start({
       operation: id,
       acknowledgement: "packscout_dev",
     });
@@ -164,18 +183,18 @@ test("one operation at a time: a second request names what is running", () => {
   assert.equal(panel.children.length, 1);
 
   panel.children[0]?.request.onExit({ code: 0, signal: null });
-  assert.equal(panel.runner.start({ operation: "seed" }).ok, true);
+  assert.equal((await panel.runner.start({ operation: "seed" })).ok, true);
   assert.equal(panel.children.length, 2);
 });
 
-test("locality is re-read at execution time, not cached from construction", () => {
+test("locality is re-read at execution time, not cached from construction", async () => {
   const panel = harness();
-  assert.equal(panel.runner.start({ operation: "migrate" }).ok, true);
+  assert.equal((await panel.runner.start({ operation: "migrate" })).ok, true);
   panel.children[0]?.request.onExit({ code: 0, signal: null });
 
   // The developer repoints their environment at a shared database.
   panel.repointTo(REMOTE);
-  const refusal = panel.runner.start({ operation: "migrate" });
+  const refusal = await panel.runner.start({ operation: "migrate" });
   assert.equal(refusal.ok, false);
   assert.equal(
     refusal.ok === false ? refusal.code : "",
@@ -184,10 +203,10 @@ test("locality is re-read at execution time, not cached from construction", () =
   assert.equal(panel.children.length, 1, "no child ran against the remote target");
 });
 
-test("a target that drifted after the dialog opened refuses before spawning", () => {
+test("a target that drifted after the dialog opened refuses before spawning", async () => {
   const panel = harness();
   panel.repointTo("postgresql://packscout:hunter2@127.0.0.1:5432/packscout_other");
-  const refusal = panel.runner.start({
+  const refusal = await panel.runner.start({
     operation: "reset",
     acknowledgement: "packscout_dev",
     expectedDatabase: "packscout_dev",
@@ -201,9 +220,9 @@ test("a target that drifted after the dialog opened refuses before spawning", ()
   assert.deepEqual(panel.saved, [], "a refused attempt writes no in-flight marker");
 });
 
-test("a mismatched acknowledgement refuses before spawning", () => {
+test("a mismatched acknowledgement refuses before spawning", async () => {
   const panel = harness();
-  const refusal = panel.runner.start({
+  const refusal = await panel.runner.start({
     operation: "reset",
     acknowledgement: "packscout-dev",
   });
@@ -215,9 +234,9 @@ test("a mismatched acknowledgement refuses before spawning", () => {
   assert.equal(panel.children.length, 0);
 });
 
-test("the in-flight marker is written before the child starts", () => {
+test("the in-flight marker is written before the child starts", async () => {
   const panel = harness();
-  panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "migrate" });
   assert.equal(panel.children[0]?.markersWhenSpawned, 1);
   const marker = panel.saved[0];
   assert.ok(marker);
@@ -225,11 +244,12 @@ test("the in-flight marker is written before the child starts", () => {
   assert.equal(marker.database, "packscout_dev");
 });
 
-test("a successful run settles, clears its marker and reports the outcome", () => {
+test("a successful run settles, clears its marker and reports the outcome", async () => {
   const panel = harness();
-  panel.runner.start({ operation: "seed" });
+  await panel.runner.start({ operation: "seed" });
   panel.children[0]?.request.onOutput("seeding\ndone\n");
   panel.children[0]?.request.onExit({ code: 0, signal: null });
+  await panel.markersSettled();
 
   assert.equal(panel.runner.running(), null);
   const last = panel.runner.last();
@@ -241,9 +261,9 @@ test("a successful run settles, clears its marker and reports the outcome", () =
   assert.equal(panel.timers[0]?.cleared, true, "the timeout was cancelled");
 });
 
-test("a failing run reports the exit code without inventing a cause", () => {
+test("a failing run reports the exit code without inventing a cause", async () => {
   const panel = harness();
-  panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "migrate" });
   panel.children[0]?.request.onExit({ code: 3, signal: null });
 
   const last = panel.runner.last();
@@ -252,9 +272,9 @@ test("a failing run reports the exit code without inventing a cause", () => {
   assert.match(last?.message ?? "", /exit code 3/u);
 });
 
-test("output streams to subscribers and is capped at the configured limit", () => {
+test("output streams to subscribers and is capped at the configured limit", async () => {
   const panel = harness({ lineLimit: 3 });
-  panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "migrate" });
   panel.children[0]?.request.onOutput("one\ntwo\nthree\nfour\nfive\n");
 
   assert.deepEqual(
@@ -273,21 +293,25 @@ test("output streams to subscribers and is capped at the configured limit", () =
   assert.equal(last?.outcome, "succeeded", "the cap does not abort the operation");
 });
 
-test("output events name the run they belong to", () => {
+test("output events name the run they belong to", async () => {
   const panel = harness();
-  const result = panel.runner.start({ operation: "seed" });
+  const result = await panel.runner.start({ operation: "seed" });
   assert.equal(result.ok, true);
   panel.children[0]?.request.onOutput("line\n");
   const [event] = panel.events.filter((item) => item.type === "output");
   assert.equal(event?.type === "output" ? event.runId : "", "run-1");
 });
 
-test("the overall timeout stops the run, kills the child and says so", () => {
+test("the overall timeout stops the run, kills the child and says so", async () => {
   const panel = harness({ timeoutMs: 60_000 });
-  panel.runner.start({ operation: "reset", acknowledgement: "packscout_dev" });
+  await panel.runner.start({
+    operation: "reset",
+    acknowledgement: "packscout_dev",
+  });
   assert.equal(panel.timers[0]?.milliseconds, 60_000);
 
   panel.timers[0]?.handler();
+  await panel.markersSettled();
 
   const last = panel.runner.last();
   assert.equal(last?.outcome, "timed_out");
@@ -303,20 +327,20 @@ test("the overall timeout stops the run, kills the child and says so", () => {
   assert.equal(panel.saved.at(-1), null, "a timed-out run is no longer in doubt");
 });
 
-test("a child that never starts settles the run as failed", () => {
+test("a child that never starts settles the run as failed", async () => {
   const panel = harness();
-  panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "migrate" });
   panel.children[0]?.request.onError(new Error("spawn npm ENOENT"));
   assert.equal(panel.runner.last()?.outcome, "failed");
   assert.match(panel.runner.last()?.message ?? "", /spawn npm ENOENT/u);
 });
 
-test("messages and output are sanitised before they leave the runner", () => {
+test("messages and output are sanitised before they leave the runner", async () => {
   const secret = LOCAL;
   const panel = harness({
     sanitize: (text) => text.replaceAll(secret, "[redacted]"),
   });
-  panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "migrate" });
   panel.children[0]?.request.onOutput(`could not reach ${secret}\n`);
   panel.children[0]?.request.onError(new Error(`failed for ${secret}`));
 
@@ -338,6 +362,7 @@ test("an interrupted run is adopted as an unknown outcome", async () => {
     },
   });
   await panel.runner.restore();
+  await panel.markersSettled();
 
   const last = panel.runner.last();
   assert.equal(last?.outcome, "unknown");
@@ -366,10 +391,14 @@ test("a marker the panel cannot trust is ignored rather than invented from", asy
   }
 });
 
-test("shutdown terminates the child but leaves the marker for the next start", () => {
+test("shutdown terminates the child but leaves the marker for the next start", async () => {
   const panel = harness();
-  panel.runner.start({ operation: "reset", acknowledgement: "packscout_dev" });
+  await panel.runner.start({
+    operation: "reset",
+    acknowledgement: "packscout_dev",
+  });
   panel.runner.shutdown();
+  await panel.markersSettled();
 
   assert.equal(panel.children[0]?.killed, 1);
   assert.equal(
@@ -379,6 +408,108 @@ test("shutdown terminates the child but leaves the marker for the next start", (
   );
   const marker = parseOperationMarker(panel.saved[0]);
   assert.equal(marker?.operation, "reset");
+});
+
+/**
+ * The lock is about the database, not about the record. A timed-out script is
+ * still inside its termination grace period — still connected, still able to
+ * write — so admitting a second operation against the same database while the
+ * first is dying would race work no one can observe.
+ */
+test("the lock is held until a timed-out run's process tree has actually exited", async () => {
+  const panel = harness({ timeoutMs: 60_000, holdTermination: true });
+  await panel.runner.start({ operation: "migrate" });
+  panel.timers[0]?.handler();
+
+  assert.equal(panel.runner.last()?.outcome, "timed_out");
+  assert.equal(panel.children[0]?.killed, 1, "termination was requested");
+
+  const refusal = await panel.runner.start({
+    operation: "reset",
+    acknowledgement: "packscout_dev",
+  });
+  assert.equal(refusal.ok, false);
+  assert.equal(
+    refusal.ok === false ? refusal.code : "",
+    "ops_panel_operation_busy",
+  );
+  assert.match(
+    refusal.ok === false ? refusal.message : "",
+    /still being stopped/u,
+  );
+  assert.equal(
+    panel.children.length,
+    1,
+    "no second child ran alongside a script that had not exited",
+  );
+
+  await panel.releaseTermination();
+  assert.equal((await panel.runner.start({ operation: "seed" })).ok, true);
+  assert.equal(panel.children.length, 2);
+});
+
+/**
+ * The marker is the panel's only evidence that a run happened at all. A store
+ * that writes slowly — a busy disk, a slow filesystem — must not let the child
+ * start first, and must not let a fast exit clear a marker that has not landed.
+ */
+test("a delayed marker store still lands the in-flight marker before the child starts", async () => {
+  const calls: (OperationMarker | null)[] = [];
+  const completions: string[] = [];
+  let releaseFirstWrite: (() => void) | undefined;
+  let markerCleared: (() => void) | undefined;
+  const cleared = new Promise<void>((resolve) => {
+    markerCleared = resolve;
+  });
+  const children: OperationSpawnRequest[] = [];
+
+  const runner = createDatabaseOperationRunner({
+    permit: () => requireLocalDatabaseTarget({ [DATABASE_URL_VARIABLE]: LOCAL }),
+    markerStore: {
+      load: async () => null,
+      save: async (marker) => {
+        calls.push(marker);
+        if (marker !== null) {
+          await new Promise<void>((resolve) => {
+            releaseFirstWrite = resolve;
+          });
+          completions.push("marker");
+          return;
+        }
+        completions.push("clear");
+        markerCleared?.();
+      },
+    },
+    spawn: (request) => {
+      children.push(request);
+      return { kill: () => Promise.resolve() };
+    },
+    setTimer: () => "timer",
+    clearTimer: () => undefined,
+  });
+
+  const started = runner.start({ operation: "migrate" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(
+    children.length,
+    0,
+    "the child must not start before its marker is durable",
+  );
+
+  releaseFirstWrite?.();
+  const result = await started;
+  assert.equal(result.ok, true);
+  assert.equal(children.length, 1);
+
+  children[0]?.onExit({ code: 0, signal: null });
+  await cleared;
+  assert.deepEqual(
+    completions,
+    ["marker", "clear"],
+    "the clear was ordered behind the write it clears",
+  );
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1], null);
 });
 
 test("a marker parses back into the operation it named", () => {

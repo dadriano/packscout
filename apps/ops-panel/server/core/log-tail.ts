@@ -83,6 +83,12 @@ export interface LogTailer {
   /** Reference-counted attach; the returned function detaches exactly once. */
   attach(): () => void;
   observe(observation: LogFileObservation, nowMs: number): TailObservation;
+  /**
+   * Begin streaming from a boundary the caller has already aligned — the end of
+   * the initial window, so the window and the live tail meet exactly. Ignored
+   * once a cursor exists, so it can never move a tail that is already running.
+   */
+  adoptCursor(offset: number): void;
   /** Hand back the bytes an `align` range asked for. */
   adoptAlignment(range: ByteRange, bytes: Uint8Array): void;
   /** Hand back the bytes a `read` range asked for. */
@@ -278,20 +284,24 @@ export function createLogTailer({
       };
     },
 
-    adoptAlignment(range, bytes) {
+    adoptCursor(offset) {
       if (cursor !== null) return;
       if (viewers === 0) return;
-      const boundary = bytes.lastIndexOf(0x0a);
-      const aligned =
-        boundary === -1 ? range.offset : range.offset + boundary + 1;
-      cursor = aligned;
+      cursor = offset;
       splitter = createLogLineSplitter({
         service,
         generation,
-        offset: aligned,
+        offset,
         maxLineBytes,
         holdMs,
       });
+    },
+
+    adoptAlignment(range, bytes) {
+      const boundary = bytes.lastIndexOf(0x0a);
+      tailer.adoptCursor(
+        boundary === -1 ? range.offset : range.offset + boundary + 1,
+      );
     },
 
     ingest(range, bytes, nowMs) {
