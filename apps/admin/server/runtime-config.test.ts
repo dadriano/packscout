@@ -7,6 +7,7 @@ import {
   readBase64Key,
   readServiceHost,
   readPort,
+  readPositiveCount,
   readPositiveDuration,
   readRequiredSecret,
   readTrustedProxies,
@@ -76,6 +77,16 @@ test("admin security configuration fails closed and normalizes trusted origins",
   assert.throws(() => readRequiredSecret("short", "SECRET", 32), /SECRET/);
   assert.equal(readPositiveDuration(undefined, 60_000, "IDLE_MS"), 60_000);
   assert.throws(() => readPositiveDuration("0", 60_000, "IDLE_MS"), /IDLE_MS/);
+  // Alert thresholds fail closed the same way: a mistyped ceiling must stop
+  // the service rather than quietly disable the condition it bounds.
+  assert.equal(readPositiveCount(undefined, 100, "BACKLOG_LIMIT"), 100);
+  assert.equal(readPositiveCount("250", 100, "BACKLOG_LIMIT"), 250);
+  assert.throws(() => readPositiveCount("0", 100, "BACKLOG_LIMIT"), /BACKLOG_LIMIT/);
+  assert.throws(() => readPositiveCount("1.5", 100, "BACKLOG_LIMIT"), /BACKLOG_LIMIT/);
+  assert.throws(
+    () => readPositiveCount("2000000", 100, "BACKLOG_LIMIT"),
+    /BACKLOG_LIMIT/,
+  );
   assert.deepEqual(
     readAllowedOrigins(
       "https://admin.packscout.test/path, https://admin.packscout.test",

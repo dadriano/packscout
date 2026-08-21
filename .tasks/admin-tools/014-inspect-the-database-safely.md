@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/010
 **Blocks:** admin-tools/015
 **Estimated scope:** medium
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -43,13 +43,20 @@ An operator opens Data and sees the status card: which database the apps point a
 
 ## Acceptance Criteria
 
-- [ ] The status view reports identity, locality, reachability, size, top tables, and migration state accurately, with the three unhappy states distinct and honest.
-- [ ] Credentials never appear in any response, client state, log, or child-process argument list.
-- [ ] A non-local or unparseable database target classifies as non-local and the row browser refuses to launch server-side with a clear explanation.
-- [ ] The supervised row browser starts, embeds, survives-or-reports crashes truthfully, and is terminated on panel shutdown; its launch/stop actions are origin-guarded and audited.
-- [ ] The row-browser child listens only on a loopback address, and the panel refuses to embed it when that cannot be verified.
-- [ ] Migration aggregation reads rolled-back-then-reapplied migrations as applied, and a fresh database as behind.
+- [x] The status view reports identity, locality, reachability, size, top tables, and migration state accurately, with the three unhappy states distinct and honest.
+- [x] Credentials never appear in any response, client state, log, or child-process argument list.
+- [x] A non-local or unparseable database target classifies as non-local and the row browser refuses to launch server-side with a clear explanation.
+- [x] The supervised row browser starts, embeds, survives-or-reports crashes truthfully, and is terminated on panel shutdown; its launch/stop actions are origin-guarded and audited.
+- [x] The row-browser child listens only on a loopback address, and the panel refuses to embed it when that cannot be verified.
+- [x] Migration aggregation reads rolled-back-then-reapplied migrations as applied, and a fresh database as behind.
 
 ## Verification
 
 Pure-logic tests prove the locality classifier's fail-closed behavior (loopback variants local; hostnames, unparseable URLs, and remote IPs non-local) and the migration-state aggregation cases; supervision tests prove readiness detection, startup timeout, crash reflection, and shutdown teardown. The panel test suite and workspace typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: Ports the reference panel's database surface onto admin-tools/010's declared guard membership — status reads are sensitive reads under `/api/database`, row-browser start/stop are privileged and audited, and the locality gate is a server-side fact re-evaluated at every attempt.
+- Divergences: none in behavior. Two implementation notes: the panel gained a direct `pg` dependency (declared in `apps/ops-panel/package.json`, with a two-line `package-lock.json` addition) because the status probe needs bounded connect/statement timeouts and non-leaky driver errors that the ORM client does not offer; and the row browser's port joins the reserved 5100-5199 local range (default 5112) rather than the ORM tool's own default of 5555.
+- Verification: `npm run test:ops-panel` (EXIT 0, 371 tests passing); `npm run typecheck` (EXIT 0); `npm run lint` (EXIT 0); `npm run scan:framework-standards:ratchet` (EXIT 0, 0 new findings, 0 grown oversized modules). Additionally exercised against the live local PostgreSQL: status read returned `ready`/`local`/`reachable` with size, 12 tables, migration state `behind` plus two drifted migrations and no credential in the payload; a start through `POST /api/database/row-browser` reached `ready` with the child listening only on `127.0.0.1:5112` and no credential in its argv; `DELETE` removed the listener; both were recorded in the activity trail; a remote target answered `409 ops_panel_database_not_local`.

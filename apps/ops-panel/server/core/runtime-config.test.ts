@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  defaultStudioPort,
   describeStartupFailure,
   OPS_PANEL_DEFAULT_HMR_PORT,
   OPS_PANEL_DEFAULT_PORT,
@@ -48,22 +49,54 @@ test("configuration reads defaults and overrides together", () => {
     host: "127.0.0.1",
     port: 5110,
     hmrPort: 5111,
+    studioPort: 5112,
     pollIntervalMs: 1_000,
     tailIntervalMs: 200,
+    databaseRefreshMs: 5_000,
   });
   assert.deepEqual(
     readOpsPanelConfiguration({
       PACKSCOUT_OPS_PANEL_PORT: "5120",
       PACKSCOUT_OPS_PANEL_POLL_MS: "2000",
       PACKSCOUT_OPS_PANEL_TAIL_MS: "500",
+      PACKSCOUT_OPS_PANEL_DATABASE_REFRESH_MS: "10000",
     }),
     {
       host: "127.0.0.1",
       port: 5120,
       hmrPort: 5121,
+      studioPort: 5122,
       pollIntervalMs: 2_000,
       tailIntervalMs: 500,
+      databaseRefreshMs: 10_000,
     },
+  );
+});
+
+test("the row browser's port stays inside the reserved range", () => {
+  assert.equal(defaultStudioPort(5110), 5112);
+  assert.equal(defaultStudioPort(5198), 5100);
+  assert.equal(defaultStudioPort(5199), 5101);
+  assert.equal(
+    readOpsPanelConfiguration({ PACKSCOUT_OPS_PANEL_STUDIO_PORT: "5150" }).studioPort,
+    5150,
+  );
+  assert.throws(
+    () => readOpsPanelConfiguration({ PACKSCOUT_OPS_PANEL_STUDIO_PORT: "5555" }),
+    /between 5100 and 5199/,
+  );
+});
+
+test("the database refresh interval is bounded on both sides", () => {
+  assert.throws(
+    () =>
+      readOpsPanelConfiguration({ PACKSCOUT_OPS_PANEL_DATABASE_REFRESH_MS: "10" }),
+    /between 1000 and 60000 milliseconds/,
+  );
+  assert.throws(
+    () =>
+      readOpsPanelConfiguration({ PACKSCOUT_OPS_PANEL_DATABASE_REFRESH_MS: "120000" }),
+    /between 1000 and 60000 milliseconds/,
   );
 });
 

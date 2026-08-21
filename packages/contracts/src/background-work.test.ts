@@ -105,6 +105,30 @@ test("queue depth and oldest-pending age are derived once, server-side", () => {
   );
 });
 
+test("a configured depth ceiling backs the queue up before anything is late", () => {
+  const queue = (pending: number, depthLimit: number | null) =>
+    evaluateRecomputationBacklog(
+      backlog({
+        pending,
+        readyPending: pending,
+        oldestPendingAvailableAt: "2026-08-19T11:59:30.000Z",
+        depthLimit,
+      }),
+    );
+
+  // Every entry is inside the timeliness window; only the ceiling decides.
+  assert.equal(queue(2, 2).state, "healthy");
+  assert.equal(queue(3, 2).state, "backlogged");
+  assert.equal(queue(3, 2).depthLimit, 2);
+  // No ceiling configured leaves depth reported but never judged, so the
+  // measure stays visible without inventing a threshold.
+  assert.equal(queue(500, null).state, "healthy");
+  assert.equal(queue(500, null).depth, 500);
+  assert.equal(queue(500, null).depthLimit, null);
+  // A ceiling outside its bounds is ignored rather than silencing the queue.
+  assert.equal(queue(3, 0).depthLimit, null);
+});
+
 test("negative or fractional counts cannot distort the backlog measures", () => {
   const evaluation = evaluateRecomputationBacklog(
     backlog({ pending: -5, readyPending: 9, claimed: 1.5, expiredClaims: 9, failed: -1 }),

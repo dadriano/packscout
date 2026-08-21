@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ProductUserDirectoryRow } from "@packscout/contracts";
+import type {
+  AuthSessionResponse,
+  OperatorPermission,
+  ProductUserDirectoryRow,
+} from "@packscout/contracts";
 import { act } from "react";
 import { MemoryRouter } from "react-router-dom";
+import { ConfirmProvider } from "../providers/confirm.tsx";
+import { SessionProvider } from "../providers/session.tsx";
+import { ToastProvider } from "../providers/toast.tsx";
 import {
   changeControl,
   cleanupPage,
@@ -39,11 +46,46 @@ const opaqueUser: ProductUserDirectoryRow = {
   savedCollectibleCount: 0,
 };
 
-function route() {
+const administrator: readonly OperatorPermission[] = [
+  "product_users:view",
+  "product_users:manage",
+];
+/** A viewer holds the read permission and not the account control. */
+const viewer: readonly OperatorPermission[] = ["product_users:view"];
+
+function session(
+  permissions: readonly OperatorPermission[],
+): AuthSessionResponse {
+  return {
+    operator: {
+      id: "00000000-0000-4000-8000-000000000001",
+      email: "operator@packscout.test",
+      displayName: "Morgan Scout",
+      state: "active",
+    },
+    membership: {
+      organizationId: "00000000-0000-4000-8000-000000000010",
+      organizationName: "PackScout",
+      role: permissions.includes("product_users:manage")
+        ? "admin"
+        : "data_operator",
+    },
+    permissions: [...permissions],
+    csrfToken: "csrf-test-token",
+  };
+}
+
+function route(permissions: readonly OperatorPermission[] = administrator) {
   return (
-    <MemoryRouter initialEntries={["/users"]}>
-      <ProductUsersPage />
-    </MemoryRouter>
+    <ToastProvider>
+      <ConfirmProvider>
+        <SessionProvider initialSession={session(permissions)}>
+          <MemoryRouter initialEntries={["/users"]}>
+            <ProductUsersPage />
+          </MemoryRouter>
+        </SessionProvider>
+      </ConfirmProvider>
+    </ToastProvider>
   );
 }
 
@@ -225,4 +267,107 @@ test("paging forward and back replays the directory cursors", async (context) =>
   await settlePage();
   assert.match(pageText(renderer), /Page 1/);
   assert.deepEqual(body(requests[2] as RecordedRequest), { limit: 20 });
+});
+
+test("suspending from the ledger states the consequence first, then shows the new standing", async (context) => {
+  const requests = stubFetch(context, (request) =>
+    String(request.input).endsWith("/product-users/standing")
+      ? jsonResponse({
+          user: { ...emailUser, standing: "suspended" },
+          changed: true,
+        })
+      : jsonResponse({
+          items: [emailUser],
+          nextCursor: null,
+          searchTruncated: false,
+        }),
+  );
+
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  await act(async () => findButton(renderer, "Suspend").click());
+  await settlePage();
+
+  // Nothing has happened yet: the administrator is being told what will.
+  assert.equal(requests.length, 1);
+  const confirmText = pageText(renderer);
+  assert.match(confirmText, /Suspend this account\?/);
+  assert.match(confirmText, /cannot save or unsave anything/);
+  assert.match(confirmText, /Everything they have already saved is kept/);
+  assert.match(confirmText, /still browse the public catalogue/);
+  assert.match(confirmText, /reinstate them at any time/);
+  // A confirmation is a decision, so declining it must also be possible.
+  findButton(renderer, "Cancel");
+
+  await act(async () => findButton(renderer, "Suspend account").click());
+  await settlePage();
+
+  assert.equal(requests.length, 2);
+  assert.equal(String(requests[1]?.input), "/api/product-users/standing");
+  assert.equal(requests[1]?.init?.method, "POST");
+  assert.deepEqual(body(requests[1] as RecordedRequest), {
+    subject: emailUser.subject,
+    standing: "suspended",
+  });
+
+  // The ledger reflects the standing the backend reported, and the control
+  // now offers the reverse — without reloading the listing under the operator.
+  const text = pageText(renderer);
+  assert.match(text, /Suspended/);
+  assert.match(text, /Account suspended\. Everything they saved is kept\./);
+  findButton(renderer, "Reinstate");
+  assert.equal(requests.length, 2);
+});
+
+test("declining the confirmation leaves the account exactly as it was", async (context) => {
+  const requests = stubFetch(context, () =>
+    jsonResponse({
+      items: [emailUser],
+      nextCursor: null,
+      searchTruncated: false,
+    }),
+  );
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  await act(async () => findButton(renderer, "Suspend").click());
+  await settlePage();
+  await act(async () => findButton(renderer, "Cancel").click());
+  await settlePage();
+
+  assert.equal(requests.length, 1);
+  assert.doesNotMatch(pageText(renderer), /Suspend this account\?/);
+  assert.match(pageText(renderer), /Active/);
+  findButton(renderer, "Suspend");
+});
+
+test("an operator who cannot manage accounts sees the standing and no control", async (context) => {
+  const requests = stubFetch(context, () =>
+    jsonResponse({
+      items: [emailUser, opaqueUser],
+      nextCursor: null,
+      searchTruncated: false,
+    }),
+  );
+  const renderer = await renderPage(route(viewer));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  const labels = [...renderer.container.querySelectorAll("button")].map(
+    (button) => button.textContent?.trim() ?? "",
+  );
+  assert.deepEqual(
+    labels.filter((label) =>
+      /suspend|reinstate|delete|remove|purge/i.test(label),
+    ),
+    [],
+  );
+  // Standing is still readable; only the ability to change it is absent.
+  const text = pageText(renderer);
+  assert.match(text, /Active/);
+  assert.match(text, /Suspended/);
+  assert.equal(requests.length, 1);
 });

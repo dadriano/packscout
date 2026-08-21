@@ -2,10 +2,17 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import type { AuditTrail } from "./core/audit-trail.ts";
 import type { LogSourceRegistry } from "./core/log-sources.ts";
 import type { LogStreamHub } from "./core/log-stream-hub.ts";
+import type { DatabaseOperationRunner } from "./core/operation-supervisor.ts";
+import type { StudioSupervisor } from "./core/studio-supervisor.ts";
+import type { DatabaseMonitor } from "./database-monitor.ts";
 import { createPanelAccessMiddleware } from "./express/panel-access.ts";
+import { createLogHistoryReader } from "./log-history-reader.ts";
 import type { LogTailReader } from "./log-tail-reader.ts";
 import { createActivityRouter } from "./routes/activity.ts";
+import { createDatabaseRouter } from "./routes/database.ts";
+import { createDatabaseOperationsRouter } from "./routes/database-operations.ts";
 import { createHealthRouter } from "./routes/health.ts";
+import { createLogHistoryRouter } from "./routes/log-history.ts";
 import { createLogsRouter } from "./routes/logs.ts";
 import { createLogSourcesRouter } from "./routes/log-sources.ts";
 
@@ -16,6 +23,12 @@ export interface OpsPanelAppOptions {
   reader: LogTailReader;
   logDirectory: string;
   pollIntervalMs: number;
+  database: {
+    monitor: DatabaseMonitor;
+    supervisor: StudioSupervisor;
+    operations: DatabaseOperationRunner;
+    env: Readonly<Record<string, string | undefined>>;
+  };
   onAuditError?: (error: unknown) => void;
 }
 
@@ -25,8 +38,9 @@ export interface OpsPanelAppOptions {
  * Permanent design invariant: no endpoint, parameter, or debug path runs a
  * caller-supplied command, path, or SQL statement. Everything the panel reads
  * is derived from the log-file convention or from configuration it resolved
- * itself. Later surfaces mount under `/api/logs` and `/api/database`, which is
- * what puts them inside the declared guard membership.
+ * itself, and the only workflows it executes are the three named entries in the
+ * database-operations registry. Surfaces mount under `/api/logs` and
+ * `/api/database`, which is what puts them inside the declared guard membership.
  */
 export function createOpsPanelApp({
   audit,
@@ -35,6 +49,7 @@ export function createOpsPanelApp({
   reader,
   logDirectory,
   pollIntervalMs,
+  database,
   onAuditError,
 }: OpsPanelAppOptions): Express {
   const app = express();
@@ -51,7 +66,23 @@ export function createOpsPanelApp({
     "/api/logs/sources",
     createLogSourcesRouter({ registry, logDirectory, pollIntervalMs }),
   );
+  // History shares the tail's stream hub, so a page and a live batch agree
+  // about which generation a byte offset belongs to.
+  app.use(
+    "/api/logs",
+    createLogHistoryRouter({
+      reader: createLogHistoryReader({ directory: logDirectory, hub }),
+    }),
+  );
   app.use("/api/logs", createLogsRouter({ hub, reader }));
+  app.use(
+    "/api/database/operations",
+    createDatabaseOperationsRouter({
+      runner: database.operations,
+      env: database.env,
+    }),
+  );
+  app.use("/api/database", createDatabaseRouter(database));
   app.use("/api/activity", createActivityRouter({ audit }));
 
   // Unknown API routes answer with the panel's stable error shape rather than

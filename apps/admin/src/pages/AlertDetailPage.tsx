@@ -23,6 +23,39 @@ function evidenceEntries(evidence: AdminAlertDetail["occurrences"][number]["evid
   );
 }
 
+interface AlertTarget {
+  readonly href: string;
+  readonly label: string;
+}
+
+/**
+ * Machinery conditions are about the pipeline itself, so they carry no
+ * provider, run, or quarantine to open. Their kind names the monitoring view
+ * that shows the same condition in context.
+ */
+const machineryTargets: Partial<Record<AdminAlertSummary["kind"], AlertTarget>> = {
+  worker_fleet_silent: { href: "/workers", label: "Review worker fleet" },
+  recomputation_backlogged: {
+    href: "/background-work",
+    label: "Review background work",
+  },
+  retention_overdue: {
+    href: "/background-work",
+    label: "Review retention runs",
+  },
+};
+
+function alertTarget(alert: AdminAlertSummary): AlertTarget | null {
+  if (alert.quarantineId) {
+    return { href: `/quarantine/${alert.quarantineId}`, label: "Review quarantine" };
+  }
+  if (alert.runId) return { href: `/runs/${alert.runId}`, label: "Review import run" };
+  if (alert.providerId) {
+    return { href: `/providers/${alert.providerId}`, label: "Review provider" };
+  }
+  return machineryTargets[alert.kind] ?? null;
+}
+
 export function AlertDetailPage() {
   const { alertId = "" } = useParams();
   const { confirm } = useConfirm();
@@ -91,13 +124,7 @@ export function AlertDetailPage() {
     return <div className="ops-error" role="alert"><p>{error ?? "Operational alert not found."}</p><Link className="admin-button admin-button--secondary" to="/alerts">Return to alerts</Link></div>;
   }
 
-  const target = alert.quarantineId
-    ? { href: `/quarantine/${alert.quarantineId}`, label: "Review quarantine" }
-    : alert.runId
-      ? { href: `/runs/${alert.runId}`, label: "Review import run" }
-      : alert.providerId
-        ? { href: `/providers/${alert.providerId}`, label: "Review provider" }
-        : null;
+  const target = alertTarget(alert);
 
   return (
     <div className="admin-page">

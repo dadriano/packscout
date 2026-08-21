@@ -29,8 +29,8 @@ The user-administration and operations-panel designs port the approved reference
 | 001 | Extend operator access control for user administration | small | done | none |
 | 002 | Record product-user sign-ups | medium | done | none |
 | 003 | Browse product users in the admin | medium | done | 001, 002 |
-| 004 | Inspect what a user has | medium | todo | 001, 003 |
-| 005 | Suspend and reinstate product users | medium | todo | 001, 002, 003 |
+| 004 | Inspect what a user has | medium | done | 001, 003 |
+| 005 | Suspend and reinstate product users | medium | done | 001, 002, 003 |
 
 ### Worker monitoring
 
@@ -39,7 +39,7 @@ The user-administration and operations-panel designs port the approved reference
 | 006 | Track worker liveness | medium | done | none |
 | 007 | Monitor the worker fleet in the admin | large | done | 006 |
 | 008 | Surface background queues and maintenance runs | medium | done | none |
-| 009 | Alert on worker and backlog problems | medium | todo | 006, 007, 008 |
+| 009 | Alert on worker and backlog problems | medium | done | 006, 007, 008 |
 
 ### Local operations panel (logs and database)
 
@@ -47,10 +47,10 @@ The user-administration and operations-panel designs port the approved reference
 |---|---|---|---|---|
 | 010 | Establish the local operations panel | medium | done | none |
 | 011 | Stream live logs with faithful tailing | large | done | 010 |
-| 012 | Browse log history and search the past | medium | todo | 011, 013 |
+| 012 | Browse log history and search the past | medium | done | 011, 013 |
 | 013 | Filter logs with intelligence | large | done | 011 |
-| 014 | Inspect the database safely | medium | todo | 010 |
-| 015 | Run guarded database operations | medium | todo | 014 |
+| 014 | Inspect the database safely | medium | done | 010 |
+| 015 | Run guarded database operations | medium | done | 014 |
 
 ## Build Order
 

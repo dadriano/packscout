@@ -59,7 +59,7 @@ export function AlertsPage() {
       <PageHeader
         eyebrow="Data pipeline / Attention"
         title="Operational alerts"
-        description="Repeated conditions stay grouped. Freshness, data quality, and recoveries remain separate so the right remediation stays visible."
+        description="Repeated conditions stay grouped. Freshness, data quality, worker machinery, and recoveries remain separate so the right remediation stays visible."
       />
       <form className="alerts-filter" aria-label="Filter operational alerts" onSubmit={applyFilter}>
         <div className="admin-field">

@@ -9,6 +9,7 @@ import {
 } from "./_generated/server";
 import {
   deriveProductUserAttributes,
+  findProductUserBySubject,
   productUserStandingValidator,
   productUserTimestamp,
   productUserTimestampMilliseconds,
@@ -44,18 +45,6 @@ async function requireIdentity(
   const identity = await ctx.auth.getUserIdentity();
   if (identity === null) refuseProductUser("AUTH_REQUIRED");
   return identity;
-}
-
-async function findBySubject(
-  ctx: Pick<QueryCtx, "db">,
-  subject: string,
-): Promise<Doc<"productUsers"> | null> {
-  const matches = await ctx.db
-    .query("productUsers")
-    .withIndex("by_subject", (index) => index.eq("subject", subject))
-    .take(2);
-  if (matches.length > 1) refuseProductUser("PRODUCT_USER_STATE_CONFLICT");
-  return matches[0] ?? null;
 }
 
 /**
@@ -107,7 +96,7 @@ async function establishRecord(
   identity: UserIdentity,
 ): Promise<{ created: boolean; standing: "active" | "suspended" }> {
   const attributes = deriveProductUserAttributes(identity);
-  const existing = await findBySubject(ctx, attributes.subject);
+  const existing = await findProductUserBySubject(ctx, attributes.subject);
   const nowMilliseconds = Date.now();
   const observedAt = productUserTimestamp(nowMilliseconds);
 
@@ -165,7 +154,7 @@ export const getMyStanding = query({
   handler: async (ctx) => {
     const identity = await requireIdentity(ctx);
     const subject = requireProductUserSubject(identity.tokenIdentifier);
-    const existing = await findBySubject(ctx, subject);
+    const existing = await findProductUserBySubject(ctx, subject);
     return { standing: existing?.standing ?? "active" };
   },
 });

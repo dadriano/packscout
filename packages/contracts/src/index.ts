@@ -10,6 +10,7 @@ export * from "./catalog-manifest-publication-v1.ts";
 export * from "./catalog-manifest-publication-auth-v1.ts";
 export * from "./catalog-manifest-publication-v1-receipts.ts";
 export * from "./catalog-retention-v1.ts";
+export * from "./machinery-conditions.ts";
 export * from "./product-users.ts";
 export * from "./provider-feed.ts";
 export * from "./provider-stream-contract-v2.ts";

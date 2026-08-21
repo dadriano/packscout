@@ -84,6 +84,8 @@
     "db:prisma:validate": "npm run prisma:validate --workspace=@packscout/database",
     "db:prisma:generate": "npm run prisma:generate --workspace=@packscout/database",
     "db:prisma:migrate:deploy": "npm run prisma:migrate:deploy --workspace=@packscout/database",
+    "db:seed:local": "node scripts/local/seed-postgres-development-data.mjs",
+    "db:reset:local": "node scripts/local/reset-postgres-development-database.mjs",
     "test:prisma-schema": "npm run test:prisma-schema --workspace=@packscout/database",
     "test:prisma-lifecycle": "npm run test:prisma-lifecycle --workspace=@packscout/database",
     "test:prisma-setup": "npm run test:prisma-setup --workspace=@packscout/database",

@@ -29,6 +29,7 @@ export * from "./heat-promotion-bootstrap.ts";
 export * from "./heat-promotion-operations.ts";
 export * from "./heat-promotion-runner.ts";
 export * from "./heat-promotion-types.ts";
+export * from "./machinery-alert-service.ts";
 export * from "./normalized-heat-observation-contracts.ts";
 export * from "./normalized-heat-observation-port.ts";
 export * from "./operational-alert-service.ts";

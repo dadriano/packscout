@@ -15,6 +15,7 @@ export * from "./heat-promotion-manifest-repository.ts";
 export * from "./heat-promotion-repository.ts";
 export * from "./ingestion-repository.ts";
 export * from "./import-run-repository.ts";
+export * from "./machinery-alert-read-repository.ts";
 export * from "./normalized-heat-observation-repository.ts";
 export * from "./normalized-heat-retention-repository.ts";
 export * from "./operational-alert-repository.ts";

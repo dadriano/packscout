@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/014
 **Blocks:** none
 **Estimated scope:** medium
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -43,12 +43,19 @@ After pulling a branch with new migrations, an operator opens Data, sees "2 pend
 
 ## Acceptance Criteria
 
-- [ ] Migrate reuses the existing canonical workflow; seed and reset run through newly defined, environment-qualified workspace workflows that pass the repository's script-safety check — all three with live streamed output and post-completion status refresh.
-- [ ] Reset requires a typed database-name acknowledgment validated at execution time; mismatch and drift both refuse with explanations.
-- [ ] Non-local targets make all three operations unavailable in the UI and refused server-side; concurrent requests serialize with a clear busy outcome.
-- [ ] Output cap and timeout bound every run and are reported when hit; a panel restart mid-run yields a visible unknown-outcome report.
-- [ ] Every attempt, including refusals, appears in the audit trail; none of the endpoints accept caller-supplied commands or SQL.
+- [x] Migrate reuses the existing canonical workflow; seed and reset run through newly defined, environment-qualified workspace workflows that pass the repository's script-safety check — all three with live streamed output and post-completion status refresh.
+- [x] Reset requires a typed database-name acknowledgment validated at execution time; mismatch and drift both refuse with explanations.
+- [x] Non-local targets make all three operations unavailable in the UI and refused server-side; concurrent requests serialize with a clear busy outcome.
+- [x] Output cap and timeout bound every run and are reported when hit; a panel restart mid-run yields a visible unknown-outcome report.
+- [x] Every attempt, including refusals, appears in the audit trail; none of the endpoints accept caller-supplied commands or SQL.
 
 ## Verification
 
 Guard tests prove execution-time refusals (non-local, acknowledgment mismatch, target drift, busy lock) and that only the three registered operations are invocable; streaming tests prove the output cap, timeout, and interrupted-run unknown-outcome reporting. The panel test suite and workspace typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: The three registered operations delegate to workspace scripts (`db:prisma:migrate:deploy`, the new `db:seed:local`, the new `db:reset:local`), and every guard — locality, the single-operation lock, target drift, and the typed acknowledgment — is evaluated by the supervisor at the moment the operation starts, against a target re-resolved from the environment right then.
+- Divergences: none in scope. One environmental note: `prisma migrate reset` carries its own AI-agent safety guard, so the destructive step of `db:reset:local` could not be executed to completion during verification — it refused with that guard's message, and the panel reported the failure honestly (marker written, output streamed, run settled as `failed` with the exit code named). Migrate and seed were exercised end to end against a real local PostgreSQL database through the panel's own spawn adapter.
+- Verification: `npm run test:ops-panel` (EXIT 0, 447 tests passing), `npm run typecheck` (EXIT 0), `npm run lint` (EXIT 0), `npm run check:scripts` (EXIT 0, 8 package.json files scanned), `npm run scan:framework-standards:ratchet` (EXIT 0, 0 new findings, 0 grown modules). Additionally `npm run check:framework` (EXIT 0) and `npm run test:tooling` (EXIT 0, 205 + 2 tests) for the new workspace scripts. Live checks against a scratch database: migrate and seed streamed to success through the runner, the seed proved idempotent, both scripts refused unset, unparseable, and non-loopback targets, and a mistyped acknowledgment refused the reset without writing an in-flight marker.

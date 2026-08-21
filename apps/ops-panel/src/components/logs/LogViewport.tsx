@@ -7,6 +7,12 @@ import {
 import type { HighlightRange } from "../../logs/highlight.ts";
 import type { FactsLookup, LogDisplayItem } from "../../logs/line-groups.ts";
 import {
+  anchoredScrollTop,
+  captureScrollAnchor,
+  shouldLoadOlder,
+  type ScrollAnchor,
+} from "../../logs/scroll-anchor.ts";
+import {
   computeFixedWindow,
   computeMeasuredWindow,
   createRowMetrics,
@@ -25,6 +31,12 @@ import { LogRowView } from "./LogRowView.tsx";
  *
  * The reader's top visible row is reported upwards as the anchor so the buffer
  * knows which text must not be evicted out from under them.
+ *
+ * That same row does a second job when history (admin-tools/012) prepends older
+ * output above it. Inserting rows moves everything on screen down by whatever
+ * they happen to be tall, so the pane re-scrolls to keep the anchored row under
+ * the reader's eye. Without it, scrolling up would throw the text away exactly
+ * when someone is concentrating on it.
  */
 
 export interface LogViewportProps {
@@ -39,6 +51,12 @@ export interface LogViewportProps {
   facts: FactsLookup;
   highlight: (text: string) => HighlightRange[];
   onToggleGroup: (groupId: string) => void;
+  /** Copy one group whole, folded members included. */
+  onCopyRow: (groupId: string) => void;
+  /** Called when the reader nears the top and older output should load. */
+  onReachTop: () => void;
+  /** A row to centre and mark, e.g. the search result being read in context. */
+  focusedId: string | null;
   emptyMessage: string;
 }
 
@@ -52,6 +70,9 @@ export function LogViewport({
   facts,
   highlight,
   onToggleGroup,
+  onCopyRow,
+  onReachTop,
+  focusedId,
   emptyMessage,
 }: LogViewportProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -103,17 +124,73 @@ export function LogViewport({
 
   const visible = items.slice(virtual.startIndex, virtual.endIndex);
 
+  /** Where a row's top edge sits inside the canvas, measured or arithmetic. */
+  const offsetOf = useCallback(
+    (index: number) =>
+      preferences.wrap ? metrics.offsetOf(index) : index * rowHeight,
+    [metrics, preferences.wrap, rowHeight],
+  );
+  const indexAt = useCallback(
+    (top: number) =>
+      preferences.wrap
+        ? metrics.indexAt(top)
+        : Math.max(0, Math.floor(top / rowHeight)),
+    [metrics, preferences.wrap, rowHeight],
+  );
+
+  const anchorRef = useRef<ScrollAnchor | null>(null);
+  const anchorIndexRef = useRef(-1);
+  const centredFor = useRef<string | null>(null);
+
   const handleScroll = useCallback(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    setScrollTop(scroller.scrollTop);
-    const atBottom = isAtBottom(
-      scroller.scrollTop,
-      scroller.clientHeight,
-      scroller.scrollHeight,
-    );
+    const top = scroller.scrollTop;
+    setScrollTop(top);
+    const atBottom = isAtBottom(top, scroller.clientHeight, scroller.scrollHeight);
     if (atBottom !== following) onFollowingChange(atBottom);
-  }, [following, onFollowingChange]);
+
+    // Remember the row under the reader's eye before anything can be inserted
+    // above it, so the correction below has something true to restore.
+    const index = Math.min(indexAt(top), Math.max(0, items.length - 1));
+    anchorRef.current = atBottom
+      ? null
+      : captureScrollAnchor(items[index]?.id, offsetOf(index), top);
+    anchorIndexRef.current = atBottom ? -1 : index;
+
+    if (shouldLoadOlder({ scrollTop: top, following: atBottom, rowCount: items.length })) {
+      onReachTop();
+    }
+  }, [following, indexAt, items, offsetOf, onFollowingChange, onReachTop]);
+
+  // Older output arrived above: put the anchored row back where it was.
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    const anchor = anchorRef.current;
+    if (!scroller || !anchor || following) return;
+    const index = items.findIndex((item) => item.id === anchor.id);
+    // A row evicted while the page was in flight cannot be restored to; leaving
+    // the view alone is better than scrolling somewhere arbitrary.
+    if (index < 0 || index === anchorIndexRef.current) return;
+    anchorIndexRef.current = index;
+    const next = anchoredScrollTop(anchor, offsetOf(index));
+    if (Math.abs(next - scroller.scrollTop) < 1) return;
+    scroller.scrollTop = next;
+    setScrollTop(next);
+  }, [following, items, offsetOf]);
+
+  // A search result opens centred, so the match is read in its context rather
+  // than at the edge of the pane.
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || focusedId === null || centredFor.current === focusedId) return;
+    const index = items.findIndex((item) => item.id === focusedId);
+    if (index < 0) return;
+    centredFor.current = focusedId;
+    const next = Math.max(0, offsetOf(index) - scroller.clientHeight / 2);
+    scroller.scrollTop = next;
+    setScrollTop(next);
+  }, [focusedId, items, offsetOf]);
 
   // Report the top visible row so eviction can be kept away from it.
   useEffect(() => {
@@ -196,6 +273,8 @@ export function LogViewport({
                 facts={facts}
                 highlight={highlight}
                 onToggleGroup={onToggleGroup}
+                onCopyRow={onCopyRow}
+                focused={item.id === focusedId}
                 timestamps={preferences.timestamps}
                 ansi={preferences.ansi}
                 now={now}

@@ -28,6 +28,21 @@ function line(text: string, service = "worker"): LogRow {
   };
 }
 
+function panelMarker(detail: string): LogRow {
+  sequence += 1;
+  return {
+    type: "marker",
+    id: `marker:*:0:0:restarted:client-${sequence}`,
+    kind: "restarted",
+    reason: "browsing",
+    service: "*",
+    generation: 0,
+    offset: 0,
+    observedAt: "2026-08-20T10:00:00.000Z",
+    detail,
+  };
+}
+
 function view(
   rows: readonly LogRow[],
   options: {
@@ -97,4 +112,18 @@ test("the whole pipeline narrows to the matching event, head included", () => {
   assert.equal(narrowed.total, 4, "out of four");
   assert.equal(narrowed.groups.length, 1);
   assert.equal(narrowed.groups[0]?.members.length, 1, "copy still gets the frame");
+});
+
+test("a panel-wide marker survives focusing on one service", () => {
+  // Focus hides other services' output; a seam belongs to the pane itself, and
+  // hiding it would let the reader believe the stream was continuous.
+  const result = view([line("worker output"), panelMarker("Returned to live."), line("admin output", "admin")], {
+    hidden: new Set(["admin"]),
+  });
+  assert.deepEqual(
+    result.items.map((item) =>
+      item.row.type === "marker" ? item.row.detail : item.row.text,
+    ),
+    ["worker output", "Returned to live."],
+  );
 });

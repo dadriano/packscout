@@ -153,6 +153,29 @@ export function readPositiveDuration(
   return candidate;
 }
 
+/**
+ * A bounded whole-number setting, such as a queue-depth alert threshold. The
+ * upper bound keeps a mistyped value from disabling a condition outright.
+ */
+export function readPositiveCount(
+  value: string | undefined,
+  fallback: number,
+  variableName: string,
+  maximum = 1_000_000,
+): number {
+  const candidate = value === undefined ? fallback : Number(value);
+  if (
+    !Number.isSafeInteger(candidate) ||
+    candidate <= 0 ||
+    candidate > maximum
+  ) {
+    throw new Error(
+      `${variableName} must be an integer between 1 and ${maximum}.`,
+    );
+  }
+  return candidate;
+}
+
 export function readAllowedOrigins(
   value: string | undefined,
   fallback: readonly string[],

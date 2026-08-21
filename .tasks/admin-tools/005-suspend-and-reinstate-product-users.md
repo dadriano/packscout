@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/001, admin-tools/002, admin-tools/003
 **Blocks:** none
 **Estimated scope:** medium
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -43,13 +43,20 @@ In the admin, a Suspend control appears on active users and a Reinstate control 
 
 ## Acceptance Criteria
 
-- [ ] An administrator can suspend and reinstate a user with confirmation, immediate standing updates in the admin, and audit records for both actions.
-- [ ] While suspended, the user's save/unsave mutations are rejected server-side even on a session established before the suspension, and the product shows the suspended notice.
-- [ ] Reinstatement restores full signed-in behavior with all previously saved items intact.
-- [ ] Duplicate/concurrent suspend or reinstate actions converge safely to a correct standing.
-- [ ] An identity with no directory record retains full authenticated capabilities (missing record = active standing).
-- [ ] Data operators and anonymous clients cannot perform either action and see no controls for them.
+- [x] An administrator can suspend and reinstate a user with confirmation, immediate standing updates in the admin, and audit records for both actions.
+- [x] While suspended, the user's save/unsave mutations are rejected server-side even on a session established before the suspension, and the product shows the suspended notice.
+- [x] Reinstatement restores full signed-in behavior with all previously saved items intact.
+- [x] Duplicate/concurrent suspend or reinstate actions converge safely to a correct standing.
+- [x] An identity with no directory record retains full authenticated capabilities (missing record = active standing).
+- [x] Data operators and anonymous clients cannot perform either action and see no controls for them.
 
 ## Verification
 
 Product backend tests prove suspended-standing rejection of authenticated mutations (including with a pre-suspension session), missing-record-evaluates-as-active, and clean reinstatement; admin route behavior tests prove the permission matrix, confirmation-backed mutations, convergence on repeat actions, and audit emission. The workspace test suites and typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: Reversible, database-authoritative status flip with fail-closed server-side enforcement re-read at request time, an audited manage-gated admin control, and a plain product notice — exactly the reference admin's account-control pattern, with no hard delete anywhere.
+- Divergences: none. The self-read `savedItems.getSavedItemIds` deliberately stays open while suspended (the task scopes rejection to authenticated writes, and "saved data is kept" requires the owner can still see it). The audit record stores the target as a pseudonymous reference in metadata rather than in `audit_events.subject_id`, because that column is a workspace UUID and a hosted-provider subject key is issuer-qualified personal data; this follows the admin's existing actor-pseudonymization convention.
+- Verification: `npm run lint:admin` EXIT 0; `npm run typecheck` EXIT 0; `npm run test:admin` EXIT 0 (155 pass, 0 fail); `npm run test:convex` EXIT 0 (23 files, 167 pass); `npm run test:frontend` EXIT 0 (190 pass, 0 fail); `npm run build:admin` EXIT 0; `npm run scan:framework-standards:ratchet` EXIT 0 (0 new findings, 0 grown modules). Also confirmed green: `npm run lint:frontend`, `npm run lint:contracts`, `npm run check:boundaries`, `npm run check:docs`.

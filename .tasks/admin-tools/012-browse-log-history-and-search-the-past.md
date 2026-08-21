@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/011, admin-tools/013
 **Blocks:** none
 **Estimated scope:** medium
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -40,12 +40,19 @@ An operator investigating an overnight failure scrolls up and the log keeps fill
 
 ## Acceptance Criteria
 
-- [ ] Backward paging fills history for all visible services with stable scroll anchoring, correct merges (no duplicates or gaps by identity), and an explicit start-of-log state.
-- [ ] Jump-to-start and forward paging work in detached mode, and generation changes during any history browsing return to live with a marker.
-- [ ] Deep search streams progress, cancels cleanly, respects match/byte caps with an honest stop note, and jump-to-context centers bounded unfiltered context around the selected match.
-- [ ] Oversized lines return as bounded fragments whose cursors progress (no infinite loop, no unbounded payload).
-- [ ] Visible-lines export, raw-file download, and group-aware copy produce the expected content.
+- [x] Backward paging fills history for all visible services with stable scroll anchoring, correct merges (no duplicates or gaps by identity), and an explicit start-of-log state.
+- [x] Jump-to-start and forward paging work in detached mode, and generation changes during any history browsing return to live with a marker.
+- [x] Deep search streams progress, cancels cleanly, respects match/byte caps with an honest stop note, and jump-to-context centers bounded unfiltered context around the selected match.
+- [x] Oversized lines return as bounded fragments whose cursors progress (no infinite loop, no unbounded payload).
+- [x] Visible-lines export, raw-file download, and group-aware copy produce the expected content.
 
 ## Verification
 
 Pure-logic tests prove the history reader's backward/forward chunking, byte budgets, oversized-line fragmenting, and boundary reporting, plus search cap/cancel/progress accounting; the panel test suite and workspace typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: History pages are produced by the tail's own line splitter at the same byte offsets in the same generation, so `line:<service>:<generation>:<offset>` identity is shared across the initial window, the live stream, prepended scrollback, forward paging, and search results; every read is bounded by a byte budget and a line cap, and every returned cursor strictly progresses.
+- Divergences: Deep search matching runs in the browser rather than on the server. The task requires the search to run against the *active compiled filter* and forbids a second matcher, and `compileFilter`/`readLineFacts` live in the client; the server therefore only serves bounded backward pages and the client applies the identical compiled filter, which removes any possibility of the search and the pane disagreeing. Bounding is unchanged — the scan is capped by matches, by total bytes, and by cancellation, and only the current page plus capped matches are ever held. The raw download is streamed by the server and never buffered there; the browser materialises the blob only to save it, because `/api/logs/download` is deliberately excluded from the EventSource header exemption and so cannot be a plain navigation. One adjacent fix was required for correctness: `logs/log-view.ts` now keeps panel-scope markers visible when a single service is focused, otherwise the return-to-live seam marker this task raises would be filtered away.
+- Verification: `npm run test:ops-panel` -> EXIT 0 (513 tests, 513 pass); `npm run typecheck` -> EXIT 0; `npm run lint` -> EXIT 0; `npm run scan:framework-standards:ratchet` -> EXIT 0 (0 findings, 0 new, 0 grown modules). Additionally exercised against a running panel: backward paging to the true start of a 2,002-line log (0 duplicate rows, scroll anchor held the reader's row across each prepend), jump-to-start via the `g` binding, deep search with a live filter into unfiltered centred context, raw download headers and the 403 without the panel header, and a mid-browse truncation returning the view to live with the generation-change marker rendered inline.

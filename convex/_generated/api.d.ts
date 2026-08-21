@@ -47,6 +47,7 @@ import type * as productionHeatRetention from "../productionHeatRetention.js";
 import type * as productionPublicationKeyConfig from "../productionPublicationKeyConfig.js";
 import type * as productUserDirectory from "../productUserDirectory.js";
 import type * as productUserRecords from "../productUserRecords.js";
+import type * as productUserSavedItems from "../productUserSavedItems.js";
 import type * as productUsers from "../productUsers.js";
 import type * as providerCatalogDependentWrites from "../providerCatalogDependentWrites.js";
 import type * as providerCatalogEntityWrites from "../providerCatalogEntityWrites.js";
@@ -119,6 +120,7 @@ declare const fullApi: ApiFromModules<{
   productionPublicationKeyConfig: typeof productionPublicationKeyConfig;
   productUserDirectory: typeof productUserDirectory;
   productUserRecords: typeof productUserRecords;
+  productUserSavedItems: typeof productUserSavedItems;
   productUsers: typeof productUsers;
   providerCatalogDependentWrites: typeof providerCatalogDependentWrites;
   providerCatalogEntityWrites: typeof providerCatalogEntityWrites;

@@ -2,14 +2,23 @@ import {
   boundedProductUserSubjectLabel,
   describeProductUserIdentity,
   type ProductUserDirectoryRow,
+  type ProductUserStandingChange,
 } from "@packscout/contracts";
+import { Link } from "react-router-dom";
 import { StatusBadge } from "../StatusBadge";
 import { dateTime } from "../operations/OperationStatus";
+import { ProductUserStandingControl } from "./ProductUserStandingControl";
 
 interface ProductUserLedgerProps {
   users: ProductUserDirectoryRow[];
   /** Ledger position of the first row on this page, one-based. */
   startIndex: number;
+  /**
+   * The account control appears only for operators holding the manage
+   * permission. Everyone else sees the standing and no way to change it.
+   */
+  canManage: boolean;
+  onStandingChange: (change: ProductUserStandingChange) => void;
 }
 
 function saved(count: number, noun: string): string {
@@ -19,9 +28,14 @@ function saved(count: number, noun: string): string {
 /**
  * Rows are keyed on the subject — the stable identity the product backend
  * assigns — so a user with no email and no wallet address is still a complete,
- * addressable row rather than a blank one.
+ * addressable row that opens its own detail view.
  */
-export function ProductUserLedger({ users, startIndex }: ProductUserLedgerProps) {
+export function ProductUserLedger({
+  users,
+  startIndex,
+  canManage,
+  onStandingChange,
+}: ProductUserLedgerProps) {
   return (
     <section className="admin-ledger" aria-labelledby="product-users-ledger-title">
       <header className="admin-section-heading">
@@ -45,9 +59,13 @@ export function ProductUserLedger({ users, startIndex }: ProductUserLedgerProps)
             <article key={user.subject} data-subject={user.subject}>
               <span>{String(startIndex + index).padStart(2, "0")}</span>
               <div>
-                <strong className="product-users__label" title={identity.label}>
+                <Link
+                  className="product-users__label"
+                  to={`/users/${encodeURIComponent(user.subject)}`}
+                  title={identity.label}
+                >
                   {identity.label}
-                </strong>
+                </Link>
                 {secondaryLine ? (
                   <p className="product-users__identity">{secondaryLine}</p>
                 ) : null}
@@ -79,10 +97,18 @@ export function ProductUserLedger({ users, startIndex }: ProductUserLedgerProps)
                   </div>
                 </dl>
               </div>
-              <StatusBadge
-                label={user.standing === "active" ? "Active" : "Suspended"}
-                tone={user.standing === "active" ? "ready" : "danger"}
-              />
+              <div className="product-users__row-actions">
+                <StatusBadge
+                  label={user.standing === "active" ? "Active" : "Suspended"}
+                  tone={user.standing === "active" ? "ready" : "danger"}
+                />
+                {canManage ? (
+                  <ProductUserStandingControl
+                    user={user}
+                    onChanged={onStandingChange}
+                  />
+                ) : null}
+              </div>
             </article>
           );
         })}

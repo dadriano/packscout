@@ -62,6 +62,12 @@ The Express boundary authenticates, authorizes, validates, delegates to shared
 services, and maps stable errors. Organization scope and mutation permissions are
 enforced again at the persistence boundary and covered directly by integration tests.
 
+The admin server also hosts one bounded background cycle: the machinery alert
+evaluation. It is the only periodic work outside the worker, and deliberately so
+— it detects a dead worker fleet, which a detector inside that fleet could not.
+It reads the same shared condition evaluations the monitoring pages render and
+publishes through the existing operational alert path.
+
 ## Local operations panel
 
 `apps/ops-panel` is a developer tool, not a product surface. It is deliberately

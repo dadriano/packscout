@@ -16,6 +16,10 @@ import { LineText } from "./LineText.tsx";
  * A head shows what it is hiding: how many lines it folded, and how many of
  * them matched. Without the second number, expanding a group would be a guess,
  * and a search that matched deep inside a trace would look like a false hit.
+ *
+ * Copying a row copies its whole group for the same reason: the row on screen
+ * is the event, not the first line of it, and pasting a message with no trace
+ * under it helps nobody.
  */
 
 const SEVERITY_LABEL: Readonly<Record<LogSeverity, string>> = Object.freeze({
@@ -39,6 +43,9 @@ export interface LogRowViewProps {
   ansi: boolean;
   now: number;
   onToggleGroup: (groupId: string) => void;
+  onCopyRow: (groupId: string) => void;
+  /** The row a search result opened on, marked so it can be found instantly. */
+  focused: boolean;
 }
 
 function LogRowViewComponent({
@@ -49,6 +56,8 @@ function LogRowViewComponent({
   ansi,
   now,
   onToggleGroup,
+  onCopyRow,
+  focused,
 }: LogRowViewProps) {
   const { row } = item;
   const { plainText, time } = facts(row);
@@ -77,6 +86,7 @@ function LogRowViewComponent({
       data-severity={item.severity}
       data-role={item.role}
       data-matched={item.matched ? "yes" : "no"}
+      data-focused={focused ? "yes" : "no"}
       style={serviceBadgeVariables(row.service)}
     >
       {item.role === "head" ? (
@@ -134,6 +144,21 @@ function LogRowViewComponent({
           &#8230;
         </span>
       ) : null}
+
+      <button
+        type="button"
+        className="panel-log-copy-row"
+        onClick={() => onCopyRow(item.groupId)}
+        title={
+          item.memberCount > 0
+            ? `Copy this line and its ${item.memberCount} folded ${
+                item.memberCount === 1 ? "line" : "lines"
+              }`
+            : "Copy this line"
+        }
+      >
+        Copy
+      </button>
     </div>
   );
 }

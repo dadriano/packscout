@@ -17,6 +17,7 @@ function actions(overrides: Partial<Parameters<typeof logShortcutBindings>[0]> =
       togglePause: record("toggle-pause"),
       jumpToLive: record("jump-to-live"),
       focusService: (service: string | null) => calls.push(`focus:${service}`),
+      jumpToStart: record("jump-to-start"),
       toggleWrap: record("toggle-wrap"),
       openHelp: record("open-help"),
       dismiss: record("dismiss"),
@@ -57,7 +58,7 @@ test("only dismissal is allowed to act while typing", () => {
 test("the core loop is reachable from the keyboard", () => {
   const { calls, input } = actions();
   const registry = createShortcutRegistry(logShortcutBindings(input));
-  for (const key of ["/", "p", "l", "]", "a", "w", "?"]) {
+  for (const key of ["/", "p", "l", "]", "a", "g", "w", "?"]) {
     assert.equal(registry.handle({ key }), true, `${key} should be bound`);
   }
   assert.deepEqual(calls, [
@@ -66,9 +67,19 @@ test("the core loop is reachable from the keyboard", () => {
     "jump-to-live",
     "focus:admin",
     "focus:null",
+    "jump-to-start",
     "toggle-wrap",
     "open-help",
   ]);
+});
+
+test("history browsing is reachable from the keyboard and documented", () => {
+  const binding = logShortcutBindings(actions().input).find(
+    (entry) => entry.id === "jump-to-start",
+  );
+  assert.ok(binding, "jump-to-start registers into the shared registry");
+  assert.equal(binding.key, "g");
+  assert.ok(binding.description.length > 0, "help is generated from the registry");
 });
 
 test("stepping from a focused service moves along the rail", () => {

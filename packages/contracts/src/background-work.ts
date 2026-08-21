@@ -147,6 +147,12 @@ export interface RecomputationBacklogFacts {
   readonly failed: number;
   readonly oldestPendingAvailableAt: string | null;
   readonly timelyAfterMs: number | null;
+  /**
+   * How much work may be owed before depth alone counts as a backlog. Omitted
+   * or `null` when no ceiling is configured, in which case depth is reported
+   * but never judged — the age and stuck-work rules still apply.
+   */
+  readonly depthLimit?: number | null;
 }
 
 export interface RecomputationBacklogEvaluation {
@@ -160,6 +166,7 @@ export interface RecomputationBacklogEvaluation {
   readonly failed: number;
   readonly oldestPendingAgeMs: number | null;
   readonly timelyAfterMs: number | null;
+  readonly depthLimit: number | null;
 }
 
 export type RetentionCadenceState =
@@ -227,7 +234,9 @@ export function resolveBackgroundWorkTimelinessMs(
 /**
  * Queue depth and oldest-pending age, plus the state the admin badges and
  * alerting both key off. Expired claims and failed entries count as backlog
- * because both are work no worker will pick up without an operator.
+ * because both are work no worker will pick up without an operator, and depth
+ * past its configured ceiling counts because a queue that large is not being
+ * drained even while each entry is still inside the timeliness window.
  */
 export function evaluateRecomputationBacklog(
   facts: RecomputationBacklogFacts,
@@ -247,6 +256,13 @@ export function evaluateRecomputationBacklog(
     facts.timelyAfterMs > 0
       ? facts.timelyAfterMs
       : null;
+  const depthLimit =
+    facts.depthLimit !== null &&
+    facts.depthLimit !== undefined &&
+    Number.isInteger(facts.depthLimit) &&
+    facts.depthLimit > 0
+      ? facts.depthLimit
+      : null;
   const evaluation = {
     depth: pending + claimed,
     pending,
@@ -256,11 +272,16 @@ export function evaluateRecomputationBacklog(
     failed,
     oldestPendingAgeMs,
     timelyAfterMs,
+    depthLimit,
   };
   if (evaluation.depth === 0 && failed === 0) {
     return { state: "idle", ...evaluation };
   }
-  if (expiredClaims > 0 || failed > 0) {
+  if (
+    expiredClaims > 0 ||
+    failed > 0 ||
+    (depthLimit !== null && evaluation.depth > depthLimit)
+  ) {
     return { state: "backlogged", ...evaluation };
   }
   if (timelyAfterMs === null) return { state: "unknown", ...evaluation };

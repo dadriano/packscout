@@ -9,16 +9,14 @@ import {
 import {
   evaluateRecomputationBacklog,
   evaluateRetentionCadence,
-  resolveBackgroundWorkTimelinessMs,
   type RecomputationQueueEntry,
   type RecomputationRecoveryAction,
   type RecomputationRecoveryResult,
   type RetentionExecutionSummary,
-  type WorkerEffectiveSettings,
 } from "@packscout/contracts";
-import { classifyWorkerPresence } from "@packscout/services";
 import { createProviderActorKeyer, createRecordReferencer } from "./auth/actor-key.ts";
 import { InvalidOperationCursorError } from "./import-operations-runtime.ts";
+import { resolveLiveTimelinessMs } from "./machinery-derivations.ts";
 import type {
   BackgroundWorkRouterDependencies,
   RecomputationQueuePage,
@@ -32,6 +30,12 @@ type BackgroundWorkDatabase = ConstructorParameters<
 export interface AdminBackgroundWorkRuntimeInput {
   readonly database: BackgroundWorkDatabase;
   readonly actorPseudonymKey: Uint8Array;
+  /**
+   * Queue depth a workspace may owe before depth alone counts as a backlog.
+   * The same configured ceiling reaches alerting, so the badge on this page and
+   * the alert flip together rather than at two different queue sizes.
+   */
+  readonly backlogDepthLimit: number | null;
 }
 
 type CursorKind = "recomputation" | "retention";
@@ -171,17 +175,14 @@ export function createAdminBackgroundWorkRuntime(
   }
 
   /**
-   * The settings the live fleet actually published. A stopped or stale
-   * instance no longer speaks for the fleet, so its window is excluded and an
-   * absent fleet yields no threshold at all.
+   * The timeliness window the live fleet published, shared with alerting so the
+   * queue badge and the queue alert read the same threshold.
    */
-  async function publishedSettings(
-    now: Date,
-  ): Promise<readonly WorkerEffectiveSettings[]> {
-    const instances = await presence.listInstances({ limit: 100 });
-    return instances
-      .filter((instance) => classifyWorkerPresence(instance, now) === "running")
-      .map((instance) => instance.effectiveSettings);
+  async function timelinessMs(now: Date): Promise<number | null> {
+    return resolveLiveTimelinessMs(
+      await presence.listInstances({ limit: 100 }),
+      now,
+    );
   }
 
   async function resolve(
@@ -202,7 +203,7 @@ export function createAdminBackgroundWorkRuntime(
       async listRecomputations(request): Promise<RecomputationQueuePage> {
         const now = clock.now();
         const before = decodeCursor("recomputation", request.cursor);
-        const [page, aggregate, settings] = await Promise.all([
+        const [page, aggregate, timelyAfterMs] = await Promise.all([
           repository.listRecomputations({
             organizationId: request.organizationId,
             limit: request.limit,
@@ -213,7 +214,7 @@ export function createAdminBackgroundWorkRuntime(
             organizationId: request.organizationId,
             now,
           }),
-          publishedSettings(now),
+          timelinessMs(now),
         ]);
         const last = page.items.at(-1);
         return {
@@ -231,14 +232,15 @@ export function createAdminBackgroundWorkRuntime(
             failed: aggregate.failed,
             oldestPendingAvailableAt:
               aggregate.oldestPendingAvailableAt?.toISOString() ?? null,
-            timelyAfterMs: resolveBackgroundWorkTimelinessMs(settings),
+            timelyAfterMs,
+            depthLimit: input.backlogDepthLimit,
           }),
         };
       },
       async listRetentionExecutions(request): Promise<RetentionExecutionPage> {
         const now = clock.now();
         const before = decodeCursor("retention", request.cursor);
-        const [page, latest, settings] = await Promise.all([
+        const [page, latest, timelyAfterMs] = await Promise.all([
           repository.listRetentionExecutions({
             organizationId: request.organizationId,
             limit: request.limit,
@@ -247,7 +249,7 @@ export function createAdminBackgroundWorkRuntime(
           repository.latestRetentionExecution({
             organizationId: request.organizationId,
           }),
-          publishedSettings(now),
+          timelinessMs(now),
         ]);
         const last = page.items.at(-1);
         return {
@@ -258,7 +260,7 @@ export function createAdminBackgroundWorkRuntime(
               : null,
           cadence: evaluateRetentionCadence({
             now: now.toISOString(),
-            expectedIntervalMs: resolveBackgroundWorkTimelinessMs(settings),
+            expectedIntervalMs: timelyAfterMs,
             latest: latest ? toExecution(latest) : null,
           }),
         };

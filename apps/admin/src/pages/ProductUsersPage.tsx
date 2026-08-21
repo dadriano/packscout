@@ -1,69 +1,30 @@
-import { useEffect, useState, type FormEvent } from "react";
-import type { ProductUserDirectoryRow } from "@packscout/contracts";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import type {
+  ProductUserDirectoryRow,
+  ProductUserStandingChange,
+} from "@packscout/contracts";
 import { AdminApiError } from "../api/client";
 import { listProductUsers } from "../api/product-users";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { AuthRestrictedState } from "../components/auth/AuthRestrictedState";
 import { KeysetPagination } from "../components/operations/KeysetPagination";
+import {
+  describeDirectoryFailure,
+  type DirectoryFailure,
+} from "../components/product-users/directory-failure";
 import { ProductUserLedger } from "../components/product-users/ProductUserLedger";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { useSession } from "../providers/session";
 
 const PAGE_SIZE = 20;
 
-interface DirectoryFailure {
-  readonly title: string;
-  readonly description: string;
-  /** False when retrying the same request cannot help. */
-  readonly retryable: boolean;
-}
-
-/**
- * Failure copy derived from the admin's own stable codes. The product-backend
- * integration never reports a raw upstream error, so there is nothing here to
- * restate beyond what the admin service already decided to say.
- */
-function describeFailure(error: unknown): DirectoryFailure {
-  if (error instanceof AdminApiError) {
-    if (error.code === "PRODUCT_USER_DIRECTORY_UNCONFIGURED") {
-      return {
-        title: "The product-user directory is not connected.",
-        description:
-          "This admin service has no configured connection to the product backend, so sign-ups cannot be listed. Nothing has been changed; configure the integration on the server and reload.",
-        retryable: false,
-      };
-    }
-    if (error.code === "INVALID_PRODUCT_USER_CURSOR") {
-      return {
-        title: "This page of the directory is no longer valid.",
-        description:
-          "The directory moved on while you were paging through it. Return to the first page to continue.",
-        retryable: false,
-      };
-    }
-    if (error.status === 429) {
-      return {
-        title: "Too many directory requests.",
-        description: "Wait a moment before searching or paging again.",
-        retryable: true,
-      };
-    }
-    return {
-      title: "The product-user directory could not be loaded.",
-      description: `${error.message} Nothing has been changed.`,
-      retryable: true,
-    };
-  }
-  return {
-    title: "The product-user directory could not be loaded.",
-    description:
-      "PackScout Admin is temporarily unavailable. Nothing has been changed.",
-    retryable: true,
-  };
-}
-
 export function ProductUsersPage() {
   useDocumentTitle("Users");
+  const { status } = useSession();
+  const canManage =
+    status.phase === "authenticated" &&
+    status.session.permissions.includes("product_users:manage");
   const [users, setUsers] = useState<ProductUserDirectoryRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -101,13 +62,29 @@ export function ProductUsersPage() {
           return;
         }
         setUsers([]);
-        setFailure(describeFailure(error));
+        setFailure(describeDirectoryFailure(error));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
   }, [appliedSearch, cursor, refreshIndex]);
+
+  /**
+   * The ledger reflects the standing the backend reports, immediately and in
+   * place. The whole page is not reloaded: a listing reload would move rows
+   * under the administrator who just acted, and the row they acted on is the
+   * one thing that certainly changed.
+   */
+  const applyStandingChange = useCallback((change: ProductUserStandingChange) => {
+    setUsers((rows) =>
+      rows.map((row) =>
+        row.subject === change.user.subject
+          ? { ...row, standing: change.user.standing }
+          : row,
+      ),
+    );
+  }, []);
 
   function restart(search: string) {
     setCursor(undefined);
@@ -240,6 +217,8 @@ export function ProductUsersPage() {
         <ProductUserLedger
           users={users}
           startIndex={cursorStack.length * PAGE_SIZE + 1}
+          canManage={canManage}
+          onStandingChange={applyStandingChange}
         />
       )}
 

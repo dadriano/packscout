@@ -1,18 +1,24 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { internalQuery, type QueryCtx } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  type QueryCtx,
+} from "./_generated/server";
 import {
   compareProductUserRecency,
+  findProductUserBySubject,
   formatProductUserSearchCursor,
   isProductUserSearchCursor,
   normalizeProductUserSearchTerm,
   parseProductUserSearchCursor,
   productUserDirectoryRowValidator,
   productUserRecordValidator,
-  PRODUCT_USER_MAX_SUBJECT_LENGTH,
+  productUserStandingValidator,
   refuseProductUser,
   requireProductUserPageSize,
+  requireProductUserSubjectArgument,
   toProductUserRecord,
   type ProductUserDirectoryRow,
   type ProductUserSearchTerm,
@@ -20,13 +26,17 @@ import {
 import { MAX_SAVED_ITEMS_PER_KIND } from "./savedItems";
 
 /**
- * Privileged product-user directory reads for the admin integration.
+ * The privileged product-user directory surface for the admin integration.
  *
  * These are internal functions: they are not part of the app's public API and
  * are unreachable from browsers, product clients, and any other authenticated
  * product caller. The only external entry point is the admin-integration HTTP
  * surface in `http.ts`, which authenticates its caller server-side with a
- * deployment secret before running these queries.
+ * deployment secret before running them.
+ *
+ * The one write here flips a record's standing. It is deliberately the only
+ * mutation an administrator can reach: there is no hard delete, and nothing on
+ * this surface touches a user's saved items.
  */
 
 /**
@@ -190,19 +200,49 @@ export const getDirectoryRecord = internalQuery({
   args: { subject: v.string() },
   returns: v.union(productUserRecordValidator, v.null()),
   handler: async (ctx, args) => {
-    const subject = args.subject;
-    if (
-      subject.length === 0 ||
-      subject.length > PRODUCT_USER_MAX_SUBJECT_LENGTH
-    ) {
-      refuseProductUser("PRODUCT_USER_SUBJECT_INVALID");
+    const subject = requireProductUserSubjectArgument(args.subject);
+    const existing = await findProductUserBySubject(ctx, subject);
+    return existing === null ? null : toProductUserRecord(existing);
+  },
+});
+
+/**
+ * Sets a directory record's standing to exactly the requested value.
+ *
+ * The operation is a reversible status flip and nothing else: saved items are
+ * never read, rewritten, or deleted here, and no record is ever removed.
+ *
+ * It is idempotent by construction, so repeated and concurrent administrator
+ * actions converge rather than failing. Convex runs each mutation as a
+ * serializable transaction, so two administrators acting at once are ordered;
+ * whichever runs second observes the first's write, and both callers are told
+ * the authoritative resulting standing. `changed` distinguishes "this call
+ * flipped it" from "it was already there" without turning the second call into
+ * an error.
+ *
+ * A subject with no record returns `null` rather than creating one: standing
+ * belongs to a recorded sign-up, and an unrecorded identity is active by
+ * definition.
+ */
+export const setDirectoryStanding = internalMutation({
+  args: { subject: v.string(), standing: productUserStandingValidator },
+  returns: v.object({
+    record: v.union(productUserRecordValidator, v.null()),
+    changed: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const subject = requireProductUserSubjectArgument(args.subject);
+    const existing = await findProductUserBySubject(ctx, subject);
+    if (existing === null) return { record: null, changed: false };
+    if (existing.standing === args.standing) {
+      return { record: toProductUserRecord(existing), changed: false };
     }
-    const matches = await ctx.db
-      .query("productUsers")
-      .withIndex("by_subject", (index) => index.eq("subject", subject))
-      .take(2);
-    if (matches.length > 1) refuseProductUser("PRODUCT_USER_STATE_CONFLICT");
-    const existing = matches[0];
-    return existing === undefined ? null : toProductUserRecord(existing);
+    await ctx.db.patch("productUsers", existing._id, {
+      standing: args.standing,
+    });
+    return {
+      record: { ...toProductUserRecord(existing), standing: args.standing },
+      changed: true,
+    };
   },
 });

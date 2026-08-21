@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   boundedProductUserSubjectLabel,
+  describeProductUserEstimatedEv,
   describeProductUserIdentity,
   listProductUsersRequestSchema,
+  productUserDetailRequestSchema,
   PRODUCT_USER_DIRECTORY_MAX_PAGE_SIZE,
   PRODUCT_USER_MAX_SEARCH_LENGTH,
+  PRODUCT_USER_MAX_SUBJECT_LENGTH,
 } from "./product-users.ts";
 
 const subject = "https://auth.example.test/|did:example:1234567890abcdefghij";
@@ -89,6 +92,42 @@ test("subject labels keep the distinguishing part within a bounded width", () =>
   assert.ok(label.startsWith("did:example:1234"));
   assert.ok(label.endsWith("0123456789"));
   assert.ok(label.includes("…"));
+});
+
+test("detail requests demand one bounded subject and nothing else", () => {
+  assert.equal(
+    productUserDetailRequestSchema.parse({ subject: `  ${subject}  ` }).subject,
+    subject,
+  );
+  for (const request of [
+    {},
+    { subject: "" },
+    { subject: "   " },
+    { subject: "a".repeat(PRODUCT_USER_MAX_SUBJECT_LENGTH + 1) },
+    { subject, savedRepackId: "40000000-0000-5000-8000-000000000001" },
+  ]) {
+    assert.equal(productUserDetailRequestSchema.safeParse(request).success, false);
+  }
+});
+
+test("estimated value reads as money, return, and confidence", () => {
+  assert.equal(
+    describeProductUserEstimatedEv({
+      evDollarsMinorUnits: 125_000,
+      grossReturnBasisPoints: 10_738,
+      confidenceBand: "high",
+    }),
+    "+$1,250.00 EV · 107% of price · high confidence",
+  );
+  // A pack estimated to lose money says so rather than hiding the sign.
+  assert.equal(
+    describeProductUserEstimatedEv({
+      evDollarsMinorUnits: -305,
+      grossReturnBasisPoints: 9_700,
+      confidenceBand: "low",
+    }),
+    "-$3.05 EV · 97% of price · low confidence",
+  );
 });
 
 test("short subject keys are shown in full and empty keys stay labelled", () => {

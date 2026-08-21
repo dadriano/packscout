@@ -1,7 +1,10 @@
 import {
   operationalNotificationSchema,
+  type MachineryCondition,
+  type MachineryConditionKind,
   type NotificationPublishResult,
   type OperationalNotification,
+  type OperationalSeverity,
   type PromotionLane,
 } from "@packscout/contracts";
 import type {
@@ -88,6 +91,92 @@ function promotionAlertScope(
   return `promotion:${deploymentScopeDigest}:${lane}${
     platformKey === undefined ? "" : `:${platformKey}`
   }`;
+}
+
+interface MachineryCopy {
+  readonly severity: OperationalSeverity;
+  readonly title: string;
+  readonly summary: string;
+  readonly recoveredTitle: string;
+  readonly recoveredSummary: string;
+}
+
+/**
+ * Operator-facing wording for the machinery conditions. The measures stay in
+ * bounded evidence; these sentences only say what broke and why it matters, so
+ * a condition reads the same wherever it is surfaced.
+ */
+const machineryCopy: Record<MachineryConditionKind, MachineryCopy> = {
+  worker_fleet_silent: {
+    severity: "critical",
+    title: "No worker is alive",
+    summary:
+      "No worker instance has reported inside the liveness window the fleet published, so nothing is importing, recalculating, or expiring evidence.",
+    recoveredTitle: "Worker fleet recovered",
+    recoveredSummary:
+      "A worker instance is reporting inside its published liveness window again.",
+  },
+  import_run_stalled: {
+    severity: "critical",
+    title: "Import run is stalled",
+    summary:
+      "A running import run has not advanced its heartbeat within the window the fleet published; the worker holding it may be gone.",
+    recoveredTitle: "Import run recovered",
+    recoveredSummary:
+      "The import run is beating again, or it reached a terminal outcome.",
+  },
+  provider_schedule_overdue: {
+    severity: "warning",
+    title: "Provider schedule is overdue",
+    summary:
+      "A provider is past its next-due time by more than the fleet's own liveness window, or is held behind a claim that outlived its expiry.",
+    recoveredTitle: "Provider schedule recovered",
+    recoveredSummary:
+      "The provider schedule is inside its due tolerance and holds no expired claim.",
+  },
+  recomputation_backlogged: {
+    severity: "warning",
+    title: "Recomputation queue is backing up",
+    summary:
+      "Estimated-EV recomputation work is past a configured queue threshold, or is stuck behind expired claims and failed entries.",
+    recoveredTitle: "Recomputation queue recovered",
+    recoveredSummary:
+      "The recomputation queue is inside its thresholds with no stuck work.",
+  },
+  retention_overdue: {
+    severity: "warning",
+    title: "Protected-data retention is overdue",
+    summary:
+      "No protected-data cleanup has started within its expected interval while evidence is still known to be waiting.",
+    recoveredTitle: "Protected-data retention resumed",
+    recoveredSummary:
+      "A protected-data cleanup started inside its expected interval again.",
+  },
+};
+
+/** A fleet that never reported has no silence to describe, only an absence. */
+const NEVER_REPORTED_SUMMARY =
+  "No worker instance has reported at all inside the retained presence window, so how long the fleet has been quiet cannot be measured.";
+
+function machineryEvidence(
+  condition: MachineryCondition,
+): OperationalNotification["evidence"] {
+  return {
+    outcome: condition.outcome,
+    ...(condition.threshold === null ? {} : { reasonCode: condition.threshold }),
+    ...(condition.observedMs === null
+      ? {}
+      : { durationMs: condition.observedMs }),
+    ...(condition.thresholdMs === null
+      ? {}
+      : { thresholdMs: condition.thresholdMs }),
+    ...(condition.observedCount === null
+      ? {}
+      : { count: condition.observedCount }),
+    ...(condition.thresholdCount === null
+      ? {}
+      : { thresholdCount: condition.thresholdCount }),
+  };
 }
 
 function failedNotification(): NotificationPublishResult {
@@ -296,6 +385,63 @@ export class OperationalEventService {
         count: Math.max(0, Math.floor(input.expiredCount)),
         durationMs: Math.max(0, Math.floor(input.durationMs)),
       },
+    });
+  }
+
+  /**
+   * Raises one machinery condition. The condition arrives already decided by
+   * the shared evaluations, so this only publishes it; the durable alert path
+   * groups repeat occurrences onto the single alert its dedupe key names.
+   */
+  machineryConditionRaised(input: {
+    organizationId: string;
+    condition: MachineryCondition;
+  }): Promise<NotificationPublishResult> {
+    const { condition } = input;
+    const copy = machineryCopy[condition.kind];
+    return this.emit({
+      organizationId: input.organizationId,
+      kind: condition.kind,
+      severity: copy.severity,
+      providerId: condition.providerId,
+      runId: condition.runId,
+      quarantineId: null,
+      dedupeKey: condition.dedupeKey,
+      recoveryKey: condition.recoveryKey,
+      title: copy.title,
+      summary:
+        condition.outcome === "WORKER_FLEET_NEVER_REPORTED"
+          ? NEVER_REPORTED_SUMMARY
+          : copy.summary,
+      evidence: machineryEvidence(condition),
+    });
+  }
+
+  /**
+   * Closes a machinery condition that no longer holds. One recovery kind serves
+   * every condition because the recovery key already names which one cleared,
+   * and a recurrence reopens through the ordinary alert lifecycle.
+   */
+  machineryConditionCleared(input: {
+    organizationId: string;
+    kind: MachineryConditionKind;
+    recoveryKey: string;
+    providerId: string | null;
+    runId: string | null;
+  }): Promise<NotificationPublishResult> {
+    const copy = machineryCopy[input.kind];
+    return this.emit({
+      organizationId: input.organizationId,
+      kind: "machinery_recovered",
+      severity: "info",
+      providerId: input.providerId,
+      runId: input.runId,
+      quarantineId: null,
+      dedupeKey: `${input.recoveryKey}:recovered`,
+      recoveryKey: input.recoveryKey,
+      title: copy.recoveredTitle,
+      summary: copy.recoveredSummary,
+      evidence: { outcome: "MACHINERY_RECOVERED" },
     });
   }
 

@@ -1,5 +1,8 @@
+import { PRODUCT_USER_SUSPENDED_ERROR_CODE } from "@packscout/contracts";
 import type { UserIdentity } from "convex/server";
 import { ConvexError, v, type Infer } from "convex/values";
+import type { Doc } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
 
 /**
  * Shared shape and normalization rules for the durable product-user directory.
@@ -38,28 +41,37 @@ const SEARCH_CURSOR = /^offset:(\d{1,6})$/u;
 export type ProductUserErrorCode =
   | "AUTH_REQUIRED"
   | "AUTH_IDENTITY_INVALID"
+  | typeof PRODUCT_USER_SUSPENDED_ERROR_CODE
   | "PRODUCT_USER_STATE_CONFLICT"
   | "PRODUCT_USER_SEARCH_INVALID"
   | "PRODUCT_USER_PAGE_SIZE_INVALID"
   | "PRODUCT_USER_PAGE_CURSOR_INVALID"
   | "PRODUCT_USER_SUBJECT_INVALID";
 
+/**
+ * `ACCOUNT_SUSPENDED` is the stable, distinguishable outcome every
+ * authenticated write path raises for a suspended account. The message states
+ * the standing and nothing else: no operator, no reason, no internals.
+ */
+const PRODUCT_USER_MESSAGES: Readonly<Record<ProductUserErrorCode, string>> =
+  Object.freeze({
+    AUTH_REQUIRED: "Authentication is required for product-user records.",
+    AUTH_IDENTITY_INVALID:
+      "The authenticated identity is not valid for product-user records.",
+    [PRODUCT_USER_SUSPENDED_ERROR_CODE]: "This account is suspended.",
+    PRODUCT_USER_STATE_CONFLICT:
+      "The product-user directory state is inconsistent.",
+    PRODUCT_USER_SEARCH_INVALID:
+      "The product-user directory search term is invalid.",
+    PRODUCT_USER_PAGE_SIZE_INVALID:
+      "The requested product-user page size is out of bounds.",
+    PRODUCT_USER_PAGE_CURSOR_INVALID: "The product-user page cursor is invalid.",
+    PRODUCT_USER_SUBJECT_INVALID:
+      "The requested product-user subject is invalid.",
+  });
+
 export function refuseProductUser(code: ProductUserErrorCode): never {
-  const message =
-    code === "AUTH_REQUIRED"
-      ? "Authentication is required for product-user records."
-      : code === "AUTH_IDENTITY_INVALID"
-        ? "The authenticated identity is not valid for product-user records."
-        : code === "PRODUCT_USER_STATE_CONFLICT"
-          ? "The product-user directory state is inconsistent."
-          : code === "PRODUCT_USER_SEARCH_INVALID"
-            ? "The product-user directory search term is invalid."
-            : code === "PRODUCT_USER_PAGE_SIZE_INVALID"
-              ? "The requested product-user page size is out of bounds."
-              : code === "PRODUCT_USER_PAGE_CURSOR_INVALID"
-                ? "The product-user page cursor is invalid."
-                : "The requested product-user subject is invalid.";
-  throw new ConvexError({ code, message });
+  throw new ConvexError({ code, message: PRODUCT_USER_MESSAGES[code] });
 }
 
 export const productUserStandingValidator = v.union(
@@ -148,6 +160,22 @@ export function normalizeProductUserAuthMethod(value: unknown): string {
     : text.toLowerCase();
 }
 
+/**
+ * Bounds a subject supplied by the trusted admin integration. The value is an
+ * addressing argument, never an authorization claim: product callers cannot
+ * reach the functions that accept it, and product-side ownership still comes
+ * from the Convex-verified identity.
+ */
+export function requireProductUserSubjectArgument(subject: string): string {
+  if (
+    subject.length === 0 ||
+    subject.length > PRODUCT_USER_MAX_SUBJECT_LENGTH
+  ) {
+    refuseProductUser("PRODUCT_USER_SUBJECT_INVALID");
+  }
+  return subject;
+}
+
 export function requireProductUserSubject(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -191,6 +219,58 @@ export function toProductUserRecord(
     lastSeenAt: document.lastSeenAt,
     standing: document.standing,
   };
+}
+
+/**
+ * The one directory record for a subject, or null when that identity has never
+ * been recorded. Two records for one subject is an impossible state, so it
+ * refuses rather than picking a winner.
+ */
+export async function findProductUserBySubject(
+  ctx: Pick<QueryCtx, "db">,
+  subject: string,
+): Promise<Doc<"productUsers"> | null> {
+  const matches = await ctx.db
+    .query("productUsers")
+    .withIndex("by_subject", (index) => index.eq("subject", subject))
+    .take(2);
+  if (matches.length > 1) refuseProductUser("PRODUCT_USER_STATE_CONFLICT");
+  return matches[0] ?? null;
+}
+
+/**
+ * The authoritative standing for a subject, read from the database.
+ *
+ * An identity with no directory record reads as `active`. That is the intended
+ * meaning of fail-closed here: the check trusts the stored record over the
+ * session, not the other way round. A missing record is an unrecorded sign-up
+ * — a user who predates the directory, or a best-effort record write that has
+ * not landed — and never a suspension.
+ */
+export async function readProductUserStanding(
+  ctx: Pick<QueryCtx, "db">,
+  subject: string,
+): Promise<ProductUserStanding> {
+  const existing = await findProductUserBySubject(ctx, subject);
+  return existing?.standing ?? "active";
+}
+
+/**
+ * The standing gate for authenticated write paths. It is deliberately a
+ * database read inside the caller's own transaction, so standing is evaluated
+ * at request time: a session established before a suspension gains nothing,
+ * and a reinstatement takes effect on the very next request.
+ *
+ * This is the default for every future authenticated capability, not a
+ * saved-item special case.
+ */
+export async function requireActiveProductUserStanding(
+  ctx: Pick<QueryCtx, "db">,
+  subject: string,
+): Promise<void> {
+  if ((await readProductUserStanding(ctx, subject)) === "suspended") {
+    refuseProductUser(PRODUCT_USER_SUSPENDED_ERROR_CODE);
+  }
 }
 
 export function productUserTimestamp(epochMilliseconds: number): string {

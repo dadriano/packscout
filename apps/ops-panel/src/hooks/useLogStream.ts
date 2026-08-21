@@ -12,6 +12,7 @@ import {
 import {
   createClientMarkerFactory,
   RECONNECTED_DETAIL,
+  type ClientMarkerFactory,
 } from "../logs/client-markers.ts";
 import { createLogBuffer, toLogRows, type LogBuffer } from "../logs/log-buffer.ts";
 import {
@@ -42,6 +43,15 @@ export interface LogStreamState {
   buffer: LogBuffer;
   /** Increments on every buffer mutation; drives rendering. */
   version: number;
+  /** Notifies the renderer that the buffer changed outside this hook. */
+  sync: () => void;
+  /**
+   * The session's marker factory. History (admin-tools/012) raises its own
+   * markers through it so their ids share one sequence and cannot collide.
+   */
+  createMarker: ClientMarkerFactory;
+  /** Re-read the per-service windows, e.g. on returning from history. */
+  refreshWindows: () => Promise<void>;
   status: LogConnectionStatus;
   error: string | null;
   paused: boolean;
@@ -230,6 +240,9 @@ export function useLogStream({
   return {
     buffer,
     version,
+    sync,
+    createMarker,
+    refreshWindows: () => loadWindows(false),
     status: paused ? "paused" : status,
     error,
     paused,

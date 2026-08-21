@@ -27,12 +27,26 @@ export const TAIL_INTERVAL_MS = Object.freeze({
   fallback: 200,
 });
 
+/**
+ * Database status refreshes while the surface is open. Slower than log tailing:
+ * a status read costs a database round trip, and size and row estimates move on
+ * the scale of minutes, not frames.
+ */
+export const DATABASE_REFRESH_MS = Object.freeze({
+  minimum: 1_000,
+  maximum: 60_000,
+  fallback: 5_000,
+});
+
 export interface OpsPanelRuntimeConfiguration {
   host: string;
   port: number;
   hmrPort: number;
+  /** The supervised row browser's own loopback listener. */
+  studioPort: number;
   pollIntervalMs: number;
   tailIntervalMs: number;
+  databaseRefreshMs: number;
 }
 
 export function readReservedPort(
@@ -103,6 +117,25 @@ export function readTailIntervalMs(
   return readBoundedIntervalMs(value, variableName, TAIL_INTERVAL_MS);
 }
 
+export function readDatabaseRefreshMs(
+  value: string | undefined,
+  variableName: string,
+): number {
+  return readBoundedIntervalMs(value, variableName, DATABASE_REFRESH_MS);
+}
+
+/**
+ * The row browser's default port: two above the panel, inside the same reserved
+ * range, wrapping rather than escaping it. It is validated by the same reserved
+ * -range rule as every other panel port, so it can never land on a stray port.
+ */
+export function defaultStudioPort(panelPort: number): number {
+  const candidate = panelPort + 2;
+  return candidate > RESERVED_PORT_RANGE.maximum
+    ? RESERVED_PORT_RANGE.minimum + (candidate - RESERVED_PORT_RANGE.maximum - 1)
+    : candidate;
+}
+
 export function readOpsPanelConfiguration(
   env: Readonly<Record<string, string | undefined>>,
 ): OpsPanelRuntimeConfiguration {
@@ -124,6 +157,11 @@ export function readOpsPanelConfiguration(
         : port + 1,
       "PACKSCOUT_OPS_PANEL_HMR_PORT",
     ),
+    studioPort: readReservedPort(
+      env.PACKSCOUT_OPS_PANEL_STUDIO_PORT,
+      defaultStudioPort(port),
+      "PACKSCOUT_OPS_PANEL_STUDIO_PORT",
+    ),
     pollIntervalMs: readPollIntervalMs(
       env.PACKSCOUT_OPS_PANEL_POLL_MS,
       "PACKSCOUT_OPS_PANEL_POLL_MS",
@@ -131,6 +169,10 @@ export function readOpsPanelConfiguration(
     tailIntervalMs: readTailIntervalMs(
       env.PACKSCOUT_OPS_PANEL_TAIL_MS,
       "PACKSCOUT_OPS_PANEL_TAIL_MS",
+    ),
+    databaseRefreshMs: readDatabaseRefreshMs(
+      env.PACKSCOUT_OPS_PANEL_DATABASE_REFRESH_MS,
+      "PACKSCOUT_OPS_PANEL_DATABASE_REFRESH_MS",
     ),
   };
 }

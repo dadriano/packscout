@@ -1,25 +1,31 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import type { LogLineRecord } from "../api/panel-types.ts";
 import { PanelPageHeader } from "../components/PanelShell.tsx";
 import { LogFilterBar } from "../components/logs/LogFilterBar.tsx";
+import { LogHistoryBar } from "../components/logs/LogHistoryBar.tsx";
+import { LogSearchPanel } from "../components/logs/LogSearchPanel.tsx";
 import { LogSourceRail } from "../components/logs/LogSourceRail.tsx";
 import { LogToolbar } from "../components/logs/LogToolbar.tsx";
 import { LogViewport } from "../components/logs/LogViewport.tsx";
 import { ShortcutHelpDialog } from "../components/logs/ShortcutHelpDialog.tsx";
+import { useHistorySearch } from "../hooks/useHistorySearch.ts";
+import { useLogExport } from "../hooks/useLogExport.ts";
 import { useLogFilterActions } from "../hooks/useLogFilterActions.ts";
+import { useLogHistory } from "../hooks/useLogHistory.ts";
 import { useLogPreferences } from "../hooks/useLogPreferences.ts";
 import { useLogSources } from "../hooks/useLogSources.ts";
 import { useLogStream } from "../hooks/useLogStream.ts";
 import { usePanelViewState } from "../hooks/usePanelViewState.ts";
 import { useServiceRail } from "../hooks/useServiceRail.ts";
 import { useShortcutRegistry, useShortcuts } from "../hooks/useShortcuts.ts";
-import { compileFilter, ERRORS_PRESET } from "../logs/filter.ts";
+import { compileFilter, EMPTY_FILTER, ERRORS_PRESET } from "../logs/filter.ts";
 import { createLineFactsCache } from "../logs/line-facts.ts";
 import { logShortcutBindings } from "../logs/log-shortcuts.ts";
 import { buildLogView } from "../logs/log-view.ts";
 
 /**
- * The live log surface.
+ * The log surface: live output, its past, and a way to take either away.
  *
  * Everything here reads one buffer fed by one connection. Which services are
  * shown, what matches, how lines are grouped and coloured — all of it is applied
@@ -27,10 +33,16 @@ import { buildLogView } from "../logs/log-view.ts";
  * something different. That is what makes filtering instant and reversible, and
  * what lets a shared link reproduce the view without replaying anything.
  *
+ * History is the one thing the server must be asked for, because the buffer is
+ * bounded and yesterday is not in it. Those reads are bounded too, and they
+ * produce records with the same byte-derived identity the live tail produces,
+ * so prepended history and live output merge into one timeline rather than two
+ * that have to be reconciled.
+ *
  * This module composes; it decides almost nothing. The filter semantics, the
- * grouping, the rail's arithmetic, and the URL codec all live in framework-free
- * modules beside it, so the page can be read as an assembly and the reasoning
- * can be tested without a browser.
+ * grouping, the paging cursors, the search accounting, and the URL codec all
+ * live in framework-free modules beside it, so the page can be read as an
+ * assembly and the reasoning can be tested without a browser.
  */
 
 export function LogsPage() {
@@ -50,11 +62,25 @@ export function LogsPage() {
     facts,
   });
 
-  const stream = useLogStream({ onLines: rail.observe });
+  // History has to be told about live arrivals to notice a rotation, and it is
+  // built from the stream it would be observing. A ref breaks the knot without
+  // making the connection depend on a callback that changes every render.
+  const liveObserver = useRef<((lines: readonly LogLineRecord[]) => void) | null>(
+    null,
+  );
+  const railObserve = rail.observe;
+  const onLines = useCallback(
+    (lines: readonly LogLineRecord[]) => {
+      railObserve(lines);
+      liveObserver.current?.(lines);
+    },
+    [railObserve],
+  );
+
+  const stream = useLogStream({ onLines });
   const { buffer, version, paused, setPaused, setFollowing } = stream;
 
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [helpOpen, setHelpOpen] = useState(false);
   // The element itself rather than a ref: the shortcut that focuses it is built
   // during render, and a callback ref keeps that out of ref territory entirely.
@@ -62,6 +88,7 @@ export function LogsPage() {
 
   const actions = useLogFilterActions(filter, view.setFilter, settings.rememberSearch);
   const compiled = useMemo(() => compileFilter(filter), [filter]);
+  const unfiltered = useMemo(() => compileFilter(EMPTY_FILTER), []);
 
   const isVisible = useCallback(
     (service: string) =>
@@ -71,12 +98,66 @@ export function LogsPage() {
     [focusedService, settings.hidden],
   );
 
+  // The rail is rebuilt on every clock tick, so the *names* are derived through
+  // a value that only changes when a service appears or disappears. Without it
+  // the bindings would be re-registered twice a second, shuffling the order the
+  // help dialog lists them in.
+  const serviceList = rail.entries.map((entry) => entry.service).join("\n");
+  const serviceNames = useMemo(
+    () => (serviceList === "" ? [] : serviceList.split("\n")),
+    [serviceList],
+  );
+  const visibleServices = useMemo(
+    () => serviceNames.filter(isVisible),
+    [isVisible, serviceNames],
+  );
+
+  const history = useLogHistory({
+    buffer,
+    services: visibleServices,
+    isVisible,
+    following: stream.following,
+    setFollowing,
+    setPaused,
+    refreshWindows: stream.refreshWindows,
+    createMarker: stream.createMarker,
+    sync: stream.sync,
+  });
+  const observeLive = history.observeLive;
+  useEffect(() => {
+    liveObserver.current = observeLive;
+    return () => {
+      liveObserver.current = null;
+    };
+  }, [observeLive]);
+
+  const search = useHistorySearch({ filter: compiled, services: visibleServices });
+
+  // Context around a search result is deliberately unfiltered: the point of
+  // opening a match is to read what surrounds it, and the filter that found it
+  // would hide most of that.
   const { items, groups, matched, total } = useMemo(
-    () => buildLogView({ rows: buffer.rows(), isVisible, filter: compiled, facts, expanded }),
+    () =>
+      buildLogView({
+        rows: buffer.rows(),
+        isVisible,
+        filter: history.unfiltered ? unfiltered : compiled,
+        facts,
+        expanded,
+      }),
     // `version` is the signal that the (mutable) row array changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buffer, compiled, expanded, facts, isVisible, version],
+    [buffer, compiled, expanded, facts, history.unfiltered, isVisible, unfiltered, version],
   );
+
+  const exports = useLogExport({
+    groups,
+    facts,
+    scope: focusedService,
+    filterActive: compiled.active,
+    matched,
+    total,
+  });
 
   const setFilter = view.setFilter;
   const setService = view.setService;
@@ -97,46 +178,20 @@ export function LogsPage() {
     });
   }, []);
 
-  const copyVisible = useCallback(() => {
-    // Whole groups, not the rendered rows: a folded stack trace copies as the
-    // event it is rather than as its first line.
-    const text = groups
-      .flatMap((group) => [group.head, ...group.members])
-      .map((row) => facts(row).plainText)
-      .join("\n");
-    const clipboard = navigator.clipboard;
-    if (!clipboard) {
-      setCopyState("failed");
-      return;
-    }
-    clipboard.writeText(text).then(
-      () => setCopyState("copied"),
-      () => setCopyState("failed"),
-    );
-  }, [facts, groups]);
-
-  useEffect(() => {
-    if (copyState === "idle") return;
-    const timer = setTimeout(() => setCopyState("idle"), 2_000);
-    return () => clearTimeout(timer);
-  }, [copyState]);
-
   const focusFilter = useCallback(() => filterInput?.focus(), [filterInput]);
   const dismiss = useCallback(() => {
     setHelpOpen(false);
     filterInput?.blur();
   }, [filterInput]);
 
-  // The rail is rebuilt on every clock tick, so the *names* are derived through
-  // a value that only changes when a service appears or disappears. Without it
-  // the bindings would be re-registered twice a second, shuffling the order that
-  // later surfaces (admin-tools/012) register into.
-  const serviceList = rail.entries.map((entry) => entry.service).join("\n");
-  const serviceNames = useMemo(
-    () => (serviceList === "" ? [] : serviceList.split("\n")),
-    [serviceList],
-  );
+  const detached = history.detached !== null;
+  const returnToLive = history.returnToLive;
+  const jumpToLive = useCallback(() => {
+    if (detached) returnToLive();
+    else setFollowing(true);
+  }, [detached, returnToLive, setFollowing]);
 
+  const jumpToStart = history.jumpToStart;
   const { updatePreferences, preferences } = settings;
   const registry = useShortcutRegistry();
   const bindings = useMemo(
@@ -146,8 +201,9 @@ export function LogsPage() {
         focusedService,
         focusFilter,
         togglePause: () => setPaused(!paused),
-        jumpToLive: () => setFollowing(true),
+        jumpToLive,
         focusService: setService,
+        jumpToStart: () => jumpToStart(focusedService),
         toggleWrap: () => updatePreferences({ wrap: !preferences.wrap }),
         openHelp: () => setHelpOpen(true),
         dismiss,
@@ -156,16 +212,20 @@ export function LogsPage() {
       dismiss,
       focusFilter,
       focusedService,
+      jumpToLive,
+      jumpToStart,
       paused,
       preferences.wrap,
       serviceNames,
-      setFollowing,
       setPaused,
       setService,
       updatePreferences,
     ],
   );
   useShortcuts(registry, bindings);
+
+  const rawSizeBytes =
+    sources.find((source) => source.service === focusedService)?.sizeBytes ?? null;
 
   return (
     <>
@@ -193,14 +253,15 @@ export function LogsPage() {
       <LogToolbar
         status={stream.status}
         following={stream.following}
+        browsing={detached}
         preferences={preferences}
         onPreferenceChange={updatePreferences}
         paused={paused}
-        onPausedChange={setPaused}
+        onPausedChange={(next) => (detached ? returnToLive() : setPaused(next))}
         heldCount={stream.heldCount}
         bufferedCount={buffer.size()}
-        onCopyVisible={copyVisible}
-        copyState={copyState}
+        onCopyVisible={exports.copyVisible}
+        copyState={exports.copyState}
         onShowShortcuts={() => setHelpOpen(true)}
         resetArmed={settings.resetArmed}
         onResetPreferences={settings.requestReset}
@@ -226,6 +287,37 @@ export function LogsPage() {
         inputRef={setFilterInput}
       />
 
+      <LogHistoryBar
+        loading={history.loadingOlder}
+        startNotice={history.startNotice}
+        detachedNotice={history.detachedNotice}
+        detached={detached}
+        atEnd={history.detached?.atEnd ?? false}
+        focusedService={focusedService}
+        rawSizeBytes={rawSizeBytes}
+        onJumpToStart={() => jumpToStart(focusedService)}
+        onLoadMore={history.loadMoreForward}
+        onReturnToLive={returnToLive}
+        onExportVisible={exports.exportVisible}
+        onDownloadRaw={() => focusedService && exports.downloadRaw(focusedService)}
+        downloadState={exports.downloadState}
+        downloadError={exports.downloadError}
+        error={history.error}
+        onDismissError={history.dismissError}
+      />
+
+      <LogSearchPanel
+        filterActive={compiled.active}
+        services={visibleServices}
+        running={search.running}
+        progress={search.progress}
+        outcome={search.outcome}
+        onStart={search.start}
+        onCancel={search.cancel}
+        onClear={search.clear}
+        onOpenMatch={history.openContext}
+      />
+
       <div className="panel-log-workspace">
         <LogSourceRail
           entries={rail.entries}
@@ -245,8 +337,11 @@ export function LogsPage() {
             onFollowingChange={setFollowing}
             onAnchorChange={stream.setAnchor}
             facts={facts}
-            highlight={compiled.highlight}
+            highlight={history.unfiltered ? unfiltered.highlight : compiled.highlight}
             onToggleGroup={toggleGroup}
+            onCopyRow={exports.copyGroup}
+            onReachTop={history.loadOlder}
+            focusedId={history.focusedId}
             emptyMessage={
               compiled.active && buffer.size() > 0
                 ? "No line in the buffer matches this filter."
@@ -257,11 +352,7 @@ export function LogsPage() {
           />
 
           {stream.following ? null : (
-            <button
-              type="button"
-              className="panel-log-pill"
-              onClick={() => setFollowing(true)}
-            >
+            <button type="button" className="panel-log-pill" onClick={jumpToLive}>
               {stream.pendingCount > 0
                 ? `${stream.pendingCount.toLocaleString("en-US")} new ${
                     stream.pendingCount === 1 ? "line" : "lines"
@@ -273,7 +364,8 @@ export function LogsPage() {
       </div>
 
       <p className="panel-log-footnote">
-        Showing the last {stream.windowLines} lines per service on attach.{" "}
+        Showing the last {stream.windowLines} lines per service on attach; scroll up
+        to read further back.{" "}
         <Link to="/logs/sources">Inspect the discovered log files</Link>.
       </p>
 

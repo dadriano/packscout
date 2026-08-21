@@ -9,7 +9,8 @@ import type { ShortcutBinding } from "./shortcuts.ts";
  *
  * The choices are the ones muscle memory already knows: `/` opens search, as it
  * does in every pager and every code host; `?` opens help, as it does in every
- * application that has help.
+ * application that has help; `g` goes to the start of the file, as it does in
+ * `less` and in vim.
  */
 
 export interface LogShortcutActions {
@@ -20,6 +21,8 @@ export interface LogShortcutActions {
   togglePause: () => void;
   jumpToLive: () => void;
   focusService: (service: string | null) => void;
+  /** Read the focused service's log from its first byte (admin-tools/012). */
+  jumpToStart: () => void;
   toggleWrap: () => void;
   openHelp: () => void;
   dismiss: () => void;
@@ -93,6 +96,13 @@ export function logShortcutBindings(actions: LogShortcutActions): ShortcutBindin
       description: "Show every service again",
       group: "Services",
       run: () => actions.focusService(null),
+    },
+    {
+      id: "jump-to-start",
+      key: "g",
+      description: "Read the focused service's log from the start",
+      group: "Stream",
+      run: actions.jumpToStart,
     },
     {
       id: "toggle-wrap",

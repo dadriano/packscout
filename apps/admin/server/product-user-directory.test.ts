@@ -256,6 +256,206 @@ test("transport failures and unreadable bodies are one bounded outcome", async (
   assert.equal(parseError.code, "PRODUCT_USER_DIRECTORY_UNAVAILABLE");
 });
 
+function savedItemsResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    catalogAvailable: true,
+    savedRepacks: [
+      {
+        publicRepackId: "40000000-0000-5000-8000-000000000001",
+        savedAt: "2026-08-19T12:00:02.000Z",
+        resolution: "resolved",
+        repack: {
+          name: "Mythic Pokemon Gacha",
+          vendorDisplayName: "Collector Crypt",
+          availability: "active",
+          estimatedEv: {
+            evDollarsMinorUnits: 12_500,
+            grossReturnBasisPoints: 10_500,
+            confidenceBand: "high",
+          },
+        },
+      },
+      {
+        publicRepackId: "40000000-0000-5000-8000-000000000999",
+        savedAt: "2026-08-19T12:00:01.000Z",
+        resolution: "unresolved",
+        repack: null,
+      },
+    ],
+    savedCollectibles: [
+      {
+        publicCollectibleId: "30000000-0000-5000-8000-000000000001",
+        savedAt: "2026-08-19T12:00:03.000Z",
+        resolution: "resolved",
+        collectible: { name: "Charizard Holo PSA 10", collectibleType: "card" },
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function detailFetch(
+  record: unknown,
+  savedItems: unknown = savedItemsResponse(),
+) {
+  return recordingFetch(({ url }) =>
+    jsonResponse(url.endsWith("/record") ? { record } : savedItems),
+  );
+}
+
+test("the detail read joins the record lookup to the resolved saved items", async () => {
+  const { calls, implementation } = detailFetch(row());
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: implementation,
+  });
+
+  const detail = await reader.getProductUserDetail({ subject });
+  assert.equal(detail.catalogAvailable, true);
+  assert.equal(detail.user.subject, subject);
+  // The record projection carries identity, not saved-item counts.
+  assert.deepEqual(Object.keys(detail.user).sort(), [
+    "authMethod",
+    "email",
+    "firstSeenAt",
+    "lastSeenAt",
+    "standing",
+    "subject",
+    "walletAddress",
+  ]);
+  assert.deepEqual(detail.savedRepacks[0], {
+    resolution: "resolved",
+    publicRepackId: "40000000-0000-5000-8000-000000000001",
+    savedAt: "2026-08-19T12:00:02.000Z",
+    name: "Mythic Pokemon Gacha",
+    vendorDisplayName: "Collector Crypt",
+    availability: "active",
+    estimatedEv: {
+      evDollarsMinorUnits: 12_500,
+      grossReturnBasisPoints: 10_500,
+      confidenceBand: "high",
+    },
+  });
+  assert.deepEqual(detail.savedRepacks[1], {
+    resolution: "unresolved",
+    publicRepackId: "40000000-0000-5000-8000-000000000999",
+    savedAt: "2026-08-19T12:00:01.000Z",
+  });
+  assert.deepEqual(detail.savedCollectibles, [
+    {
+      resolution: "resolved",
+      publicCollectibleId: "30000000-0000-5000-8000-000000000001",
+      savedAt: "2026-08-19T12:00:03.000Z",
+      name: "Charizard Holo PSA 10",
+      collectibleType: "card",
+    },
+  ]);
+
+  // Both privileged reads are POSTs carrying the secret, with the subject in
+  // the body rather than the URL.
+  assert.deepEqual(
+    calls.map(({ url }) => url).sort(),
+    [
+      "https://backend.example.test/admin/product-users/record",
+      "https://backend.example.test/admin/product-users/saved-items",
+    ],
+  );
+  for (const call of calls) {
+    assert.equal(call.init?.method, "POST");
+    assert.equal(
+      (call.init?.headers as Record<string, string>).authorization,
+      `Bearer ${token}`,
+    );
+    assert.doesNotMatch(call.url, /did:example|\?/);
+    assert.deepEqual(JSON.parse(String(call.init?.body)), { subject });
+  }
+});
+
+test("a subject with no record is not found, and empty collections are honest", async () => {
+  const missing = detailFetch(null);
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: missing.implementation,
+  });
+  const error = await refusal(reader.getProductUserDetail({ subject }));
+  assert.equal(error.code, "PRODUCT_USER_NOT_FOUND");
+  assert.equal(error.status, 404);
+
+  const empty = detailFetch(
+    row(),
+    savedItemsResponse({ savedRepacks: [], savedCollectibles: [] }),
+  );
+  const emptyReader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: empty.implementation,
+  });
+  const detail = await emptyReader.getProductUserDetail({ subject });
+  assert.deepEqual(detail.savedRepacks, []);
+  assert.deepEqual(detail.savedCollectibles, []);
+});
+
+test("an unreadable catalog is reported rather than mislabelled as removed", async () => {
+  const { implementation } = detailFetch(
+    row(),
+    savedItemsResponse({
+      catalogAvailable: false,
+      savedRepacks: [
+        {
+          publicRepackId: "40000000-0000-5000-8000-000000000001",
+          savedAt: "2026-08-19T12:00:02.000Z",
+          resolution: "unresolved",
+          repack: null,
+        },
+      ],
+      savedCollectibles: [],
+    }),
+  );
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: implementation,
+  });
+  const detail = await reader.getProductUserDetail({ subject });
+  assert.equal(detail.catalogAvailable, false);
+  assert.equal(detail.savedRepacks[0]?.resolution, "unresolved");
+});
+
+test("a cap-sized collection survives the relay and a broken one does not", async () => {
+  const capped = Array.from({ length: 250 }, (_, index) => ({
+    publicRepackId: `40000000-0000-5000-8000-${String(index).padStart(12, "0")}`,
+    savedAt: "2026-08-19T12:00:00.000Z",
+    resolution: "unresolved",
+    repack: null,
+  }));
+  const { implementation } = detailFetch(
+    row(),
+    savedItemsResponse({ savedRepacks: capped, savedCollectibles: [] }),
+  );
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: implementation,
+  });
+  const detail = await reader.getProductUserDetail({ subject });
+  assert.equal(detail.savedRepacks.length, 250);
+
+  const brokenCollections = [
+    { savedRepacks: "not-an-array" },
+    { savedRepacks: [{ resolution: "resolved", publicRepackId: "40000000", savedAt: "2026-08-19T12:00:00.000Z" }] },
+    { savedRepacks: [{ resolution: "resolved", publicRepackId: "", savedAt: "2026-08-19T12:00:00.000Z", repack: { name: "n", vendorDisplayName: "v", availability: "active", estimatedEv: null } }] },
+    { savedRepacks: [{ resolution: "resolved", publicRepackId: "40000000", savedAt: "nope", repack: { name: "n", vendorDisplayName: "v", availability: "active", estimatedEv: null } }] },
+    { savedRepacks: [{ resolution: "resolved", publicRepackId: "40000000", savedAt: "2026-08-19T12:00:00.000Z", repack: { name: "n", vendorDisplayName: "v", availability: "withdrawn", estimatedEv: null } }] },
+    { savedCollectibles: [{ resolution: "resolved", publicCollectibleId: "30000000", savedAt: "2026-08-19T12:00:00.000Z", collectible: { name: "n", collectibleType: "spaceship" } }] },
+  ];
+  for (const overrides of brokenCollections) {
+    const broken = detailFetch(row(), savedItemsResponse(overrides));
+    const brokenReader = createProductUserDirectoryReader({
+      config,
+      fetchImplementation: broken.implementation,
+    });
+    const error = await refusal(brokenReader.getProductUserDetail({ subject }));
+    assert.equal(error.code, "PRODUCT_USER_DIRECTORY_UNAVAILABLE");
+  }
+});
+
 test("directory configuration is optional, bounded, and never partially trusted", () => {
   assert.deepEqual(
     readProductUserDirectoryConfig({

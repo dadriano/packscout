@@ -41,6 +41,8 @@ const TEXT_SIZE_LABEL: Record<TextSize, string> = {
 export interface LogToolbarProps {
   status: LogConnectionStatus;
   following: boolean;
+  /** True while a detached history read is showing instead of the tail. */
+  browsing: boolean;
   preferences: LogDisplayPreferences;
   onPreferenceChange: (patch: Partial<LogDisplayPreferences>) => void;
   paused: boolean;
@@ -57,6 +59,7 @@ export interface LogToolbarProps {
 export function LogToolbar({
   status,
   following,
+  browsing,
   preferences,
   onPreferenceChange,
   paused,
@@ -69,8 +72,10 @@ export function LogToolbar({
   resetArmed,
   onResetPreferences,
 }: LogToolbarProps) {
+  // A detached history read looks like a paused stream from the outside and
+  // means something else entirely, so it says so rather than borrowing a label.
   const viewingState: LogConnectionStatus | "browsing" =
-    status === "live" && !following ? "browsing" : status;
+    browsing || (status === "live" && !following) ? "browsing" : status;
 
   return (
     <div className="panel-log-toolbar">
@@ -96,7 +101,7 @@ export function LogToolbar({
           onClick={() => onPausedChange(!paused)}
           aria-pressed={paused}
         >
-          {paused ? "Resume" : "Pause"}
+          {browsing ? "Return to live" : paused ? "Resume" : "Pause"}
         </button>
 
         <button type="button" className="panel-button" onClick={onCopyVisible}>

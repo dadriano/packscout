@@ -180,12 +180,18 @@ const listProductUsers = httpAction(async (ctx, request) => {
   }
 });
 
+function readSubject(value: unknown): string | null {
+  return typeof value === "string" && value.length <= MAX_SUBJECT_LENGTH
+    ? value
+    : null;
+}
+
 const getProductUser = httpAction(async (ctx, request) => {
   if (!isAuthorized(request)) return unauthorized();
   const body = await readJsonObject(request);
   if (body === null) return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
-  const subject = body.subject;
-  if (typeof subject !== "string" || subject.length > MAX_SUBJECT_LENGTH) {
+  const subject = readSubject(body.subject);
+  if (subject === null) {
     return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
   }
   try {
@@ -194,6 +200,77 @@ const getProductUser = httpAction(async (ctx, request) => {
         internal.productUserDirectory.getDirectoryRecord,
         { subject },
       ),
+    });
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
+function readStanding(value: unknown): "active" | "suspended" | null {
+  return value === "active" || value === "suspended" ? value : null;
+}
+
+/**
+ * The one privileged write on this surface: a reversible standing flip.
+ *
+ * It reports the authoritative resulting record, so a repeated or concurrent
+ * administrator action converges on the truth rather than failing. A subject
+ * the directory has never recorded returns a null record, which the admin
+ * restates as "not found" — never as a silent success.
+ */
+const setProductUserStanding = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  const subject = readSubject(body.subject);
+  const standing = readStanding(body.standing);
+  if (subject === null || standing === null) {
+    return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runMutation(internal.productUserDirectory.setDirectoryStanding, {
+        subject,
+        standing,
+      }),
+    );
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
+/**
+ * One product user's saved repacks and saved collectibles, already resolved
+ * against the active catalog. Each kind runs as its own query transaction, so
+ * an owner at the per-kind save cap stays comfortably inside one transaction's
+ * read budget.
+ */
+const getProductUserSavedItems = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  const subject = readSubject(body.subject);
+  if (subject === null) {
+    return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  }
+  try {
+    const [repacks, collectibles] = await Promise.all([
+      ctx.runQuery(internal.productUserSavedItems.listSavedRepacksForSubject, {
+        subject,
+      }),
+      ctx.runQuery(
+        internal.productUserSavedItems.listSavedCollectiblesForSubject,
+        { subject },
+      ),
+    ]);
+    return jsonResponse(200, {
+      // Both kinds resolve against the same active release; a gap in either
+      // read is reported as no catalog rather than as removed references.
+      catalogAvailable:
+        repacks.catalogAvailable && collectibles.catalogAvailable,
+      savedRepacks: repacks.items,
+      savedCollectibles: collectibles.items,
     });
   } catch (error) {
     return refusalResponse(error);
@@ -503,6 +580,16 @@ http.route({
   path: "/admin/product-users/record",
   method: "POST",
   handler: getProductUser,
+});
+http.route({
+  path: "/admin/product-users/saved-items",
+  method: "POST",
+  handler: getProductUserSavedItems,
+});
+http.route({
+  path: "/admin/product-users/standing",
+  method: "POST",
+  handler: setProductUserStanding,
 });
 
 export default http;

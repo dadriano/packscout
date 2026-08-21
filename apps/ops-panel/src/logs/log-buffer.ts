@@ -78,6 +78,15 @@ export interface LogBuffer {
   size(): number;
   has(id: string): boolean;
   append(rows: readonly LogRow[]): LogBufferChange;
+  /**
+   * Rows the reader asked for by browsing (admin-tools/012), added at the tail.
+   *
+   * A pause holds *live* output so the reader's place is not disturbed by
+   * arrivals they did not ask for. History is the opposite: it is the thing
+   * they asked for, and holding it would leave the pane empty while the panel
+   * pretends to be busy. So it lands immediately, pause or no pause.
+   */
+  appendHistory(rows: readonly LogRow[]): LogBufferChange;
   /** Older rows, for admin-tools/012's backwards paging. */
   prepend(rows: readonly LogRow[]): LogBufferChange;
   isFollowing(): boolean;
@@ -211,6 +220,10 @@ export function createLogBuffer({
       }
       change.held = held.length;
       return change;
+    },
+
+    appendHistory(incoming) {
+      return admit(incoming, false);
     },
 
     prepend(incoming) {

@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/001, admin-tools/003
 **Blocks:** none
 **Estimated scope:** medium
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -41,13 +41,20 @@ An administrator selects a user in the Users ledger and lands on that user's pag
 
 ## Acceptance Criteria
 
-- [ ] An administrator can open any listed user and see their identity summary and both saved-item collections resolved against the active catalog, ordered newest save first.
-- [ ] The privileged per-subject saved-items read is rejected for public and ordinary authenticated callers.
-- [ ] Saved items referencing entries absent from the active catalog appear with a clear unresolved label and their stable identifier.
-- [ ] A user at the per-kind save cap renders completely and usably; a user with no saves shows distinct empty states.
-- [ ] Anonymous and data-operator access receives the standard unauthenticated/forbidden outcomes.
-- [ ] No mutation of saved items is possible through this surface.
+- [x] An administrator can open any listed user and see their identity summary and both saved-item collections resolved against the active catalog, ordered newest save first.
+- [x] The privileged per-subject saved-items read is rejected for public and ordinary authenticated callers.
+- [x] Saved items referencing entries absent from the active catalog appear with a clear unresolved label and their stable identifier.
+- [x] A user at the per-kind save cap renders completely and usably; a user with no saves shows distinct empty states.
+- [x] Anonymous and data-operator access receives the standard unauthenticated/forbidden outcomes.
+- [x] No mutation of saved items is possible through this surface.
 
 ## Verification
 
 Admin route behavior tests prove the detail read's authorization matrix and relay shaping; product-backend tests prove the privileged per-subject read's access control and its resolution output, including the unresolved-reference fallback, newest-first ordering, and cap-sized collections; a page-level test covers resolved, unresolved-labeled, and empty renderings. The admin and product-backend test suites and typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: The privileged per-subject saved-items read lives in the product backend behind the existing authenticated POST-only server-to-server surface, the admin server relays a bounded explicit projection guarded by `product_users:view`, and the browser reaches the product backend only through that route.
+- Divergences: The read is two internal queries (one per kind) behind one route rather than a single internal query, so an owner at the 250-per-kind cap stays inside one Convex query transaction's read budget. The response adds a `catalogAvailable` flag so an unreadable catalog is never mislabelled as references leaving the catalog.
+- Verification: `npm run lint:admin` (0), `npm run typecheck` (0), `npm run test:admin` (0, 142 tests), `npm run test:convex` (0, 162 tests), `npm run build:admin` (0), `npm run scan:framework-standards:ratchet` (0, no new findings).

@@ -67,7 +67,13 @@
       "promotion_activation_delayed",
       "promotion_settlement_blocked",
       "promotion_failed",
-      "promotion_recovered"
+      "promotion_recovered",
+      "worker_fleet_silent",
+      "import_run_stalled",
+      "provider_schedule_overdue",
+      "recomputation_backlogged",
+      "retention_overdue",
+      "machinery_recovered"
     ],
     "operational_severity": [
       "info",

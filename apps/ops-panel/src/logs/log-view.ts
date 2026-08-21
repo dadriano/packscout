@@ -9,6 +9,7 @@ import {
   type LogDisplayItem,
   type VisibleGroup,
 } from "./line-groups.ts";
+import { isPanelMarker } from "./log-buffer.ts";
 
 /**
  * One buffer to one list of rendered rows.
@@ -21,6 +22,12 @@ import {
  *
  * Keeping it here, as one pure function, is what lets the page recompute the
  * view on every keystroke without owning any of the reasoning.
+ *
+ * Panel-scope markers are the one thing service visibility does not apply to.
+ * A dropped connection, a return from history, a buffer that had to refuse rows
+ * — none of those belong to a service, and hiding them because one service is in
+ * focus would let a reader believe the output above and below a seam was
+ * continuous when it was not.
  */
 
 export interface LogViewInput {
@@ -53,7 +60,9 @@ export function buildLogView({
   facts,
   expanded,
 }: LogViewInput): LogView {
-  const visibleRows = rows.filter((row) => isVisible(row.service));
+  const visibleRows = rows.filter(
+    (row) => isPanelMarker(row) || isVisible(row.service),
+  );
   const groups = groupLogRows(visibleRows, facts);
   const admitted = filterGroups(groups, filter, facts);
   const counts = countLines(groups, admitted, filter.active);

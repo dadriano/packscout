@@ -288,6 +288,30 @@ page shows a bounded "not connected" state instead of failing. Only operators
 holding the `product_users:view` permission (administrators) see the page at
 all.
 
+### Machinery alerting in the admin
+
+The admin server evaluates the pipeline's machinery conditions — a silent
+worker fleet, a stalled import run, an overdue provider schedule, a backed-up
+recomputation queue, and retention that stopped running — and raises them
+through the same operational alerts as every other condition. The cycle runs
+here rather than in the worker because the loudest condition is that no worker
+is alive; a detector inside the fleet would die with it.
+
+Its thresholds come from the settings the worker fleet publishes, so a page and
+an alert cannot disagree. Two server-only values tune the rest, and both have
+safe defaults:
+
+```dotenv
+PACKSCOUT_ADMIN_MACHINERY_ALERT_INTERVAL_MS=60000
+PACKSCOUT_ADMIN_RECOMPUTATION_BACKLOG_LIMIT=100
+```
+
+The interval decides only how quickly a condition is noticed. The backlog limit
+is the queue depth a workspace may owe before depth alone counts as a backlog,
+and the background-work page reads the same value, so the badge and the alert
+flip together. Alerts stay inside the existing notification boundary: nothing
+is emailed or posted to an external endpoint.
+
 ## Verification
 
 ```bash

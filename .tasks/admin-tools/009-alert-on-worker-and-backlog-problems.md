@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/006, admin-tools/007, admin-tools/008
 **Blocks:** none
 **Estimated scope:** medium
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -42,13 +42,20 @@ An operator who opens the admin after a quiet weekend sees an active "no live wo
 
 ## Acceptance Criteria
 
-- [ ] Each of the five conditions raises exactly one active alert while it persists, with the observed value and threshold in its context, and follows the existing lifecycle on clearance and recurrence.
-- [ ] Fleet-silence alerting demonstrably fires when no worker process is alive.
-- [ ] Alerts and the monitoring views consume the same server-side condition evaluations, and at each threshold boundary the shared evaluation flips exactly once (views may additionally display raw measures below alert thresholds).
-- [ ] A fleet-silence alert still raises when no presence records exist at all, reporting the duration as unknown/at-least-the-retention-window rather than fabricating one.
-- [ ] New alerts render in the existing alerts UI with functioning acknowledge/resolve and navigation context.
-- [ ] No external delivery channel is introduced; no secrets or raw payloads appear in alert context.
+- [x] Each of the five conditions raises exactly one active alert while it persists, with the observed value and threshold in its context, and follows the existing lifecycle on clearance and recurrence.
+- [x] Fleet-silence alerting demonstrably fires when no worker process is alive.
+- [x] Alerts and the monitoring views consume the same server-side condition evaluations, and at each threshold boundary the shared evaluation flips exactly once (views may additionally display raw measures below alert thresholds).
+- [x] A fleet-silence alert still raises when no presence records exist at all, reporting the duration as unknown/at-least-the-retention-window rather than fabricating one.
+- [x] New alerts render in the existing alerts UI with functioning acknowledge/resolve and navigation context.
+- [x] No external delivery channel is introduced; no secrets or raw payloads appear in alert context.
 
 ## Verification
 
 Alert-generation tests prove raise/dedupe/resolve/recur for each condition around its threshold (just-under raises nothing; just-over raises once; persistence doesn't duplicate; clearance resolves), including a fleet-silence scenario with no live worker in the composition. The affected package and admin test suites and typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: The five conditions are derived only from the admin-tools/006–008 shared evaluations and published worker settings, and are published through the existing operational-event-to-alert path, so the monitoring views and the alerts cannot disagree.
+- Divergences: The queue-depth ceiling was added to the shared `evaluateRecomputationBacklog` rather than applied only in alerting, so the background-work badge and the alert flip at the same depth; a single `machinery_recovered` kind closes all five conditions because each alert's recovery key already names which condition cleared.
+- Verification: `npm run lint:admin` (0), `npm run typecheck` (0), `npm run test:services` (0, 386 passing), `npm run test:admin` (0, 159 passing), `npm run test:database` (0, 127 passing), `npm run build:admin` (0), `npm run scan:framework-standards:ratchet` (0, no new findings). Also `npm run lint` (0), `npm run test:contracts` (0, 142 passing), `npm run test:worker` (0, 84 passing), `npm run check:framework` (0).

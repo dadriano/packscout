@@ -1592,6 +1592,12 @@ enum operational_event_kind {
   promotion_settlement_blocked
   promotion_failed
   promotion_recovered
+  worker_fleet_silent
+  import_run_stalled
+  provider_schedule_overdue
+  recomputation_backlogged
+  retention_overdue
+  machinery_recovered
 }
 
 enum operational_severity {

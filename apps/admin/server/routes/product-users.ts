@@ -1,16 +1,28 @@
 import { Router, type RequestHandler, type Response } from "express";
 import {
   listProductUsersRequestSchema,
+  productUserDetailRequestSchema,
+  setProductUserStandingRequestSchema,
   PRODUCT_USER_MAX_AUTH_METHOD_LENGTH,
   PRODUCT_USER_MAX_CURSOR_LENGTH,
+  PRODUCT_USER_MAX_DISPLAY_NAME_LENGTH,
+  PRODUCT_USER_MAX_PUBLIC_ID_LENGTH,
+  PRODUCT_USER_MAX_SAVED_ITEM_COUNT,
   PRODUCT_USER_MAX_SUBJECT_LENGTH,
   PRODUCT_USER_MAX_TEXT_LENGTH,
   PRODUCT_USER_MAX_WALLET_ADDRESS_LENGTH,
   type ProductUserDirectoryRow,
+  type ProductUserRecord,
+  type ProductUserSavedCollectible,
+  type ProductUserSavedRepack,
 } from "@packscout/contracts";
 import type { AuthService } from "@packscout/services";
 import type { SessionCookiePolicy } from "../auth/cookies.ts";
-import { createRequireSession } from "../auth/middleware.ts";
+import { createRequireSession, getAuthenticatedActor } from "../auth/middleware.ts";
+import {
+  productUserAuditAction,
+  type ProductUserAuditSink,
+} from "../product-user-audit.ts";
 import {
   ProductUserDirectoryError,
   type ProductUserDirectoryReader,
@@ -20,18 +32,24 @@ import {
  * The admin's product-user directory surface.
  *
  * The browser talks only to this route; the server-to-server integration and
- * its credential stay behind it. Reads are guarded by `product_users:view`,
- * which only administrators hold, and every listing is bounded and paginated.
+ * its credential stay behind it. Reads are guarded by `product_users:view` and
+ * the one account control by `product_users:manage`, both of which only
+ * administrators hold, and every listing is bounded and paginated.
  *
  * The listing is a POST because search terms and subject keys are personal
  * data: carrying them in a request body keeps them out of URLs, browser
- * history, referrers, and access logs. It performs no mutation, so the
- * same-origin guard — not a CSRF token — is what keeps it same-site.
+ * history, referrers, and access logs. Reads perform no mutation, so the
+ * same-origin guard — not a CSRF token — is what keeps them same-site; the
+ * standing control is a state change and additionally requires the token.
+ *
+ * There is exactly one write here and it is a reversible standing flip. No
+ * route on this surface deletes a product user or edits what they have saved.
  */
 
 export interface ProductUsersRouterDependencies {
   readonly auth: Pick<AuthService, "resolveSession" | "requirePermission">;
   readonly directory: ProductUserDirectoryReader;
+  readonly audit: ProductUserAuditSink;
   readonly cookiePolicy: SessionCookiePolicy;
   readonly sameOrigin: RequestHandler;
 }
@@ -46,23 +64,80 @@ function boundedOrNull(value: string | null, maximum: number): string | null {
 
 /**
  * Explicit field-by-field projection. Nothing the browser has no business
- * seeing can ride along, whatever the upstream row happens to carry.
+ * seeing can ride along, whatever the upstream record happens to carry.
  */
-function sanitizeRow(row: ProductUserDirectoryRow): ProductUserDirectoryRow {
+function sanitizeRecord(record: ProductUserRecord): ProductUserRecord {
   return {
-    subject: bounded(row.subject, PRODUCT_USER_MAX_SUBJECT_LENGTH),
-    authMethod: bounded(row.authMethod, PRODUCT_USER_MAX_AUTH_METHOD_LENGTH),
-    email: boundedOrNull(row.email, PRODUCT_USER_MAX_TEXT_LENGTH),
+    subject: bounded(record.subject, PRODUCT_USER_MAX_SUBJECT_LENGTH),
+    authMethod: bounded(record.authMethod, PRODUCT_USER_MAX_AUTH_METHOD_LENGTH),
+    email: boundedOrNull(record.email, PRODUCT_USER_MAX_TEXT_LENGTH),
     walletAddress: boundedOrNull(
-      row.walletAddress,
+      record.walletAddress,
       PRODUCT_USER_MAX_WALLET_ADDRESS_LENGTH,
     ),
-    firstSeenAt: row.firstSeenAt,
-    lastSeenAt: row.lastSeenAt,
-    standing: row.standing,
+    firstSeenAt: record.firstSeenAt,
+    lastSeenAt: record.lastSeenAt,
+    standing: record.standing,
+  };
+}
+
+function sanitizeRow(row: ProductUserDirectoryRow): ProductUserDirectoryRow {
+  return {
+    ...sanitizeRecord(row),
     savedRepackCount: row.savedRepackCount,
     savedCollectibleCount: row.savedCollectibleCount,
   };
+}
+
+/**
+ * Saved items are relayed, never restated: the browser receives the identifier,
+ * the save time, and only the display fields the product backend resolved.
+ */
+function sanitizeSavedRepack(item: ProductUserSavedRepack): ProductUserSavedRepack {
+  const publicRepackId = bounded(
+    item.publicRepackId,
+    PRODUCT_USER_MAX_PUBLIC_ID_LENGTH,
+  );
+  return item.resolution === "resolved"
+    ? {
+        resolution: "resolved",
+        publicRepackId,
+        savedAt: item.savedAt,
+        name: bounded(item.name, PRODUCT_USER_MAX_DISPLAY_NAME_LENGTH),
+        vendorDisplayName: bounded(
+          item.vendorDisplayName,
+          PRODUCT_USER_MAX_DISPLAY_NAME_LENGTH,
+        ),
+        availability: item.availability,
+        estimatedEv:
+          item.estimatedEv === null
+            ? null
+            : {
+                evDollarsMinorUnits: item.estimatedEv.evDollarsMinorUnits,
+                grossReturnBasisPoints:
+                  item.estimatedEv.grossReturnBasisPoints,
+                confidenceBand: item.estimatedEv.confidenceBand,
+              },
+      }
+    : { resolution: "unresolved", publicRepackId, savedAt: item.savedAt };
+}
+
+function sanitizeSavedCollectible(
+  item: ProductUserSavedCollectible,
+): ProductUserSavedCollectible {
+  const publicCollectibleId = bounded(
+    item.publicCollectibleId,
+    PRODUCT_USER_MAX_PUBLIC_ID_LENGTH,
+  );
+  return item.resolution === "resolved"
+    ? {
+        resolution: "resolved",
+        publicCollectibleId,
+        savedAt: item.savedAt,
+        name: bounded(item.name, PRODUCT_USER_MAX_DISPLAY_NAME_LENGTH),
+        collectibleType: item.collectibleType,
+      }
+    : { resolution: "unresolved", publicCollectibleId, savedAt: item.savedAt };
 }
 
 function invalid(response: Response, details: unknown): void {
@@ -88,6 +163,16 @@ function failure(response: Response, error: unknown): void {
   });
 }
 
+/**
+ * A short, non-personal description of why an attempt did not succeed. It is
+ * the directory's own stable code, never an upstream message.
+ */
+function failureReason(error: unknown): string {
+  return error instanceof ProductUserDirectoryError
+    ? error.code
+    : "PRODUCT_USER_DIRECTORY_UNAVAILABLE";
+}
+
 export function createProductUsersRouter(
   dependencies: ProductUsersRouterDependencies,
 ) {
@@ -95,6 +180,11 @@ export function createProductUsersRouter(
   const read = createRequireSession(dependencies.auth, dependencies.cookiePolicy, {
     permission: "product_users:view",
   });
+  const manage = createRequireSession(
+    dependencies.auth,
+    dependencies.cookiePolicy,
+    { csrf: true, permission: "product_users:manage" },
+  );
 
   router.post("/list", dependencies.sameOrigin, read, async (request, response) => {
     const body = listProductUsersRequestSchema.safeParse(request.body ?? {});
@@ -116,6 +206,83 @@ export function createProductUsersRouter(
         searchTruncated: page.searchTruncated,
       });
     } catch (error) {
+      failure(response, error);
+    }
+  });
+
+  /**
+   * One user's detail: their directory record and both saved-item collections,
+   * already resolved against the active catalog by the product backend. The
+   * browser never reaches that backend; this is the only route to it, and it is
+   * a read — no path here adds, removes, or edits a user's saved items.
+   */
+  router.post("/detail", dependencies.sameOrigin, read, async (request, response) => {
+    const body = productUserDetailRequestSchema.safeParse(request.body ?? {});
+    if (!body.success) return invalid(response, body.error.flatten().fieldErrors);
+    try {
+      const detail = await dependencies.directory.getProductUserDetail({
+        subject: body.data.subject,
+      });
+      // Personal data must not be stored by any intermediary or the browser.
+      response.setHeader("Cache-Control", "no-store");
+      response.status(200).json({
+        user: sanitizeRecord(detail.user),
+        catalogAvailable: detail.catalogAvailable,
+        savedRepacks: detail.savedRepacks
+          .slice(0, PRODUCT_USER_MAX_SAVED_ITEM_COUNT)
+          .map(sanitizeSavedRepack),
+        savedCollectibles: detail.savedCollectibles
+          .slice(0, PRODUCT_USER_MAX_SAVED_ITEM_COUNT)
+          .map(sanitizeSavedCollectible),
+      });
+    } catch (error) {
+      failure(response, error);
+    }
+  });
+
+  /**
+   * The one account control: a reversible standing flip, guarded by
+   * `product_users:manage` and a CSRF token, and audited whichever way it goes.
+   *
+   * The request names the standing it wants rather than an operation, so the
+   * administrator who acts on a stale row and the administrator who acts twice
+   * both converge on the same authoritative result instead of toggling or
+   * failing. The response restates the standing the product backend now holds.
+   */
+  router.post("/standing", dependencies.sameOrigin, manage, async (request, response) => {
+    const body = setProductUserStandingRequestSchema.safeParse(request.body ?? {});
+    if (!body.success) return invalid(response, body.error.flatten().fieldErrors);
+    const actor = getAuthenticatedActor(response);
+    const { subject, standing } = body.data;
+    const event = {
+      organizationId: actor.organizationId,
+      actorId: actor.operatorId,
+      action: productUserAuditAction(standing),
+      subject,
+      occurredAt: new Date(),
+    } as const;
+    try {
+      const change = await dependencies.directory.setProductUserStanding({
+        subject,
+        standing,
+      });
+      await dependencies.audit.append({
+        ...event,
+        outcome: "success",
+        standing: change.user.standing,
+      });
+      // Personal data must not be stored by any intermediary or the browser.
+      response.setHeader("Cache-Control", "no-store");
+      response.status(200).json({
+        user: sanitizeRecord(change.user),
+        changed: change.changed,
+      });
+    } catch (error) {
+      // An attempt that did not complete is still an attempt on someone's
+      // account, so it is recorded before the refusal is reported.
+      await dependencies.audit
+        .append({ ...event, outcome: "failure", reason: failureReason(error) })
+        .catch(() => undefined);
       failure(response, error);
     }
   });

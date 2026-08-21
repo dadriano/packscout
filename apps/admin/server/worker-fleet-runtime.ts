@@ -1,30 +1,27 @@
 import {
   PrismaWorkerFleetReadRepository,
   PrismaWorkerPresenceRepository,
-  type ProviderScheduleRecord,
   type RunningImportRunRecord,
   type WorkerFleetCursor,
   type WorkerPresenceRecord,
 } from "@packscout/database";
 import {
-  evaluateRunStall,
-  evaluateScheduleHealth,
-  evaluateWorkerFleet,
   isScheduleWedged,
-  resolveWorkerFleetSettings,
   WORKER_FLEET_SCAN_LIMIT,
-  type ScheduleHealthView,
   type StalledRunView,
   type WorkerActivityScope,
-  type WorkerFleetSettingsResolution,
   type WorkerInstanceView,
 } from "@packscout/contracts";
-import {
-  classifyWorkerPresence,
-  isImportRunStalled,
-  workerPresenceAgeMs,
-} from "@packscout/services";
+import { classifyWorkerPresence, workerPresenceAgeMs } from "@packscout/services";
 import { InvalidOperationCursorError } from "./import-operations-runtime.ts";
+import {
+  evaluateFleetFrom,
+  evaluateRunStallFor,
+  readWorkerFleetSnapshot,
+  toScheduleHealthView,
+  toStalledRunView,
+  type WorkerFleetSnapshot,
+} from "./machinery-derivations.ts";
 import type {
   ScheduleHealthPage,
   StalledRunPage,
@@ -37,11 +34,9 @@ import type {
  * Composes the admin's worker-fleet reads from durable presence, run, and
  * schedule evidence.
  *
- * Every threshold comes from what the fleet published — per-instance staleness
- * through `classifyWorkerPresence`, run heartbeats through `isImportRunStalled`,
- * schedule tolerance through the resolved presence window — and every condition
- * is decided by the shared evaluations, so the admin and alerting describe one
- * observation the same way.
+ * Every condition comes from the shared derivations alerting also reads, so the
+ * page and the alert describe one observation the same way; this module only
+ * pages the evidence and shapes it for the browser.
  */
 
 type WorkerFleetDatabase = ConstructorParameters<
@@ -104,13 +99,6 @@ function lastSignalOf(record: RunningImportRunRecord): Date | null {
   return record.heartbeatAt ?? record.startedAt;
 }
 
-interface PresenceSnapshot {
-  readonly records: readonly WorkerPresenceRecord[];
-  readonly settings: WorkerFleetSettingsResolution;
-  /** Identities still retained, so a departed lease holder reads as departed. */
-  readonly identities: ReadonlySet<string>;
-}
-
 export function createAdminWorkerFleetRuntime(
   input: AdminWorkerFleetRuntimeInput,
 ): Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy"> {
@@ -118,17 +106,8 @@ export function createAdminWorkerFleetRuntime(
   const presence = new PrismaWorkerPresenceRepository(input.database);
   const evidence = new PrismaWorkerFleetReadRepository(input.database);
 
-  async function readPresence(): Promise<PresenceSnapshot> {
-    const records = await presence.listInstances({
-      limit: WORKER_FLEET_SCAN_LIMIT,
-    });
-    return {
-      records,
-      settings: resolveWorkerFleetSettings(
-        records.map((record) => record.effectiveSettings),
-      ),
-      identities: new Set(records.map((record) => record.instanceId)),
-    };
+  function readPresence(): Promise<WorkerFleetSnapshot> {
+    return readWorkerFleetSnapshot(presence, WORKER_FLEET_SCAN_LIMIT);
   }
 
   function toInstanceView(
@@ -173,89 +152,6 @@ export function createAdminWorkerFleetRuntime(
     };
   }
 
-  /**
-   * A run counts as stalled only when `isImportRunStalled` says so against the
-   * window the fleet published. Without published settings nothing says what
-   * "stalled" means, so no run is accused of it.
-   */
-  function stallOf(
-    record: RunningImportRunRecord,
-    staleAfterMs: number | null,
-    now: Date,
-  ): ReturnType<typeof evaluateRunStall> | null {
-    if (staleAfterMs === null) return null;
-    const stalled = isImportRunStalled(
-      {
-        state: record.state,
-        heartbeatAt: record.heartbeatAt,
-        startedAt: record.startedAt,
-      },
-      { runHeartbeatStaleAfterMs: staleAfterMs },
-      now,
-    );
-    if (!stalled) return null;
-    return evaluateRunStall({
-      now: now.toISOString(),
-      stalled,
-      lastSignalAt: lastSignalOf(record)?.toISOString() ?? null,
-      staleAfterMs,
-    });
-  }
-
-  function toStalledRun(
-    record: RunningImportRunRecord,
-    stall: ReturnType<typeof evaluateRunStall>,
-    now: Date,
-    identities: ReadonlySet<string>,
-  ): StalledRunView {
-    return {
-      runId: record.runId,
-      providerId: record.providerId,
-      providerName: record.providerName,
-      platformKey: record.platformKey,
-      trigger: record.trigger,
-      startedAt: record.startedAt?.toISOString() ?? null,
-      lastHeartbeatAt: record.heartbeatAt?.toISOString() ?? null,
-      stall,
-      leaseOwner: record.leaseOwner,
-      leaseOwnerPresent:
-        record.leaseOwner !== null && identities.has(record.leaseOwner),
-      leaseExpiresAt: record.leaseExpiresAt?.toISOString() ?? null,
-      leaseExpired:
-        record.leaseExpiresAt !== null &&
-        record.leaseExpiresAt.getTime() <= now.getTime(),
-    };
-  }
-
-  function toScheduleHealth(
-    record: ProviderScheduleRecord,
-    overdueAfterMs: number | null,
-    now: Date,
-    identities: ReadonlySet<string>,
-  ): ScheduleHealthView {
-    return {
-      providerId: record.providerId,
-      providerName: record.providerName,
-      platformKey: record.platformKey,
-      nextDueAt: record.nextDueAt.toISOString(),
-      health: evaluateScheduleHealth({
-        now: now.toISOString(),
-        nextDueAt: record.nextDueAt.toISOString(),
-        claimOwner: record.claimOwner,
-        claimExpiresAt: record.claimExpiresAt?.toISOString() ?? null,
-        lastClaimedAt: record.lastClaimedAt?.toISOString() ?? null,
-        overdueAfterMs,
-      }),
-      claimOwner: record.claimOwner,
-      claimOwnerPresent:
-        record.claimOwner !== null && identities.has(record.claimOwner),
-      claimExpiresAt: record.claimExpiresAt?.toISOString() ?? null,
-      lastClaimedAt: record.lastClaimedAt?.toISOString() ?? null,
-      lastOutcome: record.lastOutcome,
-      lastRunId: record.lastRunId,
-    };
-  }
-
   return {
     reads: {
       async listInstances(request): Promise<WorkerFleetInstancesPage> {
@@ -274,12 +170,15 @@ export function createAdminWorkerFleetRuntime(
         const published = snapshot.settings.settings;
         const stalledRuns = runs.items.filter(
           (record) =>
-            stallOf(record, published?.runHeartbeatStaleAfterMs ?? null, now) !==
-            null,
+            evaluateRunStallFor(
+              record,
+              published?.runHeartbeatStaleAfterMs ?? null,
+              now,
+            ) !== null,
         ).length;
         const wedgedSchedules = schedules.items.filter((record) =>
           isScheduleWedged(
-            toScheduleHealth(
+            toScheduleHealthView(
               record,
               published?.presenceStaleAfterMs ?? null,
               now,
@@ -300,12 +199,9 @@ export function createAdminWorkerFleetRuntime(
               toInstanceView(record, now, request.organizationId, providerNames),
             ),
           hasMore: snapshot.records.length > request.limit,
-          fleet: evaluateWorkerFleet({
-            now: now.toISOString(),
-            instances: snapshot.records.map((record) => ({
-              status: classifyWorkerPresence(record, now),
-              heartbeatAgeMs: workerPresenceAgeMs(record, now),
-            })),
+          fleet: evaluateFleetFrom({
+            records: snapshot.records,
+            now,
             stalledRuns,
             wedgedSchedules,
           }),
@@ -332,12 +228,14 @@ export function createAdminWorkerFleetRuntime(
         // run after it is fresher: the stalled set ends there and so does paging.
         let reachedFreshRun = false;
         for (const record of page.items) {
-          const stall = stallOf(record, staleAfterMs, now);
+          const stall = evaluateRunStallFor(record, staleAfterMs, now);
           if (stall === null) {
             reachedFreshRun = true;
             break;
           }
-          items.push(toStalledRun(record, stall, now, snapshot.identities));
+          items.push(
+            toStalledRunView(record, stall, now, snapshot.identities),
+          );
           lastStalled = record;
         }
         const signal = lastStalled ? lastSignalOf(lastStalled) : null;
@@ -367,7 +265,12 @@ export function createAdminWorkerFleetRuntime(
         const last = page.items.at(-1);
         return {
           items: page.items.map((record) =>
-            toScheduleHealth(record, overdueAfterMs, now, snapshot.identities),
+            toScheduleHealthView(
+              record,
+              overdueAfterMs,
+              now,
+              snapshot.identities,
+            ),
           ),
           nextCursor:
             page.hasMore && last

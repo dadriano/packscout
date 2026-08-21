@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
 import type { ViteDevServer } from "vite";
+import { RECOMPUTATION_BACKLOG_DEPTH_DEFAULT } from "@packscout/contracts";
+import { MachineryAlertService } from "@packscout/services";
 import {
   createPrismaClientLifecycle,
   DatabaseLoginAttemptLimiter,
@@ -16,7 +18,13 @@ import { createAdminApp } from "./app.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
 import { createAdminBackgroundWorkRuntime } from "./background-work-runtime.ts";
 import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
+import {
+  createAdminMachineryAlertFactsSource,
+  startMachineryAlertLoop,
+  type MachineryAlertLoop,
+} from "./machinery-alert-runtime.ts";
 import { createAdminOperationalRuntime } from "./operational-runtime.ts";
+import { createProductUserAuditSink } from "./product-user-audit.ts";
 import { createProductUserDirectoryReader } from "./product-user-directory.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
 import { createAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
@@ -28,6 +36,7 @@ import {
   readProductUserDirectoryConfig,
   readServiceHost,
   readPort,
+  readPositiveCount,
   readPositiveDuration,
   readRequiredSecret,
   readTrustedProxies,
@@ -94,6 +103,22 @@ const trustedProxies = readTrustedProxies(
   "PACKSCOUT_ADMIN_TRUSTED_PROXIES",
 );
 /**
+ * How often the machinery conditions are evaluated. The cadence only decides
+ * how quickly a condition is noticed; the thresholds themselves come from the
+ * settings the worker fleet publishes.
+ */
+const machineryAlertIntervalMs = readPositiveDuration(
+  process.env.PACKSCOUT_ADMIN_MACHINERY_ALERT_INTERVAL_MS,
+  60 * 1_000,
+  "PACKSCOUT_ADMIN_MACHINERY_ALERT_INTERVAL_MS",
+);
+/** Shared by the background-work page and the queue-depth alert condition. */
+const recomputationBacklogLimit = readPositiveCount(
+  process.env.PACKSCOUT_ADMIN_RECOMPUTATION_BACKLOG_LIMIT,
+  RECOMPUTATION_BACKLOG_DEPTH_DEFAULT,
+  "PACKSCOUT_ADMIN_RECOMPUTATION_BACKLOG_LIMIT",
+);
+/**
  * The product backend's admin surface. Absent or unusable configuration leaves
  * the directory unconfigured rather than stopping the admin: every pipeline
  * workflow stays available and the users page explains the missing integration.
@@ -129,6 +154,7 @@ function closeHttpServer(server: Server | undefined): Promise<void> {
 const databaseLifecycle = createPrismaClientLifecycle({ databaseUrl });
 let server: Server | undefined;
 let developmentServer: ViteDevServer | undefined;
+let machineryAlerts: MachineryAlertLoop | undefined;
 let shutdownPromise: Promise<void> | undefined;
 
 try {
@@ -174,11 +200,16 @@ try {
     backgroundWork: createAdminBackgroundWorkRuntime({
       database,
       actorPseudonymKey: providerActorKey,
+      backlogDepthLimit: recomputationBacklogLimit,
     }),
     workerFleet: createAdminWorkerFleetRuntime({ database }),
     productUsers: {
       directory: createProductUserDirectoryReader({
         config: productUserDirectoryConfig,
+      }),
+      audit: createProductUserAuditSink({
+        database,
+        actorPseudonymKey: providerActorKey,
       }),
     },
     operationalAlerts: { alerts: operational.alerts },
@@ -207,6 +238,30 @@ try {
     });
   }
 
+  // Fleet silence cannot be detected by the fleet, so the machinery conditions
+  // are evaluated here: the admin is the always-on process that survives the
+  // exact failure the loudest condition describes.
+  const machineryAlertService = new MachineryAlertService(
+    createAdminMachineryAlertFactsSource({
+      database,
+      backlogDepthLimit: recomputationBacklogLimit,
+    }),
+    operational.events,
+  );
+  machineryAlerts = startMachineryAlertLoop({
+    cycle: () => machineryAlertService.runCycle(),
+    intervalMs: machineryAlertIntervalMs,
+    onFailure: () => {
+      // Names the failed capability, never any evidence it was reading.
+      console.error(
+        JSON.stringify({
+          level: "error",
+          event: "admin_machinery_alert_cycle_failed",
+        }),
+      );
+    },
+  });
+
   server = app.listen(port, host);
   await waitForListening(server);
   process.once("SIGINT", handleShutdownSignal);
@@ -219,6 +274,7 @@ try {
     );
   }
 } catch (error) {
+  await machineryAlerts?.stop().catch(() => undefined);
   await closeHttpServer(server).catch(() => undefined);
   await developmentServer?.close().catch(() => undefined);
   await databaseLifecycle.close().catch(() => undefined);
@@ -229,9 +285,14 @@ function shutDown(): Promise<void> {
   shutdownPromise ??= (async () => {
     let shutdownError: unknown;
     try {
-      await closeHttpServer(server);
+      await machineryAlerts?.stop();
     } catch (error) {
       shutdownError = error;
+    }
+    try {
+      await closeHttpServer(server);
+    } catch (error) {
+      shutdownError ??= error;
     }
     try {
       await developmentServer?.close();

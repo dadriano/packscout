@@ -127,6 +127,7 @@ const backlog = evaluateRecomputationBacklog({
   failed: 1,
   oldestPendingAvailableAt: "2026-08-19T11:00:00.000Z",
   timelyAfterMs: 60_000,
+  depthLimit: 100,
 });
 const cadence = evaluateRetentionCadence({
   now,
@@ -296,6 +297,9 @@ test("both operator roles read queue and retention pages with server-derived mea
         failed: 1,
         oldestPendingAgeMs: 3_600_000,
         timelyAfterMs: 60_000,
+        // The configured depth ceiling reaches the browser as a measure, so the
+        // page and the queue alert quote the same threshold.
+        depthLimit: 100,
       });
 
       const retention = await fetch(
