@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 import {
+  endPoolFully,
+  guardPoolErrors,
+} from "./pool-teardown.test-support.ts";
+import {
   assertSchemaParity,
   inspectSchema,
   loadSchemaParityManifest,
@@ -31,31 +35,6 @@ const ids = {
   secret: "00000000-0000-4000-8000-000000000040",
 } as const;
 
-async function endPoolFully(pool: Pool): Promise<void> {
-  const expectedRemovals = pool.totalCount;
-  if (expectedRemovals === 0) {
-    await pool.end();
-    return;
-  }
-
-  let removalCount = 0;
-  let resolveRemovals: (() => void) | undefined;
-  const removals = new Promise<void>((resolve) => {
-    resolveRemovals = resolve;
-  });
-  const onRemove = () => {
-    removalCount += 1;
-    if (removalCount === expectedRemovals) resolveRemovals?.();
-  };
-  pool.on("remove", onRemove);
-  try {
-    await pool.end();
-    await removals;
-  } finally {
-    pool.off("remove", onRemove);
-  }
-}
-
 async function createDisposableDatabase(): Promise<{
   db: Pool;
   databaseUrl: string;
@@ -69,11 +48,15 @@ async function createDisposableDatabase(): Promise<{
   if (!/^packscout_prisma_schema_[0-9]+_[0-9]+$/.test(databaseName)) {
     throw new Error("refusing to create an unscoped test database");
   }
-  const admin = new Pool({ connectionString: adminUrl.toString(), max: 1 });
+  const admin = guardPoolErrors(
+    new Pool({ connectionString: adminUrl.toString(), max: 1 }),
+  );
   await admin.query(`create database "${databaseName}"`);
   const databaseUrl = new URL(adminUrl);
   databaseUrl.pathname = `/${databaseName}`;
-  const db = new Pool({ connectionString: databaseUrl.toString(), max: 4 });
+  const db = guardPoolErrors(
+    new Pool({ connectionString: databaseUrl.toString(), max: 4 }),
+  );
   return {
     db,
     databaseUrl: databaseUrl.toString(),
