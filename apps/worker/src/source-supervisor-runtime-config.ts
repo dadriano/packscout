@@ -23,14 +23,19 @@ export class ProviderSourceSupervisorConfigurationError extends Error {
   }
 }
 
-export interface ProviderSourceSupervisorConfiguration {
+/** Settings the supervisor shares with the combined provider worker. */
+export interface ProviderSourceSupervisorSharedConfiguration {
   readonly actorPseudonymKey: Uint8Array;
   readonly databaseUrl: string;
   readonly environment: ProviderSourceSupervisorEnvironment;
+  readonly workerId: string;
+}
+
+export interface ProviderSourceSupervisorConfiguration
+  extends ProviderSourceSupervisorSharedConfiguration {
   readonly sourceConnectionConfigurationKey: Uint8Array;
   readonly sourceConnectionConfigurationKeyVersion: number;
   readonly sourceDatabaseVolumePath: string;
-  readonly workerId: string;
 }
 
 function databaseVolumePathFor(value: string | undefined): string {
@@ -127,11 +132,30 @@ function workerIdFor(value: string | undefined, fallback: string): string {
   return resolved;
 }
 
-/** Reads exactly the settings owned by the source-supervisor process. */
-export function readProviderSourceSupervisorConfiguration(
+const supervisorOnlyVariables = [
+  "PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64",
+  "PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION",
+  "PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH",
+] as const;
+
+/**
+ * True when any supervisor-only setting is present. The combined worker uses
+ * this to tell a deliberately absent supervisor lane (none set) apart from a
+ * partial misconfiguration (some set), which must still fail startup.
+ */
+export function hasProviderSourceSupervisorSettings(
+  environment: NodeJS.ProcessEnv,
+): boolean {
+  return supervisorOnlyVariables.some(
+    (name) => (environment[name] ?? "").trim().length > 0,
+  );
+}
+
+/** Reads the settings shared with the combined provider worker. */
+export function readProviderSourceSupervisorSharedConfiguration(
   environment: NodeJS.ProcessEnv,
   fallbackWorkerId: string,
-): ProviderSourceSupervisorConfiguration {
+): ProviderSourceSupervisorSharedConfiguration {
   return Object.freeze({
     actorPseudonymKey: canonicalKeyFor(
       environment.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
@@ -139,6 +163,20 @@ export function readProviderSourceSupervisorConfiguration(
     ),
     databaseUrl: databaseUrlFor(environment.PACKSCOUT_DATABASE_URL),
     environment: environmentFor(environment.NODE_ENV),
+    workerId: workerIdFor(environment.PACKSCOUT_WORKER_ID, fallbackWorkerId),
+  });
+}
+
+/** Reads exactly the settings owned by the source-supervisor process. */
+export function readProviderSourceSupervisorConfiguration(
+  environment: NodeJS.ProcessEnv,
+  fallbackWorkerId: string,
+): ProviderSourceSupervisorConfiguration {
+  return Object.freeze({
+    ...readProviderSourceSupervisorSharedConfiguration(
+      environment,
+      fallbackWorkerId,
+    ),
     sourceConnectionConfigurationKey: canonicalKeyFor(
       environment.PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64,
       "SOURCE_CONNECTION_KEY_INVALID",
@@ -149,6 +187,5 @@ export function readProviderSourceSupervisorConfiguration(
     sourceDatabaseVolumePath: databaseVolumePathFor(
       environment.PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH,
     ),
-    workerId: workerIdFor(environment.PACKSCOUT_WORKER_ID, fallbackWorkerId),
   });
 }

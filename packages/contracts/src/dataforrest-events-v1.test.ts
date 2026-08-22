@@ -209,6 +209,26 @@ test("normalization rejects a record outside the immutable source provider", () 
   );
 });
 
+test("raw-valid trade currencies outside the ticker vocabulary fail normalization as ZodError", () => {
+  const trade = dataforestEventsV1EvidenceFixture.courtyard.initial.records[3];
+  for (const currency of ["usd", "$", `0x${"a".repeat(40)}`]) {
+    const rawValid = dataforrestEventRecordV1Schema.parse({
+      ...trade,
+      currency,
+    });
+    assert.throws(
+      () =>
+        normalizeDataforrestEventRecord(
+          rawValid,
+          "courtyard",
+          "fixture:trade-currency",
+        ),
+      (error: unknown) => error instanceof Error && error.name === "ZodError",
+      currency,
+    );
+  }
+});
+
 test("DataForrest continuation accepts only the evidenced polling vocabulary", () => {
   const reachedHead = dataforrestEventsPageV1Schema.parse(
     dataforestEventsV1EvidenceFixture.courtyard.reachedHead,

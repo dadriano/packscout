@@ -56,12 +56,16 @@ export async function lockProviderSourceCanonicalProjectionIdentities(
       )
     ),
   ]))].sort();
-  for (const key of keys) {
-    const lockId = createHash("sha256").update(key).digest().readBigInt64BE(0);
-    await transaction.$queryRaw<Array<{ locked: string }>>(Prisma.sql`
-      select pg_advisory_xact_lock(${lockId})::text as locked
-    `);
-  }
+  if (keys.length === 0) return;
+  // One statement acquires every lock; unnest preserves the sorted key order,
+  // so acquisition order (and deadlock avoidance) matches the per-key loop.
+  const lockIds = keys.map((key) =>
+    createHash("sha256").update(key).digest().readBigInt64BE(0)
+  );
+  await transaction.$queryRaw<Array<{ locked: string }>>(Prisma.sql`
+    select pg_advisory_xact_lock(k)::text as locked
+    from unnest(array[${Prisma.join(lockIds)}]::bigint[]) as k
+  `);
 }
 
 export function providerSourceProjectionCommand(
@@ -102,6 +106,84 @@ export async function loadProviderSourceCanonicalHistory(
     order by revision.revision_number
     for share of entity, revision
   `);
+}
+
+interface ProviderSourceCanonicalProjectionIdentity {
+  readonly platformKey: string;
+  readonly recordKind: string;
+  readonly providerRecordId: string;
+}
+
+/** Stable per-page map key for one exact canonical projection identity. */
+export function providerSourceCanonicalProjectionIdentityKey(
+  projection: ProviderSourceCanonicalProjectionIdentity,
+): string {
+  return JSON.stringify([
+    projection.platformKey,
+    projection.recordKind,
+    projection.providerRecordId,
+  ]);
+}
+
+/**
+ * Loads the complete committed history for every projection identity in one
+ * statement. Row-level semantics match {@link loadProviderSourceCanonicalHistory}:
+ * the same columns, the same revision-number ordering per identity, and the
+ * same `for share` entity and revision locks. Identities with no committed
+ * revisions map to an empty list.
+ */
+export async function loadProviderSourceCanonicalHistoryByIdentity(
+  transaction: PackscoutTransactionClient,
+  scope: ProviderSourceCanonicalScope,
+  projections: readonly ProviderSourceCanonicalProjectionPlan[],
+): Promise<ReadonlyMap<string, readonly ProviderSourceCanonicalHistoryRow[]>> {
+  const identitiesByKey = new Map<
+    string,
+    ProviderSourceCanonicalProjectionIdentity
+  >();
+  for (const projection of projections) {
+    const key = providerSourceCanonicalProjectionIdentityKey(projection);
+    if (!identitiesByKey.has(key)) identitiesByKey.set(key, projection);
+  }
+  const history = new Map<string, ProviderSourceCanonicalHistoryRow[]>();
+  for (const key of identitiesByKey.keys()) history.set(key, []);
+  if (identitiesByKey.size === 0) return history;
+  const identityRows = [...identitiesByKey.values()].map((identity) =>
+    Prisma.sql`(
+      ${identity.platformKey},
+      cast(${identity.recordKind} as public.canonical_record_kind),
+      ${identity.providerRecordId}
+    )`
+  );
+  const rows = await transaction.$queryRaw<Array<{
+    platformKey: string;
+    recordKind: string;
+    providerRecordId: string;
+    contentFingerprint: string;
+    effectiveAt: Date;
+  }>>(Prisma.sql`
+    select entity.platform_key as "platformKey",
+           entity.record_kind::text as "recordKind",
+           entity.external_id as "providerRecordId",
+           revision.content_hash as "contentFingerprint",
+           revision.source_updated_at as "effectiveAt"
+    from public.canonical_entities as entity
+    join public.canonical_revisions as revision on revision.entity_id = entity.id
+    where entity.organization_id = ${scope.organizationId}::uuid
+      and (entity.platform_key, entity.record_kind, entity.external_id) in (
+        values ${Prisma.join(identityRows)}
+      )
+    order by entity.platform_key, entity.record_kind, entity.external_id,
+             revision.revision_number
+    for share of entity, revision
+  `);
+  for (const row of rows) {
+    history.get(providerSourceCanonicalProjectionIdentityKey(row))?.push({
+      contentFingerprint: row.contentFingerprint,
+      effectiveAt: row.effectiveAt,
+    });
+  }
+  return history;
 }
 
 export async function hasProviderSourceCanonicalKindConflict(
@@ -157,6 +239,114 @@ export async function countProviderSourceUnresolvedRelationships(
     }
   }
   return count;
+}
+
+type ProviderSourceProjectionRelationshipPlan =
+  ProviderSourceCanonicalProjectionPlan["relationships"][number];
+
+/** Stable map key for one exact (projection identity, relationship) tuple. */
+export function providerSourceUnresolvedRelationshipKey(
+  projection: ProviderSourceCanonicalProjectionPlan,
+  relationship: ProviderSourceProjectionRelationshipPlan,
+): string {
+  return JSON.stringify([
+    projection.platformKey,
+    projection.recordKind,
+    projection.providerRecordId,
+    relationship.relationship,
+    relationship.targetCanonicalKind,
+    relationship.targetProviderRecordId,
+  ]);
+}
+
+/**
+ * Counts stored unresolved relationships for every (projection, relationship)
+ * tuple in one grouped statement. Each distinct tuple is queried once and the
+ * predicate matches {@link countProviderSourceUnresolvedRelationships} exactly;
+ * tuples with no unresolved rows map to zero.
+ */
+export async function countProviderSourceUnresolvedRelationshipsByTuple(
+  transaction: PackscoutTransactionClient,
+  scope: ProviderSourceCanonicalScope,
+  projections: readonly ProviderSourceCanonicalProjectionPlan[],
+): Promise<ReadonlyMap<string, number>> {
+  const tuplesByKey = new Map<string, Readonly<{
+    projection: ProviderSourceCanonicalProjectionPlan;
+    relationship: ProviderSourceProjectionRelationshipPlan;
+  }>>();
+  for (const projection of projections) {
+    for (const relationship of projection.relationships) {
+      const key = providerSourceUnresolvedRelationshipKey(
+        projection,
+        relationship,
+      );
+      if (!tuplesByKey.has(key)) tuplesByKey.set(key, { projection, relationship });
+    }
+  }
+  const counts = new Map<string, number>();
+  for (const key of tuplesByKey.keys()) counts.set(key, 0);
+  if (tuplesByKey.size === 0) return counts;
+  const tupleRows = [...tuplesByKey.values()].map(({ projection, relationship }) =>
+    Prisma.sql`(
+      ${projection.platformKey},
+      cast(${projection.recordKind} as public.canonical_record_kind),
+      ${projection.providerRecordId},
+      ${relationship.relationship},
+      cast(${relationship.targetCanonicalKind} as public.canonical_record_kind),
+      ${relationship.targetProviderRecordId}
+    )`
+  );
+  const rows = await transaction.$queryRaw<Array<{
+    platformKey: string;
+    recordKind: string;
+    providerRecordId: string;
+    relationshipKind: string;
+    targetRecordKind: string;
+    targetProviderRecordId: string;
+    count: bigint;
+  }>>(Prisma.sql`
+    select tuple.platform_key as "platformKey",
+           tuple.record_kind::text as "recordKind",
+           tuple.external_id as "providerRecordId",
+           tuple.relationship_kind as "relationshipKind",
+           tuple.target_record_kind::text as "targetRecordKind",
+           tuple.target_external_id as "targetProviderRecordId",
+           count(stored.id)::bigint as count
+    from (values ${Prisma.join(tupleRows)}) as tuple(
+      platform_key, record_kind, external_id,
+      relationship_kind, target_record_kind, target_external_id
+    )
+    left join public.canonical_entities as entity
+      on entity.organization_id = ${scope.organizationId}::uuid
+     and entity.platform_key = tuple.platform_key
+     and entity.record_kind = tuple.record_kind
+     and entity.external_id = tuple.external_id
+    left join public.canonical_relationships as stored
+      on stored.source_entity_id = entity.id
+     and stored.organization_id = entity.organization_id
+     and stored.relationship_kind = tuple.relationship_kind
+     and stored.target_platform_key = tuple.platform_key
+     and stored.target_record_kind = tuple.target_record_kind
+     and stored.target_external_id = tuple.target_external_id
+     and stored.target_entity_id is null
+    group by tuple.platform_key, tuple.record_kind, tuple.external_id,
+             tuple.relationship_kind, tuple.target_record_kind,
+             tuple.target_external_id
+  `);
+  for (const row of rows) {
+    counts.set(
+      JSON.stringify([
+        row.platformKey,
+        row.recordKind,
+        row.providerRecordId,
+        row.relationshipKind,
+        row.targetRecordKind,
+        row.targetProviderRecordId,
+      ]),
+      Number(row.count),
+    );
+  }
+  return counts;
 }
 
 export async function loadCompleteProviderSourceEvInput(

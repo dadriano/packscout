@@ -1,3 +1,4 @@
+import type { ZodError } from "zod";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestContinuation,
@@ -185,6 +186,10 @@ function sourceContextIsValid(
     });
 }
 
+// Mirrors the outcome contract's safe-reference constraint so record-local
+// defect paths always survive normalized-page validation downstream.
+const safeFieldPathPattern = /^[a-z0-9](?:[a-z0-9:._-]{0,254}[a-z0-9])?$/u;
+
 function fieldPathsFromIssues(
   issues: readonly Readonly<{ path: PropertyKey[] }>[],
 ): string[] {
@@ -195,8 +200,9 @@ function fieldPathsFromIssues(
           typeof part === "string" || typeof part === "number"
         )
         .join(".")
+        .replace(/[A-Z]/gu, (character) => `_${character.toLowerCase()}`)
     )
-    .filter((path) => path.length > 0)
+    .filter((path) => safeFieldPathPattern.test(path))
     .slice(0, 32);
   return [...new Set(paths.length > 0 ? paths : ["record"])] as string[];
 }
@@ -295,15 +301,28 @@ function interpretRecord(
       evidenceReference,
     );
   }
-  return {
-    status: "valid",
-    recordIndex,
-    observation: normalizeDataforrestEventRecord(
-      parsed.data,
-      provider,
+  try {
+    return {
+      status: "valid",
+      recordIndex,
+      observation: normalizeDataforrestEventRecord(
+        parsed.data,
+        provider,
+        evidenceReference,
+      ),
+    };
+  } catch (error) {
+    // Normalization defects are record-local: raw-valid values the normalized
+    // contract rejects (for example a lowercase trade currency) must quarantine
+    // this record instead of failing the entire page.
+    if (!(error instanceof Error) || error.name !== "ZodError") throw error;
+    return invalidOutcome(
+      recordIndex,
+      "invalid_field_values",
+      fieldPathsFromIssues((error as ZodError).issues),
       evidenceReference,
-    ),
-  };
+    );
+  }
 }
 
 function interpretRecords(

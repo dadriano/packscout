@@ -1,8 +1,11 @@
 import { hostname } from "node:os";
 import {
+  hasProviderSourceSupervisorSettings,
   ProviderSourceSupervisorConfigurationError,
   readProviderSourceSupervisorConfiguration,
+  readProviderSourceSupervisorSharedConfiguration,
   type ProviderSourceSupervisorConfiguration,
+  type ProviderSourceSupervisorSharedConfiguration,
 } from "./source-supervisor-runtime-config.ts";
 
 export {
@@ -53,7 +56,7 @@ export class ProviderWorkerConfigurationError extends Error {
 }
 
 export interface ProviderWorkerConfiguration
-  extends ProviderSourceSupervisorConfiguration {
+  extends ProviderSourceSupervisorSharedConfiguration {
   readonly credentialKey: Uint8Array;
   readonly credentialKeyVersion: number;
   readonly databasePoolMaximum: number;
@@ -70,6 +73,12 @@ export interface ProviderWorkerConfiguration
   readonly retentionOrganizationDiscoveryLimit: number;
   readonly runHeartbeatStaleAfterMilliseconds: number;
   readonly scheduleClaimLeaseMilliseconds: number;
+  /**
+   * Undefined when none of the supervisor-only settings are set, which is the
+   * supported way to run the combined worker without the source-supervisor
+   * lane. A partially set group still fails configuration.
+   */
+  readonly sourceSupervisor?: ProviderSourceSupervisorConfiguration;
   readonly workerHost: string;
   readonly workerVersion: string;
 }
@@ -171,12 +180,16 @@ export function readProviderWorkerConfiguration(
   environment: NodeJS.ProcessEnv,
   fallbackWorkerId: string,
 ): ProviderWorkerConfiguration {
-  let sourceSupervisor: ProviderSourceSupervisorConfiguration;
+  let shared: ProviderSourceSupervisorSharedConfiguration;
+  let sourceSupervisor: ProviderSourceSupervisorConfiguration | undefined;
   try {
-    sourceSupervisor = readProviderSourceSupervisorConfiguration(
+    shared = readProviderSourceSupervisorSharedConfiguration(
       environment,
       fallbackWorkerId,
     );
+    sourceSupervisor = hasProviderSourceSupervisorSettings(environment)
+      ? readProviderSourceSupervisorConfiguration(environment, fallbackWorkerId)
+      : undefined;
   } catch (error) {
     if (error instanceof ProviderSourceSupervisorConfigurationError) {
       throw new ProviderWorkerConfigurationError(error.code);
@@ -203,7 +216,7 @@ export function readProviderWorkerConfiguration(
     throw new ProviderWorkerConfigurationError("PRESENCE_STALE_INVALID");
   }
   return Object.freeze({
-    ...sourceSupervisor,
+    ...shared,
     credentialKey: keyFor(
       environment.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64,
       "CREDENTIAL_KEY_INVALID",
@@ -293,6 +306,7 @@ export function readProviderWorkerConfiguration(
       300_000,
       "SCHEDULE_CLAIM_LEASE_INVALID",
     ),
+    sourceSupervisor,
     workerHost: workerHostFor(environment.PACKSCOUT_WORKER_HOST),
     workerVersion: workerVersionFor(environment.PACKSCOUT_WORKER_VERSION),
   });

@@ -198,6 +198,15 @@ export class ProviderSourceObservationRepository {
   async upsertSemanticObservationInTransaction(
     transaction: PackscoutTransactionClient,
     input: UpsertSemanticObservationInput,
+    options?: Readonly<{
+      /**
+       * Skips the page-constant source-revision fence lookup. Only pass true
+       * when the same transaction already verified the identical
+       * (organizationId, providerId, sourceInstanceId, sourceRevisionId) fence
+       * through an earlier call with the check enabled.
+       */
+      skipSourceRevisionFenceCheck?: boolean;
+    }>,
   ): Promise<UpsertSemanticObservationResult> {
     const expectedMeaning = resolveLaunchSourceRecordMeaning(
       input.recordIdScopeKey,
@@ -236,19 +245,21 @@ export class ProviderSourceObservationRepository {
       );
     }
 
-    const source = await transaction.provider_source_instances.findFirst({
-      where: {
-        id: input.sourceInstanceId,
-        organization_id: input.organizationId,
-        provider_id: input.providerId,
-      },
-      select: { active_revision_id: true },
-    });
-    if (!source || source.active_revision_id !== input.sourceRevisionId) {
-      throw new PersistenceError(
-        "SOURCE_FENCED",
-        "Observation source revision is not current.",
-      );
+    if (options?.skipSourceRevisionFenceCheck !== true) {
+      const source = await transaction.provider_source_instances.findFirst({
+        where: {
+          id: input.sourceInstanceId,
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+        },
+        select: { active_revision_id: true },
+      });
+      if (!source || source.active_revision_id !== input.sourceRevisionId) {
+        throw new PersistenceError(
+          "SOURCE_FENCED",
+          "Observation source revision is not current.",
+        );
+      }
     }
 
     const sourceRecord = await transaction.source_record_identities.upsert({
@@ -320,63 +331,89 @@ export class ProviderSourceObservationRepository {
     transaction: PackscoutTransactionClient,
     input: RecordDeliveryOccurrenceInput,
   ): Promise<{ occurrenceId: bigint }> {
-    if (!Number.isSafeInteger(input.recordIndex) || input.recordIndex < 0) {
-      throw new TypeError(
-        "Delivery record index must be a nonnegative safe integer.",
-      );
-    }
-    if (input.disposition === "quarantined") {
-      if (!SAFE_REASON_CODE_PATTERN.test(input.reasonCode)) {
-        throw new TypeError(
-          "Quarantine reason code must be a bounded safe reference.",
-        );
-      }
-      if (
-        input.semanticObservationId !== null &&
-        input.sourceRecordId === null
-      ) {
-        throw new TypeError(
-          "A semantic observation cannot exist without its source record.",
-        );
-      }
-    } else if (input.reasonCode !== undefined && input.reasonCode !== null) {
-      throw new TypeError(
-        "Only quarantined deliveries may carry a reason code.",
-      );
-    }
-
+    validateDeliveryOccurrenceInput(input);
     const occurrence = await transaction.source_delivery_occurrences.create({
-      data: {
-        organization_id: input.organizationId,
-        provider_id: input.providerId,
-        source_instance_id: input.sourceInstanceId,
-        source_revision_id: input.sourceRevisionId,
-        run_id: input.runId,
-        page_id: input.pageId,
-        record_index: input.recordIndex,
-        source_record_id: input.sourceRecordId,
-        semantic_observation_id: input.semanticObservationId,
-        request_attempt_id: input.requestAttemptId,
-        source_type_key: input.sourceTypeKey,
-        source_adapter_version: input.sourceAdapterVersion,
-        normalized_contract_version: input.normalizedContractVersion,
-        mapper_key: input.mapperKey,
-        mapper_version: input.mapperVersion,
-        identity_namespace_key: input.identityNamespaceKey,
-        checkpoint_codec_version: input.checkpointCodecVersion,
-        checkpoint_generation: input.checkpointGeneration,
-        connection_health_generation: input.connectionHealthGeneration,
-        supervisor_epoch_id: input.supervisorEpochId,
-        connection_profile_id: input.connectionProfileId,
-        connection_revision_id: input.connectionRevisionId,
-        collected_at: input.collectedAt,
-        native_evidence_reference: input.nativeEvidenceReference,
-        disposition: input.disposition,
-        reason_code:
-          input.disposition === "quarantined" ? input.reasonCode : null,
-      },
+      data: deliveryOccurrenceRow(input),
       select: { id: true },
     });
     return { occurrenceId: occurrence.id };
   }
+
+  /**
+   * Records many final record dispositions in one statement. Validation is
+   * identical to {@link recordDeliveryOccurrenceInTransaction} for every row
+   * and runs completely before the insert. Use only when no caller needs the
+   * generated occurrence ids.
+   */
+  async recordDeliveryOccurrencesInTransaction(
+    transaction: PackscoutTransactionClient,
+    inputs: readonly RecordDeliveryOccurrenceInput[],
+  ): Promise<void> {
+    for (const input of inputs) validateDeliveryOccurrenceInput(input);
+    if (inputs.length === 0) return;
+    await transaction.source_delivery_occurrences.createMany({
+      data: inputs.map(deliveryOccurrenceRow),
+    });
+  }
+}
+
+function validateDeliveryOccurrenceInput(
+  input: RecordDeliveryOccurrenceInput,
+): void {
+  if (!Number.isSafeInteger(input.recordIndex) || input.recordIndex < 0) {
+    throw new TypeError(
+      "Delivery record index must be a nonnegative safe integer.",
+    );
+  }
+  if (input.disposition === "quarantined") {
+    if (!SAFE_REASON_CODE_PATTERN.test(input.reasonCode)) {
+      throw new TypeError(
+        "Quarantine reason code must be a bounded safe reference.",
+      );
+    }
+    if (
+      input.semanticObservationId !== null &&
+      input.sourceRecordId === null
+    ) {
+      throw new TypeError(
+        "A semantic observation cannot exist without its source record.",
+      );
+    }
+  } else if (input.reasonCode !== undefined && input.reasonCode !== null) {
+    throw new TypeError(
+      "Only quarantined deliveries may carry a reason code.",
+    );
+  }
+}
+
+function deliveryOccurrenceRow(input: RecordDeliveryOccurrenceInput) {
+  return {
+    organization_id: input.organizationId,
+    provider_id: input.providerId,
+    source_instance_id: input.sourceInstanceId,
+    source_revision_id: input.sourceRevisionId,
+    run_id: input.runId,
+    page_id: input.pageId,
+    record_index: input.recordIndex,
+    source_record_id: input.sourceRecordId,
+    semantic_observation_id: input.semanticObservationId,
+    request_attempt_id: input.requestAttemptId,
+    source_type_key: input.sourceTypeKey,
+    source_adapter_version: input.sourceAdapterVersion,
+    normalized_contract_version: input.normalizedContractVersion,
+    mapper_key: input.mapperKey,
+    mapper_version: input.mapperVersion,
+    identity_namespace_key: input.identityNamespaceKey,
+    checkpoint_codec_version: input.checkpointCodecVersion,
+    checkpoint_generation: input.checkpointGeneration,
+    connection_health_generation: input.connectionHealthGeneration,
+    supervisor_epoch_id: input.supervisorEpochId,
+    connection_profile_id: input.connectionProfileId,
+    connection_revision_id: input.connectionRevisionId,
+    collected_at: input.collectedAt,
+    native_evidence_reference: input.nativeEvidenceReference,
+    disposition: input.disposition,
+    reason_code:
+      input.disposition === "quarantined" ? input.reasonCode : null,
+  } as const;
 }

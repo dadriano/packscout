@@ -280,6 +280,15 @@ export function selectCatalogRepack(
   });
 }
 
+export function clearCatalogRepackSelection(
+  query: ListPublicRepacksInput,
+): ListPublicRepacksInput {
+  return listPublicRepacksInputSchema.parse({
+    ...query,
+    selectedPublicRepackId: null,
+  });
+}
+
 export function serializeDashboardFilters(
   filters: ListPublicRepacksInput["filters"],
   provider?: DashboardProvider,
@@ -310,6 +319,7 @@ export function resetCatalogPagination(
     cursor: null,
     cursorStack: null,
     queryFingerprint: null,
+    selectedPublicRepackId: null,
   });
 }
 

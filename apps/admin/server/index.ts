@@ -40,8 +40,8 @@ import {
   readPort,
   readPositiveCount,
   readPositiveDuration,
-  readPositiveInteger,
   readRequiredSecret,
+  readSourceAdministrationSettings,
   readTrustedProxies,
   serviceHttpOrigin,
 } from "./runtime-config.ts";
@@ -96,14 +96,16 @@ const providerActorKey = readBase64Key(
   process.env.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
   "PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64",
 );
-const sourceConnectionConfigurationKey = readBase64Key(
-  process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64,
-  "PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64",
-);
-const sourceConnectionConfigurationKeyVersion = readPositiveInteger(
-  process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION,
-  "PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION",
-);
+/**
+ * Absent as a pair, the source-connection keys leave source administration
+ * unconfigured rather than stopping the admin: every other workflow stays
+ * available and the source routes answer with a stable error. A partially set
+ * or invalid pair still fails startup.
+ */
+const sourceAdministration = readSourceAdministrationSettings({
+  key: process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64,
+  keyVersion: process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION,
+});
 const allowedOrigins = readAllowedOrigins(
   process.env.PACKSCOUT_ADMIN_ALLOWED_ORIGINS,
   isDevelopment ? adminDevelopmentAllowedOrigins(host, port) : [],
@@ -190,13 +192,17 @@ try {
     production: !isDevelopment,
     allowedOrigins,
   });
-  const providerSourceRuntime = createAdminProviderSourceRuntime({
-    database,
-    connectionConfigurationKey: sourceConnectionConfigurationKey,
-    connectionConfigurationKeyVersion: sourceConnectionConfigurationKeyVersion,
-    actorPseudonymKey: providerActorKey,
-    environment: isDevelopment ? "local" : "production",
-  });
+  const providerSourceRuntime = sourceAdministration
+    ? createAdminProviderSourceRuntime({
+      database,
+      connectionConfigurationKey:
+        sourceAdministration.connectionConfigurationKey,
+      connectionConfigurationKeyVersion:
+        sourceAdministration.connectionConfigurationKeyVersion,
+      actorPseudonymKey: providerActorKey,
+      environment: isDevelopment ? "local" : "production",
+    })
+    : undefined;
   const app = createAdminApp({
     trustedProxies,
     auth,
@@ -231,6 +237,7 @@ try {
     operationalHealth: { health: operational.health },
     providerSources: providerSourceRuntime,
     providerSourceOperations: providerSourceRuntime,
+    sourceAdministrationUnconfigured: providerSourceRuntime === undefined,
   });
 
   if (isDevelopment) {
@@ -293,6 +300,15 @@ try {
     // Names the missing capability, never any configuration value.
     console.log(
       "Packscout Admin: the product-user directory integration is not configured.",
+    );
+  }
+  if (sourceAdministration === null) {
+    // Names the missing capability, never any configuration value.
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        event: "admin_source_administration_unconfigured",
+      }),
     );
   }
 } catch (error) {

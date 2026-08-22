@@ -14,6 +14,10 @@ import {
   matchingRepackRows,
   type CategoryHierarchy,
 } from "./publicRepackAggregates";
+import {
+  isValidRepackSearchRow,
+  normalizeLegacyPackAvailability,
+} from "./publicRepackValidation";
 
 const hierarchy: CategoryHierarchy = new Map();
 const allFilters: PublicRepackFilters = {
@@ -148,5 +152,31 @@ describe("public pack availability query behavior", () => {
       deterministicVisibleSelection(afterReappearance, selectedId)
         ?.publicRepackId,
     ).toBe(selectedId);
+  });
+});
+
+describe("legacy pack availability normalization", () => {
+  test("stored legacy vocabulary translates onto the four-state union", () => {
+    expect(normalizeLegacyPackAvailability("active")).toBe("available");
+    expect(normalizeLegacyPackAvailability("disabled")).toBe("unavailable");
+    for (const state of fourStates) {
+      expect(normalizeLegacyPackAvailability(state.availability)).toBe(
+        state.availability,
+      );
+    }
+  });
+
+  test("a stored legacy row becomes a valid public row only after translation", () => {
+    const legacyRow = {
+      ...row(5, "available"),
+      availability: "active",
+    } as unknown as RepackSearchRow;
+    expect(isValidRepackSearchRow(legacyRow)).toBe(false);
+    expect(
+      isValidRepackSearchRow({
+        ...legacyRow,
+        availability: normalizeLegacyPackAvailability("active"),
+      }),
+    ).toBe(true);
   });
 });

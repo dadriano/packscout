@@ -13,6 +13,11 @@ test("all-repacks opens the sheet only from an explicit query selection", () => 
   assert.match(source, /navigate\(selectCatalogRepack\(query, publicRepackId\)\)/);
 });
 
+test("closing the sheet clears the selected repack from the URL", () => {
+  assert.match(source, /navigate\(clearCatalogRepackSelection\(query\)\)/);
+  assert.match(source, /onClose=\{closeInspector\}/);
+});
+
 test("all-repacks delegates the desired-chase search to the page heading", () => {
   assert.equal(source.includes("all-repacks-search"), false);
   assert.equal(source.includes("Search all repacks"), false);

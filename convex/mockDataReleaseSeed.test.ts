@@ -621,6 +621,51 @@ describe("mock V2 data release", () => {
     expect(aliasSearch.data.matches[0]?.name).toContain("Umbreon");
   });
 
+  test("stored legacy availability passes schema validation and reads back normalized", async () => {
+    enableSeed();
+    const t = createTest();
+    await t.mutation(internal.mockDataReleaseSeed.seed, {});
+
+    // The patch itself proves the stored-table validator still accepts the
+    // retired vocabulary that pre-rename documents hold.
+    const legacyRepackId = await t.run(async (ctx) => {
+      const repacks = await ctx.db.query("providerCatalogRepacks").take(10);
+      const available = repacks.find(
+        ({ detail }) => detail.availability === "available",
+      );
+      if (available === undefined) throw new Error("Expected available repack.");
+      await ctx.db.patch("providerCatalogRepacks", available._id, {
+        detail: { ...available.detail, availability: "active" },
+      });
+      return available.publicRepackId;
+    });
+
+    const list = await t.query(api.publicRepacks.listPublicRepacks, {
+      filters: { availability: "all" },
+      currentTime: Date.now(),
+    });
+    expect(listPublicRepacksResultSchema.parse(list).ok).toBe(true);
+    if (!list.ok) throw new Error("Expected legacy catalog success.");
+    expect(
+      list.data.rows.find(
+        ({ publicRepackId }) => publicRepackId === legacyRepackId,
+      )?.availability,
+    ).toBe("available");
+
+    // Search-shard rows are hash-pinned, so only their stored validator is
+    // exercised here: legacy rows must remain writable and readable documents.
+    await t.run(async (ctx) => {
+      const shard = (await ctx.db.query("providerCatalogSearchShards").take(1))[0];
+      if (shard === undefined) throw new Error("Expected search shard.");
+      await ctx.db.patch("providerCatalogSearchShards", shard._id, {
+        rows: shard.rows.map((row) => ({
+          ...row,
+          availability: "disabled" as const,
+        })),
+      });
+    });
+  });
+
   test("keeps same-manifest cursors and distinguishes retained from expired releases", async () => {
     enableSeed();
     const t = createTest();

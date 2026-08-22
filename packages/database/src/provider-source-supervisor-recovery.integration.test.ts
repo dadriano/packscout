@@ -188,6 +188,116 @@ test("takeover fences a terminal source-test/result gap without another claim", 
   }
 });
 
+test("takeover reconciliation blocks queued profile work for recovery", async () => {
+  const { fixture, source, ownerKey, leaseToken, epoch } =
+    await recoveryFixture("reconcile-blocks-queued-work");
+  try {
+    const now = await databaseNow(fixture.database);
+    const claimToken = randomUUID();
+    const detector = await fixture.database.source_connection_test_jobs.create({
+      data: {
+        organization_id: fixture.organizationId,
+        connection_profile_id: fixture.connectionProfileId,
+        connection_revision_id: fixture.connectionRevisionId,
+        expected_health_generation: 0n,
+        state: "running",
+        requested_by_actor_key: "operator-admin",
+        claim_owner: ownerKey,
+        claim_token: claimToken,
+        claim_expires_at: new Date(now.getTime() + 20_000),
+        supervisor_epoch_id: epoch.epochId,
+        started_at: now,
+      },
+    });
+    const requests = new ProviderSourceRequestRepository(fixture.database);
+    const attemptId = await requests.begin({
+      organizationId: fixture.organizationId,
+      requestLeaseId: randomUUID(),
+      claimOwner: ownerKey,
+      claimToken,
+      supervisorEpochId: epoch.epochId,
+      supervisorOwnerKey: ownerKey,
+      supervisorLeaseToken: leaseToken,
+      connectionProfileId: fixture.connectionProfileId,
+      connectionRevisionId: fixture.connectionRevisionId,
+      expectedHealthGeneration: 0n,
+      operation: { kind: "connection_test", connectionTestJobId: detector.id },
+      startedAt: now,
+    });
+    const requested = await new ProviderSourceImportRunRepository(
+      fixture.database,
+    ).requestRun({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      runId: randomUUID(),
+      trigger: "manual",
+      requestedByActorKey: "operator-admin",
+      requestedAt: now,
+      expectedSourceRevisionId: source.sourceRevisionId,
+    });
+    if (requested.kind !== "created") throw new Error("Expected queued run.");
+
+    const takeoverAt = await databaseNow(fixture.database);
+    await fixture.database.source_supervisor_epochs.update({
+      where: { id: epoch.epochId },
+      data: {
+        acquired_at: new Date(takeoverAt.getTime() - 60_000),
+        last_renewed_at: new Date(takeoverAt.getTime() - 60_000),
+        lease_expires_at: new Date(takeoverAt.getTime() - 30_000),
+        takeover_not_before: new Date(takeoverAt.getTime() - 15_000),
+      },
+    });
+    const replacementOwner = `${ownerKey}-replacement`;
+    const replacementLeaseToken = randomUUID();
+    const replacement = await new ProviderSourceSupervisorRepository(
+      fixture.database,
+    ).acquire({
+      environmentKey: "reconcile-blocks-queued-work-environment",
+      ownerKey: replacementOwner,
+      leaseToken: replacementLeaseToken,
+      now: takeoverAt,
+    });
+    const reconciled = await requests.reconcilePredecessorAttempt({
+      organizationId: fixture.organizationId,
+      requestAttemptId: attemptId,
+      currentSupervisorEpochId: replacement.epochId,
+      currentSupervisorOwnerKey: replacementOwner,
+      currentSupervisorLeaseToken: replacementLeaseToken,
+      safeOutcomeHash: "e".repeat(64),
+      reconciledAt: takeoverAt,
+    });
+
+    // The queued run keeps its recovery lineage instead of being claimed and
+    // terminally fenced as STALE_QUEUED_WORK by the replacement supervisor.
+    const [run, runtime] = await Promise.all([
+      fixture.database.import_runs.findUniqueOrThrow({
+        where: { id: requested.run.id },
+      }),
+      fixture.database.provider_source_runtime_states.findUniqueOrThrow({
+        where: { source_instance_id: source.sourceInstanceId },
+      }),
+    ]);
+    assert.equal(run.state, "incomplete");
+    assert.equal(run.failure_code, "CONNECTION_BLOCKED");
+    assert.equal(run.lease_owner, null);
+    assert.equal(runtime.activity, "waiting");
+    assert.equal(runtime.wait_reason, "connection_blocked");
+    assert.equal(runtime.blocking_episode_id, reconciled.blockingEpisodeId);
+    assert.equal(await new ProviderSourceSupervisorWorkRepository(
+      fixture.database,
+    ).claimNext({
+      epochId: replacement.epochId,
+      ownerKey: replacementOwner,
+      leaseToken: replacementLeaseToken,
+      claimOwner: replacementOwner,
+      claimToken: randomUUID(),
+      claimLeaseId: randomUUID(),
+    }), null);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("paired-capacity wait and grant are durable exact-claim lane states", async () => {
   const { fixture, source, ownerKey, leaseToken, epoch } =
     await recoveryFixture("durable-admission-wait");

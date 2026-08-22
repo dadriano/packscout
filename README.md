@@ -301,6 +301,31 @@ page shows a bounded "not connected" state instead of failing. Only operators
 holding the `product_users:view` permission (administrators) see the page at
 all.
 
+### Optional provider-source supervision
+
+Three server-only values enable the provider-source supervisor lane in the
+worker and source administration in the admin:
+
+```dotenv
+PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64=<canonical-base64-32-byte-key>
+PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION=<positive-integer>
+PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH=<absolute-non-root-path>
+```
+
+- `PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64` — key encrypting stored
+  source-connection configuration; shared by the worker and the admin.
+- `PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION` — the active encryption revision
+  of that key; shared by the worker and the admin.
+- `PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH` — the PostgreSQL data volume whose
+  capacity the supervisor's admission gate measures; worker only.
+
+Leaving all of them unset is safe and supported: the combined worker boots
+with the supervisor lane disabled (it logs
+`provider_source_supervisor_disabled` once at startup), and the admin boots
+with the provider-source routes answering `503 SOURCE_ADMIN_UNCONFIGURED`.
+Setting only part of the group is a misconfiguration and fails startup. The
+dedicated source-supervisor entrypoint always requires all of them.
+
 ### Machinery alerting in the admin
 
 The admin server evaluates the pipeline's machinery conditions — a silent

@@ -13,7 +13,10 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { canonicalJson } from "./dataReleaseCanonicalHash";
 import { refuseProviderRelease } from "./providerReleaseErrors";
-import { repackSearchRowMatchesDetail } from "./publicRepackValidation";
+import {
+  normalizeLegacyPackAvailability,
+  repackSearchRowMatchesDetail,
+} from "./publicRepackValidation";
 
 export type ProviderCatalogDependentWriteResult = Readonly<{
   unresolvedRepackDelta: number;
@@ -319,7 +322,15 @@ export async function writeProviderSearchShards(
     ) {
       refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT");
     }
-    previousShard = stored;
+    // Stored rows may predate the availability rename; hash checks above ran
+    // on the stored bytes, so translate only afterwards.
+    previousShard = {
+      ...stored,
+      rows: stored.rows.map((row) => ({
+        ...row,
+        availability: normalizeLegacyPackAvailability(row.availability),
+      })),
+    };
   }
   let searchRowCountDelta = 0;
   for (const [offset, shard] of records.entries()) {
@@ -359,7 +370,13 @@ export async function writeProviderSearchShards(
       if (repack === null) {
         refuseProviderRelease("PROVIDER_RELEASE_REFERENCE_INVALID");
       }
-      if (!repackSearchRowMatchesDetail(row, repack.detail)) {
+      const detail = {
+        ...repack.detail,
+        availability: normalizeLegacyPackAvailability(
+          repack.detail.availability,
+        ),
+      };
+      if (!repackSearchRowMatchesDetail(row, detail)) {
         refuseProviderRelease("PROVIDER_RELEASE_ENTITY_INVALID");
       }
       lastPublicRepackId = row.publicRepackId;

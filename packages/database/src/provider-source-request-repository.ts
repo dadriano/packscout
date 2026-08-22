@@ -4,7 +4,10 @@ import {
   sourceAdapterFailureSchema,
   type SourceAdapterFailure,
 } from "@packscout/contracts";
-import type { PackscoutPrismaClient } from "./database.ts";
+import type {
+  PackscoutPrismaClient,
+  PackscoutTransactionClient,
+} from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
 import { ProviderSourceDiagnosticRepository } from
@@ -924,36 +927,16 @@ export class ProviderSourceRequestRepository {
         // sibling attempts remain claim-pinned so the process can abort and
         // terminalize them through their own exact detecting-lease CAS.
         await Promise.all([
-          transaction.source_connection_test_jobs.updateMany({
-            where: {
-              organization_id: input.organizationId,
-              connection_profile_id: attempt.connectionProfileId,
-              state: "queued",
-              blocking_episode_id: null,
-            },
-            data: { state: "cancelled", finished_at: databaseNow },
-          }),
-          transaction.provider_source_test_jobs.updateMany({
-            where: {
-              organization_id: input.organizationId,
-              connection_profile_id: attempt.connectionProfileId,
-              state: "queued",
-            },
-            data: { state: "cancelled", finished_at: databaseNow },
-          }),
-          transaction.import_runs.updateMany({
-            where: {
-              organization_id: input.organizationId,
-              connection_profile_id: attempt.connectionProfileId,
-              state: "queued",
-            },
-            data: {
-              state: "incomplete",
-              failure_code: "CONNECTION_BLOCKED",
-              failure_summary: "Connection recovery is required.",
-              finished_at: databaseNow,
-            },
-          }),
+          this.#blockQueuedProfileWork(transaction, {
+            organizationId: input.organizationId,
+            connectionProfileId: attempt.connectionProfileId,
+            supervisorEpochId: input.supervisorEpochId,
+            blockingEpisodeId,
+            blockingEpisodeConnectionRevisionId:
+              terminalOpenEpisode?.connection_revision_id
+                ?? attempt.connectionRevisionId,
+            blockingHealthGeneration: blockingEpisodeHealthGeneration,
+          }, databaseNow),
           attempt.runId
             ? transaction.import_runs.updateMany({
                 where: {
@@ -976,28 +959,6 @@ export class ProviderSourceRequestRepository {
                 },
               })
             : Promise.resolve({ count: 0 }),
-          transaction.$executeRaw(Prisma.sql`
-            update public.provider_source_runtime_states as runtime
-            set supervisor_epoch_id = cast(${input.supervisorEpochId} as uuid),
-                phase = 'waiting',
-                activity = 'waiting',
-                wait_reason = 'connection_blocked',
-                action_required_code = null,
-                current_run_id = null,
-                connection_revision_id = cast(${terminalOpenEpisode?.connection_revision_id
-                  ?? attempt.connectionRevisionId} as uuid),
-                run_lease_acquired_at = null,
-                run_lease_expires_at = null,
-                blocking_episode_id = cast(${blockingEpisodeId} as uuid),
-                blocking_health_generation = ${blockingEpisodeHealthGeneration},
-                updated_at = ${databaseNow}
-            from public.provider_source_instances as source
-            where source.id = runtime.source_instance_id
-              and source.organization_id = runtime.organization_id
-              and source.connection_profile_id = cast(${attempt.connectionProfileId} as uuid)
-              and source.organization_id = cast(${input.organizationId} as uuid)
-              and runtime.connection_profile_id = cast(${attempt.connectionProfileId} as uuid)
-          `),
         ]);
       }
 
@@ -1300,6 +1261,18 @@ export class ProviderSourceRequestRepository {
         });
         createdEpisode = true;
         episodeRevisionId = attempt.connection_revision_id;
+        // The uncertain episode blocks the profile exactly like a detected
+        // outage: still-queued bound work must wait out recovery as
+        // incomplete/CONNECTION_BLOCKED instead of being claimed and
+        // terminally fenced by the replacement supervisor.
+        await this.#blockQueuedProfileWork(transaction, {
+          organizationId: input.organizationId,
+          connectionProfileId: attempt.connection_profile_id,
+          supervisorEpochId: input.currentSupervisorEpochId,
+          blockingEpisodeId: episode.id,
+          blockingEpisodeConnectionRevisionId: episodeRevisionId,
+          blockingHealthGeneration: resultingHealthGeneration,
+        }, databaseNow);
       }
       await transaction.compact_source_request_attempts.create({
         data: {
@@ -1417,5 +1390,78 @@ export class ProviderSourceRequestRepository {
       }
       return { blockingEpisodeId: episode.id };
     }, PROVIDER_SOURCE_CONTROL_PLANE_TRANSACTION);
+  }
+
+  /**
+   * Closes every not-yet-started work item bound to a newly blocked profile
+   * so queued work waits out recovery as incomplete/CONNECTION_BLOCKED rather
+   * than being claimed and terminally fenced later. Shared by the detecting
+   * terminalization and takeover reconciliation.
+   */
+  async #blockQueuedProfileWork(
+    transaction: PackscoutTransactionClient,
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      supervisorEpochId: string;
+      blockingEpisodeId: string;
+      blockingEpisodeConnectionRevisionId: string;
+      blockingHealthGeneration: bigint;
+    }>,
+    databaseNow: Date,
+  ): Promise<void> {
+    await Promise.all([
+      transaction.source_connection_test_jobs.updateMany({
+        where: {
+          organization_id: input.organizationId,
+          connection_profile_id: input.connectionProfileId,
+          state: "queued",
+          blocking_episode_id: null,
+        },
+        data: { state: "cancelled", finished_at: databaseNow },
+      }),
+      transaction.provider_source_test_jobs.updateMany({
+        where: {
+          organization_id: input.organizationId,
+          connection_profile_id: input.connectionProfileId,
+          state: "queued",
+        },
+        data: { state: "cancelled", finished_at: databaseNow },
+      }),
+      transaction.import_runs.updateMany({
+        where: {
+          organization_id: input.organizationId,
+          connection_profile_id: input.connectionProfileId,
+          state: "queued",
+        },
+        data: {
+          state: "incomplete",
+          failure_code: "CONNECTION_BLOCKED",
+          failure_summary: "Connection recovery is required.",
+          finished_at: databaseNow,
+        },
+      }),
+      transaction.$executeRaw(Prisma.sql`
+        update public.provider_source_runtime_states as runtime
+        set supervisor_epoch_id = cast(${input.supervisorEpochId} as uuid),
+            phase = 'waiting',
+            activity = 'waiting',
+            wait_reason = 'connection_blocked',
+            action_required_code = null,
+            current_run_id = null,
+            connection_revision_id = cast(${input.blockingEpisodeConnectionRevisionId} as uuid),
+            run_lease_acquired_at = null,
+            run_lease_expires_at = null,
+            blocking_episode_id = cast(${input.blockingEpisodeId} as uuid),
+            blocking_health_generation = ${input.blockingHealthGeneration},
+            updated_at = ${databaseNow}
+        from public.provider_source_instances as source
+        where source.id = runtime.source_instance_id
+          and source.organization_id = runtime.organization_id
+          and source.connection_profile_id = cast(${input.connectionProfileId} as uuid)
+          and source.organization_id = cast(${input.organizationId} as uuid)
+          and runtime.connection_profile_id = cast(${input.connectionProfileId} as uuid)
+      `),
+    ]);
   }
 }

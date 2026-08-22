@@ -34,6 +34,7 @@ import {
   type CatalogPageSize,
   type CatalogViewLayout,
   catalogSheetInspectorInitiallyOpen,
+  clearCatalogRepackSelection,
   nextCatalogPage,
   previousCatalogPage,
   resetCatalogPagination,
@@ -214,6 +215,11 @@ export function AllRepacksClient({
     navigate(selectCatalogRepack(query, publicRepackId));
   }
 
+  function closeInspector() {
+    setInspectorOpen(false);
+    navigate(clearCatalogRepackSelection(query));
+  }
+
   function sortCatalog(sort: PublicRepackSort, direction: "asc" | "desc") {
     navigate(resetCatalogPagination(query, { sort, direction }));
   }
@@ -391,7 +397,7 @@ export function AllRepacksClient({
           }
           metadata={page.metadata}
           onActionOutcome={reportAction}
-          onClose={() => setInspectorOpen(false)}
+          onClose={closeInspector}
           placement="sheet"
           repack={selectedRepack}
           returnFocusRef={selectionTriggerRef}

@@ -19,13 +19,14 @@ import {
 } from "./estimated-ev-recomputation-repository.ts";
 import {
   writeCanonicalProjectionBatch,
-  type CanonicalProjectionWriteResult,
+  type CanonicalProjectionWriteInput,
 } from "./ingestion-page-batch-writer.ts";
 import { ProviderSourceCheckpointRepository } from "./provider-source-checkpoint-repository.ts";
 import { ProviderSourceDiagnosticRepository } from "./provider-source-diagnostic-repository.ts";
 import {
   ProviderSourceObservationRepository,
   resolveLaunchSourceRecordMeaning,
+  type RecordDeliveryOccurrenceInput,
   type SourceDeliveryDisposition,
 } from "./provider-source-observation-repository.ts";
 import {
@@ -39,12 +40,15 @@ import {
 } from "./provider-source-page-validation.ts";
 import { lockProviderSourcePageOwnership } from "./provider-source-page-ownership.ts";
 import {
-  countProviderSourceUnresolvedRelationships,
+  countProviderSourceUnresolvedRelationshipsByTuple,
   hasProviderSourceCanonicalKindConflict,
   loadCompleteProviderSourceEvInput,
-  loadProviderSourceCanonicalHistory,
+  loadProviderSourceCanonicalHistoryByIdentity,
   lockProviderSourceCanonicalProjectionIdentities,
+  providerSourceCanonicalProjectionIdentityKey,
   providerSourceProjectionCommand,
+  providerSourceUnresolvedRelationshipKey,
+  type ProviderSourceCanonicalHistoryRow,
 } from "./provider-source-canonical-page-queries.ts";
 import { advanceSettledPublicWatermark } from "./public-change-settlement-repository.ts";
 
@@ -279,14 +283,19 @@ export class ProviderSourcePageRepository {
       const serializedReplay = await this.loadExactReplay(transaction, input);
       if (serializedReplay) return serializedReplay;
 
+      const canonicalScope = {
+        organizationId: input.pins.organizationId,
+        provider: input.pins.provider,
+      } as const;
+      const mappedProjections = input.plan.outcomes.flatMap((outcome) =>
+        outcome.kind === "semantic" && outcome.mapping.status === "mapped"
+          ? outcome.mapping.projections
+          : []
+      );
       await lockProviderSourceCanonicalProjectionIdentities(
         transaction,
         input.pins.organizationId,
-        input.plan.outcomes.flatMap((outcome) =>
-          outcome.kind === "semantic" && outcome.mapping.status === "mapped"
-            ? outcome.mapping.projections
-            : []
-        ),
+        mappedProjections,
       );
       await this.options.afterCanonicalIdentityLock?.();
 
@@ -352,6 +361,32 @@ export class ProviderSourcePageRepository {
       const counts = emptyCounts(input.plan.counts.warnings);
       const evCauses = new Map<string, bigint[]>();
 
+      // The advisory locks above serialize every mapped identity, so the
+      // committed history cannot change for the rest of this transaction
+      // except through this page's own writes. Those writes are deferred into
+      // one batch, and inPageHistoryByIdentity mirrors them so later records
+      // decide against exactly the history a reload would have returned.
+      const storedHistoryByIdentity =
+        await loadProviderSourceCanonicalHistoryByIdentity(
+          transaction,
+          canonicalScope,
+          mappedProjections,
+        );
+      const inPageHistoryByIdentity = new Map<
+        string,
+        ProviderSourceCanonicalHistoryRow[]
+      >();
+      const deferredProjectionWrites: Array<{
+        write: CanonicalProjectionWriteInput;
+        projection: ProviderSourceCanonicalProjectionPlan;
+        becomesCurrent: boolean;
+      }> = [];
+      const deferredDeliveryOccurrences: RecordDeliveryOccurrenceInput[] = [];
+      const deliveredProjectionPlans: Array<
+        readonly ProviderSourceCanonicalProjectionPlan[]
+      > = [];
+      let sourceRevisionFenceVerified = false;
+
       for (const outcome of input.plan.outcomes) {
         if (outcome.kind === "adapter_invalid") {
           await this.recordQuarantine(transaction, input, outcome, evidence, committedAt, {
@@ -387,7 +422,11 @@ export class ProviderSourcePageRepository {
               normalizedContent: outcome.semanticContent,
               ...meaning,
             },
+            // The fence fields are page-constant pins, so the first record's
+            // check inside this transaction covers every later record.
+            { skipSourceRevisionFenceCheck: sourceRevisionFenceVerified },
           );
+        sourceRevisionFenceVerified = true;
         if (semantic.kind === "identity_conflict") {
           await this.recordQuarantine(transaction, input, outcome, evidence, committedAt, {
             sourceRecordId: semantic.sourceRecordId,
@@ -440,14 +479,15 @@ export class ProviderSourcePageRepository {
         }>;
         let conflictReason: "identity_kind_conflict" | "immutable_content_conflict" | null = null;
         for (const projection of outcome.mapping.projections) {
-          const history = await loadProviderSourceCanonicalHistory(
-            transaction,
-            {
-              organizationId: input.pins.organizationId,
-              provider: input.pins.provider,
-            },
-            projection,
-          );
+          const identityKey =
+            providerSourceCanonicalProjectionIdentityKey(projection);
+          // Earlier records' accepted-but-deferred writes extend the stored
+          // history; this record's own earlier projections do not, matching
+          // the immediate-write ordering this loop previously produced.
+          const history = [
+            ...(storedHistoryByIdentity.get(identityKey) ?? []),
+            ...(inPageHistoryByIdentity.get(identityKey) ?? []),
+          ];
           const decision = decideProviderSourceCanonicalLifecycle({
             recordIdScopeKey: projection.recordIdScopeKey,
             canonicalKind: projection.recordKind,
@@ -485,12 +525,9 @@ export class ProviderSourcePageRepository {
         const changes = decisions.filter(
           (decision) => decision.disposition !== "duplicate",
         );
-        let writes: readonly CanonicalProjectionWriteResult[] = [];
-        if (changes.length > 0) {
-          writes = await writeCanonicalProjectionBatch(
-            transaction,
-            { retentionDays: 90, actorPseudonymKey: this.options.actorPseudonymKey },
-            changes.map((change, projectionIndex) => ({
+        for (const [projectionIndex, change] of changes.entries()) {
+          deferredProjectionWrites.push({
+            write: {
               organizationId: input.pins.organizationId,
               providerId: input.pins.providerId,
               origin: {
@@ -506,25 +543,21 @@ export class ProviderSourcePageRepository {
               becomesCurrent: change.becomesCurrent,
               acceptedAt: committedAt,
               publicChangeKind: "provider_projection",
-            })),
-          );
-          counts.canonicalRevisions += writes.filter(({ created }) => created).length;
-          for (const [index, write] of writes.entries()) {
-            const change = changes[index]!;
-            if (!write.created || !change.becomesCurrent) continue;
-            const projection = change.projection;
-            if (projection.evInputStatus !== "ready") continue;
-            const packId = projection.recordKind === "pack"
-              ? projection.providerRecordId
-              : projection.recordKind === "ev_input"
-                ? projection.affectedPackProviderRecordId
-                : null;
-            if (packId) {
-              const causes = evCauses.get(packId) ?? [];
-              causes.push(write.publicChangeSequence);
-              evCauses.set(packId, causes);
-            }
-          }
+            },
+            projection: change.projection,
+            becomesCurrent: change.becomesCurrent,
+          });
+          // Mirror the batch writer's durable row for later records: the plan
+          // validation pins contentFingerprint to the writer's content hash,
+          // and the writer stores source_updated_at as new Date(effectiveAt).
+          const identityKey =
+            providerSourceCanonicalProjectionIdentityKey(change.projection);
+          const pending = inPageHistoryByIdentity.get(identityKey) ?? [];
+          pending.push({
+            contentFingerprint: change.projection.contentFingerprint,
+            effectiveAt: new Date(change.projection.effectiveAt),
+          });
+          inPageHistoryByIdentity.set(identityKey, pending);
         }
 
         const disposition: Exclude<SourceDeliveryDisposition, "quarantined"> =
@@ -534,27 +567,66 @@ export class ProviderSourcePageRepository {
               ? "inserted"
               : "duplicate";
         counts[disposition] += 1;
-        await this.#observations.recordDeliveryOccurrenceInTransaction(
+        deferredDeliveryOccurrences.push({
+          ...this.occurrencePins(input),
+          recordIndex: outcome.recordIndex,
+          sourceRecordId: semantic.sourceRecordId,
+          semanticObservationId: semantic.semanticObservationId,
+          collectedAt: new Date(outcome.observation.collectedAt),
+          nativeEvidenceReference: outcome.protectedNativeEvidenceRef,
+          disposition,
+        });
+        deliveredProjectionPlans.push(outcome.mapping.projections);
+      }
+
+      if (deferredProjectionWrites.length > 0) {
+        const writes = await writeCanonicalProjectionBatch(
           transaction,
-          {
-            ...this.occurrencePins(input),
-            recordIndex: outcome.recordIndex,
-            sourceRecordId: semantic.sourceRecordId,
-            semanticObservationId: semantic.semanticObservationId,
-            collectedAt: new Date(outcome.observation.collectedAt),
-            nativeEvidenceReference: outcome.protectedNativeEvidenceRef,
-            disposition,
-          },
+          { retentionDays: 90, actorPseudonymKey: this.options.actorPseudonymKey },
+          deferredProjectionWrites.map(({ write }) => write),
         );
-        counts.unresolvedRelationships +=
-          await countProviderSourceUnresolvedRelationships(
+        counts.canonicalRevisions += writes.filter(({ created }) => created).length;
+        for (const [index, write] of writes.entries()) {
+          const { projection, becomesCurrent } = deferredProjectionWrites[index]!;
+          if (!write.created || !becomesCurrent) continue;
+          if (projection.evInputStatus !== "ready") continue;
+          const packId = projection.recordKind === "pack"
+            ? projection.providerRecordId
+            : projection.recordKind === "ev_input"
+              ? projection.affectedPackProviderRecordId
+              : null;
+          if (packId) {
+            const causes = evCauses.get(packId) ?? [];
+            causes.push(write.publicChangeSequence);
+            evCauses.set(packId, causes);
+          }
+        }
+      }
+      await this.#observations.recordDeliveryOccurrencesInTransaction(
+        transaction,
+        deferredDeliveryOccurrences,
+      );
+      if (deliveredProjectionPlans.length > 0) {
+        const unresolvedCounts =
+          await countProviderSourceUnresolvedRelationshipsByTuple(
             transaction,
-            {
-              organizationId: input.pins.organizationId,
-              provider: input.pins.provider,
-            },
-            outcome.mapping.projections,
+            canonicalScope,
+            deliveredProjectionPlans.flat(),
           );
+        // Sum per delivered record so tuples shared between records keep the
+        // same per-record multiplicity the sequential counts produced.
+        for (const projections of deliveredProjectionPlans) {
+          for (const projection of projections) {
+            for (const relationship of projection.relationships) {
+              counts.unresolvedRelationships += unresolvedCounts.get(
+                providerSourceUnresolvedRelationshipKey(
+                  projection,
+                  relationship,
+                ),
+              ) ?? 0;
+            }
+          }
+        }
       }
 
       for (const [packExternalId, causeSequences] of evCauses) {

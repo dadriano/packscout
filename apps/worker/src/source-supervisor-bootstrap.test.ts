@@ -147,6 +147,71 @@ test("source-only cleanup joins a stop requested during runtime startup", async 
   ]);
 });
 
+test("a signal-path stop rejection is sunk and still surfaces at shutdown", async () => {
+  const events: string[] = [];
+  const listeners = new Map<string, () => void>();
+  let releaseStart: (() => void) | undefined;
+  const startGate = new Promise<void>((resolve) => {
+    releaseStart = resolve;
+  });
+  let startEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => {
+    startEntered = resolve;
+  });
+  const stopFailure = new Error("supervisor stop refused");
+  let stopCalls = 0;
+  let innerStop: Promise<void> | undefined;
+
+  const running = runProviderSourceSupervisorOnly({
+    environment: sourceEnvironment(),
+    fallbackWorkerId: "source-supervisor:fallback",
+    dependencies: {
+      createDatabaseLifecycle() {
+        return {
+          client: {} as PackscoutPrismaClient,
+          async start() { events.push("database_started"); },
+          async close() { events.push("database_closed"); },
+        };
+      },
+      createRuntime() {
+        return {
+          async start() {
+            events.push("runtime_starting");
+            startEntered?.();
+            await startGate;
+          },
+          stop() {
+            stopCalls += 1;
+            // The runtime's own stop memo never resets, mirroring the real
+            // supervisor: every caller joins the same failed shutdown.
+            innerStop ??= Promise.reject(stopFailure);
+            return innerStop;
+          },
+        };
+      },
+      signals: {
+        once(signal, listener) { listeners.set(signal, listener); },
+        removeListener(signal) { listeners.delete(signal); },
+      },
+    },
+  });
+
+  await entered;
+  listeners.get("SIGTERM")?.();
+  // Let the voided signal-path wrapper settle (and clear the wrapper memo)
+  // before startup finishes, so the shutdown path must build a fresh wrapper.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  releaseStart?.();
+  await assert.rejects(running, (error: unknown) => error === stopFailure);
+
+  assert.equal(stopCalls, 2);
+  assert.deepEqual(events, [
+    "database_started",
+    "runtime_starting",
+    "database_closed",
+  ]);
+});
+
 test("source-only bootstrap fails configuration before database startup", async () => {
   let databaseCreations = 0;
   await assert.rejects(

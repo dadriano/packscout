@@ -10,8 +10,8 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { productUserDocumentValidator } from "./productUserRecords";
 import {
-  publicPackAvailabilityValidator,
-  repackSearchRowValidator,
+  storedPackAvailabilityValidator,
+  storedRepackSearchRowValidator,
 } from "./publicRepackValidation";
 
 const sha256Validator = v.string();
@@ -496,7 +496,9 @@ const publicRepackDetailValidator = v.object({
   ),
   categories: v.array(publicRepackCategoryValidator),
   collectibleTypes: v.array(collectibleTypeValidator),
-  availability: publicPackAvailabilityValidator,
+  // Stored details may predate the availability rename; reads translate the
+  // legacy vocabulary before it reaches any public result.
+  availability: storedPackAvailabilityValidator,
   price: priceValidator,
   evEstimates: v.object({
     vendorReported: vendorReportedEvEstimateValidator,
@@ -950,7 +952,7 @@ export default defineSchema({
     rowCount: v.number(),
     byteCount: v.number(),
     contentHash: sha256Validator,
-    rows: v.array(repackSearchRowValidator),
+    rows: v.array(storedRepackSearchRowValidator),
   }).index("by_release_id_and_shard_number", ["releaseId", "shardNumber"]),
 
   providerCatalogSearchShardProofs: defineTable({

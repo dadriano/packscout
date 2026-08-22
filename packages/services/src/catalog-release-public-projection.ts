@@ -55,26 +55,38 @@ const key = (platformKey: string, externalId: string) =>
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+// Canonical revisions persisted before the availability rename still hold
+// active/disabled; translate them at read time and keep rejecting values
+// outside both vocabularies.
+const normalizeLegacyAvailability = (value: unknown): unknown =>
+  value === "active" ? "available" : value === "disabled" ? "unavailable" : value;
+
 function packContent(value: unknown): PublicAvailabilityPackContent {
+  const availability = isObject(value)
+    ? normalizeLegacyAvailability(value.availability)
+    : undefined;
   if (!isObject(value) || value.schemaVersion !== "catalog-projection-v1" ||
       value.entityType !== "pack" || typeof value.name !== "string" ||
       !["available", "unavailable", "unknown", "sold_out"].includes(
-        String(value.availability),
+        String(availability),
       )) {
     throw new CatalogProjectionAssemblyError("CANONICAL_PROJECTION_INVALID");
   }
-  return value as unknown as PublicAvailabilityPackContent;
+  return { ...value, availability } as unknown as PublicAvailabilityPackContent;
 }
 
 function assetContent(value: unknown): PublicAvailabilityAssetContent {
+  const availability = isObject(value)
+    ? normalizeLegacyAvailability(value.availability)
+    : undefined;
   if (!isObject(value) || value.schemaVersion !== "catalog-projection-v1" ||
       value.entityType !== "catalog_asset" ||
       !["available", "unavailable", "unknown", "sold_out"].includes(
-        String(value.availability),
+        String(availability),
       )) {
     throw new CatalogProjectionAssemblyError("CANONICAL_PROJECTION_INVALID");
   }
-  return value as unknown as PublicAvailabilityAssetContent;
+  return { ...value, availability } as unknown as PublicAvailabilityAssetContent;
 }
 
 function evInputContent(value: unknown): CanonicalEvInputProjectionContent {

@@ -9,6 +9,7 @@ import { ToastProvider } from "../providers/toast.tsx";
 import {
   changeControl,
   cleanupPage,
+  deferred,
   findButton,
   jsonResponse,
   pageText,
@@ -297,6 +298,116 @@ test("paused action-required provider detail blocks false retries and names the 
   assert.equal(buttonLabels.includes("Run now"), false);
   assert.equal(buttonLabels.includes("Retry source"), false);
   assert.equal(buttonLabels.includes("Test source"), false);
+});
+
+test("provider detail drops disconnected older diagnostics on refresh and discards stale older responses after filter changes", async (context) => {
+  const detail = operationsDetail();
+  const base = diagnosticHistory();
+  const [pageCommitted, connectionRetry] = base.events;
+  assert.ok(pageCommitted && connectionRetry);
+  const olderPage: ProviderSourceDiagnosticHistory = {
+    ...base,
+    events: [{ ...connectionRetry, occurredAt: "2026-08-21T11:58:00.000Z", safeCode: "OLDER_RETRY" }],
+    nextCursor: "cursor-older",
+  };
+  const disconnectedPage: ProviderSourceDiagnosticHistory = {
+    ...base,
+    events: [
+      { ...pageCommitted, occurredAt: "2026-08-21T12:01:00.000Z", safeCode: "NEWEST_COMMIT" },
+      pageCommitted,
+    ],
+    nextCursor: "cursor-newest",
+  };
+  const criticalPage: ProviderSourceDiagnosticHistory = {
+    ...base,
+    events: [{ ...pageCommitted, severity: "critical", safeCode: "CRITICAL_ONLY" }],
+    nextCursor: "cursor-critical",
+    filter: { severity: "critical", phase: null, runId: null, contextEventsHidden: false },
+  };
+  const stalePage: ProviderSourceDiagnosticHistory = {
+    ...base,
+    events: [{ ...connectionRetry, occurredAt: "2026-08-21T11:57:00.000Z", safeCode: "STALE_OLDER" }],
+    nextCursor: null,
+  };
+  let newestPage = base;
+  let heldOlderResponse: Promise<Response> | null = null;
+  stubFetch(context, ({ input }) => {
+    const path = String(input);
+    if (path.includes("/diagnostics")) {
+      const url = new URL(path, "https://admin.packscout.test");
+      if (url.searchParams.has("cursor")) {
+        return heldOlderResponse ?? jsonResponse(olderPage);
+      }
+      return jsonResponse(url.searchParams.get("severity") === "critical" ? criticalPage : newestPage);
+    }
+    if (path === `/api/provider-source-operations/providers/${operationsFixtureIds.providers[0]}`) {
+      return jsonResponse(detail);
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  const routed = await renderPage(
+    <ToastProvider>
+      <SessionProvider initialSession={operationsSession()}>
+        <MemoryRouter initialEntries={[`/providers/${operationsFixtureIds.providers[0]}`]}>
+          <Routes><Route path="/providers/:providerId" element={<ProviderDetailPage />} /></Routes>
+        </MemoryRouter>
+      </SessionProvider>
+    </ToastProvider>,
+  );
+  cleanupPage(context, routed);
+  await settlePage();
+  const shownEvents = () => routed.container.querySelectorAll(".source-diagnostic-event").length;
+
+  assert.equal(shownEvents(), 2);
+  await act(async () => {
+    findButton(routed, "Load older events").click();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+  assert.equal(shownEvents(), 3);
+  assert.match(pageText(routed), /OLDER_RETRY/);
+
+  await act(async () => findButton(routed, "Pause display").click());
+  await act(async () => {
+    findButton(routed, "Resume display").click();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+  assert.equal(shownEvents(), 3);
+  assert.match(pageText(routed), /OLDER_RETRY/);
+
+  newestPage = disconnectedPage;
+  await act(async () => findButton(routed, "Pause display").click());
+  await act(async () => {
+    findButton(routed, "Resume display").click();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+  assert.equal(shownEvents(), 2);
+  assert.match(pageText(routed), /NEWEST_COMMIT/);
+  assert.doesNotMatch(pageText(routed), /OLDER_RETRY/);
+
+  const heldOlder = deferred<Response>();
+  heldOlderResponse = heldOlder.promise;
+  await act(async () => {
+    findButton(routed, "Load older events").click();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await act(async () => {
+    changeControl(routed, "diagnostic-severity", "critical");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+  assert.match(pageText(routed), /CRITICAL_ONLY/);
+  await act(async () => {
+    heldOlder.resolve(jsonResponse(stalePage));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+  assert.equal(shownEvents(), 1);
+  assert.doesNotMatch(pageText(routed), /STALE_OLDER/);
+  assert.doesNotMatch(pageText(routed), /older diagnostic events loaded/iu);
+  assert.equal(findButton(routed, "Load older events").disabled, false);
 });
 
 test("forbidden overview exposes no evidence and read-only provider detail hides administrator controls", async (context) => {

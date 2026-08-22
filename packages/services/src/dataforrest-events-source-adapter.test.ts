@@ -459,6 +459,8 @@ test("all four filters normalize initial, continuation, replay, empty, and poll-
 
 test("record-local defects remain ordered while wrapper and continuation defects are fatal", async () => {
   const valid = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0];
+  const validTrade =
+    dataforestEventsV1EvidenceFixture.courtyard.initial.records[3];
   const { entity: _entity, ...missingEntity } = valid;
   void _entity;
   const mixedPage = {
@@ -469,6 +471,7 @@ test("record-local defects remain ordered while wrapper and continuation defects
       { ...valid, platform: "phygitals" },
       { ...valid, occurred_at: "not-a-timestamp" },
       missingEntity,
+      { ...validTrade, currency: "usd" },
     ],
     next_cursor: "mixed-cursor-next",
     poll_after_seconds: 0,
@@ -496,11 +499,36 @@ test("record-local defects remain ordered while wrapper and continuation defects
         "platform_mismatch",
         "invalid_timestamp",
         "missing_required_fields",
+        "invalid_field_values",
       ],
     );
-    assert.equal(mixed.value.protectedNativeEvidence.length, 6);
+    const unnormalizableTrade = mixed.value.normalizedPage.outcomes[6];
+    assert.equal(unnormalizableTrade?.status, "invalid");
+    if (unnormalizableTrade?.status === "invalid") {
+      assert.deepEqual(unnormalizableTrade.fieldPaths, ["currency"]);
+    }
+    assert.equal(mixed.value.protectedNativeEvidence.length, 7);
   }
   mixedOperation.requestLease.close();
+
+  responses.unshift(mixedPage);
+  const sourceTest = await sourceOperation(testRuntime, "courtyard");
+  const sourceCapture = await successfulCapture(adapter, sourceTest);
+  const sourceInterpretation = await interpretSourceAdapterSourceTest(
+    adapter,
+    sourceTest,
+    sourceCapture,
+  );
+  assert.equal(sourceInterpretation.ok, false);
+  if (!sourceInterpretation.ok) {
+    assert.equal(sourceInterpretation.failure.code, "invalid_response");
+  }
+  assert.equal(sourceInterpretation.recordCount, 7);
+  assert.deepEqual(
+    sourceInterpretation.diagnostics.map(({ code }) => code),
+    ["source_records_invalid"],
+  );
+  sourceTest.requestLease.close();
 
   for (const [index] of fatalPages.entries()) {
     const operation = await pageOperation(testRuntime, "courtyard", null);

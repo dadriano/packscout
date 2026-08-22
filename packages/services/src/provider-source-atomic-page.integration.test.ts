@@ -1902,9 +1902,14 @@ test("representative mixed commit measures normalized, canonical, evidence, oper
       measurement.sample,
       committedArtifact.storageMeasurement.sample,
     );
-    assert.equal(
-      measurement.pageStatementCount,
-      committedArtifact.storageMeasurement.pageStatementCount,
+    // The committed artifact records the measured statement budget from before
+    // page-level batching; the live count must never regress above it. Rerun
+    // with PACKSCOUT_PRINT_PROVIDER_SOURCE_CAPACITY=1 to re-record the artifact.
+    assert.ok(
+      measurement.pageStatementCount <=
+        committedArtifact.storageMeasurement.pageStatementCount,
+      `page statement count ${measurement.pageStatementCount} exceeded the ` +
+        `committed budget ${committedArtifact.storageMeasurement.pageStatementCount}`,
     );
     assert.equal(
       committedArtifact.storageMeasurement.allocationPageBytes,

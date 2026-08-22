@@ -199,18 +199,37 @@ test("unavailable listings remain discoverable and unavailable values use bounde
   }
 });
 
-test("release assembly rejects legacy pack availability instead of translating it", async () => {
-  for (const availability of ["active", "disabled"] as const) {
+test("release assembly translates legacy pack availability and still blocks unknown values", async () => {
+  for (const [availability, translated] of [
+    ["active", "available"],
+    ["disabled", "unavailable"],
+  ] as const) {
     const legacy = changePack(fixtureSnapshot(), "alpha", { availability });
     const plan = await assembler(fixtureCheckpoint(), legacy).assemble({
       requestedWatermark: 20n,
       baseline: null,
       trigger: "settled_change",
     });
-    assert.equal(plan.classification, "blocked");
-    if (plan.classification === "blocked") {
-      assert.equal(plan.reason, "CANONICAL_PROJECTION_INVALID");
+    assert.equal(plan.classification, "publish");
+    if (plan.classification === "publish") {
+      const projected = plan.manifest.repacks.find(({ publicRepackId }) =>
+        publicRepackId === fixtureIds.alphaRepack,
+      );
+      assert.equal(projected?.availability, translated);
     }
+  }
+
+  const invalid = changePack(fixtureSnapshot(), "alpha", {
+    availability: "retired",
+  });
+  const plan = await assembler(fixtureCheckpoint(), invalid).assemble({
+    requestedWatermark: 20n,
+    baseline: null,
+    trigger: "settled_change",
+  });
+  assert.equal(plan.classification, "blocked");
+  if (plan.classification === "blocked") {
+    assert.equal(plan.reason, "CANONICAL_PROJECTION_INVALID");
   }
 });
 

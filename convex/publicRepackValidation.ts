@@ -13,7 +13,7 @@ import {
   type PublicRepackSort,
   type RepackSearchRow,
 } from "@packscout/contracts";
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import { canonicalJson } from "./dataReleaseCanonicalHash";
 
 export const MAX_PUBLIC_REPACKS = MAX_PUBLIC_REPACKS_PER_RELEASE;
@@ -93,6 +93,34 @@ export const repackSearchRowValidator = v.object({
     v.null(),
   ),
 });
+
+/**
+ * Stored catalog documents written before the availability rename still hold
+ * the retired active/disabled vocabulary. Only stored-table validators accept
+ * it; every read translates legacy values with
+ * {@link normalizeLegacyPackAvailability} so public results and function
+ * validators stay on the strict four-state union.
+ */
+export const storedPackAvailabilityValidator = v.union(
+  publicPackAvailabilityValidator,
+  v.literal("active"),
+  v.literal("disabled"),
+);
+
+export const storedRepackSearchRowValidator = v.object({
+  ...repackSearchRowValidator.fields,
+  availability: storedPackAvailabilityValidator,
+});
+
+export function normalizeLegacyPackAvailability(
+  availability: Infer<typeof storedPackAvailabilityValidator>,
+): Infer<typeof publicPackAvailabilityValidator> {
+  return availability === "active"
+    ? "available"
+    : availability === "disabled"
+      ? "unavailable"
+      : availability;
+}
 
 type ValidationResult<T> =
   { readonly ok: true; readonly value: T } | { readonly ok: false };

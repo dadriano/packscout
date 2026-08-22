@@ -61,7 +61,10 @@ export async function runProviderSourceSupervisorOnly(input: Readonly<{
     return stopPromise;
   };
   const requestStop = (): void => {
-    void stop();
+    // The wrapper memo resets when it settles, so a later `await stop()` may
+    // never observe this copy's rejection. Sink it here; the runtime's own
+    // stop failure still surfaces through the awaited stop() during shutdown.
+    void stop().catch(() => {});
   };
 
   try {

@@ -407,6 +407,129 @@ test("the atomic page boundary records all four exclusive dispositions", async (
   );
 });
 
+test("a verified page fence lets later upserts skip the source lookup only on request", async () => {
+  const repository = new ProviderSourceObservationRepository();
+  let sourceLookups = 0;
+  let semanticInsertCount = 0;
+  const transaction = {
+    provider_source_instances: {
+      findFirst: async () => {
+        sourceLookups += 1;
+        return { active_revision_id: sourceRevisionId };
+      },
+    },
+    source_record_identities: {
+      upsert: async () => ({
+        id: sourceRecordId,
+        record_kind: "catalog",
+        record_discriminator: "catalog_pack",
+      }),
+    },
+    source_semantic_observations: {
+      createMany: async () => ({ count: semanticInsertCount++ === 0 ? 1 : 0 }),
+      findUniqueOrThrow: async () => ({ id: semanticObservationId }),
+    },
+  } as unknown as PackscoutTransactionClient;
+
+  await repository.upsertSemanticObservationInTransaction(
+    transaction,
+    observationInput,
+  );
+  assert.equal(sourceLookups, 1);
+  await repository.upsertSemanticObservationInTransaction(
+    transaction,
+    observationInput,
+    { skipSourceRevisionFenceCheck: true },
+  );
+  assert.equal(sourceLookups, 1);
+  await repository.upsertSemanticObservationInTransaction(
+    transaction,
+    observationInput,
+    { skipSourceRevisionFenceCheck: false },
+  );
+  assert.equal(sourceLookups, 2);
+});
+
+test("the batched delivery boundary writes every disposition in one insert", async () => {
+  const repository = new ProviderSourceObservationRepository();
+  const batches: Array<Array<Record<string, unknown>>> = [];
+  const transaction = {
+    source_delivery_occurrences: {
+      createMany: async (query: { data: Array<Record<string, unknown>> }) => {
+        batches.push(query.data);
+        return { count: query.data.length };
+      },
+    },
+  } as unknown as PackscoutTransactionClient;
+
+  await repository.recordDeliveryOccurrencesInTransaction(transaction, []);
+  assert.equal(batches.length, 0);
+
+  await repository.recordDeliveryOccurrencesInTransaction(transaction, [
+    {
+      ...occurrenceBase,
+      recordIndex: 0,
+      disposition: "inserted",
+      sourceRecordId,
+      semanticObservationId,
+    },
+    {
+      ...occurrenceBase,
+      recordIndex: 1,
+      disposition: "duplicate",
+      sourceRecordId,
+      semanticObservationId,
+    },
+  ]);
+  assert.equal(batches.length, 1);
+  assert.deepEqual(
+    batches[0]?.map((row) => ({
+      recordIndex: row.record_index,
+      disposition: row.disposition,
+      reasonCode: row.reason_code,
+      sourceRecordId: row.source_record_id,
+      semanticObservationId: row.semantic_observation_id,
+    })),
+    [
+      {
+        recordIndex: 0,
+        disposition: "inserted",
+        reasonCode: null,
+        sourceRecordId,
+        semanticObservationId,
+      },
+      {
+        recordIndex: 1,
+        disposition: "duplicate",
+        reasonCode: null,
+        sourceRecordId,
+        semanticObservationId,
+      },
+    ],
+  );
+
+  await assert.rejects(
+    repository.recordDeliveryOccurrencesInTransaction(transaction, [
+      {
+        ...occurrenceBase,
+        recordIndex: 0,
+        disposition: "inserted",
+        sourceRecordId,
+        semanticObservationId,
+      },
+      {
+        ...occurrenceBase,
+        recordIndex: -1,
+        disposition: "inserted",
+        sourceRecordId,
+        semanticObservationId,
+      },
+    ]),
+    /nonnegative safe integer/,
+  );
+  assert.equal(batches.length, 1);
+});
+
 test("delivery validation rejects lineage and reason combinations the database forbids", async () => {
   const repository = new ProviderSourceObservationRepository();
   const transaction = {

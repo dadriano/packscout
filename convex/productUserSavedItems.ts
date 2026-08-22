@@ -11,7 +11,10 @@ import {
   compareSavedItemCandidateOrder,
   MAX_SAVED_ITEMS_PER_KIND,
 } from "./savedItems";
-import { publicPackAvailabilityValidator } from "./publicRepackValidation";
+import {
+  normalizeLegacyPackAvailability,
+  publicPackAvailabilityValidator,
+} from "./publicRepackValidation";
 
 /**
  * Privileged per-subject saved-item reads for the admin integration.
@@ -194,7 +197,9 @@ function displayRepack(detail: Doc<"providerCatalogRepacks">["detail"]) {
   return {
     name: detail.name,
     vendorDisplayName: detail.vendorDisplayName,
-    availability: detail.availability,
+    // Stored details may predate the availability rename; the returns
+    // validator stays on the strict four-state union.
+    availability: normalizeLegacyPackAvailability(detail.availability),
     estimatedEv:
       packScout.status === "available"
         ? {

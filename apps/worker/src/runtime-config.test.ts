@@ -66,7 +66,6 @@ test("worker configuration validates production defaults and bounded overrides",
   assert.equal(configuration.retentionOrganizationDiscoveryLimit, 40);
   assert.equal(configuration.databasePoolMaximum, 9);
   assert.equal(configuration.credentialKeyVersion, 4);
-  assert.equal(configuration.sourceConnectionConfigurationKeyVersion, 7);
   assert.deepEqual(configuration.estimatedEvVerifiedUsdStablecoins, [
     "USDC",
     "USDT",
@@ -76,8 +75,13 @@ test("worker configuration validates production defaults and bounded overrides",
     [...configuration.actorPseudonymKey],
     [...Buffer.alloc(32, 7)],
   );
+  assert.ok(configuration.sourceSupervisor);
+  assert.equal(
+    configuration.sourceSupervisor.sourceConnectionConfigurationKeyVersion,
+    7,
+  );
   assert.deepEqual(
-    [...configuration.sourceConnectionConfigurationKey],
+    [...configuration.sourceSupervisor.sourceConnectionConfigurationKey],
     [...Buffer.alloc(32, 11)],
   );
 });
@@ -159,6 +163,65 @@ test("source connection encryption settings are required without provider fallba
           "source-supervisor:1",
         ),
       hasConfigurationCode("SOURCE_CONNECTION_KEY_VERSION_INVALID"),
+    );
+  }
+});
+
+test("worker configuration runs without the source supervisor lane when none of its settings are set", () => {
+  for (const overrides of [
+    {
+      PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64: undefined,
+      PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION: undefined,
+      PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH: undefined,
+    },
+    {
+      PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64: "",
+      PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION: " ",
+      PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH: "",
+    },
+  ]) {
+    const configuration = readProviderWorkerConfiguration(
+      validEnvironment(overrides),
+      "worker:1",
+    );
+
+    assert.equal(configuration.sourceSupervisor, undefined);
+    assert.equal(configuration.environment, "production");
+    assert.equal(configuration.workerId, "worker:1");
+    assert.deepEqual(
+      [...configuration.actorPseudonymKey],
+      [...Buffer.alloc(32, 7)],
+    );
+  }
+});
+
+test("worker configuration still fails startup on a partial source supervisor group", () => {
+  const partials: [NodeJS.ProcessEnv, ProviderWorkerConfigurationErrorCode][] = [
+    [
+      {
+        PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64: undefined,
+        PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION: undefined,
+      },
+      "SOURCE_CONNECTION_KEY_INVALID",
+    ],
+    [
+      {
+        PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION: undefined,
+        PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH: "",
+      },
+      "SOURCE_CONNECTION_KEY_VERSION_INVALID",
+    ],
+    [
+      { PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH: undefined },
+      "SOURCE_DATABASE_VOLUME_PATH_INVALID",
+    ],
+  ];
+
+  for (const [overrides, code] of partials) {
+    assert.throws(
+      () =>
+        readProviderWorkerConfiguration(validEnvironment(overrides), "worker:1"),
+      hasConfigurationCode(code),
     );
   }
 });

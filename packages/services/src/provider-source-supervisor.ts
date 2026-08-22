@@ -1091,8 +1091,16 @@ export class ProviderSourceSupervisor<
         }
       }).catch(async () => {
         if (this.#stopping) return;
-        this.#dependencies.executor.abortAll("ownership_lost");
-        await this.#beginFence("SUPERVISOR_RENEWAL_LOST");
+        try {
+          // #beginFence stops admission before it aborts in-flight leases, so
+          // the ownership-lost abort cannot throw ahead of the durable fence.
+          await this.#beginFence("SUPERVISOR_RENEWAL_LOST");
+        } catch {
+          // Nothing may escape this detached lane: a rejection here would be
+          // unhandled once #renewalInFlight clears. The runtime fence is
+          // already up, so the failure stays observable as fenced_draining
+          // while every later control-plane call fails closed.
+        }
       });
       const trackedRenewal = renewal.finally(() => {
         if (this.#renewalInFlight === trackedRenewal) {

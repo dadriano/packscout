@@ -305,15 +305,24 @@ export class ProviderSourceRetentionRepository {
       `);
     }
     if (phase === "quarantines") {
+      // Legacy quarantines without a delivery occurrence share this guarded
+      // sweep, so pre-occurrence rows drain instead of sitting open forever.
+      // Rows with a running retry are deferred; only open rows flip to
+      // expired, while retained payloads are scrubbed regardless of state.
       return transaction.$executeRaw(Prisma.sql`
         with selected as (
           select quarantine.id
           from public.quarantine_records as quarantine
-          join public.import_pages as page on page.id = quarantine.page_id
           where quarantine.organization_id = cast(${execution.organization_id} as uuid)
-            and page.source_instance_id is not null
             and quarantine.payload_json is not null
             and quarantine.expires_at <= ${execution.started_at}
+            and not exists (
+              select 1
+              from public.quarantine_attempts as attempts
+              where attempts.organization_id = quarantine.organization_id
+                and attempts.quarantine_id = quarantine.id
+                and attempts.state = 'running'::public.quarantine_attempt_state
+            )
           order by quarantine.expires_at, quarantine.id
           limit ${execution.batch_size}
           for update of quarantine skip locked
@@ -321,7 +330,11 @@ export class ProviderSourceRetentionRepository {
         update public.quarantine_records as quarantine
         set payload_json = null,
             payload_expired_at = ${completedAt},
-            state = 'expired'
+            state = case
+              when quarantine.state = 'open'::public.quarantine_state
+                then 'expired'::public.quarantine_state
+              else quarantine.state
+            end
         from selected
         where quarantine.id = selected.id
       `);

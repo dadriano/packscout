@@ -82,6 +82,29 @@ function milliseconds(value: number): string {
     : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+type DiagnosticEvent = ProviderSourceDiagnosticHistory["events"][number];
+
+function sameDiagnosticEvent(a: DiagnosticEvent, b: DiagnosticEvent): boolean {
+  return a.occurredAt === b.occurredAt &&
+    a.scope === b.scope &&
+    a.eventKind === b.eventKind &&
+    a.safeCode === b.safeCode;
+}
+
+function mergeRefreshedDiagnostics(
+  current: readonly ProviderSourceDiagnosticHistory[],
+  refreshed: ProviderSourceDiagnosticHistory,
+): ProviderSourceDiagnosticHistory[] {
+  // Older pages are keyset-anchored strictly below the previous newest page's
+  // last event. Keep them only while the refreshed newest page still contains
+  // that anchor; otherwise new events slid the window and the stitched feed
+  // would silently skip events, so drop the stale older pages instead.
+  const anchor = current[0]?.events.at(-1);
+  const connected = anchor !== undefined &&
+    refreshed.events.some((event) => sameDiagnosticEvent(event, anchor));
+  return connected ? [refreshed, ...current.slice(1)] : [refreshed];
+}
+
 export function ProviderDetailPage() {
   const { providerId = "" } = useParams();
   const { status } = useSession();
@@ -106,6 +129,7 @@ export function ProviderDetailPage() {
   const [intervalDraft, setIntervalDraft] = useState("");
   const priorOperationalState = useRef<string | null>(null);
   const intervalOwner = useRef<string | null>(null);
+  const diagnosticGeneration = useRef(0);
   useDocumentTitle(detail?.source.displayName ?? "Provider Processor");
 
   const refresh = useCallback(() => {
@@ -146,9 +170,7 @@ export function ProviderDetailPage() {
     })
       .then((result) => {
         if (!active) return;
-        setDiagnosticPages((current) => current.length === 0
-          ? [result]
-          : [result, ...current.slice(1)]);
+        setDiagnosticPages((current) => mergeRefreshedDiagnostics(current, result));
         setDiagnosticFailure(null);
       })
       .catch((error: unknown) => {
@@ -177,7 +199,13 @@ export function ProviderDetailPage() {
     };
   }, [displayPaused, refresh]);
 
+  useEffect(() => () => {
+    // Invalidate any in-flight load-older request once this page unmounts.
+    diagnosticGeneration.current += 1;
+  }, []);
+
   function changeFilter(next: ProviderSourceDiagnosticFilter): void {
+    diagnosticGeneration.current += 1;
     setDiagnosticPages([]);
     setDiagnosticFailure(null);
     setDiagnosticLoading(true);
@@ -188,6 +216,7 @@ export function ProviderDetailPage() {
   async function loadOlder(): Promise<void> {
     const cursor = diagnosticPages.at(-1)?.nextCursor;
     if (!cursor) return;
+    const generation = diagnosticGeneration.current;
     setLoadingOlder(true);
     setDiagnosticFailure(null);
     try {
@@ -196,11 +225,17 @@ export function ProviderDetailPage() {
         cursor,
         limit: 25,
       });
-      setDiagnosticPages((current) => [...current, page]);
+      // Discard responses that resolved after the filter changed or the page
+      // unmounted; append only while the requested cursor still ends the feed.
+      if (generation !== diagnosticGeneration.current) return;
+      setDiagnosticPages((current) => current.at(-1)?.nextCursor === cursor
+        ? [...current, page]
+        : current);
       setAnnouncement(page.history.state === "expired"
         ? page.history.message
         : `${page.events.length} older diagnostic events loaded.`);
     } catch (error) {
+      if (generation !== diagnosticGeneration.current) return;
       setDiagnosticFailure(readError(error, "diagnostics"));
     } finally {
       setLoadingOlder(false);

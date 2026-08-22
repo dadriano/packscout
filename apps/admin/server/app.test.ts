@@ -54,6 +54,26 @@ test("malformed JSON is rejected without leaking implementation details", async 
   });
 });
 
+test("provider-source routes answer a stable unconfigured state without the source keys", async () => {
+  await withServer(
+    createAdminApp({ sourceAdministrationUnconfigured: true }),
+    async (baseUrl) => {
+      for (const path of [
+        "/api/provider-sources/catalog",
+        "/api/provider-source-operations/runs",
+      ]) {
+        const response = await fetch(`${baseUrl}${path}`);
+
+        assert.equal(response.status, 503);
+        assert.deepEqual(await response.json(), {
+          error: "Source administration is not configured on this deployment.",
+          code: "SOURCE_ADMIN_UNCONFIGURED",
+        });
+      }
+    },
+  );
+});
+
 test("admin app trusts forwarded addresses only from configured proxy ranges", () => {
   assert.equal(createAdminApp().get("trust proxy"), false);
   assert.deepEqual(

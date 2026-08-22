@@ -4,6 +4,7 @@ import {
   DEFAULT_CATALOG_QUERY,
   catalogHrefForSummary,
   catalogSheetInspectorInitiallyOpen,
+  clearCatalogRepackSelection,
   nextCatalogPage,
   parseCatalogViewLayout,
   parseCatalogQueryState,
@@ -74,7 +75,7 @@ test("non-available repacks stay hidden unless the URL opts into every availabil
   );
 });
 
-test("selected repack survives canonical URL parsing and later filter revisions", () => {
+test("selected repack survives canonical URL parsing until filters are revised", () => {
   const selected = selectCatalogRepack(DEFAULT_CATALOG_QUERY, REPACK_ID);
   expectSelectionLifecycle(selected);
 
@@ -96,12 +97,22 @@ test("selected repack survives canonical URL parsing and later filter revisions"
     const revised = resetCatalogPagination(query, {
       filters: { ...query.filters, availability: "all" },
     });
-    assert.equal(revised.selectedPublicRepackId, REPACK_ID);
+    assert.equal(revised.selectedPublicRepackId, null);
     assert.equal(
       serializeCatalogQueryState(revised),
-      `/packs?selected=${REPACK_ID}&availability=all`,
+      "/packs?availability=all",
     );
   }
+});
+
+test("closing the sheet clears only the selected repack from the query", () => {
+  const selected = selectCatalogRepack(
+    nextCatalogPage(DEFAULT_CATALOG_QUERY, "page-two", "d".repeat(64)),
+    REPACK_ID,
+  );
+  const cleared = clearCatalogRepackSelection(selected);
+  assert.deepEqual(cleared, { ...selected, selectedPublicRepackId: null });
+  assert.equal(serializeCatalogQueryState(cleared).includes("selected"), false);
 });
 
 test("catalog page size and view are constrained, canonical URL state", () => {
@@ -144,16 +155,14 @@ test("search, filters, and sorting reset cursor navigation together", () => {
     cursor: "page-two",
     cursorStack: "WyJwYWdlLW9uZSJd",
     queryFingerprint: "a".repeat(64),
+    selectedPublicRepackId: REPACK_ID,
   };
   const reset = resetCatalogPagination(paged, { search: "pokemon" });
   assert.equal(reset.search, "pokemon");
   assert.equal(reset.cursor, null);
   assert.equal(reset.cursorStack, null);
   assert.equal(reset.queryFingerprint, null);
-  assert.equal(
-    reset.selectedPublicRepackId,
-    DEFAULT_CATALOG_QUERY.selectedPublicRepackId,
-  );
+  assert.equal(reset.selectedPublicRepackId, null);
 });
 
 test("changing page size resets cursor navigation before a new page is read", () => {

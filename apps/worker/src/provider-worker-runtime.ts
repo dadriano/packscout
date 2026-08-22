@@ -311,6 +311,7 @@ export class ProviderWorkerRuntime {
           });
           this.stop();
         });
+    let sourceSupervisorStopFailure: unknown;
     // Registration is durable but best-effort: an instance that cannot publish
     // its presence still performs pipeline work.
     try {
@@ -354,7 +355,19 @@ export class ProviderWorkerRuntime {
       this.dependencies.promotion?.stop();
       this.dependencies.heatPromotion?.stop();
       this.dependencies.catalogRetention?.stop();
-      await this.dependencies.sourceSupervisor?.stop();
+      try {
+        await this.dependencies.sourceSupervisor?.stop();
+      } catch (error) {
+        // A failed supervisor stop must not replace start()'s outcome or skip
+        // the cleanup below; it is logged here and rethrown after the stopped
+        // log alongside the other captured lane failures.
+        sourceSupervisorStopFailure = error;
+        this.log({
+          level: "error",
+          event: "provider_source_supervisor_runtime_failed",
+          failureCode: "PROVIDER_SOURCE_SUPERVISOR_STOP_ERROR",
+        });
+      }
       if (promotionFailed) {
         // A retained Heat adapter is expected to stop cooperatively, but it
         // cannot mask a fail-closed Task011 startup refusal. Keep a late
@@ -387,6 +400,9 @@ export class ProviderWorkerRuntime {
     }
     if (promotionFailed) throw promotionFailure;
     if (sourceSupervisorFailure !== undefined) throw sourceSupervisorFailure;
+    if (sourceSupervisorStopFailure !== undefined) {
+      throw sourceSupervisorStopFailure;
+    }
   }
 
   /**
@@ -411,7 +427,11 @@ export class ProviderWorkerRuntime {
     this.dependencies.promotion?.stop();
     this.dependencies.heatPromotion?.stop();
     this.dependencies.catalogRetention?.stop();
-    void this.dependencies.sourceSupervisor?.stop();
+    // start()'s finally awaits sourceSupervisor.stop() again and surfaces its
+    // failure after cleanup; this detached copy only needs a rejection sink
+    // so it can never become an unhandled rejection.
+    void Promise.resolve(this.dependencies.sourceSupervisor?.stop())
+      .catch(() => {});
     this.#sleepController?.abort();
   }
 

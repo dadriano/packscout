@@ -94,7 +94,7 @@ export function classifyProviderSourceControlPlaneFailure(
     code === "P1001" || code === "P1002" || code === "P1008" ||
     code === "P1017" || code === "57P01" || code === "08006"
   ) return "connection";
-  if (code === "P2024" || code === "57014") return "timeout";
+  if (code === "P2024" || code === "P2028" || code === "57014") return "timeout";
   return "invariant";
 }
 

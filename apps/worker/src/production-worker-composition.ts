@@ -174,10 +174,14 @@ export function createProductionWorkerRuntime(
     logger: input.retentionLogger,
     fetch: input.fetch,
   });
-  const sourceSupervisor = createProviderSourceSupervisorRuntime({
-    configuration: input.provider,
-    database: input.database,
-  });
+  // The source-supervisor lane only exists when its settings do; the
+  // combined worker's other lanes never depend on it.
+  const sourceSupervisor = input.provider.sourceSupervisor === undefined
+    ? undefined
+    : createProviderSourceSupervisorRuntime({
+      configuration: input.provider.sourceSupervisor,
+      database: input.database,
+    });
   return createProviderWorkerRuntime({
     configuration: input.provider,
     database: input.database,

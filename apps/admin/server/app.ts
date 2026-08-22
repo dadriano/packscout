@@ -84,12 +84,29 @@ export interface AdminAppDependencies {
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
+  /**
+   * Deployments without the source-connection keys run with source
+   * administration deliberately unconfigured. The provider-source routes are
+   * then mounted with a stable "unconfigured" answer so clients parse an
+   * explicit capability state instead of a generic 404.
+   */
+  sourceAdministrationUnconfigured?: boolean;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
   response.status(404).json({
     error: "Admin API route not found.",
     code: "API_ROUTE_NOT_FOUND",
+  });
+};
+
+const sourceAdministrationUnconfigured: RequestHandler = (
+  _request,
+  response,
+) => {
+  response.status(503).json({
+    error: "Source administration is not configured on this deployment.",
+    code: "SOURCE_ADMIN_UNCONFIGURED",
   });
 };
 
@@ -248,6 +265,13 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         }),
       );
     }
+  }
+  if (dependencies.sourceAdministrationUnconfigured) {
+    app.use("/api/provider-sources", sourceAdministrationUnconfigured);
+    app.use(
+      "/api/provider-source-operations",
+      sourceAdministrationUnconfigured,
+    );
   }
   app.use("/api", apiNotFound);
   app.use(handleApiError);

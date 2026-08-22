@@ -102,6 +102,38 @@ export function readBase64Key(
   return decoded;
 }
 
+export interface SourceAdministrationSettings {
+  /** Key encrypting stored source-connection configuration. */
+  readonly connectionConfigurationKey: Uint8Array;
+  /** Active encryption revision for that key. */
+  readonly connectionConfigurationKeyVersion: number;
+}
+
+/**
+ * Reads the source-administration key pair.
+ *
+ * Both values absent is a supported deployment shape: source administration
+ * stays unconfigured and its routes answer with a stable error instead of
+ * stopping the admin. Setting only one of the pair is a misconfiguration
+ * rather than a decision, so it still fails startup, as does an invalid value.
+ */
+export function readSourceAdministrationSettings(input: {
+  key: string | undefined;
+  keyVersion: string | undefined;
+}): SourceAdministrationSettings | null {
+  if (!input.key?.trim() && !input.keyVersion?.trim()) return null;
+  return {
+    connectionConfigurationKey: readBase64Key(
+      input.key,
+      "PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64",
+    ),
+    connectionConfigurationKeyVersion: readPositiveInteger(
+      input.keyVersion,
+      "PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION",
+    ),
+  };
+}
+
 /** Shortest accepted product-backend integration secret. */
 const MINIMUM_DIRECTORY_TOKEN_LENGTH = 32;
 
