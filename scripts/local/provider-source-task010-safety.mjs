@@ -372,7 +372,7 @@ export function assertTask010BootstrapSnapshot(snapshot, expected) {
       provider?.organizationId !== expected.organizationId ||
       provider.platformKey !== definition.platformKey ||
       provider.displayName !== definition.displayName ||
-      provider.state !== "draft" ||
+      provider.state !== "active" ||
       provider.activeRevisionId !== null ||
       provider.nextRunAt !== null
     ) {
@@ -472,6 +472,19 @@ export function assertTask010BackfillTopologySnapshot(snapshot) {
     snapshot.activeProfileCount !== 1 ||
     snapshot.sourceCount !== 4 ||
     snapshot.readySourceCount !== 4 ||
+    snapshot.providerRoots.length !== TASK010_PROVIDER_IDENTITIES.length ||
+    TASK010_PROVIDER_IDENTITIES.some((definition) => {
+      const provider = snapshot.providerRoots.find(
+        ({ id }) => id === definition.id,
+      );
+      return (
+        provider?.platformKey !== definition.platformKey ||
+        provider.displayName !== definition.displayName ||
+        provider.state !== "active" ||
+        provider.activeRevisionId !== null ||
+        provider.nextRunAt !== null
+      );
+    }) ||
     snapshot.sources.some(
       (source) =>
         !["paused", "active"].includes(source.state) ||

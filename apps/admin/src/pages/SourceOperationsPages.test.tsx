@@ -73,6 +73,9 @@ test("operations overview renders four server rows and returns exact Run, Pause,
   assert.match(pageText(renderer), /Waiting for capacity/);
   assert.match(pageText(renderer), /Action required/);
   assert.match(pageText(renderer), /Total unknown/);
+  assert.equal(findButton(renderer, "Resolve before run").disabled, true);
+  assert.match(pageText(renderer), /Disable this source.*Test source.*Activate paused.*Resume/iu);
+  assert.doesNotMatch(pageText(renderer), /Retry source/iu);
 
   await act(async () => {
     findButton(renderer, "Run now").click();
@@ -155,9 +158,6 @@ test("provider detail preserves safe state through refresh and action failures w
       }
       return jsonResponse({ scheduleRevisionId: operationsFixtureIds.schedules[0], audit: { outcome: "succeeded" } });
     }
-    if (path.endsWith("/test")) {
-      return jsonResponse({ jobId: operationsFixtureIds.revisions[0], state: "pending", audit: { outcome: "succeeded" } });
-    }
     throw new Error(`Unexpected request: ${path}`);
   });
   const routed = await renderPage(
@@ -178,13 +178,11 @@ test("provider detail preserves safe state through refresh and action failures w
   assert.match(pageText(routed), /Page committed/);
   assert.match(pageText(routed), /Shared connection/);
 
-  await act(async () => {
-    findButton(routed, "Test source").click();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  });
-  await settlePage();
-  assert.match(pageText(routed), /source test pending/iu);
-  assert.ok(requests.some(({ input }) => String(input).endsWith("/test")));
+  assert.equal(
+    [...routed.container.querySelectorAll("button")]
+      .some((button) => button.textContent?.trim() === "Test source"),
+    false,
+  );
 
   await act(async () => findButton(routed, "Pause display").click());
   diagnosticsFail = true;
@@ -257,6 +255,48 @@ test("provider detail preserves safe state through refresh and action failures w
   assert.match(pageText(routed), /changed in another session/iu);
   assert.equal(routed.container.querySelector<HTMLInputElement>("#provider-source-interval")?.value, "777");
   assert.match(pageText(routed), /Source contract/);
+});
+
+test("paused action-required provider detail blocks false retries and names the tested lifecycle recovery", async (context) => {
+  const baseDetail = operationsDetail(3);
+  const detail = {
+    ...baseDetail,
+    source: {
+      ...baseDetail.source,
+      source: {
+        ...baseDetail.source.source!,
+        lifecycle: "paused" as const,
+      },
+    },
+  };
+  stubFetch(context, ({ input }) => {
+    const path = String(input);
+    if (path.includes("/diagnostics")) return jsonResponse(diagnosticHistory(3));
+    if (path === `/api/provider-source-operations/providers/${operationsFixtureIds.providers[3]}`) {
+      return jsonResponse(detail);
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  const routed = await renderPage(
+    <ToastProvider>
+      <SessionProvider initialSession={operationsSession()}>
+        <MemoryRouter initialEntries={[`/providers/${operationsFixtureIds.providers[3]}`]}>
+          <Routes><Route path="/providers/:providerId" element={<ProviderDetailPage />} /></Routes>
+        </MemoryRouter>
+      </SessionProvider>
+    </ToastProvider>,
+  );
+  cleanupPage(context, routed);
+  await settlePage();
+
+  assert.equal(findButton(routed, "Resolve before run").disabled, true);
+  assert.equal(findButton(routed, "Resume").disabled, true);
+  assert.match(pageText(routed), /Disable → Test source → Activate paused → Resume/u);
+  const buttonLabels = [...routed.container.querySelectorAll("button")]
+    .map((button) => button.textContent?.trim());
+  assert.equal(buttonLabels.includes("Run now"), false);
+  assert.equal(buttonLabels.includes("Retry source"), false);
+  assert.equal(buttonLabels.includes("Test source"), false);
 });
 
 test("forbidden overview exposes no evidence and read-only provider detail hides administrator controls", async (context) => {

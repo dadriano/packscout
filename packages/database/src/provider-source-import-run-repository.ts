@@ -278,6 +278,17 @@ export class ProviderSourceImportRunRepository {
           },
         });
       if (!checkpoint) return { kind: "source_unavailable" };
+      const runtime = await transaction.provider_source_runtime_states.findFirst({
+        where: {
+          source_instance_id: source.id,
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+        },
+        select: { activity: true },
+      });
+      if (runtime?.activity === "action_required") {
+        return { kind: "source_unavailable" };
+      }
       const openEpisode = await transaction.source_connection_health_episodes.findFirst({
         where: {
           organization_id: input.organizationId,

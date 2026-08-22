@@ -25,6 +25,19 @@ Database setup uses an empty PostgreSQL 16+ target and the checked-in Prisma
 migrations. Follow the [database provisioning workflow](docs/database-provisioning.md)
 before starting a database-backed runtime.
 
+## Ingestion pipeline operations
+
+Operators should start with the
+[ingestion pipeline operator guide](docs/ingestion-pipelines/README.md). It
+covers the single-supervisor process model, source and connection setup, daily
+Run/Pause/Resume workflows, diagnostics, capacity guards, credential recovery,
+quarantine, checkpoint safety, and graceful restart behavior.
+
+A first full-history DataForrest import has additional fail-closed target,
+storage, bootstrap, and reconciliation gates. Follow the
+[guarded Task010 runbook](docs/dataforest-source-integration-task010-local-runbook.md)
+instead of starting it with the general development commands.
+
 ## Development
 
 ```bash

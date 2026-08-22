@@ -366,6 +366,29 @@ test("source activation stays disabled after a newer pending or failed connectio
   }
 });
 
+test("source testing is offered only for draft and disabled lifecycle states", async (context) => {
+  for (const state of ["draft", "disabled", "paused", "active", "replaced"] as const) {
+    const stateCatalog: ProviderSourceAdminCatalog = {
+      ...catalog,
+      sources: catalog.sources.map((source) => ({ ...source, state })),
+    };
+    const renderer = await renderPage(
+      <ProviderSourceLedger
+        catalog={stateCatalog}
+        canManage
+        pendingKey={null}
+        onCreate={async () => true}
+        onCommand={() => undefined}
+        onInterval={async () => true}
+      />,
+    );
+    cleanupPage(context, renderer);
+    const hasTest = [...renderer.container.querySelectorAll("button")]
+      .some((button) => button.textContent?.trim() === "Test");
+    assert.equal(hasTest, state === "draft" || state === "disabled", state);
+  }
+});
+
 test("replacement waits for selected-provider confirmation and explains the checkpoint boundary", async (context) => {
   let replacementBody: unknown = null;
   const requests = stubFetch(context, ({ input, init }) => {

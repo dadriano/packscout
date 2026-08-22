@@ -436,6 +436,19 @@ export class ProviderSourceAdminLifecycleRepository
       const source = await this.#lockSource(transaction, input);
       const occurredAt = input.resumedAt ?? input.disabledAt;
       if (!source || !occurredAt) this.#fenced("Source lifecycle changed.");
+      if (command === "resume") {
+        const runtime = await transaction.provider_source_runtime_states.findFirst({
+          where: {
+            source_instance_id: source.id,
+            organization_id: source.organizationId,
+            provider_id: source.providerId,
+          },
+          select: { activity: true },
+        });
+        if (runtime?.activity === "action_required") {
+          this.#fenced("Action-required source must be disabled and tested before resume.");
+        }
+      }
       if (
         command === "resume" &&
         source.state === "active" &&

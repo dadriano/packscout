@@ -270,6 +270,10 @@
   margin-left: auto;
 }
 
+.source-recovery-guidance {
+  margin-top: 0.85rem;
+}
+
 .source-operator-boundary {
   padding: 1rem 1.1rem;
   border-left: 3px solid var(--admin-accent);

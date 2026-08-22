@@ -686,7 +686,7 @@ test("repeat pause and resume commands coalesce with DB-time lifecycle diagnosti
   }
 });
 
-test("pause and resume preserve an unresolved source action-required fence", async () => {
+test("pause preserves an unresolved source action-required fence and resume rejects", async () => {
   const isolated = await createProviderSourceAcceptanceFixture(
     "action-required-lifecycle",
   );
@@ -727,15 +727,81 @@ test("pause and resume preserve an unresolved source action-required fence", asy
       ...common,
       requestedAt: new Date("2026-08-21T13:05:00.000Z"),
     });
-    await repository.resume({
-      ...common,
-      resumedAt: new Date("2026-08-21T13:06:00.000Z"),
+    await assert.rejects(
+      repository.resume({
+        ...common,
+        resumedAt: new Date("2026-08-21T13:06:00.000Z"),
+      }),
+      (error) => error instanceof PersistenceError && error.code === "SOURCE_FENCED",
+    );
+    const [persistedSource, runtime] = await Promise.all([
+      isolated.database.provider_source_instances.findUniqueOrThrow({
+        where: { id: isolatedSource.sourceInstanceId },
+      }),
+      isolated.database.provider_source_runtime_states.findUniqueOrThrow({
+        where: { source_instance_id: isolatedSource.sourceInstanceId },
+      }),
+    ]);
+    assert.equal(persistedSource.state, "paused");
+    assert.equal(runtime.phase, "action_required");
+    assert.equal(runtime.activity, "action_required");
+    assert.equal(runtime.action_required_code, "MAPPER_PIN_UNAVAILABLE");
+  } finally {
+    await isolated.close();
+  }
+});
+
+test("manual import fails closed while the exact current source requires action", async () => {
+  const isolated = await createProviderSourceAcceptanceFixture(
+    "action-required-manual-run",
+  );
+  try {
+    const isolatedSource = await createAcceptanceProviderSource(isolated, {
+      platformKey: "courtyard",
+      displayName: "Courtyard action-required manual run",
+      mapperKey: "courtyard-provider-observation",
+      identityNamespaceKey: "courtyard-v1",
+      intervalSeconds: 60,
+      hashCharacter: "d",
     });
+    await activateAcceptanceRuntime(
+      isolated.database,
+      isolated,
+      isolatedSource,
+      ACCEPTANCE_CREATED_AT,
+    );
+    await isolated.database.provider_source_runtime_states.update({
+      where: { source_instance_id: isolatedSource.sourceInstanceId },
+      data: {
+        phase: "action_required",
+        activity: "action_required",
+        action_required_code: "MAPPER_PIN_UNAVAILABLE",
+      },
+    });
+
+    const result = await new ProviderSourceImportRunRepository(
+      isolated.database,
+    ).requestRun({
+      organizationId: isolated.organizationId,
+      providerId: isolatedSource.providerId,
+      runId: randomUUID(),
+      trigger: "manual",
+      requestedByActorKey: "operator-admin",
+      requestedAt: new Date("2026-08-21T13:07:00.000Z"),
+      expectedSourceRevisionId: isolatedSource.sourceRevisionId,
+    });
+
+    assert.deepEqual(result, { kind: "source_unavailable" });
+    assert.equal(
+      await isolated.database.import_runs.count({
+        where: { source_instance_id: isolatedSource.sourceInstanceId },
+      }),
+      0,
+    );
     const runtime = await isolated.database.provider_source_runtime_states
       .findUniqueOrThrow({
         where: { source_instance_id: isolatedSource.sourceInstanceId },
       });
-    assert.equal(runtime.phase, "action_required");
     assert.equal(runtime.activity, "action_required");
     assert.equal(runtime.action_required_code, "MAPPER_PIN_UNAVAILABLE");
   } finally {

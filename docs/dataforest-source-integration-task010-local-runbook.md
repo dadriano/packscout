@@ -4,6 +4,11 @@
 interface. This procedure never uses the disposable embedded-admin database and
 never deletes or adopts existing application data.
 
+For routine source operation after bootstrap, use the
+[ingestion pipeline operator guide](ingestion-pipelines/README.md). This runbook
+owns only the guarded Task010 target, configuration, first backfill, and final
+reconciliation procedure.
+
 **Current admission state (2026-08-22): BLOCKED.** The read-only audit found
 102,168,420,352 available bytes, a deficit of 8,655,196,315,504 bytes against
 Task 010's required 8,757,364,735,856 available bytes. The filesystem is 89.72%
@@ -111,11 +116,16 @@ In Source configuration:
    Paste the authorized bearer only into **Bearer credential**. Do not put it in
    `.env.task010.local`, a command, screenshot, or note; clear the clipboard.
 2. Select **Test** for the connection. In Terminal B run the configuration-only
-   supervisor shown below. Wait for the test result, then select **Activate
-   revision**.
+   supervisor shown below. Wait for the test result, reload Source
+   configuration, then select **Activate revision**.
 3. For each stable provider root, save one inactive source with its matching
    provider/mapper choice, the shared profile, and interval `60`. Select
-   **Test**, wait for success, then **Activate paused**.
+   **Test**, wait for success, reload Source configuration, then **Activate
+   paused**.
+
+Source Configuration does not poll completed test jobs. Reload it after each
+connection, source, or recovery test before judging the result or activating a
+revision.
 
 Terminal B:
 
@@ -131,20 +141,27 @@ backfill worker when a source is activated or resumed.
 
 ## 4. Real backfill procedure — only after an approved capacity receipt
 
-Do not execute this section while the scorecard is BLOCKED. Re-run the guarded
-inspect immediately before the start. Then start only the singleton source
-supervisor (never `start-admin-embedded` or the aggregate worker):
+Do not execute this section while the scorecard is BLOCKED. Start only the
+singleton source supervisor (never `start-admin-embedded` or the aggregate
+worker):
 
 ```bash
-npm run inspect:provider-source-task010-target:local
 unset PACKSCOUT_TASK010_ADMIN_PASSWORD PACKSCOUT_DATA_API_TOKEN
 npm run start:provider-source-task010-backfill:local
 ```
 
+The empty-target inspect command belongs only before migration. It intentionally
+rejects this migrated, bootstrapped database. Immediately before opening the
+worker, the backfill starter itself rechecks the exact database identity,
+migrated schema, current capacity with application relations present, bootstrap
+receipt, and four-source backfill topology. Any failed recheck stops before the
+supervisor can claim work.
+
 The backfill start requires exactly one active tested profile at cap 2 and
 exactly four tested, fully pinned paused-or-active sources. In Operations,
-select **Resume** and **Run now** for all four sources. Verify two provider lanes
-overlap while each individual checkpoint remains sequential.
+select **Resume** for all four sources; Resume makes each lane due immediately.
+Verify two provider lanes overlap while each individual checkpoint remains
+sequential.
 
 After multiple sources have committed pages, stop Terminal B with `Ctrl-C`.
 Restart the same backfill command and verify each source resumes from its own

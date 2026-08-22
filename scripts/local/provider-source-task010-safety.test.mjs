@@ -259,7 +259,7 @@ test("bootstrap receipt requires exact roots and capacity/schema identity", () =
     providers: TASK010_PROVIDER_IDENTITIES.map((provider) => ({
       ...provider,
       organizationId: environment.organizationId,
-      state: "draft",
+      state: "active",
       activeRevisionId: null,
       nextRunAt: null,
     })),
@@ -292,14 +292,35 @@ test("bootstrap receipt requires exact roots and capacity/schema identity", () =
       error instanceof Task010SafetyError &&
       error.code === "BOOTSTRAP_RECEIPT_INVALID",
   );
+  assert.throws(
+    () =>
+      assertTask010BootstrapSnapshot(
+        {
+          ...snapshot,
+          providers: snapshot.providers.map((provider, index) =>
+            index === 0 ? { ...provider, state: "draft" } : provider,
+          ),
+        },
+        { ...environment, databaseIdentity, capacityReceipt },
+      ),
+    (error) =>
+      error instanceof Task010SafetyError &&
+      error.code === "BOOTSTRAP_PROVIDER_IDENTITY_INVALID",
+  );
 });
 
-test("backfill topology requires one active revision and four fully pinned sources", () => {
+test("backfill topology requires four exact active roots and fully pinned sources", () => {
   const ready = {
     profileCount: 1,
     activeProfileCount: 1,
     sourceCount: 4,
     readySourceCount: 4,
+    providerRoots: TASK010_PROVIDER_IDENTITIES.map((provider) => ({
+      ...provider,
+      state: "active",
+      activeRevisionId: null,
+      nextRunAt: null,
+    })),
     sources: Array.from({ length: 4 }, () => ({
       state: "paused",
       activeRevisionId: "revision",
@@ -310,6 +331,18 @@ test("backfill topology requires one active revision and four fully pinned sourc
   for (const invalid of [
     { ...ready, activeProfileCount: 0 },
     { ...ready, sourceCount: 3 },
+    {
+      ...ready,
+      providerRoots: ready.providerRoots.map((provider, index) =>
+        index === 0 ? { ...provider, state: "draft" } : provider,
+      ),
+    },
+    {
+      ...ready,
+      providerRoots: ready.providerRoots.map((provider, index) =>
+        index === 0 ? { ...provider, platformKey: "unexpected" } : provider,
+      ),
+    },
     {
       ...ready,
       sources: ready.sources.map((source, index) =>

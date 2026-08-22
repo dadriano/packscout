@@ -190,6 +190,45 @@ test("bounded operational labels cover worker, capacity, recovery, retry, pause,
   }
 });
 
+test("action-required processors block manual runs and name the tested lifecycle recovery", () => {
+  Object.assign(globalThis, { React });
+  const source: ProviderSourceOperationsSource = {
+    ...baseSource,
+    source: {
+      ...baseSource.source!,
+      lifecycle: "paused",
+    },
+    processor: {
+      ...baseSource.processor!,
+      activity: "action_required",
+      phase: "action_required",
+      waitReason: "action_required",
+      actionRequiredCode: "SOURCE_ACTION_REQUIRED",
+    },
+    activeRun: null,
+    latestRun: {
+      ...baseSource.activeRun!,
+      state: "failed",
+      finishedAt: now,
+      failureCode: "SOURCE_ACTION_REQUIRED",
+    },
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <ProviderSourceOperationsLedger
+        sources={[source]}
+        canOperate
+        pendingKey={null}
+        onCommand={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+  assert.match(html, /<button[^>]*disabled=""[^>]*>Resolve before run<\/button>/u);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>Resume<\/button>/u);
+  assert.match(html, /Disable this source.*Test source.*Activate paused.*Resume/u);
+  assert.doesNotMatch(html, />Retry source<|>Run now</u);
+});
+
 test("diagnostic feed labels shared context, run-filter hiding, expiry gaps, and safe references", () => {
   Object.assign(globalThis, { React });
   const page: ProviderSourceDiagnosticHistory = {

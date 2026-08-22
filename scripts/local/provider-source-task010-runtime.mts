@@ -539,7 +539,7 @@ export async function bootstrapTask010Target(
         `
         insert into public.provider_sources
           (id, organization_id, platform_key, display_name, state)
-        values ($1::uuid, $2::uuid, $3, $4, 'draft')
+        values ($1::uuid, $2::uuid, $3, $4, 'active')
       `,
         [
           provider.id,
@@ -738,8 +738,9 @@ export async function verifyTask010SourceTopology(
     seenProviders.add(source.providerId);
   }
   if (options.requireBackfillReady) {
-    const readySources = await client.query<{ count: string }>(
-      `
+    const [readySources, providerRoots] = await Promise.all([
+      client.query<{ count: string }>(
+        `
       select count(*)::text as count
       from public.provider_source_instances as source
       join public.provider_source_revisions as revision
@@ -770,13 +771,36 @@ export async function verifyTask010SourceTopology(
         and schedule_revision.freshness_grace_seconds = 900
         and checkpoint.checkpoint_generation >= 1
     `,
-      [environment.organizationId, profile?.id],
-    );
+        [environment.organizationId, profile?.id],
+      ),
+      client.query<{
+        id: string;
+        platformKey: string;
+        displayName: string;
+        state: string;
+        activeRevisionId: string | null;
+        nextRunAt: Date | null;
+      }>(
+        `
+        select id::text,
+               platform_key as "platformKey",
+               display_name as "displayName",
+               state::text,
+               active_revision_id::text as "activeRevisionId",
+               next_run_at as "nextRunAt"
+        from public.provider_sources
+        where organization_id = $1::uuid
+        order by platform_key
+      `,
+        [environment.organizationId],
+      ),
+    ]);
     assertTask010BackfillTopologySnapshot({
       profileCount: profiles.rows.length,
       activeProfileCount: 1,
       sourceCount: sources.rows.length,
       readySourceCount: Number(readySources.rows[0]?.count),
+      providerRoots: providerRoots.rows,
       sources: sources.rows.map((source) => ({
         state: source.state,
         activeRevisionId: source.activeRevisionId,

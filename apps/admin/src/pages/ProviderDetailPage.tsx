@@ -316,6 +316,9 @@ export function ProviderDetailPage() {
 
   const source = detail.source;
   const sourceRevision = source.source;
+  const sourceTestAvailable = sourceRevision?.lifecycle === "draft" ||
+    sourceRevision?.lifecycle === "disabled";
+  const sourceActionRequired = source.processor?.activity === "action_required";
   const staleDisplay = displayPaused || detailFailure !== null || diagnosticFailure !== null;
   return (
     <div className="admin-page source-operations-page">
@@ -384,11 +387,19 @@ export function ProviderDetailPage() {
             <span className="admin-kicker">Selected provider only</span>
             <h2 id="source-admin-inline-title">Test and timing</h2>
             <p>These controls affect {source.displayName} only. Shared credential and destructive lifecycle controls remain in Source configuration.</p>
+            {sourceActionRequired ? (
+              <aside className="admin-note admin-note-warning source-recovery-guidance" role="note">
+                <strong>Disable → Test source → Activate paused → Resume.</strong>{" "}
+                Correct the reported cause before testing. Run now, Test source while active, and Resume cannot clear Action required.
+              </aside>
+            ) : null}
           </div>
           <div className="source-admin-inline__actions">
-            <button type="button" className="admin-button admin-button-secondary" disabled={pendingKey !== null} onClick={() => { void requestSourceTest(); }}>
-              {pendingKey?.endsWith(":test") ? "Requesting test…" : "Test source"}
-            </button>
+            {sourceTestAvailable ? (
+              <button type="button" className="admin-button admin-button-secondary" disabled={pendingKey !== null} onClick={() => { void requestSourceTest(); }}>
+                {pendingKey?.endsWith(":test") ? "Requesting test…" : "Test source"}
+              </button>
+            ) : null}
             <form onSubmit={(event) => { void reviseInterval(event); }}>
               <div className="admin-field">
                 <label htmlFor="provider-source-interval">Interval seconds</label>

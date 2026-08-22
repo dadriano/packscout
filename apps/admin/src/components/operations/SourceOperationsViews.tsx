@@ -148,7 +148,12 @@ export function ProviderSourceOperationsLedger({
         {sources.map((source) => {
           const operational = sourceOperationalLabel(source);
           const isPending = pendingKey?.startsWith(`${source.providerId}:`) ?? false;
-          const runLabel = source.latestRun?.state === "failed" ? "Retry source" : "Run now";
+          const actionRequired = source.processor?.activity === "action_required";
+          const runLabel = actionRequired
+            ? "Resolve before run"
+            : source.latestRun?.state === "failed"
+              ? "Retry source"
+              : "Run now";
           return (
             <article key={source.providerId} className={`source-lane is-${source.processor?.activity ?? "unconfigured"}`}>
               <div className="source-lane__rail" aria-hidden="true"><span /></div>
@@ -180,15 +185,21 @@ export function ProviderSourceOperationsLedger({
                 <div><dt>Retry / quarantine</dt><dd>{source.processor?.retryCount ?? 0} retries · {source.progress.openQuarantine} open</dd></div>
                 <div><dt>Run / lease age</dt><dd>{source.activeRun ? <Link to={`/runs/${source.activeRun.id}`}>{humanize(source.activeRun.state)}</Link> : "No active run"} / {source.processor?.runLeaseAgeMilliseconds === null || source.processor?.runLeaseAgeMilliseconds === undefined ? "No lease" : elapsed(source.processor.runLeaseAgeMilliseconds)}</dd></div>
               </dl>
+              {actionRequired ? (
+                <aside className="admin-note admin-note-warning source-recovery-guidance" role="note">
+                  <strong>Administrator recovery required.</strong>{" "}
+                  Disable this source, correct the reported cause, run Test source while disabled, Activate paused, then Resume. Run now and Resume cannot clear Action required.
+                </aside>
+              ) : null}
               <footer className="source-lane__actions">
                 {source.configured ? <Link to={`/providers/${source.providerId}`}>Diagnostics</Link> : <Link to="/source-configuration">Configure source</Link>}
                 <Link to={`/runs?providerId=${source.providerId}`}>Run history</Link>
                 {source.progress.openQuarantine > 0 ? <Link to={`/quarantine?providerId=${source.providerId}&state=open`}>Quarantine</Link> : null}
                 {canOperate && source.source ? (
                   <div>
-                    <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.lifecycle !== "active"} onClick={() => onCommand(source, "run")}>{isPending ? "Working…" : runLabel}</button>
+                    <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.lifecycle !== "active" || actionRequired} onClick={() => onCommand(source, "run")}>{isPending ? "Working…" : runLabel}</button>
                     {source.source.lifecycle === "active" ? <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.pauseRequested} onClick={() => onCommand(source, "pause")}>Pause</button> : null}
-                    {source.source.lifecycle === "paused" || source.source.pauseRequested ? <button type="button" className="admin-button admin-button-primary" disabled={isPending} onClick={() => onCommand(source, "resume")}>Resume</button> : null}
+                    {source.source.lifecycle === "paused" || source.source.pauseRequested ? <button type="button" className="admin-button admin-button-primary" disabled={isPending || actionRequired} onClick={() => onCommand(source, "resume")}>Resume</button> : null}
                   </div>
                 ) : null}
               </footer>

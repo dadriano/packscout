@@ -428,9 +428,11 @@ export function ProviderSourceLedger({
               </dl>
               {canManage ? (
                 <div className="source-config-ledger__actions">
-                  <button type="button" className="admin-button admin-button-secondary"
-                    disabled={pendingKey !== null || source.state === "replaced"}
-                    onClick={() => onCommand("test", source)}>Test</button>
+                  {(["draft", "disabled"].includes(source.state)) ? (
+                    <button type="button" className="admin-button admin-button-secondary"
+                      disabled={pendingKey !== null}
+                      onClick={() => onCommand("test", source)}>Test</button>
+                  ) : null}
                   <button type="button" className="admin-button admin-button-secondary"
                     disabled={pendingKey !== null || !canActivate}
                     onClick={() => onCommand("activate", source)}>Activate paused</button>
