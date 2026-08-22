@@ -54,10 +54,10 @@ export function SavedItemCollection({
   const hidden = rows.length - visible.length;
 
   return (
-    <section className="admin-ledger" aria-labelledby={`${id}-title`}>
-      <header className="admin-section-heading">
+    <section className="admin-surface admin-panel" aria-labelledby={`${id}-title`}>
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">{eyebrow}</span>
+          <span className="admin-kicker">{eyebrow}</span>
           <h2 id={`${id}-title`}>{title}</h2>
         </div>
         <span className="admin-section-count">
@@ -106,7 +106,7 @@ export function SavedItemCollection({
           {hidden > 0 ? (
             <button
               type="button"
-              className="admin-button admin-button--secondary"
+              className="admin-button admin-button-secondary"
               onClick={() => setExpanded(true)}
             >
               {`Show all ${rows.length}`}

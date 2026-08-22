@@ -16,11 +16,11 @@ export function PageHeader({
   return (
     <header className="admin-page-header">
       <div>
-        <span className="admin-eyebrow">{eyebrow}</span>
-        <h1>{title}</h1>
-        <p>{description}</p>
+        <span className="admin-kicker">{eyebrow}</span>
+        <h1 className="admin-page-title">{title}</h1>
+        <p className="admin-page-copy">{description}</p>
       </div>
-      {actions ? <div className="admin-page-header__actions">{actions}</div> : null}
+      {actions ? <div className="admin-page-actions">{actions}</div> : null}
     </header>
   );
 }

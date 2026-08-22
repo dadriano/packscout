@@ -32,9 +32,9 @@ function label(value: string): string {
 export function ProviderLedger({ items }: ProviderLedgerProps) {
   return (
     <section className="provider-ledger" aria-labelledby="providers-ledger-title">
-      <header className="admin-section-heading">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Provider ledger</span>
+          <span className="admin-kicker">Provider ledger</span>
           <h2 id="providers-ledger-title">Configured data sources</h2>
         </div>
         <span className="admin-section-count">

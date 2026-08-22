@@ -57,7 +57,7 @@ function SectionState({
         <p>{error}</p>
         <button
           type="button"
-          className="admin-button admin-button--secondary"
+          className="admin-button admin-button-secondary"
           onClick={onRetry}
         >
           Try again
@@ -122,7 +122,7 @@ export function WorkerFleetPage() {
               aria-labelledby="fleet-state-title"
             >
               <div>
-                <span className="admin-eyebrow">Fleet state</span>
+                <span className="admin-kicker">Fleet state</span>
                 <h2 id="fleet-state-title">
                   {evaluation.state === "healthy"
                     ? "Workers are running"

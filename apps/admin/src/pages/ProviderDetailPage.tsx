@@ -135,7 +135,7 @@ export function ProviderDetailPage() {
 
   if (loading) return <div className="provider-loading" aria-busy="true">Loading provider and health…</div>;
   if (!provider || !health) {
-    return <div className="provider-load-error" role="alert"><p>{error ?? "Provider not found."}</p><Link className="admin-button admin-button--secondary" to="/providers">Return to providers</Link></div>;
+    return <div className="provider-load-error" role="alert"><p>{error ?? "Provider not found."}</p><Link className="admin-button admin-button-secondary" to="/providers">Return to providers</Link></div>;
   }
 
   const revision = provider.latestRevision;
@@ -147,11 +147,11 @@ export function ProviderDetailPage() {
         eyebrow={`Data providers / ${provider.platformKey}`}
         title={provider.displayName}
         description={`Revision ${revision.version} · ${revision.adapterKey} · ${revision.endpointHost}`}
-        actions={<Link className="admin-button admin-button--secondary" to="/providers">All providers</Link>}
+        actions={<Link className="admin-button admin-button-secondary" to="/providers">All providers</Link>}
       />
 
       {!canManage ? <aside className="provider-read-only-note"><strong>Read-only access</strong><p>Credential contents and configuration controls are restricted. Stored credentials remain masked.</p></aside> : null}
-      {error ? <div className="provider-load-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => setReloadIndex((value) => value + 1)}>Reload current state</button></div> : null}
+      {error ? <div className="provider-load-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => setReloadIndex((value) => value + 1)}>Reload current state</button></div> : null}
 
       <section className="provider-detail-status" aria-label="Provider status">
         <StatusBadge label={label(provider.state)} tone={tone(provider.state)} />
@@ -162,11 +162,11 @@ export function ProviderDetailPage() {
 
       {canStartImports ? (
         <section className="provider-actions" aria-labelledby="provider-import-actions-title">
-          <div><span className="admin-eyebrow">Import operations</span><h2 id="provider-import-actions-title">Manual import</h2><p>Manual and scheduled imports share one active-run limit and the same durable cursor.</p></div>
+          <div><span className="admin-kicker">Import operations</span><h2 id="provider-import-actions-title">Manual import</h2><p>Manual and scheduled imports share one active-run limit and the same durable cursor.</p></div>
           <div>
-            <Link className="admin-button admin-button--secondary" to={`/runs?providerId=${provider.id}`}>Run history</Link>
-            {health.openQuarantineCount > 0 ? <Link className="admin-button admin-button--secondary" to={`/quarantine?providerId=${provider.id}&state=open`}>Review quarantine ({health.openQuarantineCount})</Link> : null}
-            {health.activeRun ? <Link className="admin-button admin-button--primary" to={`/runs/${health.activeRun.id}`}>Open active run</Link> : <button type="button" className="admin-button admin-button--primary" disabled={provider.state !== "active"} title={provider.state !== "active" ? "Enable the tested provider before requesting an import." : undefined} onClick={() => void startManualImport()}>Run import</button>}
+            <Link className="admin-button admin-button-secondary" to={`/runs?providerId=${provider.id}`}>Run history</Link>
+            {health.openQuarantineCount > 0 ? <Link className="admin-button admin-button-secondary" to={`/quarantine?providerId=${provider.id}&state=open`}>Review quarantine ({health.openQuarantineCount})</Link> : null}
+            {health.activeRun ? <Link className="admin-button admin-button-primary" to={`/runs/${health.activeRun.id}`}>Open active run</Link> : <button type="button" className="admin-button admin-button-primary" disabled={provider.state !== "active"} title={provider.state !== "active" ? "Enable the tested provider before requesting an import." : undefined} onClick={() => void startManualImport()}>Run import</button>}
           </div>
           {health.activeRun ? <p className="provider-actions__gate">A {health.activeRun.state} import already owns this provider. Open it instead of starting duplicate work.</p> : null}
         </section>
@@ -174,13 +174,13 @@ export function ProviderDetailPage() {
 
       {canManage ? (
         <section className="provider-actions" aria-labelledby="provider-actions-title">
-          <div><span className="admin-eyebrow">Administrator controls</span><h2 id="provider-actions-title">Test before enablement</h2><p>A successful test is required for this exact revision. Changes never overwrite revision history.</p></div>
+          <div><span className="admin-kicker">Administrator controls</span><h2 id="provider-actions-title">Test before enablement</h2><p>A successful test is required for this exact revision. Changes never overwrite revision history.</p></div>
           <div>
-            {provider.state !== "archived" ? <Link className="admin-button admin-button--secondary" to={`/providers/${provider.id}/edit`}>Create revision</Link> : null}
-            {provider.state !== "archived" ? <button type="button" className="admin-button admin-button--secondary" disabled={testing} onClick={() => void runTest()}>{testing ? "Testing…" : "Test connection"}</button> : null}
-            {provider.state !== "active" && provider.state !== "archived" ? <button type="button" className="admin-button admin-button--primary" disabled={!enableReady} title={!enableReady ? "Run a successful connection test for this revision first." : undefined} onClick={() => void lifecycle("activate")}>Enable provider</button> : null}
-            {provider.state === "active" ? <button type="button" className="admin-button admin-button--danger" onClick={() => void lifecycle("disable")}>Disable provider</button> : null}
-            {provider.state === "disabled" ? <button type="button" className="admin-button admin-button--danger" onClick={() => void lifecycle("archive")}>Archive provider</button> : null}
+            {provider.state !== "archived" ? <Link className="admin-button admin-button-secondary" to={`/providers/${provider.id}/edit`}>Create revision</Link> : null}
+            {provider.state !== "archived" ? <button type="button" className="admin-button admin-button-secondary" disabled={testing} onClick={() => void runTest()}>{testing ? "Testing…" : "Test connection"}</button> : null}
+            {provider.state !== "active" && provider.state !== "archived" ? <button type="button" className="admin-button admin-button-primary" disabled={!enableReady} title={!enableReady ? "Run a successful connection test for this revision first." : undefined} onClick={() => void lifecycle("activate")}>Enable provider</button> : null}
+            {provider.state === "active" ? <button type="button" className="admin-button admin-button-danger" onClick={() => void lifecycle("disable")}>Disable provider</button> : null}
+            {provider.state === "disabled" ? <button type="button" className="admin-button admin-button-danger" onClick={() => void lifecycle("archive")}>Archive provider</button> : null}
           </div>
           {!enableReady && provider.state !== "active" && provider.state !== "archived" ? <p className="provider-actions__gate">Enablement is locked until this revision passes its connection test.</p> : null}
         </section>
@@ -188,7 +188,7 @@ export function ProviderDetailPage() {
 
       <div className="provider-detail-grid">
         <section className="provider-detail-card" aria-labelledby="provider-config-title">
-          <header><span className="admin-eyebrow">Masked settings</span><h2 id="provider-config-title">Configuration</h2></header>
+          <header><span className="admin-kicker">Masked settings</span><h2 id="provider-config-title">Configuration</h2></header>
           <dl>
             <div><dt>Platform</dt><dd>{provider.platformKey}</dd></div>
             <div><dt>Adapter</dt><dd>{revision.adapterKey}</dd></div>
@@ -200,7 +200,7 @@ export function ProviderDetailPage() {
           </dl>
         </section>
         <section className="provider-detail-card" aria-labelledby="provider-health-title">
-          <header><span className="admin-eyebrow">Operational evidence</span><h2 id="provider-health-title">Health</h2></header>
+          <header><span className="admin-kicker">Operational evidence</span><h2 id="provider-health-title">Health</h2></header>
           <dl>
             <div><dt>Last provider head</dt><dd>{dateTime(health.lastHeadReachedAt)}</dd></div>
             <div><dt>Next due</dt><dd>{dateTime(health.nextDueAt)}</dd></div>
@@ -213,7 +213,7 @@ export function ProviderDetailPage() {
       </div>
 
       <section className="provider-test-result" aria-labelledby="provider-test-title" aria-live="polite">
-        <header><span className="admin-eyebrow">Revision {revision.version}</span><h2 id="provider-test-title">Latest connection test</h2></header>
+        <header><span className="admin-kicker">Revision {revision.version}</span><h2 id="provider-test-title">Latest connection test</h2></header>
         {test ? <div><StatusBadge label={label(test.verdict)} tone={tone(test.verdict)} /><p>Checked {dateTime(test.checkedAt)} · {test.latencyMs} ms{test.responseStatus ? ` · HTTP ${test.responseStatus}` : ""}</p>{test.recordCounts ? <p>{test.recordCounts.catalog} catalog · {test.recordCounts.pulls} pulls · {test.recordCounts.sales} sales</p> : null}{test.sanitizedCode ? <code>{test.sanitizedCode}</code> : null}</div> : <p>No connection test has been recorded for this revision.</p>}
       </section>
     </div>

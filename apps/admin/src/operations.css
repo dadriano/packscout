@@ -590,13 +590,13 @@
   }
 
   .ops-ledger__rows article:not(:has(.ops-ledger__select)) .ops-ledger__identity,
-  .ops-ledger__rows article:not(:has(.ops-ledger__select)) > .admin-status,
+  .ops-ledger__rows article:not(:has(.ops-ledger__select)) > .admin-pill,
   .ops-ledger__rows article:not(:has(.ops-ledger__select)) .ops-ledger__badges {
     grid-column: 1 / -1;
   }
 
   .ops-ledger__rows article:has(.ops-ledger__select) .ops-ledger__identity,
-  .ops-ledger__rows article:has(.ops-ledger__select) > .admin-status {
+  .ops-ledger__rows article:has(.ops-ledger__select) > .admin-pill {
     grid-column: 2;
   }
 

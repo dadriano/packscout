@@ -143,7 +143,7 @@ test("the directory lists sign-ups newest first, including records with no email
   assert.match(text, /No email or wallet address recorded for this sign-up/);
   assert.match(text, /did:example:opaque/);
   assert.equal(
-    renderer.container.querySelectorAll(".admin-ledger__rows article").length,
+    renderer.container.querySelectorAll(".admin-row-list article").length,
     2,
   );
 
@@ -286,7 +286,7 @@ test("an unavailable integration degrades to a bounded, non-destructive error", 
   assert.match(text, /Nothing has been changed/);
   assert.doesNotMatch(text, /Bearer|token|convex/i);
   assert.equal(
-    renderer.container.querySelectorAll(".admin-ledger__rows article").length,
+    renderer.container.querySelectorAll(".admin-row-list article").length,
     0,
   );
   assert.ok(renderer.container.querySelector('[role="alert"]'));

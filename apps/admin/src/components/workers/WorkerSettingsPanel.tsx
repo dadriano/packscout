@@ -29,7 +29,7 @@ export function WorkerSettingsPanel({
   return (
     <section className="ops-detail" aria-labelledby="worker-settings-title">
       <header>
-        <span className="admin-eyebrow">Effective worker settings</span>
+        <span className="admin-kicker">Effective worker settings</span>
         <h2 id="worker-settings-title">Operating thresholds in force</h2>
       </header>
       {settings === null ? (
