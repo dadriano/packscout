@@ -21,7 +21,7 @@ import {
   writeCanonicalProjectionBatch,
   type CanonicalProjectionWriteInput,
 } from "./ingestion-page-batch-writer.ts";
-import { ProviderSourceCheckpointRepository } from "./provider-source-checkpoint-repository.ts";
+import { ProviderSourceCursorRepository } from "./provider-source-cursor-repository.ts";
 import { ProviderSourceDiagnosticRepository } from "./provider-source-diagnostic-repository.ts";
 import {
   ProviderSourceObservationRepository,
@@ -64,7 +64,7 @@ export {
 export interface ProviderSourceAtomicPageCommitResult {
   readonly kind: "committed" | "already_committed";
   readonly pageId: string;
-  readonly checkpointFingerprint: string | null;
+  readonly cursorFingerprint: string | null;
   readonly continuation: ProviderSourcePagePlan["normalizedPage"]["continuation"];
   readonly counts: Readonly<{
     inserted: number;
@@ -81,7 +81,7 @@ export interface ProviderSourceAtomicPageCommitResult {
 export interface ProviderSourcePageRepositoryOptions {
   readonly actorPseudonymKey: Uint8Array | string;
   /** Test-only failure injection used to prove the complete page rolls back. */
-  readonly beforeCheckpointAdvance?: () => void | Promise<void>;
+  readonly beforeCursorAdvance?: () => void | Promise<void>;
   /** Test-only barrier after exact canonical identities are serialized. */
   readonly afterCanonicalIdentityLock?: () => void | Promise<void>;
 }
@@ -103,10 +103,10 @@ interface ExistingPageRow {
   readonly connectionHealthGeneration: bigint | null;
   readonly runClaimLeaseId: string | null;
   readonly supervisorEpochId: string | null;
-  readonly checkpointCodecVersion: string | null;
-  readonly checkpointGeneration: bigint | null;
-  readonly requestedCheckpointFingerprint: string | null;
-  readonly nextCheckpointFingerprint: string | null;
+  readonly cursorCodecVersion: string | null;
+  readonly cursorGeneration: bigint | null;
+  readonly requestedCursorFingerprint: string | null;
+  readonly nextCursorFingerprint: string | null;
   readonly continuationKind: "continue" | "poll_after" | null;
   readonly minimumDelaySeconds: number | null;
   readonly recordCounts: unknown;
@@ -154,13 +154,9 @@ function snapshotAtomicPageInput(
     protectedRawResponse: new Uint8Array(input.protectedRawResponse),
     protectedRawResponseSha256: input.protectedRawResponseSha256,
     protectedNativeEvidence: structuredClone(input.protectedNativeEvidence),
-    nextCheckpointFingerprint: input.nextCheckpointFingerprint,
+    nextCursorFingerprint: input.nextCursorFingerprint,
     committedAt: new Date(input.committedAt.getTime()),
   };
-}
-
-function checkpointBytes(value: string | null): Uint8Array<ArrayBuffer> | null {
-  return value === null ? null : asPrismaBytes(new TextEncoder().encode(value));
 }
 
 function addRetentionDays(value: Date, days: number): Date {
@@ -237,7 +233,7 @@ function exactQuarantineEvidence(
 }
 
 export class ProviderSourcePageRepository {
-  readonly #checkpoints: ProviderSourceCheckpointRepository;
+  readonly #cursors: ProviderSourceCursorRepository;
   readonly #diagnostics: ProviderSourceDiagnosticRepository;
   readonly #observations = new ProviderSourceObservationRepository();
 
@@ -245,7 +241,7 @@ export class ProviderSourcePageRepository {
     private readonly database: PackscoutPrismaClient,
     private readonly options: ProviderSourcePageRepositoryOptions,
   ) {
-    this.#checkpoints = new ProviderSourceCheckpointRepository(database);
+    this.#cursors = new ProviderSourceCursorRepository(database);
     this.#diagnostics = new ProviderSourceDiagnosticRepository(database);
   }
 
@@ -299,12 +295,8 @@ export class ProviderSourcePageRepository {
       );
       await this.options.afterCanonicalIdentityLock?.();
 
-      const requestedCheckpoint = checkpointBytes(
-        input.pins.requestedCheckpoint.value,
-      );
-      const nextCheckpoint = checkpointBytes(
-        input.plan.normalizedPage.nextCheckpoint.value,
-      );
+      const requestedCursor = input.pins.requestedCursor.value;
+      const nextCursor = input.plan.normalizedPage.nextCursor.value;
       const continuation = input.plan.normalizedPage.continuation;
       await transaction.import_pages.create({
         data: {
@@ -335,15 +327,15 @@ export class ProviderSourcePageRepository {
           request_attempt_id: input.pins.requestAttemptId,
           run_claim_lease_id: input.pins.runClaimLeaseId,
           supervisor_epoch_id: input.pins.supervisorEpochId,
-          checkpoint_codec_version: input.pins.checkpointCodecVersion,
-          checkpoint_generation: input.pins.checkpointGeneration,
-          requested_checkpoint: requestedCheckpoint,
-          requested_checkpoint_fingerprint:
-            input.pins.requestedCheckpointFingerprint,
-          requested_checkpoint_key:
-            input.pins.requestedCheckpointFingerprint ?? "initial",
-          next_checkpoint: nextCheckpoint,
-          next_checkpoint_fingerprint: input.nextCheckpointFingerprint,
+          cursor_codec_version: input.pins.cursorCodecVersion,
+          cursor_generation: input.pins.cursorGeneration,
+          requested_cursor: requestedCursor,
+          requested_cursor_fingerprint:
+            input.pins.requestedCursorFingerprint,
+          requested_cursor_key:
+            input.pins.requestedCursorFingerprint ?? "initial",
+          next_cursor: nextCursor,
+          next_cursor_fingerprint: input.nextCursorFingerprint,
           continuation_kind: continuation.kind,
           minimum_delay_seconds:
             continuation.kind === "poll_after"
@@ -691,7 +683,7 @@ export class ProviderSourcePageRepository {
           records: input.plan.outcomes.length,
         },
         continuation,
-        checkpointFingerprint: input.nextCheckpointFingerprint,
+        cursorFingerprint: input.nextCursorFingerprint,
         sourceTypeKey: input.pins.sourceTypeKey,
         sourceAdapterVersion: input.pins.sourceAdapterVersion,
         normalizedContractVersion: input.pins.normalizedContractVersion,
@@ -707,8 +699,8 @@ export class ProviderSourcePageRepository {
         evidence: { continuation_kind: continuation.kind },
       });
 
-      await this.options.beforeCheckpointAdvance?.();
-      const checkpoint = await this.#checkpoints.advanceInTransaction(
+      await this.options.beforeCursorAdvance?.();
+      const cursor = await this.#cursors.advanceInTransaction(
         transaction,
         {
           organizationId: input.pins.organizationId,
@@ -716,12 +708,12 @@ export class ProviderSourcePageRepository {
           sourceInstanceId: input.pins.sourceInstanceId,
           sourceRevisionId: input.pins.sourceRevisionId,
           sourceAdapterVersion: input.pins.sourceAdapterVersion,
-          checkpointCodecVersion: input.pins.checkpointCodecVersion,
-          checkpointGeneration: input.pins.checkpointGeneration,
-          expectedCheckpointFingerprint:
-            input.pins.requestedCheckpointFingerprint,
-          nextCheckpoint,
-          nextCheckpointFingerprint: input.nextCheckpointFingerprint,
+          cursorCodecVersion: input.pins.cursorCodecVersion,
+          cursorGeneration: input.pins.cursorGeneration,
+          expectedCursorFingerprint:
+            input.pins.requestedCursorFingerprint,
+          nextCursor,
+          nextCursorFingerprint: input.nextCursorFingerprint,
           continuation,
           runId: input.pins.runId,
           pageId: input.pins.pageId,
@@ -745,7 +737,7 @@ export class ProviderSourcePageRepository {
       return {
         kind: "committed",
         pageId: input.pins.pageId,
-        checkpointFingerprint: checkpoint.fingerprint,
+        cursorFingerprint: cursor.fingerprint,
         continuation,
         counts,
       };
@@ -767,8 +759,8 @@ export class ProviderSourcePageRepository {
       mapperKey: input.pins.mapperKey,
       mapperVersion: input.pins.mapperVersion,
       identityNamespaceKey: input.pins.identityNamespaceKey,
-      checkpointCodecVersion: input.pins.checkpointCodecVersion,
-      checkpointGeneration: input.pins.checkpointGeneration,
+      cursorCodecVersion: input.pins.cursorCodecVersion,
+      cursorGeneration: input.pins.cursorGeneration,
       connectionHealthGeneration: input.pins.connectionHealthGeneration,
       supervisorEpochId: input.pins.supervisorEpochId,
       connectionProfileId: input.pins.connectionProfileId,
@@ -898,10 +890,10 @@ export class ProviderSourcePageRepository {
              connection_health_generation as "connectionHealthGeneration",
              run_claim_lease_id as "runClaimLeaseId",
              supervisor_epoch_id as "supervisorEpochId",
-             checkpoint_codec_version as "checkpointCodecVersion",
-             checkpoint_generation as "checkpointGeneration",
-             requested_checkpoint_fingerprint as "requestedCheckpointFingerprint",
-             next_checkpoint_fingerprint as "nextCheckpointFingerprint",
+             cursor_codec_version as "cursorCodecVersion",
+             cursor_generation as "cursorGeneration",
+             requested_cursor_fingerprint as "requestedCursorFingerprint",
+             next_cursor_fingerprint as "nextCursorFingerprint",
              continuation_kind::text as "continuationKind",
              minimum_delay_seconds as "minimumDelaySeconds",
              record_counts_json as "recordCounts",
@@ -935,11 +927,11 @@ export class ProviderSourcePageRepository {
       page.connectionHealthGeneration !== input.pins.connectionHealthGeneration ||
       page.runClaimLeaseId !== input.pins.runClaimLeaseId ||
       page.supervisorEpochId !== input.pins.supervisorEpochId ||
-      page.checkpointCodecVersion !== input.pins.checkpointCodecVersion ||
-      page.checkpointGeneration !== input.pins.checkpointGeneration ||
-      page.requestedCheckpointFingerprint !==
-        input.pins.requestedCheckpointFingerprint ||
-      page.nextCheckpointFingerprint !== input.nextCheckpointFingerprint ||
+      page.cursorCodecVersion !== input.pins.cursorCodecVersion ||
+      page.cursorGeneration !== input.pins.cursorGeneration ||
+      page.requestedCursorFingerprint !==
+        input.pins.requestedCursorFingerprint ||
+      page.nextCursorFingerprint !== input.nextCursorFingerprint ||
       page.continuationKind !== continuation.kind ||
       page.minimumDelaySeconds !==
         (continuation.kind === "poll_after"
@@ -954,7 +946,7 @@ export class ProviderSourcePageRepository {
     return {
       kind: "already_committed",
       pageId: page.id,
-      checkpointFingerprint: page.nextCheckpointFingerprint,
+      cursorFingerprint: page.nextCursorFingerprint,
       continuation,
       counts,
     };

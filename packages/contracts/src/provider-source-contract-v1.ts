@@ -149,7 +149,15 @@ export const providerSourceSingletonTiming = Object.freeze({
   takeoverGraceSeconds: 15,
 });
 
-export const OPAQUE_CHECKPOINT_VALUE_MAXIMUM_UTF8_BYTES = 16_384;
+export const OPAQUE_CURSOR_VALUE_MAXIMUM_UTF8_BYTES = 16_384;
+export const OPAQUE_CURSOR_VALUE_INVALID_TEXT_ERROR =
+  "provider_source.cursor_value_invalid_text";
+
+const cursorTextEncoder = new TextEncoder();
+const cursorTextDecoder = new TextDecoder("utf-8", {
+  fatal: true,
+  ignoreBOM: true,
+});
 
 export const providerSourceControlPlaneRetry = Object.freeze({
   maximumAttempts: 3,
@@ -179,7 +187,7 @@ export const providerSourceDiagnosticCorrelationKindSchema = z.enum(
 export const providerSourceDiagnosticEventKindSchema = z.enum(
   providerSourceDiagnosticEventKinds,
 );
-export const providerSourceDiagnosticCheckpointFingerprintSchema = z
+export const providerSourceDiagnosticCursorFingerprintSchema = z
   .string()
   .regex(/^[0-9a-f]{64}$/u);
 export const providerSourceDiagnosticCommandCorrelationKeySchema = z
@@ -270,25 +278,37 @@ export const launchRecordIdScopeDeclarations = Object.freeze([
   },
 ] as const);
 
-export const opaqueCheckpointValueSchema = z
+export const opaqueCursorValueSchema = z
   .string()
   .min(1)
-  .refine(
-    (value) =>
-      new TextEncoder().encode(value).byteLength <=
-        OPAQUE_CHECKPOINT_VALUE_MAXIMUM_UTF8_BYTES,
-    { message: "provider_source.checkpoint_value_too_large" },
-  );
+  .superRefine((value, context) => {
+    const encoded = cursorTextEncoder.encode(value);
+    if (
+      value.includes("\u0000") ||
+      cursorTextDecoder.decode(encoded) !== value
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: OPAQUE_CURSOR_VALUE_INVALID_TEXT_ERROR,
+      });
+    }
+    if (encoded.byteLength > OPAQUE_CURSOR_VALUE_MAXIMUM_UTF8_BYTES) {
+      context.addIssue({
+        code: "custom",
+        message: "provider_source.cursor_value_too_large",
+      });
+    }
+  });
 
-export const opaqueCheckpointEnvelopeSchema = z
+export const opaqueCursorEnvelopeSchema = z
   .object({
     sourceInstanceId: opaqueIdentifierSchema,
     sourceRevisionId: opaqueIdentifierSchema,
     sourceTypeKey: registrationKeySchema,
     adapterVersion: registrationKeySchema,
-    checkpointCodecKey: registrationKeySchema,
-    checkpointGeneration: z.number().int().min(1),
-    value: opaqueCheckpointValueSchema.nullable(),
+    cursorCodecKey: registrationKeySchema,
+    cursorGeneration: z.number().int().min(1),
+    value: opaqueCursorValueSchema.nullable(),
   })
   .strict();
 
@@ -300,7 +320,7 @@ export const sourceAdapterFailureCodes = [
   "server_failure",
   "rate_limited",
   "invalid_source_configuration",
-  "invalid_checkpoint",
+  "invalid_cursor",
   "invalid_response",
   "unsupported_provider",
   "authentication_failed",
@@ -353,7 +373,7 @@ export const sourceAdapterFailureSchema = z
         disposition: z.literal("source_action_required"),
         code: z.enum([
           "invalid_source_configuration",
-          "invalid_checkpoint",
+          "invalid_cursor",
           "invalid_response",
           "unsupported_provider",
         ]),
@@ -426,7 +446,7 @@ export const sourceAdapterManifestV1Schema = z
     adapterVersion: registrationKeySchema,
     normalizedContractVersion: z.literal(PROVIDER_OBSERVATION_CONTRACT_VERSION),
     compatibleConnectionTypeKey: registrationKeySchema,
-    checkpointCodecKey: registrationKeySchema,
+    cursorCodecKey: registrationKeySchema,
     operatorLabel: z.string().trim().min(1).max(80),
     requestBounds: providerSourceRequestBoundsSchema,
     maximumConnectionRequestCap: z.number().int().min(1).max(4),
@@ -459,8 +479,8 @@ export type NormalizedContinuation = z.infer<typeof normalizedContinuationSchema
 export type RecordIdScopeDeclaration = z.infer<
   typeof recordIdScopeDeclarationSchema
 >;
-export type OpaqueCheckpointEnvelope = z.infer<
-  typeof opaqueCheckpointEnvelopeSchema
+export type OpaqueCursorEnvelope = z.infer<
+  typeof opaqueCursorEnvelopeSchema
 >;
 export type SourceAdapterFailure = z.infer<typeof sourceAdapterFailureSchema>;
 export type SourceAdapterMeasurements = z.infer<

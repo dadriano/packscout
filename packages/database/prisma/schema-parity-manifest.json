@@ -7,7 +7,7 @@
   "expectedCounts": {
     "tables": 81,
     "enums": 37,
-    "columns": 1286,
+    "columns": 1283,
     "indexes": 142,
     "uniqueConstraints": 51,
     "foreignKeys": 277,
@@ -2385,13 +2385,6 @@
           "identity": null,
           "default": null
         },
-        "checkpoint_generation": {
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
         "claim_owner": {
           "type": "text",
           "primaryKey": false,
@@ -2429,6 +2422,13 @@
         },
         "connection_test_job_id": {
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cursor_generation": {
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
@@ -2497,14 +2497,14 @@
           "identity": null,
           "default": null
         },
-        "requested_checkpoint_fingerprint": {
+        "requested_cursor_fingerprint": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
           "default": null
         },
-        "requested_checkpoint_key": {
+        "requested_cursor_key": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -2771,7 +2771,7 @@
           "value": "(((response_bytes IS NULL) OR (response_bytes >= 0)) AND ((duration_ms IS NULL) OR (duration_ms >= 0)))"
         },
         "compact_source_request_attempts_scope_check": {
-          "value": "(((operation_kind = 'connection_test'::source_request_operation_kind) AND (connection_test_job_id IS NOT NULL) AND (provider_id IS NULL) AND (source_instance_id IS NULL) AND (source_revision_id IS NULL) AND (source_test_job_id IS NULL) AND (run_id IS NULL) AND (page_number IS NULL) AND (checkpoint_generation IS NULL) AND (requested_checkpoint_fingerprint IS NULL) AND (requested_checkpoint_key IS NULL) AND (((blocking_episode_id IS NULL) AND (blocking_episode_connection_revision_id IS NULL)) OR ((blocking_episode_id IS NOT NULL) AND (blocking_episode_connection_revision_id IS NOT NULL)))) OR ((operation_kind = 'source_test'::source_request_operation_kind) AND (connection_test_job_id IS NULL) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (source_test_job_id IS NOT NULL) AND (run_id IS NULL) AND (page_number IS NULL) AND (checkpoint_generation IS NULL) AND (requested_checkpoint_fingerprint IS NULL) AND (requested_checkpoint_key IS NULL) AND ((blocking_episode_id IS NULL) = (blocking_episode_connection_revision_id IS NULL))) OR ((operation_kind = 'page_read'::source_request_operation_kind) AND (connection_test_job_id IS NULL) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (source_test_job_id IS NULL) AND (run_id IS NOT NULL) AND (page_number IS NOT NULL) AND (page_number > 0) AND (checkpoint_generation IS NOT NULL) AND (checkpoint_generation >= 1) AND ((requested_checkpoint_fingerprint IS NULL) OR (requested_checkpoint_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (requested_checkpoint_key = COALESCE(requested_checkpoint_fingerprint, 'initial'::text)) AND ((blocking_episode_id IS NULL) = (blocking_episode_connection_revision_id IS NULL))))"
+          "value": "(((operation_kind = 'connection_test'::source_request_operation_kind) AND (connection_test_job_id IS NOT NULL) AND (provider_id IS NULL) AND (source_instance_id IS NULL) AND (source_revision_id IS NULL) AND (source_test_job_id IS NULL) AND (run_id IS NULL) AND (page_number IS NULL) AND (cursor_generation IS NULL) AND (requested_cursor_fingerprint IS NULL) AND (requested_cursor_key IS NULL) AND (((blocking_episode_id IS NULL) AND (blocking_episode_connection_revision_id IS NULL)) OR ((blocking_episode_id IS NOT NULL) AND (blocking_episode_connection_revision_id IS NOT NULL)))) OR ((operation_kind = 'source_test'::source_request_operation_kind) AND (connection_test_job_id IS NULL) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (source_test_job_id IS NOT NULL) AND (run_id IS NULL) AND (page_number IS NULL) AND (cursor_generation IS NULL) AND (requested_cursor_fingerprint IS NULL) AND (requested_cursor_key IS NULL) AND ((blocking_episode_id IS NULL) = (blocking_episode_connection_revision_id IS NULL))) OR ((operation_kind = 'page_read'::source_request_operation_kind) AND (connection_test_job_id IS NULL) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (source_test_job_id IS NULL) AND (run_id IS NOT NULL) AND (page_number IS NOT NULL) AND (page_number > 0) AND (cursor_generation IS NOT NULL) AND (cursor_generation >= 1) AND ((requested_cursor_fingerprint IS NULL) OR (requested_cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (requested_cursor_key IS NOT NULL) AND (requested_cursor_key = COALESCE(requested_cursor_fingerprint, 'initial'::text)) AND ((blocking_episode_id IS NULL) = (blocking_episode_connection_revision_id IS NULL))))"
         },
         "compact_source_request_attempts_terminal_check": {
           "value": "((terminal_state <> 'in_flight'::source_request_attempt_state) AND (btrim(outcome_class) <> ''::text) AND (btrim(claim_owner) <> ''::text) AND (safe_outcome_hash ~ '^[0-9a-f]{64}$'::text) AND (terminal_at >= started_at) AND (expected_health_generation >= 0) AND ((terminal_state <> 'connection_outcome_uncertain'::source_request_attempt_state) OR ((blocking_episode_id IS NOT NULL) AND (blocking_episode_connection_revision_id IS NOT NULL))) AND ((compacted_at IS NULL) OR (compacted_at >= terminal_at)))"
@@ -3188,20 +3188,6 @@
     },
     "import_pages": {
       "columns": {
-        "checkpoint_codec_version": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
-        "checkpoint_generation": {
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
         "committed_at": {
           "type": "timestamp with time zone",
           "primaryKey": false,
@@ -3232,6 +3218,20 @@
         },
         "continuation_kind": {
           "type": "source_continuation_kind",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cursor_codec_version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cursor_generation": {
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
@@ -3286,21 +3286,14 @@
           "identity": null,
           "default": null
         },
-        "next_checkpoint": {
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
-        "next_checkpoint_fingerprint": {
+        "next_cursor": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
           "default": null
         },
-        "next_cursor": {
+        "next_cursor_fingerprint": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -3391,28 +3384,21 @@
           "identity": null,
           "default": null
         },
-        "requested_checkpoint": {
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
-        "requested_checkpoint_fingerprint": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
-        "requested_checkpoint_key": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
         "requested_cursor": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "requested_cursor_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "requested_cursor_key": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -3576,8 +3562,8 @@
             "connection_profile_id",
             "connection_revision_id",
             "connection_health_generation",
-            "checkpoint_generation",
-            "requested_checkpoint_key"
+            "cursor_generation",
+            "requested_cursor_key"
           ],
           "referencedTable": "compact_source_request_attempts",
           "referencedColumns": [
@@ -3592,8 +3578,8 @@
             "connection_profile_id",
             "connection_revision_id",
             "expected_health_generation",
-            "checkpoint_generation",
-            "requested_checkpoint_key"
+            "cursor_generation",
+            "requested_cursor_key"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -3637,7 +3623,7 @@
             "mapper_key",
             "mapper_version",
             "identity_namespace_key",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "referencedTable": "provider_source_revisions",
           "referencedColumns": [
@@ -3652,7 +3638,7 @@
             "mapper_key",
             "mapper_version",
             "identity_namespace_key",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -3690,22 +3676,22 @@
       },
       "checkConstraints": {
         "import_pages_cursors_bounded": {
-          "value": "(((requested_cursor IS NULL) OR (length(requested_cursor) <= 2048)) AND ((next_cursor IS NULL) OR (length(next_cursor) <= 2048)))"
+          "value": "((source_instance_id IS NOT NULL) OR (((requested_cursor IS NULL) OR (length(requested_cursor) <= 2048)) AND ((next_cursor IS NULL) OR (length(next_cursor) <= 2048))))"
         },
         "import_pages_normalized_commit_hash_check": {
           "value": "(((source_instance_id IS NULL) AND (normalized_commit_hash IS NULL)) OR ((source_instance_id IS NOT NULL) AND (normalized_commit_hash IS NOT NULL) AND (normalized_commit_hash ~ '^[0-9a-f]{64}$'::text)))"
         },
         "import_pages_normalized_runtime_shape_check": {
-          "value": "((source_instance_id IS NULL) OR ((requested_cursor IS NULL) AND (next_cursor IS NULL) AND (has_more IS NULL) AND (protected_raw_response_sha256 ~ '^[0-9a-f]{64}$'::text) AND (((protected_raw_response IS NOT NULL) AND ((octet_length(protected_raw_response) >= 1) AND (octet_length(protected_raw_response) <= 2097152)) AND (payload_expired_at IS NULL)) OR ((protected_raw_response IS NULL) AND (payload_expired_at IS NOT NULL)))))"
+          "value": "((source_instance_id IS NULL) OR ((has_more IS NULL) AND (protected_raw_response_sha256 ~ '^[0-9a-f]{64}$'::text) AND (((protected_raw_response IS NOT NULL) AND ((octet_length(protected_raw_response) >= 1) AND (octet_length(protected_raw_response) <= 2097152)) AND (payload_expired_at IS NULL)) OR ((protected_raw_response IS NULL) AND (payload_expired_at IS NOT NULL)))))"
         },
         "import_pages_page_number_positive": {
           "value": "(page_number > 0)"
         },
         "import_pages_source_continuation_check": {
-          "value": "((source_instance_id IS NULL) OR ((continuation_kind = 'continue'::source_continuation_kind) AND (minimum_delay_seconds IS NULL) AND (next_checkpoint IS NOT NULL) AND (next_checkpoint_fingerprint ~ '^[0-9a-f]{64}$'::text)) OR ((continuation_kind = 'poll_after'::source_continuation_kind) AND ((minimum_delay_seconds >= 0) AND (minimum_delay_seconds <= 86400))))"
+          "value": "((source_instance_id IS NULL) OR ((continuation_kind IS NOT NULL) AND (((continuation_kind = 'continue'::source_continuation_kind) AND (minimum_delay_seconds IS NULL) AND (next_cursor IS NOT NULL) AND (next_cursor_fingerprint IS NOT NULL) AND (next_cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)) OR ((continuation_kind = 'poll_after'::source_continuation_kind) AND (minimum_delay_seconds IS NOT NULL) AND ((minimum_delay_seconds >= 0) AND (minimum_delay_seconds <= 86400))))))"
         },
         "import_pages_source_pins_check": {
-          "value": "((source_instance_id IS NULL) OR ((source_revision_id IS NOT NULL) AND (btrim(source_type_key) <> ''::text) AND (btrim(source_adapter_version) <> ''::text) AND (btrim(normalized_contract_version) <> ''::text) AND (btrim(mapper_key) <> ''::text) AND (btrim(mapper_version) <> ''::text) AND (btrim(identity_namespace_key) <> ''::text) AND (connection_profile_id IS NOT NULL) AND (connection_revision_id IS NOT NULL) AND (connection_health_generation >= 0) AND (request_attempt_id IS NOT NULL) AND (supervisor_epoch_id IS NOT NULL) AND (btrim(checkpoint_codec_version) <> ''::text) AND (checkpoint_generation >= 1) AND ((requested_checkpoint IS NULL) = (requested_checkpoint_fingerprint IS NULL)) AND ((requested_checkpoint IS NULL) OR ((octet_length(requested_checkpoint) >= 1) AND (octet_length(requested_checkpoint) <= 16384))) AND ((requested_checkpoint_fingerprint IS NULL) OR (requested_checkpoint_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (requested_checkpoint_key = COALESCE(requested_checkpoint_fingerprint, 'initial'::text))))"
+          "value": "((source_instance_id IS NULL) OR ((source_revision_id IS NOT NULL) AND (source_type_key IS NOT NULL) AND (btrim(source_type_key) <> ''::text) AND (source_adapter_version IS NOT NULL) AND (btrim(source_adapter_version) <> ''::text) AND (normalized_contract_version IS NOT NULL) AND (btrim(normalized_contract_version) <> ''::text) AND (mapper_key IS NOT NULL) AND (btrim(mapper_key) <> ''::text) AND (mapper_version IS NOT NULL) AND (btrim(mapper_version) <> ''::text) AND (identity_namespace_key IS NOT NULL) AND (btrim(identity_namespace_key) <> ''::text) AND (connection_profile_id IS NOT NULL) AND (connection_revision_id IS NOT NULL) AND (connection_health_generation IS NOT NULL) AND (connection_health_generation >= 0) AND (request_attempt_id IS NOT NULL) AND (supervisor_epoch_id IS NOT NULL) AND (cursor_codec_version IS NOT NULL) AND (btrim(cursor_codec_version) <> ''::text) AND (cursor_generation IS NOT NULL) AND (cursor_generation >= 1) AND ((requested_cursor IS NULL) = (requested_cursor_fingerprint IS NULL)) AND ((requested_cursor IS NULL) OR ((octet_length(requested_cursor) >= 1) AND (octet_length(requested_cursor) <= 16384))) AND ((requested_cursor_fingerprint IS NULL) OR (requested_cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (requested_cursor_key IS NOT NULL) AND (requested_cursor_key = COALESCE(requested_cursor_fingerprint, 'initial'::text)) AND ((next_cursor IS NULL) = (next_cursor_fingerprint IS NULL)) AND ((next_cursor IS NULL) OR ((octet_length(next_cursor) >= 1) AND (octet_length(next_cursor) <= 16384))) AND ((next_cursor_fingerprint IS NULL) OR (next_cursor_fingerprint ~ '^[0-9a-f]{64}$'::text))))"
         },
         "import_pages_source_raw_retention_check": {
           "value": "((source_instance_id IS NULL) OR (expires_at = (committed_at + '7 days'::interval)))"
@@ -3720,20 +3706,6 @@
           "notNull": true,
           "identity": null,
           "default": "0"
-        },
-        "checkpoint_codec_version": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
-        "checkpoint_generation": {
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
         },
         "claim_lease_id": {
           "type": "uuid",
@@ -3777,22 +3749,36 @@
           "identity": null,
           "default": "now()"
         },
-        "current_checkpoint": {
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
-        "current_checkpoint_fingerprint": {
+        "current_cursor": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
           "default": null
         },
-        "current_checkpoint_key": {
+        "current_cursor_fingerprint": {
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "current_cursor_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cursor_codec_version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cursor_generation": {
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
@@ -3924,28 +3910,21 @@
           "identity": null,
           "default": null
         },
-        "requested_checkpoint": {
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
-        "requested_checkpoint_fingerprint": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
-        "requested_checkpoint_key": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
         "requested_cursor": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "requested_cursor_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "requested_cursor_key": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -4036,8 +4015,8 @@
             "source_revision_id",
             "connection_profile_id",
             "connection_revision_id",
-            "checkpoint_generation",
-            "requested_checkpoint_key",
+            "cursor_generation",
+            "requested_cursor_key",
             "lease_owner",
             "lease_token"
           ],
@@ -4053,7 +4032,7 @@
             "source_revision_id",
             "connection_profile_id",
             "connection_revision_id",
-            "checkpoint_generation",
+            "cursor_generation",
             "lease_owner",
             "lease_token"
           ],
@@ -4189,7 +4168,7 @@
             "mapper_key",
             "mapper_version",
             "identity_namespace_key",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "referencedTable": "provider_source_revisions",
           "referencedColumns": [
@@ -4204,7 +4183,7 @@
             "mapper_key",
             "mapper_version",
             "identity_namespace_key",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -4215,7 +4194,7 @@
           "value": "(attempt >= 0)"
         },
         "import_runs_exactly_one_runtime_owner_check": {
-          "value": "(((source_instance_id IS NULL) AND (config_revision_id IS NOT NULL) AND (current_checkpoint IS NULL) AND (current_checkpoint_fingerprint IS NULL) AND (current_checkpoint_key IS NULL) AND (next_page_number IS NULL)) OR ((source_instance_id IS NOT NULL) AND (config_revision_id IS NULL) AND (requested_cursor IS NULL) AND (final_cursor IS NULL) AND ((current_checkpoint IS NULL) = (current_checkpoint_fingerprint IS NULL)) AND ((current_checkpoint IS NULL) OR ((octet_length(current_checkpoint) >= 1) AND (octet_length(current_checkpoint) <= 16384))) AND ((current_checkpoint_fingerprint IS NULL) OR (current_checkpoint_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (current_checkpoint_key = COALESCE(current_checkpoint_fingerprint, 'initial'::text)) AND (next_page_number IS NOT NULL) AND (next_page_number > 0)))"
+          "value": "(((source_instance_id IS NULL) AND (config_revision_id IS NOT NULL) AND (current_cursor IS NULL) AND (current_cursor_fingerprint IS NULL) AND (current_cursor_key IS NULL) AND (next_page_number IS NULL)) OR ((source_instance_id IS NOT NULL) AND (config_revision_id IS NULL) AND (final_cursor IS NULL) AND ((current_cursor IS NULL) = (current_cursor_fingerprint IS NULL)) AND ((current_cursor IS NULL) OR ((octet_length(current_cursor) >= 1) AND (octet_length(current_cursor) <= 16384))) AND ((current_cursor_fingerprint IS NULL) OR (current_cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (current_cursor_key IS NOT NULL) AND (current_cursor_key = COALESCE(current_cursor_fingerprint, 'initial'::text)) AND (next_page_number IS NOT NULL) AND (next_page_number > 0)))"
         },
         "import_runs_failure_bounded": {
           "value": "(((failure_code IS NULL) OR (length(failure_code) <= 128)) AND ((failure_summary IS NULL) OR (length(failure_summary) <= 500)))"
@@ -4230,10 +4209,10 @@
           "value": "((trigger <> 'manual'::import_trigger) OR (requested_by_actor_key IS NOT NULL))"
         },
         "import_runs_requested_cursor_bounded": {
-          "value": "((requested_cursor IS NULL) OR (length(requested_cursor) <= 2048))"
+          "value": "((source_instance_id IS NOT NULL) OR (requested_cursor IS NULL) OR (length(requested_cursor) <= 2048))"
         },
         "import_runs_source_pins_check": {
-          "value": "((source_instance_id IS NULL) OR ((source_revision_id IS NOT NULL) AND (btrim(source_type_key) <> ''::text) AND (btrim(source_adapter_version) <> ''::text) AND (btrim(normalized_contract_version) <> ''::text) AND (btrim(mapper_key) <> ''::text) AND (btrim(mapper_version) <> ''::text) AND (btrim(identity_namespace_key) <> ''::text) AND (connection_profile_id IS NOT NULL) AND (connection_revision_id IS NOT NULL) AND (btrim(checkpoint_codec_version) <> ''::text) AND (checkpoint_generation >= 1) AND ((requested_checkpoint IS NULL) = (requested_checkpoint_fingerprint IS NULL)) AND ((requested_checkpoint IS NULL) OR ((octet_length(requested_checkpoint) >= 1) AND (octet_length(requested_checkpoint) <= 16384))) AND ((requested_checkpoint_fingerprint IS NULL) OR (requested_checkpoint_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (requested_checkpoint_key = COALESCE(requested_checkpoint_fingerprint, 'initial'::text))))"
+          "value": "((source_instance_id IS NULL) OR ((source_revision_id IS NOT NULL) AND (source_type_key IS NOT NULL) AND (btrim(source_type_key) <> ''::text) AND (source_adapter_version IS NOT NULL) AND (btrim(source_adapter_version) <> ''::text) AND (normalized_contract_version IS NOT NULL) AND (btrim(normalized_contract_version) <> ''::text) AND (mapper_key IS NOT NULL) AND (btrim(mapper_key) <> ''::text) AND (mapper_version IS NOT NULL) AND (btrim(mapper_version) <> ''::text) AND (identity_namespace_key IS NOT NULL) AND (btrim(identity_namespace_key) <> ''::text) AND (connection_profile_id IS NOT NULL) AND (connection_revision_id IS NOT NULL) AND (cursor_codec_version IS NOT NULL) AND (btrim(cursor_codec_version) <> ''::text) AND (cursor_generation IS NOT NULL) AND (cursor_generation >= 1) AND ((requested_cursor IS NULL) = (requested_cursor_fingerprint IS NULL)) AND ((requested_cursor IS NULL) OR ((octet_length(requested_cursor) >= 1) AND (octet_length(requested_cursor) <= 16384))) AND ((requested_cursor_fingerprint IS NULL) OR (requested_cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (requested_cursor_key IS NOT NULL) AND (requested_cursor_key = COALESCE(requested_cursor_fingerprint, 'initial'::text))))"
         }
       }
     },
@@ -9148,31 +9127,31 @@
         }
       }
     },
-    "provider_source_checkpoint_fingerprints": {
+    "provider_source_cursor_fingerprints": {
       "columns": {
-        "checkpoint_codec_version": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": null,
-          "default": null
-        },
-        "checkpoint_fingerprint": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": null,
-          "default": null
-        },
-        "checkpoint_generation": {
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": null,
-          "default": null
-        },
         "committed_at": {
           "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "cursor_codec_version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "cursor_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "cursor_generation": {
+          "type": "bigint",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
@@ -9197,7 +9176,7 @@
           "primaryKey": true,
           "notNull": true,
           "identity": null,
-          "default": "nextval('provider_source_checkpoint_fingerprints_id_seq'::regclass)"
+          "default": "nextval('provider_source_cursor_fingerprints_id_seq'::regclass)"
         },
         "organization_id": {
           "type": "uuid",
@@ -9236,20 +9215,20 @@
         }
       },
       "indexes": {
-        "provider_source_checkpoint_fingerprints_cycle_unique": {
+        "provider_source_cursor_fingerprints_cycle_unique": {
           "columns": [
             "source_instance_id",
-            "checkpoint_generation",
-            "checkpoint_fingerprint"
+            "cursor_generation",
+            "cursor_fingerprint"
           ],
           "unique": true,
           "where": null
         },
-        "provider_source_checkpoint_fingerprints_generation_idx": {
+        "provider_source_cursor_fingerprints_generation_idx": {
           "columns": [
             "organization_id",
             "source_instance_id",
-            "checkpoint_generation"
+            "cursor_generation"
           ],
           "unique": false,
           "where": null
@@ -9257,7 +9236,7 @@
       },
       "uniqueConstraints": {},
       "foreignKeys": {
-        "provider_source_checkpoint_fingerprints_page_fk": {
+        "provider_source_cursor_fingerprints_page_fk": {
           "columns": [
             "first_committed_page_id",
             "organization_id",
@@ -9265,8 +9244,8 @@
             "first_committed_run_id",
             "source_instance_id",
             "source_revision_id",
-            "checkpoint_generation",
-            "checkpoint_fingerprint"
+            "cursor_generation",
+            "cursor_fingerprint"
           ],
           "referencedTable": "import_pages",
           "referencedColumns": [
@@ -9276,20 +9255,20 @@
             "run_id",
             "source_instance_id",
             "source_revision_id",
-            "checkpoint_generation",
-            "next_checkpoint_fingerprint"
+            "cursor_generation",
+            "next_cursor_fingerprint"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "provider_source_checkpoint_fingerprints_revision_fk": {
+        "provider_source_cursor_fingerprints_revision_fk": {
           "columns": [
             "source_revision_id",
             "organization_id",
             "provider_id",
             "source_instance_id",
             "source_adapter_version",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "referencedTable": "provider_source_revisions",
           "referencedColumns": [
@@ -9298,12 +9277,12 @@
             "provider_id",
             "source_instance_id",
             "source_adapter_version",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "provider_source_checkpoint_fingerprints_run_fk": {
+        "provider_source_cursor_fingerprints_run_fk": {
           "columns": [
             "first_committed_run_id",
             "organization_id",
@@ -9322,7 +9301,7 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "provider_source_checkpoint_fingerprints_source_fk": {
+        "provider_source_cursor_fingerprints_source_fk": {
           "columns": [
             "source_instance_id",
             "organization_id",
@@ -9339,15 +9318,15 @@
         }
       },
       "checkConstraints": {
-        "provider_source_checkpoint_fingerprints_check": {
-          "value": "((checkpoint_generation >= 1) AND (checkpoint_fingerprint ~ '^[0-9a-f]{64}$'::text))"
+        "provider_source_cursor_fingerprints_check": {
+          "value": "((cursor_generation >= 1) AND (cursor_fingerprint ~ '^[0-9a-f]{64}$'::text))"
         },
-        "provider_source_checkpoint_fingerprints_page_run_check": {
+        "provider_source_cursor_fingerprints_page_run_check": {
           "value": "((first_committed_page_id IS NOT NULL) AND (first_committed_run_id IS NOT NULL))"
         }
       }
     },
-    "provider_source_checkpoints": {
+    "provider_source_cursors": {
       "columns": {
         "advanced_by_page_id": {
           "type": "uuid",
@@ -9363,28 +9342,28 @@
           "identity": null,
           "default": null
         },
-        "checkpoint_bytes": {
-          "type": "bytea",
+        "cursor": {
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
           "default": null
         },
-        "checkpoint_codec_version": {
+        "cursor_codec_version": {
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
           "default": null
         },
-        "checkpoint_fingerprint": {
+        "cursor_fingerprint": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
           "default": null
         },
-        "checkpoint_generation": {
+        "cursor_generation": {
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
@@ -9435,7 +9414,7 @@
         }
       },
       "indexes": {
-        "provider_source_checkpoints_provider_idx": {
+        "provider_source_cursors_provider_idx": {
           "columns": [
             "organization_id",
             "provider_id"
@@ -9443,7 +9422,7 @@
           "unique": false,
           "where": null
         },
-        "provider_source_checkpoints_scope_unique": {
+        "provider_source_cursors_scope_unique": {
           "columns": [
             "source_instance_id",
             "organization_id",
@@ -9455,7 +9434,7 @@
       },
       "uniqueConstraints": {},
       "foreignKeys": {
-        "provider_source_checkpoints_page_fk": {
+        "provider_source_cursors_page_fk": {
           "columns": [
             "advanced_by_page_id",
             "organization_id",
@@ -9463,8 +9442,7 @@
             "advanced_by_run_id",
             "source_instance_id",
             "source_revision_id",
-            "checkpoint_generation",
-            "checkpoint_fingerprint"
+            "cursor_generation"
           ],
           "referencedTable": "import_pages",
           "referencedColumns": [
@@ -9474,20 +9452,19 @@
             "run_id",
             "source_instance_id",
             "source_revision_id",
-            "checkpoint_generation",
-            "next_checkpoint_fingerprint"
+            "cursor_generation"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "provider_source_checkpoints_revision_fk": {
+        "provider_source_cursors_revision_fk": {
           "columns": [
             "source_revision_id",
             "organization_id",
             "provider_id",
             "source_instance_id",
             "source_adapter_version",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "referencedTable": "provider_source_revisions",
           "referencedColumns": [
@@ -9496,12 +9473,12 @@
             "provider_id",
             "source_instance_id",
             "source_adapter_version",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "provider_source_checkpoints_run_fk": {
+        "provider_source_cursors_run_fk": {
           "columns": [
             "advanced_by_run_id",
             "organization_id",
@@ -9520,7 +9497,7 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "provider_source_checkpoints_source_fk": {
+        "provider_source_cursors_source_fk": {
           "columns": [
             "source_instance_id",
             "organization_id",
@@ -9537,14 +9514,14 @@
         }
       },
       "checkConstraints": {
-        "provider_source_checkpoints_envelope_check": {
-          "value": "(((checkpoint_bytes IS NULL) AND (checkpoint_fingerprint IS NULL)) OR ((checkpoint_bytes IS NOT NULL) AND ((octet_length(checkpoint_bytes) >= 1) AND (octet_length(checkpoint_bytes) <= 16384)) AND (checkpoint_fingerprint ~ '^[0-9a-f]{64}$'::text)))"
+        "provider_source_cursors_envelope_check": {
+          "value": "(((cursor IS NULL) AND (cursor_fingerprint IS NULL)) OR ((cursor IS NOT NULL) AND (cursor_fingerprint IS NOT NULL) AND ((octet_length(cursor) >= 1) AND (octet_length(cursor) <= 16384)) AND (cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)))"
         },
-        "provider_source_checkpoints_generation_check": {
-          "value": "(checkpoint_generation >= 1)"
+        "provider_source_cursors_generation_check": {
+          "value": "(cursor_generation >= 1)"
         },
-        "provider_source_checkpoints_page_run_check": {
-          "value": "(((advanced_by_run_id IS NULL) AND (advanced_by_page_id IS NULL)) OR ((advanced_by_run_id IS NOT NULL) AND (advanced_by_page_id IS NOT NULL) AND (checkpoint_fingerprint IS NOT NULL)))"
+        "provider_source_cursors_page_run_check": {
+          "value": "(((advanced_by_run_id IS NULL) AND (advanced_by_page_id IS NULL) AND (cursor IS NULL) AND (cursor_fingerprint IS NULL)) OR ((advanced_by_run_id IS NOT NULL) AND (advanced_by_page_id IS NOT NULL)))"
         }
       }
     },
@@ -9861,13 +9838,6 @@
     },
     "provider_source_revisions": {
       "columns": {
-        "checkpoint_codec_version": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": null,
-          "default": null
-        },
         "configuration_hash": {
           "type": "text",
           "primaryKey": false,
@@ -9897,6 +9867,13 @@
           "default": "CURRENT_TIMESTAMP"
         },
         "created_by_actor_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "cursor_codec_version": {
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -10045,7 +10022,7 @@
       },
       "checkConstraints": {
         "provider_source_revisions_keys_check": {
-          "value": "((btrim(source_type_key) <> ''::text) AND (btrim(source_adapter_version) <> ''::text) AND (normalized_contract_version = 'packscout.provider-observation.v1'::text) AND (btrim(mapper_key) <> ''::text) AND (btrim(mapper_version) <> ''::text) AND (btrim(identity_namespace_key) <> ''::text) AND (btrim(checkpoint_codec_version) <> ''::text) AND (configuration_hash ~ '^[0-9a-f]{64}$'::text) AND (jsonb_typeof(configuration_json) = 'object'::text) AND (jsonb_typeof(record_id_scopes_json) = 'array'::text) AND (jsonb_array_length(record_id_scopes_json) > 0))"
+          "value": "((btrim(source_type_key) <> ''::text) AND (btrim(source_adapter_version) <> ''::text) AND (normalized_contract_version = 'packscout.provider-observation.v1'::text) AND (btrim(mapper_key) <> ''::text) AND (btrim(mapper_version) <> ''::text) AND (btrim(identity_namespace_key) <> ''::text) AND (btrim(cursor_codec_version) <> ''::text) AND (configuration_hash ~ '^[0-9a-f]{64}$'::text) AND (jsonb_typeof(configuration_json) = 'object'::text) AND (jsonb_typeof(record_id_scopes_json) = 'array'::text) AND (jsonb_array_length(record_id_scopes_json) > 0))"
         },
         "provider_source_revisions_number_check": {
           "value": "(revision_number > 0)"
@@ -10082,13 +10059,6 @@
           "identity": null,
           "default": null
         },
-        "checkpoint_fingerprint": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
         "connection_profile_id": {
           "type": "uuid",
           "primaryKey": false,
@@ -10119,6 +10089,13 @@
         },
         "current_run_id": {
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cursor_fingerprint": {
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
@@ -10409,14 +10386,14 @@
         "provider_source_runtime_states_block_shape_check": {
           "value": "(((blocking_episode_id IS NULL) AND (blocking_health_generation IS NULL)) OR ((blocking_episode_id IS NOT NULL) AND (blocking_health_generation IS NOT NULL)))"
         },
-        "provider_source_runtime_states_checkpoint_check": {
-          "value": "((checkpoint_fingerprint IS NULL) OR (checkpoint_fingerprint ~ '^[0-9a-f]{64}$'::text))"
-        },
         "provider_source_runtime_states_continuation_check": {
           "value": "(((continuation_kind = 'poll_after'::source_continuation_kind) AND (continuation_minimum_delay_seconds IS NOT NULL)) OR ((continuation_kind = 'continue'::source_continuation_kind) AND (continuation_minimum_delay_seconds IS NULL)) OR ((continuation_kind IS NULL) AND (continuation_minimum_delay_seconds IS NULL)))"
         },
         "provider_source_runtime_states_counts_check": {
           "value": "(((retry_attempt >= 0) AND (retry_attempt <= 2147483647)) AND ((pages_committed >= 0) AND (pages_committed <= 2147483647)) AND ((records_committed >= 0) AND (records_committed <= 2147483647)) AND ((blocking_health_generation IS NULL) OR (blocking_health_generation >= 0)) AND ((continuation_minimum_delay_seconds IS NULL) OR ((continuation_minimum_delay_seconds >= 0) AND (continuation_minimum_delay_seconds <= 86400))))"
+        },
+        "provider_source_runtime_states_cursor_check": {
+          "value": "((cursor_fingerprint IS NULL) OR (cursor_fingerprint ~ '^[0-9a-f]{64}$'::text))"
         },
         "provider_source_runtime_states_phase_check": {
           "value": "(phase = ANY (ARRAY['idle'::text, 'due'::text, 'queued'::text, 'claimed'::text, 'requesting'::text, 'validating'::text, 'committing'::text, 'retry_wait'::text, 'waiting'::text, 'paused'::text, 'action_required'::text, 'reached_head'::text, 'terminal'::text]))"
@@ -13602,20 +13579,6 @@
     },
     "source_delivery_occurrences": {
       "columns": {
-        "checkpoint_codec_version": {
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": null,
-          "default": null
-        },
-        "checkpoint_generation": {
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": null,
-          "default": null
-        },
         "collected_at": {
           "type": "timestamp(6) with time zone",
           "primaryKey": false,
@@ -13650,6 +13613,20 @@
           "notNull": true,
           "identity": null,
           "default": "CURRENT_TIMESTAMP"
+        },
+        "cursor_codec_version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "cursor_generation": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
         },
         "disposition": {
           "type": "source_delivery_disposition",
@@ -13839,7 +13816,7 @@
             "connection_profile_id",
             "connection_revision_id",
             "connection_health_generation",
-            "checkpoint_generation"
+            "cursor_generation"
           ],
           "referencedTable": "compact_source_request_attempts",
           "referencedColumns": [
@@ -13853,7 +13830,7 @@
             "connection_profile_id",
             "connection_revision_id",
             "expected_health_generation",
-            "checkpoint_generation"
+            "cursor_generation"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -13906,7 +13883,7 @@
             "supervisor_epoch_id",
             "connection_profile_id",
             "connection_revision_id",
-            "checkpoint_generation",
+            "cursor_generation",
             "connection_health_generation"
           ],
           "referencedTable": "import_pages",
@@ -13921,7 +13898,7 @@
             "supervisor_epoch_id",
             "connection_profile_id",
             "connection_revision_id",
-            "checkpoint_generation",
+            "cursor_generation",
             "connection_health_generation"
           ],
           "onDelete": "restrict",
@@ -13955,7 +13932,7 @@
             "mapper_key",
             "mapper_version",
             "identity_namespace_key",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "referencedTable": "provider_source_revisions",
           "referencedColumns": [
@@ -13970,7 +13947,7 @@
             "mapper_key",
             "mapper_version",
             "identity_namespace_key",
-            "checkpoint_codec_version"
+            "cursor_codec_version"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -14000,7 +13977,7 @@
           "value": "(((disposition = ANY (ARRAY['inserted'::source_delivery_disposition, 'revised'::source_delivery_disposition, 'duplicate'::source_delivery_disposition])) AND (source_record_id IS NOT NULL) AND (semantic_observation_id IS NOT NULL) AND (reason_code IS NULL)) OR ((disposition = 'quarantined'::source_delivery_disposition) AND (reason_code IS NOT NULL) AND (btrim(reason_code) <> ''::text) AND (length(reason_code) <= 256) AND ((semantic_observation_id IS NULL) OR (source_record_id IS NOT NULL))))"
         },
         "source_delivery_occurrences_position_check": {
-          "value": "((record_index >= 0) AND (checkpoint_generation >= 1) AND (connection_health_generation >= 0) AND (btrim(native_evidence_reference) <> ''::text))"
+          "value": "((record_index >= 0) AND (cursor_generation >= 1) AND (connection_health_generation >= 0) AND (btrim(native_evidence_reference) <> ''::text))"
         }
       }
     },
@@ -14022,13 +13999,6 @@
         },
         "blocking_episode_id": {
           "type": "uuid",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
-        "checkpoint_fingerprint": {
-          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
@@ -14082,6 +14052,13 @@
           "notNull": true,
           "identity": null,
           "default": "'{}'::jsonb"
+        },
+        "cursor_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
         },
         "duration_ms": {
           "type": "integer",
@@ -14614,7 +14591,7 @@
           "value": "(((continuation_kind IS NULL) AND (minimum_delay_seconds IS NULL)) OR ((continuation_kind = 'continue'::source_continuation_kind) AND (minimum_delay_seconds IS NULL)) OR ((continuation_kind = 'poll_after'::source_continuation_kind) AND ((minimum_delay_seconds >= 0) AND (minimum_delay_seconds <= 86400))))"
         },
         "source_processor_diagnostic_events_safety_check": {
-          "value": "((btrim(event_kind) <> ''::text) AND (btrim(phase) <> ''::text) AND (btrim(safe_code) <> ''::text) AND (jsonb_typeof(counters_json) = 'object'::text) AND (jsonb_typeof(evidence_json) = 'object'::text) AND (octet_length((evidence_json)::text) <= 4096) AND ((duration_ms IS NULL) OR (duration_ms >= 0)) AND ((response_bytes IS NULL) OR (response_bytes >= 0)) AND ((retry_delay_ms IS NULL) OR (retry_delay_ms >= 0)) AND ((checkpoint_fingerprint IS NULL) OR (checkpoint_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND ((command_correlation_key IS NULL) OR (command_correlation_key ~ '^[a-z0-9]([a-z0-9_.:-]{0,126}[a-z0-9])?$'::text)) AND (expires_at = (occurred_at + '30 days'::interval)))"
+          "value": "((btrim(event_kind) <> ''::text) AND (btrim(phase) <> ''::text) AND (btrim(safe_code) <> ''::text) AND (jsonb_typeof(counters_json) = 'object'::text) AND (jsonb_typeof(evidence_json) = 'object'::text) AND (octet_length((evidence_json)::text) <= 4096) AND ((duration_ms IS NULL) OR (duration_ms >= 0)) AND ((response_bytes IS NULL) OR (response_bytes >= 0)) AND ((retry_delay_ms IS NULL) OR (retry_delay_ms >= 0)) AND ((cursor_fingerprint IS NULL) OR (cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND ((command_correlation_key IS NULL) OR (command_correlation_key ~ '^[a-z0-9]([a-z0-9_.:-]{0,126}[a-z0-9])?$'::text)) AND (expires_at = (occurred_at + '30 days'::interval)))"
         },
         "source_processor_diagnostic_events_scope_check": {
           "value": "(((correlation_kind = 'connection_test'::source_diagnostic_correlation_kind) AND (event_kind = 'connection_test'::text) AND (scope = 'connection'::source_diagnostic_scope) AND (provider_id IS NULL) AND (source_instance_id IS NULL) AND (source_revision_id IS NULL) AND (normalized_contract_version IS NULL) AND (source_test_job_id IS NULL) AND (run_id IS NULL) AND (page_id IS NULL) AND (run_trigger IS NULL) AND (command_correlation_key IS NULL) AND (audit_event_id IS NULL) AND (connection_test_job_id IS NOT NULL) AND (((blocking_episode_id IS NULL) AND (blocking_episode_connection_revision_id IS NULL)) OR ((blocking_episode_id IS NOT NULL) AND (blocking_episode_connection_revision_id IS NOT NULL)))) OR ((correlation_kind = 'connection_episode'::source_diagnostic_correlation_kind) AND (event_kind = 'connection_episode'::text) AND (scope = 'connection'::source_diagnostic_scope) AND (provider_id IS NULL) AND (source_instance_id IS NULL) AND (source_revision_id IS NULL) AND (normalized_contract_version IS NULL) AND (source_test_job_id IS NULL) AND (run_id IS NULL) AND (page_id IS NULL) AND (run_trigger IS NULL) AND (command_correlation_key IS NULL) AND (audit_event_id IS NULL) AND (connection_test_job_id IS NULL) AND (blocking_episode_id IS NOT NULL) AND (blocking_episode_connection_revision_id IS NOT NULL)) OR ((correlation_kind = 'lifecycle'::source_diagnostic_correlation_kind) AND (event_kind = 'source_lifecycle'::text) AND (scope = 'source'::source_diagnostic_scope) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (normalized_contract_version IS NOT NULL) AND (blocking_episode_id IS NULL) AND (blocking_episode_connection_revision_id IS NULL) AND (connection_test_job_id IS NULL) AND ((((command_correlation_key IS NOT NULL))::integer + ((audit_event_id IS NOT NULL))::integer) = 1) AND (source_test_job_id IS NULL) AND (run_id IS NULL) AND (page_id IS NULL) AND (request_attempt_id IS NULL) AND (run_trigger IS NULL)) OR ((correlation_kind = 'source_test'::source_diagnostic_correlation_kind) AND (event_kind = 'source_test'::text) AND (scope = 'source'::source_diagnostic_scope) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (normalized_contract_version IS NOT NULL) AND (blocking_episode_id IS NULL) AND (blocking_episode_connection_revision_id IS NULL) AND (connection_test_job_id IS NULL) AND (source_test_job_id IS NOT NULL) AND (command_correlation_key IS NULL) AND (audit_event_id IS NULL) AND (run_id IS NULL) AND (page_id IS NULL) AND (run_trigger IS NULL)) OR ((correlation_kind = 'run'::source_diagnostic_correlation_kind) AND (event_kind = 'source_run'::text) AND (scope = 'source'::source_diagnostic_scope) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (normalized_contract_version IS NOT NULL) AND (blocking_episode_id IS NULL) AND (blocking_episode_connection_revision_id IS NULL) AND (connection_test_job_id IS NULL) AND (source_test_job_id IS NULL) AND (command_correlation_key IS NULL) AND (audit_event_id IS NULL) AND (run_id IS NOT NULL) AND (run_trigger IS NOT NULL) AND (page_id IS NULL) AND (request_attempt_id IS NULL)) OR ((correlation_kind = 'page'::source_diagnostic_correlation_kind) AND (event_kind = 'source_page'::text) AND (scope = 'source'::source_diagnostic_scope) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (normalized_contract_version IS NOT NULL) AND (blocking_episode_id IS NULL) AND (blocking_episode_connection_revision_id IS NULL) AND (connection_test_job_id IS NULL) AND (source_test_job_id IS NULL) AND (command_correlation_key IS NULL) AND (audit_event_id IS NULL) AND (run_id IS NOT NULL) AND (run_trigger IS NOT NULL) AND ((page_id IS NOT NULL) OR (request_attempt_id IS NOT NULL))))"
@@ -15394,13 +15371,6 @@
           "identity": null,
           "default": null
         },
-        "checkpoint_generation": {
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "identity": null,
-          "default": null
-        },
         "claim_owner": {
           "type": "text",
           "primaryKey": false,
@@ -15438,6 +15408,13 @@
         },
         "connection_test_job_id": {
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "cursor_generation": {
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
@@ -15513,14 +15490,14 @@
           "identity": null,
           "default": null
         },
-        "requested_checkpoint_fingerprint": {
+        "requested_cursor_fingerprint": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "identity": null,
           "default": null
         },
-        "requested_checkpoint_key": {
+        "requested_cursor_key": {
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -15796,7 +15773,7 @@
           "value": "((expected_health_generation >= 0) AND ((response_status IS NULL) OR ((response_status >= 100) AND (response_status <= 599))) AND ((response_bytes IS NULL) OR (response_bytes >= 0)) AND ((duration_ms IS NULL) OR (duration_ms >= 0)))"
         },
         "source_request_attempts_scope_check": {
-          "value": "(((operation_kind = 'connection_test'::source_request_operation_kind) AND (connection_test_job_id IS NOT NULL) AND (provider_id IS NULL) AND (source_instance_id IS NULL) AND (source_revision_id IS NULL) AND (source_test_job_id IS NULL) AND (run_id IS NULL) AND (page_number IS NULL) AND (checkpoint_generation IS NULL) AND (requested_checkpoint_fingerprint IS NULL) AND (requested_checkpoint_key IS NULL) AND (((blocking_episode_id IS NULL) AND (blocking_episode_connection_revision_id IS NULL)) OR ((blocking_episode_id IS NOT NULL) AND (blocking_episode_connection_revision_id IS NOT NULL)))) OR ((operation_kind = 'source_test'::source_request_operation_kind) AND (connection_test_job_id IS NULL) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (source_test_job_id IS NOT NULL) AND (run_id IS NULL) AND (page_number IS NULL) AND (checkpoint_generation IS NULL) AND (requested_checkpoint_fingerprint IS NULL) AND (requested_checkpoint_key IS NULL) AND ((blocking_episode_id IS NULL) = (blocking_episode_connection_revision_id IS NULL))) OR ((operation_kind = 'page_read'::source_request_operation_kind) AND (connection_test_job_id IS NULL) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (source_test_job_id IS NULL) AND (run_id IS NOT NULL) AND (page_number IS NOT NULL) AND (page_number > 0) AND (checkpoint_generation IS NOT NULL) AND (checkpoint_generation >= 1) AND (requested_checkpoint_key = COALESCE(requested_checkpoint_fingerprint, 'initial'::text)) AND ((blocking_episode_id IS NULL) = (blocking_episode_connection_revision_id IS NULL))))"
+          "value": "(((operation_kind = 'connection_test'::source_request_operation_kind) AND (connection_test_job_id IS NOT NULL) AND (provider_id IS NULL) AND (source_instance_id IS NULL) AND (source_revision_id IS NULL) AND (source_test_job_id IS NULL) AND (run_id IS NULL) AND (page_number IS NULL) AND (cursor_generation IS NULL) AND (requested_cursor_fingerprint IS NULL) AND (requested_cursor_key IS NULL) AND (((blocking_episode_id IS NULL) AND (blocking_episode_connection_revision_id IS NULL)) OR ((blocking_episode_id IS NOT NULL) AND (blocking_episode_connection_revision_id IS NOT NULL)))) OR ((operation_kind = 'source_test'::source_request_operation_kind) AND (connection_test_job_id IS NULL) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (source_test_job_id IS NOT NULL) AND (run_id IS NULL) AND (page_number IS NULL) AND (cursor_generation IS NULL) AND (requested_cursor_fingerprint IS NULL) AND (requested_cursor_key IS NULL) AND ((blocking_episode_id IS NULL) = (blocking_episode_connection_revision_id IS NULL))) OR ((operation_kind = 'page_read'::source_request_operation_kind) AND (connection_test_job_id IS NULL) AND (provider_id IS NOT NULL) AND (source_instance_id IS NOT NULL) AND (source_revision_id IS NOT NULL) AND (source_test_job_id IS NULL) AND (run_id IS NOT NULL) AND (page_number IS NOT NULL) AND (page_number > 0) AND (cursor_generation IS NOT NULL) AND (cursor_generation >= 1) AND (requested_cursor_key IS NOT NULL) AND (requested_cursor_key = COALESCE(requested_cursor_fingerprint, 'initial'::text)) AND ((blocking_episode_id IS NULL) = (blocking_episode_connection_revision_id IS NULL))))"
         },
         "source_request_attempts_terminal_check": {
           "value": "(((state = 'in_flight'::source_request_attempt_state) AND (terminal_at IS NULL) AND (expires_at IS NULL) AND (outcome_class IS NULL) AND (safe_outcome_hash IS NULL)) OR ((state <> 'in_flight'::source_request_attempt_state) AND (terminal_at IS NOT NULL) AND (expires_at = (terminal_at + '30 days'::interval)) AND (outcome_class IS NOT NULL) AND (safe_outcome_hash ~ '^[0-9a-f]{64}$'::text) AND ((state <> 'connection_outcome_uncertain'::source_request_attempt_state) OR ((blocking_episode_id IS NOT NULL) AND (blocking_episode_connection_revision_id IS NOT NULL)))))"

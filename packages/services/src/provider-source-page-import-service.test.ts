@@ -7,8 +7,9 @@ import {
   providerIdentityNamespaceByLaunchProvider,
   type ProviderSourcePageCommitPins,
 } from "@packscout/contracts";
-import { OpaqueCheckpointGuard } from "./opaque-checkpoint-guard.ts";
+import { OpaqueCursorGuard } from "./opaque-cursor-guard.ts";
 import {
+  ProviderSourcePageImportError,
   ProviderSourcePageImportService,
   type ProviderSourceAtomicPagePersistenceInput,
 } from "./provider-source-page-import-service.ts";
@@ -27,31 +28,31 @@ const fingerprintKey = new Uint8Array(32).fill(7);
 
 async function fixture(continuation: "continue" | "poll_after" = "continue") {
   const descriptor = descriptorFor("courtyard");
-  const requestedCheckpoint = {
+  const requestedCursor = {
     sourceInstanceId: "source-courtyard",
     sourceRevisionId: "revision-courtyard",
     sourceTypeKey: "dataforrest-events-v1",
     adapterVersion: "dataforrest-events-v1",
-    checkpointCodecKey: "dataforrest-events-cursor-v1",
-    checkpointGeneration: 1,
+    cursorCodecKey: "dataforrest-events-cursor-v1",
+    cursorGeneration: 1,
     value: continuation === "continue" ? "cursor-a" : null,
   } as const;
-  const nextCheckpoint = {
-    ...requestedCheckpoint,
+  const nextCursor = {
+    ...requestedCursor,
     value: continuation === "continue" ? "cursor-b" : null,
   };
-  const guard = new OpaqueCheckpointGuard(fingerprintKey);
-  const requestedCheckpointFingerprint = requestedCheckpoint.value === null
+  const guard = new OpaqueCursorGuard(fingerprintKey);
+  const requestedCursorFingerprint = requestedCursor.value === null
     ? null
-    : guard.fingerprint(requestedCheckpoint);
+    : guard.fingerprint(requestedCursor);
   const pins: ProviderSourcePageCommitPins = {
     organizationId: "00000000-0000-4000-8000-000000000001",
     providerId: "00000000-0000-4000-8000-000000000002",
     provider: "courtyard",
-    sourceInstanceId: requestedCheckpoint.sourceInstanceId,
-    sourceRevisionId: requestedCheckpoint.sourceRevisionId,
-    sourceTypeKey: requestedCheckpoint.sourceTypeKey,
-    sourceAdapterVersion: requestedCheckpoint.adapterVersion,
+    sourceInstanceId: requestedCursor.sourceInstanceId,
+    sourceRevisionId: requestedCursor.sourceRevisionId,
+    sourceTypeKey: requestedCursor.sourceTypeKey,
+    sourceAdapterVersion: requestedCursor.adapterVersion,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     mapperKey: descriptor.mapperKey,
     mapperVersion: descriptor.mapperVersion,
@@ -73,10 +74,10 @@ async function fixture(continuation: "continue" | "poll_after" = "continue") {
     runClaimLeaseId: "00000000-0000-4000-8000-000000000010",
     pageId: "00000000-0000-4000-8000-000000000011",
     pageNumber: 1,
-    checkpointCodecVersion: requestedCheckpoint.checkpointCodecKey,
-    checkpointGeneration: 1n,
-    requestedCheckpoint,
-    requestedCheckpointFingerprint,
+    cursorCodecVersion: requestedCursor.cursorCodecKey,
+    cursorGeneration: 1n,
+    requestedCursor,
+    requestedCursorFingerprint,
   };
   const raw = new TextEncoder().encode("sanitized-page");
   const page = normalizedProviderObservationPageSchema.parse({
@@ -85,7 +86,7 @@ async function fixture(continuation: "continue" | "poll_after" = "continue") {
     outcomes: [
       { status: "valid", recordIndex: 0, observation: packObservation() },
     ],
-    nextCheckpoint,
+    nextCursor,
     continuation: continuation === "continue"
       ? { kind: "continue" }
       : { kind: "poll_after", minimumDelaySeconds: 60 },
@@ -126,10 +127,10 @@ async function fixture(continuation: "continue" | "poll_after" = "continue") {
         pageAttemptId: pins.pageId,
         pageNumber: pins.pageNumber,
         pageLimit: 250,
-        checkpointGeneration: Number(pins.checkpointGeneration),
-        requestedCheckpointFingerprint: pins.requestedCheckpointFingerprint,
+        cursorGeneration: Number(pins.cursorGeneration),
+        requestedCursorFingerprint: pins.requestedCursorFingerprint,
       },
-      requestedCheckpoint,
+      requestedCursor,
     },
     new StaticCapturedPageSourceAdapter(
       dataforrestEventsV1SourceAdapterManifest,
@@ -153,7 +154,7 @@ test("completed normalized page is planned once and handed to one atomic reposit
         return {
           kind: "committed",
           pageId: input.pins.pageId,
-          checkpointFingerprint: input.nextCheckpointFingerprint,
+          cursorFingerprint: input.nextCursorFingerprint,
           continuation: input.plan.normalizedPage.continuation,
           counts: {
             inserted: 1,
@@ -180,14 +181,14 @@ test("completed normalized page is planned once and handed to one atomic reposit
   assert.equal(committed[0]?.plan.outcomes.length, 1);
   assert.equal(committed[0]?.protectedRawResponseSha256.length, 64);
   assert.equal(
-    committed[0]?.nextCheckpointFingerprint,
+    committed[0]?.nextCursorFingerprint,
     guard.fingerprint(adapterResult.ok
-      ? adapterResult.value.normalizedPage.nextCheckpoint
-      : pins.requestedCheckpoint),
+      ? adapterResult.value.normalizedPage.nextCursor
+      : pins.requestedCursor),
   );
 });
 
-test("poll-after may preserve the null checkpoint without inventing a fingerprint", async () => {
+test("poll-after may preserve the null cursor without inventing a fingerprint", async () => {
   const { pins, adapterResult, guard } = await fixture("poll_after");
   let persisted: ProviderSourceAtomicPagePersistenceInput | undefined;
   const service = new ProviderSourcePageImportService(
@@ -201,7 +202,7 @@ test("poll-after may preserve the null checkpoint without inventing a fingerprin
         return {
           kind: "committed",
           pageId: input.pins.pageId,
-          checkpointFingerprint: input.nextCheckpointFingerprint,
+          cursorFingerprint: input.nextCursorFingerprint,
           continuation: input.plan.normalizedPage.continuation,
           counts: {
             inserted: 1,
@@ -222,7 +223,51 @@ test("poll-after may preserve the null checkpoint without inventing a fingerprin
     adapterResult,
     committedAt: new Date("2026-08-21T12:00:00.000Z"),
   });
-  assert.equal(persisted?.nextCheckpointFingerprint, null);
+  assert.equal(persisted?.nextCursorFingerprint, null);
+});
+
+test("page import rejects non-lossless cursor text before planning or persistence", async () => {
+  const { pins, adapterResult, guard } = await fixture();
+  let plannerCalls = 0;
+  let persistenceCalls = 0;
+  const productionMappers = createProviderObservationMapperRegistryFromManifest();
+  const service = new ProviderSourcePageImportService(
+    new ProviderSourcePagePlanner({
+      resolve(input) {
+        plannerCalls += 1;
+        return productionMappers.resolve(input);
+      },
+    }),
+    guard,
+    {
+      async commitPage() {
+        persistenceCalls += 1;
+        throw new Error("must not commit");
+      },
+    },
+  );
+
+  for (const value of [
+    "cursor\u0000value",
+    "cursor-\ud800-value",
+    "cursor-\udfff-value",
+  ]) {
+    await assert.rejects(
+      service.importPage({
+        pins: {
+          ...pins,
+          requestedCursor: { ...pins.requestedCursor, value },
+        },
+        adapterResult,
+        committedAt: new Date("2026-08-21T12:00:00.000Z"),
+      }),
+      (error) =>
+        error instanceof ProviderSourcePageImportError &&
+        error.code === "cursor_mismatch",
+    );
+  }
+  assert.equal(plannerCalls, 0);
+  assert.equal(persistenceCalls, 0);
 });
 
 test("a structurally matching but unregistered result fails before planner or persistence", async () => {

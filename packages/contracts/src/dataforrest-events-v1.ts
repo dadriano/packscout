@@ -4,14 +4,14 @@ import {
   PROVIDER_SOURCE_CONTRACT_VERSION,
   launchProviderKeys,
   launchRecordIdScopeDeclarations,
-  opaqueCheckpointValueSchema,
+  opaqueCursorValueSchema,
   providerIdentityNamespaceByLaunchProvider,
   providerSourceLaunchBounds,
   sourceAdapterManifestV1Schema,
   type LaunchProviderKey,
   type LaunchRecordIdScopeKey,
   type NormalizedContinuation,
-  type OpaqueCheckpointEnvelope,
+  type OpaqueCursorEnvelope,
   type SourceAdapterManifestV1,
 } from "./provider-source-contract-v1.ts";
 import {
@@ -29,7 +29,7 @@ export const DATAFORREST_EVENTS_V1_ADAPTER_VERSION =
   "dataforrest-events-adapter-v1" as const;
 export const DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY =
   "dataforrest-events-connection-v1" as const;
-export const DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY =
+export const DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY =
   "dataforrest-cursor-v1" as const;
 export const DATAFORREST_EVENTS_V1_ENDPOINT =
   "https://198.204.245.26.sslip.io/v1/events" as const;
@@ -92,7 +92,7 @@ export const dataforrestRawRecordEnvelopeV1Schema = z
     message: "dataforrest_events.record_field_limit_exceeded",
   });
 
-export const dataforrestOpaqueCursorV1Schema = opaqueCheckpointValueSchema
+export const dataforrestOpaqueCursorV1Schema = opaqueCursorValueSchema
   .refine((value) => value.trim().length > 0, {
     message: "dataforrest_events.invalid_cursor",
   });
@@ -143,7 +143,7 @@ export const dataforrestEventsV1SourceAdapterManifest =
     adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     compatibleConnectionTypeKey: DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY,
-    checkpointCodecKey: DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
+    cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     operatorLabel: "DataForrest Events V1",
     requestBounds: {
       pageLimit: providerSourceLaunchBounds.pageTargetRecords,
@@ -282,10 +282,10 @@ export function dataforrestContinuation(
     : { kind: "poll_after", minimumDelaySeconds: 60 };
 }
 
-export function dataforrestNextCheckpoint(
-  current: OpaqueCheckpointEnvelope,
+export function dataforrestNextCursor(
+  current: OpaqueCursorEnvelope,
   page: DataforrestEventsPageV1,
-): OpaqueCheckpointEnvelope {
+): OpaqueCursorEnvelope {
   return {
     ...current,
     value: page.next_cursor,

@@ -1,8 +1,8 @@
 import {
-  opaqueCheckpointEnvelopeSchema,
+  opaqueCursorEnvelopeSchema,
   providerSourceRequestBoundsSchema,
   recordIdScopeDeclarationSchema,
-  type OpaqueCheckpointEnvelope,
+  type OpaqueCursorEnvelope,
   type ProviderSourceRequestBounds,
   type RecordIdScopeDeclaration,
 } from "@packscout/contracts";
@@ -220,11 +220,11 @@ export function canonicalizeBounds(
   }
 }
 
-export function canonicalizeCheckpoint(
-  checkpoint: unknown,
-): OpaqueCheckpointEnvelope {
+export function canonicalizeCursor(
+  cursor: unknown,
+): OpaqueCursorEnvelope {
   try {
-    return Object.freeze(opaqueCheckpointEnvelopeSchema.parse(checkpoint));
+    return Object.freeze(opaqueCursorEnvelopeSchema.parse(cursor));
   } catch {
     throw new SourceAdapterContractError("invalid_operation_shape");
   }

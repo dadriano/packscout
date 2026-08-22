@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
+  DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
@@ -46,7 +46,7 @@ import {
 interface OperationBuilderInput {
   readonly sourceTypeKey: string;
   readonly adapterVersion: string;
-  readonly checkpointCodecKey: string;
+  readonly cursorCodecKey: string;
   readonly connectionConfiguration: Readonly<Record<string, unknown>>;
   readonly sourceConfiguration: Readonly<Record<string, unknown>>;
 }
@@ -148,15 +148,15 @@ function operationBuilders(input: OperationBuilderInput) {
         },
       });
     },
-    async buildPageOperation(checkpointValue: string | null = null) {
-      const requestedCheckpoint = {
+    async buildPageOperation(cursorValue: string | null = null) {
+      const requestedCursor = {
         sourceInstanceId: sourcePins.sourceInstanceId,
         sourceRevisionId: sourcePins.sourceRevisionId,
         sourceTypeKey: input.sourceTypeKey,
         adapterVersion: input.adapterVersion,
-        checkpointCodecKey: input.checkpointCodecKey,
-        checkpointGeneration: 1,
-        value: checkpointValue,
+        cursorCodecKey: input.cursorCodecKey,
+        cursorGeneration: 1,
+        value: cursorValue,
       } as const;
       const pins: PageReadRequestPins = {
         ...commonPins,
@@ -165,17 +165,17 @@ function operationBuilders(input: OperationBuilderInput) {
         operationKind: "page_read",
         importRunId: "run-conformance",
         runClaimLeaseId: "run-lease-conformance",
-        pageAttemptId: `page-conformance-${checkpointValue ?? "initial"}`,
+        pageAttemptId: `page-conformance-${cursorValue ?? "initial"}`,
         pageNumber: 1,
         pageLimit: 250,
-        checkpointGeneration: 1,
-        requestedCheckpointFingerprint: checkpointValue === null
+        cursorGeneration: 1,
+        requestedCursorFingerprint: cursorValue === null
           ? null
-          : createHash("sha256").update(checkpointValue).digest("hex"),
+          : createHash("sha256").update(cursorValue).digest("hex"),
       };
       const requestLease = await authority.admit({
         pins,
-        requestedCheckpoint,
+        requestedCursor,
         guard: () => true,
       });
       return createPageReadOperation({
@@ -192,9 +192,9 @@ function operationBuilders(input: OperationBuilderInput) {
           runClaimLeaseId: pins.runClaimLeaseId,
           pageAttemptId: pins.pageAttemptId,
           pageNumber: pins.pageNumber,
-          checkpointGeneration: 1,
-          requestedCheckpointFingerprint: pins.requestedCheckpointFingerprint,
-          requestedCheckpoint,
+          cursorGeneration: 1,
+          requestedCursorFingerprint: pins.requestedCursorFingerprint,
+          requestedCursor,
           pageLimit: 250,
         },
       });
@@ -206,7 +206,7 @@ function alternateOperationBuilders() {
   return operationBuilders({
     sourceTypeKey: alternateManifest.sourceTypeKey,
     adapterVersion: alternateManifest.adapterVersion,
-    checkpointCodecKey: alternateManifest.checkpointCodecKey,
+    cursorCodecKey: alternateManifest.cursorCodecKey,
     connectionConfiguration: { channel: "fixture" },
     sourceConfiguration: { partition: "courtyard" },
   });
@@ -248,7 +248,7 @@ test("DataForrest and an alternate wrapper satisfy one transport-neutral adapter
   const dataforrestBuilders = operationBuilders({
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
     adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-    checkpointCodecKey: DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
+    cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     connectionConfiguration: {
       endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
       bearerToken: "conformance-secret",
@@ -269,7 +269,7 @@ test("DataForrest and an alternate wrapper satisfy one transport-neutral adapter
       bearerToken: "conformance-secret",
     },
     validSourceConfiguration: { platform: "courtyard" },
-    expectedCheckpointValue:
+    expectedCursorValue:
       dataforestEventsV1EvidenceFixture.courtyard.initial.next_cursor,
     ...dataforrestBuilders,
   });
@@ -280,7 +280,7 @@ test("DataForrest and an alternate wrapper satisfy one transport-neutral adapter
     provider: "courtyard",
     validConnectionConfiguration: { channel: "fixture" },
     validSourceConfiguration: { partition: "courtyard" },
-    expectedCheckpointValue: alternateWrapper.continuation.bookmark,
+    expectedCursorValue: alternateWrapper.continuation.bookmark,
     ...alternateBuilders,
   });
   assert.equal(dataforrestResult.page.ok, true);
@@ -298,7 +298,7 @@ test("DataForrest and an alternate wrapper satisfy one transport-neutral adapter
       assert.equal(normalizedPage.provider, "courtyard");
     }
     assert.equal(
-      alternateResult.page.value.normalizedPage.nextCheckpoint.value,
+      alternateResult.page.value.normalizedPage.nextCursor.value,
       "alternate-bookmark-001",
     );
     assert.deepEqual(
@@ -308,7 +308,7 @@ test("DataForrest and an alternate wrapper satisfy one transport-neutral adapter
   }
 });
 
-test("alternate adapter rejects malformed wrapper and checkpoint grammar with stable diagnostics", async () => {
+test("alternate adapter rejects malformed wrapper and cursor grammar with stable diagnostics", async () => {
   const protectedMarker = "alternate-secret-must-not-cross";
   const malformedPayloads = [
     { ...alternateWrapper, protectedMarker },
@@ -418,7 +418,7 @@ test("alternate adapter rejects malformed wrapper and checkpoint grammar with st
 
   const adapter = new AlternateBookmarkSourceAdapter();
   const builders = alternateOperationBuilders();
-  const page = await builders.buildPageOperation("foreign-checkpoint");
+  const page = await builders.buildPageOperation("foreign-cursor");
   const request = await captureRequest(
     builders.requestLeaseAuthority,
     adapter,
@@ -432,7 +432,7 @@ test("alternate adapter rejects malformed wrapper and checkpoint grammar with st
     request,
   );
   assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.failure.code, "invalid_checkpoint");
+  if (!result.ok) assert.equal(result.failure.code, "invalid_cursor");
   page.requestLease.close();
 });
 
@@ -473,8 +473,8 @@ test("alternate adapter fails closed for cancelled, reused, and mismatched lease
     sourceRevisionId: "foreign-revision",
     correlation: {
       ...original.correlation,
-      requestedCheckpoint: {
-        ...original.correlation.requestedCheckpoint,
+      requestedCursor: {
+        ...original.correlation.requestedCursor,
         sourceRevisionId: "foreign-revision",
       },
     },
@@ -568,9 +568,9 @@ test("alternate results cannot cross operation-bound completion", async () => {
         ...interpretation.value,
         normalizedPage: {
           ...interpretation.value.normalizedPage,
-          nextCheckpoint: {
-            ...interpretation.value.normalizedPage.nextCheckpoint,
-            checkpointCodecKey: "foreign-codec",
+          nextCursor: {
+            ...interpretation.value.normalizedPage.nextCursor,
+            cursorCodecKey: "foreign-codec",
           },
         },
       },

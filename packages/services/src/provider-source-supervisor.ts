@@ -105,13 +105,13 @@ export type SourceSupervisorWorkDisposition =
   | Readonly<{
       kind: "continued";
       continuationRunId: string;
-      checkpointFingerprint: string;
+      cursorFingerprint: string;
       pagesCommitted: number;
       recordsCommitted: number;
     }>
   | Readonly<{
       kind: "reached_head";
-      checkpointFingerprint: string | null;
+      cursorFingerprint: string | null;
       minimumDelaySeconds: number;
       pagesCommitted: number;
       recordsCommitted: number;
@@ -198,7 +198,7 @@ export interface SourceSupervisorCapacityAdmissionHook<
 export type SourceSupervisorExecutionResult =
   | Readonly<{
       kind: "page_committed";
-      checkpointFingerprint: string | null;
+      cursorFingerprint: string | null;
       continuation: NormalizedContinuation;
       pagesCommitted: number;
       recordsCommitted: number;
@@ -338,7 +338,7 @@ export class SourceSupervisorStaleWorkError extends Error {
 }
 
 /**
- * Source-neutral singleton loop. Adapter transport, credentials, checkpoint
+ * Source-neutral singleton loop. Adapter transport, credentials, cursor
  * grammar, mapping, and page persistence remain behind the executor port.
  */
 export class ProviderSourceSupervisor<
@@ -1008,22 +1008,22 @@ export class ProviderSourceSupervisor<
     if (result.continuation.kind === "poll_after") {
       return {
         kind: "reached_head",
-        checkpointFingerprint: result.checkpointFingerprint,
+        cursorFingerprint: result.cursorFingerprint,
         minimumDelaySeconds: result.continuation.minimumDelaySeconds,
         pagesCommitted: result.pagesCommitted,
         recordsCommitted: result.recordsCommitted,
       };
     }
-    if (result.checkpointFingerprint === null) {
+    if (result.cursorFingerprint === null) {
       return {
         kind: "action_required",
-        safeCode: "CONTINUE_CHECKPOINT_MISSING",
+        safeCode: "CONTINUE_CURSOR_MISSING",
       };
     }
     return {
       kind: "continued",
       continuationRunId: this.#dependencies.ids.id(),
-      checkpointFingerprint: result.checkpointFingerprint,
+      cursorFingerprint: result.cursorFingerprint,
       pagesCommitted: result.pagesCommitted,
       recordsCommitted: result.recordsCommitted,
     };

@@ -10,8 +10,8 @@ owns only the guarded Task010 target, configuration, first backfill, and final
 reconciliation procedure.
 
 **Current admission state (2026-08-22): BLOCKED.** The read-only audit found
-102,168,420,352 available bytes, a deficit of 8,655,196,315,504 bytes against
-Task 010's required 8,757,364,735,856 available bytes. The filesystem is 89.72%
+102,168,420,352 available bytes, a deficit of 8,657,163,818,123 bytes against
+Task 010's required 8,759,332,238,475 available bytes. The filesystem is 89.72%
 used, beyond the independently enforced 80% fence. Do not run a real backfill
 on this host.
 
@@ -160,19 +160,19 @@ supervisor can claim work.
 The backfill start requires exactly one active tested profile at cap 2 and
 exactly four tested, fully pinned paused-or-active sources. In Operations,
 select **Resume** for all four sources; Resume makes each lane due immediately.
-Verify two provider lanes overlap while each individual checkpoint remains
+Verify two provider lanes overlap while each individual cursor remains
 sequential.
 
 After multiple sources have committed pages, stop Terminal B with `Ctrl-C`.
 Restart the same backfill command and verify each source resumes from its own
-checkpoint. During the run:
+cursor. During the run:
 
 - Select **Pause** for one provider and confirm it stops after its current page
   while the other three continue; then **Resume**.
 - Select **Run now** while that provider is pending/running and confirm it
   coalesces rather than creating duplicate work.
 - In Source configuration, revise one provider interval, select **Save timing**,
-  and confirm other sources' next-due times/checkpoints do not change.
+  and confirm other sources' next-due times/cursors do not change.
 - Open each provider from Operations and inspect its diagnostic feed. Shared
   connection events must be labeled; source events must remain provider-local.
 - Exercise one retry or provider-local failure and recovery without pausing an
@@ -180,7 +180,7 @@ checkpoint. During the run:
 - After every provider reaches head, observe at least one due window and verify
   no early upstream poll.
 
-Stop safely with `Ctrl-C`. Never reset a checkpoint or delete data as part of
+Stop safely with `Ctrl-C`. Never reset a cursor or delete data as part of
 this runbook.
 
 ## 5. Reconcile and verify

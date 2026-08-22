@@ -28,8 +28,8 @@ test("source operations reads source-owned counters and reject cross-tenant refe
       {
         state: "running",
         createdAt: ACCEPTANCE_CREATED_AT,
-        requestedCheckpoint: null,
-        requestedCheckpointFingerprint: null,
+        requestedCursor: null,
+        requestedCursorFingerprint: null,
       },
     );
     await fixture.database.import_runs.update({

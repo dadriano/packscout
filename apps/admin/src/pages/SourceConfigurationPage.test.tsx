@@ -116,10 +116,10 @@ const catalog: ProviderSourceAdminCatalog = {
     intervalSeconds: 60,
     freshnessGraceSeconds: 900,
     scheduleRevisionId,
-    checkpoint: {
+    cursor: {
       generation: "2",
       fingerprint,
-      resumeLabel: "Saved checkpoint",
+      resumeLabel: "Saved cursor",
     },
     test: {
       jobId: sourceRevisionId,
@@ -170,10 +170,10 @@ function page(initialSession: AuthSessionResponse) {
   );
 }
 
-test("configuration UI renders masked evidence and explicit checkpoint impact without secret material", async (context) => {
+test("configuration UI renders masked evidence and explicit cursor impact without secret material", async (context) => {
   stubFetch(context, (request) => {
     const path = String(request.input);
-    if (path.endsWith("checkpoint-reset-preview")) {
+    if (path.endsWith("cursor-reset-preview")) {
       return jsonResponse({
         preview: {
           providerId,
@@ -181,10 +181,10 @@ test("configuration UI renders masked evidence and explicit checkpoint impact wi
           sourceInstanceId: sourceId,
           sourceRevisionId,
           sourceState: "paused",
-          checkpointGeneration: "2",
-          checkpointFingerprint: fingerprint,
+          cursorGeneration: "2",
+          cursorFingerprint: fingerprint,
           confirmation: "RESET courtyard TO FEED START",
-          consequence: "The saved checkpoint will be cleared and the next resume will start from Feed start.",
+          consequence: "The saved cursor will be cleared and the next resume will start from Feed start.",
         },
       });
     }
@@ -205,7 +205,7 @@ test("configuration UI renders masked evidence and explicit checkpoint impact wi
   }
 
   await act(async () => {
-    findButton(renderer, "Reset checkpoint").click();
+    findButton(renderer, "Reset cursor").click();
     await new Promise<void>((resolve) => setImmediate(resolve));
   });
   assert.match(pageText(renderer), /next resume will start from Feed start/);
@@ -389,7 +389,7 @@ test("source testing is offered only for draft and disabled lifecycle states", a
   }
 });
 
-test("replacement waits for selected-provider confirmation and explains the checkpoint boundary", async (context) => {
+test("replacement waits for selected-provider confirmation and explains the cursor boundary", async (context) => {
   let replacementBody: unknown = null;
   const requests = stubFetch(context, ({ input, init }) => {
     const path = String(input);
@@ -436,7 +436,7 @@ test("replacement waits for selected-provider confirmation and explains the chec
 
   assert.equal(replacementBody, null);
   assert.match(pageText(renderer), /Only courtyard is affected/iu);
-  assert.match(pageText(renderer), /checkpoint cannot transfer/iu);
+  assert.match(pageText(renderer), /cursor cannot transfer/iu);
   assert.match(pageText(renderer), /activation begins paused/iu);
 
   await act(async () => {

@@ -21,9 +21,9 @@ export function isExactProviderSourceRequestBeginReplay(
     source_test_job_id: string | null;
     run_id: string | null;
     page_number: number | null;
-    checkpoint_generation: bigint | null;
-    requested_checkpoint_fingerprint: string | null;
-    requested_checkpoint_key: string | null;
+    cursor_generation: bigint | null;
+    requested_cursor_fingerprint: string | null;
+    requested_cursor_key: string | null;
     blocking_episode_id: string | null;
   }>,
   input: Readonly<{
@@ -68,14 +68,14 @@ export function isExactProviderSourceRequestBeginReplay(
     existing.page_number === (operation.kind === "page_read"
       ? operation.pageNumber
       : null) &&
-    existing.checkpoint_generation === (operation.kind === "page_read"
-      ? operation.checkpointGeneration
+    existing.cursor_generation === (operation.kind === "page_read"
+      ? operation.cursorGeneration
       : null) &&
-    existing.requested_checkpoint_fingerprint === (operation.kind === "page_read"
-      ? operation.requestedCheckpointFingerprint
+    existing.requested_cursor_fingerprint === (operation.kind === "page_read"
+      ? operation.requestedCursorFingerprint
       : null) &&
-    existing.requested_checkpoint_key === (operation.kind === "page_read"
-      ? operation.requestedCheckpointFingerprint ?? "initial"
+    existing.requested_cursor_key === (operation.kind === "page_read"
+      ? operation.requestedCursorFingerprint ?? "initial"
       : null) &&
     existing.blocking_episode_id === (operation.kind === "connection_test"
       ? operation.blockingEpisodeId ?? null

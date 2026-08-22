@@ -1,11 +1,11 @@
 import type {
-  ConfirmProviderSourceCheckpointResetRequest,
+  ConfirmProviderSourceCursorResetRequest,
   CreateProviderSourceRequest,
   CreateSourceConnectionProfileRequest,
   CreateSourceConnectionRecoveryRevisionRequest,
   ProviderSourceAdminAuditReceipt,
   ProviderSourceAdminCatalog,
-  ProviderSourceCheckpointResetPreview,
+  ProviderSourceCursorResetPreview,
   ReplaceProviderSourceRequest,
   ReviseProviderSourceIntervalRequest,
   RotateSourceConnectionCredentialRequest,
@@ -189,26 +189,26 @@ export function reviseProviderSourceInterval(
   });
 }
 
-export function previewProviderSourceCheckpointReset(
+export function previewProviderSourceCursorReset(
   providerId: string,
   sourceInstanceId: string,
   expectedSourceRevisionId: string,
 ) {
-  return requestJson<{ preview: ProviderSourceCheckpointResetPreview }>(
-    sourcePath(providerId, sourceInstanceId, "checkpoint-reset-preview"),
+  return requestJson<{ preview: ProviderSourceCursorResetPreview }>(
+    sourcePath(providerId, sourceInstanceId, "cursor-reset-preview"),
     { method: "POST", json: { expectedSourceRevisionId } },
   );
 }
 
-export function resetProviderSourceCheckpoint(
+export function resetProviderSourceCursor(
   providerId: string,
   sourceInstanceId: string,
-  input: ConfirmProviderSourceCheckpointResetRequest,
+  input: ConfirmProviderSourceCursorResetRequest,
 ) {
   return requestJson<{
-    checkpointGeneration: string;
+    cursorGeneration: string;
     audit: ProviderSourceAdminAuditReceipt;
-  }>(sourcePath(providerId, sourceInstanceId, "checkpoint-reset"), {
+  }>(sourcePath(providerId, sourceInstanceId, "cursor-reset"), {
     method: "POST",
     json: input,
   });

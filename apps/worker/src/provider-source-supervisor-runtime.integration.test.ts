@@ -29,7 +29,7 @@ import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import {
   AesGcmSourceConnectionConfigurationCipher,
   DataforrestEventsSourceAdapter,
-  OpaqueCheckpointGuard,
+  OpaqueCursorGuard,
   ProviderSourcePageImportService,
   ProviderSourcePagePlanner,
   ProviderSourceSupervisor,
@@ -117,7 +117,7 @@ function createRealSupervisor(input: Readonly<{
   const mappers = createProviderObservationMapperRegistryFromManifest();
   const pageImports = new ProviderSourcePageImportService(
     new ProviderSourcePagePlanner(mappers),
-    new OpaqueCheckpointGuard(actorKey),
+    new OpaqueCursorGuard(actorKey),
     new ProviderSourcePageRepository(input.database, {
       actorPseudonymKey: actorKey,
     }),
@@ -350,8 +350,8 @@ async function createDataforrestFixture(input: Readonly<{
       mapperKey: descriptor.mapperKey,
       mapperVersion: descriptor.mapperVersion,
       identityNamespaceKey: providerIdentityNamespaceByLaunchProvider[provider],
-      checkpointCodecVersion:
-        dataforrestEventsV1SourceAdapterManifest.checkpointCodecKey,
+      cursorCodecVersion:
+        dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
       revisionNumber: 1,
       intervalSeconds: input.intervals[index]!,
       configuration: { platform: provider },
@@ -485,7 +485,7 @@ async function createAlternateFixture(
     mapperKey: descriptor.mapperKey,
     mapperVersion: descriptor.mapperVersion,
     identityNamespaceKey: providerIdentityNamespaceByLaunchProvider.courtyard,
-    checkpointCodecVersion: alternateBookmarkSourceManifest.checkpointCodecKey,
+    cursorCodecVersion: alternateBookmarkSourceManifest.cursorCodecKey,
     revisionNumber: 1,
     intervalSeconds: 60,
     configuration: { partition: "courtyard" },
@@ -652,8 +652,8 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
       },
     );
     for (const source of setup.sources) {
-      const [checkpoint, schedule, pages, diagnostics] = await Promise.all([
-        fixture.database.provider_source_checkpoints.findUniqueOrThrow({
+      const [sourceCursor, schedule, pages, diagnostics] = await Promise.all([
+        fixture.database.provider_source_cursors.findUniqueOrThrow({
           where: { source_instance_id: source.sourceInstanceId },
         }),
         fixture.database.provider_source_schedules.findUniqueOrThrow({
@@ -669,7 +669,7 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
         }),
       ]);
       assert.equal(
-        new TextDecoder().decode(checkpoint.checkpoint_bytes!),
+        sourceCursor.cursor,
         dataforestEventsV1EvidenceFixture[source.provider].reachedHead.next_cursor,
       );
       assert.deepEqual(pages.map(({ page_number }) => page_number), [1, 2, 3]);
@@ -732,8 +732,8 @@ test("test-only alternate adapter uses the unchanged supervisor and durable page
       }), 1);
     });
     assert.equal(adapter.captureCount, 1);
-    const [checkpoint, page, events] = await Promise.all([
-      fixture.database.provider_source_checkpoints.findUniqueOrThrow({
+    const [sourceCursor, page, events] = await Promise.all([
+      fixture.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: setup.source.sourceInstanceId },
       }),
       fixture.database.import_pages.findFirstOrThrow({
@@ -743,8 +743,7 @@ test("test-only alternate adapter uses the unchanged supervisor and durable page
         where: { source_instance_id: setup.source.sourceInstanceId },
       }),
     ]);
-    assert.equal(new TextDecoder().decode(checkpoint.checkpoint_bytes!),
-      "alternate-bookmark-001");
+    assert.equal(sourceCursor.cursor, "alternate-bookmark-001");
     assert.equal(page.continuation_kind, "poll_after");
     assert.equal(page.minimum_delay_seconds, 60);
     assert.equal(
@@ -772,7 +771,7 @@ test("test-only alternate adapter uses the unchanged supervisor and durable page
   }
 });
 
-test("transient page retry keeps the exact checkpoint and cannot run before DB backoff", async () => {
+test("transient page retry keeps the exact cursor and cannot run before DB backoff", async () => {
   const fixture = await createMigratedTestDatabase();
   const requestedCursors: Array<string | null> = [];
   let calls = 0;
@@ -787,7 +786,7 @@ test("transient page retry keeps the exact checkpoint and cannot run before DB b
   try {
     const setup = await createDataforrestFixture({
       database: fixture.database,
-      testKey: "retry-same-checkpoint",
+      testKey: "retry-same-cursor",
       intervals: [60],
       providers: ["courtyard"],
     });
@@ -831,10 +830,10 @@ test("transient page retry keeps the exact checkpoint and cannot run before DB b
       1_000,
     );
     assert.equal(await fixture.database.import_pages.count(), 0);
-    assert.equal((await fixture.database.provider_source_checkpoints
+    assert.equal((await fixture.database.provider_source_cursors
       .findUniqueOrThrow({
         where: { source_instance_id: setup.sources[0]!.sourceInstanceId },
-      })).checkpoint_bytes, null);
+      })).cursor, null);
 
     await supervisor.runCycle();
     await new Promise<void>((resolve) => setTimeout(resolve, 30));
@@ -897,12 +896,12 @@ test("transient page exhaustion applies the exact three durable backoffs", async
         });
       }
     }
-    const [runtime, checkpoint, attempts, retryEvents, terminalEvent] =
+    const [runtime, sourceCursor, attempts, retryEvents, terminalEvent] =
       await Promise.all([
         fixture.database.provider_source_runtime_states.findUniqueOrThrow({
           where: { source_instance_id: setup.sources[0]!.sourceInstanceId },
         }),
-        fixture.database.provider_source_checkpoints.findUniqueOrThrow({
+        fixture.database.provider_source_cursors.findUniqueOrThrow({
           where: { source_instance_id: setup.sources[0]!.sourceInstanceId },
         }),
         fixture.database.compact_source_request_attempts.count({
@@ -926,7 +925,7 @@ test("transient page exhaustion applies the exact three durable backoffs", async
     assert.equal(supervisor.state, "active");
     assert.equal(runtime.activity, "action_required");
     assert.equal(runtime.action_required_code, "TRANSIENT_RETRIES_EXHAUSTED");
-    assert.equal(checkpoint.checkpoint_bytes, null);
+    assert.equal(sourceCursor.cursor, null);
     assert.equal(attempts, 4);
     assert.deepEqual(
       retryEvents.map(({ retry_delay_ms }) => retry_delay_ms),

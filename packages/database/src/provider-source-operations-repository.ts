@@ -77,7 +77,7 @@ export interface ProviderSourceOperationsPageRecord {
     kind: "continue" | "poll_after";
     minimumDelaySeconds?: number;
   }> | null;
-  readonly checkpointFingerprint: string | null;
+  readonly cursorFingerprint: string | null;
 }
 
 export interface ProviderSourceOperationsDetailRecord {
@@ -314,7 +314,7 @@ export class ProviderSourceOperationsRepository {
           record_counts_json: true,
           continuation_kind: true,
           minimum_delay_seconds: true,
-          next_checkpoint_fingerprint: true,
+          next_cursor_fingerprint: true,
         },
       }),
     ]);
@@ -333,7 +333,7 @@ export class ProviderSourceOperationsRepository {
                 kind: "poll_after" as const,
                 minimumDelaySeconds: page.minimum_delay_seconds ?? 0,
               },
-        checkpointFingerprint: page.next_checkpoint_fingerprint,
+        cursorFingerprint: page.next_cursor_fingerprint,
       })),
     };
   }

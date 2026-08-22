@@ -52,7 +52,7 @@ async function sourceFixture(now: Date) {
     mapperKey: "courtyard-provider-observation",
     mapperVersion: "1",
     identityNamespaceKey: "dataforrest-courtyard-records-v1",
-    checkpointCodecVersion: "dataforrest-cursor-v1",
+    cursorCodecVersion: "dataforrest-cursor-v1",
     revisionNumber: 1,
     intervalSeconds: 60,
     configuration: { provider: "courtyard" },

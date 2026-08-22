@@ -163,11 +163,11 @@ function diagnosticPort(
         retryDelayMs: input.disposition?.kind === "retrying"
           ? input.disposition.retryDelayMilliseconds
           : null,
-        checkpointFingerprint:
-          input.disposition && "checkpointFingerprint" in input.disposition
-            ? input.disposition.checkpointFingerprint
+        cursorFingerprint:
+          input.disposition && "cursorFingerprint" in input.disposition
+            ? input.disposition.cursorFingerprint
             : work.kind === "page_read"
-              ? work.requestedCheckpointFingerprint
+              ? work.requestedCursorFingerprint
               : null,
         continuation: input.disposition?.kind === "continued"
           ? { kind: "continue" as const }

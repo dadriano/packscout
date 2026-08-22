@@ -5,7 +5,7 @@ import {
   dataforrestEventRecordV1Schema,
   dataforrestEventsPageV1Schema,
   dataforrestEventsSourceConfigurationV1Schema,
-  dataforrestNextCheckpoint,
+  dataforrestNextCursor,
   dataforrestEventsV1SourceAdapterManifest,
   normalizeDataforrestEventRecord,
   sourceAdapterFailureSchema,
@@ -425,11 +425,11 @@ async function interpretDataforrestPageUnsafe(
   const continuation = dataforrestContinuation(parsed.page);
   if (
     continuation.kind === "continue" &&
-    parsed.page.next_cursor === context.requestedCheckpoint.value
+    parsed.page.next_cursor === context.requestedCursor.value
   ) {
     return {
       ok: false,
-      failure: failure("invalid_checkpoint"),
+      failure: failure("invalid_cursor"),
       diagnostics: [diagnostic("continuation_did_not_advance")],
     };
   }
@@ -464,8 +464,8 @@ async function interpretDataforrestPageUnsafe(
         normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
         provider: context.provider,
         outcomes: [...outcomes],
-        nextCheckpoint: dataforrestNextCheckpoint(
-          context.requestedCheckpoint,
+        nextCursor: dataforrestNextCursor(
+          context.requestedCursor,
           parsed.page,
         ),
         continuation,

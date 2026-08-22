@@ -123,7 +123,7 @@ export class ProviderSourceAdminCatalogRepository {
       orderBy: [{ created_at: "asc" }, { id: "asc" }],
     });
     return Promise.all(sources.map(async (source) => {
-      const [provider, revision, profile, schedule, checkpoint, job] =
+      const [provider, revision, profile, schedule, cursor, job] =
         await Promise.all([
           this.database.provider_sources.findFirst({
             where: { id: source.provider_id, organization_id: organizationId },
@@ -146,7 +146,7 @@ export class ProviderSourceAdminCatalogRepository {
           this.database.provider_source_schedules.findFirst({
             where: { source_instance_id: source.id, organization_id: organizationId },
           }),
-          this.database.provider_source_checkpoints.findFirst({
+          this.database.provider_source_cursors.findFirst({
             where: { source_instance_id: source.id, organization_id: organizationId },
           }),
           this.database.provider_source_test_jobs.findFirst({
@@ -154,7 +154,7 @@ export class ProviderSourceAdminCatalogRepository {
             orderBy: [{ created_at: "desc" }, { id: "desc" }],
           }),
         ]);
-      if (!provider || !revision || !schedule || !checkpoint) return null;
+      if (!provider || !revision || !schedule || !cursor) return null;
       const [scheduleRevision, result, connectionRevision] = await Promise.all([
         this.database.provider_source_schedule_revisions.findFirst({
           where: {
@@ -200,8 +200,8 @@ export class ProviderSourceAdminCatalogRepository {
         intervalSeconds: scheduleRevision.interval_seconds,
         freshnessGraceSeconds: scheduleRevision.freshness_grace_seconds,
         scheduleRevisionId: scheduleRevision.id,
-        checkpointGeneration: checkpoint.checkpoint_generation,
-        checkpointFingerprint: checkpoint.checkpoint_fingerprint,
+        cursorGeneration: cursor.cursor_generation,
+        cursorFingerprint: cursor.cursor_fingerprint,
         test: {
           jobId: job?.id ?? null,
           connectionRevisionId: job?.connection_revision_id ?? null,

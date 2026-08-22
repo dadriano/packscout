@@ -5,7 +5,7 @@ import {
   launchProviderKeySchema,
   launchRecordIdScopeKeySchema,
   normalizedContinuationSchema,
-  opaqueCheckpointEnvelopeSchema,
+  opaqueCursorEnvelopeSchema,
   sourceAdapterMeasurementsSchema,
   sourceAdapterSafeDiagnosticSchema,
 } from "./provider-source-contract-v1.ts";
@@ -299,7 +299,7 @@ export const normalizedProviderObservationPageSchema = z
     normalizedContractVersion: z.literal(PROVIDER_OBSERVATION_CONTRACT_VERSION),
     provider: launchProviderKeySchema,
     outcomes: z.array(normalizedObservationOutcomeSchema),
-    nextCheckpoint: opaqueCheckpointEnvelopeSchema,
+    nextCursor: opaqueCursorEnvelopeSchema,
     continuation: normalizedContinuationSchema,
     measurements: sourceAdapterMeasurementsSchema,
     diagnostics: z.array(sourceAdapterSafeDiagnosticSchema).max(32),

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { providerIdentityNamespaceByLaunchProvider } from "@packscout/contracts";
 import type { Prisma } from "@prisma/client";
 import {
-  ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
+  ACCEPTANCE_CURSOR_CODEC_VERSION,
   ACCEPTANCE_CREATED_AT,
   ACCEPTANCE_NORMALIZED_CONTRACT_VERSION,
   ACCEPTANCE_SOURCE_ADAPTER_VERSION,
@@ -44,7 +44,7 @@ test("source-owned run pins survive queued and running progress without repinnin
           mapper_key: source.mapperKey,
           mapper_version: "2",
           identity_namespace_key: source.identityNamespaceKey,
-          checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
+          cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
           configuration_json: { provider: "courtyard", revision: 2 },
           configuration_hash: "c".repeat(64),
           record_id_scopes_json: [
@@ -82,14 +82,14 @@ test("source-owned run pins survive queued and running progress without repinnin
         identity_namespace_key: source.identityNamespaceKey,
         connection_profile_id: fixture.connectionProfileId,
         connection_revision_id: fixture.connectionRevisionId,
-        checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
-        checkpoint_generation: 1n,
-        requested_checkpoint: null,
-        requested_checkpoint_fingerprint: null,
-        requested_checkpoint_key: "initial",
-        current_checkpoint: null,
-        current_checkpoint_fingerprint: null,
-        current_checkpoint_key: "initial",
+        cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+        cursor_generation: 1n,
+        requested_cursor: null,
+        requested_cursor_fingerprint: null,
+        requested_cursor_key: "initial",
+        current_cursor: null,
+        current_cursor_fingerprint: null,
+        current_cursor_key: "initial",
         next_page_number: 1,
       },
     });
@@ -144,12 +144,10 @@ test("source-owned run pins survive queued and running progress without repinnin
 
     await assertRepinRejected(revisionTwoPins);
 
-    const requestedCheckpoint = new Uint8Array(new ArrayBuffer(12));
-    requestedCheckpoint.set(new TextEncoder().encode("checkpoint-a"));
     await assertRepinRejected({
-      requested_checkpoint: requestedCheckpoint,
-      requested_checkpoint_fingerprint: "d".repeat(64),
-      requested_checkpoint_key: "d".repeat(64),
+      requested_cursor: "cursor-a",
+      requested_cursor_fingerprint: "d".repeat(64),
+      requested_cursor_key: "d".repeat(64),
     });
 
     const progressedAt = new Date(startedAt.getTime() + 5_000);
@@ -203,7 +201,7 @@ test("source-owned run pins survive queued and running progress without repinnin
       finished.normalized_contract_version,
       ACCEPTANCE_NORMALIZED_CONTRACT_VERSION,
     );
-    assert.equal(finished.requested_checkpoint_key, "initial");
+    assert.equal(finished.requested_cursor_key, "initial");
 
     const pinFunction = await fixture.database.$queryRaw<
       Array<{ definition: string }>
@@ -225,11 +223,11 @@ test("source-owned run pins survive queued and running progress without repinnin
       "identity_namespace_key",
       "connection_profile_id",
       "connection_revision_id",
-      "checkpoint_codec_version",
-      "checkpoint_generation",
-      "requested_checkpoint",
-      "requested_checkpoint_fingerprint",
-      "requested_checkpoint_key",
+      "cursor_codec_version",
+      "cursor_generation",
+      "requested_cursor",
+      "requested_cursor_fingerprint",
+      "requested_cursor_key",
     ]) {
       assert.match(
         pinFunction[0]?.definition ?? "",

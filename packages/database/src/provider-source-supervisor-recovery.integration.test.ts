@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
-  ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
+  ACCEPTANCE_CURSOR_CODEC_VERSION,
   ACCEPTANCE_NORMALIZED_CONTRACT_VERSION,
   ACCEPTANCE_SOURCE_ADAPTER_VERSION,
   ACCEPTANCE_SOURCE_TYPE_KEY,
@@ -797,7 +797,7 @@ test("a terminal connection-test capture/result gap is fenced idempotently", asy
   }
 });
 
-test("a terminal page capture refetches the same checkpoint only after expiry", async () => {
+test("a terminal page capture refetches the same cursor only after expiry", async () => {
   const { fixture, source, ownerKey, leaseToken, epoch } =
     await recoveryFixture("terminal-page-gap");
   try {
@@ -811,8 +811,8 @@ test("a terminal page capture refetches the same checkpoint only after expiry", 
       {
         state: "running",
         createdAt: now,
-        requestedCheckpoint: null,
-        requestedCheckpointFingerprint: null,
+        requestedCursor: null,
+        requestedCursorFingerprint: null,
         leaseOwner: ownerKey,
         leaseToken: claimToken,
         claimLeaseId,
@@ -850,8 +850,8 @@ test("a terminal page capture refetches the same checkpoint only after expiry", 
         sourceRevisionId: source.sourceRevisionId,
         runId: run.id,
         pageNumber: 1,
-        checkpointGeneration: 1n,
-        requestedCheckpointFingerprint: null,
+        cursorGeneration: 1n,
+        requestedCursorFingerprint: null,
       },
       startedAt: now,
     });
@@ -895,12 +895,12 @@ test("a terminal page capture refetches the same checkpoint only after expiry", 
       leaseToken,
     });
 
-    const [storedRun, runtime, checkpoint] = await Promise.all([
+    const [storedRun, runtime, cursor] = await Promise.all([
       fixture.database.import_runs.findUniqueOrThrow({ where: { id: run.id } }),
       fixture.database.provider_source_runtime_states.findUniqueOrThrow({
         where: { source_instance_id: source.sourceInstanceId },
       }),
-      fixture.database.provider_source_checkpoints.findUniqueOrThrow({
+      fixture.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: source.sourceInstanceId },
       }),
     ]);
@@ -909,8 +909,8 @@ test("a terminal page capture refetches the same checkpoint only after expiry", 
     assert.equal(storedRun.lease_owner, null);
     assert.equal(runtime.activity, "queued");
     assert.equal(runtime.current_run_id, run.id);
-    assert.equal(checkpoint.checkpoint_generation, 1n);
-    assert.equal(checkpoint.checkpoint_fingerprint, null);
+    assert.equal(cursor.cursor_generation, 1n);
+    assert.equal(cursor.cursor_fingerprint, null);
     assert.equal(
       await fixture.database.source_processor_diagnostic_events.count({
         where: { run_id: run.id, phase: "work_recovered" },
@@ -931,8 +931,8 @@ test("a terminal page capture refetches the same checkpoint only after expiry", 
     }
     assert.equal(reclaimed.runId, run.id);
     assert.equal(reclaimed.pageNumber, 1);
-    assert.equal(reclaimed.checkpointGeneration, 1n);
-    assert.equal(reclaimed.requestedCheckpointFingerprint, null);
+    assert.equal(reclaimed.cursorGeneration, 1n);
+    assert.equal(reclaimed.requestedCursorFingerprint, null);
     assert.equal(
       await fixture.database.source_processor_diagnostic_events.count({
         where: {
@@ -977,15 +977,15 @@ test("a source already paused by page commit overrides a stale continuation", as
     if (!claimed || claimed.kind !== "page_read") {
       throw new Error("Expected a claimed page read.");
     }
-    const checkpointFingerprint = "d".repeat(64);
+    const cursorFingerprint = "d".repeat(64);
     await fixture.database.$transaction([
       fixture.database.import_runs.update({
         where: { id: claimed.runId },
         data: {
           counters_json: { pages: 1, records: 2 },
-          current_checkpoint: new Uint8Array([1]),
-          current_checkpoint_fingerprint: checkpointFingerprint,
-          current_checkpoint_key: checkpointFingerprint,
+          current_cursor: "stale-cursor",
+          current_cursor_fingerprint: cursorFingerprint,
+          current_cursor_key: cursorFingerprint,
           next_page_number: 2,
         },
       }),
@@ -1008,7 +1008,7 @@ test("a source already paused by page commit overrides a stale continuation", as
       decision: {
         kind: "continued",
         continuationRunId: randomUUID(),
-        checkpointFingerprint,
+        cursorFingerprint,
         pagesCommitted: 1,
         recordsCommitted: 2,
       },
@@ -1295,7 +1295,7 @@ test("an elapsed queued continuation rolls over before any old-run request", asy
     const runClaimLeaseId = randomUUID();
     const requestAttemptId = randomUUID();
     const pageId = randomUUID();
-    const nextCheckpoint = new TextEncoder().encode("rollover-checkpoint-1");
+    const nextCursor = "rollover-cursor-1";
     const nextFingerprint = "9".repeat(64);
     await fixture.database.import_runs.update({
       where: { id: requested.run.id },
@@ -1328,8 +1328,8 @@ test("an elapsed queued continuation rolls over before any old-run request", asy
         source_revision_id: source.sourceRevisionId,
         run_id: requested.run.id,
         page_number: 1,
-        checkpoint_generation: 1n,
-        requested_checkpoint_key: "initial",
+        cursor_generation: 1n,
+        requested_cursor_key: "initial",
         started_at: now,
         terminal_at: now,
       },
@@ -1360,38 +1360,38 @@ test("an elapsed queued continuation rolls over before any old-run request", asy
         request_attempt_id: requestAttemptId,
         run_claim_lease_id: runClaimLeaseId,
         supervisor_epoch_id: epoch.epochId,
-        checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
-        checkpoint_generation: 1n,
-        requested_checkpoint_key: "initial",
-        next_checkpoint: nextCheckpoint,
-        next_checkpoint_fingerprint: nextFingerprint,
+        cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+        cursor_generation: 1n,
+        requested_cursor_key: "initial",
+        next_cursor: nextCursor,
+        next_cursor_fingerprint: nextFingerprint,
         continuation_kind: "continue",
         protected_raw_response: new TextEncoder().encode("protected-page"),
         protected_raw_response_sha256: "a".repeat(64),
         normalized_commit_hash: "b".repeat(64),
       },
     });
-    await fixture.database.provider_source_checkpoint_fingerprints.create({
+    await fixture.database.provider_source_cursor_fingerprints.create({
       data: {
         organization_id: fixture.organizationId,
         provider_id: source.providerId,
         source_instance_id: source.sourceInstanceId,
         source_revision_id: source.sourceRevisionId,
-        checkpoint_generation: 1n,
+        cursor_generation: 1n,
         source_adapter_version: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
-        checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
-        checkpoint_fingerprint: nextFingerprint,
+        cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+        cursor_fingerprint: nextFingerprint,
         first_committed_run_id: requested.run.id,
         first_committed_page_id: pageId,
         committed_at: now,
       },
     });
     await Promise.all([
-      fixture.database.provider_source_checkpoints.update({
+      fixture.database.provider_source_cursors.update({
         where: { source_instance_id: source.sourceInstanceId },
         data: {
-          checkpoint_bytes: nextCheckpoint,
-          checkpoint_fingerprint: nextFingerprint,
+          cursor: nextCursor,
+          cursor_fingerprint: nextFingerprint,
           advanced_by_run_id: requested.run.id,
           advanced_by_page_id: pageId,
           updated_at: now,
@@ -1406,9 +1406,9 @@ test("an elapsed queued continuation rolls over before any old-run request", asy
           claim_lease_id: null,
           lease_expires_at: null,
           heartbeat_at: null,
-          current_checkpoint: nextCheckpoint,
-          current_checkpoint_fingerprint: nextFingerprint,
-          current_checkpoint_key: nextFingerprint,
+          current_cursor: nextCursor,
+          current_cursor_fingerprint: nextFingerprint,
+          current_cursor_key: nextFingerprint,
           next_page_number: 2,
           counters_json: { pages: 1, records: 1 },
         },
@@ -1452,8 +1452,8 @@ test("an elapsed queued continuation rolls over before any old-run request", asy
     assert.equal(continuations.length, 1);
     assert.equal(continuations[0]?.state, "queued");
     assert.equal(
-      continuations[0]?.requested_checkpoint_key,
-      oldRun.current_checkpoint_key,
+      continuations[0]?.requested_cursor_key,
+      oldRun.current_cursor_key,
     );
     const next = await work.claimNext({
       epochId: epoch.epochId,
@@ -1712,7 +1712,7 @@ test("same-revision profile recovery preserves a retained nonrevoked connection 
     assert.equal(resumed.trigger, "recovery");
     assert.equal(resumed.state, "queued");
     assert.equal(resumed.connection_revision_id, fixture.connectionRevisionId);
-    assert.equal(resumed.requested_checkpoint_key, blockedRun.current_checkpoint_key);
+    assert.equal(resumed.requested_cursor_key, blockedRun.current_cursor_key);
     assert.equal(
       await fixture.database.import_runs.count({
         where: {
@@ -1888,7 +1888,7 @@ test("a profile episode fences a terminal source-test capture before result publ
   }
 });
 
-test("pause after claim and graceful release completes at the unchanged checkpoint", async () => {
+test("pause after claim and graceful release completes at the unchanged cursor", async () => {
   const { fixture, source, ownerKey, leaseToken, epoch } =
     await recoveryFixture("pause-claimed-unstarted");
   try {
@@ -1934,7 +1934,7 @@ test("pause after claim and graceful release completes at the unchanged checkpoi
       waitReason: "graceful_shutdown",
       releasedAt: now,
     });
-    const [pausedSource, pausedRun, pausedLane, checkpoint] = await Promise.all([
+    const [pausedSource, pausedRun, pausedLane, cursor] = await Promise.all([
       fixture.database.provider_source_instances.findUniqueOrThrow({
         where: { id: source.sourceInstanceId },
       }),
@@ -1944,7 +1944,7 @@ test("pause after claim and graceful release completes at the unchanged checkpoi
       fixture.database.provider_source_runtime_states.findUniqueOrThrow({
         where: { source_instance_id: source.sourceInstanceId },
       }),
-      fixture.database.provider_source_checkpoints.findUniqueOrThrow({
+      fixture.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: source.sourceInstanceId },
       }),
     ]);
@@ -1954,7 +1954,7 @@ test("pause after claim and graceful release completes at the unchanged checkpoi
     assert.equal(pausedRun.failure_code, "SOURCE_PAUSED");
     assert.equal(pausedLane.activity, "paused");
     assert.equal(pausedLane.current_run_id, null);
-    assert.equal(checkpoint.checkpoint_fingerprint, null);
+    assert.equal(cursor.cursor_fingerprint, null);
     assert.equal(
       await fixture.database.source_request_attempts.count({
         where: { run_id: requested.run.id },
@@ -1980,7 +1980,7 @@ test("pause after claim and graceful release completes at the unchanged checkpoi
       expectedSourceRevisionId: source.sourceRevisionId,
     });
     if (resumed.kind !== "created") throw new Error("Expected resumed run.");
-    assert.equal(resumed.run.requestedCheckpointFingerprint, null);
+    assert.equal(resumed.run.requestedCursorFingerprint, null);
     assert.equal(
       (await fixture.database.provider_source_runtime_states.findUniqueOrThrow({
         where: { source_instance_id: source.sourceInstanceId },

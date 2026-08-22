@@ -230,7 +230,7 @@ create table public.provider_source_runtime_states (
   records_committed integer not null default 0,
   run_started_at timestamptz,
   last_progress_at timestamptz,
-  checkpoint_fingerprint text,
+  cursor_fingerprint text,
   continuation_kind public.source_continuation_kind,
   continuation_minimum_delay_seconds integer,
   next_due_at timestamptz,
@@ -324,10 +324,10 @@ create table public.provider_source_runtime_states (
       action_required_code is null
       or action_required_code ~ '^[A-Z][A-Z0-9_]{0,127}$'
     ),
-  constraint provider_source_runtime_states_checkpoint_check
+  constraint provider_source_runtime_states_cursor_check
     check (
-      checkpoint_fingerprint is null
-      or checkpoint_fingerprint ~ '^[0-9a-f]{64}$'
+      cursor_fingerprint is null
+      or cursor_fingerprint ~ '^[0-9a-f]{64}$'
     ),
   constraint provider_source_runtime_states_counts_check
     check (
@@ -393,7 +393,7 @@ insert into public.provider_source_runtime_states (
   phase,
   activity,
   wait_reason,
-  checkpoint_fingerprint,
+  cursor_fingerprint,
   next_due_at,
   updated_at
 )
@@ -415,14 +415,14 @@ select
     else 'inactive'
   end,
   null,
-  checkpoint.checkpoint_fingerprint,
+  cursor.cursor_fingerprint,
   schedule.next_due_at,
   clock_timestamp()
 from public.provider_source_instances as source
-join public.provider_source_checkpoints as checkpoint
-  on checkpoint.source_instance_id = source.id
- and checkpoint.organization_id = source.organization_id
- and checkpoint.provider_id = source.provider_id
+join public.provider_source_cursors as cursor
+  on cursor.source_instance_id = source.id
+ and cursor.organization_id = source.organization_id
+ and cursor.provider_id = source.provider_id
 left join public.provider_source_schedules as schedule
   on schedule.source_instance_id = source.id
  and schedule.organization_id = source.organization_id

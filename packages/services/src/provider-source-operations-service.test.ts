@@ -116,10 +116,10 @@ const catalog = providerSourceAdminCatalogSchema.parse({
       ],
       intervalSeconds: 60,
       freshnessGraceSeconds: 900,
-      checkpoint: {
+      cursor: {
         generation: "1",
         fingerprint: index === 0 ? "a".repeat(64) : null,
-        resumeLabel: index === 0 ? "Saved checkpoint" : "Feed start",
+        resumeLabel: index === 0 ? "Saved cursor" : "Feed start",
       },
       test: {
         jobId: uuid(100 + index),
@@ -180,8 +180,8 @@ const snapshot = providerSourceSupervisorSnapshotSchema.parse({
       mapperKey: `${provider}-mapper`,
       mapperVersion: "v1",
       identityNamespaceKey: `identity-${provider}`,
-      checkpointCodecVersion: "dataforrest-cursor-v1",
-      checkpointGeneration: "1",
+      cursorCodecVersion: "dataforrest-cursor-v1",
+      cursorGeneration: "1",
       lifecycle: index === 1 ? "paused" : "active",
       phase: index === 0 ? "waiting" : index === 1 ? "paused" : "reached_head",
       activity: index === 0 ? "waiting" : index === 1 ? "paused" : "inactive",
@@ -197,7 +197,7 @@ const snapshot = providerSourceSupervisorSnapshotSchema.parse({
           ? new Date(now.getTime() - 10_000).toISOString()
           : null,
       },
-      checkpointFingerprint: index === 0 ? "a".repeat(64) : null,
+      cursorFingerprint: index === 0 ? "a".repeat(64) : null,
       continuation: index === 0 ? { kind: "continue" } : null,
       nextDueAt: new Date(now.getTime() + 60_000).toISOString(),
       connectionEpisode: { episodeId: uuid(90), healthGeneration: "3" },
@@ -276,7 +276,7 @@ function runtime(historyState: "current" | "expired" = "current") {
             committedAt: now,
             records: counters,
             continuation: { kind: "continue" as const },
-            checkpointFingerprint: "a".repeat(64),
+            cursorFingerprint: "a".repeat(64),
           }],
         };
       },
@@ -298,7 +298,7 @@ function runtime(historyState: "current" | "expired" = "current") {
             responseBytes: 512,
             retryDelayMilliseconds: null,
             continuation: { kind: "continue" as const },
-            checkpointFingerprint: "a".repeat(64),
+            cursorFingerprint: "a".repeat(64),
             counters: { records: 20 },
             runId,
             hasTestReference: false,

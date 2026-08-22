@@ -47,7 +47,7 @@ function addDays(value: Date, days: number): Date {
   return new Date(value.getTime() + days * 86_400_000);
 }
 
-function requestedCheckpointKey(fingerprint: string | null): string {
+function requestedCursorKey(fingerprint: string | null): string {
   return fingerprint ?? "initial";
 }
 
@@ -320,7 +320,7 @@ export class ProviderSourceRequestRepository {
           });
           if (!job) throw new PersistenceError("SOURCE_FENCED", "Source-test claim was lost.");
         } else {
-          const [run, checkpoint] = await Promise.all([
+          const [run, cursor] = await Promise.all([
             transaction.import_runs.findFirst({
               where: {
                 id: input.operation.runId,
@@ -336,12 +336,12 @@ export class ProviderSourceRequestRepository {
                 identity_namespace_key: sourceRevision.identity_namespace_key,
                 connection_profile_id: input.connectionProfileId,
                 connection_revision_id: input.connectionRevisionId,
-                checkpoint_codec_version: sourceRevision.checkpoint_codec_version,
-                checkpoint_generation: input.operation.checkpointGeneration,
-                current_checkpoint_fingerprint:
-                  input.operation.requestedCheckpointFingerprint,
-                current_checkpoint_key: requestedCheckpointKey(
-                  input.operation.requestedCheckpointFingerprint,
+                cursor_codec_version: sourceRevision.cursor_codec_version,
+                cursor_generation: input.operation.cursorGeneration,
+                current_cursor_fingerprint:
+                  input.operation.requestedCursorFingerprint,
+                current_cursor_key: requestedCursorKey(
+                  input.operation.requestedCursorFingerprint,
                 ),
                 next_page_number: input.operation.pageNumber,
                 lease_owner: input.claimOwner,
@@ -351,19 +351,19 @@ export class ProviderSourceRequestRepository {
               },
               select: { id: true },
             }),
-            transaction.provider_source_checkpoints.findFirst({
+            transaction.provider_source_cursors.findFirst({
               where: {
                 source_instance_id: input.operation.sourceInstanceId,
                 organization_id: input.organizationId,
                 source_revision_id: input.operation.sourceRevisionId,
-                checkpoint_generation: input.operation.checkpointGeneration,
-                checkpoint_fingerprint: input.operation.requestedCheckpointFingerprint,
+                cursor_generation: input.operation.cursorGeneration,
+                cursor_fingerprint: input.operation.requestedCursorFingerprint,
               },
               select: { source_instance_id: true },
             }),
           ]);
-          if (!run || !checkpoint) {
-            throw new PersistenceError("SOURCE_FENCED", "Run or checkpoint claim was lost.");
+          if (!run || !cursor) {
+            throw new PersistenceError("SOURCE_FENCED", "Run or cursor claim was lost.");
           }
         }
       }
@@ -396,14 +396,14 @@ export class ProviderSourceRequestRepository {
           source_test_job_id: operation.kind === "source_test" ? operation.sourceTestJobId : null,
           run_id: operation.kind === "page_read" ? operation.runId : null,
           page_number: operation.kind === "page_read" ? operation.pageNumber : null,
-          checkpoint_generation: operation.kind === "page_read"
-            ? operation.checkpointGeneration
+          cursor_generation: operation.kind === "page_read"
+            ? operation.cursorGeneration
             : null,
-          requested_checkpoint_fingerprint: operation.kind === "page_read"
-            ? operation.requestedCheckpointFingerprint
+          requested_cursor_fingerprint: operation.kind === "page_read"
+            ? operation.requestedCursorFingerprint
             : null,
-          requested_checkpoint_key: operation.kind === "page_read"
-            ? requestedCheckpointKey(operation.requestedCheckpointFingerprint)
+          requested_cursor_key: operation.kind === "page_read"
+            ? requestedCursorKey(operation.requestedCursorFingerprint)
             : null,
           blocking_episode_id: operation.kind === "connection_test"
             ? operation.blockingEpisodeId ?? null
@@ -494,8 +494,8 @@ export class ProviderSourceRequestRepository {
         sourceTestJobId: string | null;
         runId: string | null;
         pageNumber: number | null;
-        checkpointGeneration: bigint | null;
-        requestedCheckpointFingerprint: string | null;
+        cursorGeneration: bigint | null;
+        requestedCursorFingerprint: string | null;
         blockingEpisodeId: string | null;
         blockingEpisodeConnectionRevisionId: string | null;
         requestLeaseId: string;
@@ -520,8 +520,8 @@ export class ProviderSourceRequestRepository {
                source_test_job_id as "sourceTestJobId",
                run_id as "runId",
                page_number as "pageNumber",
-               checkpoint_generation as "checkpointGeneration",
-               requested_checkpoint_fingerprint as "requestedCheckpointFingerprint",
+               cursor_generation as "cursorGeneration",
+               requested_cursor_fingerprint as "requestedCursorFingerprint",
                blocking_episode_id as "blockingEpisodeId",
                blocking_episode_connection_revision_id as "blockingEpisodeConnectionRevisionId",
                request_lease_id as "requestLeaseId",
@@ -811,7 +811,7 @@ export class ProviderSourceRequestRepository {
         if (!sourceRevision) {
           throw new PersistenceError("SOURCE_FENCED", "Page-read source revision changed.");
         }
-        const [run, source, checkpoint] = await Promise.all([
+        const [run, source, cursor] = await Promise.all([
           transaction.import_runs.findFirst({
             where: {
               id: attempt.runId ?? undefined,
@@ -826,11 +826,11 @@ export class ProviderSourceRequestRepository {
               identity_namespace_key: sourceRevision.identity_namespace_key,
               connection_profile_id: attempt.connectionProfileId,
               connection_revision_id: attempt.connectionRevisionId,
-              checkpoint_codec_version: sourceRevision.checkpoint_codec_version,
-              checkpoint_generation: attempt.checkpointGeneration ?? undefined,
-              requested_checkpoint_fingerprint: attempt.requestedCheckpointFingerprint,
-              requested_checkpoint_key: requestedCheckpointKey(
-                attempt.requestedCheckpointFingerprint,
+              cursor_codec_version: sourceRevision.cursor_codec_version,
+              cursor_generation: attempt.cursorGeneration ?? undefined,
+              requested_cursor_fingerprint: attempt.requestedCursorFingerprint,
+              requested_cursor_key: requestedCursorKey(
+                attempt.requestedCursorFingerprint,
               ),
               lease_owner: attempt.claimOwner,
               lease_token: attempt.claimToken,
@@ -849,19 +849,19 @@ export class ProviderSourceRequestRepository {
             },
             select: { id: true },
           }),
-          transaction.provider_source_checkpoints.findFirst({
+          transaction.provider_source_cursors.findFirst({
             where: {
               source_instance_id: attempt.sourceInstanceId ?? undefined,
               organization_id: input.organizationId,
               source_revision_id: attempt.sourceRevisionId ?? undefined,
-              checkpoint_generation: attempt.checkpointGeneration ?? undefined,
-              checkpoint_fingerprint: attempt.requestedCheckpointFingerprint,
+              cursor_generation: attempt.cursorGeneration ?? undefined,
+              cursor_fingerprint: attempt.requestedCursorFingerprint,
             },
             select: { source_instance_id: true },
           }),
         ]);
-        if (!run || !source || !checkpoint) {
-          throw new PersistenceError("SOURCE_FENCED", "Page-read run, source, or checkpoint fence changed.");
+        if (!run || !source || !cursor) {
+          throw new PersistenceError("SOURCE_FENCED", "Page-read run, source, or cursor fence changed.");
         }
       }
 
@@ -984,10 +984,10 @@ export class ProviderSourceRequestRepository {
           source_test_job_id: attempt.sourceTestJobId,
           run_id: attempt.runId,
           page_number: attempt.pageNumber,
-          checkpoint_generation: attempt.checkpointGeneration,
-          requested_checkpoint_fingerprint: attempt.requestedCheckpointFingerprint,
-          requested_checkpoint_key: attempt.operationKind === "page_read"
-            ? requestedCheckpointKey(attempt.requestedCheckpointFingerprint)
+          cursor_generation: attempt.cursorGeneration,
+          requested_cursor_fingerprint: attempt.requestedCursorFingerprint,
+          requested_cursor_key: attempt.operationKind === "page_read"
+            ? requestedCursorKey(attempt.requestedCursorFingerprint)
             : null,
           response_bytes: input.responseBytes,
           duration_ms: input.durationMs,
@@ -1296,10 +1296,10 @@ export class ProviderSourceRequestRepository {
           source_test_job_id: attempt.source_test_job_id,
           run_id: attempt.run_id,
           page_number: attempt.page_number,
-          checkpoint_generation: attempt.checkpoint_generation,
-          requested_checkpoint_fingerprint: attempt.requested_checkpoint_fingerprint,
-          requested_checkpoint_key: attempt.operation_kind === "page_read"
-            ? requestedCheckpointKey(attempt.requested_checkpoint_fingerprint)
+          cursor_generation: attempt.cursor_generation,
+          requested_cursor_fingerprint: attempt.requested_cursor_fingerprint,
+          requested_cursor_key: attempt.operation_kind === "page_read"
+            ? requestedCursorKey(attempt.requested_cursor_fingerprint)
             : null,
           blocking_episode_id: episode.id,
           blocking_episode_connection_revision_id: episodeRevisionId,

@@ -6,7 +6,7 @@ import {
 } from "./provider-source-contract-v1.ts";
 import {
   productionProviderSourceTypeKeySchema,
-  providerSourceCheckpointGenerationSchema,
+  providerSourceCursorGenerationSchema,
   providerSourceHealthGenerationSchema,
   providerSourceTestStateSchema,
 } from "./provider-source-admin.ts";
@@ -185,10 +185,10 @@ export const providerSourceOperationsSourceSchema = z.object({
     latestFailureCode: safeCodeSchema.nullable(),
     recoveredAt: timestampSchema.nullable(),
   }).strict(),
-  checkpoint: z.object({
-    generation: providerSourceCheckpointGenerationSchema,
+  cursor: z.object({
+    generation: providerSourceCursorGenerationSchema,
     fingerprint: fingerprintSchema.nullable(),
-    resumeLabel: z.enum(["Feed start", "Saved checkpoint"]),
+    resumeLabel: z.enum(["Feed start", "Saved cursor"]),
   }).strict().nullable(),
   progress: z.object({
     pages: boundedCountSchema,
@@ -225,7 +225,7 @@ const pageProgressSchema = z.object({
   records: countSummarySchema,
   dispositions: dispositionSummarySchema,
   continuation: normalizedContinuationSchema.nullable(),
-  checkpointFingerprint: fingerprintSchema.nullable(),
+  cursorFingerprint: fingerprintSchema.nullable(),
 }).strict();
 
 export const providerSourceOperationsDetailSchema = z.object({
@@ -262,7 +262,7 @@ export const providerSourceDiagnosticEventSchema = z.object({
   responseBytes: boundedCountSchema.nullable(),
   retryDelayMilliseconds: boundedCountSchema.nullable(),
   continuation: normalizedContinuationSchema.nullable(),
-  checkpointFingerprint: fingerprintSchema.nullable(),
+  cursorFingerprint: fingerprintSchema.nullable(),
   counters: z.record(registrationKeySchema, boundedCountSchema),
   references: z.array(diagnosticReferenceSchema).max(4),
 }).strict();

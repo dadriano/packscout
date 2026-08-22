@@ -11,7 +11,7 @@ import {
 import type { PackscoutPrismaClient } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import {
-  ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
+  ACCEPTANCE_CURSOR_CODEC_VERSION,
   ACCEPTANCE_CREATED_AT,
   ACCEPTANCE_NORMALIZED_CONTRACT_VERSION,
   ACCEPTANCE_SOURCE_ADAPTER_VERSION,
@@ -163,8 +163,8 @@ test("provider-source history and diagnostic retention are enforced by PostgreSQ
       {
         state: "running",
         createdAt: committedAt,
-        requestedCheckpoint: null,
-        requestedCheckpointFingerprint: null,
+        requestedCursor: null,
+        requestedCursorFingerprint: null,
         leaseOwner: ownerKey,
         leaseToken: runLeaseToken,
         leaseExpiresAt: supervisor.leaseExpiresAt,
@@ -172,7 +172,7 @@ test("provider-source history and diagnostic retention are enforced by PostgreSQ
     );
     const requestAttemptId = randomUUID();
     const pageId = randomUUID();
-    const checkpointFingerprint = "c".repeat(64);
+    const cursorFingerprint = "c".repeat(64);
     await fixture.database.compact_source_request_attempts.create({
       data: {
         request_attempt_id: requestAttemptId,
@@ -193,8 +193,8 @@ test("provider-source history and diagnostic retention are enforced by PostgreSQ
         source_revision_id: source.sourceRevisionId,
         run_id: run.id,
         page_number: 1,
-        checkpoint_generation: 1n,
-        requested_checkpoint_key: "initial",
+        cursor_generation: 1n,
+        requested_cursor_key: "initial",
         started_at: committedAt,
         terminal_at: committedAt,
       },
@@ -224,11 +224,11 @@ test("provider-source history and diagnostic retention are enforced by PostgreSQ
         connection_health_generation: 0n,
         request_attempt_id: requestAttemptId,
         supervisor_epoch_id: supervisor.epochId,
-        checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
-        checkpoint_generation: 1n,
-        requested_checkpoint_key: "initial",
-        next_checkpoint: new TextEncoder().encode("checkpoint-1"),
-        next_checkpoint_fingerprint: checkpointFingerprint,
+        cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+        cursor_generation: 1n,
+        requested_cursor_key: "initial",
+        next_cursor: "cursor-1",
+        next_cursor_fingerprint: cursorFingerprint,
         continuation_kind: "continue",
         protected_raw_response: new TextEncoder().encode("protected-page"),
         protected_raw_response_sha256: "e".repeat(64),
@@ -236,16 +236,16 @@ test("provider-source history and diagnostic retention are enforced by PostgreSQ
       },
     });
     const fingerprint =
-      await fixture.database.provider_source_checkpoint_fingerprints.create({
+      await fixture.database.provider_source_cursor_fingerprints.create({
         data: {
           organization_id: fixture.organizationId,
           provider_id: source.providerId,
           source_instance_id: source.sourceInstanceId,
           source_revision_id: source.sourceRevisionId,
-          checkpoint_generation: 1n,
+          cursor_generation: 1n,
           source_adapter_version: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
-          checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
-          checkpoint_fingerprint: checkpointFingerprint,
+          cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+          cursor_fingerprint: cursorFingerprint,
           first_committed_run_id: run.id,
           first_committed_page_id: pageId,
           committed_at: committedAt,
@@ -267,8 +267,8 @@ test("provider-source history and diagnostic retention are enforced by PostgreSQ
         mapper_key: source.mapperKey,
         mapper_version: "1",
         identity_namespace_key: source.identityNamespaceKey,
-        checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
-        checkpoint_generation: 1n,
+        cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+        cursor_generation: 1n,
         connection_health_generation: 0n,
         supervisor_epoch_id: supervisor.epochId,
         connection_profile_id: fixture.connectionProfileId,
@@ -280,11 +280,11 @@ test("provider-source history and diagnostic retention are enforced by PostgreSQ
       },
     });
     for (const mutation of [
-      fixture.database.provider_source_checkpoint_fingerprints.update({
+      fixture.database.provider_source_cursor_fingerprints.update({
         where: { id: fingerprint.id },
         data: { committed_at: new Date(committedAt.getTime() + 1) },
       }),
-      fixture.database.provider_source_checkpoint_fingerprints.delete({
+      fixture.database.provider_source_cursor_fingerprints.delete({
         where: { id: fingerprint.id },
       }),
       fixture.database.source_delivery_occurrences.update({

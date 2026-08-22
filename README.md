@@ -31,7 +31,7 @@ Operators should start with the
 [ingestion pipeline operator guide](docs/ingestion-pipelines/README.md). It
 covers the single-supervisor process model, source and connection setup, daily
 Run/Pause/Resume workflows, diagnostics, capacity guards, credential recovery,
-quarantine, checkpoint safety, and graceful restart behavior.
+quarantine, cursor safety, and graceful restart behavior.
 
 A first full-history DataForrest import has additional fail-closed target,
 storage, bootstrap, and reconciliation gates. Follow the

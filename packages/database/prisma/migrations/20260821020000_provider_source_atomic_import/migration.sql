@@ -3,17 +3,17 @@
 ALTER TABLE "import_runs"
   ALTER COLUMN "config_revision_id" DROP NOT NULL,
   ADD COLUMN "claim_lease_id" UUID,
-  ADD COLUMN "current_checkpoint" BYTEA,
-  ADD COLUMN "current_checkpoint_fingerprint" TEXT,
-  ADD COLUMN "current_checkpoint_key" TEXT,
+  ADD COLUMN "current_cursor" TEXT,
+  ADD COLUMN "current_cursor_fingerprint" TEXT,
+  ADD COLUMN "current_cursor_key" TEXT,
   ADD COLUMN "next_page_number" INTEGER;
 
--- requested_checkpoint* is immutable run-start provenance. The current tuple
+-- requested_cursor* is immutable run-start provenance. The current tuple
 -- is the durable page-turn intent and advances after each committed page.
 UPDATE "import_runs"
-SET "current_checkpoint" = "requested_checkpoint",
-    "current_checkpoint_fingerprint" = "requested_checkpoint_fingerprint",
-    "current_checkpoint_key" = "requested_checkpoint_key",
+SET "current_cursor" = "requested_cursor",
+    "current_cursor_fingerprint" = "requested_cursor_fingerprint",
+    "current_cursor_key" = "requested_cursor_key",
     "next_page_number" = 1
 WHERE "source_instance_id" IS NOT NULL;
 
@@ -23,42 +23,42 @@ ALTER TABLE "import_runs"
     (
       "source_instance_id" IS NULL
       AND "config_revision_id" IS NOT NULL
-      AND "current_checkpoint" IS NULL
-      AND "current_checkpoint_fingerprint" IS NULL
-      AND "current_checkpoint_key" IS NULL
+      AND "current_cursor" IS NULL
+      AND "current_cursor_fingerprint" IS NULL
+      AND "current_cursor_key" IS NULL
       AND "next_page_number" IS NULL
     )
     OR
     (
       "source_instance_id" IS NOT NULL
       AND "config_revision_id" IS NULL
-      AND "requested_cursor" IS NULL
       AND "final_cursor" IS NULL
-      AND (("current_checkpoint" IS NULL) =
-        ("current_checkpoint_fingerprint" IS NULL))
+      AND (("current_cursor" IS NULL) =
+        ("current_cursor_fingerprint" IS NULL))
       AND (
-        "current_checkpoint" IS NULL
-        OR octet_length("current_checkpoint") BETWEEN 1 AND 16384
+        "current_cursor" IS NULL
+        OR octet_length("current_cursor") BETWEEN 1 AND 16384
       )
       AND (
-        "current_checkpoint_fingerprint" IS NULL
-        OR "current_checkpoint_fingerprint" ~ '^[0-9a-f]{64}$'
+        "current_cursor_fingerprint" IS NULL
+        OR "current_cursor_fingerprint" ~ '^[0-9a-f]{64}$'
       )
-      AND "current_checkpoint_key" =
-        COALESCE("current_checkpoint_fingerprint", 'initial')
+      AND "current_cursor_key" IS NOT NULL
+      AND "current_cursor_key" =
+        COALESCE("current_cursor_fingerprint", 'initial')
       AND "next_page_number" IS NOT NULL
       AND "next_page_number" > 0
     )
   );
 
 -- Page attempts must remain valid historical proof after the run advances to
--- its next checkpoint. Their run FK therefore pins the immutable claim scope,
--- while admission atomically compares the attempt checkpoint to run.current_*.
+-- its next cursor. Their run FK therefore pins the immutable claim scope,
+-- while admission atomically compares the attempt cursor to run.current_*.
 CREATE UNIQUE INDEX "import_runs_source_lease_claim_unique"
 ON "import_runs" (
   "id", "organization_id", "provider_id", "source_instance_id",
   "source_revision_id", "connection_profile_id", "connection_revision_id",
-  "checkpoint_generation", "lease_owner", "lease_token"
+  "cursor_generation", "lease_owner", "lease_token"
 );
 
 ALTER TABLE "source_request_attempts"
@@ -67,12 +67,12 @@ ALTER TABLE "source_request_attempts"
   FOREIGN KEY (
     "run_id", "organization_id", "provider_id", "source_instance_id",
     "source_revision_id", "connection_profile_id", "connection_revision_id",
-    "checkpoint_generation", "claim_owner", "claim_token"
+    "cursor_generation", "claim_owner", "claim_token"
   )
   REFERENCES "import_runs"(
     "id", "organization_id", "provider_id", "source_instance_id",
     "source_revision_id", "connection_profile_id", "connection_revision_id",
-    "checkpoint_generation", "lease_owner", "lease_token"
+    "cursor_generation", "lease_owner", "lease_token"
   ) ON DELETE RESTRICT ON UPDATE NO ACTION;
 
 ALTER TABLE "compact_source_request_attempts"
@@ -81,12 +81,12 @@ ALTER TABLE "compact_source_request_attempts"
   FOREIGN KEY (
     "run_id", "organization_id", "provider_id", "source_instance_id",
     "source_revision_id", "connection_profile_id", "connection_revision_id",
-    "checkpoint_generation", "claim_owner", "claim_token"
+    "cursor_generation", "claim_owner", "claim_token"
   )
   REFERENCES "import_runs"(
     "id", "organization_id", "provider_id", "source_instance_id",
     "source_revision_id", "connection_profile_id", "connection_revision_id",
-    "checkpoint_generation", "lease_owner", "lease_token"
+    "cursor_generation", "lease_owner", "lease_token"
   ) ON DELETE RESTRICT ON UPDATE NO ACTION;
 
 -- Compact receipts retain the safe measurements that participate in the
@@ -110,9 +110,7 @@ ALTER TABLE "import_pages"
   CHECK (
     "source_instance_id" IS NULL
     OR (
-      "requested_cursor" IS NULL
-      AND "next_cursor" IS NULL
-      AND "has_more" IS NULL
+      "has_more" IS NULL
       AND "protected_raw_response_sha256" ~ '^[0-9a-f]{64}$'
       AND (
         (

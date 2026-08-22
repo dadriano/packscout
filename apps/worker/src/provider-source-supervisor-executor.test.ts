@@ -93,7 +93,7 @@ function sourceWork(): ClaimedSourceTestWork {
     mapperKey: "courtyard-v1",
     mapperVersion: "v1",
     identityNamespaceKey: dataforrestIdentityNamespaceByProvider.courtyard,
-    checkpointCodecVersion: alternateBookmarkSourceManifest.checkpointCodecKey,
+    cursorCodecVersion: alternateBookmarkSourceManifest.cursorCodecKey,
     sourceConfiguration: { partition: "courtyard" },
     recordIdScopes: persistedScopes,
   };

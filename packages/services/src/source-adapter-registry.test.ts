@@ -23,7 +23,7 @@ function fixtureAdapter(
     adapterVersion,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     compatibleConnectionTypeKey: `${sourceTypeKey}-connection`,
-    checkpointCodecKey: `${sourceTypeKey}-checkpoint`,
+    cursorCodecKey: `${sourceTypeKey}-cursor`,
     operatorLabel: "Alternate fixture source",
     requestBounds: {
       pageLimit: 250,

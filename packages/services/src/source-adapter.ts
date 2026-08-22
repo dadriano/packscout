@@ -8,7 +8,7 @@ import {
   type ProviderSourceRequestBounds,
   type LaunchProviderKey,
   type NormalizedProviderObservationPage,
-  type OpaqueCheckpointEnvelope,
+  type OpaqueCursorEnvelope,
   type RecordIdScopeDeclaration,
   type SourceAdapterFailure,
   type SourceAdapterManifestV1,
@@ -18,7 +18,7 @@ import {
 import {
   SourceAdapterContractError,
   canonicalizeBounds,
-  canonicalizeCheckpoint,
+  canonicalizeCursor,
   canonicalizeConfiguration,
   canonicalizeJsonValue,
   canonicalizeRecordIdScopes,
@@ -99,14 +99,14 @@ const correlationKeysByOperation = Object.freeze({
     "sourceTestJobId",
   ],
   page_read: [
-    "checkpointGeneration",
+    "cursorGeneration",
     "connectionHealthGeneration",
     "importRunId",
     "pageAttemptId",
     "pageNumber",
     "pageLimit",
-    "requestedCheckpoint",
-    "requestedCheckpointFingerprint",
+    "requestedCursor",
+    "requestedCursorFingerprint",
     "runClaimLeaseId",
     "singletonFencingEpoch",
   ],
@@ -170,7 +170,7 @@ export function assertSourceAdapterOperation(
     (!isDeepFrozenJsonValue(operation.sourceConfiguration) ||
       !isDeepFrozenJsonValue(operation.recordIdScopes) ||
       (operationKind === "page_read" &&
-        !isDeepFrozenJsonValue(operation.correlation.requestedCheckpoint)))
+        !isDeepFrozenJsonValue(operation.correlation.requestedCursor)))
   ) {
     throw new SourceAdapterContractError("invalid_operation_shape");
   }
@@ -232,9 +232,9 @@ export interface PageReadOperation extends SourceOperationBase {
     runClaimLeaseId: string;
     pageAttemptId: string;
     pageNumber: number;
-    checkpointGeneration: number;
-    requestedCheckpointFingerprint: string | null;
-    requestedCheckpoint: OpaqueCheckpointEnvelope;
+    cursorGeneration: number;
+    requestedCursorFingerprint: string | null;
+    requestedCursor: OpaqueCursorEnvelope;
     pageLimit: number;
   }>;
 }
@@ -342,8 +342,8 @@ export function createPageReadOperation(
   const correlation = canonicalizeJsonValue(
     {
       ...input.correlation,
-      requestedCheckpoint: canonicalizeCheckpoint(
-        input.correlation.requestedCheckpoint,
+      requestedCursor: canonicalizeCursor(
+        input.correlation.requestedCursor,
       ),
     },
     new Set(),
@@ -398,7 +398,7 @@ export interface SourceTestInterpretationContext
 export interface PageReadInterpretationContext
   extends SourceAdapterInterpretationSourceContext {
   readonly operationKind: "page_read";
-  readonly requestedCheckpoint: OpaqueCheckpointEnvelope;
+  readonly requestedCursor: OpaqueCursorEnvelope;
   readonly pageLimit: number;
   readonly pageNumber: number;
 }
@@ -457,9 +457,9 @@ export function sourceAdapterOperationScopeOf(
     pageAttemptId: operation.correlation.pageAttemptId,
     pageNumber: operation.correlation.pageNumber,
     pageLimit: operation.correlation.pageLimit,
-    checkpointGeneration: operation.correlation.checkpointGeneration,
-    requestedCheckpointFingerprint:
-      operation.correlation.requestedCheckpointFingerprint,
+    cursorGeneration: operation.correlation.cursorGeneration,
+    requestedCursorFingerprint:
+      operation.correlation.requestedCursorFingerprint,
   };
 }
 
@@ -506,7 +506,7 @@ export function sourceAdapterInterpretationContextOf(
   return Object.freeze({
     ...source,
     operationKind: "page_read",
-    requestedCheckpoint: operation.correlation.requestedCheckpoint,
+    requestedCursor: operation.correlation.requestedCursor,
     pageLimit: operation.correlation.pageLimit,
     pageNumber: operation.correlation.pageNumber,
   });
@@ -551,7 +551,7 @@ export function consumeSourceAdapterRequestLease(
   return operation.operationKind === "page_read"
     ? operation.requestLease.consume(
         scope,
-        operation.correlation.requestedCheckpoint,
+        operation.correlation.requestedCursor,
       )
     : operation.requestLease.consume(scope);
 }
@@ -1279,7 +1279,7 @@ function completeValidatedSourceAdapterPageInterpretation(
     ]) ||
     !hasExactKeys(interpretation.value.normalizedPage, [
       "continuation",
-      "nextCheckpoint",
+      "nextCursor",
       "normalizedContractVersion",
       "outcomes",
       "provider",
@@ -1318,20 +1318,20 @@ function completeValidatedSourceAdapterPageInterpretation(
   }
   const measurements = normalizedPage.measurements;
   const canonicalPageDiagnostics = normalizedPage.diagnostics;
-  const requestedCheckpoint = operation.correlation.requestedCheckpoint;
-  const nextCheckpoint = normalizedPage.nextCheckpoint;
+  const requestedCursor = operation.correlation.requestedCursor;
+  const nextCursor = normalizedPage.nextCursor;
   if (
     normalizedPage.provider !== operation.provider ||
     normalizedPage.normalizedContractVersion !==
       operation.normalizedContractVersion ||
-    nextCheckpoint.sourceInstanceId !== operation.sourceInstanceId ||
-    nextCheckpoint.sourceRevisionId !== operation.sourceRevisionId ||
-    nextCheckpoint.sourceTypeKey !== operation.sourceTypeKey ||
-    nextCheckpoint.adapterVersion !== operation.adapterVersion ||
-    nextCheckpoint.checkpointCodecKey !==
-      requestedCheckpoint.checkpointCodecKey ||
-    nextCheckpoint.checkpointGeneration !==
-      operation.correlation.checkpointGeneration
+    nextCursor.sourceInstanceId !== operation.sourceInstanceId ||
+    nextCursor.sourceRevisionId !== operation.sourceRevisionId ||
+    nextCursor.sourceTypeKey !== operation.sourceTypeKey ||
+    nextCursor.adapterVersion !== operation.adapterVersion ||
+    nextCursor.cursorCodecKey !==
+      requestedCursor.cursorCodecKey ||
+    nextCursor.cursorGeneration !==
+      operation.correlation.cursorGeneration
   ) {
     throw new SourceAdapterContractError("invalid_interpretation_shape");
   }

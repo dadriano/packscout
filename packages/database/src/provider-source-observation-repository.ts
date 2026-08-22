@@ -178,8 +178,8 @@ export type RecordDeliveryOccurrenceInput = Readonly<{
   mapperKey: string;
   mapperVersion: string;
   identityNamespaceKey: string;
-  checkpointCodecVersion: string;
-  checkpointGeneration: bigint;
+  cursorCodecVersion: string;
+  cursorGeneration: bigint;
   connectionHealthGeneration: bigint;
   supervisorEpochId: string;
   connectionProfileId: string;
@@ -404,8 +404,8 @@ function deliveryOccurrenceRow(input: RecordDeliveryOccurrenceInput) {
     mapper_key: input.mapperKey,
     mapper_version: input.mapperVersion,
     identity_namespace_key: input.identityNamespaceKey,
-    checkpoint_codec_version: input.checkpointCodecVersion,
-    checkpoint_generation: input.checkpointGeneration,
+    cursor_codec_version: input.cursorCodecVersion,
+    cursor_generation: input.cursorGeneration,
     connection_health_generation: input.connectionHealthGeneration,
     supervisor_epoch_id: input.supervisorEpochId,
     connection_profile_id: input.connectionProfileId,

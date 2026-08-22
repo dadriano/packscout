@@ -46,8 +46,8 @@ ALTER TYPE "import_trigger" ADD VALUE 'continuation';
 ALTER TYPE "source_record_kind" RENAME VALUE 'sale' TO 'trade';
 
 -- AlterTable
-ALTER TABLE "import_pages" ADD COLUMN     "checkpoint_codec_version" TEXT,
-ADD COLUMN     "checkpoint_generation" BIGINT,
+ALTER TABLE "import_pages" ADD COLUMN     "cursor_codec_version" TEXT,
+ADD COLUMN     "cursor_generation" BIGINT,
 ADD COLUMN     "connection_health_generation" BIGINT,
 ADD COLUMN     "connection_profile_id" UUID,
 ADD COLUMN     "connection_revision_id" UUID,
@@ -56,13 +56,11 @@ ADD COLUMN     "identity_namespace_key" TEXT,
 ADD COLUMN     "mapper_key" TEXT,
 ADD COLUMN     "mapper_version" TEXT,
 ADD COLUMN     "minimum_delay_seconds" INTEGER,
-ADD COLUMN     "next_checkpoint" BYTEA,
-ADD COLUMN     "next_checkpoint_fingerprint" TEXT,
+ADD COLUMN     "next_cursor_fingerprint" TEXT,
 ADD COLUMN     "normalized_contract_version" TEXT,
 ADD COLUMN     "request_attempt_id" UUID,
-ADD COLUMN     "requested_checkpoint" BYTEA,
-ADD COLUMN     "requested_checkpoint_fingerprint" TEXT,
-ADD COLUMN     "requested_checkpoint_key" TEXT,
+ADD COLUMN     "requested_cursor_fingerprint" TEXT,
+ADD COLUMN     "requested_cursor_key" TEXT,
 ADD COLUMN     "source_adapter_version" TEXT,
 ADD COLUMN     "source_instance_id" UUID,
 ADD COLUMN     "source_revision_id" UUID,
@@ -70,8 +68,8 @@ ADD COLUMN     "source_type_key" TEXT,
 ADD COLUMN     "supervisor_epoch_id" UUID;
 
 -- AlterTable
-ALTER TABLE "import_runs" ADD COLUMN     "checkpoint_codec_version" TEXT,
-ADD COLUMN     "checkpoint_generation" BIGINT,
+ALTER TABLE "import_runs" ADD COLUMN     "cursor_codec_version" TEXT,
+ADD COLUMN     "cursor_generation" BIGINT,
 ADD COLUMN     "connection_profile_id" UUID,
 ADD COLUMN     "connection_revision_id" UUID,
 ADD COLUMN     "identity_namespace_key" TEXT,
@@ -79,9 +77,8 @@ ADD COLUMN     "lease_token" UUID,
 ADD COLUMN     "mapper_key" TEXT,
 ADD COLUMN     "mapper_version" TEXT,
 ADD COLUMN     "normalized_contract_version" TEXT,
-ADD COLUMN     "requested_checkpoint" BYTEA,
-ADD COLUMN     "requested_checkpoint_fingerprint" TEXT,
-ADD COLUMN     "requested_checkpoint_key" TEXT,
+ADD COLUMN     "requested_cursor_fingerprint" TEXT,
+ADD COLUMN     "requested_cursor_key" TEXT,
 ADD COLUMN     "source_adapter_version" TEXT,
 ADD COLUMN     "source_instance_id" UUID,
 ADD COLUMN     "source_revision_id" UUID,
@@ -226,7 +223,7 @@ CREATE TABLE "provider_source_revisions" (
     "mapper_key" TEXT NOT NULL,
     "mapper_version" TEXT NOT NULL,
     "identity_namespace_key" TEXT NOT NULL,
-    "checkpoint_codec_version" TEXT NOT NULL,
+    "cursor_codec_version" TEXT NOT NULL,
     "configuration_json" JSONB NOT NULL,
     "configuration_hash" TEXT NOT NULL,
     "record_id_scopes_json" JSONB NOT NULL,
@@ -272,39 +269,39 @@ CREATE TABLE "provider_source_schedules" (
 );
 
 -- CreateTable
-CREATE TABLE "provider_source_checkpoints" (
+CREATE TABLE "provider_source_cursors" (
     "source_instance_id" UUID NOT NULL,
     "organization_id" UUID NOT NULL,
     "provider_id" UUID NOT NULL,
     "source_revision_id" UUID NOT NULL,
     "source_adapter_version" TEXT NOT NULL,
-    "checkpoint_codec_version" TEXT NOT NULL,
-    "checkpoint_generation" BIGINT NOT NULL DEFAULT 1,
-    "checkpoint_bytes" BYTEA,
-    "checkpoint_fingerprint" TEXT,
+    "cursor_codec_version" TEXT NOT NULL,
+    "cursor_generation" BIGINT NOT NULL DEFAULT 1,
+    "cursor" TEXT,
+    "cursor_fingerprint" TEXT,
     "advanced_by_run_id" UUID,
     "advanced_by_page_id" UUID,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
 
-    CONSTRAINT "provider_source_checkpoints_pkey" PRIMARY KEY ("source_instance_id")
+    CONSTRAINT "provider_source_cursors_pkey" PRIMARY KEY ("source_instance_id")
 );
 
 -- CreateTable
-CREATE TABLE "provider_source_checkpoint_fingerprints" (
+CREATE TABLE "provider_source_cursor_fingerprints" (
     "id" BIGSERIAL NOT NULL,
     "organization_id" UUID NOT NULL,
     "provider_id" UUID NOT NULL,
     "source_instance_id" UUID NOT NULL,
     "source_revision_id" UUID NOT NULL,
-    "checkpoint_generation" BIGINT NOT NULL,
+    "cursor_generation" BIGINT NOT NULL,
     "source_adapter_version" TEXT NOT NULL,
-    "checkpoint_codec_version" TEXT NOT NULL,
-    "checkpoint_fingerprint" TEXT NOT NULL,
+    "cursor_codec_version" TEXT NOT NULL,
+    "cursor_fingerprint" TEXT NOT NULL,
     "first_committed_run_id" UUID,
     "first_committed_page_id" UUID,
     "committed_at" TIMESTAMPTZ(6) NOT NULL,
 
-    CONSTRAINT "provider_source_checkpoint_fingerprints_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "provider_source_cursor_fingerprints_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -410,9 +407,9 @@ CREATE TABLE "source_request_attempts" (
     "source_test_job_id" UUID,
     "run_id" UUID,
     "page_number" INTEGER,
-    "checkpoint_generation" BIGINT,
-    "requested_checkpoint_fingerprint" TEXT,
-    "requested_checkpoint_key" TEXT,
+    "cursor_generation" BIGINT,
+    "requested_cursor_fingerprint" TEXT,
+    "requested_cursor_key" TEXT,
     "blocking_episode_id" UUID,
     "blocking_episode_connection_revision_id" UUID,
     "outcome_class" TEXT,
@@ -451,9 +448,9 @@ CREATE TABLE "compact_source_request_attempts" (
     "source_test_job_id" UUID,
     "run_id" UUID,
     "page_number" INTEGER,
-    "checkpoint_generation" BIGINT,
-    "requested_checkpoint_fingerprint" TEXT,
-    "requested_checkpoint_key" TEXT,
+    "cursor_generation" BIGINT,
+    "requested_cursor_fingerprint" TEXT,
+    "requested_cursor_key" TEXT,
     "blocking_episode_id" UUID,
     "blocking_episode_connection_revision_id" UUID,
     "started_at" TIMESTAMPTZ(6) NOT NULL,
@@ -521,8 +518,8 @@ CREATE TABLE "source_delivery_occurrences" (
     "mapper_key" TEXT NOT NULL,
     "mapper_version" TEXT NOT NULL,
     "identity_namespace_key" TEXT NOT NULL,
-    "checkpoint_codec_version" TEXT NOT NULL,
-    "checkpoint_generation" BIGINT NOT NULL,
+    "cursor_codec_version" TEXT NOT NULL,
+    "cursor_generation" BIGINT NOT NULL,
     "connection_health_generation" BIGINT NOT NULL,
     "supervisor_epoch_id" UUID NOT NULL,
     "connection_profile_id" UUID NOT NULL,
@@ -554,7 +551,7 @@ CREATE TABLE "source_processor_diagnostic_events" (
     "continuation_kind" "source_continuation_kind",
     "minimum_delay_seconds" INTEGER,
     "retry_delay_ms" INTEGER,
-    "checkpoint_fingerprint" TEXT,
+    "cursor_fingerprint" TEXT,
     "source_type_key" TEXT NOT NULL,
     "source_adapter_version" TEXT NOT NULL,
     "normalized_contract_version" TEXT,
@@ -678,10 +675,10 @@ CREATE UNIQUE INDEX "provider_source_instances_owner_unique" ON "provider_source
 CREATE UNIQUE INDEX "provider_source_revisions_scope_unique" ON "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "provider_source_revisions_pins_unique" ON "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "checkpoint_codec_version");
+CREATE UNIQUE INDEX "provider_source_revisions_pins_unique" ON "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "cursor_codec_version");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "provider_source_revisions_checkpoint_unique" ON "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "checkpoint_codec_version");
+CREATE UNIQUE INDEX "provider_source_revisions_cursor_unique" ON "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "cursor_codec_version");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "provider_source_revisions_diagnostic_unique" ON "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version");
@@ -708,16 +705,16 @@ CREATE INDEX "provider_source_schedules_due_idx" ON "provider_source_schedules"(
 CREATE UNIQUE INDEX "provider_source_schedules_scope_unique" ON "provider_source_schedules"("source_instance_id", "organization_id", "provider_id");
 
 -- CreateIndex
-CREATE INDEX "provider_source_checkpoints_provider_idx" ON "provider_source_checkpoints"("organization_id", "provider_id");
+CREATE INDEX "provider_source_cursors_provider_idx" ON "provider_source_cursors"("organization_id", "provider_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "provider_source_checkpoints_scope_unique" ON "provider_source_checkpoints"("source_instance_id", "organization_id", "provider_id");
+CREATE UNIQUE INDEX "provider_source_cursors_scope_unique" ON "provider_source_cursors"("source_instance_id", "organization_id", "provider_id");
 
 -- CreateIndex
-CREATE INDEX "provider_source_checkpoint_fingerprints_generation_idx" ON "provider_source_checkpoint_fingerprints"("organization_id", "source_instance_id", "checkpoint_generation");
+CREATE INDEX "provider_source_cursor_fingerprints_generation_idx" ON "provider_source_cursor_fingerprints"("organization_id", "source_instance_id", "cursor_generation");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "provider_source_checkpoint_fingerprints_cycle_unique" ON "provider_source_checkpoint_fingerprints"("source_instance_id", "checkpoint_generation", "checkpoint_fingerprint");
+CREATE UNIQUE INDEX "provider_source_cursor_fingerprints_cycle_unique" ON "provider_source_cursor_fingerprints"("source_instance_id", "cursor_generation", "cursor_fingerprint");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "provider_source_health_states_scope_unique" ON "provider_source_health_states"("source_instance_id", "organization_id", "provider_id");
@@ -789,10 +786,10 @@ CREATE UNIQUE INDEX "compact_source_request_attempts_source_test_unique" ON "com
 CREATE UNIQUE INDEX "compact_source_request_attempts_page_unique" ON "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "page_number");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "compact_source_request_attempts_page_fence_unique" ON "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "page_number", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "checkpoint_generation", "requested_checkpoint_key");
+CREATE UNIQUE INDEX "compact_source_request_attempts_page_fence_unique" ON "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "page_number", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "cursor_generation", "requested_cursor_key");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "compact_source_request_attempts_occurrence_unique" ON "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "checkpoint_generation");
+CREATE UNIQUE INDEX "compact_source_request_attempts_occurrence_unique" ON "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "cursor_generation");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "compact_source_request_attempts_diagnostic_source_unique" ON "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id");
@@ -878,7 +875,7 @@ CREATE UNIQUE INDEX "import_runs_source_owner_unique"
 ON "import_runs" ("id", "organization_id", "provider_id", "source_instance_id");
 
 CREATE UNIQUE INDEX "import_runs_source_claim_unique"
-ON "import_runs" ("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "checkpoint_generation", "requested_checkpoint_key", "lease_owner", "lease_token");
+ON "import_runs" ("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "cursor_generation", "requested_cursor_key", "lease_owner", "lease_token");
 
 CREATE UNIQUE INDEX "import_runs_source_diagnostic_unique"
 ON "import_runs" ("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "trigger");
@@ -887,10 +884,16 @@ CREATE UNIQUE INDEX "import_pages_source_scope_unique"
 ON "import_pages" ("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id");
 
 CREATE UNIQUE INDEX "import_pages_source_attempt_unique"
-ON "import_pages" ("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "request_attempt_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "checkpoint_generation", "connection_health_generation");
+ON "import_pages" ("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "request_attempt_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "cursor_generation", "connection_health_generation");
 
-CREATE UNIQUE INDEX "import_pages_source_checkpoint_unique"
-ON "import_pages" ("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "checkpoint_generation", "next_checkpoint_fingerprint");
+CREATE UNIQUE INDEX "import_pages_source_cursor_unique"
+ON "import_pages" ("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "cursor_generation", "next_cursor_fingerprint");
+
+-- The authoritative cursor also records pages that intentionally advance to a
+-- null cursor at provider head. Its position key therefore cannot depend on a
+-- nullable fingerprint; cursor history keeps using the fingerprint-bound key.
+CREATE UNIQUE INDEX "import_pages_source_cursor_position_unique"
+ON "import_pages" ("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "cursor_generation");
 
 CREATE UNIQUE INDEX "import_pages_source_diagnostic_unique"
 ON "import_pages" ("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "request_attempt_id");
@@ -1023,7 +1026,7 @@ ALTER TABLE "provider_source_revisions"
     AND btrim("mapper_key") <> ''
     AND btrim("mapper_version") <> ''
     AND btrim("identity_namespace_key") <> ''
-    AND btrim("checkpoint_codec_version") <> ''
+    AND btrim("cursor_codec_version") <> ''
     AND "configuration_hash" ~ '^[0-9a-f]{64}$'
     AND jsonb_typeof("configuration_json") = 'object'
     AND jsonb_typeof("record_id_scopes_json") = 'array'
@@ -1065,31 +1068,37 @@ ALTER TABLE "provider_source_schedules"
     OR ("claim_owner" IS NOT NULL AND "claim_token" IS NOT NULL AND "claim_expires_at" IS NOT NULL)
   );
 
-ALTER TABLE "provider_source_checkpoints"
-  ADD CONSTRAINT "provider_source_checkpoints_generation_check"
-  CHECK ("checkpoint_generation" >= 1),
-  ADD CONSTRAINT "provider_source_checkpoints_page_run_check"
+ALTER TABLE "provider_source_cursors"
+  ADD CONSTRAINT "provider_source_cursors_generation_check"
+  CHECK ("cursor_generation" >= 1),
+  ADD CONSTRAINT "provider_source_cursors_page_run_check"
   CHECK (
-    ("advanced_by_run_id" IS NULL AND "advanced_by_page_id" IS NULL)
-    OR ("advanced_by_run_id" IS NOT NULL AND "advanced_by_page_id" IS NOT NULL AND "checkpoint_fingerprint" IS NOT NULL)
+    (
+      "advanced_by_run_id" IS NULL
+      AND "advanced_by_page_id" IS NULL
+      AND "cursor" IS NULL
+      AND "cursor_fingerprint" IS NULL
+    )
+    OR ("advanced_by_run_id" IS NOT NULL AND "advanced_by_page_id" IS NOT NULL)
   ),
-  ADD CONSTRAINT "provider_source_checkpoints_envelope_check"
+  ADD CONSTRAINT "provider_source_cursors_envelope_check"
   CHECK (
-    ("checkpoint_bytes" IS NULL AND "checkpoint_fingerprint" IS NULL)
+    ("cursor" IS NULL AND "cursor_fingerprint" IS NULL)
     OR (
-      "checkpoint_bytes" IS NOT NULL
-      AND octet_length("checkpoint_bytes") BETWEEN 1 AND 16384
-      AND "checkpoint_fingerprint" ~ '^[0-9a-f]{64}$'
+      "cursor" IS NOT NULL
+      AND "cursor_fingerprint" IS NOT NULL
+      AND octet_length("cursor") BETWEEN 1 AND 16384
+      AND "cursor_fingerprint" ~ '^[0-9a-f]{64}$'
     )
   );
 
-ALTER TABLE "provider_source_checkpoint_fingerprints"
-  ADD CONSTRAINT "provider_source_checkpoint_fingerprints_check"
+ALTER TABLE "provider_source_cursor_fingerprints"
+  ADD CONSTRAINT "provider_source_cursor_fingerprints_check"
   CHECK (
-    "checkpoint_generation" >= 1
-    AND "checkpoint_fingerprint" ~ '^[0-9a-f]{64}$'
+    "cursor_generation" >= 1
+    AND "cursor_fingerprint" ~ '^[0-9a-f]{64}$'
   ),
-  ADD CONSTRAINT "provider_source_checkpoint_fingerprints_page_run_check"
+  ADD CONSTRAINT "provider_source_cursor_fingerprints_page_run_check"
   CHECK ("first_committed_page_id" IS NOT NULL AND "first_committed_run_id" IS NOT NULL);
 
 ALTER TABLE "provider_source_health_states"
@@ -1166,9 +1175,9 @@ ALTER TABLE "source_supervisor_epochs"
 ALTER TABLE "source_request_attempts"
   ADD CONSTRAINT "source_request_attempts_scope_check"
   CHECK (
-    ("operation_kind" = 'connection_test' AND "connection_test_job_id" IS NOT NULL AND "provider_id" IS NULL AND "source_instance_id" IS NULL AND "source_revision_id" IS NULL AND "source_test_job_id" IS NULL AND "run_id" IS NULL AND "page_number" IS NULL AND "checkpoint_generation" IS NULL AND "requested_checkpoint_fingerprint" IS NULL AND "requested_checkpoint_key" IS NULL AND (("blocking_episode_id" IS NULL AND "blocking_episode_connection_revision_id" IS NULL) OR ("blocking_episode_id" IS NOT NULL AND "blocking_episode_connection_revision_id" IS NOT NULL)))
-    OR ("operation_kind" = 'source_test' AND "connection_test_job_id" IS NULL AND "provider_id" IS NOT NULL AND "source_instance_id" IS NOT NULL AND "source_revision_id" IS NOT NULL AND "source_test_job_id" IS NOT NULL AND "run_id" IS NULL AND "page_number" IS NULL AND "checkpoint_generation" IS NULL AND "requested_checkpoint_fingerprint" IS NULL AND "requested_checkpoint_key" IS NULL AND (("blocking_episode_id" IS NULL) = ("blocking_episode_connection_revision_id" IS NULL)))
-    OR ("operation_kind" = 'page_read' AND "connection_test_job_id" IS NULL AND "provider_id" IS NOT NULL AND "source_instance_id" IS NOT NULL AND "source_revision_id" IS NOT NULL AND "source_test_job_id" IS NULL AND "run_id" IS NOT NULL AND "page_number" IS NOT NULL AND "page_number" > 0 AND "checkpoint_generation" IS NOT NULL AND "checkpoint_generation" >= 1 AND "requested_checkpoint_key" = COALESCE("requested_checkpoint_fingerprint", 'initial') AND (("blocking_episode_id" IS NULL) = ("blocking_episode_connection_revision_id" IS NULL)))
+    ("operation_kind" = 'connection_test' AND "connection_test_job_id" IS NOT NULL AND "provider_id" IS NULL AND "source_instance_id" IS NULL AND "source_revision_id" IS NULL AND "source_test_job_id" IS NULL AND "run_id" IS NULL AND "page_number" IS NULL AND "cursor_generation" IS NULL AND "requested_cursor_fingerprint" IS NULL AND "requested_cursor_key" IS NULL AND (("blocking_episode_id" IS NULL AND "blocking_episode_connection_revision_id" IS NULL) OR ("blocking_episode_id" IS NOT NULL AND "blocking_episode_connection_revision_id" IS NOT NULL)))
+    OR ("operation_kind" = 'source_test' AND "connection_test_job_id" IS NULL AND "provider_id" IS NOT NULL AND "source_instance_id" IS NOT NULL AND "source_revision_id" IS NOT NULL AND "source_test_job_id" IS NOT NULL AND "run_id" IS NULL AND "page_number" IS NULL AND "cursor_generation" IS NULL AND "requested_cursor_fingerprint" IS NULL AND "requested_cursor_key" IS NULL AND (("blocking_episode_id" IS NULL) = ("blocking_episode_connection_revision_id" IS NULL)))
+    OR ("operation_kind" = 'page_read' AND "connection_test_job_id" IS NULL AND "provider_id" IS NOT NULL AND "source_instance_id" IS NOT NULL AND "source_revision_id" IS NOT NULL AND "source_test_job_id" IS NULL AND "run_id" IS NOT NULL AND "page_number" IS NOT NULL AND "page_number" > 0 AND "cursor_generation" IS NOT NULL AND "cursor_generation" >= 1 AND "requested_cursor_key" IS NOT NULL AND "requested_cursor_key" = COALESCE("requested_cursor_fingerprint", 'initial') AND (("blocking_episode_id" IS NULL) = ("blocking_episode_connection_revision_id" IS NULL)))
   ),
   ADD CONSTRAINT "source_request_attempts_terminal_check"
   CHECK (
@@ -1197,9 +1206,9 @@ ALTER TABLE "compact_source_request_attempts"
   ),
   ADD CONSTRAINT "compact_source_request_attempts_scope_check"
   CHECK (
-    ("operation_kind" = 'connection_test' AND "connection_test_job_id" IS NOT NULL AND "provider_id" IS NULL AND "source_instance_id" IS NULL AND "source_revision_id" IS NULL AND "source_test_job_id" IS NULL AND "run_id" IS NULL AND "page_number" IS NULL AND "checkpoint_generation" IS NULL AND "requested_checkpoint_fingerprint" IS NULL AND "requested_checkpoint_key" IS NULL AND (("blocking_episode_id" IS NULL AND "blocking_episode_connection_revision_id" IS NULL) OR ("blocking_episode_id" IS NOT NULL AND "blocking_episode_connection_revision_id" IS NOT NULL)))
-    OR ("operation_kind" = 'source_test' AND "connection_test_job_id" IS NULL AND "provider_id" IS NOT NULL AND "source_instance_id" IS NOT NULL AND "source_revision_id" IS NOT NULL AND "source_test_job_id" IS NOT NULL AND "run_id" IS NULL AND "page_number" IS NULL AND "checkpoint_generation" IS NULL AND "requested_checkpoint_fingerprint" IS NULL AND "requested_checkpoint_key" IS NULL AND (("blocking_episode_id" IS NULL) = ("blocking_episode_connection_revision_id" IS NULL)))
-      OR ("operation_kind" = 'page_read' AND "connection_test_job_id" IS NULL AND "provider_id" IS NOT NULL AND "source_instance_id" IS NOT NULL AND "source_revision_id" IS NOT NULL AND "source_test_job_id" IS NULL AND "run_id" IS NOT NULL AND "page_number" IS NOT NULL AND "page_number" > 0 AND "checkpoint_generation" IS NOT NULL AND "checkpoint_generation" >= 1 AND ("requested_checkpoint_fingerprint" IS NULL OR "requested_checkpoint_fingerprint" ~ '^[0-9a-f]{64}$') AND "requested_checkpoint_key" = COALESCE("requested_checkpoint_fingerprint", 'initial') AND (("blocking_episode_id" IS NULL) = ("blocking_episode_connection_revision_id" IS NULL)))
+    ("operation_kind" = 'connection_test' AND "connection_test_job_id" IS NOT NULL AND "provider_id" IS NULL AND "source_instance_id" IS NULL AND "source_revision_id" IS NULL AND "source_test_job_id" IS NULL AND "run_id" IS NULL AND "page_number" IS NULL AND "cursor_generation" IS NULL AND "requested_cursor_fingerprint" IS NULL AND "requested_cursor_key" IS NULL AND (("blocking_episode_id" IS NULL AND "blocking_episode_connection_revision_id" IS NULL) OR ("blocking_episode_id" IS NOT NULL AND "blocking_episode_connection_revision_id" IS NOT NULL)))
+    OR ("operation_kind" = 'source_test' AND "connection_test_job_id" IS NULL AND "provider_id" IS NOT NULL AND "source_instance_id" IS NOT NULL AND "source_revision_id" IS NOT NULL AND "source_test_job_id" IS NOT NULL AND "run_id" IS NULL AND "page_number" IS NULL AND "cursor_generation" IS NULL AND "requested_cursor_fingerprint" IS NULL AND "requested_cursor_key" IS NULL AND (("blocking_episode_id" IS NULL) = ("blocking_episode_connection_revision_id" IS NULL)))
+      OR ("operation_kind" = 'page_read' AND "connection_test_job_id" IS NULL AND "provider_id" IS NOT NULL AND "source_instance_id" IS NOT NULL AND "source_revision_id" IS NOT NULL AND "source_test_job_id" IS NULL AND "run_id" IS NOT NULL AND "page_number" IS NOT NULL AND "page_number" > 0 AND "cursor_generation" IS NOT NULL AND "cursor_generation" >= 1 AND ("requested_cursor_fingerprint" IS NULL OR "requested_cursor_fingerprint" ~ '^[0-9a-f]{64}$') AND "requested_cursor_key" IS NOT NULL AND "requested_cursor_key" = COALESCE("requested_cursor_fingerprint", 'initial') AND (("blocking_episode_id" IS NULL) = ("blocking_episode_connection_revision_id" IS NULL)))
   );
 
 CREATE FUNCTION "reject_source_test_result_mutations"()
@@ -1275,8 +1284,8 @@ BEFORE UPDATE OR DELETE ON "provider_source_schedule_revisions"
 FOR EACH ROW
 EXECUTE FUNCTION "enforce_provider_source_append_only_history"();
 
-CREATE TRIGGER "provider_source_checkpoint_fingerprints_append_only_guard"
-BEFORE UPDATE OR DELETE ON "provider_source_checkpoint_fingerprints"
+CREATE TRIGGER "provider_source_cursor_fingerprints_append_only_guard"
+BEFORE UPDATE OR DELETE ON "provider_source_cursor_fingerprints"
 FOR EACH ROW
 EXECUTE FUNCTION "enforce_provider_source_append_only_history"();
 
@@ -1367,9 +1376,9 @@ BEGIN
         AND proof."source_test_job_id" IS NOT DISTINCT FROM OLD."source_test_job_id"
         AND proof."run_id" IS NOT DISTINCT FROM OLD."run_id"
         AND proof."page_number" IS NOT DISTINCT FROM OLD."page_number"
-        AND proof."checkpoint_generation" IS NOT DISTINCT FROM OLD."checkpoint_generation"
-        AND proof."requested_checkpoint_fingerprint" IS NOT DISTINCT FROM OLD."requested_checkpoint_fingerprint"
-        AND proof."requested_checkpoint_key" IS NOT DISTINCT FROM OLD."requested_checkpoint_key"
+        AND proof."cursor_generation" IS NOT DISTINCT FROM OLD."cursor_generation"
+        AND proof."requested_cursor_fingerprint" IS NOT DISTINCT FROM OLD."requested_cursor_fingerprint"
+        AND proof."requested_cursor_key" IS NOT DISTINCT FROM OLD."requested_cursor_key"
         AND proof."blocking_episode_id" IS NOT DISTINCT FROM OLD."blocking_episode_id"
         AND proof."blocking_episode_connection_revision_id" IS NOT DISTINCT FROM OLD."blocking_episode_connection_revision_id"
         AND proof."started_at" = OLD."started_at"
@@ -1418,9 +1427,9 @@ BEGIN
         AND proof."source_test_job_id" IS NOT DISTINCT FROM NEW."source_test_job_id"
         AND proof."run_id" IS NOT DISTINCT FROM NEW."run_id"
         AND proof."page_number" IS NOT DISTINCT FROM NEW."page_number"
-        AND proof."checkpoint_generation" IS NOT DISTINCT FROM NEW."checkpoint_generation"
-        AND proof."requested_checkpoint_fingerprint" IS NOT DISTINCT FROM NEW."requested_checkpoint_fingerprint"
-        AND proof."requested_checkpoint_key" IS NOT DISTINCT FROM NEW."requested_checkpoint_key"
+        AND proof."cursor_generation" IS NOT DISTINCT FROM NEW."cursor_generation"
+        AND proof."requested_cursor_fingerprint" IS NOT DISTINCT FROM NEW."requested_cursor_fingerprint"
+        AND proof."requested_cursor_key" IS NOT DISTINCT FROM NEW."requested_cursor_key"
         AND proof."blocking_episode_id" IS NOT DISTINCT FROM NEW."blocking_episode_id"
         AND proof."blocking_episode_connection_revision_id" IS NOT DISTINCT FROM NEW."blocking_episode_connection_revision_id"
         AND proof."started_at" = NEW."started_at"
@@ -1471,9 +1480,9 @@ BEGIN
       AND proof."source_test_job_id" IS NOT DISTINCT FROM OLD."source_test_job_id"
       AND proof."run_id" IS NOT DISTINCT FROM OLD."run_id"
       AND proof."page_number" IS NOT DISTINCT FROM OLD."page_number"
-      AND proof."checkpoint_generation" IS NOT DISTINCT FROM OLD."checkpoint_generation"
-      AND proof."requested_checkpoint_fingerprint" IS NOT DISTINCT FROM OLD."requested_checkpoint_fingerprint"
-      AND proof."requested_checkpoint_key" IS NOT DISTINCT FROM OLD."requested_checkpoint_key"
+      AND proof."cursor_generation" IS NOT DISTINCT FROM OLD."cursor_generation"
+      AND proof."requested_cursor_fingerprint" IS NOT DISTINCT FROM OLD."requested_cursor_fingerprint"
+      AND proof."requested_cursor_key" IS NOT DISTINCT FROM OLD."requested_cursor_key"
       AND proof."blocking_episode_id" IS NOT DISTINCT FROM OLD."blocking_episode_id"
       AND proof."blocking_episode_connection_revision_id" IS NOT DISTINCT FROM OLD."blocking_episode_connection_revision_id"
       AND proof."started_at" = OLD."started_at"
@@ -2249,7 +2258,7 @@ EXECUTE FUNCTION "enforce_source_semantic_observation_content"();
 
 ALTER TABLE "source_delivery_occurrences"
   ADD CONSTRAINT "source_delivery_occurrences_position_check"
-  CHECK ("record_index" >= 0 AND "checkpoint_generation" >= 1 AND "connection_health_generation" >= 0 AND btrim("native_evidence_reference") <> ''),
+  CHECK ("record_index" >= 0 AND "cursor_generation" >= 1 AND "connection_health_generation" >= 0 AND btrim("native_evidence_reference") <> ''),
   ADD CONSTRAINT "source_delivery_occurrences_observation_check"
   CHECK (
     (
@@ -2358,7 +2367,7 @@ ALTER TABLE "source_processor_diagnostic_events"
     AND ("duration_ms" IS NULL OR "duration_ms" >= 0)
     AND ("response_bytes" IS NULL OR "response_bytes" >= 0)
     AND ("retry_delay_ms" IS NULL OR "retry_delay_ms" >= 0)
-    AND ("checkpoint_fingerprint" IS NULL OR "checkpoint_fingerprint" ~ '^[0-9a-f]{64}$')
+    AND ("cursor_fingerprint" IS NULL OR "cursor_fingerprint" ~ '^[0-9a-f]{64}$')
     AND ("command_correlation_key" IS NULL OR "command_correlation_key" ~ '^[a-z0-9]([a-z0-9_.:-]{0,126}[a-z0-9])?$')
     AND "expires_at" = "occurred_at" + interval '30 days'
   );
@@ -2383,26 +2392,47 @@ ALTER TABLE "source_retention_executions"
     OR ("state" IN ('succeeded', 'failed') AND "finished_at" IS NOT NULL)
   );
 
+-- The reused cursor columns predate provider-source ingestion and carry a
+-- 2,048-character legacy bound. Keep that historical contract for legacy
+-- rows while source-owned rows use the exact 16 KiB UTF-8 bound below.
+ALTER TABLE "import_runs"
+  DROP CONSTRAINT "import_runs_requested_cursor_bounded",
+  ADD CONSTRAINT "import_runs_requested_cursor_bounded"
+  CHECK (
+    "source_instance_id" IS NOT NULL
+    OR "requested_cursor" IS NULL
+    OR length("requested_cursor") <= 2048
+  );
+
 ALTER TABLE "import_runs"
   ADD CONSTRAINT "import_runs_source_pins_check"
   CHECK (
     "source_instance_id" IS NULL
     OR (
       "source_revision_id" IS NOT NULL
+      AND "source_type_key" IS NOT NULL
       AND btrim("source_type_key") <> ''
+      AND "source_adapter_version" IS NOT NULL
       AND btrim("source_adapter_version") <> ''
+      AND "normalized_contract_version" IS NOT NULL
       AND btrim("normalized_contract_version") <> ''
+      AND "mapper_key" IS NOT NULL
       AND btrim("mapper_key") <> ''
+      AND "mapper_version" IS NOT NULL
       AND btrim("mapper_version") <> ''
+      AND "identity_namespace_key" IS NOT NULL
       AND btrim("identity_namespace_key") <> ''
       AND "connection_profile_id" IS NOT NULL
       AND "connection_revision_id" IS NOT NULL
-      AND btrim("checkpoint_codec_version") <> ''
-      AND "checkpoint_generation" >= 1
-      AND (("requested_checkpoint" IS NULL) = ("requested_checkpoint_fingerprint" IS NULL))
-      AND ("requested_checkpoint" IS NULL OR octet_length("requested_checkpoint") BETWEEN 1 AND 16384)
-      AND ("requested_checkpoint_fingerprint" IS NULL OR "requested_checkpoint_fingerprint" ~ '^[0-9a-f]{64}$')
-      AND "requested_checkpoint_key" = COALESCE("requested_checkpoint_fingerprint", 'initial')
+      AND "cursor_codec_version" IS NOT NULL
+      AND btrim("cursor_codec_version") <> ''
+      AND "cursor_generation" IS NOT NULL
+      AND "cursor_generation" >= 1
+      AND (("requested_cursor" IS NULL) = ("requested_cursor_fingerprint" IS NULL))
+      AND ("requested_cursor" IS NULL OR octet_length("requested_cursor") BETWEEN 1 AND 16384)
+      AND ("requested_cursor_fingerprint" IS NULL OR "requested_cursor_fingerprint" ~ '^[0-9a-f]{64}$')
+      AND "requested_cursor_key" IS NOT NULL
+      AND "requested_cursor_key" = COALESCE("requested_cursor_fingerprint", 'initial')
     )
   );
 
@@ -2429,11 +2459,11 @@ BEGIN
       OR NEW."identity_namespace_key" IS DISTINCT FROM OLD."identity_namespace_key"
       OR NEW."connection_profile_id" IS DISTINCT FROM OLD."connection_profile_id"
       OR NEW."connection_revision_id" IS DISTINCT FROM OLD."connection_revision_id"
-      OR NEW."checkpoint_codec_version" IS DISTINCT FROM OLD."checkpoint_codec_version"
-      OR NEW."checkpoint_generation" IS DISTINCT FROM OLD."checkpoint_generation"
-      OR NEW."requested_checkpoint" IS DISTINCT FROM OLD."requested_checkpoint"
-      OR NEW."requested_checkpoint_fingerprint" IS DISTINCT FROM OLD."requested_checkpoint_fingerprint"
-      OR NEW."requested_checkpoint_key" IS DISTINCT FROM OLD."requested_checkpoint_key"
+      OR NEW."cursor_codec_version" IS DISTINCT FROM OLD."cursor_codec_version"
+      OR NEW."cursor_generation" IS DISTINCT FROM OLD."cursor_generation"
+      OR NEW."requested_cursor" IS DISTINCT FROM OLD."requested_cursor"
+      OR NEW."requested_cursor_fingerprint" IS DISTINCT FROM OLD."requested_cursor_fingerprint"
+      OR NEW."requested_cursor_key" IS DISTINCT FROM OLD."requested_cursor_key"
     )
   THEN
     RAISE EXCEPTION 'source-owned import run pins are immutable'
@@ -2459,14 +2489,25 @@ BEFORE UPDATE OF
   "identity_namespace_key",
   "connection_profile_id",
   "connection_revision_id",
-  "checkpoint_codec_version",
-  "checkpoint_generation",
-  "requested_checkpoint",
-  "requested_checkpoint_fingerprint",
-  "requested_checkpoint_key"
+  "cursor_codec_version",
+  "cursor_generation",
+  "requested_cursor",
+  "requested_cursor_fingerprint",
+  "requested_cursor_key"
 ON "import_runs"
 FOR EACH ROW
 EXECUTE FUNCTION "enforce_import_run_source_pin_immutability"();
+
+ALTER TABLE "import_pages"
+  DROP CONSTRAINT "import_pages_cursors_bounded",
+  ADD CONSTRAINT "import_pages_cursors_bounded"
+  CHECK (
+    "source_instance_id" IS NOT NULL
+    OR (
+      ("requested_cursor" IS NULL OR length("requested_cursor") <= 2048)
+      AND ("next_cursor" IS NULL OR length("next_cursor") <= 2048)
+    )
+  );
 
 ALTER TABLE "import_pages"
   ADD CONSTRAINT "import_pages_source_pins_check"
@@ -2474,30 +2515,58 @@ ALTER TABLE "import_pages"
     "source_instance_id" IS NULL
     OR (
       "source_revision_id" IS NOT NULL
+      AND "source_type_key" IS NOT NULL
       AND btrim("source_type_key") <> ''
+      AND "source_adapter_version" IS NOT NULL
       AND btrim("source_adapter_version") <> ''
+      AND "normalized_contract_version" IS NOT NULL
       AND btrim("normalized_contract_version") <> ''
+      AND "mapper_key" IS NOT NULL
       AND btrim("mapper_key") <> ''
+      AND "mapper_version" IS NOT NULL
       AND btrim("mapper_version") <> ''
+      AND "identity_namespace_key" IS NOT NULL
       AND btrim("identity_namespace_key") <> ''
       AND "connection_profile_id" IS NOT NULL
       AND "connection_revision_id" IS NOT NULL
+      AND "connection_health_generation" IS NOT NULL
       AND "connection_health_generation" >= 0
       AND "request_attempt_id" IS NOT NULL
       AND "supervisor_epoch_id" IS NOT NULL
-      AND btrim("checkpoint_codec_version") <> ''
-      AND "checkpoint_generation" >= 1
-      AND (("requested_checkpoint" IS NULL) = ("requested_checkpoint_fingerprint" IS NULL))
-      AND ("requested_checkpoint" IS NULL OR octet_length("requested_checkpoint") BETWEEN 1 AND 16384)
-      AND ("requested_checkpoint_fingerprint" IS NULL OR "requested_checkpoint_fingerprint" ~ '^[0-9a-f]{64}$')
-      AND "requested_checkpoint_key" = COALESCE("requested_checkpoint_fingerprint", 'initial')
+      AND "cursor_codec_version" IS NOT NULL
+      AND btrim("cursor_codec_version") <> ''
+      AND "cursor_generation" IS NOT NULL
+      AND "cursor_generation" >= 1
+      AND (("requested_cursor" IS NULL) = ("requested_cursor_fingerprint" IS NULL))
+      AND ("requested_cursor" IS NULL OR octet_length("requested_cursor") BETWEEN 1 AND 16384)
+      AND ("requested_cursor_fingerprint" IS NULL OR "requested_cursor_fingerprint" ~ '^[0-9a-f]{64}$')
+      AND "requested_cursor_key" IS NOT NULL
+      AND "requested_cursor_key" = COALESCE("requested_cursor_fingerprint", 'initial')
+      AND (("next_cursor" IS NULL) = ("next_cursor_fingerprint" IS NULL))
+      AND ("next_cursor" IS NULL OR octet_length("next_cursor") BETWEEN 1 AND 16384)
+      AND ("next_cursor_fingerprint" IS NULL OR "next_cursor_fingerprint" ~ '^[0-9a-f]{64}$')
     )
   ),
   ADD CONSTRAINT "import_pages_source_continuation_check"
   CHECK (
     "source_instance_id" IS NULL
-    OR ("continuation_kind" = 'continue' AND "minimum_delay_seconds" IS NULL AND "next_checkpoint" IS NOT NULL AND "next_checkpoint_fingerprint" ~ '^[0-9a-f]{64}$')
-    OR ("continuation_kind" = 'poll_after' AND "minimum_delay_seconds" BETWEEN 0 AND 86400)
+    OR (
+      "continuation_kind" IS NOT NULL
+      AND (
+        (
+          "continuation_kind" = 'continue'
+          AND "minimum_delay_seconds" IS NULL
+          AND "next_cursor" IS NOT NULL
+          AND "next_cursor_fingerprint" IS NOT NULL
+          AND "next_cursor_fingerprint" ~ '^[0-9a-f]{64}$'
+        )
+        OR (
+          "continuation_kind" = 'poll_after'
+          AND "minimum_delay_seconds" IS NOT NULL
+          AND "minimum_delay_seconds" BETWEEN 0 AND 86400
+        )
+      )
+    )
   ),
   ADD CONSTRAINT "import_pages_source_raw_retention_check"
   CHECK ("source_instance_id" IS NULL OR "expires_at" = "committed_at" + interval '7 days');
@@ -2570,33 +2639,33 @@ ALTER TABLE "provider_source_schedules"
   FOREIGN KEY ("last_run_id", "organization_id", "provider_id", "source_instance_id")
   REFERENCES "import_runs"("id", "organization_id", "provider_id", "source_instance_id") ON DELETE RESTRICT ON UPDATE NO ACTION;
 
-ALTER TABLE "provider_source_checkpoints"
-  ADD CONSTRAINT "provider_source_checkpoints_source_fk"
+ALTER TABLE "provider_source_cursors"
+  ADD CONSTRAINT "provider_source_cursors_source_fk"
   FOREIGN KEY ("source_instance_id", "organization_id", "provider_id")
   REFERENCES "provider_source_instances"("id", "organization_id", "provider_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
-  ADD CONSTRAINT "provider_source_checkpoints_revision_fk"
-  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "checkpoint_codec_version")
-  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "checkpoint_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
-  ADD CONSTRAINT "provider_source_checkpoints_run_fk"
+  ADD CONSTRAINT "provider_source_cursors_revision_fk"
+  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "cursor_codec_version")
+  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "cursor_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  ADD CONSTRAINT "provider_source_cursors_run_fk"
   FOREIGN KEY ("advanced_by_run_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id")
   REFERENCES "import_runs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
-  ADD CONSTRAINT "provider_source_checkpoints_page_fk"
-  FOREIGN KEY ("advanced_by_page_id", "organization_id", "provider_id", "advanced_by_run_id", "source_instance_id", "source_revision_id", "checkpoint_generation", "checkpoint_fingerprint")
-  REFERENCES "import_pages"("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "checkpoint_generation", "next_checkpoint_fingerprint") ON DELETE RESTRICT ON UPDATE NO ACTION;
+  ADD CONSTRAINT "provider_source_cursors_page_fk"
+  FOREIGN KEY ("advanced_by_page_id", "organization_id", "provider_id", "advanced_by_run_id", "source_instance_id", "source_revision_id", "cursor_generation")
+  REFERENCES "import_pages"("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "cursor_generation") ON DELETE RESTRICT ON UPDATE NO ACTION;
 
-ALTER TABLE "provider_source_checkpoint_fingerprints"
-  ADD CONSTRAINT "provider_source_checkpoint_fingerprints_source_fk"
+ALTER TABLE "provider_source_cursor_fingerprints"
+  ADD CONSTRAINT "provider_source_cursor_fingerprints_source_fk"
   FOREIGN KEY ("source_instance_id", "organization_id", "provider_id")
   REFERENCES "provider_source_instances"("id", "organization_id", "provider_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
-  ADD CONSTRAINT "provider_source_checkpoint_fingerprints_revision_fk"
-  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "checkpoint_codec_version")
-  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "checkpoint_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
-  ADD CONSTRAINT "provider_source_checkpoint_fingerprints_run_fk"
+  ADD CONSTRAINT "provider_source_cursor_fingerprints_revision_fk"
+  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "cursor_codec_version")
+  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "source_adapter_version", "cursor_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  ADD CONSTRAINT "provider_source_cursor_fingerprints_run_fk"
   FOREIGN KEY ("first_committed_run_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id")
   REFERENCES "import_runs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
-  ADD CONSTRAINT "provider_source_checkpoint_fingerprints_page_fk"
-  FOREIGN KEY ("first_committed_page_id", "organization_id", "provider_id", "first_committed_run_id", "source_instance_id", "source_revision_id", "checkpoint_generation", "checkpoint_fingerprint")
-  REFERENCES "import_pages"("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "checkpoint_generation", "next_checkpoint_fingerprint") ON DELETE RESTRICT ON UPDATE NO ACTION;
+  ADD CONSTRAINT "provider_source_cursor_fingerprints_page_fk"
+  FOREIGN KEY ("first_committed_page_id", "organization_id", "provider_id", "first_committed_run_id", "source_instance_id", "source_revision_id", "cursor_generation", "cursor_fingerprint")
+  REFERENCES "import_pages"("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "cursor_generation", "next_cursor_fingerprint") ON DELETE RESTRICT ON UPDATE NO ACTION;
 
 ALTER TABLE "provider_source_health_states"
   ADD CONSTRAINT "provider_source_health_states_source_fk"
@@ -2632,8 +2701,8 @@ ALTER TABLE "source_request_attempts"
   FOREIGN KEY ("source_test_job_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "supervisor_epoch_id", "claim_owner", "claim_token")
   REFERENCES "provider_source_test_jobs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "supervisor_epoch_id", "claim_owner", "claim_token") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "source_request_attempts_run_fk"
-  FOREIGN KEY ("run_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "checkpoint_generation", "requested_checkpoint_key", "claim_owner", "claim_token")
-  REFERENCES "import_runs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "checkpoint_generation", "requested_checkpoint_key", "lease_owner", "lease_token") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  FOREIGN KEY ("run_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "cursor_generation", "requested_cursor_key", "claim_owner", "claim_token")
+  REFERENCES "import_runs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "cursor_generation", "requested_cursor_key", "lease_owner", "lease_token") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "source_request_attempts_episode_fk"
   FOREIGN KEY ("blocking_episode_id", "organization_id", "connection_profile_id", "blocking_episode_connection_revision_id")
   REFERENCES "source_connection_health_episodes"("id", "organization_id", "connection_profile_id", "connection_revision_id") ON DELETE RESTRICT ON UPDATE NO ACTION;
@@ -2745,8 +2814,8 @@ EXECUTE FUNCTION "enforce_canonical_semantic_origin_identity"();
 
 ALTER TABLE "source_delivery_occurrences"
   ADD CONSTRAINT "source_delivery_occurrences_revision_fk"
-  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "checkpoint_codec_version")
-  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "checkpoint_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "cursor_codec_version")
+  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "cursor_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "source_delivery_occurrences_connection_fk"
   FOREIGN KEY ("connection_revision_id", "organization_id", "connection_profile_id", "source_type_key", "source_adapter_version")
   REFERENCES "source_connection_revisions"("id", "organization_id", "connection_profile_id", "source_type_key", "source_adapter_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
@@ -2754,11 +2823,11 @@ ALTER TABLE "source_delivery_occurrences"
   FOREIGN KEY ("run_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id")
   REFERENCES "import_runs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "source_delivery_occurrences_page_fk"
-  FOREIGN KEY ("page_id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "request_attempt_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "checkpoint_generation", "connection_health_generation")
-  REFERENCES "import_pages"("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "request_attempt_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "checkpoint_generation", "connection_health_generation") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  FOREIGN KEY ("page_id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "request_attempt_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "cursor_generation", "connection_health_generation")
+  REFERENCES "import_pages"("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "request_attempt_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "cursor_generation", "connection_health_generation") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "source_delivery_occurrences_attempt_fk"
-  FOREIGN KEY ("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "connection_health_generation", "checkpoint_generation")
-  REFERENCES "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "checkpoint_generation") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  FOREIGN KEY ("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "connection_health_generation", "cursor_generation")
+  REFERENCES "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "cursor_generation") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "source_delivery_occurrences_record_fk"
   FOREIGN KEY ("source_record_id", "organization_id", "source_instance_id")
   REFERENCES "source_record_identities"("id", "organization_id", "source_instance_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
@@ -2837,8 +2906,8 @@ ALTER TABLE "compact_source_request_attempts"
   FOREIGN KEY ("source_test_job_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "supervisor_epoch_id", "claim_owner", "claim_token")
   REFERENCES "provider_source_test_jobs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "supervisor_epoch_id", "claim_owner", "claim_token") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "compact_source_request_attempts_run_fk"
-  FOREIGN KEY ("run_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "checkpoint_generation", "requested_checkpoint_key", "claim_owner", "claim_token")
-  REFERENCES "import_runs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "checkpoint_generation", "requested_checkpoint_key", "lease_owner", "lease_token") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  FOREIGN KEY ("run_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "cursor_generation", "requested_cursor_key", "claim_owner", "claim_token")
+  REFERENCES "import_runs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "connection_profile_id", "connection_revision_id", "cursor_generation", "requested_cursor_key", "lease_owner", "lease_token") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "compact_source_request_attempts_episode_fk"
   FOREIGN KEY ("blocking_episode_id", "organization_id", "connection_profile_id", "blocking_episode_connection_revision_id")
   REFERENCES "source_connection_health_episodes"("id", "organization_id", "connection_profile_id", "connection_revision_id") ON DELETE RESTRICT ON UPDATE NO ACTION;
@@ -2848,8 +2917,8 @@ ALTER TABLE "import_runs"
   FOREIGN KEY ("source_instance_id", "organization_id", "provider_id")
   REFERENCES "provider_source_instances"("id", "organization_id", "provider_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "import_runs_source_revision_fk"
-  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "checkpoint_codec_version")
-  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "checkpoint_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "cursor_codec_version")
+  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "cursor_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "import_runs_connection_revision_fk"
   FOREIGN KEY ("connection_revision_id", "organization_id", "connection_profile_id", "source_type_key", "source_adapter_version")
   REFERENCES "source_connection_revisions"("id", "organization_id", "connection_profile_id", "source_type_key", "source_adapter_version") ON DELETE RESTRICT ON UPDATE NO ACTION;
@@ -2859,13 +2928,13 @@ ALTER TABLE "import_pages"
   FOREIGN KEY ("run_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id")
   REFERENCES "import_runs"("id", "organization_id", "provider_id", "source_instance_id", "source_revision_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "import_pages_source_revision_fk"
-  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "checkpoint_codec_version")
-  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "checkpoint_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  FOREIGN KEY ("source_revision_id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "cursor_codec_version")
+  REFERENCES "provider_source_revisions"("id", "organization_id", "provider_id", "source_instance_id", "connection_profile_id", "source_type_key", "source_adapter_version", "normalized_contract_version", "mapper_key", "mapper_version", "identity_namespace_key", "cursor_codec_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "import_pages_connection_revision_fk"
   FOREIGN KEY ("connection_revision_id", "organization_id", "connection_profile_id", "source_type_key", "source_adapter_version")
   REFERENCES "source_connection_revisions"("id", "organization_id", "connection_profile_id", "source_type_key", "source_adapter_version") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "import_pages_request_attempt_fk"
-  FOREIGN KEY ("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "page_number", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "connection_health_generation", "checkpoint_generation", "requested_checkpoint_key")
-  REFERENCES "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "page_number", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "checkpoint_generation", "requested_checkpoint_key") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  FOREIGN KEY ("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "page_number", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "connection_health_generation", "cursor_generation", "requested_cursor_key")
+  REFERENCES "compact_source_request_attempts"("request_attempt_id", "organization_id", "provider_id", "source_instance_id", "source_revision_id", "run_id", "page_number", "supervisor_epoch_id", "connection_profile_id", "connection_revision_id", "expected_health_generation", "cursor_generation", "requested_cursor_key") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "import_pages_supervisor_epoch_fk"
   FOREIGN KEY ("supervisor_epoch_id") REFERENCES "source_supervisor_epochs"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;

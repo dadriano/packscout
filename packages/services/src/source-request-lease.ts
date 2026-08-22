@@ -1,7 +1,7 @@
 import {
-  opaqueCheckpointEnvelopeSchema,
+  opaqueCursorEnvelopeSchema,
   type LaunchProviderKey,
-  type OpaqueCheckpointEnvelope,
+  type OpaqueCursorEnvelope,
 } from "@packscout/contracts";
 import {
   ConnectionPermitCoordinatorError,
@@ -51,8 +51,8 @@ export interface PageReadRequestPins extends SourceScopedRequestPins {
   readonly pageAttemptId: string;
   readonly pageNumber: number;
   readonly pageLimit: number;
-  readonly checkpointGeneration: number;
-  readonly requestedCheckpointFingerprint: string | null;
+  readonly cursorGeneration: number;
+  readonly requestedCursorFingerprint: string | null;
 }
 
 export type SourceRequestOperationPins =
@@ -95,7 +95,7 @@ export interface SourceRequestInvocation {
 
 export type SourceRequestAdmissionGuard = (
   pins: SourceRequestOperationPins,
-  requestedCheckpoint: OpaqueCheckpointEnvelope | null,
+  requestedCursor: OpaqueCursorEnvelope | null,
   signal: AbortSignal,
 ) => boolean | Promise<boolean>;
 
@@ -108,11 +108,11 @@ interface SourceRequestLeaseAdmissionBase {
 export type SourceRequestLeaseAdmissionInput =
   | (SourceRequestLeaseAdmissionBase & Readonly<{
       pins: ConnectionTestRequestPins | SourceTestRequestPins;
-      requestedCheckpoint?: never;
+      requestedCursor?: never;
     }>)
   | (SourceRequestLeaseAdmissionBase & Readonly<{
       pins: PageReadRequestPins;
-      requestedCheckpoint: OpaqueCheckpointEnvelope;
+      requestedCursor: OpaqueCursorEnvelope;
     }>);
 
 const sourceRequestLeaseIssueAuthority = Symbol("source-request-lease-authority");
@@ -159,8 +159,8 @@ const keysByOperation = Object.freeze({
     "pageAttemptId",
     "pageNumber",
     "pageLimit",
-    "checkpointGeneration",
-    "requestedCheckpointFingerprint",
+    "cursorGeneration",
+    "requestedCursorFingerprint",
   ],
 } as const satisfies Readonly<
   Record<SourceRequestOperationPins["operationKind"], readonly string[]>
@@ -324,10 +324,10 @@ function canonicalizePins(
     !Number.isSafeInteger(record.pageLimit) ||
     Number(record.pageLimit) < 1 ||
     Number(record.pageLimit) > 5_000 ||
-    !isPositiveGeneration(record.checkpointGeneration) ||
-    (record.requestedCheckpointFingerprint !== null &&
-      (typeof record.requestedCheckpointFingerprint !== "string" ||
-        !/^[a-f0-9]{64}$/u.test(record.requestedCheckpointFingerprint)))
+    !isPositiveGeneration(record.cursorGeneration) ||
+    (record.requestedCursorFingerprint !== null &&
+      (typeof record.requestedCursorFingerprint !== "string" ||
+        !/^[a-f0-9]{64}$/u.test(record.requestedCursorFingerprint)))
   ) {
     throw new SourceRequestLeaseError("invalid_pins");
   }
@@ -339,9 +339,9 @@ function canonicalizePins(
     pageAttemptId: record.pageAttemptId as string,
     pageNumber: record.pageNumber as number,
     pageLimit: record.pageLimit as number,
-    checkpointGeneration: record.checkpointGeneration as number,
-    requestedCheckpointFingerprint:
-      record.requestedCheckpointFingerprint as string | null,
+    cursorGeneration: record.cursorGeneration as number,
+    requestedCursorFingerprint:
+      record.requestedCursorFingerprint as string | null,
   });
 }
 
@@ -349,33 +349,33 @@ function pinKey(pins: SourceRequestOperationPins): string {
   return JSON.stringify(pins);
 }
 
-function canonicalizeRequestedCheckpoint(
+function canonicalizeRequestedCursor(
   pins: SourceRequestOperationPins,
-  checkpoint: OpaqueCheckpointEnvelope | undefined,
-): OpaqueCheckpointEnvelope | null {
+  cursor: OpaqueCursorEnvelope | undefined,
+): OpaqueCursorEnvelope | null {
   if (pins.operationKind !== "page_read") {
-    if (checkpoint !== undefined) {
+    if (cursor !== undefined) {
       throw new SourceRequestLeaseError("invalid_pins");
     }
     return null;
   }
-  const parsed = opaqueCheckpointEnvelopeSchema.safeParse(checkpoint);
+  const parsed = opaqueCursorEnvelopeSchema.safeParse(cursor);
   if (
     !parsed.success ||
     parsed.data.sourceInstanceId !== pins.sourceInstanceId ||
     parsed.data.sourceRevisionId !== pins.sourceRevisionId ||
     parsed.data.sourceTypeKey !== pins.sourceTypeKey ||
     parsed.data.adapterVersion !== pins.adapterVersion ||
-    parsed.data.checkpointGeneration !== pins.checkpointGeneration
+    parsed.data.cursorGeneration !== pins.cursorGeneration
   ) {
     throw new SourceRequestLeaseError("invalid_pins");
   }
   return Object.freeze({ ...parsed.data });
 }
 
-function checkpointsEqual(
-  left: OpaqueCheckpointEnvelope | null,
-  right: OpaqueCheckpointEnvelope | null,
+function cursorsEqual(
+  left: OpaqueCursorEnvelope | null,
+  right: OpaqueCursorEnvelope | null,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -408,14 +408,14 @@ export class SourceRequestLease {
   readonly #abortController = new AbortController();
   readonly #externalSignal: AbortSignal | undefined;
   readonly #onExternalAbort: (() => void) | undefined;
-  readonly #requestedCheckpoint: OpaqueCheckpointEnvelope | null;
+  readonly #requestedCursor: OpaqueCursorEnvelope | null;
   #state: SourceRequestLeaseState = "available";
 
   constructor(
     issueAuthority: symbol,
     pins: SourceRequestOperationPins,
     permit: PairedConnectionPermit,
-    requestedCheckpoint: OpaqueCheckpointEnvelope | null,
+    requestedCursor: OpaqueCursorEnvelope | null,
     externalSignal?: AbortSignal,
   ) {
     if (issueAuthority !== sourceRequestLeaseIssueAuthority) {
@@ -423,7 +423,7 @@ export class SourceRequestLease {
     }
     this.pins = canonicalizePins(pins);
     this.#permit = permit;
-    this.#requestedCheckpoint = requestedCheckpoint;
+    this.#requestedCursor = requestedCursor;
     this.#externalSignal = externalSignal;
     this.#onExternalAbort = externalSignal === undefined
       ? undefined
@@ -454,7 +454,7 @@ export class SourceRequestLease {
 
   consume(
     expectedPins: SourceRequestOperationPins,
-    expectedCheckpoint?: OpaqueCheckpointEnvelope,
+    expectedCursor?: OpaqueCursorEnvelope,
   ): SourceRequestInvocation {
     if (this.#state === "consumed") {
       throw new SourceRequestLeaseError("already_consumed");
@@ -465,13 +465,13 @@ export class SourceRequestLease {
     if (this.#state === "closed") {
       throw new SourceRequestLeaseError("closed");
     }
-    const canonicalExpectedCheckpoint = canonicalizeRequestedCheckpoint(
+    const canonicalExpectedCursor = canonicalizeRequestedCursor(
       expectedPins,
-      expectedCheckpoint,
+      expectedCursor,
     );
     if (
       !sourceRequestOperationPinsEqual(this.pins, expectedPins) ||
-      !checkpointsEqual(this.#requestedCheckpoint, canonicalExpectedCheckpoint)
+      !cursorsEqual(this.#requestedCursor, canonicalExpectedCursor)
     ) {
       throw new SourceRequestLeaseError("pin_mismatch");
     }
@@ -635,9 +635,9 @@ export class SourceRequestLeaseAuthority {
     input: SourceRequestLeaseAdmissionInput,
   ): Promise<SourceRequestLease> {
     const pins = canonicalizePins(input.pins);
-    const requestedCheckpoint = canonicalizeRequestedCheckpoint(
+    const requestedCursor = canonicalizeRequestedCursor(
       pins,
-      input.requestedCheckpoint,
+      input.requestedCursor,
     );
     const profile: ConnectionProfilePermitIdentity = {
       organizationId: pins.organizationId,
@@ -665,7 +665,7 @@ export class SourceRequestLeaseAuthority {
       }
       const active = await input.guard(
         pins,
-        requestedCheckpoint,
+        requestedCursor,
         input.signal ?? new AbortController().signal,
       );
       if (!active) {
@@ -678,7 +678,7 @@ export class SourceRequestLeaseAuthority {
         sourceRequestLeaseIssueAuthority,
         pins,
         permit,
-        requestedCheckpoint,
+        requestedCursor,
         input.signal,
       );
       this.#ownedLeases.add(lease);

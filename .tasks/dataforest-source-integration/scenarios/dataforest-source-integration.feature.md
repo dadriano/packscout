@@ -8,7 +8,7 @@ Owner: data pipeline build
 Given one tested DataForrest connection profile
 When Courtyard, Collector Crypt, Phygitals, and ClutchPacks sources reference it
 Then the encrypted bearer credential is stored once
-And every source retains its own immutable filter, opaque checkpoint, interval, runs, leases, health, and diagnostic feed
+And every source retains its own immutable filter, opaque cursor, interval, runs, leases, health, and diagnostic feed
 
 Coverage: Manual gap — implementation has not started. Automated ownership, uniqueness, tenancy, and isolation coverage is owned by task `dataforest-source-integration/002` and must replace this gap with a named test file or command before completion.
 
@@ -16,17 +16,17 @@ Coverage: Manual gap — implementation has not started. Automated ownership, un
 
 Given Courtyard uses an active DataForrest source and the other providers use their own active DataForrest sources
 When a conformance test disables Courtyard's source and activates a tested replacement source with the same normalized contract, record-ID scopes, and identity namespace
-Then the replacement starts at its own null checkpoint while the old source, checkpoint, and provenance remain historical
-And Courtyard retains stable canonical identity while no other provider's source, checkpoint, schedule, run, health, or diagnostic feed changes
+Then the replacement starts at its own null cursor while the old source, cursor, and provenance remain historical
+And Courtyard retains stable canonical identity while no other provider's source, cursor, schedule, run, health, or diagnostic feed changes
 
-Coverage: Manual gap — implementation has not started. Automated source replacement, checkpoint, provenance, and identity coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/004`, and `dataforest-source-integration/006` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated source replacement, cursor, provenance, and identity coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/004`, and `dataforest-source-integration/006` and must replace this gap before completion.
 
 ## Scenario: An incompatible source identity cannot activate
 
 Given a prospective Courtyard source adapter emits a different identity namespace or record-ID scope from the active Courtyard contract
 When its tested replacement source requests activation
-Then activation is rejected before a run, checkpoint, source observation, or canonical revision is created
-And PackScout adds no ID crosswalk, checkpoint conversion, dual-source cutover, or reconciliation ledger in this feature
+Then activation is rejected before a run, cursor, source observation, or canonical revision is created
+And PackScout adds no ID crosswalk, cursor conversion, dual-source cutover, or reconciliation ledger in this feature
 
 Coverage: Manual gap — implementation has not started. Automated identity-namespace, activation, no-write, and excluded-bridge coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/004`, and `dataforest-source-integration/006` and must replace this gap before completion.
 
@@ -43,10 +43,10 @@ Coverage: Manual gap — implementation has not started. Automated secret bootst
 
 Given an administrator has requested connection and source tests and no live supervisor owns the environment lease
 When the administrator attempts activation
-Then the tests remain pending and activation is rejected without moving a checkpoint or writing canonical data
+Then the tests remain pending and activation is rejected without moving a cursor or writing canonical data
 And after the supervisor records current successful results the source may activate paused under the same lifecycle contract
 
-Coverage: Manual gap — implementation has not started. Automated pending-test, live-execution, activation, checkpoint, and canonical-isolation coverage is owned by tasks `dataforest-source-integration/004` and `dataforest-source-integration/007` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated pending-test, live-execution, activation, cursor, and canonical-isolation coverage is owned by tasks `dataforest-source-integration/004` and `dataforest-source-integration/007` and must replace this gap before completion.
 
 ## Scenario: Adapter operations carry only their own correlation
 
@@ -54,7 +54,7 @@ Given the same connection profile is used for a connection test, source test, an
 When the generic runtime builds the three source-adapter inputs
 Then the connection test carries only connection-test correlation
 And the source test carries source context plus only source-test correlation
-And the page read carries source, checkpoint-generation, run, and page context with no test correlation
+And the page read carries source, cursor-generation, run, and page context with no test correlation
 And no adapter input contains a mapper key, mapper descriptor, or canonical instruction
 
 Coverage: Manual gap — implementation has not started. Compile-time and runtime discriminated-union, correlation-scope, and mapper-independence coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/007` and must replace this gap before completion.
@@ -70,21 +70,21 @@ And a request-boundary blocking test failure instead stores terminal attempt, fa
 
 Coverage: Manual gap — implementation has not started. Automated source-test capture quantum, request-attempt terminalization, permit release, later result compare-and-transition, and blocking-failure single-write coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, `dataforest-source-integration/004`, and `dataforest-source-integration/007` and must replace this gap before completion.
 
-## Scenario: An opaque checkpoint cannot cross source boundaries
+## Scenario: An opaque cursor cannot cross source boundaries
 
-Given an opaque checkpoint returned for one Courtyard source revision and adapter contract
+Given an opaque cursor returned for one Courtyard source revision and adapter contract
 When a request uses it with Collector Crypt or a replacement Courtyard source, revision, or adapter
 Then the request is rejected before the source adapter call
-And every source checkpoint remains unchanged while only the invalid source becomes action required
+And every source cursor remains unchanged while only the invalid source becomes action required
 
-Coverage: Manual gap — implementation has not started. Authenticated evidence and automated checkpoint-isolation coverage is owned by tasks `dataforest-source-integration/001`, `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/004` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Authenticated evidence and automated cursor-isolation coverage is owned by tasks `dataforest-source-integration/001`, `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/004` and must replace this gap before completion.
 
-## Scenario: A checkpoint cycle cannot return after restart
+## Scenario: A cursor cycle cannot return after restart
 
-Given one source generation has committed checkpoint A and then checkpoint B under `continue`
-When a later run or restarted supervisor receives checkpoint A again with `continue`
-Then the generic precommit guard rejects the page before checkpoint, outcome, canonical, or diagnostic commit without parsing the checkpoint
-And a valid `poll_after` result may still preserve checkpoint B because it does not request an immediate next page
+Given one source generation has committed cursor A and then cursor B under `continue`
+When a later run or restarted supervisor receives cursor A again with `continue`
+Then the generic precommit guard rejects the page before cursor, outcome, canonical, or diagnostic commit without parsing the cursor
+And a valid `poll_after` result may still preserve cursor B because it does not request an immediate next page
 
 Coverage: Manual gap — implementation has not started. Automated immediate-repeat, A-to-B-to-A, longer-cycle, run-rollover, restart, fingerprint, and poll-after preservation coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/006`, and `dataforest-source-integration/007` and must replace this gap before completion.
 
@@ -93,25 +93,25 @@ Coverage: Manual gap — implementation has not started. Automated immediate-rep
 Given a valid Courtyard page contains catalog, pull, and trade records
 When the DataForrest adapter normalizes and PackScout imports the page
 Then every valid normalized observation passes through the separately pinned Courtyard mapper
-And one atomic commit preserves source lineage, page outcomes, normalized continuation, and its single next checkpoint
+And one atomic commit preserves source lineage, page outcomes, normalized continuation, and its single next cursor
 
 Coverage: Manual gap — implementation has not started. Automated mixed-page, mapper-dispatch, and atomic-persistence coverage is owned by tasks `dataforest-source-integration/003`, `dataforest-source-integration/005`, and `dataforest-source-integration/006` and must replace this gap before completion.
 
 ## Scenario: A test-only alternate adapter proves the source seam
 
-Given a test-only Courtyard adapter has a different raw wrapper, checkpoint grammar, continuation signal, and connection profile from DataForrest
+Given a test-only Courtyard adapter has a different raw wrapper, cursor grammar, continuation signal, and connection profile from DataForrest
 When it emits the same normalized record contract, record-ID scopes, and identity namespace through the generic processor
-Then the unchanged Courtyard mapper, importer, scheduler, pause, resume, and diagnostic paths process it without parsing its checkpoint or branching on adapter type
+Then the unchanged Courtyard mapper, importer, scheduler, pause, resume, and diagnostic paths process it without parsing its cursor or branching on adapter type
 And production and admin registries still expose only `dataforrest-events-v1`
 
-Coverage: Manual gap — implementation has not started. Automated adapter conformance, checkpoint opacity, normalized continuation, unchanged mapping, generic runtime, production-registry, and admin-exclusion coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, `dataforest-source-integration/004`, `dataforest-source-integration/005`, `dataforest-source-integration/006`, `dataforest-source-integration/007`, and `dataforest-source-integration/008` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated adapter conformance, cursor opacity, normalized continuation, unchanged mapping, generic runtime, production-registry, and admin-exclusion coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, `dataforest-source-integration/004`, `dataforest-source-integration/005`, `dataforest-source-integration/006`, `dataforest-source-integration/007`, and `dataforest-source-integration/008` and must replace this gap before completion.
 
 ## Scenario: Normalized continuation has one exact shape
 
-Given adapter results include valid `continue`, valid `poll_after(60)`, `continue` with null checkpoint or a delay, and `poll_after` with missing, fractional, negative, or excessive delay
+Given adapter results include valid `continue`, valid `poll_after(60)`, `continue` with null cursor or a delay, and `poll_after` with missing, fractional, negative, or excessive delay
 When PackScout validates them before persistence or scheduling
-Then only `continue` without a delay and with a nonnull next checkpoint or `poll_after` with a required integer from 0 through 86,400 are accepted
-And every invalid shape leaves the checkpoint unchanged and stops only that source with a stable contract failure
+Then only `continue` without a delay and with a nonnull next cursor or `poll_after` with a required integer from 0 through 86,400 are accepted
+And every invalid shape leaves the cursor unchanged and stops only that source with a stable contract failure
 
 Coverage: Manual gap — implementation has not started. Automated discriminated-union, required-delay, bounds, persistence, scheduling, and source-isolation coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, `dataforest-source-integration/006`, and `dataforest-source-integration/007` and must replace this gap before completion.
 
@@ -120,7 +120,7 @@ Coverage: Manual gap — implementation has not started. Automated discriminated
 Given one valid page has valid catalog and pull records plus one malformed trade
 When PackScout commits the page
 Then valid records commit and the malformed trade receives one durable quarantine outcome
-And the checkpoint advances only with the complete page evidence, record outcomes, and page diagnostic
+And the cursor advances only with the complete page evidence, record outcomes, and page diagnostic
 
 Coverage: Manual gap — implementation has not started. Automated quarantine isolation and transaction coverage is owned by task `dataforest-source-integration/006` and must replace this gap before completion.
 
@@ -128,10 +128,10 @@ Coverage: Manual gap — implementation has not started. Automated quarantine is
 
 Given one page changes approved pack or EV-input facts
 When the page commits
-Then exactly one deduplicated EV recomputation request commits with the canonical revision and checkpoint
+Then exactly one deduplicated EV recomputation request commits with the canonical revision and cursor
 And a duplicate page queues nothing while an enqueue failure rolls back the whole page
 
-Coverage: Manual gap — implementation has not started. Automated EV-input, recomputation, deduplication, rollback, and checkpoint coverage is owned by tasks `dataforest-source-integration/005` and `dataforest-source-integration/006` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated EV-input, recomputation, deduplication, rollback, and cursor coverage is owned by tasks `dataforest-source-integration/005` and `dataforest-source-integration/006` and must replace this gap before completion.
 
 ## Scenario: Enum migration preserves existing derived meanings
 
@@ -209,14 +209,14 @@ And deferred mapper code and focused tests still compile without an activatable 
 
 Coverage: Manual gap — implementation has not started. Automated mapper-manifest and activation coverage is owned by tasks `dataforest-source-integration/005` and `dataforest-source-integration/006` and must replace this gap before completion.
 
-## Scenario: Platform processors run concurrently while each checkpoint stays sequential
+## Scenario: Platform processors run concurrently while each cursor stays sequential
 
 Given four due platform sources, two execution slots, and two approved DataForrest permits
 When the local supervisor claims work
 Then two different providers have overlapping requests
-And no provider starts its next page until its prior page commits the next opaque checkpoint
+And no provider starts its next page until its prior page commits the next opaque cursor
 
-Coverage: Manual gap — implementation has not started. Automated overlap, capacity, and checkpoint-sequencing coverage is owned by tasks `dataforest-source-integration/003` and `dataforest-source-integration/007` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated overlap, capacity, and cursor-sequencing coverage is owned by tasks `dataforest-source-integration/003` and `dataforest-source-integration/007` and must replace this gap before completion.
 
 ## Scenario: Request capacity belongs to the connection profile
 
@@ -242,14 +242,14 @@ Coverage: Manual gap — implementation has not started. Automated paired-admiss
 Given Courtyard has committed `continue` and three other sources are due
 When Courtyard captures its bounded upstream response body, normalizes it, and later commits that page
 Then its connection-profile permit becomes available immediately after response-body capture while its execution slot remains held through normalization and the page attempt
-And after commit it yields the execution slot with a continuation from the committed checkpoint, while each released resource goes to its oldest eligible waiter before Courtyard can jump an unserved due source
+And after commit it yields the execution slot with a continuation from the committed cursor, while each released resource goes to its oldest eligible waiter before Courtyard can jump an unserved due source
 
 Coverage: Manual gap — implementation has not started. Automated continuation, fairness, and capacity coverage is owned by task `dataforest-source-integration/007` and must replace this gap before completion.
 
 ## Scenario: One processor failure does not stop another processor
 
-Given Courtyard encounters an action-required mapping or checkpoint failure while Collector Crypt is processing
-When Courtyard stops at its last committed checkpoint
+Given Courtyard encounters an action-required mapping or cursor failure while Collector Crypt is processing
+When Courtyard stops at its last committed cursor
 Then Collector Crypt commits and continues normally
 And Courtyard releases its execution slot, holds no request permit, and leaves both resources available to other sources while the supervisor loop stays alive
 
@@ -261,13 +261,13 @@ Given four DataForrest sources share a capacity-one connection revision, a secon
 When the first DataForrest request returns an authentication failure
 Then one connection-revision action-required episode advances its health generation and the queued page makes zero upstream calls
 And the failed request does not wake the profile permit until that blocking transition is durable
-And all four DataForrest lanes wait while every platform checkpoint and source-local health detail remains unchanged
+And all four DataForrest lanes wait while every platform cursor and source-local health detail remains unchanged
 And the alternate profile, supervisor, and authorized admin operations remain available
 And at most one explicitly correlated recovery connection test may be pending or running without source state, receives the only request lease permitted under that open episode, and may call upstream while normal connection tests, source tests, and page reads make zero calls
 And duplicate recovery requests coalesce, while a failed immutable attempt leaves the episode open for a later explicit attempt
-And same-revision recovery resumes eligible work while a tested replacement revision creates new pinned runs from committed checkpoints without mutating old runs
+And same-revision recovery resumes eligible work while a tested replacement revision creates new pinned runs from committed cursors without mutating old runs
 
-Coverage: Manual gap — implementation has not started. Automated connection-health fencing, stored-once diagnostics, zero-call bound wait, same- and replacement-revision recovery, checkpoint preservation, independent-profile, and admin-operability coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, `dataforest-source-integration/004`, `dataforest-source-integration/007`, and `dataforest-source-integration/008` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated connection-health fencing, stored-once diagnostics, zero-call bound wait, same- and replacement-revision recovery, cursor preservation, independent-profile, and admin-operability coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, `dataforest-source-integration/004`, `dataforest-source-integration/007`, and `dataforest-source-integration/008` and must replace this gap before completion.
 
 ## Scenario: Simultaneous blocking outcomes create one connection episode
 
@@ -306,17 +306,17 @@ Coverage: Manual gap — implementation has not started. Automated pre-call atte
 Given one bound page has captured a successful response under connection health generation seven and is still mapping
 When a sibling request opens a blocking connection episode and advances the revision to generation eight
 Then the captured page fails its atomic precommit guard as stale
-And it writes no page, occurrence, canonical, EV, diagnostic-success, or checkpoint state
-And recovery later resumes that source from its last committed checkpoint
+And it writes no page, occurrence, canonical, EV, diagnostic-success, or cursor state
+And recovery later resumes that source from its last committed cursor
 
-Coverage: Manual gap — implementation has not started. Automated request-time health-generation lineage, post-capture episode, atomic rollback, and checkpoint-resume coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/006`, and `dataforest-source-integration/007` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated request-time health-generation lineage, post-capture episode, atomic rollback, and cursor-resume coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/006`, and `dataforest-source-integration/007` and must replace this gap before completion.
 
 ## Scenario: A singleton lease prevents two local supervisors
 
 Given one local supervisor owns the current environment lease
 When a second supervisor process starts
 Then it fails before claiming a run, executing a source test, or invoking any source adapter
-And after the owner stops or its lease expires exactly one replacement can take over durable work from committed checkpoints
+And after the owner stops or its lease expires exactly one replacement can take over durable work from committed cursors
 
 Coverage: Manual gap — implementation has not started. Automated singleton ownership, zero-call rejection, lease expiry, graceful release, and takeover coverage is owned by task `dataforest-source-integration/007` and must replace this gap before completion.
 
@@ -324,7 +324,7 @@ Coverage: Manual gap — implementation has not started. Automated singleton own
 
 Given a supervisor is waiting cancelably for a connection-profile permit under its current singleton epoch
 When the permit is granted after that epoch can no longer be renewed or validated
-Then the reserved execution slot and profile permit are atomically released without a source-adapter call, request attempt, request lease, checkpoint change, or false provider failure
+Then the reserved execution slot and profile permit are atomically released without a source-adapter call, request attempt, request lease, cursor change, or false provider failure
 And only a current owner may receive a fenced request lease and make one bounded upstream request
 
 Coverage: Manual gap — implementation has not started. Automated cancelable-wait, FIFO-grant, post-grant epoch validation, zero-call release, request-lease fencing, and single-request coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/007` and must replace this gap before completion.
@@ -332,11 +332,11 @@ Coverage: Manual gap — implementation has not started. Automated cancelable-wa
 ## Scenario: Revoked or stale work cannot call upstream after waiting
 
 Given a page read or operational test is waiting for its connection-profile permit
-When its run or job lease expires, profile revision is revoked, source is disabled or replaced, or checkpoint generation changes before the permit is granted
+When its run or job lease expires, profile revision is revoked, source is disabled or replaced, or cursor generation changes before the permit is granted
 Then the post-grant guard rejects the stale operation and atomically releases its reserved execution slot and profile permit
-And the source adapter receives zero calls and no checkpoint, page, test result, or diagnostic success is committed
+And the source adapter receives zero calls and no cursor, page, test result, or diagnostic success is committed
 
-Coverage: Manual gap — implementation has not started. Automated post-wait run/job, profile-revocation, source-lifecycle, checkpoint-generation, zero-call, and permit-release coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, `dataforest-source-integration/004`, and `dataforest-source-integration/007` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated post-wait run/job, profile-revocation, source-lifecycle, cursor-generation, zero-call, and permit-release coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, `dataforest-source-integration/004`, and `dataforest-source-integration/007` and must replace this gap before completion.
 
 ## Scenario: A partitioned old supervisor cannot overlap its replacement
 
@@ -372,7 +372,7 @@ Given the DataForrest adapter has committed `poll_after(60)` for reached-head Co
 And an administrator revises only Collector Crypt to 180 seconds
 When the supervisor checks durable work frequently
 Then Courtyard becomes due after 60 seconds and Collector Crypt after 180 seconds
-And no earlier check invokes DataForrest or changes either source's checkpoint
+And no earlier check invokes DataForrest or changes either source's cursor
 And neither source becomes stale before its own next due time plus the fixed 15-minute grace
 And no generic scheduler state contains `poll_after_seconds`
 
@@ -382,7 +382,7 @@ Coverage: Manual gap — implementation has not started. Automated schedule, tim
 
 Given several platform processors have committed pages with `continue` remaining
 When the supervisor stops and restarts after lease recovery
-Then every source resumes from its own last committed checkpoint without applying a page twice
+Then every source resumes from its own last committed cursor without applying a page twice
 And no intentional continuation or restart is reported as a provider failure
 
 Coverage: Manual gap — implementation has not started. Automated page-boundary, lease, restart, and health coverage is owned by tasks `dataforest-source-integration/006` and `dataforest-source-integration/007` and must replace this gap before completion.
@@ -391,8 +391,8 @@ Coverage: Manual gap — implementation has not started. Automated page-boundary
 
 Given one provider has future scheduled or currently running work
 When an authorized operator selects Run now, Pause, and later Resume
-Then manual work creates once or coalesces, pause stops after the current page, and resume uses the committed checkpoint
-And no other provider's schedule, run, checkpoint, or processor state changes
+Then manual work creates once or coalesces, pause stops after the current page, and resume uses the committed cursor
+And no other provider's schedule, run, cursor, or processor state changes
 
 Coverage: Manual gap — implementation has not started. Automated manual, coalescing, pause, resume, audit, and isolation coverage is owned by tasks `dataforest-source-integration/007` and `dataforest-source-integration/008` and must replace this gap before completion.
 
@@ -401,7 +401,7 @@ Coverage: Manual gap — implementation has not started. Automated manual, coale
 Given Courtyard and Phygitals commit pages concurrently and their shared connection records one bounded event
 When an operator views the Courtyard diagnostic feed
 Then the feed shows ordered Courtyard events plus the one stored, explicitly labeled connection event because Courtyard was bound to that profile at the event time
-And pagination never duplicates the shared event or exposes a Phygitals source event, another profile or tenant, credential, full checkpoint or vendor cursor, payload, personal identifier, transaction identity, or stack trace
+And pagination never duplicates the shared event or exposes a Phygitals source event, another profile or tenant, credential, full cursor or vendor cursor, payload, personal identifier, transaction identity, or stack trace
 
 Coverage: Manual gap — implementation has not started. Automated diagnostic scope, ordering, composition, and redaction coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/007`, and `dataforest-source-integration/008` and must replace this gap before completion.
 
@@ -419,7 +419,7 @@ Coverage: Manual gap — implementation has not started. Automated event-kind co
 Given a source has page-level processor events, terminal and nonterminal request attempts, and quarantined record evidence
 When processor events and terminal attempts reach 30 days, raw pages reach seven days, and quarantine evidence reaches 30 days
 Then eligible protected diagnostics and payloads expire and terminal attempts compact in bounded tenant-scoped batches
-And immutable attempt identity, outcome hash, fence lineage, checkpoints, run and page summaries, dispositions, canonical history, health, and operator audits remain
+And immutable attempt identity, outcome hash, fence lineage, cursors, run and page summaries, dispositions, canonical history, health, and operator audits remain
 And a nonterminal attempt cannot expire, while a reconciled terminal uncertain attempt keeps its episode link for 30 days before compaction
 
 Coverage: Manual gap — implementation has not started. Automated retention, cleanup, and durable-state coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/006`, and `dataforest-source-integration/007` and must replace this gap before completion.
@@ -438,7 +438,7 @@ Coverage: Manual gap — implementation has not started. Automated presence, pro
 Given an administrator and data operator belong to the same organization
 When they operate provider sources
 Then both can view progress and diagnostics and use authorized Run now, Pause, Resume, and quarantine Retry actions
-But only the administrator can change credentials, source bindings, intervals, activation, disable state, replacement, or checkpoints
+But only the administrator can change credentials, source bindings, intervals, activation, disable state, replacement, or cursors
 
 Coverage: Manual gap — implementation has not started. Direct route, tenant, component, and browser coverage is owned by tasks `dataforest-source-integration/004` and `dataforest-source-integration/008` and must replace this gap before completion.
 
@@ -474,6 +474,6 @@ Coverage: The fail-closed reconciliation contract and dated BLOCKED scorecard ar
 Given public pack projections include available, unavailable, unknown, and explicitly sold-out states
 When a buyer views the complete catalog
 Then every pack has the accurate label and only available packs have current ranking or purchase eligibility
-And no connection, source, checkpoint, vendor cursor, processor diagnostic, quarantine, credential, payment method, or protected provider value reaches the browser
+And no connection, source, cursor, vendor cursor, processor diagnostic, quarantine, credential, payment method, or protected provider value reaches the browser
 
 Coverage: Automated public contract, projection, query, component, accessibility, production-build, and local browser evidence is recorded by task `dataforest-source-integration/009`; live publication remains explicitly outside task 010 and blocked on the separate publisher/finalizer.

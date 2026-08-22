@@ -1,12 +1,12 @@
 import { Router, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 import {
-  confirmProviderSourceCheckpointResetRequestSchema,
+  confirmProviderSourceCursorResetRequestSchema,
   activateSourceConnectionRecoveryRequestSchema,
   createProviderSourceRequestSchema,
   createSourceConnectionProfileRequestSchema,
   createSourceConnectionRecoveryRevisionRequestSchema,
-  previewProviderSourceCheckpointResetRequestSchema,
+  previewProviderSourceCursorResetRequestSchema,
   providerSourceRevisionCommandSchema,
   replaceProviderSourceRequestSchema,
   requestSourceConnectionRecoveryTestSchema,
@@ -82,8 +82,8 @@ export interface ProviderSourcesRouterDependencies {
     | "pause"
     | "resume"
     | "disable"
-    | "previewCheckpointReset"
-    | "resetCheckpoint"
+    | "previewCursorReset"
+    | "resetCursor"
   >;
 }
 
@@ -533,8 +533,8 @@ export function createProviderSourcesRouter(
       | "pause"
       | "resume"
       | "disable"
-      | "checkpoint-reset-preview"
-      | "checkpoint-reset",
+      | "cursor-reset-preview"
+      | "cursor-reset",
   ) => {
     const handler = async (
       request: Parameters<RequestHandler>[0],
@@ -544,10 +544,10 @@ export function createProviderSourcesRouter(
     if (!params || !("sourceInstanceId" in params)) return;
     const schema = action === "interval"
       ? reviseProviderSourceIntervalRequestSchema
-      : action === "checkpoint-reset-preview"
-        ? previewProviderSourceCheckpointResetRequestSchema
-        : action === "checkpoint-reset"
-          ? confirmProviderSourceCheckpointResetRequestSchema
+      : action === "cursor-reset-preview"
+        ? previewProviderSourceCursorResetRequestSchema
+        : action === "cursor-reset"
+          ? confirmProviderSourceCursorResetRequestSchema
           : providerSourceRevisionCommandSchema;
     const body = parsedBody(schema, request, response);
     if (!body) return;
@@ -569,12 +569,12 @@ export function createProviderSourcesRouter(
         audit: await dependencies.sources.resume(...args),
       };
       case "disable": return { audit: await dependencies.sources.disable(...args) };
-      case "checkpoint-reset-preview":
-        return { preview: await dependencies.sources.previewCheckpointReset(...args) };
-      case "checkpoint-reset": return dependencies.sources.resetCheckpoint(...args);
+      case "cursor-reset-preview":
+        return { preview: await dependencies.sources.previewCursorReset(...args) };
+      case "cursor-reset": return dependencies.sources.resetCursor(...args);
     }
     };
-    if (action === "checkpoint-reset-preview") return command(handler);
+    if (action === "cursor-reset-preview") return command(handler);
     return audited(handler, {
       action: action === "test"
         ? "source_test_requested"
@@ -588,7 +588,7 @@ export function createProviderSourcesRouter(
                 ? "source_resumed"
                 : action === "disable"
                   ? "source_disabled"
-                  : "source_checkpoint_reset",
+                  : "source_cursor_reset",
       subjectType: "provider_source",
       subjectId: sourceSubject,
       revisionId: (request) => bodyRevision(request, ["expectedSourceRevisionId"]),
@@ -601,8 +601,8 @@ export function createProviderSourcesRouter(
     "pause",
     "resume",
     "disable",
-    "checkpoint-reset-preview",
-    "checkpoint-reset",
+    "cursor-reset-preview",
+    "cursor-reset",
   ] as const) {
     router.post(
       `/providers/:providerId/sources/:sourceInstanceId/${action}`,

@@ -9,7 +9,7 @@
 
 ## Start Here
 
-Render deterministic summaries for the shared connection and four platform processors, then prove an administrator can identify which provider is catching up, which is waiting, and which failed without seeing a credential, full checkpoint or vendor cursor, or another provider's diagnostic event.
+Render deterministic summaries for the shared connection and four platform processors, then prove an administrator can identify which provider is catching up, which is waiting, and which failed without seeing a credential, full cursor or vendor cursor, or another provider's diagnostic event.
 
 ## Objective
 
@@ -29,11 +29,11 @@ The UI must distinguish shared connection impact from source-local state. It mus
 - Show one row each for Courtyard, Collector Crypt, Phygitals, and ClutchPacks with source type, source and mapper revisions, lifecycle, processor activity, normalized continuation, sync phase, freshness, quality, interval, next due time, last progress, and head time.
 - Show pages, records by source stream, dispositions, throughput, elapsed time, retry count, open quarantine, active run, lease age, and an explicit wait reason.
 - Present percent complete or ETA only when a provider-specific total is defensible; otherwise show `Total unknown` with records, throughput, and elapsed time.
-- Make a shared connection failure visible once at connection level and on affected rows without replacing each provider's local checkpoint, quality, or lifecycle state.
+- Make a shared connection failure visible once at connection level and on affected rows without replacing each provider's local cursor, quality, or lifecycle state.
 
 ### Provider detail and diagnostics
 
-- Present source type, source and normalized-contract revisions, mapper version, identity namespace, masked adapter-validated configuration, safe checkpoint fingerprint, schedule, current run, run history, page progress, quarantine summary, and health history.
+- Present source type, source and normalized-contract revisions, mapper version, identity namespace, masked adapter-validated configuration, safe cursor fingerprint, schedule, current run, run history, page progress, quarantine summary, and health history.
 - Provide one chronological diagnostic feed scoped to the selected source plus explicitly labeled shared connection events; never include another source's local events.
 - Refresh current state and recent diagnostics every five seconds while the page is visible, and let the operator pause display refresh without changing ingestion.
 
@@ -46,8 +46,8 @@ The UI must distinguish shared connection impact from source-local state. It mus
 ### Operational controls
 
 - Let administrators and data operators use Run now, processor Pause, Resume, and authorized quarantine Retry with clear created, queued, coalesced, pause-requested, paused, and resumed outcomes.
-- Let administrators configure the first-pass DataForrest profile and sources, rotate the credential, test the connection or source, change a provider interval, activate or disable a source, replace it, and reset its checkpoint under task 004's generic lifecycle rules.
-- Require selected-provider impact copy and confirmation for disable, replacement, and checkpoint reset; never imply another provider is affected.
+- Let administrators configure the first-pass DataForrest profile and sources, rotate the credential, test the connection or source, change a provider interval, activate or disable a source, replace it, and reset its cursor under task 004's generic lifecycle rules.
+- Require selected-provider impact copy and confirmation for disable, replacement, and cursor reset; never imply another provider is affected.
 - Preserve form state and current safe evidence on validation, forbidden, conflict, no-worker, and upstream-test failures.
 - Keep operating-system worker start, stop, scaling, and hosting controls out of the admin console.
 
@@ -56,7 +56,7 @@ The UI must distinguish shared connection impact from source-local state. It mus
 - Render source type, capability, continuation, test, health, and configuration summaries supplied by the server contract rather than branching on provider names in shared admin views.
 - Show adapter-specific values only through a fixed, masked DataForrest form and safe summaries in first pass; do not add dynamic plugin installation or a universal schema-driven form system.
 - Hide unregistered and test-only adapters from every production list, create flow, command, and diagnostic filter.
-- Explain that replacing source type starts a new paused source at Feed start and cannot transfer the old checkpoint.
+- Explain that replacing source type starts a new paused source at Feed start and cannot transfer the old cursor.
 - Block replacement in the UI and server when mapper contract, record-ID scopes, or identity namespace is incompatible.
 
 ### Roles and security
@@ -83,7 +83,7 @@ An operator can answer four questions from the overview: which processors are ru
 
 The admin boundary consumes registered source-type summaries, masked connection state, supervisor presence and profile-grouped capacity, provider source and mapper revisions, normalized continuation, run and page progress, health, quarantine summaries, ordered diagnostics, and safe audit receipts.
 
-Every command returns the current masked provider state plus one stable outcome. No browser response contains a credential, authorization header, full checkpoint or vendor cursor, provider payload, personal identifier, transaction identity, stack trace, or another tenant's internal identifier.
+Every command returns the current masked provider state plus one stable outcome. No browser response contains a credential, authorization header, full cursor or vendor cursor, provider payload, personal identifier, transaction identity, stack trace, or another tenant's internal identifier.
 
 ## Acceptance Criteria
 
@@ -97,13 +97,13 @@ Every command returns the current masked provider state plus one stable outcome.
 ### Abstraction proof
 
 - [x] Shared monitoring and controls render from source-type-neutral summaries and contain no provider-name or DataForrest transport branch.
-- [x] Source type, normalized-contract version, mapper version, identity namespace, continuation, and safe checkpoint ownership are visible without protected adapter configuration.
+- [x] Source type, normalized-contract version, mapper version, identity namespace, continuation, and safe cursor ownership are visible without protected adapter configuration.
 - [x] Production create and replacement flows expose only `dataforrest-events-v1` and reject the test adapter, contract mismatch, and identity-namespace mismatch.
 
 ### Control and security proof
 
 - [x] Run now, Pause/Resume, Retry, normal or recovery connection test, source test, and interval changes return exact safe outcomes and affect only the selected provider or shared profile.
-- [x] Data operators can operate imports and quarantine but cannot configure sources, credentials, activation, disable, replacement, or checkpoints.
+- [x] Data operators can operate imports and quarantine but cannot configure sources, credentials, activation, disable, replacement, or cursors.
 - [x] Direct route tests prove authentication, authorization, tenant isolation, validation, rate control, redaction, confirmation, audit, and external-request boundaries.
 - [x] Component tests and browser smoke pass for primary monitoring, diagnostics, controls, failures, accessibility, and required widths.
 

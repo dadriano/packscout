@@ -128,8 +128,8 @@ function dependencies() {
     pause: sourceMethod("pause"),
     resume: sourceMethod("resume"),
     disable: sourceMethod("disable"),
-    previewCheckpointReset: sourceMethod("previewReset"),
-    resetCheckpoint: sourceMethod("resetCheckpoint"),
+    previewCursorReset: sourceMethod("previewReset"),
+    resetCursor: sourceMethod("resetCursor"),
   };
   return {
     calls,
@@ -307,7 +307,7 @@ test("secret mutation requires secret authority, trusted Origin, CSRF, and stric
 test("configuration and destructive reset are administrator-only and reject malformed tenant targets before service calls", async () => {
   const fixture = dependencies();
   const server = await start(app(fixture.dependencies));
-  const resetPath = `${server.url}/providers/${providerId}/sources/${sourceId}/checkpoint-reset`;
+  const resetPath = `${server.url}/providers/${providerId}/sources/${sourceId}/cursor-reset`;
   try {
     const forbidden = await fetch(resetPath, {
       method: "POST",
@@ -316,23 +316,23 @@ test("configuration and destructive reset are administrator-only and reject malf
     });
     assert.equal(forbidden.status, 403);
     const malformed = await fetch(
-      `${server.url}/providers/not-a-uuid/sources/${sourceId}/checkpoint-reset`,
+      `${server.url}/providers/not-a-uuid/sources/${sourceId}/cursor-reset`,
       { method: "POST", headers: headers(), body: "{}" },
     );
     assert.equal(malformed.status, 422);
-    assert.equal(fixture.calls.some(({ name }) => name === "resetCheckpoint"), false);
+    assert.equal(fixture.calls.some(({ name }) => name === "resetCursor"), false);
     const valid = await fetch(resetPath, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({
         expectedSourceRevisionId: revisionId,
-        expectedCheckpointGeneration: "1",
-        expectedCheckpointFingerprint: null,
+        expectedCursorGeneration: "1",
+        expectedCursorFingerprint: null,
         confirmation: "RESET COURTYARD",
       }),
     });
     assert.equal(valid.status, 200);
-    assert.equal(fixture.calls.at(-1)?.name, "resetCheckpoint");
+    assert.equal(fixture.calls.at(-1)?.name, "resetCursor");
   } finally {
     await server.close();
   }
@@ -419,13 +419,13 @@ test("every action body is strictly validated at the HTTP boundary before a serv
     [`${source}/pause`, { expectedSourceRevisionId: revisionId }],
     [`${source}/resume`, { expectedSourceRevisionId: revisionId }],
     [`${source}/disable`, { expectedSourceRevisionId: revisionId }],
-    [`${source}/checkpoint-reset-preview`, {
+    [`${source}/cursor-reset-preview`, {
       expectedSourceRevisionId: revisionId,
     }],
-    [`${source}/checkpoint-reset`, {
+    [`${source}/cursor-reset`, {
       expectedSourceRevisionId: revisionId,
-      expectedCheckpointGeneration: "1",
-      expectedCheckpointFingerprint: null,
+      expectedCursorGeneration: "1",
+      expectedCursorFingerprint: null,
       confirmation: "RESET courtyard TO FEED START",
     }],
   ] as const;

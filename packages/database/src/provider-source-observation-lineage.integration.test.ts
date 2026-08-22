@@ -86,7 +86,7 @@ async function sourceFixture() {
     mapperKey: "courtyard-provider-observation",
     mapperVersion: "1",
     identityNamespaceKey: providerIdentityNamespaceByLaunchProvider.courtyard,
-    checkpointCodecVersion: "dataforrest-cursor-v1",
+    cursorCodecVersion: "dataforrest-cursor-v1",
     revisionNumber: 1,
     intervalSeconds: 60,
     configuration: { provider: "courtyard" },
@@ -447,7 +447,7 @@ test("semantic observations share the outer commit and are the normalized canoni
       mapperVersion: "1",
       identityNamespaceKey:
         providerIdentityNamespaceByLaunchProvider.collector_crypt,
-      checkpointCodecVersion: "dataforrest-cursor-v1",
+      cursorCodecVersion: "dataforrest-cursor-v1",
       revisionNumber: 1,
       intervalSeconds: 60,
       configuration: { provider: "collector_crypt" },

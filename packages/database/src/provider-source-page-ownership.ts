@@ -6,14 +6,6 @@ import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
 import type { ProviderSourceAtomicPagePersistenceInput } from "./provider-source-page-validation.ts";
 
-function checkpointBytes(value: string | null): Uint8Array<ArrayBuffer> | null {
-  if (value === null) return null;
-  const encoded = new TextEncoder().encode(value);
-  const copy = new Uint8Array(new ArrayBuffer(encoded.byteLength));
-  copy.set(encoded);
-  return copy;
-}
-
 function fenced(message: string): never {
   throw new PersistenceError("SOURCE_FENCED", message);
 }
@@ -21,7 +13,7 @@ function fenced(message: string): never {
 /**
  * Locks every mutable page authority in global order:
  * epoch -> provider -> source -> profile -> source revision -> connection
- * revision -> run -> checkpoint. Episode creators serialize on the profile.
+ * revision -> run -> cursor. Episode creators serialize on the profile.
  */
 export async function lockProviderSourcePageOwnership(
   transaction: PackscoutTransactionClient,
@@ -99,7 +91,7 @@ export async function lockProviderSourcePageOwnership(
       and mapper_key = ${pins.mapperKey}
       and mapper_version = ${pins.mapperVersion}
       and identity_namespace_key = ${pins.identityNamespaceKey}
-      and checkpoint_codec_version = ${pins.checkpointCodecVersion}
+      and cursor_codec_version = ${pins.cursorCodecVersion}
     for share
   `);
   if (!sourceRevisions[0]) fenced("Atomic page source revision pins changed.");
@@ -157,14 +149,14 @@ export async function lockProviderSourcePageOwnership(
       and identity_namespace_key = ${pins.identityNamespaceKey}
       and connection_profile_id = ${pins.connectionProfileId}::uuid
       and connection_revision_id = ${pins.connectionRevisionId}::uuid
-      and checkpoint_codec_version = ${pins.checkpointCodecVersion}
-      and checkpoint_generation = ${pins.checkpointGeneration}
-      and current_checkpoint_fingerprint is not distinct from
-        ${pins.requestedCheckpointFingerprint}
-      and current_checkpoint_key =
-        ${pins.requestedCheckpointFingerprint ?? "initial"}
-      and current_checkpoint is not distinct from
-        ${checkpointBytes(pins.requestedCheckpoint.value)}
+      and cursor_codec_version = ${pins.cursorCodecVersion}
+      and cursor_generation = ${pins.cursorGeneration}
+      and current_cursor_fingerprint is not distinct from
+        ${pins.requestedCursorFingerprint}
+      and current_cursor_key =
+        ${pins.requestedCursorFingerprint ?? "initial"}
+      and current_cursor is not distinct from
+        ${pins.requestedCursor.value}
       and next_page_number = ${pins.pageNumber}
       and lease_owner = ${pins.runLeaseOwner}
       and lease_token = ${pins.runLeaseToken}::uuid
@@ -173,25 +165,25 @@ export async function lockProviderSourcePageOwnership(
   `);
   if (!runs[0]) fenced("Atomic page run claim pins changed.");
 
-  const checkpoints = await transaction.$queryRaw<Array<{ id: string }>>(
+  const cursors = await transaction.$queryRaw<Array<{ id: string }>>(
     Prisma.sql`
       select source_instance_id as id
-      from public.provider_source_checkpoints
+      from public.provider_source_cursors
       where source_instance_id = ${pins.sourceInstanceId}::uuid
         and organization_id = ${pins.organizationId}::uuid
         and provider_id = ${pins.providerId}::uuid
         and source_revision_id = ${pins.sourceRevisionId}::uuid
         and source_adapter_version = ${pins.sourceAdapterVersion}
-        and checkpoint_codec_version = ${pins.checkpointCodecVersion}
-        and checkpoint_generation = ${pins.checkpointGeneration}
-        and checkpoint_fingerprint is not distinct from
-          ${pins.requestedCheckpointFingerprint}
-        and checkpoint_bytes is not distinct from
-          ${checkpointBytes(pins.requestedCheckpoint.value)}
+        and cursor_codec_version = ${pins.cursorCodecVersion}
+        and cursor_generation = ${pins.cursorGeneration}
+        and cursor_fingerprint is not distinct from
+          ${pins.requestedCursorFingerprint}
+        and cursor is not distinct from
+          ${pins.requestedCursor.value}
       for update
     `,
   );
-  if (!checkpoints[0]) fenced("Atomic page checkpoint pins changed.");
+  if (!cursors[0]) fenced("Atomic page cursor pins changed.");
 
   const captureHash = createHash("sha256")
     .update(providerSourceSuccessfulCaptureCanonicalJson({
@@ -224,11 +216,11 @@ export async function lockProviderSourcePageOwnership(
       and source_revision_id = ${pins.sourceRevisionId}::uuid
       and run_id = ${pins.runId}::uuid
       and page_number = ${pins.pageNumber}
-      and checkpoint_generation = ${pins.checkpointGeneration}
-      and requested_checkpoint_fingerprint is not distinct from
-        ${pins.requestedCheckpointFingerprint}
-      and requested_checkpoint_key =
-        ${pins.requestedCheckpointFingerprint ?? "initial"}
+      and cursor_generation = ${pins.cursorGeneration}
+      and requested_cursor_fingerprint is not distinct from
+        ${pins.requestedCursorFingerprint}
+      and requested_cursor_key =
+        ${pins.requestedCursorFingerprint ?? "initial"}
     for share
   `);
   if (!attempts[0]) fenced("Atomic page request capture proof is unavailable.");

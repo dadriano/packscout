@@ -30,13 +30,13 @@ function mixedPage() {
       { status: "valid", recordIndex: 2, observation: pullObservation() },
       { status: "valid", recordIndex: 3, observation: tradeObservation() },
     ],
-    nextCheckpoint: {
+    nextCursor: {
       sourceInstanceId: "source-courtyard",
       sourceRevisionId: "revision-courtyard",
       sourceTypeKey: "dataforrest-events-v1",
       adapterVersion: "dataforrest-events-v1",
-      checkpointCodecKey: "dataforrest-events-cursor-v1",
-      checkpointGeneration: 1,
+      cursorCodecKey: "dataforrest-events-cursor-v1",
+      cursorGeneration: 1,
       value: "cursor-b",
     },
     continuation: { kind: "continue" },

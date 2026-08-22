@@ -13,7 +13,7 @@ const createdAt = new Date("2026-08-21T12:00:00.000Z");
 const sourceTypeKey = "dataforrest-events-v1";
 const sourceAdapterVersion = "dataforrest-events-adapter-v1";
 const normalizedContractVersion = "packscout.provider-observation.v1";
-const checkpointCodecVersion = "dataforrest-cursor-v1";
+const cursorCodecVersion = "dataforrest-cursor-v1";
 const connectionTypeKey = "dataforrest-events-connection-v1";
 const sourceConfigurationHash = "b".repeat(64);
 const connectionConfigurationFingerprint = "a".repeat(64);
@@ -67,7 +67,7 @@ test("source activation candidate is coherent and exact persistence pins fail cl
       mapperKey: "courtyard-provider-observation",
       mapperVersion: "1",
       identityNamespaceKey: "dataforrest-courtyard-records-v1",
-      checkpointCodecVersion,
+      cursorCodecVersion,
       revisionNumber: 1,
       configuration: sourceConfiguration,
       configurationHash: sourceConfigurationHash,
@@ -105,13 +105,13 @@ test("source activation candidate is coherent and exact persistence pins fail cl
       connectionConfigurationFingerprint);
     assert.deepEqual(candidate.sourceRevision.configuration, sourceConfiguration);
     assert.deepEqual(candidate.sourceRevision.recordIdScopes, recordIdScopes);
-    assert.deepEqual(candidate.checkpoint, {
+    assert.deepEqual(candidate.cursor, {
       sourceRevisionId: source.sourceRevisionId,
       sourceAdapterVersion,
-      checkpointCodecVersion,
-      checkpointGeneration: 1n,
-      checkpointFingerprint: null,
-      hasCheckpointBytes: false,
+      cursorCodecVersion,
+      cursorGeneration: 1n,
+      cursorFingerprint: null,
+      hasCursor: false,
       advancedByRunId: null,
       advancedByPageId: null,
     });
@@ -128,7 +128,7 @@ test("source activation candidate is coherent and exact persistence pins fail cl
       mapperKey: "courtyard-provider-observation",
       mapperVersion: "1",
       identityNamespaceKey: "dataforrest-courtyard-records-v1",
-      checkpointCodecVersion,
+      cursorCodecVersion,
       sourceConfiguration,
       sourceConfigurationHash,
       recordIdScopes,
@@ -137,7 +137,7 @@ test("source activation candidate is coherent and exact persistence pins fail cl
       connectionRequestLimit: providerSourceLaunchBounds.stableProfileRequestCap,
       connectionRevisionId: connection.revisionId,
       connectionConfigurationFingerprint,
-      checkpointGeneration: 1n,
+      cursorGeneration: 1n,
       actorKey: "operator-admin",
       activatedAt: createdAt,
     };

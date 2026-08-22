@@ -6,7 +6,7 @@ import {
   normalizedObservationSemanticCanonicalJson,
   normalizedObservationSemanticContent,
   normalizedProviderObservationPageSchema,
-  opaqueCheckpointEnvelopeSchema,
+  opaqueCursorEnvelopeSchema,
   providerSourceExpectedCanonicalRelationships,
   providerSourceCanonicalCatalogAssetContentV1Schema,
   providerSourceCanonicalEvInputContentV1Schema,
@@ -53,7 +53,7 @@ export interface ProviderSourceAtomicPagePersistenceInput {
   readonly protectedRawResponse: Uint8Array;
   readonly protectedRawResponseSha256: string;
   readonly protectedNativeEvidence: readonly ProviderSourceProtectedNativeEvidence[];
-  readonly nextCheckpointFingerprint: string | null;
+  readonly nextCursorFingerprint: string | null;
   readonly committedAt: Date;
 }
 
@@ -106,7 +106,7 @@ function validatePins(pins: unknown): asserts pins is ProviderSourcePageCommitPi
     "mapperKey",
     "mapperVersion",
     "identityNamespaceKey",
-    "checkpointCodecVersion",
+    "cursorCodecVersion",
   ] as const;
   if (
     uuidFields.some(
@@ -128,9 +128,9 @@ function validatePins(pins: unknown): asserts pins is ProviderSourcePageCommitPi
     typeof value.connectionHealthGeneration !== "bigint" ||
     value.connectionHealthGeneration < 0n ||
     value.connectionHealthGeneration > BigInt(Number.MAX_SAFE_INTEGER) ||
-    typeof value.checkpointGeneration !== "bigint" ||
-    value.checkpointGeneration < 1n ||
-    value.checkpointGeneration > BigInt(Number.MAX_SAFE_INTEGER) ||
+    typeof value.cursorGeneration !== "bigint" ||
+    value.cursorGeneration < 1n ||
+    value.cursorGeneration > BigInt(Number.MAX_SAFE_INTEGER) ||
     typeof value.singletonFencingEpoch !== "number" ||
     !Number.isSafeInteger(value.singletonFencingEpoch) ||
     value.singletonFencingEpoch < 0 ||
@@ -141,23 +141,23 @@ function validatePins(pins: unknown): asserts pins is ProviderSourcePageCommitPi
     invalidPins();
   }
 
-  const checkpoint = opaqueCheckpointEnvelopeSchema.safeParse(
-    value.requestedCheckpoint,
+  const cursor = opaqueCursorEnvelopeSchema.safeParse(
+    value.requestedCursor,
   );
   if (
-    !checkpoint.success ||
-    checkpoint.data.sourceInstanceId !== value.sourceInstanceId ||
-    checkpoint.data.sourceRevisionId !== value.sourceRevisionId ||
-    checkpoint.data.sourceTypeKey !== value.sourceTypeKey ||
-    checkpoint.data.adapterVersion !== value.sourceAdapterVersion ||
-    checkpoint.data.checkpointCodecKey !== value.checkpointCodecVersion ||
-    checkpoint.data.checkpointGeneration !==
-      Number(value.checkpointGeneration) ||
-    (checkpoint.data.value === null) !==
-      (value.requestedCheckpointFingerprint === null) ||
-    (value.requestedCheckpointFingerprint !== null &&
-      (typeof value.requestedCheckpointFingerprint !== "string" ||
-        !SHA_256_PATTERN.test(value.requestedCheckpointFingerprint)))
+    !cursor.success ||
+    cursor.data.sourceInstanceId !== value.sourceInstanceId ||
+    cursor.data.sourceRevisionId !== value.sourceRevisionId ||
+    cursor.data.sourceTypeKey !== value.sourceTypeKey ||
+    cursor.data.adapterVersion !== value.sourceAdapterVersion ||
+    cursor.data.cursorCodecKey !== value.cursorCodecVersion ||
+    cursor.data.cursorGeneration !==
+      Number(value.cursorGeneration) ||
+    (cursor.data.value === null) !==
+      (value.requestedCursorFingerprint === null) ||
+    (value.requestedCursorFingerprint !== null &&
+      (typeof value.requestedCursorFingerprint !== "string" ||
+        !SHA_256_PATTERN.test(value.requestedCursorFingerprint)))
   ) {
     invalidPins();
   }
@@ -333,22 +333,22 @@ export function validateProviderSourceAtomicPageInput(
     invalidPlan();
   }
 
-  const nextValue = parsedPage.data.nextCheckpoint.value;
+  const nextValue = parsedPage.data.nextCursor.value;
   if (
-    parsedPage.data.nextCheckpoint.sourceInstanceId !==
+    parsedPage.data.nextCursor.sourceInstanceId !==
       input.pins.sourceInstanceId ||
-    parsedPage.data.nextCheckpoint.sourceRevisionId !==
+    parsedPage.data.nextCursor.sourceRevisionId !==
       input.pins.sourceRevisionId ||
-    parsedPage.data.nextCheckpoint.sourceTypeKey !== input.pins.sourceTypeKey ||
-    parsedPage.data.nextCheckpoint.adapterVersion !==
+    parsedPage.data.nextCursor.sourceTypeKey !== input.pins.sourceTypeKey ||
+    parsedPage.data.nextCursor.adapterVersion !==
       input.pins.sourceAdapterVersion ||
-    parsedPage.data.nextCheckpoint.checkpointCodecKey !==
-      input.pins.checkpointCodecVersion ||
-    parsedPage.data.nextCheckpoint.checkpointGeneration !==
-      Number(input.pins.checkpointGeneration) ||
-    (nextValue === null) !== (input.nextCheckpointFingerprint === null) ||
-    (input.nextCheckpointFingerprint !== null &&
-      !SHA_256_PATTERN.test(input.nextCheckpointFingerprint))
+    parsedPage.data.nextCursor.cursorCodecKey !==
+      input.pins.cursorCodecVersion ||
+    parsedPage.data.nextCursor.cursorGeneration !==
+      Number(input.pins.cursorGeneration) ||
+    (nextValue === null) !== (input.nextCursorFingerprint === null) ||
+    (input.nextCursorFingerprint !== null &&
+      !SHA_256_PATTERN.test(input.nextCursorFingerprint))
   ) {
     invalidPins();
   }

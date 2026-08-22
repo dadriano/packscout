@@ -251,7 +251,7 @@ async function createHarness() {
     mapperVersion: mapper.mapperVersion,
     identityNamespaceKey:
       providerIdentityNamespaceByLaunchProvider.courtyard,
-    checkpointCodecVersion: sourceManifest.checkpointCodecKey,
+    cursorCodecVersion: sourceManifest.cursorCodecKey,
     revisionNumber: 1,
     intervalSeconds: 60,
     configuration: { platform: "courtyard" },

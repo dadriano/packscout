@@ -41,7 +41,7 @@ export interface SourceAdapterConformanceCase {
   readonly provider: LaunchProviderKey;
   readonly validConnectionConfiguration: Readonly<Record<string, unknown>>;
   readonly validSourceConfiguration: Readonly<Record<string, unknown>>;
-  readonly expectedCheckpointValue: string;
+  readonly expectedCursorValue: string;
   buildConnectionOperation(): Promise<ConnectionTestOperation>;
   buildSourceOperation(): Promise<SourceTestOperation>;
   buildPageOperation(): Promise<PageReadOperation>;
@@ -90,7 +90,7 @@ export async function assertSourceAdapterConformance(
     connectionInterpretation,
   );
   assert.equal(connectionResult.ok, true);
-  assert.equal("nextCheckpoint" in connectionResult, false);
+  assert.equal("nextCursor" in connectionResult, false);
   assert.equal(connectionResult.measurements.recordCount, 0);
   connection.requestLease.close();
 
@@ -116,7 +116,7 @@ export async function assertSourceAdapterConformance(
     sourceInterpretation,
   );
   assert.equal(sourceResult.ok, true);
-  assert.equal("nextCheckpoint" in sourceResult, false);
+  assert.equal("nextCursor" in sourceResult, false);
   assert.equal(sourceResult.measurements.recordCount > 0, true);
   source.requestLease.close();
 
@@ -162,8 +162,8 @@ export async function assertSourceAdapterConformance(
   if (pageResult.ok) {
     assert.equal(pageResult.value.normalizedPage.provider, fixture.provider);
     assert.equal(
-      pageResult.value.normalizedPage.nextCheckpoint.value,
-      fixture.expectedCheckpointValue,
+      pageResult.value.normalizedPage.nextCursor.value,
+      fixture.expectedCursorValue,
     );
     assert.equal(
       pageResult.value.normalizedPage.outcomes.length,

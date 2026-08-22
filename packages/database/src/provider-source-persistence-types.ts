@@ -52,12 +52,12 @@ export interface ProviderSourceRevisionPins {
   readonly identityNamespaceKey: string;
   readonly connectionProfileId: string;
   readonly connectionRevisionId: string;
-  readonly checkpointCodecVersion: string;
-  readonly checkpointGeneration: bigint;
+  readonly cursorCodecVersion: string;
+  readonly cursorGeneration: bigint;
 }
 
-export interface OpaqueCheckpoint {
-  readonly bytes: Uint8Array | null;
+export interface OpaqueCursor {
+  readonly cursor: string | null;
   readonly fingerprint: string | null;
   readonly generation: bigint;
   readonly codecVersion: string;
@@ -83,8 +83,8 @@ export type SourceRequestOperation =
       sourceRevisionId: string;
       runId: string;
       pageNumber: number;
-      checkpointGeneration: bigint;
-      requestedCheckpointFingerprint: string | null;
+      cursorGeneration: bigint;
+      requestedCursorFingerprint: string | null;
     }>;
 
 export type RequestAttemptTerminalState =
@@ -106,7 +106,7 @@ interface DiagnosticEventBase {
   durationMs?: number | null;
   responseBytes?: number | null;
   retryDelayMs?: number | null;
-  checkpointFingerprint?: string | null;
+  cursorFingerprint?: string | null;
   continuation?:
     | Readonly<{ kind: "continue" }>
     | Readonly<{ kind: "poll_after"; minimumDelaySeconds: number }>

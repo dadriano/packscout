@@ -42,7 +42,7 @@ export * from "./provider-source-lifecycle-admin-repository.ts";
 export * from "./provider-source-lifecycle-service.ts";
 export * from "./connection-permit-coordinator.ts";
 export * from "./source-request-lease.ts";
-export * from "./opaque-checkpoint-guard.ts";
+export * from "./opaque-cursor-guard.ts";
 export * from "./control-plane-retry.ts";
 export * from "./heat-promotion-bootstrap.ts";
 export * from "./heat-promotion-operations.ts";

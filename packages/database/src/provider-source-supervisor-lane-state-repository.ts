@@ -17,7 +17,7 @@ export interface ProviderSourceRuntimeLaneUpdate {
   readonly pagesCommitted?: number;
   readonly recordsCommitted?: number;
   readonly lastProgressAt?: Date | null;
-  readonly checkpointFingerprint?: string | null;
+  readonly cursorFingerprint?: string | null;
   readonly continuationKind?: "continue" | "poll_after" | null;
   readonly continuationMinimumDelaySeconds?: number | null;
   readonly queuedAt?: Date | null;
@@ -54,9 +54,9 @@ export async function upsertProviderSourceRuntimeLane(
       pages_committed: state.pagesCommitted ?? 0,
       records_committed: state.recordsCommitted ?? 0,
       last_progress_at: state.lastProgressAt ?? null,
-      checkpoint_fingerprint: state.checkpointFingerprint
+      cursor_fingerprint: state.cursorFingerprint
         ?? (work.kind === "page_read"
-          ? work.requestedCheckpointFingerprint
+          ? work.requestedCursorFingerprint
           : null),
       continuation_kind: state.continuationKind ?? null,
       continuation_minimum_delay_seconds:
@@ -92,9 +92,9 @@ export async function upsertProviderSourceRuntimeLane(
       ...(state.lastProgressAt === undefined
         ? {}
         : { last_progress_at: state.lastProgressAt }),
-      ...(state.checkpointFingerprint === undefined
+      ...(state.cursorFingerprint === undefined
         ? {}
-        : { checkpoint_fingerprint: state.checkpointFingerprint }),
+        : { cursor_fingerprint: state.cursorFingerprint }),
       ...(state.continuationKind === undefined
         ? {}
         : { continuation_kind: state.continuationKind }),

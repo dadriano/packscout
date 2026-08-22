@@ -46,7 +46,7 @@ interface ClaimedSourceWorkBase extends ClaimedWorkBase {
   readonly mapperKey: string;
   readonly mapperVersion: string;
   readonly identityNamespaceKey: string;
-  readonly checkpointCodecVersion: string;
+  readonly cursorCodecVersion: string;
   readonly sourceConfiguration: unknown;
   readonly recordIdScopes: unknown;
 }
@@ -64,9 +64,9 @@ export interface ClaimedPageReadWork extends ClaimedSourceWorkBase {
   readonly committedRecords: number;
   readonly retryAttempt: number;
   readonly pageNumber: number;
-  readonly checkpointGeneration: bigint;
-  readonly requestedCheckpointValue: string | null;
-  readonly requestedCheckpointFingerprint: string | null;
+  readonly cursorGeneration: bigint;
+  readonly requestedCursorValue: string | null;
+  readonly requestedCursorFingerprint: string | null;
   readonly sourceIntervalSeconds: number;
 }
 
@@ -87,13 +87,13 @@ export type ProviderSourcePageTurnDecision =
   | Readonly<{
       kind: "continued";
       continuationRunId: string;
-      checkpointFingerprint: string;
+      cursorFingerprint: string;
       pagesCommitted: number;
       recordsCommitted: number;
     }>
   | Readonly<{
       kind: "reached_head";
-      checkpointFingerprint: string | null;
+      cursorFingerprint: string | null;
       minimumDelaySeconds: number;
       pagesCommitted: number;
       recordsCommitted: number;

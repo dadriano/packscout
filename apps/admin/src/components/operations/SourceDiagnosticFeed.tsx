@@ -176,7 +176,7 @@ export function SourceDiagnosticFeed({
                 <div><dt>Response</dt><dd>{event.responseBytes === null ? "Not recorded" : `${event.responseBytes.toLocaleString()} bytes`}</dd></div>
                 <div><dt>Retry delay</dt><dd>{milliseconds(event.retryDelayMilliseconds)}</dd></div>
                 <div><dt>Continuation</dt><dd>{event.continuation ? humanize(event.continuation.kind) : "None"}</dd></div>
-                <div><dt>Checkpoint</dt><dd className="ops-cursor">{event.checkpointFingerprint ?? "Not attached"}</dd></div>
+                <div><dt>Cursor</dt><dd className="ops-cursor">{event.cursorFingerprint ?? "Not attached"}</dd></div>
                 <div><dt>Counters</dt><dd>{Object.entries(event.counters).length === 0 ? "None" : Object.entries(event.counters).map(([key, value]) => `${humanize(key)} ${value}`).join(" · ")}</dd></div>
               </dl>
               {event.references.length > 0 ? (

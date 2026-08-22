@@ -56,8 +56,8 @@ test("the durable snapshot contract rejects inferred or inconsistent lane state"
       mapperKey: "courtyard",
       mapperVersion: "v1",
       identityNamespaceKey: "fixture-identities-v1",
-      checkpointCodecVersion: "fixture-checkpoint-v1",
-      checkpointGeneration: "1",
+      cursorCodecVersion: "fixture-cursor-v1",
+      cursorGeneration: "1",
       lifecycle: "active",
       phase: "idle",
       activity: "inactive",
@@ -71,7 +71,7 @@ test("the durable snapshot contract rejects inferred or inconsistent lane state"
         recordsCommitted: 0,
         lastProgressAt: null,
       },
-      checkpointFingerprint: null,
+      cursorFingerprint: null,
       continuation: null,
       nextDueAt: null,
       connectionEpisode: null,
@@ -93,7 +93,7 @@ test("the durable snapshot contract rejects inferred or inconsistent lane state"
   assert.equal(
     providerSourceSupervisorSnapshotSchema.safeParse({
       ...base,
-      sources: [{ ...base.sources[0], checkpointGeneration: "0" }],
+      sources: [{ ...base.sources[0], cursorGeneration: "0" }],
     }).success,
     false,
   );

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
+  DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
@@ -81,7 +81,7 @@ function validCandidate(
       mapperKey: mapperKeyByProvider[provider],
       mapperVersion: "1",
       identityNamespaceKey: providerIdentityNamespaceByLaunchProvider[provider],
-      checkpointCodecVersion: DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
+      cursorCodecVersion: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
       configuration,
       configurationHash: hashProviderSourceConfiguration(configuration),
       recordIdScopes: launchRecordIdScopeDeclarations.map(
@@ -104,13 +104,13 @@ function validCandidate(
       configurationFingerprint: connectionFingerprint,
       revokedAt: null,
     },
-    checkpoint: {
+    cursor: {
       sourceRevisionId,
       sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-      checkpointCodecVersion: DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
-      checkpointGeneration: 1n,
-      checkpointFingerprint: null,
-      hasCheckpointBytes: false,
+      cursorCodecVersion: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
+      cursorGeneration: 1n,
+      cursorFingerprint: null,
+      hasCursor: false,
       advancedByRunId: null,
       advancedByPageId: null,
     },
@@ -253,7 +253,7 @@ test("activation resolves production pins and persists only the exact safe candi
     mapperVersion: "1",
     identityNamespaceKey:
       providerIdentityNamespaceByLaunchProvider.courtyard,
-    checkpointCodecVersion: DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
+    cursorCodecVersion: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     sourceConfiguration: { platform: "courtyard" },
     sourceConfigurationHash: hashProviderSourceConfiguration({
       platform: "courtyard",
@@ -266,7 +266,7 @@ test("activation resolves production pins and persists only the exact safe candi
     connectionRequestLimit: 2,
     connectionRevisionId,
     connectionConfigurationFingerprint: connectionFingerprint,
-    checkpointGeneration: 1n,
+    cursorGeneration: 1n,
     actorKey: "operator-admin",
     activatedAt,
   });
@@ -302,7 +302,7 @@ test("source configuration hashing is canonical and domain separated", () => {
   );
 });
 
-test("activation rejects source hash, source schema, scope, connection type, cap, and checkpoint drift", async () => {
+test("activation rejects source hash, source schema, scope, connection type, cap, and cursor drift", async () => {
   const baseline = validCandidate();
   const invalidSource = withSourceConfiguration(baseline, {
     platform: "collector_crypt",
@@ -360,10 +360,10 @@ test("activation rejects source hash, source schema, scope, connection type, cap
       code: "adapter_manifest_mismatch",
     },
     {
-      name: "checkpoint",
+      name: "cursor",
       candidate: {
         ...baseline,
-        checkpoint: { ...baseline.checkpoint, checkpointGeneration: 2n },
+        cursor: { ...baseline.cursor, cursorGeneration: 2n },
       },
       code: "adapter_manifest_mismatch",
     },

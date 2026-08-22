@@ -230,23 +230,23 @@ function validateCaptureOperation(
     };
   }
   if (operation.operationKind === "page_read") {
-    const checkpoint = operation.correlation.requestedCheckpoint;
+    const cursor = operation.correlation.requestedCursor;
     if (
       operation.correlation.pageLimit !== operation.bounds.pageLimit ||
-      checkpoint.sourceInstanceId !== operation.sourceInstanceId ||
-      checkpoint.sourceRevisionId !== operation.sourceRevisionId ||
-      checkpoint.sourceTypeKey !== operation.sourceTypeKey ||
-      checkpoint.adapterVersion !== operation.adapterVersion ||
-      checkpoint.checkpointCodecKey !==
-        dataforrestEventsV1SourceAdapterManifest.checkpointCodecKey ||
-      checkpoint.checkpointGeneration !==
-        operation.correlation.checkpointGeneration ||
-      (checkpoint.value !== null &&
-        !dataforrestOpaqueCursorV1Schema.safeParse(checkpoint.value).success)
+      cursor.sourceInstanceId !== operation.sourceInstanceId ||
+      cursor.sourceRevisionId !== operation.sourceRevisionId ||
+      cursor.sourceTypeKey !== operation.sourceTypeKey ||
+      cursor.adapterVersion !== operation.adapterVersion ||
+      cursor.cursorCodecKey !==
+        dataforrestEventsV1SourceAdapterManifest.cursorCodecKey ||
+      cursor.cursorGeneration !==
+        operation.correlation.cursorGeneration ||
+      (cursor.value !== null &&
+        !dataforrestOpaqueCursorV1Schema.safeParse(cursor.value).success)
     ) {
       return {
         ok: false,
-        failure: stableFailure("source_action_required", "invalid_checkpoint"),
+        failure: stableFailure("source_action_required", "invalid_cursor"),
       };
     }
   }
@@ -271,11 +271,11 @@ function buildRequestUrl(
   requestUrl.searchParams.append("limit", String(operation.bounds.pageLimit));
   if (
     operation.operationKind === "page_read" &&
-    operation.correlation.requestedCheckpoint.value !== null
+    operation.correlation.requestedCursor.value !== null
   ) {
     requestUrl.searchParams.append(
       "cursor",
-      operation.correlation.requestedCheckpoint.value,
+      operation.correlation.requestedCursor.value,
     );
   }
   return requestUrl;
@@ -319,11 +319,11 @@ function mapHttpStatus(
     operation.operationKind !== "connection_test" &&
     (status === 400 || status === 422)
   ) {
-    const hasCheckpoint = operation.operationKind === "page_read" &&
-      operation.correlation.requestedCheckpoint.value !== null;
+    const hasCursor = operation.operationKind === "page_read" &&
+      operation.correlation.requestedCursor.value !== null;
     return stableFailure(
       "source_action_required",
-      hasCheckpoint ? "invalid_checkpoint" : "invalid_source_configuration",
+      hasCursor ? "invalid_cursor" : "invalid_source_configuration",
       status,
     );
   }

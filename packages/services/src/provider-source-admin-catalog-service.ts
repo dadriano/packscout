@@ -83,8 +83,8 @@ export interface ProviderSourceAdminSourceRecord {
   readonly intervalSeconds: number;
   readonly freshnessGraceSeconds: number;
   readonly scheduleRevisionId: string;
-  readonly checkpointGeneration: bigint;
-  readonly checkpointFingerprint: string | null;
+  readonly cursorGeneration: bigint;
+  readonly cursorFingerprint: string | null;
   readonly test: TestRecord;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -331,12 +331,12 @@ export class ProviderSourceAdminCatalogService {
         intervalSeconds: record.intervalSeconds,
         freshnessGraceSeconds: record.freshnessGraceSeconds,
         scheduleRevisionId: record.scheduleRevisionId,
-        checkpoint: {
-          generation: record.checkpointGeneration.toString(),
-          fingerprint: record.checkpointFingerprint,
-          resumeLabel: record.checkpointFingerprint === null
+        cursor: {
+          generation: record.cursorGeneration.toString(),
+          fingerprint: record.cursorFingerprint,
+          resumeLabel: record.cursorFingerprint === null
             ? "Feed start" as const
-            : "Saved checkpoint" as const,
+            : "Saved cursor" as const,
         },
         test: testSummary(
           record.test,

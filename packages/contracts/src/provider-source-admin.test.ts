@@ -6,7 +6,7 @@ import {
   productionProviderSourceTypeKeys,
   providerSourceAdminAuditReceiptSchema,
   providerSourceAdminCatalogSchema,
-  providerSourceCheckpointResetPreviewSchema,
+  providerSourceCursorResetPreviewSchema,
 } from "./provider-source-admin.ts";
 
 const ids = {
@@ -149,31 +149,31 @@ test("connection credential input is strict while every catalog response is mask
   assert.equal(serialized.includes("dataforrest.example"), true);
 });
 
-test("checkpoint reset preview binds one provider, generation, and typed consequence", () => {
-  const preview = providerSourceCheckpointResetPreviewSchema.parse({
+test("cursor reset preview binds one provider, generation, and typed consequence", () => {
+  const preview = providerSourceCursorResetPreviewSchema.parse({
     providerId: ids.provider,
     provider: "courtyard",
     sourceInstanceId: ids.source,
     sourceRevisionId: ids.sourceRevision,
     sourceState: "paused",
-    checkpointGeneration: "3",
-    checkpointFingerprint: "a".repeat(64),
+    cursorGeneration: "3",
+    cursorFingerprint: "a".repeat(64),
     confirmation: "RESET COURTYARD",
     consequence:
-      "The saved checkpoint will be cleared and the next resume will start from Feed start.",
+      "The saved cursor will be cleared and the next resume will start from Feed start.",
   });
   assert.equal(preview.confirmation, "RESET COURTYARD");
   assert.equal(
-    providerSourceCheckpointResetPreviewSchema.safeParse({
+    providerSourceCursorResetPreviewSchema.safeParse({
       ...preview,
       sourceState: "active",
     }).success,
     false,
   );
   assert.equal(
-    providerSourceCheckpointResetPreviewSchema.safeParse({
+    providerSourceCursorResetPreviewSchema.safeParse({
       ...preview,
-      checkpointGeneration: "0",
+      cursorGeneration: "0",
     }).success,
     false,
   );

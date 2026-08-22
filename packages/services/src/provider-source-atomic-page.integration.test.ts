@@ -38,7 +38,7 @@ import {
   type PackscoutPrismaClient,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
-import { OpaqueCheckpointGuard } from "./opaque-checkpoint-guard.ts";
+import { OpaqueCursorGuard } from "./opaque-cursor-guard.ts";
 import { CanonicalEstimatedEvProjectionRepository } from "./estimated-ev-projection-repository.ts";
 import { EstimatedEvRecomputationProcessor } from "./estimated-ev-recomputation-processor.ts";
 import { PackScoutEstimatedEvService } from "./estimated-ev-service.ts";
@@ -75,7 +75,7 @@ import {
 } from "./providers/provider-observation-mapper.test-support.ts";
 
 const actorKey = new Uint8Array(32).fill(19);
-const checkpointKey = new Uint8Array(32).fill(23);
+const cursorKey = new Uint8Array(32).fill(23);
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -113,7 +113,7 @@ async function createRuntime(
     requestProof?: "captured" | "failed" | "in_flight" | "wrong_page";
     sourceManifest?: SourceAdapterManifestV1;
     protectedRawResponseText?: string;
-    initialNextCheckpointValue?: string;
+    initialNextCursorValue?: string;
     provider?: LaunchProviderKey;
     fixture?: Awaited<ReturnType<typeof createMigratedTestDatabase>>;
     organizationId?: string;
@@ -179,7 +179,7 @@ async function createRuntime(
     mapperKey: descriptor.mapperKey,
     mapperVersion: descriptor.mapperVersion,
     identityNamespaceKey: providerIdentityNamespaceByLaunchProvider[provider],
-    checkpointCodecVersion: manifest.checkpointCodecKey,
+    cursorCodecVersion: manifest.cursorCodecKey,
     revisionNumber: 1,
     intervalSeconds: 60,
     configuration: { platform: provider },
@@ -283,19 +283,19 @@ async function createRuntime(
     },
   });
 
-  const guard = new OpaqueCheckpointGuard(checkpointKey);
-  const requestedCheckpoint = {
+  const guard = new OpaqueCursorGuard(cursorKey);
+  const requestedCursor = {
     sourceInstanceId: source.sourceInstanceId,
     sourceRevisionId: source.sourceRevisionId,
     sourceTypeKey: manifest.sourceTypeKey,
     adapterVersion: manifest.adapterVersion,
-    checkpointCodecKey: manifest.checkpointCodecKey,
-    checkpointGeneration: 1,
+    cursorCodecKey: manifest.cursorCodecKey,
+    cursorGeneration: 1,
     value: null,
   } as const;
-  const nextCheckpoint = {
-    ...requestedCheckpoint,
-    value: options.initialNextCheckpointValue ?? "cursor-a",
+  const nextCursor = {
+    ...requestedCursor,
+    value: options.initialNextCursorValue ?? "cursor-a",
   };
   const raw = new TextEncoder().encode(
     options.protectedRawResponseText ?? "sanitized-mixed-courtyard-page",
@@ -357,7 +357,7 @@ async function createRuntime(
       { status: "valid", recordIndex: 2, observation: pullObservation() },
       { status: "valid", recordIndex: 3, observation: tradeObservation() },
     ],
-    nextCheckpoint,
+    nextCursor,
     continuation: { kind: "continue" },
     measurements: {
       durationMilliseconds: 12,
@@ -387,8 +387,8 @@ async function createRuntime(
     source_revision_id: source.sourceRevisionId,
     run_id: requested.run.id,
     page_number: requestProof === "wrong_page" ? 2 : 1,
-    checkpoint_generation: 1n,
-    requested_checkpoint_key: "initial",
+    cursor_generation: 1n,
+    requested_cursor_key: "initial",
     started_at: capturedAt,
   };
   if (requestProof === "in_flight") {
@@ -442,8 +442,8 @@ async function createRuntime(
     pageAttemptId: pageId,
     pageNumber: 1,
     pageLimit: 250,
-    checkpointGeneration: 1,
-    requestedCheckpointFingerprint: null,
+    cursorGeneration: 1,
+    requestedCursorFingerprint: null,
   });
   const protectedNativeEvidence = [
         {
@@ -461,7 +461,7 @@ async function createRuntime(
     {
       manifest,
       pins: pageRequestPins,
-      requestedCheckpoint,
+      requestedCursor,
       connectionConfiguration: { fixture: "protected" },
       sourceConfiguration: { platform: provider },
     },
@@ -499,10 +499,10 @@ async function createRuntime(
     runClaimLeaseId,
     pageId,
     pageNumber: 1,
-    checkpointCodecVersion: manifest.checkpointCodecKey,
-    checkpointGeneration: 1n,
-    requestedCheckpoint,
-    requestedCheckpointFingerprint: null,
+    cursorCodecVersion: manifest.cursorCodecKey,
+    cursorGeneration: 1n,
+    requestedCursor,
+    requestedCursorFingerprint: null,
   };
   return {
     ...fixture,
@@ -522,7 +522,7 @@ async function createRuntime(
 
 function service(
   runtime: Awaited<ReturnType<typeof createRuntime>>,
-  beforeCheckpointAdvance?: () => void | Promise<void>,
+  beforeCursorAdvance?: () => void | Promise<void>,
   mapperResolver: ProviderObservationMapperResolver =
     createProviderObservationMapperRegistryFromManifest(),
 ) {
@@ -531,7 +531,7 @@ function service(
     runtime.guard,
     new ProviderSourcePageRepository(runtime.database, {
       actorPseudonymKey: actorKey,
-      beforeCheckpointAdvance,
+      beforeCursorAdvance,
     }),
   );
 }
@@ -847,8 +847,8 @@ function plannedPersistenceInput(
     protectedRawResponseSha256:
       captured.requestCapture.protectedRawResponseSha256,
     protectedNativeEvidence: captured.protectedNativeEvidence,
-    nextCheckpointFingerprint: runtime.guard.fingerprint(
-      captured.normalizedPage.nextCheckpoint,
+    nextCursorFingerprint: runtime.guard.fingerprint(
+      captured.normalizedPage.nextCursor,
     ),
     committedAt: new Date(),
   };
@@ -1139,12 +1139,12 @@ async function capturedPageTurn(
   if (runtime.adapterResult.operationScope.operationKind !== "page_read") {
     throw new Error("page-read scope fixture unavailable");
   }
-  const requestedCheckpoint = {
-    ...runtime.pins.requestedCheckpoint,
+  const requestedCursor = {
+    ...runtime.pins.requestedCursor,
     value: input.requestedValue,
   };
-  const nextCheckpoint = {
-    ...requestedCheckpoint,
+  const nextCursor = {
+    ...requestedCursor,
     value: input.nextValue,
   };
   const raw = new TextEncoder().encode(
@@ -1178,14 +1178,14 @@ async function capturedPageTurn(
   const page = normalizedProviderObservationPageSchema.parse({
     ...runtime.adapterResult.value.normalizedPage,
     outcomes,
-    nextCheckpoint,
+    nextCursor,
     measurements: {
       ...runtime.adapterResult.value.normalizedPage.measurements,
       responseBytes: raw.byteLength,
       recordCount: outcomes.length,
     },
   });
-  const requestedFingerprint = runtime.guard.fingerprint(requestedCheckpoint);
+  const requestedFingerprint = runtime.guard.fingerprint(requestedCursor);
   const protectedRawResponseSha256 = createHash("sha256")
     .update(raw)
     .digest("hex");
@@ -1223,9 +1223,9 @@ async function capturedPageTurn(
       source_revision_id: runtime.source.sourceRevisionId,
       run_id: runtime.pins.runId,
       page_number: input.pageNumber,
-      checkpoint_generation: runtime.pins.checkpointGeneration,
-      requested_checkpoint_fingerprint: requestedFingerprint,
-      requested_checkpoint_key: requestedFingerprint,
+      cursor_generation: runtime.pins.cursorGeneration,
+      requested_cursor_fingerprint: requestedFingerprint,
+      requested_cursor_key: requestedFingerprint,
       started_at: capturedAt,
       terminal_at: capturedAt,
     },
@@ -1236,8 +1236,8 @@ async function capturedPageTurn(
       requestLeaseId,
       pageId,
       pageNumber: input.pageNumber,
-      requestedCheckpoint,
-      requestedCheckpointFingerprint: requestedFingerprint,
+      requestedCursor,
+      requestedCursorFingerprint: requestedFingerprint,
     };
   const adapterResult = await completeAuthenticPageReadForTest(
     {
@@ -1265,10 +1265,10 @@ async function capturedPageTurn(
         pageAttemptId: pageId,
         pageNumber: input.pageNumber,
         pageLimit: 250,
-        checkpointGeneration: Number(runtime.pins.checkpointGeneration),
-        requestedCheckpointFingerprint: requestedFingerprint,
+        cursorGeneration: Number(runtime.pins.cursorGeneration),
+        requestedCursorFingerprint: requestedFingerprint,
       },
-      requestedCheckpoint,
+      requestedCursor,
       connectionConfiguration: { fixture: "protected" },
       sourceConfiguration: { platform: runtime.pins.provider },
     },
@@ -1321,10 +1321,10 @@ async function completeAlternatePageRead(
         pageAttemptId: pins.pageId,
         pageNumber: pins.pageNumber,
         pageLimit: 250,
-        checkpointGeneration: Number(pins.checkpointGeneration),
-        requestedCheckpointFingerprint: pins.requestedCheckpointFingerprint,
+        cursorGeneration: Number(pins.cursorGeneration),
+        requestedCursorFingerprint: pins.requestedCursorFingerprint,
       },
-      requestedCheckpoint: pins.requestedCheckpoint,
+      requestedCursor: pins.requestedCursor,
       connectionConfiguration: { channel: "fixture" },
       sourceConfiguration: { partition: "courtyard" },
     },
@@ -1361,10 +1361,10 @@ async function completeAlternatePageRead(
       source_revision_id: pins.sourceRevisionId,
       run_id: pins.runId,
       page_number: pins.pageNumber,
-      checkpoint_generation: pins.checkpointGeneration,
-      requested_checkpoint_fingerprint: pins.requestedCheckpointFingerprint,
-      requested_checkpoint_key:
-        pins.requestedCheckpointFingerprint ?? "initial",
+      cursor_generation: pins.cursorGeneration,
+      requested_cursor_fingerprint: pins.requestedCursorFingerprint,
+      requested_cursor_key:
+        pins.requestedCursorFingerprint ?? "initial",
       started_at: capturedAt,
       terminal_at: capturedAt,
     },
@@ -1372,7 +1372,7 @@ async function completeAlternatePageRead(
   return { pins: replacementPins, adapterResult };
 }
 
-test("mixed normalized page commits valid siblings, quarantine, EV, diagnostic, and checkpoint once", async () => {
+test("mixed normalized page commits valid siblings, quarantine, EV, diagnostic, and cursor once", async () => {
   const runtime = await createRuntime("success");
   try {
     const before = await databaseNow(runtime.database);
@@ -1393,11 +1393,11 @@ test("mixed normalized page commits valid siblings, quarantine, EV, diagnostic, 
       canonicalRevisions: 4,
       evRequests: 1,
     });
-    const [page, checkpoint, ev, quarantine] = await Promise.all([
+    const [page, cursor, ev, quarantine] = await Promise.all([
       runtime.database.import_pages.findUniqueOrThrow({
         where: { id: runtime.pins.pageId },
       }),
-      runtime.database.provider_source_checkpoints.findUniqueOrThrow({
+      runtime.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: runtime.source.sourceInstanceId },
       }),
       runtime.database.estimated_ev_recomputation_requests.findFirstOrThrow({
@@ -1409,7 +1409,7 @@ test("mixed normalized page commits valid siblings, quarantine, EV, diagnostic, 
     ]);
     assert.ok(page.committed_at >= before);
     assert.notEqual(page.committed_at.toISOString(), input.committedAt.toISOString());
-    assert.equal(checkpoint.checkpoint_fingerprint, result.checkpointFingerprint);
+    assert.equal(cursor.cursor_fingerprint, result.cursorFingerprint);
     assert.equal(ev.configuration_revision_id, null);
     assert.equal(ev.source_instance_id, runtime.source.sourceInstanceId);
     assert.equal(ev.source_revision_id, runtime.source.sourceRevisionId);
@@ -1572,7 +1572,7 @@ test("representative mixed commit measures normalized, canonical, evidence, oper
     );
     let pageDurationMilliseconds = 0;
     let pageStatementCount = 0;
-    let previousCheckpoint = "";
+    let previousCursor = "";
     let pageNumber = 0;
     const windows: Array<{
       window: number;
@@ -1606,11 +1606,11 @@ test("representative mixed commit measures normalized, canonical, evidence, oper
           pageDurationMilliseconds = performance.now() - startedAt;
           pageStatementCount = runtime.statementCounter.count;
           assert.equal(committed.kind, "committed");
-          previousCheckpoint = "cursor-a";
+          previousCursor = "cursor-a";
           continue;
         }
         const suffix = String(pageNumber).padStart(3, "0");
-        const nextCheckpoint = `capacity-cursor-${suffix}`;
+        const nextCursor = `capacity-cursor-${suffix}`;
         const observedAt = new Date(
           Date.parse("2026-08-21T12:00:00.000Z") + pageNumber * 1_000,
         ).toISOString();
@@ -1671,14 +1671,14 @@ test("representative mixed commit measures normalized, canonical, evidence, oper
         const committed = await service(runtime).importPage(
           await capturedPageTurn(runtime, {
             pageNumber,
-            requestedValue: previousCheckpoint,
-            nextValue: nextCheckpoint,
+            requestedValue: previousCursor,
+            nextValue: nextCursor,
             outcomes,
             protectedRawResponseText: `sanitized-capacity-page-${suffix}`,
           }),
         );
         assert.equal(committed.kind, "committed");
-        previousCheckpoint = nextCheckpoint;
+        previousCursor = nextCursor;
       }
       await runtime.database.$executeRaw`
         insert into public.source_request_attempts (
@@ -1686,8 +1686,8 @@ test("representative mixed commit measures normalized, canonical, evidence, oper
           claim_owner, claim_token, supervisor_epoch_id, connection_profile_id,
           connection_revision_id, expected_health_generation, provider_id,
           source_instance_id, source_revision_id, connection_test_job_id,
-          source_test_job_id, run_id, page_number, checkpoint_generation,
-          requested_checkpoint_fingerprint, requested_checkpoint_key,
+          source_test_job_id, run_id, page_number, cursor_generation,
+          requested_cursor_fingerprint, requested_cursor_key,
           blocking_episode_id, blocking_episode_connection_revision_id,
           outcome_class, safe_code, safe_outcome_hash, response_status,
           response_bytes, duration_ms, started_at, terminal_at, expires_at,
@@ -1702,9 +1702,9 @@ test("representative mixed commit measures normalized, canonical, evidence, oper
                proof.expected_health_generation, proof.provider_id,
                proof.source_instance_id, proof.source_revision_id,
                proof.connection_test_job_id, proof.source_test_job_id,
-               proof.run_id, proof.page_number, proof.checkpoint_generation,
-               proof.requested_checkpoint_fingerprint,
-               proof.requested_checkpoint_key, proof.blocking_episode_id,
+               proof.run_id, proof.page_number, proof.cursor_generation,
+               proof.requested_cursor_fingerprint,
+               proof.requested_cursor_key, proof.blocking_episode_id,
                proof.blocking_episode_connection_revision_id,
                null, null, null, null, null, null, proof.started_at,
                null, null, null
@@ -2411,8 +2411,8 @@ test("occurrence-owned quarantine retry reprojects retained normalized evidence 
       await runtime.database.source_delivery_occurrences.count({
         where: { organization_id: runtime.organizationId },
       });
-    const checkpointBefore =
-      await runtime.database.provider_source_checkpoints.findUniqueOrThrow({
+    const cursorBefore =
+      await runtime.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: runtime.source.sourceInstanceId },
       });
     const retryAt = await databaseNow(runtime.database);
@@ -2469,18 +2469,18 @@ test("occurrence-owned quarantine retry reprojects retained normalized evidence 
       }),
       occurrenceCountBefore,
     );
-    const checkpointAfter =
-      await runtime.database.provider_source_checkpoints.findUniqueOrThrow({
+    const cursorAfter =
+      await runtime.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: runtime.source.sourceInstanceId },
       });
     assert.deepEqual(
       {
-        generation: checkpointAfter.checkpoint_generation,
-        fingerprint: checkpointAfter.checkpoint_fingerprint,
+        generation: cursorAfter.cursor_generation,
+        fingerprint: cursorAfter.cursor_fingerprint,
       },
       {
-        generation: checkpointBefore.checkpoint_generation,
-        fingerprint: checkpointBefore.checkpoint_fingerprint,
+        generation: cursorBefore.cursor_generation,
+        fingerprint: cursorBefore.cursor_fingerprint,
       },
     );
     assert.equal(
@@ -3040,16 +3040,11 @@ test("one run commits page two from its mutable turn while run-start lineage sta
     const run = await runtime.database.import_runs.findUniqueOrThrow({
       where: { id: runtime.pins.runId },
     });
-    assert.equal(run.requested_checkpoint, null);
-    assert.equal(run.requested_checkpoint_fingerprint, null);
-    assert.equal(run.requested_checkpoint_key, "initial");
-    assert.equal(
-      run.current_checkpoint
-        ? new TextDecoder().decode(run.current_checkpoint)
-        : null,
-      "cursor-b",
-    );
-    assert.equal(run.current_checkpoint_fingerprint, second.checkpointFingerprint);
+    assert.equal(run.requested_cursor, null);
+    assert.equal(run.requested_cursor_fingerprint, null);
+    assert.equal(run.requested_cursor_key, "initial");
+    assert.equal(run.current_cursor, "cursor-b");
+    assert.equal(run.current_cursor_fingerprint, second.cursorFingerprint);
     assert.equal(run.next_page_number, 3);
     assert.equal(
       await runtime.database.import_pages.count({
@@ -3090,7 +3085,7 @@ test("one run commits page two from its mutable turn while run-start lineage sta
       service(runtime).importPage(cycle),
       (error: unknown) =>
         error instanceof PersistenceError &&
-        error.code === "CHECKPOINT_CYCLE_DETECTED",
+        error.code === "CURSOR_CYCLE_DETECTED",
     );
     assert.equal(
       await runtime.database.import_pages.count({
@@ -3400,7 +3395,7 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
   const firstPayload = alternateBookmarkWrapper(firstBookmark);
   const runtime = await createRuntime("alternate-resume", {
     sourceManifest: alternateBookmarkSourceManifest,
-    initialNextCheckpointValue: firstBookmark,
+    initialNextCursorValue: firstBookmark,
     protectedRawResponseText: JSON.stringify(firstPayload),
   });
   try {
@@ -3409,7 +3404,7 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
       runtime.pins.sourceAdapterVersion,
       "alternate-bookmark-adapter-v1",
     );
-    assert.equal(runtime.pins.requestedCheckpoint.value, null);
+    assert.equal(runtime.pins.requestedCursor.value, null);
     const firstRead = await completeAlternatePageRead(
       runtime,
       runtime.pins,
@@ -3432,11 +3427,9 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
       unresolvedRelationships: 0,
     });
     assert.equal(
-      new TextDecoder().decode(
-        (await runtime.database.provider_source_checkpoints.findUniqueOrThrow({
-          where: { source_instance_id: runtime.source.sourceInstanceId },
-        })).checkpoint_bytes!,
-      ),
+      (await runtime.database.provider_source_cursors.findUniqueOrThrow({
+        where: { source_instance_id: runtime.source.sourceInstanceId },
+      })).cursor,
       firstBookmark,
     );
 
@@ -3478,12 +3471,7 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
     const run = await runtime.database.import_runs.findUniqueOrThrow({
       where: { id: runtime.pins.runId },
     });
-    assert.equal(
-      run.current_checkpoint
-        ? new TextDecoder().decode(run.current_checkpoint)
-        : null,
-      secondBookmark,
-    );
+    assert.equal(run.current_cursor, secondBookmark);
     assert.equal(run.next_page_number, 3);
 
     const thirdInput = await capturedPageTurn(runtime, {
@@ -3492,8 +3480,8 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
       nextValue: "alternate-bookmark-003",
     });
     const foreignSourceInstanceId = randomUUID();
-    const foreignRequestedCheckpoint = {
-      ...thirdInput.pins.requestedCheckpoint,
+    const foreignRequestedCursor = {
+      ...thirdInput.pins.requestedCursor,
       sourceInstanceId: foreignSourceInstanceId,
     };
     const foreignSourceResult = await completeAuthenticPageReadForTest(
@@ -3522,11 +3510,11 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
           pageAttemptId: randomUUID(),
           pageNumber: 3,
           pageLimit: 250,
-          checkpointGeneration: Number(runtime.pins.checkpointGeneration),
-          requestedCheckpointFingerprint:
-            runtime.guard.fingerprint(foreignRequestedCheckpoint),
+          cursorGeneration: Number(runtime.pins.cursorGeneration),
+          requestedCursorFingerprint:
+            runtime.guard.fingerprint(foreignRequestedCursor),
         },
-        requestedCheckpoint: foreignRequestedCheckpoint,
+        requestedCursor: foreignRequestedCursor,
         connectionConfiguration: { channel: "fixture" },
         sourceConfiguration: { partition: "courtyard" },
       },
@@ -3543,20 +3531,20 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
 
     assert.equal(thirdInput.adapterResult.ok, true);
     if (!thirdInput.adapterResult.ok) assert.fail("third page fixture unavailable");
-    const dataforrestRequestedCheckpoint = {
-      ...thirdInput.pins.requestedCheckpoint,
+    const dataforrestRequestedCursor = {
+      ...thirdInput.pins.requestedCursor,
       sourceTypeKey: dataforrestEventsV1SourceAdapterManifest.sourceTypeKey,
       adapterVersion: dataforrestEventsV1SourceAdapterManifest.adapterVersion,
-      checkpointCodecKey:
-        dataforrestEventsV1SourceAdapterManifest.checkpointCodecKey,
+      cursorCodecKey:
+        dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
     };
-    const dataforrestNextCheckpoint = {
-      ...dataforrestRequestedCheckpoint,
+    const dataforrestNextCursor = {
+      ...dataforrestRequestedCursor,
       value: "dataforrest-cursor-003",
     };
     const dataforrestPage = normalizedProviderObservationPageSchema.parse({
       ...thirdInput.adapterResult.value.normalizedPage,
-      nextCheckpoint: dataforrestNextCheckpoint,
+      nextCursor: dataforrestNextCursor,
     });
     const dataforrestRaw = new TextEncoder().encode("isolated-dataforrest-page");
     const foreignAdapterResult = await completeAuthenticPageReadForTest(
@@ -3585,11 +3573,11 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
           pageAttemptId: randomUUID(),
           pageNumber: 3,
           pageLimit: 250,
-          checkpointGeneration: Number(runtime.pins.checkpointGeneration),
-          requestedCheckpointFingerprint:
-            runtime.guard.fingerprint(dataforrestRequestedCheckpoint),
+          cursorGeneration: Number(runtime.pins.cursorGeneration),
+          requestedCursorFingerprint:
+            runtime.guard.fingerprint(dataforrestRequestedCursor),
         },
-        requestedCheckpoint: dataforrestRequestedCheckpoint,
+        requestedCursor: dataforrestRequestedCursor,
         connectionConfiguration: { fixture: "protected" },
         sourceConfiguration: { platform: "courtyard" },
       },
@@ -3670,7 +3658,7 @@ test("late catalog history grows canonical history without scheduling EV against
   }
 });
 
-test("a continuation run resumes from the durable source checkpoint at its own page one", async () => {
+test("a continuation run resumes from the durable source cursor at its own page one", async () => {
   const runtime = await createRuntime("run-rollover");
   try {
     await service(runtime).importPage({
@@ -3738,14 +3726,8 @@ test("a continuation run resumes from the durable source checkpoint at its own p
     const rollover = await runtime.database.import_runs.findUniqueOrThrow({
       where: { id: requested.run.id },
     });
-    assert.equal(
-      new TextDecoder().decode(rollover.requested_checkpoint!),
-      "cursor-a",
-    );
-    assert.equal(
-      new TextDecoder().decode(rollover.current_checkpoint!),
-      "cursor-a",
-    );
+    assert.equal(rollover.requested_cursor, "cursor-a");
+    assert.equal(rollover.current_cursor, "cursor-a");
     assert.equal(
       rollover.connection_revision_id,
       rotatedConnectionRevisionId,
@@ -3808,11 +3790,11 @@ test("a continuation run resumes from the durable source checkpoint at its own p
     );
     assert.equal(
       (
-        await runtime.database.provider_source_checkpoints.findUniqueOrThrow({
+        await runtime.database.provider_source_cursors.findUniqueOrThrow({
           where: { source_instance_id: runtime.source.sourceInstanceId },
         })
-      ).checkpoint_fingerprint,
-      committed.checkpointFingerprint,
+      ).cursor_fingerprint,
+      committed.cursorFingerprint,
     );
   } finally {
     await runtime.close();
@@ -3861,7 +3843,7 @@ test("explicit sold-out authority survives mapper, canonical row, and public han
   }
 });
 
-test("failure immediately before checkpoint advancement rolls the complete page back", async () => {
+test("failure immediately before cursor advancement rolls the complete page back", async () => {
   const runtime = await createRuntime("rollback");
   try {
     const runBefore = await runtime.database.import_runs.findUniqueOrThrow({
@@ -3870,13 +3852,13 @@ test("failure immediately before checkpoint advancement rolls the complete page 
     });
     await assert.rejects(
       service(runtime, () => {
-        throw new Error("forced-before-checkpoint");
+        throw new Error("forced-before-cursor");
       }).importPage({
         pins: runtime.pins,
         adapterResult: runtime.adapterResult,
         committedAt: await databaseNow(runtime.database),
       }),
-      /forced-before-checkpoint/u,
+      /forced-before-cursor/u,
     );
     const runAfter = await runtime.database.import_runs.findUniqueOrThrow({
       where: { id: runtime.pins.runId },
@@ -3893,16 +3875,16 @@ test("failure immediately before checkpoint advancement rolls the complete page 
         where: { page_id: runtime.pins.pageId, safe_code: "PAGE_COMMITTED" },
       }),
     ])) assert.equal(count, 0);
-    const checkpoint = await runtime.database.provider_source_checkpoints.findUniqueOrThrow({
+    const cursor = await runtime.database.provider_source_cursors.findUniqueOrThrow({
       where: { source_instance_id: runtime.source.sourceInstanceId },
     });
-    assert.equal(checkpoint.checkpoint_fingerprint, null);
+    assert.equal(cursor.cursor_fingerprint, null);
   } finally {
     await runtime.close();
   }
 });
 
-test("EV enqueue failure rolls back page, observations, canonical writes, diagnostics, and checkpoint", async () => {
+test("EV enqueue failure rolls back page, observations, canonical writes, diagnostics, and cursor", async () => {
   const runtime = await createRuntime("ev-enqueue-rollback");
   try {
     const diagnosticsBefore =
@@ -3911,8 +3893,8 @@ test("EV enqueue failure rolls back page, observations, canonical writes, diagno
       where: { id: runtime.pins.runId },
       select: {
         counters_json: true,
-        current_checkpoint: true,
-        current_checkpoint_fingerprint: true,
+        current_cursor: true,
+        current_cursor_fingerprint: true,
         next_page_number: true,
       },
     });
@@ -3963,23 +3945,23 @@ test("EV enqueue failure rolls back page, observations, canonical writes, diagno
       }),
       0,
     );
-    const [runAfter, checkpoint] = await Promise.all([
+    const [runAfter, cursor] = await Promise.all([
       runtime.database.import_runs.findUniqueOrThrow({
         where: { id: runtime.pins.runId },
         select: {
           counters_json: true,
-          current_checkpoint: true,
-          current_checkpoint_fingerprint: true,
+          current_cursor: true,
+          current_cursor_fingerprint: true,
           next_page_number: true,
         },
       }),
-      runtime.database.provider_source_checkpoints.findUniqueOrThrow({
+      runtime.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: runtime.source.sourceInstanceId },
       }),
     ]);
     assert.deepEqual(runAfter, runBefore);
-    assert.equal(checkpoint.checkpoint_bytes, null);
-    assert.equal(checkpoint.checkpoint_fingerprint, null);
+    assert.equal(cursor.cursor, null);
+    assert.equal(cursor.cursor_fingerprint, null);
   } finally {
     await runtime.close();
   }
@@ -4098,8 +4080,8 @@ test("concurrent platform commits isolate a mapper-failing lane from a healthy l
       [4, 1, 1, 1],
     );
     const [
-      courtyardCheckpoint,
-      phygitalsCheckpoint,
+      courtyardCursor,
+      phygitalsCursor,
       courtyardRun,
       phygitalsRun,
       courtyardPage,
@@ -4108,10 +4090,10 @@ test("concurrent platform commits isolate a mapper-failing lane from a healthy l
       phygitalsOccurrences,
       pageDiagnostics,
     ] = await Promise.all([
-      courtyard.database.provider_source_checkpoints.findUniqueOrThrow({
+      courtyard.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: courtyard.source.sourceInstanceId },
       }),
-      courtyard.database.provider_source_checkpoints.findUniqueOrThrow({
+      courtyard.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: phygitals.source.sourceInstanceId },
       }),
       courtyard.database.import_runs.findUniqueOrThrow({
@@ -4140,12 +4122,12 @@ test("concurrent platform commits isolate a mapper-failing lane from a healthy l
       }),
     ]);
     assert.equal(
-      courtyardCheckpoint.checkpoint_fingerprint,
-      failedLane.checkpointFingerprint,
+      courtyardCursor.cursor_fingerprint,
+      failedLane.cursorFingerprint,
     );
     assert.equal(
-      phygitalsCheckpoint.checkpoint_fingerprint,
-      healthyLane.checkpointFingerprint,
+      phygitalsCursor.cursor_fingerprint,
+      healthyLane.cursorFingerprint,
     );
     const lanes = [
       {
@@ -4376,8 +4358,8 @@ test("exact replay rejects changed normalized effects or protected retry evidenc
       pageAttemptId: runtime.pins.pageId,
       pageNumber: runtime.pins.pageNumber,
       pageLimit: 250,
-      checkpointGeneration: Number(runtime.pins.checkpointGeneration),
-      requestedCheckpointFingerprint: runtime.pins.requestedCheckpointFingerprint,
+      cursorGeneration: Number(runtime.pins.cursorGeneration),
+      requestedCursorFingerprint: runtime.pins.requestedCursorFingerprint,
     };
     const raw = runtime.adapterResult.value.requestCapture.protectedRawResponse;
     const changedPage = normalizedProviderObservationPageSchema.parse({
@@ -4403,7 +4385,7 @@ test("exact replay rejects changed normalized effects or protected retry evidenc
       {
         manifest: runtime.manifest,
         pins: operationPins,
-        requestedCheckpoint: runtime.pins.requestedCheckpoint,
+        requestedCursor: runtime.pins.requestedCursor,
         connectionConfiguration: { fixture: "protected" },
         sourceConfiguration: { platform: runtime.pins.provider },
       },
@@ -4434,7 +4416,7 @@ test("exact replay rejects changed normalized effects or protected retry evidenc
       {
         manifest: runtime.manifest,
         pins: operationPins,
-        requestedCheckpoint: runtime.pins.requestedCheckpoint,
+        requestedCursor: runtime.pins.requestedCursor,
         connectionConfiguration: { fixture: "protected" },
         sourceConfiguration: { platform: runtime.pins.provider },
       },
@@ -4614,8 +4596,8 @@ test("blocking health transition that wins the profile barrier rejects every pag
           source_revision_id: runtime.source.sourceRevisionId,
           run_id: runtime.pins.runId,
           page_number: 2,
-          checkpoint_generation: 1n,
-          requested_checkpoint_key: "initial",
+          cursor_generation: 1n,
+          requested_cursor_key: "initial",
           blocking_episode_id: episode.id,
           blocking_episode_connection_revision_id:
             runtime.pins.connectionRevisionId,
@@ -4757,8 +4739,8 @@ test("an open profile episode fences every revision until explicit recovery clos
           sourceRevisionId: runtime.source.sourceRevisionId,
           runId: runtime.pins.runId,
           pageNumber: runtime.pins.pageNumber,
-          checkpointGeneration: runtime.pins.checkpointGeneration,
-          requestedCheckpointFingerprint: null,
+          cursorGeneration: runtime.pins.cursorGeneration,
+          requestedCursorFingerprint: null,
         },
         startedAt: await databaseNow(runtime.database),
       }),
@@ -4787,8 +4769,8 @@ test("an open profile episode fences every revision until explicit recovery clos
           sourceRevisionId: runtime.source.sourceRevisionId,
           runId: randomUUID(),
           pageNumber: 1,
-          checkpointGeneration: runtime.pins.checkpointGeneration,
-          requestedCheckpointFingerprint: null,
+          cursorGeneration: runtime.pins.cursorGeneration,
+          requestedCursorFingerprint: null,
         },
         startedAt: await databaseNow(runtime.database),
       }),
@@ -4927,7 +4909,7 @@ test("an open profile episode fences every revision until explicit recovery clos
       ...activation,
       activatedAt: await databaseNow(runtime.database),
     });
-    const [closedEpisode, retiredRevision, profile, checkpoint, recoveryRuns] =
+    const [closedEpisode, retiredRevision, profile, cursor, recoveryRuns] =
       await Promise.all([
       runtime.database.source_connection_health_episodes.findUniqueOrThrow({
         where: { id: oldEpisodeId },
@@ -4938,7 +4920,7 @@ test("an open profile episode fences every revision until explicit recovery clos
       runtime.database.source_connection_profiles.findUniqueOrThrow({
         where: { id: runtime.pins.connectionProfileId },
       }),
-      runtime.database.provider_source_checkpoints.findUniqueOrThrow({
+      runtime.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: runtime.source.sourceInstanceId },
       }),
       runtime.database.import_runs.findMany({
@@ -4955,14 +4937,14 @@ test("an open profile episode fences every revision until explicit recovery clos
     assert.equal(profile.active_revision_id, recoveryCandidateRevisionId);
     assert.equal(recoveryRuns.length, 1);
     assert.equal(recoveryRuns[0]!.connection_revision_id, recoveryCandidateRevisionId);
-    assert.equal(recoveryRuns[0]!.checkpoint_generation, checkpoint.checkpoint_generation);
+    assert.equal(recoveryRuns[0]!.cursor_generation, cursor.cursor_generation);
     assert.equal(
-      recoveryRuns[0]!.requested_checkpoint_fingerprint,
-      checkpoint.checkpoint_fingerprint,
+      recoveryRuns[0]!.requested_cursor_fingerprint,
+      cursor.cursor_fingerprint,
     );
     assert.deepEqual(
-      recoveryRuns[0]!.requested_checkpoint,
-      checkpoint.checkpoint_bytes,
+      recoveryRuns[0]!.requested_cursor,
+      cursor.cursor,
     );
   } finally {
     await runtime.close();

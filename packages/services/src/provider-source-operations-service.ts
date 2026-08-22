@@ -82,7 +82,7 @@ interface DetailRecord {
       kind: "continue" | "poll_after";
       minimumDelaySeconds?: number;
     }> | null;
-    checkpointFingerprint: string | null;
+    cursorFingerprint: string | null;
   }>[];
 }
 
@@ -108,7 +108,7 @@ interface DiagnosticHistoryEventRecord {
     kind: "continue" | "poll_after";
     minimumDelaySeconds?: number;
   }> | null;
-  readonly checkpointFingerprint: string | null;
+  readonly cursorFingerprint: string | null;
   readonly counters: Readonly<Record<string, number>>;
   readonly runId: string | null;
   readonly hasTestReference: boolean;
@@ -454,11 +454,11 @@ function sourceSummary(input: Readonly<{
       latestFailureCode: safeCode(localFailure),
       recoveredAt: iso(input.facts?.health?.recoveredAt ?? null),
     },
-    checkpoint: input.source
+    cursor: input.source
       ? {
-          generation: input.source.checkpoint.generation,
-          fingerprint: input.source.checkpoint.fingerprint,
-          resumeLabel: input.source.checkpoint.resumeLabel,
+          generation: input.source.cursor.generation,
+          fingerprint: input.source.cursor.fingerprint,
+          resumeLabel: input.source.cursor.resumeLabel,
         }
       : null,
     progress: {
@@ -604,7 +604,7 @@ export class ProviderSourceOperationsService {
           quarantined: page.records.quarantined,
         },
         continuation: page.continuation,
-        checkpointFingerprint: page.checkpointFingerprint,
+        cursorFingerprint: page.cursorFingerprint,
       })),
       sourceTest: adminSource ? {
         state: adminSource.test.state,
@@ -658,7 +658,7 @@ export class ProviderSourceOperationsService {
         responseBytes: event.responseBytes,
         retryDelayMilliseconds: event.retryDelayMilliseconds,
         continuation: event.continuation,
-        checkpointFingerprint: event.checkpointFingerprint,
+        cursorFingerprint: event.cursorFingerprint,
         counters: event.counters,
         references: [
           ...(event.runId ? [{

@@ -9,7 +9,7 @@
 
 ## Start Here
 
-Define one normalized observation-page contract from a sanitized DataForrest fixture and a deliberately different alternate-source fixture, then prove the contract represents both page and checkpoint shapes without importing either vendor wrapper.
+Define one normalized observation-page contract from a sanitized DataForrest fixture and a deliberately different alternate-source fixture, then prove the contract represents both page and cursor shapes without importing either vendor wrapper.
 
 ## Objective
 
@@ -19,13 +19,13 @@ Give every later task one durable, vendor-neutral abstraction for stable provide
 
 A PackScout provider is the stable platform identity. A source instance is the replaceable way PackScout obtains that provider's data. A registered source adapter is the only layer that understands a vendor API, SDK, authentication shape, pagination, or polling vocabulary. Courtyard, Collector Crypt, Phygitals, and ClutchPacks each receive a DataForrest-backed source instance that uses one shared connection profile and source-adapter implementation.
 
-The existing pipeline already separates transport and platform mapping adapters, but its transport contract returns an obsolete vendor-shaped feed page. This task replaces that leaky boundary with one normalized provider-source contract and adapts existing schedules, queued runs, leases, checkpoints, health, quarantine, atomic page evidence, and canonical history to source-instance ownership.
+The existing pipeline already separates transport and platform mapping adapters, but its transport contract returns an obsolete vendor-shaped feed page. This task replaces that leaky boundary with one normalized provider-source contract and adapts existing schedules, queued runs, leases, cursors, health, quarantine, atomic page evidence, and canonical history to source-instance ownership.
 
 ## Requirements
 
 ### Versioned launch contract
 
-- Publish one versioned provider-source contract as the sole authority for adapter capabilities, normalized observations, checkpoint envelopes, continuation, identity, failure, lifecycle, schedule bounds, freshness grace, retention, singleton lease timing, and control-plane retry policy.
+- Publish one versioned provider-source contract as the sole authority for adapter capabilities, normalized observations, cursor envelopes, continuation, identity, failure, lifecycle, schedule bounds, freshness grace, retention, singleton lease timing, and control-plane retry policy.
 - Publish a separate versioned DataForrest adapter contract as the authority for its filters, raw wrapper, event codes, pagination hints, request bounds, and connection-scoped concurrency.
 - Bind both applicable contract revisions to connection profiles, source revisions, runs, diagnostics, and local completion evidence wherever those values affect interpretation.
 - Require worker, server, admin, migration, and test consumers to read the shared values instead of carrying independent defaults.
@@ -34,8 +34,8 @@ The existing pipeline already separates transport and platform mapping adapters,
 ### Source adapter contract
 
 - Give every compile-time registered source type a stable `sourceTypeKey` and adapter version, normalized-record contract version, compatible connection type, supported providers, per-provider replacement identity-namespace key, evidence-backed record-ID scope declarations, capabilities, validated configuration contracts, and safe operator label; never reuse this identity as a mapper key.
-- Require the adapter boundary to test a connection, test a source, execute or cancel one bounded request under a runtime-granted connection permit, classify failures, and report measurements without moving a checkpoint itself.
-- Normalize every successful page to one provider key, ordered observation outcomes, an adapter-owned checkpoint envelope, and exactly `{ kind: continue }` or `{ kind: poll_after, minimumDelaySeconds }`, where the delay is a required integer from 0 through 86,400.
+- Require the adapter boundary to test a connection, test a source, execute or cancel one bounded request under a runtime-granted connection permit, classify failures, and report measurements without moving a cursor itself.
+- Normalize every successful page to one provider key, ordered observation outcomes, an adapter-owned cursor envelope, and exactly `{ kind: continue }` or `{ kind: poll_after, minimumDelaySeconds }`, where the delay is a required integer from 0 through 86,400.
 - Normalize each valid observation to `providerRecordIdentity = { recordIdScopeKey, providerRecordId }`, catalog/pull/trade kind, effective and collection times, scope-qualified relationship identities, approved event, money, payment, and availability facts, strict source-neutral display/value/EV provider facts, plus a protected native-evidence reference.
 - Keep mapping-relevant provider facts in one closed, versioned semantic schema and include them in the semantic observation hash. Protected native evidence remains provenance/quarantine input only and can neither reach a mapper nor override normalized facts; authoritative sold out remains distinct from ordinary unavailable.
 - Keep raw wrapper fields, SDK objects, endpoint details, credentials, vendor cursors, and vendor polling values inside the registered adapter.
@@ -44,8 +44,8 @@ The existing pipeline already separates transport and platform mapping adapters,
 
 - Define a correlation-free `ConnectionOperationBase` containing source type and adapter version, connection profile and revision, request lease, bounds, and abort signal.
 - Define a correlation-free `SourceOperationBase` containing the connection base plus provider, source and revision, normalized-contract version, replacement identity namespace, record-ID scope declarations, and immutable source configuration; mapper metadata is absent.
-- Use a discriminated union: connection test adds only connection-test correlation, source test adds only source-test correlation to the source base, and page read adds only checkpoint, generation, run, page, and page-limit correlation to the source base.
-- Require every result and diagnostic to retain exactly its operation scope without inheriting or fabricating test, provider, source, checkpoint, run, or page identifiers.
+- Use a discriminated union: connection test adds only connection-test correlation, source test adds only source-test correlation to the source base, and page read adds only cursor, generation, run, page, and page-limit correlation to the source base.
+- Require every result and diagnostic to retain exactly its operation scope without inheriting or fabricating test, provider, source, cursor, run, or page identifiers.
 
 ### Durable test-result guard
 
@@ -64,8 +64,8 @@ The existing pipeline already separates transport and platform mapping adapters,
 
 - Give the generic runtime one process-local, tenant-safe permit coordinator keyed by stable connection-profile identity and configured from that profile's approved aggregate cap.
 - Make every connection test, source test, and page read wait cancelably in one FIFO profile queue; a pending operation holds neither an execution slot nor a request permit until the generic runtime can admit it with both resources, and adapter code cannot acquire a separate permit pool.
-- After paired grant and immediately before invocation, require one authoritative operation-specific guard to validate that the singleton epoch is active, the job or run claim lease, profile and pinned connection revision plus revocation and connection-health generation, applicable source revision and lifecycle, and for page reads the requested checkpoint and generation; failed validation atomically releases both reserved resources without creating a request attempt or calling the adapter.
-- Issue one nontransferable request lease bound to every applicable validated pin and permit exactly one bounded upstream request. Reject nested, reused, stale-job, stale-run, disabled-source, revoked-profile, stale-health-generation, wrong-checkpoint, wrong-generation, wrong-profile, wrong-epoch, or unmetered requests, and reject every operation under a blocking connection episode except the one current pending or running recovery connection-test job explicitly bound to that episode, its open health generation, and one nonrevoked same or candidate target revision.
+- After paired grant and immediately before invocation, require one authoritative operation-specific guard to validate that the singleton epoch is active, the job or run claim lease, profile and pinned connection revision plus revocation and connection-health generation, applicable source revision and lifecycle, and for page reads the requested cursor and generation; failed validation atomically releases both reserved resources without creating a request attempt or calling the adapter.
+- Issue one nontransferable request lease bound to every applicable validated pin and permit exactly one bounded upstream request. Reject nested, reused, stale-job, stale-run, disabled-source, revoked-profile, stale-health-generation, wrong-cursor, wrong-generation, wrong-profile, wrong-epoch, or unmetered requests, and reject every operation under a blocking connection episode except the one current pending or running recovery connection-test job explicitly bound to that episode, its open health generation, and one nonrevoked same or candidate target revision.
 - Persist the durable `in_flight` request attempt after paired admission and guard validation but before invoking the adapter. If that pre-call insert cannot commit under the exact shared control-plane retry policy, close the unused one-use lease, release both reserved resources, make zero upstream calls, and enter the same full-supervisor self-fencing path; no synthetic attempt row or success diagnostic is invented.
 - Before auto-closing the request lease or waking the profile permit, terminalize the durable request attempt for every bounded response capture or normalized request failure. For a typed connection-blocking failure, combine terminalization with compare-and-transition on the detecting lease's active singleton epoch, job or run claim, connection revision, and expected health generation; one current detector opens the episode, simultaneous detectors coalesce, and stale detectors cannot mutate health. Include the immutable failed result only when this is a blocking test attempt. Apply the exact shared control-plane retry policy; exhaustion starts full supervisor fencing and leaves the attempt nonterminal. Page normalization or source-test validation begins only after successful boundary terminalization.
 
@@ -87,36 +87,36 @@ The existing pipeline already separates transport and platform mapping adapters,
 
 - Give every connection revision a monotonic health generation and optional blocking action-required episode; normal connection tests, source tests, and page reads bind the current open generation.
 - Opening a blocking credential, authorization, endpoint, TLS, destination, or profile-configuration episode advances the generation once, cancels queued source tests and page reads, aborts uncompleted request leases, and fences later page commits; simultaneous request-detected failures coalesce by request-lease-fenced compare-and-transition before either permit wakes another waiter.
-- Permit at most one pending or running recovery connection test per blocking episode, coalesce duplicate requests, and record every attempt immutably; failure leaves the episode open and permits a later explicitly correlated attempt, including one for a new candidate revision, while no attempt may carry source state or advance a checkpoint.
-- A successful same-revision recovery records its immutable result and closes the episode under one compare-and-transition transaction with a new health generation so eligible work may resume from committed checkpoints; activating a tested replacement connection revision terminates or fences old-revision work and creates new-revision work from those checkpoints without mutating old run pins.
+- Permit at most one pending or running recovery connection test per blocking episode, coalesce duplicate requests, and record every attempt immutably; failure leaves the episode open and permits a later explicitly correlated attempt, including one for a new candidate revision, while no attempt may carry source state or advance a cursor.
+- A successful same-revision recovery records its immutable result and closes the episode under one compare-and-transition transaction with a new health generation so eligible work may resume from committed cursors; activating a tested replacement connection revision terminates or fences old-revision work and creates new-revision work from those cursors without mutating old run pins.
 
 ### Ownership model
 
 - Keep stable organization-scoped provider identity separate from connection profiles, source types, and source instances.
 - Make each connection profile belong to one registered source type and own adapter-validated encrypted configuration, tested state, and one stable-profile request limit shared by its credential revisions, source reads, connection tests, and source tests.
-- Make each source instance own one provider, one registered `sourceTypeKey`, a compatible profile, adapter-validated immutable configuration, a separate mapper key and version, identity namespace, lifecycle state, schedule, checkpoint, runs, leases, health, and processor diagnostic feed.
+- Make each source instance own one provider, one registered `sourceTypeKey`, a compatible profile, adapter-validated immutable configuration, a separate mapper key and version, identity namespace, lifecycle state, schedule, cursor, runs, leases, health, and processor diagnostic feed.
 - Enforce at most one active source instance per provider while retaining inactive historical source instances for audit and future source replacement.
-- Scope opaque checkpoints and processor state to source instances while keeping canonical business identity independent of source-instance and connection-profile identities.
+- Scope opaque cursors and processor state to source instances while keeping canonical business identity independent of source-instance and connection-profile identities.
 
 ### Timing revisions
 
-- Keep timing revisions in the source's separate schedule history; interval-only changes do not create a new source revision or rebind its checkpoint.
+- Keep timing revisions in the source's separate schedule history; interval-only changes do not create a new source revision or rebind its cursor.
 
 ### Durable scheduling and runs
 
-- Re-key the existing durable schedule, queued-run, lease, checkpoint, page, and health behavior to source instances rather than adding a work-intent table.
+- Re-key the existing durable schedule, queued-run, lease, cursor, page, and health behavior to source instances rather than adding a work-intent table.
 - Store only due work as queued import runs; future schedule timing remains in the durable source schedule until it becomes due.
 - Permit at most one queued or running import per source, with scheduled, manual, continuation, and recovery triggers represented on the run.
-- Pin a queued or running import to provider, source instance and revision, `sourceTypeKey` and adapter contract, normalized-record contract, `mapperKey` and mapper version, identity namespace, connection-profile revision, checkpoint codec and generation, and requested opaque checkpoint; normal revision rotation cannot rewrite it.
-- Fence stale leases, disabled or replaced sources, emergency-revoked credentials, and old checkpoint generations before another fetch or commit.
+- Pin a queued or running import to provider, source instance and revision, `sourceTypeKey` and adapter contract, normalized-record contract, `mapperKey` and mapper version, identity namespace, connection-profile revision, cursor codec and generation, and requested opaque cursor; normal revision rotation cannot rewrite it.
+- Fence stale leases, disabled or replaced sources, emergency-revoked credentials, and old cursor generations before another fetch or commit.
 
-### Opaque checkpoint guard
+### Opaque cursor guard
 
-- Bind each checkpoint envelope to source instance, source revision, source-adapter contract, checkpoint codec, and checkpoint generation; generic code may bound, compare, store, and fingerprint its bytes but never parse or convert them.
-- Let an adapter validate its own checkpoint grammar and reject an immediate `continue` result whose next checkpoint is null or equals the requested checkpoint.
-- Before commit, reject a `continue` result whose safe next-checkpoint fingerprint already exists in that source and generation, including an A-to-B-to-A cycle across runs or restarts.
-- Allow `poll_after` to preserve the requested checkpoint, including null, because it does not request an immediate next page.
-- Reset cycle history only through a confirmed checkpoint-generation reset or a distinct replacement source, never through retry, restart, timing change, or credential rotation.
+- Bind each cursor envelope to source instance, source revision, source-adapter contract, cursor codec, and cursor generation; generic code may bound, compare, store, and fingerprint its exact text value but never parse or convert it.
+- Let an adapter validate its own cursor grammar and reject an immediate `continue` result whose next cursor is null or equals the requested cursor.
+- Before commit, reject a `continue` result whose safe next-cursor fingerprint already exists in that source and generation, including an A-to-B-to-A cycle across runs or restarts.
+- Allow `poll_after` to preserve the requested cursor, including null, because it does not request an immediate next page.
+- Reset cycle history only through a confirmed cursor-generation reset or a distinct replacement source, never through retry, restart, timing change, or credential rotation.
 
 ### Stable source-record identity
 
@@ -135,8 +135,8 @@ The existing pipeline already separates transport and platform mapping adapters,
 
 - Keep canonical business identity scoped to organization, stable provider, canonical kind, and provider record ID so a compatible replacement source does not create a second business object; identity namespace is a source-compatibility assertion, not part of the canonical key.
 - Require every activatable source type to declare the same provider-specific identity-namespace key as the pinned mapper descriptor and prove that its emitted provider record IDs belong to that namespace.
-- Start every replacement source with its own null checkpoint and retain the old source, checkpoint, adapter revision, and observation provenance for audit.
-- Reject a replacement whose record IDs differ; identity bridging, automatic checkpoint transfer, and cross-source reconciliation require a separate approved feature.
+- Start every replacement source with its own null cursor and retain the old source, cursor, adapter revision, and observation provenance for audit.
+- Reject a replacement whose record IDs differ; identity bridging, automatic cursor transfer, and cross-source reconciliation require a separate approved feature.
 
 ### Canonical identity domains
 
@@ -157,9 +157,9 @@ The existing pipeline already separates transport and platform mapping adapters,
 
 - Store one authoritative protected raw page payload for seven days and compact semantic observations plus delivery occurrences that refer to that page instead of duplicating every accepted raw payload.
 - Retain a protected copy of quarantined record evidence for 30 days, independent of the page payload's expiry, so retry remains possible.
-- Preserve hashes, dispositions, canonical history, relationships, EV work, checkpoints, run summaries, health, and operator audits after protected payload expiry.
+- Preserve hashes, dispositions, canonical history, relationships, EV work, cursors, run summaries, health, and operator audits after protected payload expiry.
 - Persist sanitized diagnostic events for 30 days under an exact scope discriminator of `source` or `connection` with common severity, phase, code, timing, counters, and immutable event identity.
-- Make all retention work tenant-scoped, bounded, restart-safe, and auditable; expiry cannot remove current checkpoint state or unresolved quarantine evidence before its own deadline.
+- Make all retention work tenant-scoped, bounded, restart-safe, and auditable; expiry cannot remove current cursor state or unresolved quarantine evidence before its own deadline.
 
 ### Request-attempt retention
 
@@ -177,8 +177,8 @@ The existing pipeline already separates transport and platform mapping adapters,
 
 ### Diagnostic safety
 
-- Prohibit credentials, authorization headers, raw bodies, full checkpoints or vendor cursors, wallets, usernames, transaction identities, provider payloads, and stack dumps from diagnostic events.
-- Use safe checkpoint and request fingerprints rather than reusable values.
+- Prohibit credentials, authorization headers, raw bodies, full cursors or vendor cursors, wallets, usernames, transaction identities, provider payloads, and stack dumps from diagnostic events.
+- Use safe cursor and request fingerprints rather than reusable values.
 - Emit page and lifecycle diagnostics for accepted work rather than one event per accepted record.
 - Keep record-local details in quarantine with bounded reason codes and sanitized summaries.
 - Prevent cross-tenant or cross-source reads of runs, pages, health, source-scoped diagnostics, and retained evidence while allowing only the approved bound-profile connection events in a source feed.
@@ -196,17 +196,17 @@ None directly. Tasks 004 and 008 expose the masked lifecycle, progress, and log-
 | Provider | Stable organization-scoped platform identity |
 | Source-adapter manifest | Adapter and normalized-contract versions, compatible profile type, capabilities, providers, and identity namespaces |
 | Connection profile | Adapter-compatible encrypted configuration, stable-profile request cap, revisions, tests, health generation, and optional blocking episode |
-| Source instance | Provider binding, adapter and config revisions, immutable configuration, lifecycle, schedule, checkpoint envelope, health, and logs |
+| Source instance | Provider binding, adapter and config revisions, immutable configuration, lifecycle, schedule, cursor envelope, health, and logs |
 
 ### Runtime boundaries
 
 | Boundary | Durable owner and meaning |
 |---|---|
-| Normalized page | Ordered observation outcomes, opaque next checkpoint, normalized continuation, measurements, and safe diagnostics |
+| Normalized page | Ordered observation outcomes, opaque next cursor, normalized continuation, measurements, and safe diagnostics |
 | Source observation | One semantic fact keyed by stable source record, effective source time, normalized-contract/hash version, and normalized-content hash |
 | Observation occurrence | One page-and-record-index delivery referencing the semantic observation or invalid outcome and retaining complete delivery lineage and disposition |
-| Import run | Due trigger, source type and revision, adapter and normalized-contract revisions, mapper key and version, namespace and connection pins, checkpoint generation, requested checkpoint, lease, progress, and terminal outcome |
-| Page attempt | Run and request lease plus request-time supervisor fencing epoch and connection-health generation, requested checkpoint/generation, response capture, and atomic commit outcome |
+| Import run | Due trigger, source type and revision, adapter and normalized-contract revisions, mapper key and version, namespace and connection pins, cursor generation, requested cursor, lease, progress, and terminal outcome |
+| Page attempt | Run and request lease plus request-time supervisor fencing epoch and connection-health generation, requested cursor/generation, response capture, and atomic commit outcome |
 | Request attempt | Sanitized pre-call operation and fence correlation with in-flight or terminal state; a nonterminal attempt from any noncurrent predecessor epoch must terminalize as uncertain and link a blocking episode before another call |
 | Diagnostic event | Sanitized source or connection event with scope-valid correlation, total ordering, binding-time projection, and 30-day expiry |
 | Canonical identity | Organization, stable provider, canonical kind, and provider record ID; the frozen injective scope-to-kind map makes the canonical kind carry record-ID scope, while replacement namespace gates compatibility |
@@ -215,17 +215,17 @@ None directly. Tasks 004 and 008 expose the masked lifecycle, progress, and log-
 
 ### Ownership proof
 
-- [x] Four source instances share one encrypted connection profile while retaining different checkpoints, schedules, runs, health, and diagnostic events.
+- [x] Four source instances share one encrypted connection profile while retaining different cursors, schedules, runs, health, and diagnostic events.
 - [x] One provider cannot have overlapping active sources or imports, while different providers may own active runs concurrently.
 - [x] Replacing one provider's active source preserves stable provider and canonical identity and does not mutate another provider.
-- [x] Queued and running imports retain immutable source type, adapter, normalized-contract, mapper, namespace, connection, source, checkpoint, and generation pins; stale or revoked owners cannot fetch or commit.
+- [x] Queued and running imports retain immutable source type, adapter, normalized-contract, mapper, namespace, connection, source, cursor, and generation pins; stale or revoked owners cannot fetch or commit.
 
 ### Adapter proof
 
-- [x] DataForrest and alternate-source contract fixtures map to the same normalized record, checkpoint, continuation, failure, and diagnostic contract without vendor fields reaching generic consumers; task 003 owns the executable adapters.
-- [x] Generic code may bound, compare, store, and fingerprint opaque checkpoint bytes but cannot parse, convert, or transfer them between sources or adapters.
+- [x] DataForrest and alternate-source contract fixtures map to the same normalized record, cursor, continuation, failure, and diagnostic contract without vendor fields reaching generic consumers; task 003 owns the executable adapters.
+- [x] Generic code may bound, compare, store, and fingerprint opaque cursor text but cannot parse, convert, or transfer it between sources or adapters.
 - [x] All revisions, tests, and reads under one connection profile share one cancelable FIFO request cap, while a different profile has independent capacity.
-- [x] Every run retains its adapter, normalized-contract, connection, source, identity-namespace, checkpoint-codec, and generation pins; every delivery occurrence traces those applicable pins, while a semantic observation retains only its stable source record and contract/hash identity.
+- [x] Every run retains its adapter, normalized-contract, connection, source, identity-namespace, cursor-codec, and generation pins; every delivery occurrence traces those applicable pins, while a semantic observation retains only its stable source record and contract/hash identity.
 
 ### Identity compatibility proof
 
@@ -237,7 +237,7 @@ None directly. Tasks 004 and 008 expose the masked lifecycle, progress, and log-
 
 - [x] `continue` carries no delay, while `poll_after` always carries a validated 0–86,400-second integer minimum; missing, extra, fractional, negative, or excessive values are rejected.
 - [x] A contract harness proves permit grant followed by singleton-epoch validation before one adapter request, with cancellation or lost ownership producing no request; task 007 owns live supervisor and takeover proof.
-- [x] Immediate and cross-page checkpoint repeats are rejected for `continue`, including A-to-B-to-A after restart, while a valid `poll_after` may preserve its checkpoint.
+- [x] Immediate and cross-page cursor repeats are rejected for `continue`, including A-to-B-to-A after restart, while a valid `poll_after` may preserve its cursor.
 
 ### Data proof
 
@@ -261,6 +261,6 @@ None directly. Tasks 004 and 008 expose the masked lifecycle, progress, and log-
 ## Spec Compliance
 
 - Related specs reviewed: none.
-- Alignment: implemented the provider/source/connection split, normalized adapter contract, exact activation compatibility gate, source-owned persistence and checkpoints, immutable run and revision pins, request fencing, diagnostic retention, and source-neutral identity model as specified.
+- Alignment: implemented the provider/source/connection split, normalized adapter contract, exact activation compatibility gate, source-owned persistence and cursors, immutable run and revision pins, request fencing, diagnostic retention, and source-neutral identity model as specified.
 - Divergences: none. The legacy ingestion runtime remains intentionally unwired to these replacement tables until tasks 004, 006, and 007 complete the planned clean cutover; no compatibility read or dual-write path was added.
 - Verification: the commands above plus a final independent P1/P2 audit after the direct-PostgreSQL semantic-content guard, canonical replay normalization, immutable-history guards, and derived EV-input origin constraint were implemented; no P1/P2 finding remains.

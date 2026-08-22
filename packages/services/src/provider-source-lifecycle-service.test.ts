@@ -55,8 +55,8 @@ function snapshot(
     ],
     scheduleRevisionId,
     intervalSeconds: 60,
-    checkpointGeneration: 3n,
-    checkpointFingerprint: "a".repeat(64),
+    cursorGeneration: 3n,
+    cursorFingerprint: "a".repeat(64),
     hasActiveRun: false,
     ...overrides,
   };
@@ -66,7 +66,7 @@ class MemoryLifecycleRepository
   implements ProviderSourceLifecycleAdminRepository {
   source = snapshot();
   createInput: Parameters<ProviderSourceLifecycleAdminRepository["createSource"]>[0] | null = null;
-  resetInput: Parameters<ProviderSourceLifecycleAdminRepository["resetCheckpoint"]>[0] | null = null;
+  resetInput: Parameters<ProviderSourceLifecycleAdminRepository["resetCursor"]>[0] | null = null;
 
   async loadProvider(input: { organizationId: string; providerId: string }) {
     return input.organizationId === organizationId && input.providerId === providerId
@@ -125,8 +125,8 @@ class MemoryLifecycleRepository
   async resume() {}
   async disable() {}
 
-  async resetCheckpoint(input: Parameters<
-    ProviderSourceLifecycleAdminRepository["resetCheckpoint"]
+  async resetCursor(input: Parameters<
+    ProviderSourceLifecycleAdminRepository["resetCursor"]
   >[0]) {
     this.resetInput = input;
     return input.expectedGeneration + 1n;
@@ -230,7 +230,7 @@ test("a replacement requires an idle paused or disabled compatible predecessor a
   assert.notEqual(replacement.sourceInstanceId, oldSourceId);
 });
 
-test("activation delegates exact tested pins and checkpoint reset binds preview generation, fingerprint, and typed provider", async () => {
+test("activation delegates exact tested pins and cursor reset binds preview generation, fingerprint, and typed provider", async () => {
   const { repository, service, activationInput } = fixture();
   await service.activatePaused(
     { organizationId, actorKey: "operator-admin" },
@@ -250,7 +250,7 @@ test("activation delegates exact tested pins and checkpoint reset binds preview 
     actorKey: "operator-admin",
     activatedAt: now,
   });
-  const preview = await service.previewCheckpointReset(
+  const preview = await service.previewCursorReset(
     { organizationId, actorKey: "operator-admin" },
     providerId,
     sourceId,
@@ -258,30 +258,30 @@ test("activation delegates exact tested pins and checkpoint reset binds preview 
   );
   assert.equal(preview.confirmation, "RESET COURTYARD");
   await assert.rejects(
-    service.resetCheckpoint(
+    service.resetCursor(
       { organizationId, actorKey: "operator-admin" },
       providerId,
       sourceId,
       {
         expectedSourceRevisionId: sourceRevisionId,
-        expectedCheckpointGeneration: "3",
-        expectedCheckpointFingerprint: "b".repeat(64),
+        expectedCursorGeneration: "3",
+        expectedCursorFingerprint: "b".repeat(64),
         confirmation: preview.confirmation,
       },
     ),
     /reset_confirmation_required/u,
   );
-  const reset = await service.resetCheckpoint(
+  const reset = await service.resetCursor(
     { organizationId, actorKey: "operator-admin" },
     providerId,
     sourceId,
     {
       expectedSourceRevisionId: sourceRevisionId,
-      expectedCheckpointGeneration: preview.checkpointGeneration,
-      expectedCheckpointFingerprint: preview.checkpointFingerprint,
+      expectedCursorGeneration: preview.cursorGeneration,
+      expectedCursorFingerprint: preview.cursorFingerprint,
       confirmation: preview.confirmation,
     },
   );
-  assert.equal(reset.checkpointGeneration, "4");
+  assert.equal(reset.cursorGeneration, "4");
   assert.equal(repository.resetInput?.expectedFingerprint, "a".repeat(64));
 });

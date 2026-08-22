@@ -4,14 +4,14 @@ import { test } from "node:test";
 import { dataforestEventsV1EvidenceFixture } from "./__fixtures__/dataforest-events-v1.fixture.ts";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
+  DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   dataforrestContinuation,
   dataforrestEventRecordV1Schema,
   dataforrestEventsPageV1Schema,
   dataforrestEventsConnectionConfigurationV1Schema,
   dataforrestIdentityNamespaceByProvider,
-  dataforrestNextCheckpoint,
+  dataforrestNextCursor,
   dataforrestOpaqueCursorV1Schema,
   normalizeDataforrestEventRecord,
 } from "./dataforrest-events-v1.ts";
@@ -28,13 +28,13 @@ import {
   sourceAdapterSafeDiagnosticSchema,
 } from "./provider-source-contract-v1.ts";
 
-const checkpointBase = {
+const cursorBase = {
   sourceInstanceId: "source-001",
   sourceRevisionId: "source-revision-001",
   sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  checkpointCodecKey: DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
-  checkpointGeneration: 1,
+  cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
+  cursorGeneration: 1,
   value: null,
 } as const;
 
@@ -56,7 +56,7 @@ test("all sanitized DataForrest evidence pages parse and normalize in order", ()
         normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
         provider,
         outcomes,
-        nextCheckpoint: dataforrestNextCheckpoint(checkpointBase, page),
+        nextCursor: dataforrestNextCursor(cursorBase, page),
         continuation: dataforrestContinuation(page),
         measurements: {
           durationMilliseconds: 1,
@@ -384,13 +384,13 @@ test("an alternate vendor wrapper reaches the same generic observation contract"
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     provider: "courtyard",
     outcomes: [{ status: "valid", recordIndex: 0, observation }],
-    nextCheckpoint: {
+    nextCursor: {
       sourceInstanceId: "alternate-source-001",
       sourceRevisionId: "alternate-source-revision-001",
       sourceTypeKey: "alternate-bookmark-v1",
       adapterVersion: "alternate-bookmark-adapter-v1",
-      checkpointCodecKey: "alternate-bookmark-codec-v1",
-      checkpointGeneration: 1,
+      cursorCodecKey: "alternate-bookmark-codec-v1",
+      cursorGeneration: 1,
       value: alternate.next.bookmark,
     },
     continuation: {
@@ -423,7 +423,7 @@ test("an alternate vendor wrapper reaches the same generic observation contract"
   });
 
   assert.equal(normalizedPage.outcomes[0]?.status, "valid");
-  assert.equal(normalizedPage.nextCheckpoint.value, "alternate-bookmark-001");
+  assert.equal(normalizedPage.nextCursor.value, "alternate-bookmark-001");
   assert.deepEqual(normalizedPage.continuation, {
     kind: "poll_after",
     minimumDelaySeconds: 60,
@@ -466,7 +466,7 @@ test("normalized page measurements cannot disagree with durable outcomes", () =>
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     provider: "courtyard",
     outcomes: [],
-    nextCheckpoint: { ...checkpointBase, value: "fixture-cursor" },
+    nextCursor: { ...cursorBase, value: "fixture-cursor" },
     continuation: { kind: "poll_after", minimumDelaySeconds: 60 },
     measurements: {
       durationMilliseconds: 1,

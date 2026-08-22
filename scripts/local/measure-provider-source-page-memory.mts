@@ -9,7 +9,7 @@ import {
 } from "@packscout/contracts";
 import {
   DataforrestEventsSourceAdapter,
-  OpaqueCheckpointGuard,
+  OpaqueCursorGuard,
   ProviderSourcePageImportService,
   ProviderSourcePagePlanner,
   SOURCE_ADAPTER_REQUEST_CAPTURE_VERSION,
@@ -142,14 +142,14 @@ const ids = Object.freeze({
   supervisorEpochId: "00000000-0000-4000-8000-000000000011",
   runClaimLeaseId: "00000000-0000-4000-8000-000000000012",
 });
-const requestedCheckpoint = Object.freeze({
+const requestedCursor = Object.freeze({
   sourceInstanceId: ids.sourceInstanceId,
   sourceRevisionId: ids.sourceRevisionId,
   sourceTypeKey: dataforrestEventsV1SourceAdapterManifest.sourceTypeKey,
   adapterVersion: dataforrestEventsV1SourceAdapterManifest.adapterVersion,
-  checkpointCodecKey:
-    dataforrestEventsV1SourceAdapterManifest.checkpointCodecKey,
-  checkpointGeneration: 1,
+  cursorCodecKey:
+    dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
+  cursorGeneration: 1,
   value: null,
 });
 const pins: ProviderSourcePageCommitPins = Object.freeze({
@@ -181,11 +181,11 @@ const pins: ProviderSourcePageCommitPins = Object.freeze({
   runClaimLeaseId: ids.runClaimLeaseId,
   pageId: ids.pageId,
   pageNumber: 1,
-  checkpointCodecVersion:
-    dataforrestEventsV1SourceAdapterManifest.checkpointCodecKey,
-  checkpointGeneration: 1n,
-  requestedCheckpoint,
-  requestedCheckpointFingerprint: null,
+  cursorCodecVersion:
+    dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
+  cursorGeneration: 1n,
+  requestedCursor,
+  requestedCursorFingerprint: null,
 });
 const requestPins = Object.freeze({
   operationKind: "page_read" as const,
@@ -208,8 +208,8 @@ const requestPins = Object.freeze({
   pageAttemptId: pins.pageId,
   pageNumber: pins.pageNumber,
   pageLimit: recordsPerPage,
-  checkpointGeneration: Number(pins.checkpointGeneration),
-  requestedCheckpointFingerprint: null,
+  cursorGeneration: Number(pins.cursorGeneration),
+  requestedCursorFingerprint: null,
 });
 const adapter = new InMemoryDataforrestEventsSourceAdapter(
   maximumSizeSanitizedPage(),
@@ -218,13 +218,13 @@ const importService = new ProviderSourcePageImportService(
   new ProviderSourcePagePlanner(
     createProviderObservationMapperRegistryFromManifest(),
   ),
-  new OpaqueCheckpointGuard(new Uint8Array(32).fill(7)),
+  new OpaqueCursorGuard(new Uint8Array(32).fill(7)),
   {
     async commitPage(input) {
       return {
         kind: "committed" as const,
         pageId: input.pins.pageId,
-        checkpointFingerprint: input.nextCheckpointFingerprint,
+        cursorFingerprint: input.nextCursorFingerprint,
         continuation: input.plan.normalizedPage.continuation,
         counts: {
           inserted: input.plan.outcomes.length,
@@ -249,7 +249,7 @@ async function processMaximumSizePage(): Promise<Readonly<{
     {
       manifest: dataforrestEventsV1SourceAdapterManifest,
       pins: requestPins,
-      requestedCheckpoint,
+      requestedCursor,
       connectionConfiguration: {
         endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
         bearerToken: "capacity-fixture-token",

@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { isDeepStrictEqual } from "node:util";
 import {
-  providerSourceDiagnosticCheckpointFingerprintSchema,
+  providerSourceDiagnosticCursorFingerprintSchema,
   providerSourceDiagnosticCommandCorrelationKeySchema,
   providerSourceDiagnosticCorrelationKindSchema,
   providerSourceDiagnosticEventKindByCorrelationKind,
@@ -252,7 +252,7 @@ export interface ProviderSourceDiagnosticHistoryEvent {
     kind: "continue" | "poll_after";
     minimumDelaySeconds?: number;
   }> | null;
-  readonly checkpointFingerprint: string | null;
+  readonly cursorFingerprint: string | null;
   readonly counters: Readonly<Record<string, number>>;
   readonly runId: string | null;
   readonly hasTestReference: boolean;
@@ -335,14 +335,14 @@ export class ProviderSourceDiagnosticRepository {
       assertSafeReference("Diagnostic contract version", input.normalizedContractVersion);
     }
     if (
-      input.checkpointFingerprint !== undefined
-      && input.checkpointFingerprint !== null
-      && !providerSourceDiagnosticCheckpointFingerprintSchema.safeParse(
-        input.checkpointFingerprint,
+      input.cursorFingerprint !== undefined
+      && input.cursorFingerprint !== null
+      && !providerSourceDiagnosticCursorFingerprintSchema.safeParse(
+        input.cursorFingerprint,
       ).success
     ) {
       throw new TypeError(
-        "Diagnostic checkpoint fingerprint must be a lowercase 64-character keyed digest.",
+        "Diagnostic cursor fingerprint must be a lowercase 64-character keyed digest.",
       );
     }
     if (
@@ -417,8 +417,8 @@ export class ProviderSourceDiagnosticRepository {
           existing.response_bytes !== responseBytes ||
           !isDeepStrictEqual(existing.counters_json, counters) ||
           !isDeepStrictEqual(existing.evidence_json, evidence) ||
-          existing.checkpoint_fingerprint !==
-            (input.checkpointFingerprint ?? null)
+          existing.cursor_fingerprint !==
+            (input.cursorFingerprint ?? null)
         ) {
           throw new TypeError(
             "Diagnostic idempotency key has different immutable content.",
@@ -447,7 +447,7 @@ export class ProviderSourceDiagnosticRepository {
           ? continuation.minimumDelaySeconds
           : null,
         retry_delay_ms: retryDelayMs,
-        checkpoint_fingerprint: input.checkpointFingerprint,
+        cursor_fingerprint: input.cursorFingerprint,
         source_type_key: input.sourceTypeKey,
         source_adapter_version: input.sourceAdapterVersion,
         normalized_contract_version: input.normalizedContractVersion,
@@ -665,7 +665,7 @@ export class ProviderSourceDiagnosticRepository {
         retry_delay_ms: true,
         continuation_kind: true,
         minimum_delay_seconds: true,
-        checkpoint_fingerprint: true,
+        cursor_fingerprint: true,
         counters_json: true,
         run_id: true,
         connection_test_job_id: true,
@@ -721,7 +721,7 @@ export class ProviderSourceDiagnosticRepository {
                 kind: "poll_after" as const,
                 minimumDelaySeconds: row.minimum_delay_seconds ?? 0,
               },
-        checkpointFingerprint: row.checkpoint_fingerprint,
+        cursorFingerprint: row.cursor_fingerprint,
         counters,
         runId: row.run_id,
         hasTestReference: row.connection_test_job_id !== null ||

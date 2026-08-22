@@ -24,8 +24,8 @@ export interface KnownRequestAttempt {
   readonly sourceTestJobId: string | null;
   readonly runId: string | null;
   readonly pageNumber: number | null;
-  readonly checkpointGeneration: bigint | null;
-  readonly requestedCheckpointFingerprint: string | null;
+  readonly cursorGeneration: bigint | null;
+  readonly requestedCursorFingerprint: string | null;
   readonly blockingEpisodeId: string | null;
   readonly blockingEpisodeConnectionRevisionId: string | null;
   readonly startedAt: Date;
@@ -35,7 +35,7 @@ function addDays(value: Date, days: number): Date {
   return new Date(value.getTime() + days * 86_400_000);
 }
 
-function requestedCheckpointKey(
+function requestedCursorKey(
   operationKind: KnownRequestAttempt["operationKind"],
   fingerprint: string | null,
 ): string | null {
@@ -60,9 +60,9 @@ export async function persistKnownRequestTerminalization(
   }>,
 ): Promise<void> {
   const attempt = input.attempt;
-  const checkpointKey = requestedCheckpointKey(
+  const cursorKey = requestedCursorKey(
     attempt.operationKind,
-    attempt.requestedCheckpointFingerprint,
+    attempt.requestedCursorFingerprint,
   );
   await transaction.compact_source_request_attempts.create({
     data: {
@@ -86,9 +86,9 @@ export async function persistKnownRequestTerminalization(
       source_test_job_id: attempt.sourceTestJobId,
       run_id: attempt.runId,
       page_number: attempt.pageNumber,
-      checkpoint_generation: attempt.checkpointGeneration,
-      requested_checkpoint_fingerprint: attempt.requestedCheckpointFingerprint,
-      requested_checkpoint_key: checkpointKey,
+      cursor_generation: attempt.cursorGeneration,
+      requested_cursor_fingerprint: attempt.requestedCursorFingerprint,
+      requested_cursor_key: cursorKey,
       response_bytes: input.responseBytes,
       duration_ms: input.durationMs,
       blocking_episode_id: attempt.blockingEpisodeId,

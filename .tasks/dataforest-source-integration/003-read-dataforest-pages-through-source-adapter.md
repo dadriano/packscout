@@ -17,9 +17,9 @@ Implement DataForrest as one registered provider-source adapter that all four so
 
 ## Context
 
-Each DataForrest source instance supplies an immutable platform filter and its own nullable opaque checkpoint. All four use the same connection profile, request policy, authentication behavior, and response validation. Only the DataForrest adapter understands `/v1/events`, bearer authentication, the vendor wrapper, cursor encoding, or `poll_after_seconds`.
+Each DataForrest source instance supplies an immutable platform filter and its own nullable opaque cursor. All four use the same connection profile, request policy, authentication behavior, and response validation. Only the DataForrest adapter understands `/v1/events`, bearer authentication, the vendor wrapper, cursor encoding, or `poll_after_seconds`.
 
-The adapter decodes and validates transport data into task 002's normalized observation page. It does not select a platform mapper, create canonical candidates, commit checkpoints, schedule runs, or publish public records.
+The adapter decodes and validates transport data into task 002's normalized observation page. It does not select a platform mapper, create canonical candidates, commit cursors, schedule runs, or publish public records.
 
 First-pass request limiting is process-local because exactly one supervisor process is supported. Task 002 defines a generic stable-profile coordinator and task 007 owns its runtime sequencing. The DataForrest adapter receives a fenced request lease from that coordinator and cannot acquire capacity or call upstream without it.
 
@@ -29,14 +29,14 @@ First-pass request limiting is process-local because exactly one supervisor proc
 
 - Register one compile-time production source type, `dataforrest-events-v1`, compatible with the shared DataForrest connection type and the four approved providers; do not create one adapter per platform.
 - Validate adapter-specific connection and source configuration, test a connection, test one filtered source, and read or cancel one bounded page through task 002's source-adapter contract.
-- Return protected raw-page evidence, ordered normalized valid and invalid observations, opaque next checkpoint, normalized continuation, safe measurements, diagnostic drafts, or one stable failure.
+- Return protected raw-page evidence, ordered normalized valid and invalid observations, opaque next cursor, normalized continuation, safe measurements, diagnostic drafts, or one stable failure.
 - Keep platform canonical mapping, persistence, scheduling, and public behavior outside the adapter.
 
 ### Operation-specific inputs
 
 - Build every call from task 002's correlation-free connection or source operation base; mapper keys, mapper descriptors, and canonical behavior never enter the adapter input.
-- Add only connection-test correlation for a connection test and only source-test correlation for a source test; neither carries checkpoint, run, or page state.
-- Add only requested checkpoint envelope, checkpoint generation, run and page correlation, and page limit for a page read; it does not inherit either test correlation.
+- Add only connection-test correlation for a connection test and only source-test correlation for a source test; neither carries cursor, run, or page state.
+- Add only requested cursor envelope, cursor generation, run and page correlation, and page limit for a page read; it does not inherit either test correlation.
 
 ### DataForrest request behavior
 
@@ -52,15 +52,15 @@ First-pass request limiting is process-local because exactly one supervisor proc
 
 ### Connection-profile request control
 
-- Require a current task-002 request lease matching the operation kind, correlation, singleton epoch, job or run lease, connection revision, revocation and connection-health generation, applicable source revision and lifecycle, applicable checkpoint generation, connection profile, and abort signal before a DataForrest client call; while a blocking episode is open, accept only the single recovery connection-test lease explicitly correlated to that episode and reject normal connection tests, source tests, and page reads.
+- Require a current task-002 request lease matching the operation kind, correlation, singleton epoch, job or run lease, connection revision, revocation and connection-health generation, applicable source revision and lifecycle, applicable cursor generation, connection profile, and abort signal before a DataForrest client call; while a blocking episode is open, accept only the single recovery connection-test lease explicitly correlated to that episode and reject normal connection tests, source tests, and page reads.
 - Make exactly one bounded DataForrest request under that lease and prohibit nested, reused, wrong-profile, wrong-epoch, or unmetered subrequests.
 - At the hardened request boundary, return a normalized request outcome before lease close and require the generic coordinator to terminalize its durable request attempt before permit wake for every outcome. A typed connection-blocking outcome combines terminalization with detecting-lease CAS and durable episode create or coalesce; a blocking test failure also persists its immutable result there. Exhausted persistence leaves the attempt nonterminal and starts full owner drain. Page normalization, source-test validation, mapping, and persistence never hold the permit and cannot begin from a nonterminal attempt.
-- Return bounded request measurements without exposing other tenants, sources, credentials, checkpoint values, or request details.
+- Return bounded request measurements without exposing other tenants, sources, credentials, cursor values, or request details.
 - Prove focused adapter calls fail closed with zero upstream requests when the lease is absent, stale, cancelled, or mismatched.
 
 ### DataForrest response validation
 
-- Validate the connection probe's task-001-approved masked connectivity/auth result without producing normalized observations, a checkpoint, or source diagnostics.
+- Validate the connection probe's task-001-approved masked connectivity/auth result without producing normalized observations, a cursor, or source diagnostics.
 
 ### Filtered source response validation
 
@@ -73,13 +73,13 @@ First-pass request limiting is process-local because exactly one supervisor proc
 ### Continuation translation
 
 - Translate a source test or page read's `poll_after_seconds = 0` to `continue` and `60` to `poll_after` with a 60-second minimum; reject any unsupported value inside the adapter, then discard source-test continuation after validation.
-- For a page-read `continue`, require a nonnull next checkpoint different from the requested checkpoint; task 006 owns cross-page cycle detection, while `poll_after` may preserve the prior checkpoint, including null for a future stateless adapter.
+- For a page-read `continue`, require a nonnull next cursor different from the requested cursor; task 006 owns cross-page cycle detection, while `poll_after` may preserve the prior cursor, including null for a future stateless adapter.
 
 ### Failure classification
 
-- Classify credential, authorization, endpoint, TLS, redirect-destination, and connection-profile configuration failures as one connection-revision action-required episode with no source checkpoint change.
+- Classify credential, authorization, endpoint, TLS, redirect-destination, and connection-profile configuration failures as one connection-revision action-required episode with no source cursor change.
 - Classify platform filter, source configuration, cursor, normalized-contract, identity-namespace, record-ID-scope, and source-owned limit failures as source action required and never restart automatically from null.
-- Classify timeout, transient network, supported server failures, and observed rate limiting as retryable against the same checkpoint and revision context, retaining operation scope unless connection-health policy opens one shared profile episode.
+- Classify timeout, transient network, supported server failures, and observed rate limiting as retryable against the same cursor and revision context, retaining operation scope unless connection-health policy opens one shared profile episode.
 - Bound retries, upstream status, response excerpts, and exception details before producing an operator-safe diagnostic draft.
 - Never return a credential, authorization header, full endpoint query, full cursor, raw body, provider payload, personal identifier, or stack trace.
 
@@ -91,7 +91,7 @@ First-pass request limiting is process-local because exactly one supervisor proc
 
 ### Test-only conformance boundary
 
-- Register one alternate source adapter only in tests with a different raw wrapper, checkpoint grammar, and continuation signal but the same normalized Courtyard record contract and identity namespace.
+- Register one alternate source adapter only in tests with a different raw wrapper, cursor grammar, and continuation signal but the same normalized Courtyard record contract and identity namespace.
 - Keep the test adapter out of the exported production source-type manifest and prohibit dynamic adapter loading or unregistered source types; tasks 004 and 008 own admin invisibility.
 - Enforce a focused boundary check that the provider-source contract and adapter conformance harness do not expose DataForrest transport types or fields; tasks 005 through 008 own mapper, importer, scheduler, persistence, and admin enforcement, and task 010 owns the repository-wide check.
 
@@ -106,33 +106,33 @@ The adapter accepts a mutually exclusive discriminated union built from two corr
 | Operation | Required input |
 |---|---|
 | Connection test | `ConnectionOperationBase` plus connection-test correlation only |
-| Source test | `SourceOperationBase` plus source-test correlation only; no connection-test, checkpoint, run, or page correlation |
-| Page read | `SourceOperationBase` plus requested checkpoint envelope, generation, run, page, and page limit only; no test correlation |
+| Source test | `SourceOperationBase` plus source-test correlation only; no connection-test, cursor, run, or page correlation |
+| Page read | `SourceOperationBase` plus requested cursor envelope, generation, run, page, and page limit only; no test correlation |
 
 Output is either:
 
-- a masked connection or source-test result with measurements and no checkpoint effect;
-- a normalized page containing protected raw evidence, ordered valid and invalid observation results with closed source-neutral provider facts, opaque next checkpoint, `continue` or `poll_after(minimumDelaySeconds)`, response measurements, and safe diagnostic drafts; or
-- a stable retryable or action-required failure with no checkpoint advancement and no protected values.
+- a masked connection or source-test result with measurements and no cursor effect;
+- a normalized page containing protected raw evidence, ordered valid and invalid observation results with closed source-neutral provider facts, opaque next cursor, `continue` or `poll_after(minimumDelaySeconds)`, response measurements, and safe diagnostic drafts; or
+- a stable retryable or action-required failure with no cursor advancement and no protected values.
 
 ## Acceptance Criteria
 
 - [x] `dataforrest-events-v1` passes initial, continuation, restart, empty, replay, mixed-stream, and poll-after fixtures for all four filters.
 - [x] Fatal page defects and record-local invalid results remain distinct and deterministic.
-- [x] Two or more source reads overlap up to the approved cap without sharing filters, checkpoints, revisions, results, or diagnostics.
+- [x] Two or more source reads overlap up to the approved cap without sharing filters, cursors, revisions, results, or diagnostics.
 - [x] Connection tests, source tests, and imports require the same request-lease contract and make zero calls for absent, stale, cancelled, reused, or mismatched leases.
 - [x] Concurrent typed connection failures use detecting-request-lease CAS so one advances health, siblings coalesce, stale detectors cannot mutate it, and no profile permit wakes bound work before the durable result; exhausted persistence under the shared retry policy fences and drains the whole supervisor.
 
 ### Operation-shape proof
 
-- [x] Connection-probe, filtered source-test, and filtered page-read fixtures prove mutually exclusive request and response rules without fabricated source state or durable test checkpoints.
+- [x] Connection-probe, filtered source-test, and filtered page-read fixtures prove mutually exclusive request and response rules without fabricated source state or durable test cursors.
 - [x] Redaction tests prove secrets, full cursors, protected records, upstream bodies, and stack details cannot cross the source boundary.
 
 ### Abstraction proof
 
 - [x] DataForrest wrapper, cursor, and poll fields are absent from the provider-source contract, normalized page, and adapter conformance harness; task 010 owns the repository-wide dependency check after downstream migrations complete.
-- [x] The test-only alternate adapter satisfies the same connection-test, source-test, page, checkpoint, continuation, failure, and diagnostic contract.
-- [x] The adapter contract returns the alternate checkpoint without parsing it and validates its output against the fixed normalized Courtyard observation contract; task 006 owns mapper and importer integration.
+- [x] The test-only alternate adapter satisfies the same connection-test, source-test, page, cursor, continuation, failure, and diagnostic contract.
+- [x] The adapter contract returns the alternate cursor without parsing it and validates its output against the fixed normalized Courtyard observation contract; task 006 owns mapper and importer integration.
 - [x] DataForrest calls consume exactly one granted request lease and cannot create nested or unmetered upstream requests; task 007 owns live FIFO and cap proof.
 - [x] The production source-type manifest contains only `dataforrest-events-v1`; the alternate adapter exists only in the focused conformance harness, and tasks 004 and 008 own admin exclusion.
 

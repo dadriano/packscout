@@ -1,17 +1,13 @@
 import { PersistenceError } from "./persistence-error.ts";
 
-export function providerSourceCheckpointValue(
-  bytes: Uint8Array | null,
+export function providerSourceCursorValue(
+  cursor: string | null,
 ): string | null {
-  if (bytes === null) return null;
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new PersistenceError(
-      "SOURCE_FENCED",
-      "Opaque checkpoint storage is not valid UTF-8.",
-    );
+  if (cursor === null) return null;
+  if (new TextEncoder().encode(cursor).byteLength === 0) {
+    throw new PersistenceError("SOURCE_FENCED", "Opaque cursor storage is empty.");
   }
+  return cursor;
 }
 
 export function providerSourceBoundedCounter(

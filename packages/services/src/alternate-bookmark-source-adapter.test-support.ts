@@ -29,7 +29,7 @@ export const alternateBookmarkSourceManifest = sourceAdapterManifestV1Schema.par
   adapterVersion: "alternate-bookmark-adapter-v1",
   normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
   compatibleConnectionTypeKey: "alternate-connection-v1",
-  checkpointCodecKey: "alternate-bookmark-codec-v1",
+  cursorCodecKey: "alternate-bookmark-codec-v1",
   operatorLabel: "Alternate bookmark fixture",
   requestBounds: {
     pageLimit: 250,
@@ -274,14 +274,14 @@ export class AlternateBookmarkSourceAdapter implements SourceAdapter {
       };
     }
     if (
-      context.requestedCheckpoint.value !== null &&
+      context.requestedCursor.value !== null &&
       !/^alternate-bookmark-[0-9]{3}$/u.test(
-        context.requestedCheckpoint.value,
+        context.requestedCursor.value,
       )
     ) {
       return {
         ok: false,
-        failure: { disposition: "source_action_required", code: "invalid_checkpoint" },
+        failure: { disposition: "source_action_required", code: "invalid_cursor" },
         diagnostics: [],
       };
     }
@@ -318,8 +318,8 @@ export class AlternateBookmarkSourceAdapter implements SourceAdapter {
               protectedNativeEvidenceRef: "source_record:0",
             },
           }],
-          nextCheckpoint: {
-            ...context.requestedCheckpoint,
+          nextCursor: {
+            ...context.requestedCursor,
             value: wrapper.continuation.bookmark,
           },
           continuation: {

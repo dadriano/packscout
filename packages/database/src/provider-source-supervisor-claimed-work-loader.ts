@@ -5,7 +5,7 @@ import { type ProviderSourceSupervisorQueueCandidate } from
   "./provider-source-supervisor-work-claim-repository.ts";
 import {
   providerSourceBoundedCounter as boundedCounter,
-  providerSourceCheckpointValue as checkpointValue,
+  providerSourceCursorValue as cursorValue,
 } from "./provider-source-supervisor-work-values.ts";
 import type {
   ProviderSourceSupervisorClaimedWork,
@@ -235,7 +235,7 @@ export async function loadClaimedProviderSourceSupervisorWork(
     mapperKey: sourceRevision.mapper_key,
     mapperVersion: sourceRevision.mapper_version,
     identityNamespaceKey: sourceRevision.identity_namespace_key,
-    checkpointCodecVersion: sourceRevision.checkpoint_codec_version,
+    cursorCodecVersion: sourceRevision.cursor_codec_version,
     sourceConfiguration: sourceRevision.configuration_json,
     recordIdScopes: sourceRevision.record_id_scopes_json,
   } as const;
@@ -263,7 +263,7 @@ export async function loadClaimedProviderSourceSupervisorWork(
       connectionHealthGeneration: sourceJob.expected_health_generation,
     };
   }
-  if (!run || run.checkpoint_generation === null || run.next_page_number === null) {
+  if (!run || run.cursor_generation === null || run.next_page_number === null) {
     throw new PersistenceError("SOURCE_FENCED", "Page work pins are incomplete.");
   }
   const immutableRunPinsChanged =
@@ -309,9 +309,9 @@ export async function loadClaimedProviderSourceSupervisorWork(
     committedRecords: boundedCounter(run.counters_json, "records"),
     retryAttempt: runtime?.retry_attempt ?? 0,
     pageNumber: run.next_page_number,
-    checkpointGeneration: run.checkpoint_generation,
-    requestedCheckpointValue: checkpointValue(run.current_checkpoint),
-    requestedCheckpointFingerprint: run.current_checkpoint_fingerprint,
+    cursorGeneration: run.cursor_generation,
+    requestedCursorValue: cursorValue(run.current_cursor),
+    requestedCursorFingerprint: run.current_cursor_fingerprint,
     sourceIntervalSeconds: schedule
       ? await providerSourceScheduleIntervalSeconds(
           transaction,

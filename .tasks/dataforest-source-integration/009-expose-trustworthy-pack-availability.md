@@ -29,7 +29,7 @@ The repository has public release contracts, validators, queries, and UI fixture
 - Project canonical `available`, `unavailable`, `unknown`, or `sold_out` unchanged and reject a missing, inconsistent, or unsupported canonical availability state; task 005 alone owns DataForrest true, false, and null mapping.
 - Accept sold out only from explicit authoritative canonical provenance and never infer it from canonical unavailable or unknown state, missing evidence, disappearance, price, or nested status.
 - Include sanitized stable provider identity and catalog observation time required by the existing public trust model.
-- Exclude source-instance IDs, connection IDs, credentials, checkpoints, vendor cursors, processor diagnostics, quarantine, raw market events, payment methods, and protected provider data.
+- Exclude source-instance IDs, connection IDs, credentials, cursors, vendor cursors, processor diagnostics, quarantine, raw market events, payment methods, and protected provider data.
 
 ### Catalog and action behavior
 

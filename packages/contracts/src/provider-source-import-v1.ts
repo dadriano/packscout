@@ -1,7 +1,7 @@
 import type {
   LaunchProviderKey,
   LaunchRecordIdScopeKey,
-  OpaqueCheckpointEnvelope,
+  OpaqueCursorEnvelope,
   ProviderCanonicalKind,
 } from "./provider-source-contract-v1.ts";
 import type {
@@ -199,8 +199,8 @@ export interface ProviderSourcePageCommitPins {
   readonly runClaimLeaseId: string;
   readonly pageId: string;
   readonly pageNumber: number;
-  readonly checkpointCodecVersion: string;
-  readonly checkpointGeneration: bigint;
-  readonly requestedCheckpoint: OpaqueCheckpointEnvelope;
-  readonly requestedCheckpointFingerprint: string | null;
+  readonly cursorCodecVersion: string;
+  readonly cursorGeneration: bigint;
+  readonly requestedCursor: OpaqueCursorEnvelope;
+  readonly requestedCursorFingerprint: string | null;
 }

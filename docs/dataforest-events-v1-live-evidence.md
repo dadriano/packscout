@@ -6,7 +6,7 @@
 
 **Reviewer:** PackScout engineering (automated structural capture plus manual contract review)
 
-**Verdict:** PASS for tasks 002–009; the real local backfill remains capacity-blocked. The measured Task 010 admission requirement is 8,757,364,735,856 available bytes, and this host is explicitly rejected.
+**Verdict:** PASS for tasks 002–009; the real local backfill remains capacity-blocked. The measured Task 010 admission requirement is 8,759,332,238,475 available bytes, and this host is explicitly rejected.
 
 ## Safety boundary
 
@@ -152,8 +152,8 @@ not apply provider-specific canonical rules.
 | --- | --- | --- |
 | Missing or wrong bearer | Live/documented 401 | Connection-scoped action required; one blocking episode |
 | Unknown filter, malformed cursor, or cursor/filter mismatch | Live/documented 400 | Source/configuration action required; do not retry unchanged input |
-| Client timeout or network interruption | Client-bound behavior | Retryable with the same requested checkpoint |
-| Provider 500 | Provider documented | Retryable with the same requested checkpoint |
+| Client timeout or network interruption | Client-bound behavior | Retryable with the same requested cursor |
+| Provider 500 | Provider documented | Retryable with the same requested cursor |
 | Provider 429 / rate headers | Unavailable; not naturally observed | Do not invent semantics; preserve safe status evidence and use conservative retry handling if observed |
 | HTTP redirect | Provider documents HTTP→HTTPS 301 | Runtime sends HTTPS only and rejects redirects/destination changes |
 
@@ -202,22 +202,22 @@ twice. It projects:
 | Conservative raw full history | 98,700,000,000 |
 | Seven-day steady-poll raw pages | 25,902,938,880 |
 | Seven-day normalized page payload | 64,962,155,280 |
-| Permanent expired page lineage | 19,913,402,236 |
+| Permanent expired page lineage | 21,389,029,200 |
 | Quarantine lineage and evidence | 120,851,217,000 |
 | Page diagnostics | 473,130,492 |
 | Terminal request attempts | 946,030,076 |
 | Permanent compact attempt lineage | 14,013,054,888 |
-| **Total** | **6,568,023,551,892** |
+| **Total** | **6,569,499,178,856** |
 
 At a 60-second interval, four sources create 172,800 poll attempts in 30 days;
 including the 58,108 initial pages gives 230,908 first-window attempts. Leaving
 25% of the target volume free after the projected import requires
-**8,757,364,735,856 available bytes** before Task 010 may start. The 200 GB
+**8,759,332,238,475 available bytes** before Task 010 may start. The 200 GB
 provisional floor is therefore superseded by this measured requirement. The
 80%-used abort threshold remains independently enforced.
 
-The committed host measurement reported 994,662,584,320 bytes of capacity and
-only 25,755,877,376 available bytes. Admission was rejected for insufficient
+The refreshed committed host measurement reported 994,662,584,320 bytes of capacity and
+only 104,786,628,608 available bytes. Admission was rejected for insufficient
 free bytes, an already-exceeded 80% threshold, and a projected threshold
 breach. Task 010 must not start a real backfill on this host. This does not block
 contract, adapter, mapper, importer, scheduler, admin, or UI implementation.
@@ -226,8 +226,8 @@ The bounded-memory benchmark processed 10 warm-up pages and five 20-page trials
 (100 measured pages total), each exactly 250 records and 2 MiB, through the
 authentic capture, durable-terminalization acknowledgement, interpretation,
 deep immutable completion, import validation, mapping, planning, and discard
-path. Peak RSS rose 27,557,888 bytes. The allocator-tolerant Theil–Sen trend over
-settled heap-plus-external samples projected only 162,600 retained bytes across
+path. Peak RSS rose 36,290,560 bytes. The allocator-tolerant Theil–Sen trend over
+settled heap-plus-external samples projected only 187,134 retained bytes across
 100 pages, within the 64 MiB peak and 8 MiB retained limits. Four execution
 slots therefore reserve at most 256 MiB of page-working-set budget before normal
 process overhead.

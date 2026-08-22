@@ -112,10 +112,10 @@ const baseSource: ProviderSourceOperationsSource = {
     latestFailureCode: null,
     recoveredAt: null,
   },
-  checkpoint: {
+  cursor: {
     generation: "4",
     fingerprint: "a".repeat(64),
-    resumeLabel: "Saved checkpoint",
+    resumeLabel: "Saved cursor",
   },
   progress: {
     pages: 8,
@@ -171,7 +171,7 @@ test("source-neutral overview renders shared capacity and the exact supplied reg
 
 test("bounded operational labels cover worker, capacity, recovery, retry, pause, failure, and head states", () => {
   const cases: Array<[string, ProviderSourceOperationsSource]> = [
-    ["Not configured", { ...baseSource, configured: false, source: null, schedule: null, processor: null, checkpoint: null }],
+    ["Not configured", { ...baseSource, configured: false, source: null, schedule: null, processor: null, cursor: null }],
     ["Connection transition uncertain", { ...baseSource, connectionImpact: { state: "uncertain", safeCode: "CONNECTION_OUTCOME_UNCERTAIN", healthGeneration: "3" } }],
     ["Waiting on connection recovery", { ...baseSource, connectionImpact: { state: "reconnecting", safeCode: null, healthGeneration: "3" } }],
     ["Pause requested", { ...baseSource, source: { ...baseSource.source!, pauseRequested: true } }],
@@ -247,7 +247,7 @@ test("diagnostic feed labels shared context, run-filter hiding, expiry gaps, and
       responseBytes: null,
       retryDelayMilliseconds: 5_000,
       continuation: null,
-      checkpointFingerprint: null,
+      cursorFingerprint: null,
       counters: { attempts: 2 },
       references: [{ kind: "run", label: "Open run", href: `/runs/${ids.run}` }],
     }],

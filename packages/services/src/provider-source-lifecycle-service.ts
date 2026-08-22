@@ -1,13 +1,13 @@
 import {
-  confirmProviderSourceCheckpointResetRequestSchema,
+  confirmProviderSourceCursorResetRequestSchema,
   createProviderSourceRequestSchema,
-  previewProviderSourceCheckpointResetRequestSchema,
+  previewProviderSourceCursorResetRequestSchema,
   providerSourceRevisionCommandSchema,
   replaceProviderSourceRequestSchema,
   reviseProviderSourceIntervalRequestSchema,
   type CreateProviderSourceRequest,
   type ProviderSourceAdminAuditReceipt,
-  type ProviderSourceCheckpointResetPreview,
+  type ProviderSourceCursorResetPreview,
   type ReplaceProviderSourceRequest,
 } from "@packscout/contracts";
 import {
@@ -177,7 +177,7 @@ export class ProviderSourceLifecycleService {
       mapperKey: mapper.mapperKey,
       mapperVersion: mapper.mapperVersion,
       identityNamespaceKey: mapper.identityNamespaceKey,
-      checkpointCodecVersion: providerAdapter.manifest.checkpointCodecKey,
+      cursorCodecVersion: providerAdapter.manifest.cursorCodecKey,
       configuration: validated.value,
       configurationHash: hashProviderSourceConfiguration(validated.value),
       recordIdScopes,
@@ -384,14 +384,14 @@ export class ProviderSourceLifecycleService {
     );
   }
 
-  async previewCheckpointReset(
+  async previewCursorReset(
     context: ProviderSourceAdminCommandContext,
     providerId: string,
     sourceInstanceId: string,
     request: unknown,
-  ): Promise<ProviderSourceCheckpointResetPreview> {
+  ): Promise<ProviderSourceCursorResetPreview> {
     requireProviderSourceAdminContext(context);
-    const parsed = previewProviderSourceCheckpointResetRequestSchema.safeParse(request);
+    const parsed = previewProviderSourceCursorResetRequestSchema.safeParse(request);
     if (!parsed.success) this.#invalid();
     const source = await this.#load(context, providerId, sourceInstanceId);
     if (
@@ -405,24 +405,24 @@ export class ProviderSourceLifecycleService {
       sourceInstanceId: source.sourceInstanceId,
       sourceRevisionId: source.sourceRevisionId,
       sourceState: source.state as "paused" | "disabled",
-      checkpointGeneration: source.checkpointGeneration.toString(),
-      checkpointFingerprint: source.checkpointFingerprint,
+      cursorGeneration: source.cursorGeneration.toString(),
+      cursorFingerprint: source.cursorFingerprint,
       confirmation: `RESET ${source.provider.toUpperCase()}`,
       consequence:
-        "The saved checkpoint will be cleared and the next resume will start from Feed start.",
+        "The saved cursor will be cleared and the next resume will start from Feed start.",
     });
   }
 
-  async resetCheckpoint(
+  async resetCursor(
     context: ProviderSourceAdminCommandContext,
     providerId: string,
     sourceInstanceId: string,
     request: unknown,
   ) {
     requireProviderSourceAdminContext(context);
-    const parsed = confirmProviderSourceCheckpointResetRequestSchema.safeParse(request);
+    const parsed = confirmProviderSourceCursorResetRequestSchema.safeParse(request);
     if (!parsed.success) this.#resetConfirmation();
-    const preview = await this.previewCheckpointReset(
+    const preview = await this.previewCursorReset(
       context,
       providerId,
       sourceInstanceId,
@@ -430,25 +430,25 @@ export class ProviderSourceLifecycleService {
     );
     if (
       parsed.data.confirmation !== preview.confirmation ||
-      parsed.data.expectedCheckpointGeneration !== preview.checkpointGeneration ||
-      parsed.data.expectedCheckpointFingerprint !== preview.checkpointFingerprint
+      parsed.data.expectedCursorGeneration !== preview.cursorGeneration ||
+      parsed.data.expectedCursorFingerprint !== preview.cursorFingerprint
     ) this.#resetConfirmation();
     const resetAt = this.#clock.now();
-    const generation = await this.#repository.resetCheckpoint({
+    const generation = await this.#repository.resetCursor({
       organizationId: context.organizationId,
       providerId,
       sourceInstanceId,
       expectedSourceRevisionId: preview.sourceRevisionId,
-      expectedGeneration: BigInt(preview.checkpointGeneration),
-      expectedFingerprint: preview.checkpointFingerprint,
+      expectedGeneration: BigInt(preview.cursorGeneration),
+      expectedFingerprint: preview.cursorFingerprint,
       actorKey: context.actorKey,
       resetAt,
     });
     return Object.freeze({
-      checkpointGeneration: generation.toString(),
-      checkpointFingerprint: null,
+      cursorGeneration: generation.toString(),
+      cursorFingerprint: null,
       audit: commandReceipt(
-        "source_checkpoint_reset",
+        "source_cursor_reset",
         sourceInstanceId,
         preview.sourceRevisionId,
         resetAt,

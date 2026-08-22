@@ -142,7 +142,7 @@ export function OperationsPage() {
           ? "pause requested; the current page may commit"
           : result.state === "paused"
             ? "paused before another page began"
-            : "resumed from the committed checkpoint";
+            : "resumed from the committed cursor";
         const message = `${source.displayName}: ${outcome}.`;
         setAnnouncement(message);
         showToast(message, "success");
@@ -163,7 +163,7 @@ export function OperationsPage() {
       <PageHeader
         eyebrow="Data pipeline / Status"
         title="Platform processors"
-        description="One shared source connection feeds four isolated processor lanes. Local checkpoints, lifecycle, freshness, and quality remain distinct when the connection is affected."
+        description="One shared source connection feeds four isolated processor lanes. Local cursors, lifecycle, freshness, and quality remain distinct when the connection is affected."
         actions={
           <>
             {canConfigure ? (

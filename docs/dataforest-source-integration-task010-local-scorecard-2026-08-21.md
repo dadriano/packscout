@@ -10,12 +10,12 @@ started. No DataForrest credential was read or used.
 | Evidence                                    | Result                                                                                    |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Capacity artifact                           | `provider-source-capacity-measurement-v1`                                                 |
-| Required available bytes                    | 8,757,364,735,856                                                                         |
+| Required available bytes                    | 8,759,332,238,475                                                                         |
 | Recorded host capacity                      | 994,662,584,320 bytes                                                                     |
-| Recorded host available                     | 25,755,877,376 bytes                                                                      |
+| Recorded host available                     | 104,786,628,608 bytes                                                                     |
 | Current read-only preflight available       | 102,168,420,352 bytes on 2026-08-22                                                       |
 | Current read-only filesystem utilization    | 89.72%, above the independent 80% abort fence                                             |
-| Current capacity deficit                    | 8,655,196,315,504 bytes                                                                   |
+| Current capacity deficit                    | 8,657,163,818,123 bytes                                                                   |
 | Admission                                   | Rejected: insufficient available bytes, already over 80% used, projected threshold breach |
 | Exact backfill DB fingerprint/OID/system ID | `null` — target not provisioned because admission is rejected                             |
 | Required migration                          | `20260821040000_provider_source_page_plan_digest`                                         |
@@ -50,7 +50,7 @@ unresolved or launch-blocking count is zero.
 | Required proof                                    | Result                                           |
 | ------------------------------------------------- | ------------------------------------------------ |
 | Four-provider overlap / cap-two fairness          | `not_run`; blocker: capacity admission           |
-| Restart from four committed checkpoints           | `not_run`; blocker: capacity admission           |
+| Restart from four committed cursors           | `not_run`; blocker: capacity admission           |
 | Pause/resume isolation                            | `not_run`; blocker: capacity admission           |
 | Manual coalescing                                 | `not_run`; blocker: capacity admission           |
 | Independent interval and no-early-poll window     | `not_run`; blocker: capacity admission           |
@@ -62,7 +62,7 @@ unresolved or launch-blocking count is zero.
 | Actual elapsed duration / records per second      | `null` / `null`; blocker: backfill not run       |
 
 Planning evidence only: the authentic bounded page-path benchmark measured a
-27,557,888-byte peak RSS increase and a 162,600-byte Theil–Sen retained trend
+36,290,560-byte peak RSS increase and a 187,134-byte Theil–Sen retained trend
 over 100 measured pages. This is not substituted for the missing live Task 010
 resource evidence.
 
@@ -91,7 +91,7 @@ resource evidence.
 ## External blockers and completion decision
 
 1. Provision an exact local PostgreSQL backing volume with at least
-   8,757,364,735,856 available bytes and less than 80% used, then obtain an
+   8,759,332,238,475 available bytes and less than 80% used, then obtain an
    approved target-bound capacity receipt.
 2. Obtain an authorized DataForrest bearer through the administrator's encrypted
    UI workflow; never place it in environment, argv, output, or documentation.

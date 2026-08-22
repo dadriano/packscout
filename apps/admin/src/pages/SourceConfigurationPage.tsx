@@ -16,9 +16,9 @@ import {
   createSourceConnectionProfile,
   createSourceConnectionRecoveryRevision,
   getProviderSourceCatalog,
-  previewProviderSourceCheckpointReset,
+  previewProviderSourceCursorReset,
   replaceProviderSource,
-  resetProviderSourceCheckpoint,
+  resetProviderSourceCursor,
   requestSourceConnectionTest,
   requestSourceConnectionRecoveryTest,
   reviseProviderSourceInterval,
@@ -131,7 +131,7 @@ export function SourceConfigurationPage() {
         tier: "danger-typed",
         typedAcknowledgment: "REVOKE",
         title: `Revoke ${connection.displayName}?`,
-        description: "Only work pinned to this revision will be fenced. Committed provider checkpoints are preserved.",
+        description: "Only work pinned to this revision will be fenced. Committed provider cursors are preserved.",
         confirmLabel: "Revoke revision",
         action: async () => {
           await revokeSourceConnectionRevision(connection.id, revisionId);
@@ -158,7 +158,7 @@ export function SourceConfigurationPage() {
           : () => activateSourceConnectionRecovery(connection.id, recoveryInput),
         action === "recovery-test"
           ? "Recovery test requested against the exact blocked connection fence."
-          : "Recovery activated; old-revision work was fenced and eligible sources were queued from committed checkpoints.",
+          : "Recovery activated; old-revision work was fenced and eligible sources were queued from committed cursors.",
       );
       return;
     }
@@ -218,7 +218,7 @@ export function SourceConfigurationPage() {
           : action === "pause"
             ? "Pause requested. The current page may commit, but no next page or queued run will start."
             : action === "resume"
-              ? `Source resumed from ${source.checkpoint.resumeLabel}.`
+              ? `Source resumed from ${source.cursor.resumeLabel}.`
               : "Source command completed.",
     );
   }
@@ -227,7 +227,7 @@ export function SourceConfigurationPage() {
     setPendingKey(`source:${source.sourceInstanceId}:reset-preview`);
     setActionError(null);
     try {
-      const { preview } = await previewProviderSourceCheckpointReset(
+      const { preview } = await previewProviderSourceCursorReset(
         source.providerId,
         source.sourceInstanceId,
         source.sourceRevisionId,
@@ -235,24 +235,24 @@ export function SourceConfigurationPage() {
       await confirm({
         tier: "danger-typed",
         typedAcknowledgment: preview.confirmation,
-        title: `Reset ${preview.provider} checkpoint?`,
-        description: `${preview.consequence} Current generation: ${preview.checkpointGeneration}. Current fingerprint: ${preview.checkpointFingerprint ?? "none"}.`,
-        confirmLabel: "Reset checkpoint",
+        title: `Reset ${preview.provider} cursor?`,
+        description: `${preview.consequence} Current generation: ${preview.cursorGeneration}. Current fingerprint: ${preview.cursorFingerprint ?? "none"}.`,
+        confirmLabel: "Reset cursor",
         action: async () => {
-          await resetProviderSourceCheckpoint(
+          await resetProviderSourceCursor(
             preview.providerId,
             preview.sourceInstanceId,
             {
               expectedSourceRevisionId: preview.sourceRevisionId,
-              expectedCheckpointGeneration: preview.checkpointGeneration,
-              expectedCheckpointFingerprint: preview.checkpointFingerprint,
+              expectedCursorGeneration: preview.cursorGeneration,
+              expectedCursorFingerprint: preview.cursorFingerprint,
               confirmation: preview.confirmation,
             },
           );
           await reload();
-          setNotice(`${preview.provider} checkpoint reset to Feed start with a new generation.`);
+          setNotice(`${preview.provider} cursor reset to Feed start with a new generation.`);
         },
-        successMessage: "Checkpoint reset completed.",
+        successMessage: "Cursor reset completed.",
       });
     } catch (error) {
       setActionError(errorMessage(error));
@@ -282,7 +282,7 @@ export function SourceConfigurationPage() {
       {!canManage ? (
         <aside className="source-config-note">
           <strong>Read-only source evidence</strong>
-          <p>You can inspect masked connection, adapter, mapper, timing, test, and checkpoint state. Configuration authority remains administrator-only.</p>
+          <p>You can inspect masked connection, adapter, mapper, timing, test, and cursor state. Configuration authority remains administrator-only.</p>
         </aside>
       ) : null}
       {loading ? (
@@ -356,7 +356,7 @@ export function SourceConfigurationPage() {
                   return mutate(
                     "source:create",
                     () => createProviderSource(request as CreateProviderSourceRequest),
-                    "Inactive source created with its approved mapper and a null checkpoint.",
+                    "Inactive source created with its approved mapper and a null cursor.",
                   );
                 }
                 const replacementRequest = request as ReplaceProviderSourceRequest;
@@ -372,7 +372,7 @@ export function SourceConfigurationPage() {
                 return confirm({
                   tier: "danger",
                   title: `Replace ${providerLabel} source?`,
-                  description: `Only ${providerLabel} is affected. The ${previous?.state ?? "inactive"} source stays in history, but its checkpoint cannot transfer. The replacement starts at Feed start and must be tested; activation begins paused until an operator resumes it.`,
+                  description: `Only ${providerLabel} is affected. The ${previous?.state ?? "inactive"} source stays in history, but its cursor cannot transfer. The replacement starts at Feed start and must be tested; activation begins paused until an operator resumes it.`,
                   confirmLabel: "Replace selected source",
                   action: async () => {
                     await replaceProviderSource(replacementRequest);
@@ -394,7 +394,7 @@ export function SourceConfigurationPage() {
                     intervalSeconds,
                   },
                 ),
-                "Timing revision saved. Current work and checkpoint were preserved.",
+                "Timing revision saved. Current work and cursor were preserved.",
               )}
             />
           )}

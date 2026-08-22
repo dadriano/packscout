@@ -73,7 +73,7 @@ export interface ProviderSourceActivationCandidateSnapshot {
     mapperKey: string;
     mapperVersion: string;
     identityNamespaceKey: string;
-    checkpointCodecVersion: string;
+    cursorCodecVersion: string;
     configuration: unknown;
     configurationHash: string;
     recordIdScopes: unknown;
@@ -94,13 +94,13 @@ export interface ProviderSourceActivationCandidateSnapshot {
     configurationFingerprint: string;
     revokedAt: Date | null;
   }>;
-  readonly checkpoint: Readonly<{
+  readonly cursor: Readonly<{
     sourceRevisionId: string;
     sourceAdapterVersion: string;
-    checkpointCodecVersion: string;
-    checkpointGeneration: bigint;
-    checkpointFingerprint: string | null;
-    hasCheckpointBytes: boolean;
+    cursorCodecVersion: string;
+    cursorGeneration: bigint;
+    cursorFingerprint: string | null;
+    hasCursor: boolean;
     advancedByRunId: string | null;
     advancedByPageId: string | null;
   }>;
@@ -118,7 +118,7 @@ export interface ActivateProviderSourcePausedExactInput {
   readonly mapperKey: string;
   readonly mapperVersion: string;
   readonly identityNamespaceKey: string;
-  readonly checkpointCodecVersion: string;
+  readonly cursorCodecVersion: string;
   readonly sourceConfiguration: Readonly<Record<string, unknown>>;
   readonly sourceConfigurationHash: string;
   readonly recordIdScopes: readonly string[];
@@ -127,7 +127,7 @@ export interface ActivateProviderSourcePausedExactInput {
   readonly connectionRequestLimit: number;
   readonly connectionRevisionId: string;
   readonly connectionConfigurationFingerprint: string;
-  readonly checkpointGeneration: bigint;
+  readonly cursorGeneration: bigint;
   readonly actorKey: string;
   readonly activatedAt: Date;
 }
@@ -223,7 +223,7 @@ export class ProviderSourceLifecycleRepository {
     mapperKey: string;
     mapperVersion: string;
     identityNamespaceKey: string;
-    checkpointCodecVersion: string;
+    cursorCodecVersion: string;
     revisionNumber: number;
     scheduleRevisionNumber?: number;
     intervalSeconds?: number;
@@ -265,9 +265,9 @@ export class ProviderSourceLifecycleRepository {
       input.identityNamespaceKey,
       "Identity namespace key",
     );
-    const checkpointCodecVersion = requireRegistrationKey(
-      input.checkpointCodecVersion,
-      "Checkpoint codec version",
+    const cursorCodecVersion = requireRegistrationKey(
+      input.cursorCodecVersion,
+      "Cursor codec version",
     );
     input.recordIdScopes.forEach((scope) => requireRegistrationKey(scope, "Record-ID scope"));
     if (mapperKey === sourceTypeKey) {
@@ -380,7 +380,7 @@ export class ProviderSourceLifecycleRepository {
           mapper_key: mapperKey,
           mapper_version: mapperVersion,
           identity_namespace_key: identityNamespaceKey,
-          checkpoint_codec_version: checkpointCodecVersion,
+          cursor_codec_version: cursorCodecVersion,
           configuration_json: asJson(input.configuration),
           configuration_hash: requireSha256(input.configurationHash, "Configuration hash"),
           record_id_scopes_json: asJson(input.recordIdScopes),
@@ -418,15 +418,15 @@ export class ProviderSourceLifecycleRepository {
             updated_at: input.createdAt,
           },
         }),
-        transaction.provider_source_checkpoints.create({
+        transaction.provider_source_cursors.create({
           data: {
             source_instance_id: source.id,
             organization_id: input.organizationId,
             provider_id: input.providerId,
             source_revision_id: sourceRevision.id,
             source_adapter_version: sourceAdapterVersion,
-            checkpoint_codec_version: checkpointCodecVersion,
-            checkpoint_generation: 1n,
+            cursor_codec_version: cursorCodecVersion,
+            cursor_generation: 1n,
             updated_at: input.createdAt,
           },
         }),
@@ -489,7 +489,7 @@ export class ProviderSourceLifecycleRepository {
       });
       if (!source?.active_revision_id) return null;
 
-      const [provider, sourceRevision, connectionProfile, connectionRevision, checkpoint] =
+      const [provider, sourceRevision, connectionProfile, connectionRevision, cursor] =
         await Promise.all([
           transaction.provider_sources.findFirst({
             where: {
@@ -519,7 +519,7 @@ export class ProviderSourceLifecycleRepository {
               connection_profile_id: source.connection_profile_id,
             },
           }),
-          transaction.provider_source_checkpoints.findFirst({
+          transaction.provider_source_cursors.findFirst({
             where: {
               source_instance_id: input.sourceInstanceId,
               organization_id: input.organizationId,
@@ -532,7 +532,7 @@ export class ProviderSourceLifecycleRepository {
         || !sourceRevision
         || !connectionProfile?.active_revision_id
         || !connectionRevision
-        || !checkpoint
+        || !cursor
       ) return null;
 
       return {
@@ -558,7 +558,7 @@ export class ProviderSourceLifecycleRepository {
           mapperKey: sourceRevision.mapper_key,
           mapperVersion: sourceRevision.mapper_version,
           identityNamespaceKey: sourceRevision.identity_namespace_key,
-          checkpointCodecVersion: sourceRevision.checkpoint_codec_version,
+          cursorCodecVersion: sourceRevision.cursor_codec_version,
           configuration: sourceRevision.configuration_json,
           configurationHash: sourceRevision.configuration_hash,
           recordIdScopes: sourceRevision.record_id_scopes_json,
@@ -579,15 +579,15 @@ export class ProviderSourceLifecycleRepository {
           configurationFingerprint: connectionRevision.configuration_fingerprint,
           revokedAt: connectionRevision.revoked_at,
         },
-        checkpoint: {
-          sourceRevisionId: checkpoint.source_revision_id,
-          sourceAdapterVersion: checkpoint.source_adapter_version,
-          checkpointCodecVersion: checkpoint.checkpoint_codec_version,
-          checkpointGeneration: checkpoint.checkpoint_generation,
-          checkpointFingerprint: checkpoint.checkpoint_fingerprint,
-          hasCheckpointBytes: checkpoint.checkpoint_bytes !== null,
-          advancedByRunId: checkpoint.advanced_by_run_id,
-          advancedByPageId: checkpoint.advanced_by_page_id,
+        cursor: {
+          sourceRevisionId: cursor.source_revision_id,
+          sourceAdapterVersion: cursor.source_adapter_version,
+          cursorCodecVersion: cursor.cursor_codec_version,
+          cursorGeneration: cursor.cursor_generation,
+          cursorFingerprint: cursor.cursor_fingerprint,
+          hasCursor: cursor.cursor !== null,
+          advancedByRunId: cursor.advanced_by_run_id,
+          advancedByPageId: cursor.advanced_by_page_id,
         },
       };
     }, {
@@ -606,7 +606,7 @@ export class ProviderSourceLifecycleRepository {
     requireRegistrationKey(input.mapperKey, "Mapper key");
     requireRegistrationKey(input.mapperVersion, "Mapper version");
     requireRegistrationKey(input.identityNamespaceKey, "Identity namespace key");
-    requireRegistrationKey(input.checkpointCodecVersion, "Checkpoint codec version");
+    requireRegistrationKey(input.cursorCodecVersion, "Cursor codec version");
     requireRegistrationKey(input.connectionTypeKey, "Connection type key");
     requireSha256(input.sourceConfigurationHash, "Source configuration hash");
     requireSha256(
@@ -620,8 +620,8 @@ export class ProviderSourceLifecycleRepository {
     ) {
       throw new TypeError("Connection request limit must be an integer from 1 through 4.");
     }
-    if (input.checkpointGeneration < 1n) {
-      throw new TypeError("Checkpoint generation must be positive.");
+    if (input.cursorGeneration < 1n) {
+      throw new TypeError("Cursor generation must be positive.");
     }
     if (
       input.recordIdScopes.length === 0
@@ -677,7 +677,7 @@ export class ProviderSourceLifecycleRepository {
         );
       }
 
-      const [provider, sourceRevision, connectionRevision, checkpoint] = await Promise.all([
+      const [provider, sourceRevision, connectionRevision, cursor] = await Promise.all([
         transaction.provider_sources.findFirst({
           where: {
             id: input.providerId,
@@ -699,7 +699,7 @@ export class ProviderSourceLifecycleRepository {
             mapper_key: input.mapperKey,
             mapper_version: input.mapperVersion,
             identity_namespace_key: input.identityNamespaceKey,
-            checkpoint_codec_version: input.checkpointCodecVersion,
+            cursor_codec_version: input.cursorCodecVersion,
             configuration_hash: input.sourceConfigurationHash,
             configuration_json: { equals: sourceConfiguration },
             record_id_scopes_json: { equals: recordIdScopes },
@@ -719,20 +719,20 @@ export class ProviderSourceLifecycleRepository {
           },
           select: { health_generation: true },
         }),
-        transaction.provider_source_checkpoints.findFirst({
+        transaction.provider_source_cursors.findFirst({
           where: {
             source_instance_id: input.sourceInstanceId,
             organization_id: input.organizationId,
             provider_id: input.providerId,
             source_revision_id: input.sourceRevisionId,
             source_adapter_version: input.sourceAdapterVersion,
-            checkpoint_codec_version: input.checkpointCodecVersion,
-            checkpoint_generation: input.checkpointGeneration,
+            cursor_codec_version: input.cursorCodecVersion,
+            cursor_generation: input.cursorGeneration,
           },
           select: { source_instance_id: true },
         }),
       ]);
-      if (!provider || !sourceRevision || !connectionRevision || !checkpoint) {
+      if (!provider || !sourceRevision || !connectionRevision || !cursor) {
         throw new PersistenceError(
           "SOURCE_FENCED",
           "Source activation pins changed after compatibility validation.",
@@ -868,10 +868,10 @@ export class ProviderSourceLifecycleRepository {
     if (!revision || !profile?.active_revision_id) {
       throw new PersistenceError("SOURCE_FENCED", "Source has no active connection revision.");
     }
-    const checkpoint = await this.database.provider_source_checkpoints.findFirst({
+    const cursor = await this.database.provider_source_cursors.findFirst({
       where: { source_instance_id: source.id, organization_id: input.organizationId },
     });
-    if (!checkpoint) throw new PersistenceError("NOT_FOUND", "Source checkpoint was not found.");
+    if (!cursor) throw new PersistenceError("NOT_FOUND", "Source cursor was not found.");
     return {
       providerId: source.provider_id,
       sourceInstanceId: source.id,
@@ -884,8 +884,8 @@ export class ProviderSourceLifecycleRepository {
       identityNamespaceKey: revision.identity_namespace_key,
       connectionProfileId: source.connection_profile_id,
       connectionRevisionId: profile.active_revision_id,
-      checkpointCodecVersion: checkpoint.checkpoint_codec_version,
-      checkpointGeneration: checkpoint.checkpoint_generation,
+      cursorCodecVersion: cursor.cursor_codec_version,
+      cursorGeneration: cursor.cursor_generation,
     };
   }
 }

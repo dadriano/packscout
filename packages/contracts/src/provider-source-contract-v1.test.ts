@@ -4,11 +4,12 @@ import {
   canonicalKindByLaunchScope,
   launchRecordIdScopeDeclarations,
   normalizedContinuationSchema,
-  OPAQUE_CHECKPOINT_VALUE_MAXIMUM_UTF8_BYTES,
-  opaqueCheckpointEnvelopeSchema,
-  opaqueCheckpointValueSchema,
+  OPAQUE_CURSOR_VALUE_INVALID_TEXT_ERROR,
+  OPAQUE_CURSOR_VALUE_MAXIMUM_UTF8_BYTES,
+  opaqueCursorEnvelopeSchema,
+  opaqueCursorValueSchema,
   providerSourceControlPlaneRetry,
-  providerSourceDiagnosticCheckpointFingerprintSchema,
+  providerSourceDiagnosticCursorFingerprintSchema,
   providerSourceDiagnosticCommandCorrelationKeySchema,
   providerSourceDiagnosticCorrelationKinds,
   providerSourceDiagnosticEventKindByCorrelationKind,
@@ -82,29 +83,59 @@ test("continuation is a strict discriminated union with bounded integer delay", 
   }
 });
 
-test("opaque checkpoints share one exact 16 KiB UTF-8 byte bound", () => {
-  assert.equal(OPAQUE_CHECKPOINT_VALUE_MAXIMUM_UTF8_BYTES, 16_384);
+test("opaque cursors share one exact 16 KiB UTF-8 byte bound", () => {
+  assert.equal(OPAQUE_CURSOR_VALUE_MAXIMUM_UTF8_BYTES, 16_384);
   const exactAscii = "a".repeat(16_384);
   const exactMultibyte = "é".repeat(8_192);
   const oversizedMultibyte = `${exactMultibyte}a`;
-  assert.equal(opaqueCheckpointValueSchema.safeParse(exactAscii).success, true);
+  const exactAstral = "🙂".repeat(4_096);
+  assert.equal(opaqueCursorValueSchema.safeParse(exactAscii).success, true);
   assert.equal(
-    opaqueCheckpointValueSchema.safeParse(exactMultibyte).success,
+    opaqueCursorValueSchema.safeParse(exactMultibyte).success,
     true,
   );
+  assert.equal(opaqueCursorValueSchema.safeParse(exactAstral).success, true);
   assert.equal(
-    opaqueCheckpointValueSchema.safeParse(oversizedMultibyte).success,
+    opaqueCursorValueSchema.safeParse(`${exactAstral}a`).success,
     false,
   );
-  assert.equal(opaqueCheckpointEnvelopeSchema.safeParse({
+  assert.equal(
+    opaqueCursorValueSchema.safeParse(oversizedMultibyte).success,
+    false,
+  );
+  assert.equal(opaqueCursorEnvelopeSchema.safeParse({
     sourceInstanceId: "source-1",
     sourceRevisionId: "source-revision-1",
     sourceTypeKey: "fixture-source-v1",
     adapterVersion: "fixture-adapter-v1",
-    checkpointCodecKey: "fixture-checkpoint-v1",
-    checkpointGeneration: 1,
+    cursorCodecKey: "fixture-cursor-v1",
+    cursorGeneration: 1,
     value: oversizedMultibyte,
   }).success, false);
+});
+
+test("opaque cursors reject text that cannot round-trip losslessly through PostgreSQL UTF-8", () => {
+  for (const invalid of [
+    "cursor\u0000value",
+    "cursor-\ud800-value",
+    "cursor-\udfff-value",
+  ]) {
+    const parsed = opaqueCursorValueSchema.safeParse(invalid);
+    assert.equal(parsed.success, false);
+    if (!parsed.success) {
+      assert.equal(
+        parsed.error.issues.some(
+          ({ message }) =>
+            message === OPAQUE_CURSOR_VALUE_INVALID_TEXT_ERROR,
+        ),
+        true,
+      );
+    }
+  }
+
+  for (const valid of ["cursor-🙂-value", "\ufeffcursor-value"]) {
+    assert.equal(opaqueCursorValueSchema.safeParse(valid).success, true);
+  }
 });
 
 test("adapter failure codes cannot cross their durable disposition boundary", () => {
@@ -119,7 +150,7 @@ test("adapter failure codes cannot cross their durable disposition boundary", ()
     },
     {
       disposition: "source_action_required",
-      code: "invalid_checkpoint",
+      code: "invalid_cursor",
       safeStatus: 422,
     },
     {
@@ -197,7 +228,7 @@ test("diagnostic vocabulary and safe references stay contract-owned", () => {
   }).success, false);
 
   assert.equal(
-    providerSourceDiagnosticCheckpointFingerprintSchema.parse("a".repeat(64)),
+    providerSourceDiagnosticCursorFingerprintSchema.parse("a".repeat(64)),
     "a".repeat(64),
   );
   for (const unsafeFingerprint of [
@@ -206,7 +237,7 @@ test("diagnostic vocabulary and safe references stay contract-owned", () => {
     "cursor:reusable-provider-value",
   ]) {
     assert.equal(
-      providerSourceDiagnosticCheckpointFingerprintSchema.safeParse(
+      providerSourceDiagnosticCursorFingerprintSchema.safeParse(
         unsafeFingerprint,
       ).success,
       false,

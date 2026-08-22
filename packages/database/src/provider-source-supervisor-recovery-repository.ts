@@ -119,9 +119,9 @@ export class ProviderSourceSupervisorRecoveryRepository {
               connection_revision_id: run.connection_revision_id,
               run_id: run.id,
               page_number: run.next_page_number,
-              checkpoint_generation: run.checkpoint_generation,
-              requested_checkpoint_key:
-                run.current_checkpoint_fingerprint ?? "initial",
+              cursor_generation: run.cursor_generation,
+              requested_cursor_key:
+                run.current_cursor_fingerprint ?? "initial",
             },
             orderBy: [{ terminal_at: "desc" }, { request_attempt_id: "desc" }],
           })
@@ -179,7 +179,7 @@ export class ProviderSourceSupervisorRecoveryRepository {
         pages_committed: pagesCommitted,
         records_committed: recordsCommitted,
         last_progress_at: page.committed_at,
-        checkpoint_fingerprint: page.next_checkpoint_fingerprint,
+        cursor_fingerprint: page.next_cursor_fingerprint,
         continuation_kind: page.continuation_kind,
         continuation_minimum_delay_seconds: page.minimum_delay_seconds,
       } as const;
@@ -486,7 +486,7 @@ export class ProviderSourceSupervisorRecoveryRepository {
         return true;
       }
       // The bounded response body is process-local. Once the old claim has
-      // expired, safely refetch from the unchanged committed checkpoint.
+      // expired, safely refetch from the unchanged committed cursor.
       await transaction.import_runs.update({
         where: { id: run.id },
         data: { state: "queued", ...clearRunLease },
@@ -610,7 +610,7 @@ export class ProviderSourceSupervisorRecoveryRepository {
       source_adapter_version: string | null;
       normalized_contract_version: string | null;
       trigger: "scheduled" | "manual" | "continuation" | "recovery";
-      current_checkpoint_fingerprint: string | null;
+      current_cursor_fingerprint: string | null;
       lease_token: string | null;
     }>,
     occurredAt: Date,
@@ -648,7 +648,7 @@ export class ProviderSourceSupervisorRecoveryRepository {
       connectionRevisionId: run.connection_revision_id,
       runId: run.id,
       runTrigger: run.trigger,
-      checkpointFingerprint: run.current_checkpoint_fingerprint,
+      cursorFingerprint: run.current_cursor_fingerprint,
     });
   }
 }

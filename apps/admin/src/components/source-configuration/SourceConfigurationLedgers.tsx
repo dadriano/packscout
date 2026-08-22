@@ -422,9 +422,9 @@ export function ProviderSourceLedger({
               </div>
               <dl className="source-config-ledger__facts">
                 <div><dt>Interval / grace</dt><dd>{source.intervalSeconds}s / 15m</dd></div>
-                <div><dt>Checkpoint</dt><dd>{source.checkpoint.resumeLabel}</dd></div>
-                <div className="source-config-ledger__fingerprint"><dt>Fingerprint</dt><dd>{source.checkpoint.fingerprint ?? "None"}</dd></div>
-                <div><dt>Generation</dt><dd>{source.checkpoint.generation}</dd></div>
+                <div><dt>Cursor</dt><dd>{source.cursor.resumeLabel}</dd></div>
+                <div className="source-config-ledger__fingerprint"><dt>Fingerprint</dt><dd>{source.cursor.fingerprint ?? "None"}</dd></div>
+                <div><dt>Generation</dt><dd>{source.cursor.generation}</dd></div>
               </dl>
               {canManage ? (
                 <div className="source-config-ledger__actions">
@@ -439,7 +439,7 @@ export function ProviderSourceLedger({
                   {source.state === "paused" ? (
                     <button type="button" className="admin-button admin-button-primary"
                       disabled={pendingKey !== null}
-                      onClick={() => onCommand("resume", source)}>Resume from {source.checkpoint.resumeLabel}</button>
+                      onClick={() => onCommand("resume", source)}>Resume from {source.cursor.resumeLabel}</button>
                   ) : null}
                   {source.state === "active" ? (
                     <button type="button" className="admin-button admin-button-secondary"
@@ -454,7 +454,7 @@ export function ProviderSourceLedger({
                   {(["paused", "disabled"].includes(source.state)) ? (
                     <button type="button" className="admin-button admin-button-danger"
                       disabled={pendingKey !== null}
-                      onClick={() => onCommand("reset", source)}>Reset checkpoint</button>
+                      onClick={() => onCommand("reset", source)}>Reset cursor</button>
                   ) : null}
                 </div>
               ) : null}

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import {
   ACCEPTANCE_CREATED_AT,
-  ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
+  ACCEPTANCE_CURSOR_CODEC_VERSION,
   ACCEPTANCE_NORMALIZED_CONTRACT_VERSION,
   ACCEPTANCE_SOURCE_ADAPTER_VERSION,
   ACCEPTANCE_SOURCE_TYPE_KEY,
@@ -17,7 +17,7 @@ import {
 import { PersistenceError } from "./persistence-error.ts";
 import { ProviderSourceAdminLifecycleRepository } from "./provider-source-admin-lifecycle-repository.ts";
 import { ProviderSourceAdminFailureAuditRepository } from "./provider-source-admin-failure-audit-repository.ts";
-import { ProviderSourceCheckpointRepository } from "./provider-source-checkpoint-repository.ts";
+import { ProviderSourceCursorRepository } from "./provider-source-cursor-repository.ts";
 import { ProviderSourceImportRunRepository } from "./provider-source-import-run-repository.ts";
 import { ProviderSourceRequestRepository } from "./provider-source-request-repository.ts";
 import { ProviderSourceSupervisorRepository } from "./provider-source-supervisor-repository.ts";
@@ -223,7 +223,7 @@ test("connection activation rejects a tested-or-untested revision once a newer c
   }
 });
 
-test("revoked connection recovery is fenced, tested, atomically queues exact checkpoint runs, and retries coalesce", async () => {
+test("revoked connection recovery is fenced, tested, atomically queues exact cursor runs, and retries coalesce", async () => {
   const isolated = await createProviderSourceAcceptanceFixture("admin-recovery");
   try {
     const recoverySource = await createAcceptanceProviderSource(isolated, {
@@ -438,8 +438,8 @@ test("revoked connection recovery is fenced, tested, atomically queues exact che
     assert.equal(run.source_instance_id, recoverySource.sourceInstanceId);
     assert.equal(run.source_revision_id, recoverySource.sourceRevisionId);
     assert.equal(run.connection_revision_id, candidateId);
-    assert.equal(run.checkpoint_generation, 1n);
-    assert.equal(run.requested_checkpoint_fingerprint, null);
+    assert.equal(run.cursor_generation, 1n);
+    assert.equal(run.requested_cursor_fingerprint, null);
     assert.equal(await isolated.database.import_runs.count({
       where: {
         source_instance_id: recoverySource.sourceInstanceId,
@@ -527,8 +527,8 @@ test("timing revisions allow draft, paused, and active sources but reject disabl
   await createPinnedSourceRun(fixture.database, fixture, source, {
     state: "running",
     createdAt: new Date("2026-08-21T12:04:11.000Z"),
-    requestedCheckpoint: null,
-    requestedCheckpointFingerprint: null,
+    requestedCursor: null,
+    requestedCursorFingerprint: null,
     leaseOwner: timingOwner,
     leaseToken: randomUUID(),
     leaseExpiresAt: timingEpoch.leaseExpiresAt,
@@ -809,7 +809,7 @@ test("manual import fails closed while the exact current source requires action"
   }
 });
 
-test("a disabled source requires a fresh exact test and reactivates paused from its preserved checkpoint", async () => {
+test("a disabled source requires a fresh exact test and reactivates paused from its preserved cursor", async () => {
   const isolated = await createProviderSourceAcceptanceFixture("disabled-reactivation");
   try {
     const disabledSource = await createAcceptanceProviderSource(isolated, {
@@ -829,15 +829,133 @@ test("a disabled source requires a fresh exact test and reactivates paused from 
     const [{ now }] = await isolated.database.$queryRaw<Array<{ now: Date }>>`
       select clock_timestamp() as "now"
     `;
-    const checkpointBytes = new TextEncoder().encode("saved-cursor");
-    const checkpointFingerprint = "9".repeat(64);
-    await isolated.database.provider_source_checkpoints.update({
-      where: { source_instance_id: disabledSource.sourceInstanceId },
-      data: {
-        checkpoint_bytes: checkpointBytes,
-        checkpoint_fingerprint: checkpointFingerprint,
-        updated_at: now,
+    const savedCursor = "saved-cursor";
+    const cursorFingerprint = "9".repeat(64);
+    const supervisorOwner = "disabled-reactivation-worker";
+    const supervisorLeaseToken = randomUUID();
+    const epoch = await new ProviderSourceSupervisorRepository(
+      isolated.database,
+    ).acquire({
+      environmentKey: "disabled-reactivation",
+      ownerKey: supervisorOwner,
+      leaseToken: supervisorLeaseToken,
+      now,
+    });
+    const runLeaseToken = randomUUID();
+    const committedRun = await createPinnedSourceRun(
+      isolated.database,
+      isolated,
+      disabledSource,
+      {
+        state: "running",
+        createdAt: now,
+        requestedCursor: null,
+        requestedCursorFingerprint: null,
+        leaseOwner: supervisorOwner,
+        leaseToken: runLeaseToken,
+        leaseExpiresAt: epoch.leaseExpiresAt,
       },
+    );
+    const requestAttemptId = randomUUID();
+    const committedPageId = randomUUID();
+    const cursors = new ProviderSourceCursorRepository(isolated.database);
+    await isolated.database.$transaction(async (transaction) => {
+      await transaction.compact_source_request_attempts.create({
+        data: {
+          request_attempt_id: requestAttemptId,
+          organization_id: isolated.organizationId,
+          operation_kind: "page_read",
+          terminal_state: "captured",
+          outcome_class: "response_captured",
+          safe_outcome_hash: "7".repeat(64),
+          request_lease_id: randomUUID(),
+          claim_owner: supervisorOwner,
+          claim_token: runLeaseToken,
+          supervisor_epoch_id: epoch.epochId,
+          connection_profile_id: isolated.connectionProfileId,
+          connection_revision_id: isolated.connectionRevisionId,
+          expected_health_generation: 0n,
+          provider_id: disabledSource.providerId,
+          source_instance_id: disabledSource.sourceInstanceId,
+          source_revision_id: disabledSource.sourceRevisionId,
+          run_id: committedRun.id,
+          page_number: 1,
+          cursor_generation: 1n,
+          requested_cursor_fingerprint: null,
+          requested_cursor_key: "initial",
+          started_at: now,
+          terminal_at: now,
+        },
+      });
+      await transaction.import_pages.create({
+        data: {
+          id: committedPageId,
+          organization_id: isolated.organizationId,
+          provider_id: disabledSource.providerId,
+          run_id: committedRun.id,
+          page_number: 1,
+          payload_json: { protectedEvidenceRef: `page:${committedPageId}` },
+          payload_hash: "8".repeat(64),
+          record_counts_json: { records: 0 },
+          committed_at: now,
+          expires_at: new Date(now.getTime() + 7 * 86_400_000),
+          source_instance_id: disabledSource.sourceInstanceId,
+          source_revision_id: disabledSource.sourceRevisionId,
+          source_type_key: ACCEPTANCE_SOURCE_TYPE_KEY,
+          source_adapter_version: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+          normalized_contract_version: ACCEPTANCE_NORMALIZED_CONTRACT_VERSION,
+          mapper_key: disabledSource.mapperKey,
+          mapper_version: "1",
+          identity_namespace_key: disabledSource.identityNamespaceKey,
+          connection_profile_id: isolated.connectionProfileId,
+          connection_revision_id: isolated.connectionRevisionId,
+          connection_health_generation: 0n,
+          request_attempt_id: requestAttemptId,
+          supervisor_epoch_id: epoch.epochId,
+          cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+          cursor_generation: 1n,
+          requested_cursor: null,
+          requested_cursor_fingerprint: null,
+          requested_cursor_key: "initial",
+          next_cursor: savedCursor,
+          next_cursor_fingerprint: cursorFingerprint,
+          continuation_kind: "continue",
+          minimum_delay_seconds: null,
+          protected_raw_response: new TextEncoder().encode("protected-page"),
+          protected_raw_response_sha256: "8".repeat(64),
+          normalized_commit_hash: "9".repeat(64),
+        },
+      });
+      await cursors.advanceInTransaction(transaction, {
+        organizationId: isolated.organizationId,
+        providerId: disabledSource.providerId,
+        sourceInstanceId: disabledSource.sourceInstanceId,
+        sourceRevisionId: disabledSource.sourceRevisionId,
+        sourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+        cursorCodecVersion: ACCEPTANCE_CURSOR_CODEC_VERSION,
+        cursorGeneration: 1n,
+        expectedCursorFingerprint: null,
+        nextCursor: savedCursor,
+        nextCursorFingerprint: cursorFingerprint,
+        continuation: { kind: "continue" },
+        runId: committedRun.id,
+        pageId: committedPageId,
+        pageNumber: 1,
+        requestAttemptId,
+        connectionProfileId: isolated.connectionProfileId,
+        connectionRevisionId: isolated.connectionRevisionId,
+        expectedHealthGeneration: 0n,
+        supervisorEpochId: epoch.epochId,
+        supervisorOwnerKey: supervisorOwner,
+        supervisorLeaseToken,
+        runLeaseOwner: supervisorOwner,
+        runLeaseToken,
+        committedAt: now,
+      });
+    });
+    await isolated.database.import_runs.update({
+      where: { id: committedRun.id },
+      data: { state: "succeeded", finished_at: now },
     });
     const admin = new ProviderSourceAdminLifecycleRepository(isolated.database);
     await admin.disable({
@@ -866,16 +984,6 @@ test("a disabled source requires a fresh exact test and reactivates paused from 
       connectionRevisionId: isolated.connectionRevisionId,
       requestedByActorKey: "operator-admin",
       requestedAt: new Date(now.getTime() + 2),
-    });
-    const supervisorOwner = "disabled-reactivation-worker";
-    const supervisorLeaseToken = randomUUID();
-    const epoch = await new ProviderSourceSupervisorRepository(
-      isolated.database,
-    ).acquire({
-      environmentKey: "disabled-reactivation",
-      ownerKey: supervisorOwner,
-      leaseToken: supervisorLeaseToken,
-      now,
     });
     const requests = new ProviderSourceRequestRepository(isolated.database);
     const testResults = new ProviderSourceTestResultRepository(isolated.database);
@@ -1009,7 +1117,7 @@ test("a disabled source requires a fresh exact test and reactivates paused from 
       mapperKey: disabledSource.mapperKey,
       mapperVersion: "1",
       identityNamespaceKey: disabledSource.identityNamespaceKey,
-      checkpointCodecVersion: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
+      cursorCodecVersion: ACCEPTANCE_CURSOR_CODEC_VERSION,
       sourceConfiguration: { provider: "courtyard" },
       sourceConfigurationHash: "f".repeat(64),
       recordIdScopes: [
@@ -1023,7 +1131,7 @@ test("a disabled source requires a fresh exact test and reactivates paused from 
       connectionRequestLimit: 2,
       connectionRevisionId: isolated.connectionRevisionId,
       connectionConfigurationFingerprint: "a".repeat(64),
-      checkpointGeneration: 1n,
+      cursorGeneration: 1n,
       actorKey: "operator-admin",
       activatedAt,
     });
@@ -1058,25 +1166,25 @@ test("a disabled source requires a fresh exact test and reactivates paused from 
     });
     await completeConnectionTest(currentConnectionJob.jobId, "success", 52);
     await activate(new Date(now.getTime() + 70));
-    const [reactivated, checkpoint] = await Promise.all([
+    const [reactivated, cursor] = await Promise.all([
       isolated.database.provider_source_instances.findUniqueOrThrow({
         where: { id: disabledSource.sourceInstanceId },
       }),
-      isolated.database.provider_source_checkpoints.findUniqueOrThrow({
+      isolated.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: disabledSource.sourceInstanceId },
       }),
     ]);
     assert.equal(reactivated.state, "paused");
     assert.equal(reactivated.disabled_at, null);
-    assert.deepEqual(new Uint8Array(checkpoint.checkpoint_bytes!), checkpointBytes);
-    assert.equal(checkpoint.checkpoint_fingerprint, checkpointFingerprint);
-    assert.equal(checkpoint.checkpoint_generation, 1n);
+    assert.equal(cursor.cursor, savedCursor);
+    assert.equal(cursor.cursor_fingerprint, cursorFingerprint);
+    assert.equal(cursor.cursor_generation, 1n);
   } finally {
     await isolated.close();
   }
 });
 
-test("disable cannot make checkpoint reset overlook an in-flight request lease", async () => {
+test("disable cannot make cursor reset overlook an in-flight request lease", async () => {
   const isolated = await createProviderSourceAcceptanceFixture("reset-lease");
   try {
     const isolatedSource = await createAcceptanceProviderSource(isolated, {
@@ -1101,8 +1209,8 @@ test("disable cannot make checkpoint reset overlook an in-flight request lease",
       {
         state: "running",
         createdAt: ACCEPTANCE_CREATED_AT,
-        requestedCheckpoint: null,
-        requestedCheckpointFingerprint: null,
+        requestedCursor: null,
+        requestedCursorFingerprint: null,
         leaseOwner: "worker-one",
         leaseToken,
         leaseExpiresAt: new Date("2026-08-21T14:00:00.000Z"),
@@ -1136,9 +1244,9 @@ test("disable cannot make checkpoint reset overlook an in-flight request lease",
         source_revision_id: isolatedSource.sourceRevisionId,
         run_id: run.id,
         page_number: 1,
-        checkpoint_generation: 1n,
-        requested_checkpoint_fingerprint: null,
-        requested_checkpoint_key: "initial",
+        cursor_generation: 1n,
+        requested_cursor_fingerprint: null,
+        requested_cursor_key: "initial",
         started_at: ACCEPTANCE_CREATED_AT,
       },
     });
@@ -1151,9 +1259,9 @@ test("disable cannot make checkpoint reset overlook an in-flight request lease",
       actorKey: "operator-admin",
       disabledAt: new Date("2026-08-21T12:30:00.000Z"),
     });
-    const checkpoints = new ProviderSourceCheckpointRepository(isolated.database);
+    const cursors = new ProviderSourceCursorRepository(isolated.database);
     await assert.rejects(
-      checkpoints.reset({
+      cursors.reset({
         organizationId: isolated.organizationId,
         providerId: isolatedSource.providerId,
         sourceInstanceId: isolatedSource.sourceInstanceId,
@@ -1170,7 +1278,7 @@ test("disable cannot make checkpoint reset overlook an in-flight request lease",
   }
 });
 
-test("normal credential rotation preserves old-revision queued, running, historical, and checkpoint pins", async () => {
+test("normal credential rotation preserves old-revision queued, running, historical, and cursor pins", async () => {
   const isolated = await createProviderSourceAcceptanceFixture("normal-rotation");
   try {
     const runningSource = await createAcceptanceProviderSource(isolated, {
@@ -1219,8 +1327,8 @@ test("normal credential rotation preserves old-revision queued, running, histori
       {
         state: "running",
         createdAt: ACCEPTANCE_CREATED_AT,
-        requestedCheckpoint: null,
-        requestedCheckpointFingerprint: null,
+        requestedCursor: null,
+        requestedCursorFingerprint: null,
         leaseOwner: supervisorOwner,
         leaseToken: runningClaimToken,
         leaseExpiresAt: epoch.leaseExpiresAt,
@@ -1233,8 +1341,8 @@ test("normal credential rotation preserves old-revision queued, running, histori
       {
         state: "succeeded",
         createdAt: new Date("2026-08-20T12:00:01.000Z"),
-        requestedCheckpoint: null,
-        requestedCheckpointFingerprint: null,
+        requestedCursor: null,
+        requestedCursorFingerprint: null,
       },
     );
     const queued = await isolated.database.import_runs.create({
@@ -1255,14 +1363,14 @@ test("normal credential rotation preserves old-revision queued, running, histori
         identity_namespace_key: queuedSource.identityNamespaceKey,
         connection_profile_id: isolated.connectionProfileId,
         connection_revision_id: isolated.connectionRevisionId,
-        checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
-        checkpoint_generation: 1n,
-        requested_checkpoint: null,
-        requested_checkpoint_fingerprint: null,
-        requested_checkpoint_key: "initial",
-        current_checkpoint: null,
-        current_checkpoint_fingerprint: null,
-        current_checkpoint_key: "initial",
+        cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+        cursor_generation: 1n,
+        requested_cursor: null,
+        requested_cursor_fingerprint: null,
+        requested_cursor_key: "initial",
+        current_cursor: null,
+        current_cursor_fingerprint: null,
+        current_cursor_key: "initial",
         next_page_number: 1,
       },
     });
@@ -1437,7 +1545,7 @@ test("normal credential rotation preserves old-revision queued, running, histori
       activatedAt: new Date("2026-08-20T12:00:08.000Z"),
     });
 
-    const [profile, oldRevision, activeRuns, checkpoints] = await Promise.all([
+    const [profile, oldRevision, activeRuns, cursors] = await Promise.all([
       isolated.database.source_connection_profiles.findUniqueOrThrow({
         where: { id: isolated.connectionProfileId },
       }),
@@ -1448,7 +1556,7 @@ test("normal credential rotation preserves old-revision queued, running, histori
         where: { id: { in: [running.id, queued.id, historical.id] } },
         orderBy: { id: "asc" },
       }),
-      isolated.database.provider_source_checkpoints.findMany({
+      isolated.database.provider_source_cursors.findMany({
         where: {
           source_instance_id: {
             in: [runningSource.sourceInstanceId, queuedSource.sourceInstanceId],
@@ -1466,9 +1574,9 @@ test("normal credential rotation preserves old-revision queued, running, histori
     assert.ok(activeRuns.every((run) =>
       run.connection_revision_id === isolated.connectionRevisionId
     ));
-    assert.ok(checkpoints.every((checkpoint) =>
-      checkpoint.checkpoint_generation === 1n &&
-      checkpoint.checkpoint_fingerprint === null
+    assert.ok(cursors.every((cursor) =>
+      cursor.cursor_generation === 1n &&
+      cursor.cursor_fingerprint === null
     ));
 
     const oldAttemptId = await requests.begin({
@@ -1489,8 +1597,8 @@ test("normal credential rotation preserves old-revision queued, running, histori
         sourceRevisionId: runningSource.sourceRevisionId,
         runId: running.id,
         pageNumber: 1,
-        checkpointGeneration: 1n,
-        requestedCheckpointFingerprint: null,
+        cursorGeneration: 1n,
+        requestedCursorFingerprint: null,
       },
       startedAt: new Date("2026-08-20T12:00:09.000Z"),
     });
@@ -1537,14 +1645,14 @@ test("normal credential rotation preserves old-revision queued, running, histori
         identity_namespace_key: queuedSource.identityNamespaceKey,
         connection_profile_id: isolated.connectionProfileId,
         connection_revision_id: candidateRevisionId,
-        checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
-        checkpoint_generation: 1n,
-        requested_checkpoint: null,
-        requested_checkpoint_fingerprint: null,
-        requested_checkpoint_key: "initial",
-        current_checkpoint: null,
-        current_checkpoint_fingerprint: null,
-        current_checkpoint_key: "initial",
+        cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+        cursor_generation: 1n,
+        requested_cursor: null,
+        requested_cursor_fingerprint: null,
+        requested_cursor_key: "initial",
+        current_cursor: null,
+        current_cursor_fingerprint: null,
+        current_cursor_key: "initial",
         next_page_number: 1,
       },
     });
@@ -1591,8 +1699,8 @@ test("normal credential rotation preserves old-revision queued, running, histori
         sourceRevisionId: runningSource.sourceRevisionId,
         runId: running.id,
         pageNumber: 1,
-        checkpointGeneration: 1n,
-        requestedCheckpointFingerprint: null,
+        cursorGeneration: 1n,
+        requestedCursorFingerprint: null,
       },
       startedAt: new Date("2026-08-20T12:00:14.000Z"),
     });
@@ -1615,21 +1723,21 @@ test("normal credential rotation preserves old-revision queued, running, histori
           sourceRevisionId: queuedSource.sourceRevisionId,
           runId: candidateRun.id,
           pageNumber: 1,
-          checkpointGeneration: 1n,
-          requestedCheckpointFingerprint: null,
+          cursorGeneration: 1n,
+          requestedCursorFingerprint: null,
         },
         startedAt: new Date("2026-08-20T12:00:14.000Z"),
       }),
       (error) => error instanceof PersistenceError &&
         ["HEALTH_GENERATION_STALE", "SOURCE_FENCED"].includes(error.code),
     );
-    assert.equal(await isolated.database.provider_source_checkpoints.count({
+    assert.equal(await isolated.database.provider_source_cursors.count({
       where: {
         source_instance_id: {
           in: [runningSource.sourceInstanceId, queuedSource.sourceInstanceId],
         },
-        checkpoint_generation: 1n,
-        checkpoint_fingerprint: null,
+        cursor_generation: 1n,
+        cursor_fingerprint: null,
       },
     }), 2);
   } finally {

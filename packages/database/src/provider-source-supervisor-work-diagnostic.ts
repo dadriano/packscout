@@ -79,9 +79,9 @@ function transitionDetails(
             minimumDelaySeconds: disposition.minimumDelaySeconds,
           }
         : null,
-    checkpointFingerprint: disposition &&
-        "checkpointFingerprint" in disposition
-      ? disposition.checkpointFingerprint
+    cursorFingerprint: disposition &&
+        "cursorFingerprint" in disposition
+      ? disposition.cursorFingerprint
       : undefined,
   };
 }
@@ -118,9 +118,9 @@ export async function appendProviderSourceSupervisorWorkDiagnostic(
     connectionRevisionId: input.work.connectionRevisionId,
     retryDelayMs: details.retryDelayMs,
     continuation: details.continuation,
-    checkpointFingerprint: details.checkpointFingerprint ??
+    cursorFingerprint: details.cursorFingerprint ??
       (input.work.kind === "page_read"
-        ? input.work.requestedCheckpointFingerprint
+        ? input.work.requestedCursorFingerprint
         : null),
     durationMs: input.durationMs,
     responseBytes: input.responseBytes,

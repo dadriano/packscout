@@ -23,7 +23,7 @@ export * from "./operational-health-repository.ts";
 export * from "./persistence-error.ts";
 export * from "./pipeline-types.ts";
 export * from "./provider-configuration-repository.ts";
-export * from "./provider-source-checkpoint-repository.ts";
+export * from "./provider-source-cursor-repository.ts";
 export * from "./provider-source-admin-lifecycle-repository.ts";
 export * from "./provider-source-admin-catalog-repository.ts";
 export * from "./provider-source-admin-read-repository.ts";

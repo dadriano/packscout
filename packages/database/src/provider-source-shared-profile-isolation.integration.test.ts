@@ -60,7 +60,7 @@ async function siblingSnapshot(
       where: { source_instance_id: { in: sourceIds } },
       orderBy: { source_instance_id: "asc" },
     }),
-    fixture.database.provider_source_checkpoints.findMany({
+    fixture.database.provider_source_cursors.findMany({
       where: { source_instance_id: { in: sourceIds } },
       orderBy: { source_instance_id: "asc" },
     }),
@@ -104,8 +104,8 @@ test("four sources sharing one connection retain independent processor state and
         {
           state: "succeeded",
           createdAt: occurredAt,
-          requestedCheckpoint: null,
-          requestedCheckpointFingerprint: null,
+          requestedCursor: null,
+          requestedCursorFingerprint: null,
         },
       );
       await fixture.database.provider_source_schedules.update({
@@ -147,12 +147,12 @@ test("four sources sharing one connection retain independent processor state and
     );
 
     const sourceIds = sources.map(({ sourceInstanceId }) => sourceInstanceId);
-    const [schedules, checkpoints, runs, health, diagnosticRows] =
+    const [schedules, cursors, runs, health, diagnosticRows] =
       await Promise.all([
         fixture.database.provider_source_schedules.findMany({
           where: { source_instance_id: { in: sourceIds } },
         }),
-        fixture.database.provider_source_checkpoints.findMany({
+        fixture.database.provider_source_cursors.findMany({
           where: { source_instance_id: { in: sourceIds } },
         }),
         fixture.database.import_runs.findMany({
@@ -165,7 +165,7 @@ test("four sources sharing one connection retain independent processor state and
           where: { source_instance_id: { in: sourceIds } },
         }),
       ]);
-    for (const rows of [schedules, checkpoints, runs, health, diagnosticRows]) {
+    for (const rows of [schedules, cursors, runs, health, diagnosticRows]) {
       assert.equal(rows.length, 4);
       assert.equal(
         new Set(
@@ -178,7 +178,7 @@ test("four sources sharing one connection retain independent processor state and
     }
     assert.deepEqual(
       new Set(
-        checkpoints.map(({ checkpoint_generation: generation }) => generation),
+        cursors.map(({ cursor_generation: generation }) => generation),
       ),
       new Set([1n]),
     );

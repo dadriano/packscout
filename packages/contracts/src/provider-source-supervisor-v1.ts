@@ -149,8 +149,8 @@ export const providerSourceSupervisorLaneSchema = z
     mapperKey: z.string().trim().min(1).max(128),
     mapperVersion: z.string().trim().min(1).max(128),
     identityNamespaceKey: z.string().trim().min(1).max(128),
-    checkpointCodecVersion: z.string().trim().min(1).max(128),
-    checkpointGeneration: z.string().regex(/^[1-9][0-9]*$/u),
+    cursorCodecVersion: z.string().trim().min(1).max(128),
+    cursorGeneration: z.string().regex(/^[1-9][0-9]*$/u),
     lifecycle: z.enum(["draft", "paused", "active", "disabled", "replaced"]),
     phase: providerSourceSupervisorPhaseSchema,
     activity: providerSourceSupervisorActivitySchema,
@@ -171,7 +171,7 @@ export const providerSourceSupervisorLaneSchema = z
         lastProgressAt: isoTimestampSchema.nullable(),
       })
       .strict(),
-    checkpointFingerprint: fingerprintSchema.nullable(),
+    cursorFingerprint: fingerprintSchema.nullable(),
     continuation: normalizedContinuationSchema.nullable(),
     nextDueAt: isoTimestampSchema.nullable(),
     connectionEpisode: z

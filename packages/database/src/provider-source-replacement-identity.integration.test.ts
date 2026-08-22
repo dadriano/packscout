@@ -74,7 +74,7 @@ async function snapshotSource(
     fixture.database.provider_source_schedules.findUniqueOrThrow({
       where: { source_instance_id: source.sourceInstanceId },
     }),
-    fixture.database.provider_source_checkpoints.findUniqueOrThrow({
+    fixture.database.provider_source_cursors.findUniqueOrThrow({
       where: { source_instance_id: source.sourceInstanceId },
     }),
     fixture.database.provider_source_health_states.findUniqueOrThrow({
@@ -179,8 +179,8 @@ test("source replacement preserves provider and canonical identity without touch
       {
         state: "succeeded",
         createdAt: ACCEPTANCE_CREATED_AT,
-        requestedCheckpoint: null,
-        requestedCheckpointFingerprint: null,
+        requestedCursor: null,
+        requestedCursorFingerprint: null,
       },
     );
     await fixture.database.provider_source_schedules.update({
@@ -355,16 +355,16 @@ test("source replacement preserves provider and canonical identity without touch
       ),
       new Set([original.sourceInstanceId, replacement.sourceInstanceId]),
     );
-    const [oldCheckpoint, replacementCheckpoint] = await Promise.all([
-      fixture.database.provider_source_checkpoints.findUniqueOrThrow({
+    const [oldCursor, replacementCursor] = await Promise.all([
+      fixture.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: original.sourceInstanceId },
       }),
-      fixture.database.provider_source_checkpoints.findUniqueOrThrow({
+      fixture.database.provider_source_cursors.findUniqueOrThrow({
         where: { source_instance_id: replacement.sourceInstanceId },
       }),
     ]);
-    assert.equal(oldCheckpoint.checkpoint_fingerprint, null);
-    assert.equal(replacementCheckpoint.checkpoint_fingerprint, null);
+    assert.equal(oldCursor.cursor_fingerprint, null);
+    assert.equal(replacementCursor.cursor_fingerprint, null);
     assert.deepEqual(await snapshotSource(fixture, sibling), siblingBefore);
   } finally {
     await fixture.close();

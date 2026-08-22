@@ -71,8 +71,8 @@ async function main(): Promise<void> {
       mapperKey: string | null;
       mapperVersion: string | null;
       identityNamespaceKey: string | null;
-      checkpointGeneration: string | null;
-      checkpointFingerprint: string | null;
+      cursorGeneration: string | null;
+      cursorFingerprint: string | null;
       headTime: Date | null;
       intervalSeconds: number | null;
       nextDueAt: Date | null;
@@ -86,8 +86,8 @@ async function main(): Promise<void> {
              revision.mapper_key as "mapperKey",
              revision.mapper_version as "mapperVersion",
              revision.identity_namespace_key as "identityNamespaceKey",
-             checkpoint.checkpoint_generation::text as "checkpointGeneration",
-             checkpoint.checkpoint_fingerprint as "checkpointFingerprint",
+             source_cursor.cursor_generation::text as "cursorGeneration",
+             source_cursor.cursor_fingerprint as "cursorFingerprint",
              health.last_head_reached_at as "headTime",
              schedule_revision.interval_seconds as "intervalSeconds",
              schedule.next_due_at as "nextDueAt"
@@ -98,8 +98,8 @@ async function main(): Promise<void> {
        and source.state <> 'replaced'
       left join public.provider_source_revisions as revision
         on revision.id = source.active_revision_id
-      left join public.provider_source_checkpoints as checkpoint
-        on checkpoint.source_instance_id = source.id
+      left join public.provider_source_cursors as source_cursor
+        on source_cursor.source_instance_id = source.id
       left join public.provider_source_health_states as health
         on health.source_instance_id = source.id
       left join public.provider_source_schedules as schedule
@@ -359,9 +359,9 @@ async function main(): Promise<void> {
         mapperKey: provider.mapperKey,
         mapperVersion: provider.mapperVersion,
         identityNamespaceKey: provider.identityNamespaceKey,
-        checkpoint: {
-          generation: provider.checkpointGeneration,
-          fingerprint: provider.checkpointFingerprint,
+        cursor: {
+          generation: provider.cursorGeneration,
+          fingerprint: provider.cursorFingerprint,
         },
         headTime: provider.headTime?.toISOString() ?? null,
         firstCommittedAt:

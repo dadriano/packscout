@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  opaqueCheckpointEnvelopeSchema,
+  opaqueCursorEnvelopeSchema,
   type ProviderSourcePageCommitPins,
   type ProviderSourcePagePlan,
 } from "@packscout/contracts";
@@ -11,13 +11,13 @@ import {
   type CapturedSourcePageV1,
   type SourceAdapterOperationResult,
 } from "./source-adapter.ts";
-import { OpaqueCheckpointGuard } from "./opaque-checkpoint-guard.ts";
+import { OpaqueCursorGuard } from "./opaque-cursor-guard.ts";
 import { ProviderSourcePagePlanner } from "./provider-source-page-planner.ts";
 
 export type ProviderSourcePageImportErrorCode =
   | "adapter_operation_failed"
   | "captured_page_invalid"
-  | "checkpoint_mismatch"
+  | "cursor_mismatch"
   | "operation_scope_mismatch";
 
 export class ProviderSourcePageImportError extends Error {
@@ -33,14 +33,14 @@ export interface ProviderSourceAtomicPagePersistenceInput {
   readonly protectedRawResponse: Uint8Array;
   readonly protectedRawResponseSha256: string;
   readonly protectedNativeEvidence: CapturedSourcePageV1["protectedNativeEvidence"];
-  readonly nextCheckpointFingerprint: string | null;
+  readonly nextCursorFingerprint: string | null;
   readonly committedAt: Date;
 }
 
 export interface ProviderSourceAtomicPageCommitResult {
   readonly kind: "committed" | "already_committed";
   readonly pageId: string;
-  readonly checkpointFingerprint: string | null;
+  readonly cursorFingerprint: string | null;
   readonly continuation: ProviderSourcePagePlan["normalizedPage"]["continuation"];
   readonly counts: Readonly<{
     inserted: number;
@@ -81,9 +81,9 @@ function assertSafePins(pins: unknown): asserts pins is ProviderSourcePageCommit
     typeof value.connectionHealthGeneration !== "bigint" ||
     value.connectionHealthGeneration < 0n ||
     value.connectionHealthGeneration > BigInt(Number.MAX_SAFE_INTEGER) ||
-    typeof value.checkpointGeneration !== "bigint" ||
-    value.checkpointGeneration < 1n ||
-    value.checkpointGeneration > BigInt(Number.MAX_SAFE_INTEGER) ||
+    typeof value.cursorGeneration !== "bigint" ||
+    value.cursorGeneration < 1n ||
+    value.cursorGeneration > BigInt(Number.MAX_SAFE_INTEGER) ||
     typeof value.singletonFencingEpoch !== "number" ||
     !Number.isSafeInteger(value.singletonFencingEpoch) ||
     value.singletonFencingEpoch < 0 ||
@@ -121,41 +121,41 @@ function scopeMatches(
     scope.runClaimLeaseId === pins.runClaimLeaseId &&
     scope.pageAttemptId === pins.pageId &&
     scope.pageNumber === pins.pageNumber &&
-    scope.checkpointGeneration === Number(pins.checkpointGeneration) &&
-    scope.requestedCheckpointFingerprint ===
-      pins.requestedCheckpointFingerprint
+    scope.cursorGeneration === Number(pins.cursorGeneration) &&
+    scope.requestedCursorFingerprint ===
+      pins.requestedCursorFingerprint
   );
 }
 
-function assertCheckpointPins(input: ProviderSourcePageImportInput): void {
+function assertCursorPins(input: ProviderSourcePageImportInput): void {
   const { pins, adapterResult } = input;
   if (!adapterResult.ok) {
     throw new ProviderSourcePageImportError("adapter_operation_failed");
   }
-  const parsed = opaqueCheckpointEnvelopeSchema.safeParse(
-    pins.requestedCheckpoint,
+  const parsed = opaqueCursorEnvelopeSchema.safeParse(
+    pins.requestedCursor,
   );
   if (!parsed.success) {
-    throw new ProviderSourcePageImportError("checkpoint_mismatch");
+    throw new ProviderSourcePageImportError("cursor_mismatch");
   }
   const requested = parsed.data;
-  const next = adapterResult.value.normalizedPage.nextCheckpoint;
+  const next = adapterResult.value.normalizedPage.nextCursor;
   for (const [actual, expected] of [
     [requested.sourceInstanceId, pins.sourceInstanceId],
     [requested.sourceRevisionId, pins.sourceRevisionId],
     [requested.sourceTypeKey, pins.sourceTypeKey],
     [requested.adapterVersion, pins.sourceAdapterVersion],
-    [requested.checkpointCodecKey, pins.checkpointCodecVersion],
-    [requested.checkpointGeneration, Number(pins.checkpointGeneration)],
+    [requested.cursorCodecKey, pins.cursorCodecVersion],
+    [requested.cursorGeneration, Number(pins.cursorGeneration)],
     [next.sourceInstanceId, pins.sourceInstanceId],
     [next.sourceRevisionId, pins.sourceRevisionId],
     [next.sourceTypeKey, pins.sourceTypeKey],
     [next.adapterVersion, pins.sourceAdapterVersion],
-    [next.checkpointCodecKey, pins.checkpointCodecVersion],
-    [next.checkpointGeneration, Number(pins.checkpointGeneration)],
+    [next.cursorCodecKey, pins.cursorCodecVersion],
+    [next.cursorGeneration, Number(pins.cursorGeneration)],
   ] as const) {
     if (actual !== expected) {
-      throw new ProviderSourcePageImportError("checkpoint_mismatch");
+      throw new ProviderSourcePageImportError("cursor_mismatch");
     }
   }
 }
@@ -167,7 +167,7 @@ function assertCheckpointPins(input: ProviderSourcePageImportInput): void {
 export class ProviderSourcePageImportService {
   constructor(
     private readonly planner: ProviderSourcePagePlanner,
-    private readonly checkpoints: OpaqueCheckpointGuard,
+    private readonly cursors: OpaqueCursorGuard,
     private readonly pages: ProviderSourceAtomicPageRepository,
   ) {}
 
@@ -203,10 +203,10 @@ export class ProviderSourcePageImportService {
       throw new ProviderSourcePageImportError("operation_scope_mismatch");
     }
     try {
-      assertCheckpointPins(input);
+      assertCursorPins(input);
     } catch (error) {
       if (error instanceof ProviderSourcePageImportError) throw error;
-      throw new ProviderSourcePageImportError("checkpoint_mismatch");
+      throw new ProviderSourcePageImportError("cursor_mismatch");
     }
 
     const captured = input.adapterResult.value;
@@ -259,28 +259,28 @@ export class ProviderSourcePageImportService {
       throw new ProviderSourcePageImportError("captured_page_invalid");
     }
 
-    const requested = input.pins.requestedCheckpoint;
+    const requested = input.pins.requestedCursor;
     let requestedFingerprint: string | null;
-    let nextCheckpointFingerprint: string | null;
+    let nextCursorFingerprint: string | null;
     try {
       requestedFingerprint = requested.value === null
         ? null
-        : this.checkpoints.fingerprint(requested);
-      const transition = this.checkpoints.guard({
+        : this.cursors.fingerprint(requested);
+      const transition = this.cursors.guard({
         requested,
-        next: captured.normalizedPage.nextCheckpoint,
+        next: captured.normalizedPage.nextCursor,
         continuation: captured.normalizedPage.continuation,
         committedFingerprints: new Set(),
       });
-      nextCheckpointFingerprint =
-        captured.normalizedPage.nextCheckpoint.value === null
+      nextCursorFingerprint =
+        captured.normalizedPage.nextCursor.value === null
           ? null
           : transition.nextFingerprint;
     } catch {
-      throw new ProviderSourcePageImportError("checkpoint_mismatch");
+      throw new ProviderSourcePageImportError("cursor_mismatch");
     }
-    if (requestedFingerprint !== input.pins.requestedCheckpointFingerprint) {
-      throw new ProviderSourcePageImportError("checkpoint_mismatch");
+    if (requestedFingerprint !== input.pins.requestedCursorFingerprint) {
+      throw new ProviderSourcePageImportError("cursor_mismatch");
     }
     const plan = this.planner.plan({
       organizationId: input.pins.organizationId,
@@ -301,7 +301,7 @@ export class ProviderSourcePageImportService {
       protectedRawResponseSha256:
         captured.requestCapture.protectedRawResponseSha256,
       protectedNativeEvidence: captured.protectedNativeEvidence,
-      nextCheckpointFingerprint,
+      nextCursorFingerprint,
       committedAt: new Date(input.committedAt),
     });
   }

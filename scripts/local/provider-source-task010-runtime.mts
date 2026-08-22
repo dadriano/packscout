@@ -748,11 +748,11 @@ export async function verifyTask010SourceTopology(
        and revision.organization_id = source.organization_id
        and revision.provider_id = source.provider_id
        and revision.source_instance_id = source.id
-      join public.provider_source_checkpoints as checkpoint
-        on checkpoint.source_instance_id = source.id
-       and checkpoint.organization_id = source.organization_id
-       and checkpoint.provider_id = source.provider_id
-       and checkpoint.source_revision_id = revision.id
+      join public.provider_source_cursors as source_cursor
+        on source_cursor.source_instance_id = source.id
+       and source_cursor.organization_id = source.organization_id
+       and source_cursor.provider_id = source.provider_id
+       and source_cursor.source_revision_id = revision.id
       join public.provider_source_schedules as schedule
         on schedule.source_instance_id = source.id
        and schedule.organization_id = source.organization_id
@@ -769,7 +769,7 @@ export async function verifyTask010SourceTopology(
         and revision.source_type_key = source.source_type_key
         and schedule_revision.interval_seconds between 60 and 86400
         and schedule_revision.freshness_grace_seconds = 900
-        and checkpoint.checkpoint_generation >= 1
+        and source_cursor.cursor_generation >= 1
     `,
         [environment.organizationId, profile?.id],
       ),

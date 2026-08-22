@@ -97,7 +97,7 @@ test("operations overview renders four server rows and returns exact Run, Pause,
     await new Promise<void>((resolve) => setImmediate(resolve));
   });
   await settlePage();
-  assert.match(pageText(renderer), /resumed from the committed checkpoint/iu);
+  assert.match(pageText(renderer), /resumed from the committed cursor/iu);
 
   const runRequest = requests.find(({ input }) => String(input).endsWith("/import-runs"));
   assert.deepEqual(JSON.parse(String(runRequest?.init?.body)), {

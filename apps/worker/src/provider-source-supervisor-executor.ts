@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   launchRecordIdScopeDeclarations,
   providerSourceLaunchBounds,
-  type OpaqueCheckpointEnvelope,
+  type OpaqueCursorEnvelope,
   type ProviderSourcePageCommitPins,
   type SourceAdapterFailure,
 } from "@packscout/contracts";
@@ -185,8 +185,8 @@ function sourceDatabaseOperation(
         sourceRevisionId: work.sourceRevisionId,
         runId: work.runId,
         pageNumber: work.pageNumber,
-        checkpointGeneration: work.checkpointGeneration,
-        requestedCheckpointFingerprint: work.requestedCheckpointFingerprint,
+        cursorGeneration: work.cursorGeneration,
+        requestedCursorFingerprint: work.requestedCursorFingerprint,
       };
 }
 
@@ -223,19 +223,19 @@ export class ProviderSourceSupervisorWorkExecutor
     const requestAttemptId = this.#ids.id();
     const requestLeaseId = this.#ids.id();
     const pageId = work.kind === "page_read" ? this.#ids.id() : null;
-    const checkpoint = work.kind === "page_read"
+    const cursor = work.kind === "page_read"
       ? Object.freeze({
           sourceInstanceId: work.sourceInstanceId,
           sourceRevisionId: work.sourceRevisionId,
           sourceTypeKey: work.sourceTypeKey,
           adapterVersion: work.sourceAdapterVersion,
-          checkpointCodecKey: work.checkpointCodecVersion,
-          checkpointGeneration: safeInteger(
-            work.checkpointGeneration,
-            "Checkpoint generation",
+          cursorCodecKey: work.cursorCodecVersion,
+          cursorGeneration: safeInteger(
+            work.cursorGeneration,
+            "Cursor generation",
           ),
-          value: work.requestedCheckpointValue,
-        } satisfies OpaqueCheckpointEnvelope)
+          value: work.requestedCursorValue,
+        } satisfies OpaqueCursorEnvelope)
       : null;
     const connectionHealthGeneration = safeInteger(
       work.connectionHealthGeneration,
@@ -299,8 +299,8 @@ export class ProviderSourceSupervisorWorkExecutor
             pageAttemptId: pageId!,
             pageNumber: work.pageNumber,
             pageLimit: providerSourceLaunchBounds.pageTargetRecords,
-            checkpointGeneration: checkpoint!.checkpointGeneration,
-            requestedCheckpointFingerprint: work.requestedCheckpointFingerprint,
+            cursorGeneration: cursor!.cursorGeneration,
+            requestedCursorFingerprint: work.requestedCursorFingerprint,
           };
 
     const admissionController = new AbortController();
@@ -316,7 +316,7 @@ export class ProviderSourceSupervisorWorkExecutor
     const pendingLease = leasePins.operationKind === "page_read"
       ? context.requestLeases.admit({
           pins: leasePins,
-          requestedCheckpoint: checkpoint!,
+          requestedCursor: cursor!,
           signal: admissionSignal,
           guard: () => {
             context.runtimeFence.assertActive();
@@ -410,7 +410,7 @@ export class ProviderSourceSupervisorWorkExecutor
     };
     const retainCancelledBeforeCallSlot = async () => {
       if (leasePins.operationKind === "page_read") {
-        lease.consume(leasePins, checkpoint!);
+        lease.consume(leasePins, cursor!);
       } else {
         lease.consume(leasePins);
       }
@@ -569,10 +569,10 @@ export class ProviderSourceSupervisorWorkExecutor
                 runClaimLeaseId: work.claimLeaseId,
                 pageAttemptId: pageId!,
                 pageNumber: work.pageNumber,
-                checkpointGeneration: checkpoint!.checkpointGeneration,
-                requestedCheckpointFingerprint:
-                  work.requestedCheckpointFingerprint,
-                requestedCheckpoint: checkpoint!,
+                cursorGeneration: cursor!.cursorGeneration,
+                requestedCursorFingerprint:
+                  work.requestedCursorFingerprint,
+                requestedCursor: cursor!,
                 pageLimit: providerSourceLaunchBounds.pageTargetRecords,
               },
             });
@@ -638,7 +638,7 @@ export class ProviderSourceSupervisorWorkExecutor
     if (connectionConfigurationFailure !== null) {
       try {
         if (leasePins.operationKind === "page_read") {
-          lease.consume(leasePins, checkpoint!);
+          lease.consume(leasePins, cursor!);
         } else {
           lease.consume(leasePins);
         }
@@ -875,10 +875,10 @@ export class ProviderSourceSupervisorWorkExecutor
       runClaimLeaseId: work.claimLeaseId,
       pageId: pageId!,
       pageNumber: work.pageNumber,
-      checkpointCodecVersion: work.checkpointCodecVersion,
-      checkpointGeneration: work.checkpointGeneration,
-      requestedCheckpoint: checkpoint!,
-      requestedCheckpointFingerprint: work.requestedCheckpointFingerprint,
+      cursorCodecVersion: work.cursorCodecVersion,
+      cursorGeneration: work.cursorGeneration,
+      requestedCursor: cursor!,
+      requestedCursorFingerprint: work.requestedCursorFingerprint,
     };
     const committed = await this.#controlPlane(context, () =>
       this.dependencies.pageImports.importPage({
@@ -888,7 +888,7 @@ export class ProviderSourceSupervisorWorkExecutor
       }));
     return {
       kind: "page_committed",
-      checkpointFingerprint: committed.checkpointFingerprint,
+      cursorFingerprint: committed.cursorFingerprint,
       continuation: committed.continuation,
       pagesCommitted: work.committedPages + 1,
       recordsCommitted:

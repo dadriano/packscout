@@ -31,7 +31,7 @@ The supplied files are representative payloads, not complete histories. Launch v
 
 - Verify a PackScout estimate only appears for complete supported distributions and that incomplete inventory, bounds, probabilities, currency, or draw semantics produce the approved unavailable reason without hiding the pack.
 - Exercise valid empty sales, null pull relationship, out-of-page relationship, unknown event type, nullable sale value, unsupported currency, malformed record, poison record, non-advancing cursor, timeout, rate limit, authentication failure, and recovery scenarios.
-- Prove valid records continue past quarantines, cursor checkpoints advance safely, quarantines retry independently, historical run outcomes remain immutable, and stale plus quality states recover independently.
+- Prove valid records continue past quarantines, cursors advance safely, quarantines retry independently, historical run outcomes remain immutable, and stale plus quality states recover independently.
 - Prove administrator and data-operator permissions, credential masking, login throttling, session revocation, configuration lifecycle, manual-run conflicts, pagination, and sanitized diagnostics through direct boundary and browser tests.
 - Prove ninety-day source expiry and notification deduplication with a controllable clock, then run focused checks and the repository's canonical `npm run verify:framework` gate.
 

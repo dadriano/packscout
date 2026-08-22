@@ -9,7 +9,7 @@
 
 ## Start Here
 
-Run two due fixture sources with two execution slots and two connection-profile request permits, then prove both source-adapter calls overlap while each source advances only its own sequential opaque checkpoint.
+Run two due fixture sources with two execution slots and two connection-profile request permits, then prove both source-adapter calls overlap while each source advances only its own sequential opaque cursor.
 
 ## Objective
 
@@ -17,9 +17,9 @@ Operate Courtyard, Collector Crypt, Phygitals, and ClutchPacks as concurrent, fa
 
 ## Context
 
-The current worker drains imports sequentially. First-pass ingestion instead needs a bounded pool of logical provider lanes. PostgreSQL remains authoritative for due schedules, queued runs, leases, checkpoints, and restart recovery; concurrency is an execution behavior, not a second queue.
+The current worker drains imports sequentially. First-pass ingestion instead needs a bounded pool of logical provider lanes. PostgreSQL remains authoritative for due schedules, queued runs, leases, cursors, and restart recovery; concurrency is an execution behavior, not a second queue.
 
-Pages within one source remain sequential because page N supplies the opaque checkpoint for page N+1. Different sources may fetch, map, and commit at the same time. The generic supervisor owns execution slots and task 002's stable-profile connection-permit coordinator, then calls the source adapter pinned by each run with one fenced request lease. Exactly one local supervisor process is supported and enforced; cross-process capacity sharing and production hosting are deferred.
+Pages within one source remain sequential because page N supplies the opaque cursor for page N+1. Different sources may fetch, map, and commit at the same time. The generic supervisor owns execution slots and task 002's stable-profile connection-permit coordinator, then calls the source adapter pinned by each run with one fenced request lease. Exactly one local supervisor process is supported and enforced; cross-process capacity sharing and production hosting are deferred.
 
 ## Requirements
 
@@ -33,19 +33,19 @@ Pages within one source remain sequential because page N supplies the opaque che
 
 ### Backfill and incremental scheduling
 
-- Start or resume a source from its committed checkpoint when the source is active and not paused.
+- Start or resume a source from its committed cursor when the source is active and not paused.
 - Continue a run across fair one-page turns while the committed continuation is `continue` and the run remains below 1,000 committed pages and 15 minutes elapsed.
-- At either run bound with `continue` remaining, finish without failed health and enqueue or schedule exactly one immediately eligible continuation from the committed checkpoint.
+- At either run bound with `continue` remaining, finish without failed health and enqueue or schedule exactly one immediately eligible continuation from the committed cursor.
 - On committed `poll_after`, mark the source at its current upstream head and set next due to the greater of that source's configured interval and the adapter's minimum delay.
 - Default every provider to 60 seconds after head and preserve independent valid intervals from 60 through 86,400 seconds; the supervisor's internal database check cadence never creates an early upstream request, and freshness cannot become stale before next due plus 15 minutes.
 
 ### Manual control and recovery
 
 - Let an authorized manual request become immediately due and return whether it created work or coalesced with that source's queued or running import.
-- Stop a requested pause after the current page commit, prevent another fetch, preserve the checkpoint, and resume with exactly one run from that checkpoint.
-- Retry bounded transient failures against the same checkpoint and place filter, source configuration, checkpoint, mapper, identity, or exhausted source-owned failures in source-scoped action-required state without changing sibling providers.
-- Open one connection-revision action-required episode and advance its health generation for shared credential, authorization, endpoint, TLS, destination, or profile-configuration failures; cancel queued bound work, abort uncompleted request leases, and make all and only bound sources wait without moving checkpoints, while other profiles and the supervisor remain operable.
-- Stop taking new claims during graceful shutdown, let active pages reach a safe commit boundary, and recover killed work after lease expiry from the last committed checkpoint.
+- Stop a requested pause after the current page commit, prevent another fetch, preserve the cursor, and resume with exactly one run from that cursor.
+- Retry bounded transient failures against the same cursor and place filter, source configuration, cursor, mapper, identity, or exhausted source-owned failures in source-scoped action-required state without changing sibling providers.
+- Open one connection-revision action-required episode and advance its health generation for shared credential, authorization, endpoint, TLS, destination, or profile-configuration failures; cancel queued bound work, abort uncompleted request leases, and make all and only bound sources wait without moving cursors, while other profiles and the supervisor remain operable.
+- Stop taking new claims during graceful shutdown, let active pages reach a safe commit boundary, and recover killed work after lease expiry from the last committed cursor.
 
 ### Diagnostic feed
 
@@ -58,7 +58,7 @@ Pages within one source remain sequential because page N supplies the opaque che
 ### Shared connection recovery
 
 - Allow at most one pending or running recovery connection test correlated to the blocking episode, open health generation, and one nonrevoked same or candidate target revision; grant only that job a recovery request lease while normal connection tests, source tests, and page reads remain fenced, coalesce duplicates, and allow a later explicit attempt after a failed immutable result.
-- On successful same-revision recovery, resume eligible work from committed checkpoints; on tested revision replacement, terminate old pinned work and create exactly one new-revision run per eligible source from its checkpoint.
+- On successful same-revision recovery, resume eligible work from committed cursors; on tested revision replacement, terminate old pinned work and create exactly one new-revision run per eligible source from its cursor.
 
 ### Uncertain transition recovery
 
@@ -70,10 +70,10 @@ Pages within one source remain sequential because page N supplies the opaque che
 ### Supervisor presence and tests
 
 - Acquire one durable environment-scoped singleton supervisor lease with a fencing epoch before claiming imports, executing tests, or invoking any source adapter; a second process fails fast and makes zero upstream requests.
-- Wait cancelably in the stable-profile FIFO permit queue; after grant, atomically revalidate singleton epoch, job or run lease, pinned profile revision, revocation and connection-health generation, applicable source revision and lifecycle, and applicable requested checkpoint and generation, then issue one request lease bound to those pins and invoke the adapter only when every check succeeds.
+- Wait cancelably in the stable-profile FIFO permit queue; after grant, atomically revalidate singleton epoch, job or run lease, pinned profile revision, revocation and connection-health generation, applicable source revision and lifecycle, and applicable requested cursor and generation, then issue one request lease bound to those pins and invoke the adapter only when every check succeeds.
 - On failed post-grant validation, atomically release the paired execution slot and profile permit without a request attempt or adapter call; on later lease loss, enter `fenced_draining`, reject new claims and tests, abort active request leases, and fence later fetch, page commit, or test-result persistence under the lost epoch.
 - Use the shared launch contract's 30-second lease, renewal at least every five seconds, 10-second request timeout, and takeover no earlier than 15 seconds after lease expiry so an old bounded request cannot overlap a replacement owner.
-- Publish only the owning lease as heartbeat and capacity state, release it on graceful stop, execute pending tests without moving checkpoints or canonical data, and let one replacement resume only after safe release or expiry plus grace.
+- Publish only the owning lease as heartbeat and capacity state, release it on graceful stop, execute pending tests without moving cursors or canonical data, and let one replacement resume only after safe release or expiry plus grace.
 
 ## User-Facing Behavior
 
@@ -86,7 +86,7 @@ The supervisor exposes:
 | Boundary | Required state |
 |---|---|
 | Capacity | Active and maximum execution slots plus request permits grouped by stable connection profile |
-| Source lane | Source type and revision, mapper version, lifecycle, wait reason, active run, lease age, progress, committed checkpoint fingerprint, continuation, and next due time |
+| Source lane | Source type and revision, mapper version, lifecycle, wait reason, active run, lease age, progress, committed cursor fingerprint, continuation, and next due time |
 | Work result | Created, coalesced, continued, reached head, paused, retrying, action required, or terminal failure |
 | Presence | Fenced singleton epoch, expiring heartbeat, draining state, capacity, and safe takeover boundary |
 | Diagnostics | Ordered source or connection events retained for 30 days |
@@ -103,25 +103,25 @@ Task 008 may observe and command these boundaries but cannot start or stop the o
 
 ### Lane isolation proof
 
-- [x] Pages remain checkpoint-sequential inside one source, while different providers commit independently without shared state.
+- [x] Pages remain cursor-sequential inside one source, while different providers commit independently without shared state.
 - [x] A source failure releases its slot and permit, records only that source's outcome, and leaves sibling processors and the supervisor alive.
-- [x] Simultaneous shared credential or endpoint failures advance one connection health generation and store one episode through detecting-lease CAS, coalesce sibling outcomes, reject stale detectors, cancel queued bound operations and uncompleted leases before another call, preserve checkpoints, grant only the single correlated recovery job a request lease with later retry, and leave independent profiles and admin operations available.
+- [x] Simultaneous shared credential or endpoint failures advance one connection health generation and store one episode through detecting-lease CAS, coalesce sibling outcomes, reject stale detectors, cancel queued bound operations and uncompleted leases before another call, preserve cursors, grant only the single correlated recovery job a request lease with later retry, and leave independent profiles and admin operations available.
 
 ### Scheduling and recovery proof
 
 - [x] `continue` safely continues or requeues work, `poll_after` waits for the greater of source interval and adapter minimum, and vendor poll values never reach the supervisor.
-- [x] Manual requests coalesce, pause stops after a committed page, resume uses the committed checkpoint, and repeated commands remain idempotent.
+- [x] Manual requests coalesce, pause stops after a committed page, resume uses the committed cursor, and repeated commands remain idempotent.
 - [x] Graceful and killed-process recovery preserve page atomicity, lease ownership, queued work, and independent schedules.
 - [x] Four providers may hold different intervals, each defaults to 60 seconds, and frequent database checks produce no early source-adapter calls.
-- [x] An A-to-B-to-A checkpoint cycle remains rejected across run rollover and supervisor restart without parsing checkpoint bytes.
+- [x] An A-to-B-to-A cursor cycle remains rejected across run rollover and supervisor restart without parsing the cursor value.
 
 ### Diagnostic proof
 
 - [x] Every durable transition produces an ordered source-scoped or explicitly connection-scoped event with the task-002 correlation required for its lifecycle, test, run, page, or connection event kind; absent identifiers are never fabricated.
-- [x] No accepted-record log explosion occurs, and seeded secrets, checkpoints, vendor cursors, payloads, personal identifiers, transaction identities, and stack text never appear.
+- [x] No accepted-record log explosion occurs, and seeded secrets, cursors, vendor cursors, payloads, personal identifiers, transaction identities, and stack text never appear.
 - [x] A second supervisor fails before any claim, test, or upstream call; renewal loss drains and aborts the old owner, and release or expiry plus grace permits one takeover with zero old/new request overlap.
 - [x] Pending connection and source tests hold exactly one generic execution slot through bounded validation and their terminal or fenced result, release request capacity after boundary terminalization, and use one compare-and-transition result transaction that references the terminal attempt and requires an active request-time supervisor epoch plus current job lease, expected pre-test health generation, and applicable source revision; blocking request failures persist their result at the boundary and no attempt terminalizes twice.
-- [x] If a queued test or page read is revoked, disabled, replaced, loses its claim, or changes checkpoint generation before paired grant, the post-grant guard atomically releases both resources with zero request attempts or adapter calls.
+- [x] If a queued test or page read is revoked, disabled, replaced, loses its claim, or changes cursor generation before paired grant, the post-grant guard atomically releases both resources with zero request attempts or adapter calls.
 
 ### Uncertain transition proof
 

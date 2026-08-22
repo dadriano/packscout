@@ -106,13 +106,13 @@ const sourcePins: SourceTestRequestPins = {
   jobClaimLeaseId: "job-lease-1",
 };
 
-const requestedCheckpoint = {
+const requestedCursor = {
   sourceInstanceId: "source-1",
   sourceRevisionId: "source-revision-1",
   sourceTypeKey: "fixture-source-v1",
   adapterVersion: "fixture-adapter-v1",
-  checkpointCodecKey: "fixture-codec-v1",
-  checkpointGeneration: 1,
+  cursorCodecKey: "fixture-codec-v1",
+  cursorGeneration: 1,
   value: null,
 } as const;
 
@@ -131,8 +131,8 @@ const pagePins: PageReadRequestPins = {
   pageAttemptId: "page-1",
   pageNumber: 1,
   pageLimit: 250,
-  checkpointGeneration: 1,
-  requestedCheckpointFingerprint: null,
+  cursorGeneration: 1,
+  requestedCursorFingerprint: null,
 };
 
 function leaseAuthority(): Readonly<{
@@ -274,7 +274,7 @@ async function pageFixture(overrides: Readonly<{
   } satisfies PageReadRequestPins;
   const requestLease = await authority.admit({
     pins,
-    requestedCheckpoint,
+    requestedCursor,
     guard: () => true,
   });
   const operation = createPageReadOperation({
@@ -303,9 +303,9 @@ async function pageFixture(overrides: Readonly<{
       runClaimLeaseId: pins.runClaimLeaseId,
       pageAttemptId: pins.pageAttemptId,
       pageNumber: pins.pageNumber,
-      checkpointGeneration: pins.checkpointGeneration,
-      requestedCheckpointFingerprint: pins.requestedCheckpointFingerprint,
-      requestedCheckpoint,
+      cursorGeneration: pins.cursorGeneration,
+      requestedCursorFingerprint: pins.requestedCursorFingerprint,
+      requestedCursor,
       pageLimit: pins.pageLimit,
     },
   });
@@ -508,7 +508,7 @@ test("interpretation context is immutable and contains no lease, abort signal, c
     assert.equal(Object.isFrozen(context), true);
   }
   assert.equal("sourceConfiguration" in connectionContext, false);
-  assert.deepEqual(pageContext.requestedCheckpoint, requestedCheckpoint);
+  assert.deepEqual(pageContext.requestedCursor, requestedCursor);
   assert.deepEqual(pageContext.sourceConfiguration, { filter: "fixture" });
   connection.requestLease.close();
   page.requestLease.close();
@@ -558,7 +558,7 @@ test("operation construction canonicalizes and deeply freezes pinned adapter inp
     true,
   );
   assert.equal(
-    Object.isFrozen(fixture.operation.correlation.requestedCheckpoint),
+    Object.isFrozen(fixture.operation.correlation.requestedCursor),
     true,
   );
   assert.throws(
@@ -841,7 +841,7 @@ test("page completion owns capture, record count, measurements, and diagnostics"
           fieldPaths: ["id"],
           protectedNativeEvidenceRef: "page_record:0",
         }],
-        nextCheckpoint: requestedCheckpoint,
+        nextCursor: requestedCursor,
         continuation: {
           kind: "poll_after" as const,
           minimumDelaySeconds: 60,
@@ -903,7 +903,7 @@ test("page completion rejects interpretation attempts to inject capture or count
     normalizedContractVersion: "packscout.provider-observation.v1" as const,
     provider: "courtyard" as const,
     outcomes: [],
-    nextCheckpoint: requestedCheckpoint,
+    nextCursor: requestedCursor,
     continuation: {
       kind: "poll_after" as const,
       minimumDelaySeconds: 60,
@@ -986,7 +986,7 @@ test("page completion rejects hash mismatch and non-bijective evidence", async (
         normalizedContractVersion: "packscout.provider-observation.v1" as const,
         provider: "courtyard" as const,
         outcomes: [outcome],
-        nextCheckpoint: requestedCheckpoint,
+        nextCursor: requestedCursor,
         continuation: {
           kind: "poll_after" as const,
           minimumDelaySeconds: 60,
@@ -1113,7 +1113,7 @@ test("operation-bound completion rejects protected test fields and foreign conte
   source.requestLease.close();
 });
 
-test("page completion rejects a foreign provider or any foreign checkpoint binding", async () => {
+test("page completion rejects a foreign provider or any foreign cursor binding", async () => {
   const fixture = await pageFixture();
   const context = sourceAdapterInterpretationContextOf(fixture.operation);
   const request = await bindRequest(
@@ -1130,7 +1130,7 @@ test("page completion rejects a foreign provider or any foreign checkpoint bindi
         normalizedContractVersion: "packscout.provider-observation.v1" as const,
         provider: "courtyard" as const,
         outcomes: [],
-        nextCheckpoint: requestedCheckpoint,
+        nextCursor: requestedCursor,
         continuation: {
           kind: "poll_after" as const,
           minimumDelaySeconds: 60,
@@ -1149,13 +1149,13 @@ test("page completion rejects a foreign provider or any foreign checkpoint bindi
       { sourceRevisionId: "foreign-revision" },
       { sourceTypeKey: "foreign-source-type" },
       { adapterVersion: "foreign-adapter" },
-      { checkpointCodecKey: "foreign-codec" },
-      { checkpointGeneration: 2 },
-    ].map((checkpointOverride) => ({
+      { cursorCodecKey: "foreign-codec" },
+      { cursorGeneration: 2 },
+    ].map((cursorOverride) => ({
       ...base.value.normalizedPage,
-      nextCheckpoint: {
-        ...requestedCheckpoint,
-        ...checkpointOverride,
+      nextCursor: {
+        ...requestedCursor,
+        ...cursorOverride,
       },
     })),
   ];

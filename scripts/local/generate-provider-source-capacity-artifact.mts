@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { statfs } from "node:fs/promises";
+import { readFile, statfs } from "node:fs/promises";
 import { promisify } from "node:util";
 import {
   buildProviderSourceCapacityForecast,
@@ -46,6 +46,96 @@ if (!storageLine) throw new Error("provider source storage measurement missing")
 const storageMeasurement = JSON.parse(
   storageLine.slice(storageLine.indexOf(storageMarker) + storageMarker.length),
 ) as Record<string, unknown>;
+
+// Physical PostgreSQL allocation windows can move by an 8 KiB page between
+// otherwise identical fresh databases. Never let a new sample lower a bound
+// that was already measured and admitted into the versioned artifact.
+const committedArtifact = JSON.parse(
+  await readFile(
+    new URL(
+      "../../docs/provider-source-capacity-measurement-v1.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as {
+  readonly storageMeasurement?: Readonly<Record<string, unknown>>;
+};
+const storageWindowBoundKeys = [
+  "structuredPhysicalBytesPerRecord",
+  "normalizedPayloadPhysicalBytesPerRecord",
+  "importPagePhysicalBytes",
+  "quarantinePhysicalBytes",
+  "quarantineEvidencePhysicalBytes",
+  "diagnosticPhysicalBytesPerPage",
+  "terminalAttemptPhysicalBytes",
+  "compactAttemptPhysicalBytes",
+] as const;
+const measuredWindows = storageMeasurement.windows;
+const committedWindows = committedArtifact.storageMeasurement?.windows;
+if (!Array.isArray(measuredWindows)) {
+  throw new Error("provider source storage measurement windows invalid");
+}
+storageMeasurement.windows = measuredWindows.map((measured, index) => {
+  if (typeof measured !== "object" || measured === null) {
+    throw new Error("provider source storage measurement window invalid");
+  }
+  const merged = { ...measured } as Record<string, unknown>;
+  const committed = Array.isArray(committedWindows)
+    ? committedWindows[index]
+    : undefined;
+  for (const key of ["structuredPhysicalBytes", ...storageWindowBoundKeys]) {
+    const measuredValue = merged[key];
+    if (typeof measuredValue !== "number" || !Number.isFinite(measuredValue)) {
+      throw new Error(`provider source storage window ${key} invalid`);
+    }
+    const committedValue = typeof committed === "object" && committed !== null
+      ? (committed as Record<string, unknown>)[key]
+      : undefined;
+    if (typeof committedValue === "number" && Number.isFinite(committedValue)) {
+      merged[key] = Math.max(measuredValue, committedValue);
+    }
+  }
+  return merged;
+});
+const allocationPageBytes = storageMeasurement.allocationPageBytes;
+if (typeof allocationPageBytes !== "number" || !Number.isFinite(allocationPageBytes)) {
+  throw new Error("provider source allocation page measurement invalid");
+}
+const storageBoundInputs = {
+  structuredPhysicalBytesPerRecord: { denominator: 96, allocationPages: 9 },
+  normalizedPayloadPhysicalBytesPerRecord: { denominator: 96, allocationPages: 1 },
+  importPagePhysicalBytes: { denominator: 24, allocationPages: 1 },
+  quarantinePhysicalBytes: { denominator: 24, allocationPages: 1 },
+  quarantineEvidencePhysicalBytes: { denominator: 24, allocationPages: 1 },
+  diagnosticPhysicalBytesPerPage: { denominator: 24, allocationPages: 1 },
+  terminalAttemptPhysicalBytes: { denominator: 24, allocationPages: 1 },
+  compactAttemptPhysicalBytes: { denominator: 24, allocationPages: 1 },
+} as const;
+for (const [key, { denominator, allocationPages }] of Object.entries(
+  storageBoundInputs,
+)) {
+  storageMeasurement[key] = Math.max(
+    ...(storageMeasurement.windows as readonly Record<string, unknown>[]).map(
+      (window) => window[key] as number,
+    ),
+  ) + Math.ceil(allocationPages * allocationPageBytes / denominator);
+}
+const measuredStatementCount = storageMeasurement.pageStatementCount;
+const committedStatementCount =
+  committedArtifact.storageMeasurement?.pageStatementCount;
+if (typeof measuredStatementCount !== "number" || !Number.isFinite(measuredStatementCount)) {
+  throw new Error("provider source statement count measurement invalid");
+}
+if (
+  typeof committedStatementCount === "number" &&
+  Number.isFinite(committedStatementCount)
+) {
+  storageMeasurement.pageStatementCount = Math.max(
+    measuredStatementCount,
+    committedStatementCount,
+  );
+}
 
 const memoryMeasurement = JSON.parse(
   await commandOutput(process.execPath, [

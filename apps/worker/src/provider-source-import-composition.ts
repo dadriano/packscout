@@ -5,7 +5,7 @@ import {
   type PackscoutPrismaClient,
 } from "@packscout/database";
 import {
-  OpaqueCheckpointGuard,
+  OpaqueCursorGuard,
   ProviderSourceImportRequestService,
   ProviderSourcePageImportService,
   ProviderSourcePagePlanner,
@@ -39,10 +39,10 @@ function createActorKeyer(key: Uint8Array): ProviderActorKeyer {
   };
 }
 
-function checkpointFingerprintKey(key: Uint8Array): Uint8Array {
+function cursorFingerprintKey(key: Uint8Array): Uint8Array {
   return new Uint8Array(
     createHmac("sha256", key)
-      .update("packscout-provider-source-checkpoint:v1")
+      .update("packscout-provider-source-cursor:v1")
       .digest(),
   );
 }
@@ -59,8 +59,8 @@ export function createProviderSourceImportComposition(input: Readonly<{
     mappers,
     pageImports: new ProviderSourcePageImportService(
       new ProviderSourcePagePlanner(mappers),
-      new OpaqueCheckpointGuard(
-        checkpointFingerprintKey(input.actorPseudonymKey),
+      new OpaqueCursorGuard(
+        cursorFingerprintKey(input.actorPseudonymKey),
       ),
       new ProviderSourcePageRepository(input.database, {
         actorPseudonymKey: input.actorPseudonymKey,

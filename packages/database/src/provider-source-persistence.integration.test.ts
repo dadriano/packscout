@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { providerIdentityNamespaceByLaunchProvider } from "@packscout/contracts";
+import { PrismaAdminImportRunRepository } from "./admin-import-run-repository.ts";
 import type { PackscoutPrismaClient } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
-import { ProviderSourceCheckpointRepository } from "./provider-source-checkpoint-repository.ts";
+import { ProviderSourceCursorRepository } from "./provider-source-cursor-repository.ts";
 import { ProviderSourceDiagnosticRepository } from "./provider-source-diagnostic-repository.ts";
 import { ProviderSourceLifecycleRepository } from "./provider-source-lifecycle-repository.ts";
 import { ProviderSourceRequestRepository } from "./provider-source-request-repository.ts";
 import { ProviderSourceRetentionRepository } from "./provider-source-retention-repository.ts";
 import { ProviderSourceSupervisorRepository } from "./provider-source-supervisor-repository.ts";
 import { ProviderSourceTestResultRepository } from "./provider-source-test-result-repository.ts";
+import {
+  createAcceptanceProviderSource,
+  createPinnedSourceRun,
+  createProviderSourceAcceptanceFixture,
+} from "./provider-source-acceptance-test-support.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
@@ -17,7 +23,7 @@ const base = new Date("2026-08-20T12:00:00.000Z");
 const sourceTypeKey = "dataforrest-events-v1";
 const sourceAdapterVersion = "dataforrest-events-adapter-v1";
 const normalizedContractVersion = "packscout.provider-observation.v1";
-const checkpointCodecVersion = "dataforrest-cursor-v1";
+const cursorCodecVersion = "dataforrest-cursor-v1";
 
 async function databaseClock(database: PackscoutPrismaClient): Promise<Date> {
   const rows = await database.$queryRaw<Array<{ now: Date }>>`
@@ -74,7 +80,7 @@ async function sourceFixture() {
     mapperKey: "courtyard-provider-observation",
     mapperVersion: "1",
     identityNamespaceKey: "dataforrest-courtyard-records-v1",
-    checkpointCodecVersion,
+    cursorCodecVersion,
     revisionNumber: 1,
     intervalSeconds: 60,
     configuration: { provider: "courtyard" },
@@ -98,7 +104,7 @@ async function sourceFixture() {
   };
 }
 
-test("four provider sources share one profile while schedules, checkpoints, and health stay isolated", async () => {
+test("four provider sources share one profile while schedules, cursors, and health stay isolated", async () => {
   const fixture = await sourceFixture();
   try {
     const setup = new PipelineSetupRepository(fixture.database);
@@ -146,7 +152,7 @@ test("four provider sources share one profile while schedules, checkpoints, and 
         mapperKey: definition.mapperKey,
         mapperVersion: "1",
         identityNamespaceKey: definition.namespaceKey,
-        checkpointCodecVersion,
+        cursorCodecVersion,
         revisionNumber: 1,
         intervalSeconds: definition.intervalSeconds,
         configuration: { provider: definition.platformKey },
@@ -174,12 +180,12 @@ test("four provider sources share one profile while schedules, checkpoints, and 
     assert.equal(new Set(sources.map((source) => source.id)).size, 4);
 
     const sourceIds = sources.map((source) => source.id);
-    const [schedules, checkpoints, healthStates] = await Promise.all([
+    const [schedules, cursors, healthStates] = await Promise.all([
       fixture.database.provider_source_schedules.findMany({
         where: { source_instance_id: { in: sourceIds } },
         orderBy: { source_instance_id: "asc" },
       }),
-      fixture.database.provider_source_checkpoints.findMany({
+      fixture.database.provider_source_cursors.findMany({
         where: { source_instance_id: { in: sourceIds } },
         orderBy: { source_instance_id: "asc" },
       }),
@@ -189,13 +195,13 @@ test("four provider sources share one profile while schedules, checkpoints, and 
       }),
     ]);
     assert.equal(schedules.length, 4);
-    assert.equal(checkpoints.length, 4);
+    assert.equal(cursors.length, 4);
     assert.equal(healthStates.length, 4);
     assert.deepEqual(
-      checkpoints.map((checkpoint) => ({
-        source: checkpoint.source_instance_id,
-        generation: checkpoint.checkpoint_generation,
-        fingerprint: checkpoint.checkpoint_fingerprint,
+      cursors.map((cursor) => ({
+        source: cursor.source_instance_id,
+        generation: cursor.cursor_generation,
+        fingerprint: cursor.cursor_fingerprint,
       })),
       sourceIds.toSorted().map((source) => ({
         source,
@@ -258,7 +264,7 @@ test("four provider sources share one profile while schedules, checkpoints, and 
       mapperKey: "courtyard-provider-observation",
       mapperVersion: "1",
       identityNamespaceKey: "dataforrest-courtyard-records-v1",
-      checkpointCodecVersion,
+      cursorCodecVersion,
       revisionNumber: 1,
       intervalSeconds: 60,
       configuration: { provider: "courtyard", replacement: true },
@@ -287,10 +293,10 @@ test("four provider sources share one profile while schedules, checkpoints, and 
   }
 });
 
-test("source checkpoints retain durable cycle history and reject unowned advancement", async () => {
+test("source cursors retain durable cycle history and reject unowned advancement", async () => {
   const fixture = await sourceFixture();
   try {
-    const checkpoints = new ProviderSourceCheckpointRepository(
+    const cursors = new ProviderSourceCursorRepository(
       fixture.database,
     );
     const cycleIndex = await fixture.database.$queryRaw<
@@ -299,26 +305,26 @@ test("source checkpoints retain durable cycle history and reject unowned advance
       select indexdef
       from pg_indexes
       where schemaname = 'public'
-        and indexname = 'provider_source_checkpoint_fingerprints_cycle_unique'
+        and indexname = 'provider_source_cursor_fingerprints_cycle_unique'
     `;
     assert.match(
       cycleIndex[0]?.indexdef ?? "",
-      /UNIQUE.*source_instance_id.*checkpoint_generation.*checkpoint_fingerprint/u,
+      /UNIQUE.*source_instance_id.*cursor_generation.*cursor_fingerprint/u,
     );
 
     await assert.rejects(
       fixture.database.$transaction((transaction) =>
-        checkpoints.advanceInTransaction(transaction, {
+        cursors.advanceInTransaction(transaction, {
           organizationId: fixture.organizationId,
           providerId: fixture.providerId,
           sourceInstanceId: fixture.sourceInstanceId,
           sourceRevisionId: fixture.sourceRevisionId,
           sourceAdapterVersion,
-          checkpointCodecVersion,
-          checkpointGeneration: 1n,
-          expectedCheckpointFingerprint: null,
-          nextCheckpoint: new TextEncoder().encode("checkpoint-b"),
-          nextCheckpointFingerprint: "2".repeat(64),
+          cursorCodecVersion,
+          cursorGeneration: 1n,
+          expectedCursorFingerprint: null,
+          nextCursor: "cursor-b",
+          nextCursorFingerprint: "2".repeat(64),
           continuation: { kind: "continue" },
           runId: "00000000-0000-4000-8000-000000000131",
           pageId: "00000000-0000-4000-8000-000000000132",
@@ -338,7 +344,7 @@ test("source checkpoints retain durable cycle history and reject unowned advance
       (error: unknown) =>
         error instanceof PersistenceError &&
         error.code === "SUPERVISOR_OWNERSHIP_LOST" &&
-        error.message === "Checkpoint commit epoch is no longer active.",
+        error.message === "Cursor commit epoch is no longer active.",
     );
 
     const supervisors = new ProviderSourceSupervisorRepository(
@@ -1096,6 +1102,46 @@ test("source-test results and compact request proof are immutable", async () => 
         where: { request_attempt_id: requestAttemptId },
       }),
     );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("admin run reads expose source cursor fingerprints without exposing raw cursors", async () => {
+  const fixture = await createProviderSourceAcceptanceFixture(
+    "admin-cursor-redaction",
+  );
+  try {
+    const source = await createAcceptanceProviderSource(fixture, {
+      platformKey: "courtyard",
+      displayName: "Courtyard",
+      mapperKey: "courtyard-provider-observation",
+      identityNamespaceKey: "dataforrest-courtyard-records-v1",
+      intervalSeconds: 60,
+      hashCharacter: "d",
+    });
+    const rawCursor = "provider-secret-cursor-value";
+    const cursorFingerprint = "e".repeat(64);
+    const run = await createPinnedSourceRun(
+      fixture.database,
+      fixture,
+      source,
+      {
+        state: "succeeded",
+        createdAt: base,
+        requestedCursor: rawCursor,
+        requestedCursorFingerprint: cursorFingerprint,
+      },
+    );
+    const record = await new PrismaAdminImportRunRepository(
+      fixture.database,
+    ).get({
+      organizationId: fixture.organizationId,
+      runId: run.id,
+    });
+    assert.equal(record?.requestedCursor, cursorFingerprint);
+    assert.equal(record?.finalCursor, null);
+    assert.doesNotMatch(JSON.stringify(record), new RegExp(rawCursor));
   } finally {
     await fixture.close();
   }

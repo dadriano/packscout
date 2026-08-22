@@ -229,7 +229,7 @@ const server = createServer(async (request, response) => {
       return;
     }
     const sourceCommand = url.pathname.match(
-      /^\/api\/provider-sources\/providers\/([^/]+)\/sources\/([^/]+)\/(pause|resume|test|interval|checkpoint-reset-preview)$/u,
+      /^\/api\/provider-sources\/providers\/([^/]+)\/sources\/([^/]+)\/(pause|resume|test|interval|cursor-reset-preview)$/u,
     );
     if (request.method === "POST" && sourceCommand) {
       const providerId = sourceCommand[1]!;
@@ -281,10 +281,10 @@ const server = createServer(async (request, response) => {
           sourceInstanceId: source.sourceInstanceId,
           sourceRevisionId: source.sourceRevisionId,
           sourceState: source.state,
-          checkpointGeneration: source.checkpoint.generation,
-          checkpointFingerprint: source.checkpoint.fingerprint,
+          cursorGeneration: source.cursor.generation,
+          cursorFingerprint: source.cursor.fingerprint,
           confirmation: `RESET ${source.provider} TO FEED START`,
-          consequence: "The saved checkpoint will be cleared and the next resume will start from Feed start.",
+          consequence: "The saved cursor will be cleared and the next resume will start from Feed start.",
         },
       });
       return;

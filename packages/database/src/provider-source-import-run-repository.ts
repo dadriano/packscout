@@ -15,7 +15,7 @@ export interface ProviderSourceImportRunRecord {
   readonly sourceRevisionId: string;
   readonly trigger: "scheduled" | "manual" | "continuation" | "recovery";
   readonly state: "queued" | "running" | "succeeded" | "incomplete" | "failed";
-  readonly requestedCheckpointFingerprint: string | null;
+  readonly requestedCursorFingerprint: string | null;
   readonly createdAt: Date;
 }
 
@@ -57,13 +57,6 @@ function deterministicDiagnosticId(...parts: readonly string[]): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function copyBytes(value: Uint8Array | null): Uint8Array<ArrayBuffer> | null {
-  if (value === null) return null;
-  const copy = new Uint8Array(new ArrayBuffer(value.byteLength));
-  copy.set(value);
-  return copy;
-}
-
 function runRecord(row: Readonly<{
   id: string;
   organization_id: string;
@@ -72,7 +65,7 @@ function runRecord(row: Readonly<{
   source_revision_id: string | null;
   trigger: "scheduled" | "manual" | "continuation" | "recovery";
   state: "queued" | "running" | "succeeded" | "incomplete" | "failed";
-  requested_checkpoint_fingerprint: string | null;
+  requested_cursor_fingerprint: string | null;
   created_at: Date;
 }>): ProviderSourceImportRunRecord {
   if (!row.source_instance_id || !row.source_revision_id) {
@@ -86,7 +79,7 @@ function runRecord(row: Readonly<{
     sourceRevisionId: row.source_revision_id,
     trigger: row.trigger,
     state: row.state,
-    requestedCheckpointFingerprint: row.requested_checkpoint_fingerprint,
+    requestedCursorFingerprint: row.requested_cursor_fingerprint,
     createdAt: row.created_at,
   };
 }
@@ -145,7 +138,7 @@ export class ProviderSourceImportRunRepository {
       if (provider.state !== "active") return { kind: "source_unavailable" };
 
       // Cross-lifecycle lock order: provider -> source instance -> connection
-      // profile -> source revision -> connection revision -> checkpoint. Source
+      // profile -> source revision -> connection revision -> cursor. Source
       // pause/disable locks only the source; connection rotation locks only the
       // profile/revision, so neither path acquires these rows in reverse order.
       const lockedSources = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -256,20 +249,20 @@ export class ProviderSourceImportRunRepository {
         });
       if (!connectionRevision) return { kind: "source_unavailable" };
 
-      const lockedCheckpoints = await transaction.$queryRaw<Array<{ source_instance_id: string }>>(Prisma.sql`
+      const lockedCursors = await transaction.$queryRaw<Array<{ source_instance_id: string }>>(Prisma.sql`
         select source_instance_id
-        from public.provider_source_checkpoints
+        from public.provider_source_cursors
         where source_instance_id = cast(${source.id} as uuid)
           and organization_id = cast(${input.organizationId} as uuid)
           and provider_id = cast(${input.providerId} as uuid)
           and source_revision_id = cast(${revision.id} as uuid)
           and source_adapter_version = ${revision.source_adapter_version}
-          and checkpoint_codec_version = ${revision.checkpoint_codec_version}
+          and cursor_codec_version = ${revision.cursor_codec_version}
         for share
       `);
-      if (!lockedCheckpoints[0]) return { kind: "source_unavailable" };
-      const checkpoint =
-        await transaction.provider_source_checkpoints.findFirst({
+      if (!lockedCursors[0]) return { kind: "source_unavailable" };
+      const cursor =
+        await transaction.provider_source_cursors.findFirst({
           where: {
             source_instance_id: source.id,
             organization_id: input.organizationId,
@@ -277,7 +270,7 @@ export class ProviderSourceImportRunRepository {
             source_revision_id: source.active_revision_id,
           },
         });
-      if (!checkpoint) return { kind: "source_unavailable" };
+      if (!cursor) return { kind: "source_unavailable" };
       const runtime = await transaction.provider_source_runtime_states.findFirst({
         where: {
           source_instance_id: source.id,
@@ -315,7 +308,7 @@ export class ProviderSourceImportRunRepository {
             trigger: active.trigger,
             occurredAt: input.scheduledDueAt,
             dueAt: input.scheduledDueAt,
-            requestedCheckpointFingerprint: active.requested_checkpoint_fingerprint,
+            requestedCursorFingerprint: active.requested_cursor_fingerprint,
             source,
             revision,
             connectionRevisionId: connectionRevision.id,
@@ -326,8 +319,8 @@ export class ProviderSourceImportRunRepository {
           id: active.id,
           trigger: active.trigger,
           requestedAt: transitionAt,
-          requestedCheckpointFingerprint:
-            active.requested_checkpoint_fingerprint,
+          requestedCursorFingerprint:
+            active.requested_cursor_fingerprint,
           source,
           revision,
           connectionRevisionId: connectionRevision.id,
@@ -356,16 +349,16 @@ export class ProviderSourceImportRunRepository {
           identity_namespace_key: revision.identity_namespace_key,
           connection_profile_id: profile.id,
           connection_revision_id: connectionRevision.id,
-          checkpoint_codec_version: revision.checkpoint_codec_version,
-          checkpoint_generation: checkpoint.checkpoint_generation,
-          requested_checkpoint: copyBytes(checkpoint.checkpoint_bytes),
-          requested_checkpoint_fingerprint: checkpoint.checkpoint_fingerprint,
-          requested_checkpoint_key:
-            checkpoint.checkpoint_fingerprint ?? "initial",
-          current_checkpoint: copyBytes(checkpoint.checkpoint_bytes),
-          current_checkpoint_fingerprint: checkpoint.checkpoint_fingerprint,
-          current_checkpoint_key:
-            checkpoint.checkpoint_fingerprint ?? "initial",
+          cursor_codec_version: revision.cursor_codec_version,
+          cursor_generation: cursor.cursor_generation,
+          requested_cursor: cursor.cursor,
+          requested_cursor_fingerprint: cursor.cursor_fingerprint,
+          requested_cursor_key:
+            cursor.cursor_fingerprint ?? "initial",
+          current_cursor: cursor.cursor,
+          current_cursor_fingerprint: cursor.cursor_fingerprint,
+          current_cursor_key:
+            cursor.cursor_fingerprint ?? "initial",
           next_page_number: 1,
           counters_json: {
             pages: 0,
@@ -408,8 +401,8 @@ export class ProviderSourceImportRunRepository {
           trigger: created.trigger,
           occurredAt: input.scheduledDueAt,
           dueAt: input.scheduledDueAt,
-          requestedCheckpointFingerprint:
-            created.requested_checkpoint_fingerprint,
+          requestedCursorFingerprint:
+            created.requested_cursor_fingerprint,
           source,
           revision,
           connectionRevisionId: connectionRevision.id,
@@ -420,8 +413,8 @@ export class ProviderSourceImportRunRepository {
         id: created.id,
         trigger: created.trigger,
         requestedAt: transitionAt,
-        requestedCheckpointFingerprint:
-          created.requested_checkpoint_fingerprint,
+        requestedCursorFingerprint:
+          created.requested_cursor_fingerprint,
         source,
         revision,
         connectionRevisionId: connectionRevision.id,
@@ -438,7 +431,7 @@ export class ProviderSourceImportRunRepository {
       trigger: "scheduled" | "manual" | "continuation" | "recovery";
       occurredAt: Date;
       dueAt: Date;
-      requestedCheckpointFingerprint: string | null;
+      requestedCursorFingerprint: string | null;
       source: Readonly<{
         id: string;
         organization_id: string;
@@ -481,7 +474,7 @@ export class ProviderSourceImportRunRepository {
       connectionRevisionId: input.connectionRevisionId,
       runId: input.id,
       runTrigger: input.trigger,
-      checkpointFingerprint: input.requestedCheckpointFingerprint,
+      cursorFingerprint: input.requestedCursorFingerprint,
       evidence: { status: input.status },
     });
   }
@@ -492,7 +485,7 @@ export class ProviderSourceImportRunRepository {
       id: string;
       trigger: "scheduled" | "manual" | "continuation" | "recovery";
       requestedAt: Date;
-      requestedCheckpointFingerprint: string | null;
+      requestedCursorFingerprint: string | null;
       source: Readonly<{
         id: string;
         organization_id: string;
@@ -529,7 +522,7 @@ export class ProviderSourceImportRunRepository {
       connectionRevisionId: input.connectionRevisionId,
       runId: input.id,
       runTrigger: input.trigger,
-      checkpointFingerprint: input.requestedCheckpointFingerprint,
+      cursorFingerprint: input.requestedCursorFingerprint,
       evidence: { status: input.status },
     });
   }

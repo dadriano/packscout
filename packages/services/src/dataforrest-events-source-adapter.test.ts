@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
+  DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
@@ -102,7 +102,7 @@ function nextRequestIdentity(kind: string) {
   } as const;
 }
 
-function checkpoint(
+function cursor(
   provider: LaunchProviderKey,
   value: string | null,
 ) {
@@ -111,13 +111,13 @@ function checkpoint(
     sourceRevisionId: `source-revision-${provider}`,
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
     adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-    checkpointCodecKey: DATAFORREST_EVENTS_V1_CHECKPOINT_CODEC_KEY,
-    checkpointGeneration: 1,
+    cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
+    cursorGeneration: 1,
     value,
   } as const;
 }
 
-function checkpointFingerprint(value: string | null): string | null {
+function cursorFingerprint(value: string | null): string | null {
   return value === null
     ? null
     : createHash("sha256").update(value).digest("hex");
@@ -208,15 +208,15 @@ async function pageOperation(
   value: string | null,
   pageBounds: ProviderSourceRequestBounds = bounds,
 ): Promise<PageReadOperation> {
-  const requestedCheckpoint = checkpoint(provider, value);
+  const requestedCursor = cursor(provider, value);
   const requestIdentity = nextRequestIdentity(`page-${provider}`);
   const pins: PageReadRequestPins = {
     ...commonPins,
     ...requestIdentity,
     operationKind: "page_read",
     provider,
-    sourceInstanceId: requestedCheckpoint.sourceInstanceId,
-    sourceRevisionId: requestedCheckpoint.sourceRevisionId,
+    sourceInstanceId: requestedCursor.sourceInstanceId,
+    sourceRevisionId: requestedCursor.sourceRevisionId,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     identityNamespaceKey: dataforrestIdentityNamespaceByProvider[provider],
     importRunId: `run-${provider}`,
@@ -224,12 +224,12 @@ async function pageOperation(
     pageAttemptId: `page-${provider}-${value ?? "initial"}`,
     pageNumber: 1,
     pageLimit: pageBounds.pageLimit,
-    checkpointGeneration: 1,
-    requestedCheckpointFingerprint: checkpointFingerprint(value),
+    cursorGeneration: 1,
+    requestedCursorFingerprint: cursorFingerprint(value),
   };
   const requestLease = await testRuntime.authority.admit({
     pins,
-    requestedCheckpoint,
+    requestedCursor,
     guard: () => true,
   });
   const operation = createPageReadOperation({
@@ -252,9 +252,9 @@ async function pageOperation(
       runClaimLeaseId: pins.runClaimLeaseId,
       pageAttemptId: pins.pageAttemptId,
       pageNumber: pins.pageNumber,
-      checkpointGeneration: pins.checkpointGeneration,
-      requestedCheckpointFingerprint: pins.requestedCheckpointFingerprint,
-      requestedCheckpoint,
+      cursorGeneration: pins.cursorGeneration,
+      requestedCursorFingerprint: pins.requestedCursorFingerprint,
+      requestedCursor,
       pageLimit: pins.pageLimit,
     },
   });
@@ -407,7 +407,7 @@ test("all four filters normalize initial, continuation, replay, empty, and poll-
     );
     assert.deepEqual(first.value.normalizedPage.continuation, { kind: "continue" });
 
-    const cursor = first.value.normalizedPage.nextCheckpoint.value;
+    const cursor = first.value.normalizedPage.nextCursor.value;
     initial.requestLease.close();
     const resumedRequests: URL[] = [];
     const resumedAdapter = adapterWithClient(async (url) => {
@@ -440,7 +440,7 @@ test("all four filters normalize initial, continuation, replay, empty, and poll-
     replay.requestLease.close();
 
     const headCursor = restarted.ok
-      ? restarted.value.normalizedPage.nextCheckpoint.value
+      ? restarted.value.normalizedPage.nextCursor.value
       : null;
     const atHead = await pageOperation(resumedRuntime, provider, headCursor);
     const empty = await completedPage(resumedAdapter, atHead);
@@ -451,7 +451,7 @@ test("all four filters normalize initial, continuation, replay, empty, and poll-
         kind: "poll_after",
         minimumDelaySeconds: 60,
       });
-      assert.equal(empty.value.normalizedPage.nextCheckpoint.value, headCursor);
+      assert.equal(empty.value.normalizedPage.nextCursor.value, headCursor);
     }
     atHead.requestLease.close();
   }
@@ -559,7 +559,7 @@ test("record-local defects remain ordered while wrapper and continuation defects
     captured,
   );
   assert.equal(interpreted.ok, false);
-  if (!interpreted.ok) assert.equal(interpreted.failure.code, "invalid_checkpoint");
+  if (!interpreted.ok) assert.equal(interpreted.failure.code, "invalid_cursor");
   stalled.requestLease.close();
 
   const boundedAdapter = adapterWithClient(async () => jsonResponse({
@@ -676,8 +676,8 @@ test("raw capture, lease cancellation, mismatch, and reuse fail closed without e
       sourceRevisionId: "wrong-revision",
       correlation: {
         ...mismatch.correlation,
-        requestedCheckpoint: {
-          ...mismatch.correlation.requestedCheckpoint,
+        requestedCursor: {
+          ...mismatch.correlation.requestedCursor,
           sourceRevisionId: "wrong-revision",
         },
       },
@@ -704,10 +704,10 @@ test("raw capture, lease cancellation, mismatch, and reuse fail closed without e
       ...mismatchInput,
       correlation: {
         ...mismatch.correlation,
-        checkpointGeneration: 2,
-        requestedCheckpoint: {
-          ...mismatch.correlation.requestedCheckpoint,
-          checkpointGeneration: 2,
+        cursorGeneration: 2,
+        requestedCursor: {
+          ...mismatch.correlation.requestedCursor,
+          cursorGeneration: 2,
         },
       },
     }),
@@ -932,7 +932,7 @@ test("DataForrest request and returned cursors enforce the shared 16 KiB UTF-8 c
   if (!whitespaceResult.ok) {
     assert.deepEqual(whitespaceResult.failure, {
       disposition: "source_action_required",
-      code: "invalid_checkpoint",
+      code: "invalid_cursor",
     });
   }
   assert.equal(requestCount, 1);
@@ -963,7 +963,88 @@ test("DataForrest request and returned cursors enforce the shared 16 KiB UTF-8 c
   responseOperation.requestLease.close();
 });
 
-test("two platform reads overlap without sharing filters, checkpoints, or results", async () => {
+test("DataForrest rejects cursor text that cannot be persisted losslessly", async () => {
+  let upstreamCalls = 0;
+  const uncalledAdapter = adapterWithClient(async () => {
+    upstreamCalls += 1;
+    throw new Error("invalid requested cursor reached the provider");
+  });
+  const invalidCursors = [
+    "cursor\u0000value",
+    "cursor-\ud800-value",
+    "cursor-\udfff-value",
+  ];
+
+  for (const invalidCursor of invalidCursors) {
+    await assert.rejects(
+      async () => {
+        const operation = await pageOperation(
+          runtime(),
+          "courtyard",
+          invalidCursor,
+        );
+        try {
+          await successfulCapture(uncalledAdapter, operation);
+        } finally {
+          operation.requestLease.close();
+        }
+      },
+      (error) =>
+        error instanceof SourceRequestLeaseError &&
+        error.code === "invalid_pins",
+    );
+  }
+  assert.equal(upstreamCalls, 0);
+
+  for (const invalidCursor of invalidCursors) {
+    const responseAdapter = adapterWithClient(async () => jsonResponse({
+      records: [],
+      next_cursor: invalidCursor,
+      poll_after_seconds: 60,
+    }));
+    const operation = await pageOperation(runtime(), "courtyard", null);
+    const request = await successfulCapture(responseAdapter, operation);
+    const result = await interpretSourceAdapterPage(
+      responseAdapter,
+      operation,
+      request,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.deepEqual(result.failure, {
+        disposition: "source_action_required",
+        code: "invalid_response",
+      });
+    }
+    operation.requestLease.close();
+  }
+
+  const astralCursor = "cursor-🙂-value";
+  const astralAdapter = adapterWithClient(async (url) => {
+    assert.equal(url.searchParams.get("cursor"), astralCursor);
+    return jsonResponse({
+      records: [],
+      next_cursor: astralCursor,
+      poll_after_seconds: 60,
+    });
+  });
+  const astralOperation = await pageOperation(
+    runtime(),
+    "courtyard",
+    astralCursor,
+  );
+  const astralResult = await completedPage(astralAdapter, astralOperation);
+  assert.equal(astralResult.ok, true);
+  if (astralResult.ok) {
+    assert.equal(
+      astralResult.value.normalizedPage.nextCursor.value,
+      astralCursor,
+    );
+  }
+  astralOperation.requestLease.close();
+});
+
+test("two platform reads overlap without sharing filters, cursors, or results", async () => {
   let active = 0;
   let maximumActive = 0;
   const releases: Array<() => void> = [];
@@ -1022,7 +1103,7 @@ test("two platform reads overlap without sharing filters, checkpoints, or result
   phygitals.requestLease.close();
 });
 
-test("connection and source tests validate pages without inventing durable checkpoint state", async () => {
+test("connection and source tests validate pages without inventing durable cursor state", async () => {
   const adapter = adapterWithClient(async () =>
     jsonResponse(dataforestEventsV1EvidenceFixture.courtyard.initial)
   );
@@ -1035,7 +1116,7 @@ test("connection and source tests validate pages without inventing durable check
     connectionCapture,
   );
   assert.equal(connectionResult.ok, true);
-  assert.equal("nextCheckpoint" in connectionResult, false);
+  assert.equal("nextCursor" in connectionResult, false);
   assert.equal(connectionResult.recordCount, 0);
 
   const source = await sourceOperation(testRuntime, "courtyard");
@@ -1046,7 +1127,7 @@ test("connection and source tests validate pages without inventing durable check
     sourceCapture,
   );
   assert.equal(sourceResult.ok, true);
-  assert.equal("nextCheckpoint" in sourceResult, false);
+  assert.equal("nextCursor" in sourceResult, false);
   assert.equal(sourceResult.recordCount, 4);
   connection.requestLease.close();
   source.requestLease.close();

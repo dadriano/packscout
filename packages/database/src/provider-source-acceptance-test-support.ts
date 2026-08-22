@@ -18,7 +18,7 @@ export const ACCEPTANCE_NORMALIZED_CONTRACT_VERSION =
   PROVIDER_OBSERVATION_CONTRACT_VERSION;
 export const ACCEPTANCE_OBSERVATION_HASH_VERSION =
   PROVIDER_OBSERVATION_HASH_VERSION;
-export const ACCEPTANCE_CHECKPOINT_CODEC_VERSION = "dataforrest-cursor-v1";
+export const ACCEPTANCE_CURSOR_CODEC_VERSION = "dataforrest-cursor-v1";
 export const ACCEPTANCE_CREATED_AT = new Date("2026-08-20T12:00:00.000Z");
 
 export interface ProviderSourceAcceptanceFixture extends MigratedTestDatabase {
@@ -103,7 +103,7 @@ export async function createAcceptanceSourceInstance(
     mapperKey: input.definition.mapperKey,
     mapperVersion: "1",
     identityNamespaceKey: input.definition.identityNamespaceKey,
-    checkpointCodecVersion: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
+    cursorCodecVersion: ACCEPTANCE_CURSOR_CODEC_VERSION,
     revisionNumber: 1,
     intervalSeconds: input.definition.intervalSeconds,
     configuration: { provider: input.definition.platformKey },
@@ -153,13 +153,6 @@ export async function createAcceptanceProviderSource(
   };
 }
 
-function copyBytes(value: Uint8Array | null): Uint8Array<ArrayBuffer> | null {
-  if (value === null) return null;
-  const copy = new Uint8Array(new ArrayBuffer(value.byteLength));
-  copy.set(value);
-  return copy;
-}
-
 export async function createPinnedSourceRun(
   database: PackscoutPrismaClient,
   fixture: ProviderSourceAcceptanceFixture,
@@ -168,8 +161,8 @@ export async function createPinnedSourceRun(
     state: "running" | "succeeded";
     trigger?: "scheduled" | "continuation";
     createdAt: Date;
-    requestedCheckpoint: Uint8Array | null;
-    requestedCheckpointFingerprint: string | null;
+    requestedCursor: string | null;
+    requestedCursorFingerprint: string | null;
     leaseOwner?: string;
     leaseToken?: string;
     claimLeaseId?: string;
@@ -200,16 +193,16 @@ export async function createPinnedSourceRun(
       identity_namespace_key: source.identityNamespaceKey,
       connection_profile_id: fixture.connectionProfileId,
       connection_revision_id: fixture.connectionRevisionId,
-      checkpoint_codec_version: ACCEPTANCE_CHECKPOINT_CODEC_VERSION,
-      checkpoint_generation: 1n,
-      requested_checkpoint: copyBytes(input.requestedCheckpoint),
-      requested_checkpoint_fingerprint: input.requestedCheckpointFingerprint,
-      requested_checkpoint_key:
-        input.requestedCheckpointFingerprint ?? "initial",
-      current_checkpoint: copyBytes(input.requestedCheckpoint),
-      current_checkpoint_fingerprint: input.requestedCheckpointFingerprint,
-      current_checkpoint_key:
-        input.requestedCheckpointFingerprint ?? "initial",
+      cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
+      cursor_generation: 1n,
+      requested_cursor: input.requestedCursor,
+      requested_cursor_fingerprint: input.requestedCursorFingerprint,
+      requested_cursor_key:
+        input.requestedCursorFingerprint ?? "initial",
+      current_cursor: input.requestedCursor,
+      current_cursor_fingerprint: input.requestedCursorFingerprint,
+      current_cursor_key:
+        input.requestedCursorFingerprint ?? "initial",
       next_page_number: 1,
     },
   });

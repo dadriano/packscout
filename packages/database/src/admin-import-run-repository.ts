@@ -184,7 +184,7 @@ export class PrismaAdminImportRunRepository {
         config_revision_id: true,
         source_revision_id: true,
         source_instance_id: true,
-        requested_checkpoint_fingerprint: true,
+        requested_cursor_fingerprint: true,
         counters_json: true,
         trigger: true,
         state: true,
@@ -227,9 +227,10 @@ export class PrismaAdminImportRunRepository {
       heartbeatAt: row.heartbeat_at,
       reachedProviderHead: row.reached_provider_head,
       failureCode: row.failure_code,
-      requestedCursor:
-        row.requested_cursor ?? row.requested_checkpoint_fingerprint,
-      finalCursor: row.final_cursor,
+      requestedCursor: row.source_instance_id === null
+        ? row.requested_cursor
+        : row.requested_cursor_fingerprint,
+      finalCursor: row.source_instance_id === null ? row.final_cursor : null,
     }));
   }
 
@@ -378,8 +379,8 @@ export class PrismaAdminImportRunRepository {
         next_cursor: true,
         has_more: true,
         continuation_kind: true,
-        requested_checkpoint_fingerprint: true,
-        next_checkpoint_fingerprint: true,
+        requested_cursor_fingerprint: true,
+        next_cursor_fingerprint: true,
         source_instance_id: true,
         record_counts_json: true,
         committed_at: true,
@@ -391,9 +392,12 @@ export class PrismaAdminImportRunRepository {
       id: page.id,
       runId: page.run_id,
       pageNumber: page.page_number,
-      requestedCursor:
-        page.requested_cursor ?? page.requested_checkpoint_fingerprint,
-      nextCursor: page.next_cursor ?? page.next_checkpoint_fingerprint,
+      requestedCursor: page.source_instance_id === null
+        ? page.requested_cursor
+        : page.requested_cursor_fingerprint,
+      nextCursor: page.source_instance_id === null
+        ? page.next_cursor
+        : page.next_cursor_fingerprint,
       hasMore: page.has_more ?? page.continuation_kind === "continue",
       committedAt: page.committed_at,
       sourceInstanceId: page.source_instance_id,

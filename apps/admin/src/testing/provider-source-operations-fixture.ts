@@ -138,10 +138,10 @@ export function operationSource(
       latestFailureCode: index === 3 ? "SOURCE_ACTION_REQUIRED" : null,
       recoveredAt: null,
     },
-    checkpoint: {
+    cursor: {
       generation: String(index + 1),
       fingerprint: String(index + 1).repeat(64),
-      resumeLabel: "Saved checkpoint",
+      resumeLabel: "Saved cursor",
     },
     progress: {
       pages: index + 4,
@@ -270,7 +270,7 @@ export function operationsDetail(index = 0): ProviderSourceOperationsDetail {
       records: { catalog: 10, pulls: 20, trades: 30, total: 60 },
       dispositions: { inserted: 44, revised: 5, duplicate: 10, quarantined: 1 },
       continuation: { kind: "continue" },
-      checkpointFingerprint: "a".repeat(64),
+      cursorFingerprint: "a".repeat(64),
     }],
     sourceTest: {
       state: "succeeded",
@@ -306,7 +306,7 @@ export function diagnosticHistory(
       responseBytes: 2_048,
       retryDelayMilliseconds: null,
       continuation: { kind: "continue" },
-      checkpointFingerprint: "a".repeat(64),
+      cursorFingerprint: "a".repeat(64),
       counters: { records: 60 },
       references: [{ kind: "run", label: "Open run", href: `/runs/${operationsFixtureIds.runs[index]}` }],
     },
@@ -322,7 +322,7 @@ export function diagnosticHistory(
       responseBytes: null,
       retryDelayMilliseconds: 5_000,
       continuation: null,
-      checkpointFingerprint: null,
+      cursorFingerprint: null,
       counters: {},
       references: [],
     }] : []),
@@ -416,10 +416,10 @@ export function sourceAdminCatalog(): ProviderSourceAdminCatalog {
       intervalSeconds: source.schedule!.intervalSeconds,
       freshnessGraceSeconds: 900 as const,
       scheduleRevisionId: source.schedule!.scheduleRevisionId,
-      checkpoint: {
-        generation: source.checkpoint!.generation,
-        fingerprint: source.checkpoint!.fingerprint,
-        resumeLabel: source.checkpoint!.resumeLabel,
+      cursor: {
+        generation: source.cursor!.generation,
+        fingerprint: source.cursor!.fingerprint,
+        resumeLabel: source.cursor!.resumeLabel,
       },
       test: {
         jobId: source.source!.sourceRevisionId,

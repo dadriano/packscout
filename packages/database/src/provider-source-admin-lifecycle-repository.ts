@@ -5,7 +5,7 @@ import {
 } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import { ProviderSourceAdminReadRepository } from "./provider-source-admin-read-repository.ts";
-import { ProviderSourceCheckpointRepository } from "./provider-source-checkpoint-repository.ts";
+import { ProviderSourceCursorRepository } from "./provider-source-cursor-repository.ts";
 import { ProviderSourceDiagnosticRepository } from
   "./provider-source-diagnostic-repository.ts";
 import { ProviderSourceLifecycleRepository } from "./provider-source-lifecycle-repository.ts";
@@ -14,13 +14,13 @@ import { providerSourceTransactionTime } from "./provider-source-database-clock.
 export class ProviderSourceAdminLifecycleRepository
   extends ProviderSourceAdminReadRepository {
   readonly #lifecycle: ProviderSourceLifecycleRepository;
-  readonly #checkpoints: ProviderSourceCheckpointRepository;
+  readonly #cursors: ProviderSourceCursorRepository;
   readonly #diagnostics: ProviderSourceDiagnosticRepository;
 
   constructor(database: PackscoutPrismaClient) {
     super(database);
     this.#lifecycle = new ProviderSourceLifecycleRepository(database);
-    this.#checkpoints = new ProviderSourceCheckpointRepository(database);
+    this.#cursors = new ProviderSourceCursorRepository(database);
     this.#diagnostics = new ProviderSourceDiagnosticRepository(database);
   }
 
@@ -34,7 +34,7 @@ export class ProviderSourceAdminLifecycleRepository
     mapperKey: string;
     mapperVersion: string;
     identityNamespaceKey: string;
-    checkpointCodecVersion: string;
+    cursorCodecVersion: string;
     configuration: Readonly<Record<string, unknown>>;
     configurationHash: string;
     recordIdScopes: readonly string[];
@@ -64,7 +64,7 @@ export class ProviderSourceAdminLifecycleRepository
       },
     });
     if (!source?.active_revision_id) return null;
-    const [provider, revision, profile, schedule, checkpoint, activeRun] =
+    const [provider, revision, profile, schedule, cursor, activeRun] =
       await Promise.all([
         this.database.provider_sources.findFirst({
           where: {
@@ -93,7 +93,7 @@ export class ProviderSourceAdminLifecycleRepository
             organization_id: input.organizationId,
           },
         }),
-        this.database.provider_source_checkpoints.findFirst({
+        this.database.provider_source_cursors.findFirst({
           where: {
             source_instance_id: source.id,
             organization_id: input.organizationId,
@@ -108,7 +108,7 @@ export class ProviderSourceAdminLifecycleRepository
           select: { id: true },
         }),
       ]);
-    if (!provider || !revision || !schedule || !checkpoint) return null;
+    if (!provider || !revision || !schedule || !cursor) return null;
     const scheduleRevision =
       await this.database.provider_source_schedule_revisions.findFirst({
         where: {
@@ -142,8 +142,8 @@ export class ProviderSourceAdminLifecycleRepository
       recordIdScopes: scopes,
       scheduleRevisionId: schedule.active_schedule_revision_id,
       intervalSeconds: scheduleRevision.interval_seconds,
-      checkpointGeneration: checkpoint.checkpoint_generation,
-      checkpointFingerprint: checkpoint.checkpoint_fingerprint,
+      cursorGeneration: cursor.cursor_generation,
+      cursorFingerprint: cursor.cursor_fingerprint,
       hasActiveRun: activeRun !== null,
     };
   }
@@ -407,7 +407,7 @@ export class ProviderSourceAdminLifecycleRepository
     await this.#transition(input, "disable");
   }
 
-  async resetCheckpoint(input: Readonly<{
+  async resetCursor(input: Readonly<{
     organizationId: string;
     providerId: string;
     sourceInstanceId: string;
@@ -417,7 +417,7 @@ export class ProviderSourceAdminLifecycleRepository
     actorKey: string;
     resetAt: Date;
   }>): Promise<bigint> {
-    return this.#checkpoints.reset(input);
+    return this.#cursors.reset(input);
   }
 
   async #transition(

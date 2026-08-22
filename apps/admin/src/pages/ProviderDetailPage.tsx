@@ -267,7 +267,7 @@ export function ProviderDetailPage() {
           ? `${source.displayName}: pause requested; the current page may commit.`
           : result.state === "paused"
             ? `${source.displayName}: paused before another page began.`
-            : `${source.displayName}: resumed from ${source.checkpoint?.resumeLabel ?? "the committed checkpoint"}.`;
+            : `${source.displayName}: resumed from ${source.cursor?.resumeLabel ?? "the committed cursor"}.`;
       }
       setAnnouncement(message);
       showToast(message, "success");
@@ -326,7 +326,7 @@ export function ProviderDetailPage() {
           intervalSeconds: seconds,
         },
       );
-      const message = `${detail.source.displayName}: interval changed to ${interval(seconds)}; current work and checkpoint were preserved.`;
+      const message = `${detail.source.displayName}: interval changed to ${interval(seconds)}; current work and cursor were preserved.`;
       setAnnouncement(message);
       showToast(message, "success");
       refresh();
@@ -413,7 +413,7 @@ export function ProviderDetailPage() {
         <aside className="source-operator-boundary">
           <strong>{canOperate ? "Operation access, not configuration access" : "Read-only provider evidence"}</strong>
           <p>{canOperate
-            ? "You may run, pause, resume, and retry authorized quarantine records. Credential, binding, interval, activation, replacement, disable, and checkpoint controls remain administrator-only."
+            ? "You may run, pause, resume, and retry authorized quarantine records. Credential, binding, interval, activation, replacement, disable, and cursor controls remain administrator-only."
             : "Your role can inspect current safe processor, run, page, and diagnostic evidence but cannot operate or configure this source."}</p>
         </aside>
       ) : (
@@ -462,13 +462,13 @@ export function ProviderDetailPage() {
               <div><dt>Capabilities</dt><dd>{detail.connection ? Object.entries(detail.connection.sourceType.capabilities).filter(([, enabled]) => enabled).map(([name]) => humanize(name)).join(" · ") : "Unavailable"}</dd></div>
             </dl>
           </section>
-          <section className="source-detail-panel" aria-labelledby="source-checkpoint-title">
-            <header><span className="admin-kicker">Durable committed position</span><h2 id="source-checkpoint-title">Checkpoint and schedule</h2></header>
+          <section className="source-detail-panel" aria-labelledby="source-cursor-title">
+            <header><span className="admin-kicker">Durable committed position</span><h2 id="source-cursor-title">Cursor and schedule</h2></header>
             <dl>
-              <div><dt>Checkpoint owner</dt><dd>{sourceRevision.sourceInstanceId}</dd></div>
-              <div><dt>Generation</dt><dd>{source.checkpoint?.generation ?? "Not established"}</dd></div>
-              <div><dt>Safe fingerprint</dt><dd className="ops-cursor">{source.checkpoint?.fingerprint ?? "Feed start"}</dd></div>
-              <div><dt>Resume</dt><dd>{source.checkpoint?.resumeLabel ?? "Feed start"}</dd></div>
+              <div><dt>Source instance</dt><dd>{sourceRevision.sourceInstanceId}</dd></div>
+              <div><dt>Generation</dt><dd>{source.cursor?.generation ?? "Not established"}</dd></div>
+              <div><dt>Safe fingerprint</dt><dd className="ops-cursor">{source.cursor?.fingerprint ?? "Feed start"}</dd></div>
+              <div><dt>Resume</dt><dd>{source.cursor?.resumeLabel ?? "Feed start"}</dd></div>
               <div><dt>Interval / grace</dt><dd>{source.schedule ? `${interval(source.schedule.intervalSeconds)} / ${interval(source.schedule.freshnessGraceSeconds)}` : "Not scheduled"}</dd></div>
               <div><dt>Next due</dt><dd>{dateTime(source.schedule?.nextDueAt ?? null)}</dd></div>
             </dl>
@@ -498,7 +498,7 @@ export function ProviderDetailPage() {
 
       <section className="source-page-progress" aria-labelledby="source-page-progress-title">
         <header className="admin-section-header"><div><span className="admin-kicker">Atomic committed pages</span><h2 id="source-page-progress-title">Page progress</h2></div><span className="admin-section-count">{detail.pageProgress.length} shown</span></header>
-        {detail.pageProgress.length === 0 ? <EmptyState title="No committed pages" description="A queued run, no live worker, or a failure before commit has no page progress." /> : <div className="source-page-progress__rows">{detail.pageProgress.map((page) => <article key={`${page.runId}:${page.pageNumber}`}><header><strong>Page {page.pageNumber}</strong><Link to={`/runs/${page.runId}`}>Open run</Link><time dateTime={page.committedAt}>{dateTime(page.committedAt)}</time></header><dl><div><dt>Streams</dt><dd>{page.records.catalog} catalog · {page.records.pulls} pulls · {page.records.trades} trades · {page.records.total} total</dd></div><div><dt>Dispositions</dt><dd>{page.dispositions.inserted} inserted · {page.dispositions.revised} revised · {page.dispositions.duplicate} duplicate · {page.dispositions.quarantined} quarantined</dd></div><div><dt>Continuation</dt><dd>{page.continuation ? humanize(page.continuation.kind) : "Provider head"}</dd></div><div><dt>Checkpoint</dt><dd className="ops-cursor">{page.checkpointFingerprint ?? "Not attached"}</dd></div></dl></article>)}</div>}
+        {detail.pageProgress.length === 0 ? <EmptyState title="No committed pages" description="A queued run, no live worker, or a failure before commit has no page progress." /> : <div className="source-page-progress__rows">{detail.pageProgress.map((page) => <article key={`${page.runId}:${page.pageNumber}`}><header><strong>Page {page.pageNumber}</strong><Link to={`/runs/${page.runId}`}>Open run</Link><time dateTime={page.committedAt}>{dateTime(page.committedAt)}</time></header><dl><div><dt>Streams</dt><dd>{page.records.catalog} catalog · {page.records.pulls} pulls · {page.records.trades} trades · {page.records.total} total</dd></div><div><dt>Dispositions</dt><dd>{page.dispositions.inserted} inserted · {page.dispositions.revised} revised · {page.dispositions.duplicate} duplicate · {page.dispositions.quarantined} quarantined</dd></div><div><dt>Continuation</dt><dd>{page.continuation ? humanize(page.continuation.kind) : "Provider head"}</dd></div><div><dt>Cursor</dt><dd className="ops-cursor">{page.cursorFingerprint ?? "Not attached"}</dd></div></dl></article>)}</div>}
       </section>
 
       <SourceDiagnosticFeed

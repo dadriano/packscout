@@ -540,9 +540,9 @@ export class ProviderSourceSupervisorWorkRepository {
                       operation_kind: "page_read" as const,
                       run_id: work.runId,
                       page_number: work.pageNumber,
-                      checkpoint_generation: work.checkpointGeneration,
-                      requested_checkpoint_key:
-                        work.requestedCheckpointFingerprint ?? "initial",
+                      cursor_generation: work.cursorGeneration,
+                      requested_cursor_key:
+                        work.requestedCursorFingerprint ?? "initial",
                     }),
             },
             select: { request_attempt_id: true },
@@ -735,9 +735,9 @@ export class ProviderSourceSupervisorWorkRepository {
               operation_kind: "page_read",
               run_id: input.work.runId,
               page_number: input.work.pageNumber,
-              checkpoint_generation: input.work.checkpointGeneration,
-              requested_checkpoint_key:
-                input.work.requestedCheckpointFingerprint ?? "initial",
+              cursor_generation: input.work.cursorGeneration,
+              requested_cursor_key:
+                input.work.requestedCursorFingerprint ?? "initial",
             },
             orderBy: [
               { terminal_at: "desc" },
@@ -824,8 +824,8 @@ export class ProviderSourceSupervisorWorkRepository {
             input.decision.pagesCommitted ||
           boundedCounter(run.counters_json, "records") !==
             input.decision.recordsCommitted ||
-          run.current_checkpoint_fingerprint !==
-            input.decision.checkpointFingerprint
+          run.current_cursor_fingerprint !==
+            input.decision.cursorFingerprint
         ) {
           throw new PersistenceError(
             "SOURCE_FENCED",
@@ -863,7 +863,7 @@ export class ProviderSourceSupervisorWorkRepository {
             retryNotBefore: null,
             runLeaseAcquiredAt: null,
             runLeaseExpiresAt: null,
-            checkpointFingerprint: input.decision.checkpointFingerprint,
+            cursorFingerprint: input.decision.cursorFingerprint,
             continuationKind: "continue",
             continuationMinimumDelaySeconds: null,
             pagesCommitted,
@@ -928,7 +928,7 @@ export class ProviderSourceSupervisorWorkRepository {
           retryNotBefore: null,
           runLeaseAcquiredAt: null,
           runLeaseExpiresAt: null,
-          checkpointFingerprint: input.decision.checkpointFingerprint,
+          cursorFingerprint: input.decision.cursorFingerprint,
           continuationKind: "continue",
           continuationMinimumDelaySeconds: null,
           pagesCommitted,
@@ -1026,7 +1026,7 @@ export class ProviderSourceSupervisorWorkRepository {
           retryNotBefore: null,
           runLeaseAcquiredAt: null,
           runLeaseExpiresAt: null,
-          checkpointFingerprint: input.decision.checkpointFingerprint,
+          cursorFingerprint: input.decision.cursorFingerprint,
           continuationKind: "poll_after",
           continuationMinimumDelaySeconds:
             input.decision.minimumDelaySeconds,
@@ -1173,7 +1173,7 @@ export class ProviderSourceSupervisorWorkRepository {
   }
 
   /**
-   * A page commit advances the run/checkpoint atomically before the supervisor
+   * A page commit advances the run/cursor atomically before the supervisor
    * records the fair-turn disposition. If the owner dies in that narrow gap,
    * finalize the already committed page from durable page metadata. Never
    * requeue it for another adapter request.

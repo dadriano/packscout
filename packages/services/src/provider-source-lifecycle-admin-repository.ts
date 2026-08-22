@@ -22,8 +22,8 @@ export interface ProviderSourceLifecycleSnapshot {
   readonly recordIdScopes: readonly string[];
   readonly scheduleRevisionId: string;
   readonly intervalSeconds: number;
-  readonly checkpointGeneration: bigint;
-  readonly checkpointFingerprint: string | null;
+  readonly cursorGeneration: bigint;
+  readonly cursorFingerprint: string | null;
   readonly hasActiveRun: boolean;
 }
 
@@ -58,7 +58,7 @@ export interface ProviderSourceLifecycleAdminRepository {
     mapperKey: string;
     mapperVersion: string;
     identityNamespaceKey: string;
-    checkpointCodecVersion: string;
+    cursorCodecVersion: string;
     configuration: Readonly<Record<string, unknown>>;
     configurationHash: string;
     recordIdScopes: readonly string[];
@@ -116,7 +116,7 @@ export interface ProviderSourceLifecycleAdminRepository {
     actorKey: string;
     disabledAt: Date;
   }>): Promise<void>;
-  resetCheckpoint(input: Readonly<{
+  resetCursor(input: Readonly<{
     organizationId: string;
     providerId: string;
     sourceInstanceId: string;

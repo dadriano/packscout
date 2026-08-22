@@ -35,7 +35,7 @@ export interface ProviderSourceActivationCandidate {
     mapperKey: string;
     mapperVersion: string;
     identityNamespaceKey: string;
-    checkpointCodecVersion: string;
+    cursorCodecVersion: string;
     configuration: unknown;
     configurationHash: string;
     recordIdScopes: unknown;
@@ -56,13 +56,13 @@ export interface ProviderSourceActivationCandidate {
     configurationFingerprint: string;
     revokedAt: Date | null;
   }>;
-  readonly checkpoint: Readonly<{
+  readonly cursor: Readonly<{
     sourceRevisionId: string;
     sourceAdapterVersion: string;
-    checkpointCodecVersion: string;
-    checkpointGeneration: bigint;
-    checkpointFingerprint: string | null;
-    hasCheckpointBytes: boolean;
+    cursorCodecVersion: string;
+    cursorGeneration: bigint;
+    cursorFingerprint: string | null;
+    hasCursor: boolean;
     advancedByRunId: string | null;
     advancedByPageId: string | null;
   }>;
@@ -80,7 +80,7 @@ export interface ActivateProviderSourcePausedExactInput {
   readonly mapperKey: string;
   readonly mapperVersion: string;
   readonly identityNamespaceKey: string;
-  readonly checkpointCodecVersion: string;
+  readonly cursorCodecVersion: string;
   readonly sourceConfiguration: Readonly<Record<string, unknown>>;
   readonly sourceConfigurationHash: string;
   readonly recordIdScopes: readonly string[];
@@ -89,7 +89,7 @@ export interface ActivateProviderSourcePausedExactInput {
   readonly connectionRequestLimit: number;
   readonly connectionRevisionId: string;
   readonly connectionConfigurationFingerprint: string;
-  readonly checkpointGeneration: bigint;
+  readonly cursorGeneration: bigint;
   readonly actorKey: string;
   readonly activatedAt: Date;
 }
@@ -146,7 +146,7 @@ export interface ActivatedProviderSourceContract {
   readonly normalizedContractVersion: string;
   readonly mapper: SourceMapperCompatibilityDescriptor;
   readonly identityNamespaceKey: string;
-  readonly checkpointCodecVersion: string;
+  readonly cursorCodecVersion: string;
   readonly requestBounds: ProviderSourceRequestBounds;
   readonly approvedAggregateRequestCap: number;
 }
@@ -269,20 +269,20 @@ function requireRelationalPins(candidate: ProviderSourceActivationCandidate): vo
   ) refuse("activation_candidate_invalid");
 }
 
-function requireActivationCheckpoint(candidate: ProviderSourceActivationCandidate): void {
-  const { checkpoint, sourceRevision } = candidate;
+function requireActivationCursor(candidate: ProviderSourceActivationCandidate): void {
+  const { cursor, sourceRevision } = candidate;
   if (
-    checkpoint.sourceRevisionId !== sourceRevision.id
-    || checkpoint.sourceAdapterVersion !== sourceRevision.sourceAdapterVersion
-    || checkpoint.checkpointCodecVersion !== sourceRevision.checkpointCodecVersion
+    cursor.sourceRevisionId !== sourceRevision.id
+    || cursor.sourceAdapterVersion !== sourceRevision.sourceAdapterVersion
+    || cursor.cursorCodecVersion !== sourceRevision.cursorCodecVersion
   ) refuse("adapter_manifest_mismatch");
   if (
     candidate.sourceInstance.state === "draft" &&
-    (checkpoint.checkpointGeneration !== 1n
-      || checkpoint.checkpointFingerprint !== null
-      || checkpoint.hasCheckpointBytes
-      || checkpoint.advancedByRunId !== null
-      || checkpoint.advancedByPageId !== null)
+    (cursor.cursorGeneration !== 1n
+      || cursor.cursorFingerprint !== null
+      || cursor.hasCursor
+      || cursor.advancedByRunId !== null
+      || cursor.advancedByPageId !== null)
   ) refuse("adapter_manifest_mismatch");
 }
 
@@ -349,7 +349,7 @@ export class ProviderSourceActivationService {
         revision.normalizedContractVersion
       || adapter.manifest.compatibleConnectionTypeKey !==
         candidate.connectionProfile.connectionTypeKey
-      || adapter.manifest.checkpointCodecKey !== revision.checkpointCodecVersion
+      || adapter.manifest.cursorCodecKey !== revision.cursorCodecVersion
       || declaration.identityNamespaceKey !== revision.identityNamespaceKey
       || !persistedScopes
       || !sameSequence(persistedScopes, manifestScopes)
@@ -358,7 +358,7 @@ export class ProviderSourceActivationService {
         adapter.manifest.maximumConnectionRequestCap
     ) refuse("adapter_manifest_mismatch");
     requireRequestBoundsWithinLaunchEnvelope(adapter.manifest.requestBounds);
-    requireActivationCheckpoint(candidate);
+    requireActivationCursor(candidate);
 
     const mapper = this.#mapperDescriptors.requireCompatible({
       mapperKey: revision.mapperKey,
@@ -413,7 +413,7 @@ export class ProviderSourceActivationService {
       mapperKey: revision.mapperKey,
       mapperVersion: revision.mapperVersion,
       identityNamespaceKey: revision.identityNamespaceKey,
-      checkpointCodecVersion: revision.checkpointCodecVersion,
+      cursorCodecVersion: revision.cursorCodecVersion,
       sourceConfiguration,
       sourceConfigurationHash: revision.configurationHash,
       recordIdScopes: persistedScopes,
@@ -423,7 +423,7 @@ export class ProviderSourceActivationService {
       connectionRevisionId: candidate.connectionRevision.id,
       connectionConfigurationFingerprint:
         candidate.connectionRevision.configurationFingerprint,
-      checkpointGeneration: candidate.checkpoint.checkpointGeneration,
+      cursorGeneration: candidate.cursor.cursorGeneration,
       actorKey: input.actorKey,
       activatedAt: input.activatedAt,
     });
@@ -435,7 +435,7 @@ export class ProviderSourceActivationService {
       normalizedContractVersion: revision.normalizedContractVersion,
       mapper,
       identityNamespaceKey: revision.identityNamespaceKey,
-      checkpointCodecVersion: revision.checkpointCodecVersion,
+      cursorCodecVersion: revision.cursorCodecVersion,
       requestBounds: adapter.manifest.requestBounds,
       approvedAggregateRequestCap: candidate.connectionProfile.requestLimit,
     });

@@ -1,38 +1,38 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { OpaqueCheckpointEnvelope } from "@packscout/contracts";
+import type { OpaqueCursorEnvelope } from "@packscout/contracts";
 import {
-  OpaqueCheckpointGuard,
-  OpaqueCheckpointGuardError,
-} from "./opaque-checkpoint-guard.ts";
+  OpaqueCursorGuard,
+  OpaqueCursorGuardError,
+} from "./opaque-cursor-guard.ts";
 
-const base: OpaqueCheckpointEnvelope = {
+const base: OpaqueCursorEnvelope = {
   sourceInstanceId: "source-1",
   sourceRevisionId: "source-revision-1",
   sourceTypeKey: "fixture-source-v1",
   adapterVersion: "fixture-adapter-v1",
-  checkpointCodecKey: "fixture-checkpoint-v1",
-  checkpointGeneration: 1,
+  cursorCodecKey: "fixture-cursor-v1",
+  cursorGeneration: 1,
   value: null,
 };
-const guard = new OpaqueCheckpointGuard(Buffer.alloc(32, 7));
+const guard = new OpaqueCursorGuard(Buffer.alloc(32, 7));
 
-function expectCode(code: OpaqueCheckpointGuardError["code"], invoke: () => unknown) {
+function expectCode(code: OpaqueCursorGuardError["code"], invoke: () => unknown) {
   assert.throws(
     invoke,
-    (error) => error instanceof OpaqueCheckpointGuardError && error.code === code,
+    (error) => error instanceof OpaqueCursorGuardError && error.code === code,
   );
 }
 
-test("continue requires a new non-null opaque checkpoint", () => {
-  expectCode("continue_checkpoint_missing", () =>
+test("continue requires a new non-null opaque cursor", () => {
+  expectCode("continue_cursor_missing", () =>
     guard.guard({
       requested: base,
       next: base,
       continuation: { kind: "continue" },
       committedFingerprints: new Set(),
     }));
-  expectCode("continue_checkpoint_unchanged", () =>
+  expectCode("continue_cursor_unchanged", () =>
     guard.guard({
       requested: { ...base, value: "A" },
       next: { ...base, value: "A" },
@@ -52,7 +52,7 @@ test("committed fingerprints reject A-to-B-to-A cycles after restart", () => {
     committedFingerprints: committedAfterFirstRun,
   });
   committedAfterFirstRun.add(bTransition.nextFingerprint);
-  expectCode("checkpoint_cycle_detected", () =>
+  expectCode("cursor_cycle_detected", () =>
     guard.guard({
       requested: b,
       next: a,
@@ -61,7 +61,7 @@ test("committed fingerprints reject A-to-B-to-A cycles after restart", () => {
     }));
 });
 
-test("poll_after may preserve null or non-null checkpoints", () => {
+test("poll_after may preserve null or non-null cursors", () => {
   assert.equal(
     guard.guard({
       requested: base,
@@ -89,7 +89,7 @@ test("null and the opaque string null have distinct fingerprints", () => {
 });
 
 test("binding changes and weak fingerprint keys fail closed", () => {
-  expectCode("checkpoint_binding_mismatch", () =>
+  expectCode("cursor_binding_mismatch", () =>
     guard.guard({
       requested: base,
       next: { ...base, sourceRevisionId: "other", value: "B" },
@@ -97,7 +97,7 @@ test("binding changes and weak fingerprint keys fail closed", () => {
       committedFingerprints: new Set(),
     }));
   expectCode(
-    "checkpoint_fingerprint_key_invalid",
-    () => new OpaqueCheckpointGuard(Buffer.alloc(31)),
+    "cursor_fingerprint_key_invalid",
+    () => new OpaqueCursorGuard(Buffer.alloc(31)),
   );
 });

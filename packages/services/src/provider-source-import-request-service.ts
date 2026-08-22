@@ -24,7 +24,7 @@ export interface ProviderSourceImportRunSummary {
   readonly sourceRevisionId: string;
   readonly trigger: "scheduled" | "manual" | "continuation" | "recovery";
   readonly state: "queued" | "running" | "succeeded" | "incomplete" | "failed";
-  readonly requestedCheckpointFingerprint: string | null;
+  readonly requestedCursorFingerprint: string | null;
   readonly createdAt: Date;
 }
 export interface ProviderSourceImportRunRequestRepository {

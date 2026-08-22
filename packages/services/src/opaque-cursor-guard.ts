@@ -1,22 +1,22 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type {
   NormalizedContinuation,
-  OpaqueCheckpointEnvelope,
+  OpaqueCursorEnvelope,
 } from "@packscout/contracts";
 
-export type OpaqueCheckpointGuardErrorCode =
-  | "checkpoint_binding_mismatch"
-  | "checkpoint_cycle_detected"
-  | "checkpoint_fingerprint_key_invalid"
-  | "continue_checkpoint_missing"
-  | "continue_checkpoint_unchanged";
+export type OpaqueCursorGuardErrorCode =
+  | "cursor_binding_mismatch"
+  | "cursor_cycle_detected"
+  | "cursor_fingerprint_key_invalid"
+  | "continue_cursor_missing"
+  | "continue_cursor_unchanged";
 
-export class OpaqueCheckpointGuardError extends Error {
-  readonly code: OpaqueCheckpointGuardErrorCode;
+export class OpaqueCursorGuardError extends Error {
+  readonly code: OpaqueCursorGuardErrorCode;
 
-  constructor(code: OpaqueCheckpointGuardErrorCode) {
-    super(`opaque_checkpoint.${code}`);
-    this.name = "OpaqueCheckpointGuardError";
+  constructor(code: OpaqueCursorGuardErrorCode) {
+    super(`opaque_cursor.${code}`);
+    this.name = "OpaqueCursorGuardError";
     this.code = code;
   }
 }
@@ -26,9 +26,9 @@ const bindingFields = [
   "sourceRevisionId",
   "sourceTypeKey",
   "adapterVersion",
-  "checkpointCodecKey",
-  "checkpointGeneration",
-] as const satisfies readonly (keyof OpaqueCheckpointEnvelope)[];
+  "cursorCodecKey",
+  "cursorGeneration",
+] as const satisfies readonly (keyof OpaqueCursorEnvelope)[];
 
 function safeEqual(left: string, right: string): boolean {
   const leftBytes = Buffer.from(left);
@@ -37,57 +37,57 @@ function safeEqual(left: string, right: string): boolean {
     timingSafeEqual(leftBytes, rightBytes);
 }
 
-export interface GuardCheckpointTransitionInput {
-  readonly requested: OpaqueCheckpointEnvelope;
-  readonly next: OpaqueCheckpointEnvelope;
+export interface GuardCursorTransitionInput {
+  readonly requested: OpaqueCursorEnvelope;
+  readonly next: OpaqueCursorEnvelope;
   readonly continuation: NormalizedContinuation;
   readonly committedFingerprints: ReadonlySet<string>;
 }
 
-export interface GuardedCheckpointTransition {
+export interface GuardedCursorTransition {
   readonly nextFingerprint: string;
   readonly shouldContinueImmediately: boolean;
 }
 
-export class OpaqueCheckpointGuard {
+export class OpaqueCursorGuard {
   readonly #fingerprintKey: Buffer;
 
   constructor(fingerprintKey: Uint8Array) {
     if (fingerprintKey.byteLength < 32) {
-      throw new OpaqueCheckpointGuardError("checkpoint_fingerprint_key_invalid");
+      throw new OpaqueCursorGuardError("cursor_fingerprint_key_invalid");
     }
     this.#fingerprintKey = Buffer.from(fingerprintKey);
   }
 
-  fingerprint(checkpoint: OpaqueCheckpointEnvelope): string {
-    const value = checkpoint.value === null
+  fingerprint(cursor: OpaqueCursorEnvelope): string {
+    const value = cursor.value === null
       ? "N"
-      : `S\0${Buffer.byteLength(checkpoint.value, "utf8")}\0${checkpoint.value}`;
+      : `S\0${Buffer.byteLength(cursor.value, "utf8")}\0${cursor.value}`;
     return createHmac("sha256", this.#fingerprintKey)
-      .update(checkpoint.sourceInstanceId)
+      .update(cursor.sourceInstanceId)
       .update("\0")
-      .update(String(checkpoint.checkpointGeneration))
+      .update(String(cursor.cursorGeneration))
       .update("\0")
       .update(value)
       .digest("hex");
   }
 
-  guard(input: GuardCheckpointTransitionInput): GuardedCheckpointTransition {
+  guard(input: GuardCursorTransitionInput): GuardedCursorTransition {
     for (const field of bindingFields) {
       if (input.requested[field] !== input.next[field]) {
-        throw new OpaqueCheckpointGuardError("checkpoint_binding_mismatch");
+        throw new OpaqueCursorGuardError("cursor_binding_mismatch");
       }
     }
 
     if (input.continuation.kind === "continue") {
       if (input.next.value === null) {
-        throw new OpaqueCheckpointGuardError("continue_checkpoint_missing");
+        throw new OpaqueCursorGuardError("continue_cursor_missing");
       }
       if (
         input.requested.value !== null &&
         safeEqual(input.requested.value, input.next.value)
       ) {
-        throw new OpaqueCheckpointGuardError("continue_checkpoint_unchanged");
+        throw new OpaqueCursorGuardError("continue_cursor_unchanged");
       }
     }
 
@@ -96,7 +96,7 @@ export class OpaqueCheckpointGuard {
       input.continuation.kind === "continue" &&
       input.committedFingerprints.has(nextFingerprint)
     ) {
-      throw new OpaqueCheckpointGuardError("checkpoint_cycle_detected");
+      throw new OpaqueCursorGuardError("cursor_cycle_detected");
     }
     return Object.freeze({
       nextFingerprint,

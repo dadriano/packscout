@@ -117,7 +117,7 @@ export function ConnectionOperationsSummary({
       </dl>
       {connection.health.blocking ? (
         <p className="source-connection-band__impact" role="status">
-          Shared connection impact began {dateTime(connection.health.blocking.openedAt)}. Each processor retains its own checkpoint, lifecycle, and quality evidence.
+          Shared connection impact began {dateTime(connection.health.blocking.openedAt)}. Each processor retains its own cursor, lifecycle, and quality evidence.
         </p>
       ) : null}
     </section>

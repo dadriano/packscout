@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   launchRecordIdScopeDeclarations,
   type NormalizedProviderObservationPage,
-  type OpaqueCheckpointEnvelope,
+  type OpaqueCursorEnvelope,
   type SourceAdapterManifestV1,
 } from "@packscout/contracts";
 import { ConnectionPermitCoordinator } from
@@ -39,7 +39,7 @@ import {
 export interface AuthenticPageOperationFixture {
   readonly manifest: SourceAdapterManifestV1;
   readonly pins: PageReadRequestPins;
-  readonly requestedCheckpoint: OpaqueCheckpointEnvelope;
+  readonly requestedCursor: OpaqueCursorEnvelope;
   readonly connectionConfiguration?: Readonly<Record<string, unknown>>;
   readonly sourceConfiguration?: Readonly<Record<string, unknown>>;
 }
@@ -174,7 +174,7 @@ export async function completeAuthenticPageReadForTest(
   const authority = new SourceRequestLeaseAuthority(coordinator);
   const requestLease = await authority.admit({
     pins: fixture.pins,
-    requestedCheckpoint: fixture.requestedCheckpoint,
+    requestedCursor: fixture.requestedCursor,
     guard: () => true,
   });
   const supportedProvider = fixture.manifest.supportedProviders.find(
@@ -207,10 +207,10 @@ export async function completeAuthenticPageReadForTest(
       runClaimLeaseId: fixture.pins.runClaimLeaseId,
       pageAttemptId: fixture.pins.pageAttemptId,
       pageNumber: fixture.pins.pageNumber,
-      checkpointGeneration: fixture.pins.checkpointGeneration,
-      requestedCheckpointFingerprint:
-        fixture.pins.requestedCheckpointFingerprint,
-      requestedCheckpoint: fixture.requestedCheckpoint,
+      cursorGeneration: fixture.pins.cursorGeneration,
+      requestedCursorFingerprint:
+        fixture.pins.requestedCursorFingerprint,
+      requestedCursor: fixture.requestedCursor,
       pageLimit: fixture.pins.pageLimit,
     },
   });

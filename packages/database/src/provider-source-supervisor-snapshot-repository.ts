@@ -50,8 +50,8 @@ interface SourceLaneRow {
   readonly mapperKey: string;
   readonly mapperVersion: string;
   readonly identityNamespaceKey: string;
-  readonly checkpointCodecVersion: string;
-  readonly checkpointGeneration: bigint;
+  readonly cursorCodecVersion: string;
+  readonly cursorGeneration: bigint;
   readonly lifecycle: "draft" | "paused" | "active" | "disabled" | "replaced";
   readonly phase: string;
   readonly activity: string;
@@ -64,7 +64,7 @@ interface SourceLaneRow {
   readonly pagesCommitted: number;
   readonly recordsCommitted: number;
   readonly lastProgressAt: Date | null;
-  readonly checkpointFingerprint: string | null;
+  readonly cursorFingerprint: string | null;
   readonly continuationKind: "continue" | "poll_after" | null;
   readonly continuationMinimumDelaySeconds: number | null;
   readonly nextDueAt: Date | null;
@@ -212,8 +212,8 @@ export class ProviderSourceSupervisorSnapshotRepository {
                revision.mapper_key as "mapperKey",
                revision.mapper_version as "mapperVersion",
                revision.identity_namespace_key as "identityNamespaceKey",
-               checkpoint.checkpoint_codec_version as "checkpointCodecVersion",
-               checkpoint.checkpoint_generation as "checkpointGeneration",
+               cursor.cursor_codec_version as "cursorCodecVersion",
+               cursor.cursor_generation as "cursorGeneration",
                source.state::text as lifecycle,
                runtime.phase,
                runtime.activity,
@@ -226,7 +226,7 @@ export class ProviderSourceSupervisorSnapshotRepository {
                runtime.pages_committed as "pagesCommitted",
                runtime.records_committed as "recordsCommitted",
                runtime.last_progress_at as "lastProgressAt",
-               runtime.checkpoint_fingerprint as "checkpointFingerprint",
+               runtime.cursor_fingerprint as "cursorFingerprint",
                runtime.continuation_kind::text as "continuationKind",
                runtime.continuation_minimum_delay_seconds
                  as "continuationMinimumDelaySeconds",
@@ -247,11 +247,11 @@ export class ProviderSourceSupervisorSnapshotRepository {
         join public.provider_sources as provider
           on provider.id = runtime.provider_id
          and provider.organization_id = runtime.organization_id
-        join public.provider_source_checkpoints as checkpoint
-          on checkpoint.source_instance_id = runtime.source_instance_id
-         and checkpoint.organization_id = runtime.organization_id
-         and checkpoint.provider_id = runtime.provider_id
-         and checkpoint.source_revision_id = runtime.source_revision_id
+        join public.provider_source_cursors as cursor
+          on cursor.source_instance_id = runtime.source_instance_id
+         and cursor.organization_id = runtime.organization_id
+         and cursor.provider_id = runtime.provider_id
+         and cursor.source_revision_id = runtime.source_revision_id
         where (${input.organizationId ?? null}::uuid is null
           or runtime.organization_id = cast(${input.organizationId ?? null} as uuid))
         order by runtime.organization_id, provider.platform_key,
@@ -309,8 +309,8 @@ export class ProviderSourceSupervisorSnapshotRepository {
             mapperKey: lane.mapperKey,
             mapperVersion: lane.mapperVersion,
             identityNamespaceKey: lane.identityNamespaceKey,
-            checkpointCodecVersion: lane.checkpointCodecVersion,
-            checkpointGeneration: lane.checkpointGeneration.toString(),
+            cursorCodecVersion: lane.cursorCodecVersion,
+            cursorGeneration: lane.cursorGeneration.toString(),
             lifecycle: lane.lifecycle,
             phase: lane.phase,
             activity: lane.activity,
@@ -332,7 +332,7 @@ export class ProviderSourceSupervisorSnapshotRepository {
               recordsCommitted: lane.recordsCommitted,
               lastProgressAt: iso(lane.lastProgressAt),
             },
-            checkpointFingerprint: lane.checkpointFingerprint,
+            cursorFingerprint: lane.cursorFingerprint,
             continuation: lane.continuationKind === null
               ? null
               : lane.continuationKind === "continue"

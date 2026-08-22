@@ -62,7 +62,7 @@ function source(index: number): ProviderSourceOperationsSource {
       latestFailureCode: null,
       recoveredAt: null,
     },
-    checkpoint: null,
+    cursor: null,
     progress: {
       pages: 0,
       records: { catalog: 0, pulls: 0, trades: 0, total: 0 },

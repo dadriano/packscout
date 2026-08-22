@@ -3,7 +3,7 @@
 This guide covers the provider-source ingestion pipeline after a PostgreSQL
 target has been provisioned. It explains how to configure sources, run one
 supervisor, monitor progress, stop and restart safely, and respond to common
-failure states without losing a committed checkpoint.
+failure states without losing a committed cursor.
 
 The current launch source is DataForrest, but the operating model is
 source-neutral: one shared connection feeds four independent provider lanes for
@@ -25,9 +25,9 @@ four stable provider roots, and prevents page reads during configuration.
   admin. It is encrypted at rest. Never put it in a tracked file, command,
   screenshot, log, diagnostic, or browser-visible variable.
 - Stop with `Ctrl-C` or `SIGTERM`. A graceful stop drains admitted work and
-  closes the database client. Never clear a lease or edit a checkpoint directly.
+  closes the database client. Never clear a lease or edit a cursor directly.
 - A retry, restart, pause, credential recovery, or worker takeover resumes from
-  the last atomically committed checkpoint. Do not reset a checkpoint as a
+  the last atomically committed cursor. Do not reset a cursor as a
   routine recovery action.
 - A full-history run requires the guarded capacity approval from the Task010
   runbook. The supervisor's ongoing 80% disk fence is an emergency stop
@@ -41,7 +41,7 @@ Admin console
   Pipeline Status ---------- operate and monitor four provider lanes
            |
            v
-PostgreSQL control plane --- schedules, runs, leases, checkpoints, diagnostics
+PostgreSQL control plane --- schedules, runs, leases, cursors, diagnostics
            |
            v
 One source supervisor ------ fair execution slots + shared connection permits
@@ -50,18 +50,37 @@ One source supervisor ------ fair execution slots + shared connection permits
 Source adapter ------------ capture, validate, normalize, classify
            |
            v
-Atomic importer ----------- evidence + canonical data + EV work + checkpoint
+Atomic importer ----------- evidence + canonical data + EV work + cursor
 ```
 
 The four provider lanes share connection health and the configured request
-limit, but each lane owns its source lifecycle, schedule, run, checkpoint,
+limit, but each lane owns its source lifecycle, schedule, run, cursor,
 freshness, quality, quarantine, and diagnostics. A provider-local failure must
 not stop a healthy sibling.
 
 Ingestion reaching provider head means PostgreSQL is current through the saved
-source checkpoint. It does not publish a release to Convex or make the data live
+source cursor. It does not publish a release to Convex or make the data live
 in the public catalog. That downstream boundary has its own
 [PostgreSQL-to-Convex promotion runbook](../postgres-convex-promotion-runbook.md).
+
+### How the next poll is stored
+
+PostgreSQL is authoritative for each provider source's resume position. The
+`provider_source_cursors` table has one row per source instance:
+
+- `cursor` is the nullable text value sent to the provider on the next poll;
+  `NULL` means **Feed start**.
+- `cursor_generation`, `cursor_codec_version`, and `cursor_fingerprint` record
+  the source-owned interpretation and safe comparison metadata.
+- `advanced_by_run_id`, `advanced_by_page_id`, and `updated_at` identify the
+  committed page that last moved the cursor.
+
+An atomic page commit stores the provider's returned cursor together with its
+run/page provenance and advances the run's `current_cursor` plus
+`next_page_number`. The next run initializes its `requested_cursor` and
+`current_cursor` from that saved source cursor. Admin and browser responses
+receive only `cursorFingerprint` and the **Saved cursor** label; the raw cursor
+never crosses the server boundary.
 
 ## Prerequisites
 
@@ -126,7 +145,7 @@ reviewed self-hosted environment with production configuration supplied by its
 secret store. Worker hosting and deployment remain environment-owned.
 
 Stop an interactive worker with `Ctrl-C`. Wait for it to exit before restarting
-or starting a different worker command. A clean restart needs no checkpoint or
+or starting a different worker command. A clean restart needs no cursor or
 lease repair:
 
 ```bash
@@ -172,14 +191,14 @@ For each stable provider root:
    page read.
 
 Activation pins the exact source, adapter, normalized contract, mapper,
-connection revision, schedule, and checkpoint generation. Changing those pins
+connection revision, schedule, and cursor generation. Changing those pins
 requires an explicit tested revision or replacement.
 
 ### 3. Begin ingestion
 
 Open `http://127.0.0.1:5101/operations` and select **Resume** for each intended
 provider. Resume makes that source due immediately from its committed
-checkpoint. **Run now** is an optional explicit manual trigger; selecting it
+cursor. **Run now** is an optional explicit manual trigger; selecting it
 while work is already queued or running exercises the same coalescing boundary
 but does not make a resumed source start sooner.
 
@@ -190,14 +209,14 @@ not create parallel work for one source.
 
 | Action           | Where                                   | Durable behavior                                                                                                                                                |
 | ---------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Run now          | Pipeline Status or provider detail      | Creates one manual run or coalesces with existing work; starts from the committed checkpoint. It is unavailable while the source requires administrator action. |
+| Run now          | Pipeline Status or provider detail      | Creates one manual run or coalesces with existing work; starts from the committed cursor. It is unavailable while the source requires administrator action. |
 | Pause            | Pipeline Status or provider detail      | Stops before the next page. An already captured page may commit first.                                                                                          |
-| Resume           | Pipeline Status or provider detail      | Makes the source due immediately and returns it to its schedule from the committed checkpoint.                                                                  |
+| Resume           | Pipeline Status or provider detail      | Makes the source due immediately and returns it to its schedule from the committed cursor.                                                                  |
 | Pause display    | Pipeline Status or provider detail      | Stops only the browser's five-second refresh. Ingestion continues.                                                                                              |
-| Save timing      | Provider detail or Source Configuration | Creates a schedule revision between 60 seconds and 24 hours; does not reset the checkpoint.                                                                     |
+| Save timing      | Provider detail or Source Configuration | Creates a schedule revision between 60 seconds and 24 hours; does not reset the cursor.                                                                     |
 | Retry quarantine | Quarantine                              | Reprocesses retained evidence independently; never rewinds the source cursor.                                                                                   |
-| Disable source   | Source Configuration                    | Stops future work after the safe boundary while preserving history and checkpoint evidence.                                                                     |
-| Replace source   | Source Configuration                    | Creates a separately tested source with its own checkpoint; identity compatibility is required.                                                                 |
+| Disable source   | Source Configuration                    | Stops future work after the safe boundary while preserving history and cursor evidence.                                                                     |
+| Replace source   | Source Configuration                    | Creates a separately tested source with its own cursor; identity compatibility is required.                                                                 |
 
 At provider head, the next fetch waits for the greater of the configured source
 interval and the adapter's source-neutral minimum delay. Repeated database polls
@@ -227,7 +246,7 @@ page count alone.
 
 ### Provider detail and diagnostics
 
-`/providers/:providerId` shows the exact source pins, safe checkpoint
+`/providers/:providerId` shows the exact source pins, safe cursor
 fingerprint, run history, committed page summaries, and bounded diagnostic
 history. Filter diagnostics by severity, phase, or run. **Load older** uses an
 opaque keyset cursor; an expired-history gap is reported explicitly and never
@@ -259,7 +278,7 @@ payloads or credentials.
 | Reached head                        | The source completed history available now.                                         | Wait for the independently configured next-due time.                                     |
 | Pause requested                     | A page was already in flight when Pause was selected.                               | Wait for the current page to commit or terminalize; no next page will start.             |
 | Retrying                            | A transient source-local failure has a durable retry time.                          | Inspect the safe code and wait for the bounded retry unless intervention is requested.   |
-| Waiting on connection recovery      | One shared connection episode blocks bound work.                                    | Recover the connection revision; do not reset four source checkpoints.                   |
+| Waiting on connection recovery      | One shared connection episode blocks bound work.                                    | Recover the connection revision; do not reset four source cursors.                   |
 | Action required                     | A source-local validation, mapping, or immutable-state problem cannot retry safely. | Inspect source diagnostics, correct the exact cause, then use the tested lifecycle path. |
 | Stale display                       | Browser refresh is paused or failed.                                                | Refresh safe evidence; this does not itself mean ingestion stopped.                      |
 
@@ -269,7 +288,7 @@ payloads or credentials.
 
 Authentication, endpoint, TLS, destination, or encrypted-configuration failure
 opens one connection-scoped blocking episode. Bound sources keep their committed
-checkpoints and wait on that episode.
+cursors and wait on that episode.
 
 1. Open **Source Configuration** and inspect the masked connection state and
    latest safe code.
@@ -278,28 +297,28 @@ checkpoints and wait on that episode.
 3. Request the episode-correlated recovery test and wait for its current result.
 4. Activate the tested recovery revision.
 5. Confirm Pipeline Status clears the shared episode and queues at most one
-   recovery run per eligible source from its committed checkpoint.
+   recovery run per eligible source from its committed cursor.
 
 Do not reactivate an old successful test, fabricate an episode, or reset source
-checkpoints. Normal credential rotation and blocking-episode recovery are
+cursors. Normal credential rotation and blocking-episode recovery are
 different operations.
 
 ### Source-local failure or quarantine
 
 Open the provider detail and filter diagnostics to the failed run or phase. If
 the failure is record-local, correct the mapper/configuration issue and retry the
-retained quarantine entry. Accepted siblings and the page checkpoint stay
+retained quarantine entry. Accepted siblings and the page cursor stay
 committed.
 
 An active source in **Action required** cannot be recovered by repeatedly
 requesting a manual run. An administrator must correct the underlying issue,
 disable the source at its safe boundary, request a fresh source test, activate
 the tested source in paused state, and then resume it from the committed
-checkpoint. Use replacement only when the source contract itself must change.
+cursor. Use replacement only when the source contract itself must change.
 
 Protected raw page bytes expire after seven days. Quarantined evidence and safe
 processor diagnostics are retained for 30 days. Compact dispositions, hashes,
-canonical history, checkpoint lineage, and request-attempt lineage remain
+canonical history, cursor lineage, and request-attempt lineage remain
 durable.
 
 ### Capacity blocked or probe failed
@@ -342,8 +361,8 @@ linked diagnostics; do not force a second process or mutate runtime tables.
   pause.
 - **Replacement** starts a new source instance at **Feed start** and requires the
   same provider identity namespace and record-ID scopes. It never transfers an
-  old checkpoint.
-- **Reset checkpoint** is a last-resort replay operation. The source must be
+  old cursor.
+- **Reset cursor** is a last-resort replay operation. The source must be
   paused or disabled; review the preview, type its exact confirmation, and
   understand that the next resume starts at **Feed start**. Never reset to fix a
   transient fetch, mapping, capacity, or worker failure.
@@ -378,12 +397,12 @@ Before handing an active pipeline to another operator, record only safe facts:
 - exact deployed commit and migration status;
 - active worker identity and supervisor renewal time;
 - connection/source revision IDs and current test states;
-- each provider lifecycle, checkpoint fingerprint, next due time, and latest
+- each provider lifecycle, cursor fingerprint, next due time, and latest
   run ID;
 - open connection episode, action-required safe code, retry time, quarantine
   count, and capacity state;
 - whether the display is live or intentionally paused.
 
-Never include the bearer, database URL, encryption keys, full checkpoint,
+Never include the bearer, database URL, encryption keys, full cursor,
 vendor cursor, raw response body, protected provider fields, or personal data in
 an operator handoff.

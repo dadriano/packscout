@@ -110,8 +110,8 @@ function repository(
         intervalSeconds: 60,
         freshnessGraceSeconds: 900,
         scheduleRevisionId,
-        checkpointGeneration: 1n,
-        checkpointFingerprint: null,
+        cursorGeneration: 1n,
+        cursorFingerprint: null,
         test: {
           jobId: connectionRevisionId,
           connectionRevisionId,
@@ -185,7 +185,7 @@ test("catalog is tenant-scoped, production-only, and exposes masked credential p
     "198.204.245.26.sslip.io");
   assert.equal(catalog.connections[0]?.latestRevision.credentialMask, "••••••••");
   assert.equal(catalog.sources[0]?.test.state, "pending");
-  assert.equal(catalog.sources[0]?.checkpoint.resumeLabel, "Feed start");
+  assert.equal(catalog.sources[0]?.cursor.resumeLabel, "Feed start");
   assert.equal(JSON.stringify(catalog).includes("must-never-leave"), false);
   assert.equal(JSON.stringify(catalog).includes("/v1/events"), false);
 });

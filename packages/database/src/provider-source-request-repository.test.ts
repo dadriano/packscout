@@ -23,7 +23,7 @@ test("only typed connection-owned failures can open a shared profile episode", a
 
   for (const blockingFailure of [
     { failureClass: "invalid_response", safeCode: "invalid_response" },
-    { failureClass: "invalid_checkpoint", safeCode: "invalid_checkpoint" },
+    { failureClass: "invalid_cursor", safeCode: "invalid_cursor" },
     { failureClass: "authentication_failed", safeCode: "endpoint_invalid" },
   ]) {
     await assert.rejects(

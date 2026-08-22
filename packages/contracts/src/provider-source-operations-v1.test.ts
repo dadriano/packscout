@@ -29,14 +29,14 @@ test("diagnostic events reject raw payload, cursor, and correlation fields", () 
     responseBytes: 512,
     retryDelayMilliseconds: null,
     continuation: { kind: "continue" },
-    checkpointFingerprint: "a".repeat(64),
+    cursorFingerprint: "a".repeat(64),
     counters: { records: 2 },
     references: [],
   };
   assert.equal(providerSourceDiagnosticEventSchema.safeParse(safe).success, true);
   for (const protectedField of [
     "rawPayload",
-    "checkpoint",
+    "cursor",
     "vendorCursor",
     "correlationId",
   ]) {

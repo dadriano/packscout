@@ -18,7 +18,7 @@ const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 export const providerSourceHealthGenerationSchema = z
   .string()
   .regex(/^(?:0|[1-9][0-9]*)$/u);
-export const providerSourceCheckpointGenerationSchema = z
+export const providerSourceCursorGenerationSchema = z
   .string()
   .regex(/^[1-9][0-9]*$/u);
 
@@ -87,7 +87,7 @@ const providerSourceAdminAuditReceiptBaseSchema = z
       "source_disabled",
       "source_interval_revised",
       "source_replacement_created",
-      "source_checkpoint_reset",
+      "source_cursor_reset",
     ]),
     subjectType: z.enum(["source_connection_profile", "provider_source"]),
     subjectId: uuidSchema.nullable(),
@@ -195,11 +195,11 @@ export const providerSourceAdminSummarySchema = z
     intervalSeconds: providerSourceIntervalSecondsSchema,
     freshnessGraceSeconds: z.literal(900),
     scheduleRevisionId: uuidSchema,
-    checkpoint: z
+    cursor: z
       .object({
-        generation: providerSourceCheckpointGenerationSchema,
+        generation: providerSourceCursorGenerationSchema,
         fingerprint: sha256Schema.nullable(),
-        resumeLabel: z.enum(["Feed start", "Saved checkpoint"]),
+        resumeLabel: z.enum(["Feed start", "Saved cursor"]),
       })
       .strict(),
     test: providerSourceTestSummarySchema,
@@ -324,31 +324,31 @@ export const reviseProviderSourceIntervalRequestSchema = z
   })
   .strict();
 
-export const previewProviderSourceCheckpointResetRequestSchema = z
+export const previewProviderSourceCursorResetRequestSchema = z
   .object({ expectedSourceRevisionId: uuidSchema })
   .strict();
 
-export const providerSourceCheckpointResetPreviewSchema = z
+export const providerSourceCursorResetPreviewSchema = z
   .object({
     providerId: uuidSchema,
     provider: launchProviderKeySchema,
     sourceInstanceId: uuidSchema,
     sourceRevisionId: uuidSchema,
     sourceState: z.enum(["paused", "disabled"]),
-    checkpointGeneration: providerSourceCheckpointGenerationSchema,
-    checkpointFingerprint: sha256Schema.nullable(),
+    cursorGeneration: providerSourceCursorGenerationSchema,
+    cursorFingerprint: sha256Schema.nullable(),
     confirmation: z.string().min(1).max(80),
     consequence: z.literal(
-      "The saved checkpoint will be cleared and the next resume will start from Feed start.",
+      "The saved cursor will be cleared and the next resume will start from Feed start.",
     ),
   })
   .strict();
 
-export const confirmProviderSourceCheckpointResetRequestSchema = z
+export const confirmProviderSourceCursorResetRequestSchema = z
   .object({
     expectedSourceRevisionId: uuidSchema,
-    expectedCheckpointGeneration: providerSourceCheckpointGenerationSchema,
-    expectedCheckpointFingerprint: sha256Schema.nullable(),
+    expectedCursorGeneration: providerSourceCursorGenerationSchema,
+    expectedCursorFingerprint: sha256Schema.nullable(),
     confirmation: z.string().min(1).max(80),
   })
   .strict();
@@ -362,8 +362,8 @@ export type SourceConnectionProfileAdminSummary = z.infer<
 export type ProviderSourceAdminSummary = z.infer<
   typeof providerSourceAdminSummarySchema
 >;
-export type ProviderSourceCheckpointResetPreview = z.infer<
-  typeof providerSourceCheckpointResetPreviewSchema
+export type ProviderSourceCursorResetPreview = z.infer<
+  typeof providerSourceCursorResetPreviewSchema
 >;
 export type CreateSourceConnectionProfileRequest = z.input<
   typeof createSourceConnectionProfileRequestSchema
@@ -386,6 +386,6 @@ export type ProviderSourceRevisionCommand = z.input<
 export type ReviseProviderSourceIntervalRequest = z.input<
   typeof reviseProviderSourceIntervalRequestSchema
 >;
-export type ConfirmProviderSourceCheckpointResetRequest = z.input<
-  typeof confirmProviderSourceCheckpointResetRequestSchema
+export type ConfirmProviderSourceCursorResetRequest = z.input<
+  typeof confirmProviderSourceCursorResetRequestSchema
 >;

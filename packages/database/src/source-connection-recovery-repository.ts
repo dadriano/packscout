@@ -511,7 +511,7 @@ export class SourceConnectionRecoveryRepository {
     const runIds: string[] = [];
     for (const source of sources) {
       if (!source.active_revision_id) continue;
-      const checkpoint = await transaction.provider_source_checkpoints.findFirst({
+      const cursor = await transaction.provider_source_cursors.findFirst({
         where: {
           organization_id: input.organizationId,
           provider_id: source.provider_id,
@@ -519,8 +519,8 @@ export class SourceConnectionRecoveryRepository {
           source_revision_id: source.active_revision_id,
         },
       });
-      if (!checkpoint) {
-        this.#fenced("Recovery source checkpoint is unavailable.");
+      if (!cursor) {
+        this.#fenced("Recovery source cursor is unavailable.");
       }
       const preservedRun = input.preserveBlockedRunPins
         ? await transaction.import_runs.findFirst({
@@ -581,18 +581,18 @@ export class SourceConnectionRecoveryRepository {
               identity_namespace_key: preservedRun.identity_namespace_key,
               connection_profile_id: input.connectionProfileId,
               connection_revision_id: preservedConnection.id,
-              checkpoint_codec_version: checkpoint.checkpoint_codec_version,
-              checkpoint_generation: checkpoint.checkpoint_generation,
-              requested_checkpoint: bytes(checkpoint.checkpoint_bytes),
-              requested_checkpoint_fingerprint:
-                checkpoint.checkpoint_fingerprint,
-              requested_checkpoint_key:
-                checkpoint.checkpoint_fingerprint ?? "initial",
-              current_checkpoint: bytes(checkpoint.checkpoint_bytes),
-              current_checkpoint_fingerprint:
-                checkpoint.checkpoint_fingerprint,
-              current_checkpoint_key:
-                checkpoint.checkpoint_fingerprint ?? "initial",
+              cursor_codec_version: cursor.cursor_codec_version,
+              cursor_generation: cursor.cursor_generation,
+              requested_cursor: cursor.cursor,
+              requested_cursor_fingerprint:
+                cursor.cursor_fingerprint,
+              requested_cursor_key:
+                cursor.cursor_fingerprint ?? "initial",
+              current_cursor: cursor.cursor,
+              current_cursor_fingerprint:
+                cursor.cursor_fingerprint,
+              current_cursor_key:
+                cursor.cursor_fingerprint ?? "initial",
               next_page_number: 1,
               counters_json: {
                 pages: 0,
@@ -619,7 +619,7 @@ export class SourceConnectionRecoveryRepository {
             sourceInstanceId: source.id,
             sourceRevisionId: source.active_revision_id,
             runId,
-            checkpoint,
+            cursor,
           });
           runIds.push(runId);
           await this.#setRecoveredLaneQueued(transaction, {
@@ -645,7 +645,7 @@ export class SourceConnectionRecoveryRepository {
           sourceInstanceId: source.id,
           sourceRevisionId: source.active_revision_id,
           runId,
-          checkpoint,
+          cursor,
         });
         runIds.push(prior.id);
         await this.#setRecoveredLaneQueued(transaction, {
@@ -687,7 +687,7 @@ export class SourceConnectionRecoveryRepository {
         sourceInstanceId: source.id,
         sourceRevisionId: source.active_revision_id,
         runId,
-        checkpoint,
+        cursor,
       });
       runIds.push(requested.run.id);
       await this.#setRecoveredLaneQueued(transaction, {
@@ -751,11 +751,11 @@ export class SourceConnectionRecoveryRepository {
       trigger: "scheduled" | "manual" | "continuation" | "recovery";
       connection_profile_id: string | null;
       connection_revision_id: string | null;
-      checkpoint_codec_version: string | null;
-      checkpoint_generation: bigint | null;
-      requested_checkpoint: Uint8Array | null;
-      requested_checkpoint_fingerprint: string | null;
-      requested_checkpoint_key: string | null;
+      cursor_codec_version: string | null;
+      cursor_generation: bigint | null;
+      requested_cursor: string | null;
+      requested_cursor_fingerprint: string | null;
+      requested_cursor_key: string | null;
     }>,
     input: Readonly<{
       organizationId: string;
@@ -765,22 +765,15 @@ export class SourceConnectionRecoveryRepository {
       sourceInstanceId: string;
       sourceRevisionId: string;
       runId: string;
-      checkpoint: Readonly<{
-        checkpoint_codec_version: string;
-        checkpoint_generation: bigint;
-        checkpoint_bytes: Uint8Array | null;
-        checkpoint_fingerprint: string | null;
+      cursor: Readonly<{
+        cursor_codec_version: string;
+        cursor_generation: bigint;
+        cursor: string | null;
+        cursor_fingerprint: string | null;
       }>;
     }>,
   ): void {
-    const expectedCheckpoint = input.checkpoint.checkpoint_bytes;
-    const checkpointBytesMatch = run.requested_checkpoint === null
-      ? expectedCheckpoint === null
-      : expectedCheckpoint !== null &&
-        run.requested_checkpoint.byteLength === expectedCheckpoint.byteLength &&
-        run.requested_checkpoint.every(
-          (value, index) => value === expectedCheckpoint[index],
-        );
+    const expectedCursor = input.cursor.cursor;
     if (
       run.id !== input.runId ||
       run.organization_id !== input.organizationId ||
@@ -790,16 +783,16 @@ export class SourceConnectionRecoveryRepository {
       run.trigger !== "recovery" ||
       run.connection_profile_id !== input.connectionProfileId ||
       run.connection_revision_id !== input.connectionRevisionId ||
-      run.checkpoint_generation === null ||
-      run.requested_checkpoint_key !==
-        (run.requested_checkpoint_fingerprint ?? "initial") ||
-      run.checkpoint_codec_version !==
-        input.checkpoint.checkpoint_codec_version ||
-        run.checkpoint_generation !== input.checkpoint.checkpoint_generation ||
-        run.requested_checkpoint_fingerprint !==
-          input.checkpoint.checkpoint_fingerprint ||
-      !checkpointBytesMatch
-    ) this.#fenced("Recovery run pins do not match the tested revision and checkpoint.");
+      run.cursor_generation === null ||
+      run.requested_cursor_key !==
+        (run.requested_cursor_fingerprint ?? "initial") ||
+      run.cursor_codec_version !==
+        input.cursor.cursor_codec_version ||
+        run.cursor_generation !== input.cursor.cursor_generation ||
+        run.requested_cursor_fingerprint !==
+          input.cursor.cursor_fingerprint ||
+      run.requested_cursor !== expectedCursor
+    ) this.#fenced("Recovery run pins do not match the tested revision and cursor.");
   }
 
   async #lockProfile(

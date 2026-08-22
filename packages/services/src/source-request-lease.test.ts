@@ -59,18 +59,18 @@ const pageReadPins: PageReadRequestPins = {
   pageAttemptId: "page-attempt-fixture",
   pageNumber: 1,
   pageLimit: 250,
-  checkpointGeneration: 3,
-  requestedCheckpointFingerprint: "a".repeat(64),
+  cursorGeneration: 3,
+  requestedCursorFingerprint: "a".repeat(64),
 };
 
-const pageRequestedCheckpoint = {
+const pageRequestedCursor = {
   sourceInstanceId: pageReadPins.sourceInstanceId,
   sourceRevisionId: pageReadPins.sourceRevisionId,
   sourceTypeKey: pageReadPins.sourceTypeKey,
   adapterVersion: pageReadPins.adapterVersion,
-  checkpointCodecKey: "fixture-checkpoint-v1",
-  checkpointGeneration: pageReadPins.checkpointGeneration,
-  value: "opaque-fixture-checkpoint",
+  cursorCodecKey: "fixture-cursor-v1",
+  cursorGeneration: pageReadPins.cursorGeneration,
+  value: "opaque-fixture-cursor",
 } as const;
 
 function setup(): Readonly<{
@@ -108,7 +108,7 @@ test("paired grant precedes the authoritative guard and exactly one request", as
   let upstreamCalls = 0;
   const lease = await authority.admit({
     pins: pageReadPins,
-    requestedCheckpoint: pageRequestedCheckpoint,
+    requestedCursor: pageRequestedCursor,
     guard: () => {
       const snapshot = coordinator.snapshot();
       assert.equal(snapshot.activeExecutionSlots, 1);
@@ -118,7 +118,7 @@ test("paired grant precedes the authoritative guard and exactly one request", as
     },
   });
 
-  const invocation = lease.consume(pageReadPins, pageRequestedCheckpoint);
+  const invocation = lease.consume(pageReadPins, pageRequestedCursor);
   order.push("request");
   upstreamCalls += 1;
   assert.equal(invocation.signal.aborted, false);
@@ -127,7 +127,7 @@ test("paired grant precedes the authoritative guard and exactly one request", as
   assert.equal(upstreamCalls, 1);
 
   assert.throws(
-    () => lease.consume(pageReadPins, pageRequestedCheckpoint),
+    () => lease.consume(pageReadPins, pageRequestedCursor),
     (error) =>
       error instanceof SourceRequestLeaseError &&
       error.code === "already_consumed",
@@ -149,7 +149,7 @@ test("lost ownership after paired grant releases both and makes no request", asy
   await assert.rejects(
     authority.admit({
       pins: pageReadPins,
-      requestedCheckpoint: pageRequestedCheckpoint,
+      requestedCursor: pageRequestedCursor,
       guard: () => false,
     }),
     (error) =>
@@ -199,7 +199,7 @@ test("cancellation during the post-grant guard releases both and makes no reques
   const upstreamCalls = 0;
   const admission = authority.admit({
     pins: pageReadPins,
-    requestedCheckpoint: pageRequestedCheckpoint,
+    requestedCursor: pageRequestedCursor,
     signal: abortController.signal,
     guard: async () => {
       guardStarted?.();
@@ -229,14 +229,14 @@ test("the one-use lease rejects pin changes and cross-operation scope", async ()
   const { authority } = setup();
   const lease = await authority.admit({
     pins: pageReadPins,
-    requestedCheckpoint: pageRequestedCheckpoint,
+    requestedCursor: pageRequestedCursor,
     guard: () => true,
   });
   assert.throws(
     () =>
       lease.consume(
         { ...pageReadPins, runClaimLeaseId: "stale-claim" },
-        pageRequestedCheckpoint,
+        pageRequestedCursor,
       ),
     (error) =>
       error instanceof SourceRequestLeaseError &&
@@ -246,14 +246,14 @@ test("the one-use lease rejects pin changes and cross-operation scope", async ()
     () =>
       lease.consume(
         { ...pageReadPins, pageLimit: 500 },
-        pageRequestedCheckpoint,
+        pageRequestedCursor,
       ),
     (error) =>
       error instanceof SourceRequestLeaseError &&
       error.code === "pin_mismatch",
   );
   assert.throws(
-    () => lease.consume({ ...pageReadPins, pageNumber: 2 }, pageRequestedCheckpoint),
+    () => lease.consume({ ...pageReadPins, pageNumber: 2 }, pageRequestedCursor),
     (error) =>
       error instanceof SourceRequestLeaseError &&
       error.code === "pin_mismatch",
@@ -265,7 +265,7 @@ test("the one-use lease rejects pin changes and cross-operation scope", async ()
           ...pageReadPins,
           normalizedContractVersion: "packscout.provider-observation.v2",
         },
-        pageRequestedCheckpoint,
+        pageRequestedCursor,
       ),
     (error) =>
       error instanceof SourceRequestLeaseError &&
@@ -274,8 +274,8 @@ test("the one-use lease rejects pin changes and cross-operation scope", async ()
   assert.throws(
     () =>
       lease.consume(pageReadPins, {
-        ...pageRequestedCheckpoint,
-        value: "different-opaque-checkpoint",
+        ...pageRequestedCursor,
+        value: "different-opaque-cursor",
       }),
     (error) =>
       error instanceof SourceRequestLeaseError &&
@@ -397,14 +397,14 @@ test("each explicit operation scope can be admitted and consumed", async () => {
   }
   const pageLease = await authority.admit({
     pins: pageReadPins,
-    requestedCheckpoint: pageRequestedCheckpoint,
-    guard: (_pins, requestedCheckpoint) => {
-      assert.deepEqual(requestedCheckpoint, pageRequestedCheckpoint);
+    requestedCursor: pageRequestedCursor,
+    guard: (_pins, requestedCursor) => {
+      assert.deepEqual(requestedCursor, pageRequestedCursor);
       return true;
     },
   });
   assert.equal(
-    pageLease.consume(pageReadPins, pageRequestedCheckpoint).pins.operationKind,
+    pageLease.consume(pageReadPins, pageRequestedCursor).pins.operationKind,
     "page_read",
   );
   releaseTerminalizedRequest(authority, pageLease);
@@ -419,7 +419,7 @@ test("pin equality is value-based but remains scope-sensitive", () => {
   assert.equal(
     sourceRequestOperationPinsEqual(pageReadPins, {
       ...pageReadPins,
-      checkpointGeneration: pageReadPins.checkpointGeneration + 1,
+      cursorGeneration: pageReadPins.cursorGeneration + 1,
     }),
     false,
   );

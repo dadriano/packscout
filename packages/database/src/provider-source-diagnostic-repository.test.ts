@@ -57,7 +57,7 @@ function repositoryFixture(): Readonly<{
           "retry_delay_ms",
           "duration_ms",
           "response_bytes",
-          "checkpoint_fingerprint",
+          "cursor_fingerprint",
         ]) {
           if (normalized[key] === undefined) normalized[key] = null;
         }
@@ -81,7 +81,7 @@ test("diagnostic append retains contract severity, category, and safe digest", a
   const { repository, writes } = repositoryFixture();
   const id = await repository.append({
     ...baseLifecycleDiagnostic,
-    checkpointFingerprint: "a".repeat(64),
+    cursorFingerprint: "a".repeat(64),
   });
   await repository.append({
     ...baseLifecycleDiagnostic,
@@ -94,17 +94,17 @@ test("diagnostic append retains contract severity, category, and safe digest", a
   assert.equal(writes[0]?.severity, "critical");
   assert.equal(writes[0]?.correlation_kind, "lifecycle");
   assert.equal(writes[0]?.event_kind, "source_lifecycle");
-  assert.equal(writes[0]?.checkpoint_fingerprint, "a".repeat(64));
+  assert.equal(writes[0]?.cursor_fingerprint, "a".repeat(64));
   assert.equal(
     writes[1]?.command_correlation_key,
     "command:01j5yr0m2v8q7y3k9h6w4n1c0b",
   );
 });
 
-test("diagnostic append rejects reusable checkpoint values and unsafe command keys", async () => {
+test("diagnostic append rejects reusable cursor values and unsafe command keys", async () => {
   const { repository, writes } = repositoryFixture();
 
-  for (const checkpointFingerprint of [
+  for (const cursorFingerprint of [
     "provider-cursor-value",
     "a".repeat(63),
     "A".repeat(64),
@@ -112,7 +112,7 @@ test("diagnostic append rejects reusable checkpoint values and unsafe command ke
     await assert.rejects(
       repository.append({
         ...baseLifecycleDiagnostic,
-        checkpointFingerprint,
+        cursorFingerprint,
       }),
       /lowercase 64-character keyed digest/u,
     );

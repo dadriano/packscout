@@ -23,7 +23,7 @@ tri-state `available`, and a safe aggregate concurrency of two.
 
 A 500-record Phygitals response exceeded the 2 MiB safety cap, so the launch
 page target is 250 records. The actual full-history import remains blocked until
-the target volume has at least **8,757,364,735,856 available bytes**, as required
+the target volume has at least **8,759,332,238,475 available bytes**, as required
 by the final-schema artifact. The former 200 GB provisional floor is
 superseded. Operators must run
 `npm run preflight:provider-source-backfill:local -- --database-path <postgres-data-volume-path> --unreconciled-attempts <count>`;
@@ -41,7 +41,7 @@ immutability, lifecycle vocabulary, and currency-reference evidence.
 The draft does **not** supply request paths, authentication, stream selector,
 raw page wrappers, page-size behavior, cursor fields, termination, ordering,
 expiry, error envelopes, or rate-limit signals. No provider-local decoder,
-runtime registration, durable checkpoint migration, backfill, or incremental
+runtime registration, durable cursor migration, backfill, or incremental
 launch claim may be approved until sanitized real evidence locks those facts.
 
 | V2 launch evidence | Current state | Verdict |
@@ -52,7 +52,7 @@ launch claim may be approved until sanitized real evidence locks those facts.
 | Request path/auth/selector and raw page wrapper | Not supplied | BLOCKED |
 | Independent cursor scope, termination, ordering, expiry, and full-history start | Not supplied | BLOCKED |
 | Provider error and rate-limit behavior | Not supplied | BLOCKED |
-| Per-stream durable checkpoint/restart and real reconciliation | Cannot run before transport evidence | BLOCKED |
+| Per-stream durable cursor/restart and real reconciliation | Cannot run before transport evidence | BLOCKED |
 
 Everything below under the aggregate V1 fixture scorecard is retained as
 historical PR #1 evidence for canonical history, quarantine, projections, and EV
@@ -159,7 +159,7 @@ The durable EV row is valid only after the repository-wide gate recorded below p
 3. Obtain and sanitize one real raw page for each of `catalog`, `pulls`, and `trades`. Record the exact request path, authentication method, stream selector, page-size behavior, raw wrapper, cursor field, end signal, error envelope, and rate-limit signals without recording a credential.
 4. Confirm from provider evidence whether each stream has an independent cursor. Record ordering, cursor expiry, null-cursor full-history behavior, incremental continuation, and catalog correction delivery. If cursor scope differs from the V2 design, stop and revise the contract rather than silently reinterpreting it.
 5. Implement and register one provider-local V2 transport decoder using the observed wrapper. Remove the launch source's aggregate V1 runtime registration, fixtures, and adapter selection in the same cutover; do not introduce aliases, dual reads, or a provider-name branch in generic orchestration.
-6. Migrate unlaunched persistence to one durable checkpoint and run per `(configuration revision, stream)`. In preproduction, backfill each stream to its evidenced terminal state, restart from every stream checkpoint, and verify that only the stream whose validated page commits advances.
+6. Migrate unlaunched persistence to one durable cursor and run per `(configuration revision, stream)`. In preproduction, backfill each stream to its evidenced terminal state, restart from every stream cursor, and verify that only the stream whose validated page commits advances.
 7. Run real incrementals with an exact event replay, a conflicting pull/trade repeat, a catalog correction, a malformed record, timeout, rate limit, authentication failure, stale/recovery, and lost-worker recovery. Reconcile accepted, duplicate, quarantined, canonical-revision, Estimated EV, unavailable, and exported counts using only sanitized stable evidence.
 8. Resolve every real count difference and define numeric release thresholds for quarantine rate and unresolved relationships. Run the focused V2 checks and `npm run verify:framework`; Product and Engineering owners must review the persisted evidence before enabling incremental schedules or labeling the public catalog live.
 
