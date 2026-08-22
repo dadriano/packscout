@@ -121,7 +121,7 @@ export function AlertDetailPage() {
 
   if (loading && !alert) return <div className="ops-loading" aria-busy="true">Loading alert evidence…</div>;
   if (!alert) {
-    return <div className="ops-error" role="alert"><p>{error ?? "Operational alert not found."}</p><Link className="admin-button admin-button--secondary" to="/alerts">Return to alerts</Link></div>;
+    return <div className="ops-error" role="alert"><p>{error ?? "Operational alert not found."}</p><Link className="admin-button admin-button-secondary" to="/alerts">Return to alerts</Link></div>;
   }
 
   const target = alertTarget(alert);
@@ -134,15 +134,15 @@ export function AlertDetailPage() {
         description={alert.summary}
         actions={
           <>
-            {target ? <Link className="admin-button admin-button--secondary" to={target.href}>{target.label}</Link> : null}
-            {alert.state === "active" ? <button type="button" className="admin-button admin-button--secondary" onClick={() => void acknowledge()}>Acknowledge</button> : null}
-            {alert.state !== "resolved" ? <button type="button" className="admin-button admin-button--primary" onClick={() => void resolve()}>Resolve alert</button> : null}
+            {target ? <Link className="admin-button admin-button-secondary" to={target.href}>{target.label}</Link> : null}
+            {alert.state === "active" ? <button type="button" className="admin-button admin-button-secondary" onClick={() => void acknowledge()}>Acknowledge</button> : null}
+            {alert.state !== "resolved" ? <button type="button" className="admin-button admin-button-primary" onClick={() => void resolve()}>Resolve alert</button> : null}
           </>
         }
       />
-      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => { setLoading(true); setRefreshIndex((value) => value + 1); }}>Refresh</button></div> : null}
+      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => { setLoading(true); setRefreshIndex((value) => value + 1); }}>Refresh</button></div> : null}
       <section className="alerts-summary" aria-labelledby="alert-state-heading">
-        <div><span className="admin-eyebrow">Current condition</span><h2 id="alert-state-heading">{humanize(alert.state)}</h2></div>
+        <div><span className="admin-kicker">Current condition</span><h2 id="alert-state-heading">{humanize(alert.state)}</h2></div>
         <div className="alerts-summary__badges"><AlertSeverity severity={alert.severity} /><AlertState state={alert.state} /></div>
         <dl>
           <div><dt>First seen</dt><dd>{dateTime(alert.firstSeenAt)}</dd></div>
@@ -154,7 +154,7 @@ export function AlertDetailPage() {
         </dl>
       </section>
       <section className="alerts-occurrences" aria-labelledby="alert-occurrences-heading">
-        <header className="admin-section-heading"><div><span className="admin-eyebrow">Safe evidence</span><h2 id="alert-occurrences-heading">Occurrence history</h2></div><span className="admin-section-count">{alert.occurrences.length} shown</span></header>
+        <header className="admin-section-header"><div><span className="admin-kicker">Safe evidence</span><h2 id="alert-occurrences-heading">Occurrence history</h2></div><span className="admin-section-count">{alert.occurrences.length} shown</span></header>
         <ol>
           {alert.occurrences.map((occurrence) => (
             <li key={occurrence.id}>

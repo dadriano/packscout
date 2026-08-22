@@ -30,9 +30,9 @@ export function ScheduleHealthLedger({
 }) {
   return (
     <section className="ops-ledger" aria-labelledby="schedule-health-title">
-      <header className="admin-section-heading">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Provider scheduling</span>
+          <span className="admin-kicker">Provider scheduling</span>
           <h2 id="schedule-health-title">Schedule health</h2>
         </div>
         <span className="admin-section-count">

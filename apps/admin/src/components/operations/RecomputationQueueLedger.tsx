@@ -21,9 +21,9 @@ export function RecomputationQueueLedger({
 }: RecomputationQueueLedgerProps) {
   return (
     <section className="ops-ledger" aria-labelledby="recomputation-ledger-title">
-      <header className="admin-section-heading">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Estimated EV recomputation</span>
+          <span className="admin-kicker">Estimated EV recomputation</span>
           <h2 id="recomputation-ledger-title">Queue entries</h2>
         </div>
         <span className="admin-section-count">

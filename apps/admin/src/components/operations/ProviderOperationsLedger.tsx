@@ -5,8 +5,8 @@ import { HealthStatus, RunStatus, dateTime, humanize, interval } from "./Operati
 export function ProviderOperationsLedger({ providers }: { providers: ProviderOperationSummary[] }) {
   return (
     <section className="ops-ledger" aria-labelledby="provider-operations-title">
-      <header className="admin-section-heading">
-        <div><span className="admin-eyebrow">Operational status</span><h2 id="provider-operations-title">Provider feeds</h2></div>
+      <header className="admin-section-header">
+        <div><span className="admin-kicker">Operational status</span><h2 id="provider-operations-title">Provider feeds</h2></div>
         <span className="admin-section-count">{String(providers.length).padStart(2, "0")} on page</span>
       </header>
       <div className="ops-ledger__rows">

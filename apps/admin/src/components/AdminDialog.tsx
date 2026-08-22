@@ -21,6 +21,13 @@ interface AdminDialogProps {
   initialFocusRef?: RefObject<HTMLElement | null>;
 }
 
+/** Dialog sizes map onto the shared panel widths. */
+const PANEL_WIDTHS: Record<AdminDialogSize, string> = {
+  small: "admin-dialog-panel--sm",
+  medium: "admin-dialog-panel--md",
+  large: "admin-dialog-panel--full",
+};
+
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const openDialogs: string[] = [];
@@ -127,7 +134,7 @@ export function AdminDialog({
       />
       <div
         ref={panelRef}
-        className={`admin-dialog admin-dialog--${size}`}
+        className={`admin-dialog-panel ${PANEL_WIDTHS[size]}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -135,10 +142,16 @@ export function AdminDialog({
         tabIndex={-1}
         onKeyDown={trapFocus}
       >
-        <header className="admin-dialog__header">
-          <div>
-            <h2 id={titleId}>{title}</h2>
-            {description ? <p id={descriptionId}>{description}</p> : null}
+        <header className="admin-dialog-header">
+          <div className="admin-dialog-titles">
+            <h2 id={titleId} className="admin-dialog-title">
+              {title}
+            </h2>
+            {description ? (
+              <p id={descriptionId} className="admin-dialog-description">
+                {description}
+              </p>
+            ) : null}
           </div>
           {dismissible ? (
             <button
@@ -151,8 +164,8 @@ export function AdminDialog({
             </button>
           ) : null}
         </header>
-        <div className="admin-dialog__body">{children}</div>
-        {footer ? <footer className="admin-dialog__footer">{footer}</footer> : null}
+        <div className="admin-dialog-body">{children}</div>
+        {footer ? <footer className="admin-dialog-footer">{footer}</footer> : null}
       </div>
     </div>
   );

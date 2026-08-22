@@ -66,7 +66,7 @@ export function RunDetailPage() {
 
   if (loading && !run) return <div className="ops-loading" aria-busy="true">Loading durable run evidence…</div>;
   if (!run) {
-    return <div className="ops-error" role="alert"><p>{error ?? "Import run not found."}</p><Link className="admin-button admin-button--secondary" to="/runs">Return to runs</Link></div>;
+    return <div className="ops-error" role="alert"><p>{error ?? "Import run not found."}</p><Link className="admin-button admin-button-secondary" to="/runs">Return to runs</Link></div>;
   }
 
   const recordTotal = run.counters.catalog + run.counters.pulls + run.counters.sales;
@@ -76,13 +76,13 @@ export function RunDetailPage() {
         eyebrow={`Import run / ${run.platformKey}`}
         title={run.providerName}
         description={`Revision ${run.configurationVersion} · ${humanize(run.trigger)} · Requested ${dateTime(run.requestedAt)}`}
-        actions={<><Link className="admin-button admin-button--secondary" to={`/providers/${run.providerId}`}>Provider</Link><Link className="admin-button admin-button--secondary" to={`/runs?providerId=${run.providerId}`}>Run history</Link></>}
+        actions={<><Link className="admin-button admin-button-secondary" to={`/providers/${run.providerId}`}>Provider</Link><Link className="admin-button admin-button-secondary" to={`/runs?providerId=${run.providerId}`}>Run history</Link></>}
       />
       <p className="admin-visually-hidden" aria-live="polite">{announcement}</p>
-      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => { setLoading(true); setRefreshIndex((value) => value + 1); }}>Refresh</button></div> : null}
+      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => { setLoading(true); setRefreshIndex((value) => value + 1); }}>Refresh</button></div> : null}
 
       <section className="ops-run-lead" aria-labelledby="run-state-title">
-        <div><span className="admin-eyebrow">Immutable outcome</span><h2 id="run-state-title">{humanize(run.state)}</h2><p>{stateGuidance(run.state)}</p></div>
+        <div><span className="admin-kicker">Immutable outcome</span><h2 id="run-state-title">{humanize(run.state)}</h2><p>{stateGuidance(run.state)}</p></div>
         <RunStatus state={run.state} />
       </section>
 
@@ -95,7 +95,7 @@ export function RunDetailPage() {
 
       {run.failure ? (
         <section className="ops-diagnostic" aria-labelledby="run-failure-title">
-          <span className="admin-eyebrow">Bounded failure</span>
+          <span className="admin-kicker">Bounded failure</span>
           <h2 id="run-failure-title">{humanize(run.failure.class)}</h2>
           <p>{run.failure.summary}</p>
           <code>{run.failure.code}</code>
@@ -104,7 +104,7 @@ export function RunDetailPage() {
 
       <div className="ops-detail-grid">
         <section className="ops-detail" aria-labelledby="run-timing-title">
-          <header><span className="admin-eyebrow">Lifecycle</span><h2 id="run-timing-title">Timing and cursor</h2></header>
+          <header><span className="admin-kicker">Lifecycle</span><h2 id="run-timing-title">Timing and cursor</h2></header>
           <dl>
             <div><dt>Requested</dt><dd>{dateTime(run.requestedAt)}</dd></div>
             <div><dt>Started</dt><dd>{dateTime(run.startedAt)}</dd></div>
@@ -117,7 +117,7 @@ export function RunDetailPage() {
           </dl>
         </section>
         <section className="ops-detail" aria-labelledby="run-timeline-title">
-          <header><span className="admin-eyebrow">State transitions</span><h2 id="run-timeline-title">Timeline</h2></header>
+          <header><span className="admin-kicker">State transitions</span><h2 id="run-timeline-title">Timeline</h2></header>
           <ol className="ops-timeline">
             {run.timeline.map((event, index) => <li key={`${event.occurredAt}-${index}`}><RunStatus state={event.state} /><div><strong>{event.summary}</strong><span>{dateTime(event.occurredAt)}</span></div></li>)}
           </ol>
@@ -125,12 +125,12 @@ export function RunDetailPage() {
       </div>
 
       <section className="ops-pages" aria-labelledby="run-pages-title">
-        <header className="admin-section-heading"><div><span className="admin-eyebrow">Durable page commits</span><h2 id="run-pages-title">Page progress</h2></div><span className="admin-section-count">{run.pages.length} shown</span></header>
+        <header className="admin-section-header"><div><span className="admin-kicker">Durable page commits</span><h2 id="run-pages-title">Page progress</h2></div><span className="admin-section-count">{run.pages.length} shown</span></header>
         {run.pages.length === 0 ? <EmptyState title="No pages committed" description="A queued run or a failure before the first durable commit has no page progress." /> : <div>{run.pages.map((page) => <article key={page.pageNumber}><strong>Page {page.pageNumber}</strong><span>{dateTime(page.committedAt)}</span><dl><div><dt>Records</dt><dd>{page.catalog} catalog · {page.pulls} pulls · {page.sales} sales</dd></div><div><dt>Outcomes</dt><dd>{page.accepted} accepted · {page.unchanged} unchanged · {page.revised} revised · {page.quarantined} quarantined</dd></div><div><dt>Cursor in</dt><dd className="ops-cursor">{page.requestedCursorPreview ?? "Feed start"}</dd></div><div><dt>Cursor out</dt><dd className="ops-cursor">{page.nextCursorPreview ?? "Provider head"}</dd></div></dl></article>)}</div>}
       </section>
 
       <section className="ops-related" aria-labelledby="run-quarantine-title">
-        <header className="admin-section-heading"><div><span className="admin-eyebrow">Current quality resolution</span><h2 id="run-quarantine-title">Related quarantine</h2></div><Link to={`/quarantine?runId=${run.id}`}>View all for run</Link></header>
+        <header className="admin-section-header"><div><span className="admin-kicker">Current quality resolution</span><h2 id="run-quarantine-title">Related quarantine</h2></div><Link to={`/quarantine?runId=${run.id}`}>View all for run</Link></header>
         {run.relatedQuarantines.length === 0 ? <p>No records from this run need review.</p> : <ul>{run.relatedQuarantines.map((entry) => <li key={entry.id}><Link to={`/quarantine/${entry.id}`}>{entry.externalId ?? `${humanize(entry.recordKind)} record ${entry.recordIndex + 1}`}</Link><QuarantineStatus state={entry.state} /><span>{entry.reasonCode}</span></li>)}</ul>}
       </section>
     </div>

@@ -18,7 +18,7 @@ export function AuthRestrictedState({
       title="This workspace is limited to administrators."
       description={description}
       action={
-        <Link className="admin-button admin-button--secondary" to="/">
+        <Link className="admin-button admin-button-secondary" to="/">
           Return to overview
         </Link>
       }
