@@ -79,3 +79,7 @@ export * from "./providers/trove/mapper.ts";
 export * from "./quarantine-service.ts";
 export * from "./repack-heat-calculator.ts";
 export * from "./worker-presence-service.ts";
+export * from "./email-delivery/adapter.ts";
+export * from "./email-delivery/delivery-service.ts";
+export * from "./email-delivery/registry.ts";
+export * from "./email-delivery/transport.ts";

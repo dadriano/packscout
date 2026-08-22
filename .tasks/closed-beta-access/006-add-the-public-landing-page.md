@@ -4,7 +4,7 @@
 **Depends on:** none
 **Blocks:** closed-beta-access/007
 **Estimated scope:** medium
-**Status:** in_progress
+**Status:** done
 
 ## Objective
 
@@ -43,13 +43,20 @@ A stranger opens PackScout and sees a page that explains the product, states tha
 
 ## Acceptance Criteria
 
-- [ ] The landing surface renders for a signed-out visitor with product explanation, an honest closed-beta statement, and a working sign-in action.
-- [ ] Rendering it performs no catalog read and no authenticated read, and it renders correctly when the catalog read model is closed.
-- [ ] The authentication provider is not initialized before sign-in intent, and no layout shift occurs when it loads.
-- [ ] A signed-in-but-unadmitted visitor sees an action appropriate to that state rather than a second sign-in loop.
-- [ ] The page satisfies the UI and accessibility standard: single page heading, keyboard-reachable actions, correct title and description, working light and dark themes, and no horizontal overflow at desktop and narrow widths.
-- [ ] Existing dashboard routes, filter URLs, and provider-banner destinations are unchanged.
+- [x] The landing surface renders for a signed-out visitor with product explanation, an honest closed-beta statement, and a working sign-in action.
+- [x] Rendering it performs no catalog read and no authenticated read, and it renders correctly when the catalog read model is closed.
+- [x] The authentication provider is not initialized before sign-in intent, and no layout shift occurs when it loads.
+- [x] A signed-in-but-unadmitted visitor sees an action appropriate to that state rather than a second sign-in loop.
+- [x] The page satisfies the UI and accessibility standard: single page heading, keyboard-reachable actions, correct title and description, working light and dark themes, and no horizontal overflow at desktop and narrow widths.
+- [x] Existing dashboard routes, filter URLs, and provider-banner destinations are unchanged.
 
 ## Verification
 
 Frontend tests render the landing surface signed-out and signed-in-unadmitted, asserting its content, single page heading, sign-in action, absence of any catalog or authenticated read, and that the authentication provider is not initialized before intent. Layout is checked at desktop and narrow widths with no page-level horizontal overflow in both themes. The frontend lint, typecheck, test, and build commands exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: `.tasks/closed-beta-access/_index.md` (the root stays dual-purpose and is wired by 007; robots de-indexing of gated surfaces is 007's; the awaiting/declined experience is 008's).
+- Alignment: the landing surface lives in `apps/frontend/components/landing/` — `LandingPage.tsx` is a server-renderable presentation with no data dependencies, `LandingAccessCta.client.tsx` is the only interactive piece and consumes the existing `usePackScoutAuth()` context, and `landing-presentation.ts` maps every auth status to the one access action (sign-in command for signed-out, busy while booting, "Continue to PackScout" for signed-in and error, plain unavailability when auth is unconfigured — never a second sign-in). All copy and the route metadata live in `apps/frontend/lib/landing-content.ts` (the `learn-content` convention), so honesty claims are test-asserted: what PackScout is, closed beta stated plainly, allowlisted-go-straight-in / everyone-else-in-review, no email capture, EV always qualified as a long-run estimate. The intent-based provider boot is untouched — the surface imports nothing from Privy or Convex and sends the same `auth.login()` boot intent every other control sends; every CTA state renders inside one 128px-reserved slot so the provider's arrival shifts nothing. `app/welcome/page.tsx` keeps the surface addressable on its own and exports `LANDING_METADATA` (absolute title, search-snippet description, OpenGraph and Twitter text, no robots directive so it stays indexable). No existing route, filter URL, or provider-banner destination moved.
+- Divergences: (1) The standalone address is a new additive route `app/welcome/page.tsx` rather than a test-only harness, because the repository's test lane has no DOM renderer and the UI standard requires a browser smoke pass; 007 may keep or retire it when wiring `/`. It reports the shell's release status as a static `unavailable` literal (the dashboard's own no-data pattern) so the shell freshness widget does not sit in "checking" forever — the page itself still performs no read. (2) Social metadata is text-only (OG/Twitter titles and descriptions, no image): the repository has no social-card asset, and the 128px favicon is below crawler minimums; adding an image belongs with a real asset. (3) The signed-in and error states both resolve to a root navigation with state-appropriate copy; distinguishing admitted from in-review there is deliberately left to 007/008. (4) On the standalone address the surrounding chrome is today's public `AppShell` (its links and search are public surfaces on this branch); the landing surface itself renders no navigation, saved-item affordances, or account controls, and the beta-time shell around `/` belongs to 007.
+- Verification: `npm run lint:frontend && npm run typecheck:frontend && npm run test:frontend && npm run build:frontend && npm run scan:framework-standards:ratchet` → exit 0 (217 tests passed, 0 failed, including `lib/landing-content.test.ts` 5 tests, `components/landing/landing-presentation.test.ts` 7 tests, `components/landing/landing-surface.source.test.ts` 7 tests; build emits `/welcome` alongside unchanged existing routes; ratchet 0 findings, 0 new). Browser smoke on the worktree servers (dev and production build): `/welcome` at 1280×800 and 375×812 in light and dark — `scrollWidth === clientWidth` with zero elements crossing the viewport at both widths, exactly one `h1` (route-focus target), h1→h2→h3 hierarchy, CTA slot measured 128px under all five auth-state texts at both widths, keyboard Tab reaches the action with the visible 2px `--color-focus` ring at 3px offset, decimal step markers restored over the shared list reset. Environment caveat recorded: the sandboxed browser pane never fires `requestAnimationFrame`, so React's streamed suspense reveal had to be invoked manually (`$RV`) to reach the settled DOM; `/learn` exhibits the identical pane behavior and `curl` shows both boundary completions in the served HTML from dev and production servers, so this is a pane quirk, not a page defect.

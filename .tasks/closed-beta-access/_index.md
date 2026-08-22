@@ -38,7 +38,7 @@ Adapted rather than copied, because PackScout's stack differs: identity arrives 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 001 | Establish the closed-beta access decision | medium | in_progress | admin-tools/002 |
+| 001 | Establish the closed-beta access decision | medium | done | admin-tools/002 |
 | 002 | Maintain the beta allowlist | medium | todo | 001 |
 | 003 | Decide access requests through the operator integration | medium | todo | 001 |
 
@@ -53,7 +53,7 @@ Adapted rather than copied, because PackScout's stack differs: identity arrives 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 006 | Add the public landing page | medium | in_progress | none |
+| 006 | Add the public landing page | medium | done | none |
 | 007 | Gate the product behind approved access | large | todo | 001, 006 |
 | 008 | Awaiting-approval and declined experience | medium | todo | 007 |
 

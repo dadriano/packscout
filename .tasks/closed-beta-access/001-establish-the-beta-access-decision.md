@@ -4,7 +4,7 @@
 **Depends on:** admin-tools/002
 **Blocks:** closed-beta-access/002, closed-beta-access/003, closed-beta-access/004, closed-beta-access/005, closed-beta-access/007
 **Estimated scope:** medium
-**Status:** in_progress
+**Status:** done
 
 ## Objective
 
@@ -48,14 +48,22 @@ Nothing visible on its own — this task establishes the fact that later tasks r
 
 ## Acceptance Criteria
 
-- [ ] A first authenticated contact from a new identity produces exactly one record whose access is awaiting review, with default provenance; concurrent first contacts converge on one record.
-- [ ] A repeat contact refreshes identity and last-seen without changing an existing decision, and never returns an approved account to awaiting review.
-- [ ] Effective access is admitted only for approved-and-not-suspended identities, and the returned reason distinguishes awaiting review, declined, and suspended.
-- [ ] An identity with no record resolves to awaiting review, and an establishment failure resolves to undetermined — neither is ever reported as admitted.
-- [ ] The authenticated self-read returns only the caller's own state; another user's state is unreachable through it.
-- [ ] The unauthenticated gate-status read reports only whether the beta is on, and returns nothing about identities, counts, or catalog data.
-- [ ] With the switch off, effective access resolves to admitted for every caller including anonymous; with it on, deny-by-default holds. No client-supplied value changes the switch.
+- [x] A first authenticated contact from a new identity produces exactly one record whose access is awaiting review, with default provenance; concurrent first contacts converge on one record.
+- [x] A repeat contact refreshes identity and last-seen without changing an existing decision, and never returns an approved account to awaiting review.
+- [x] Effective access is admitted only for approved-and-not-suspended identities, and the returned reason distinguishes awaiting review, declined, and suspended.
+- [x] An identity with no record resolves to awaiting review, and an establishment failure resolves to undetermined — neither is ever reported as admitted.
+- [x] The authenticated self-read returns only the caller's own state; another user's state is unreachable through it.
+- [x] The unauthenticated gate-status read reports only whether the beta is on, and returns nothing about identities, counts, or catalog data.
+- [x] With the switch off, effective access resolves to admitted for every caller including anonymous; with it on, deny-by-default holds. No client-supplied value changes the switch.
 
 ## Verification
 
 Product backend tests prove: default awaiting-review on first contact, idempotent and concurrent establishment, decision provenance, effective-access composition against suspended standing, missing-record and failed-establishment resolving to awaiting-review and undetermined respectively (and never to admitted), self-read isolation, the gate-status read's minimal surface, and both switch positions. The workspace typecheck and the product-backend test command exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: `.tasks/closed-beta-access/_index.md` ("The shape of the design"); provenance expectations cross-checked against closed-beta-access/002 and 003.
+- Alignment: the `productUsers` record gains an `access` decision — `awaiting_review` | `approved` | `declined` with provenance as a discriminated union (`decidedBy: "default"` with no reference, `"allowlist"` with `allowlistEntryId`, `"operator"` with `operatorId`, each with `decidedAt`) — stored separately from `standing`. `convex/productUserAccess.ts` is the admission surface: `establishAccess` (public mutation) creates or refreshes the record through the same write path as `recordSignIn`, stamps the awaiting-review default when no decision exists, and returns the composed effective access; `getMyAccess` (public query) is the authenticated self-read; `getGateStatus` (public query) tells anyone whether the beta is on and nothing else. `resolveProductUserEffectiveAccess` is the single composed resolution — admitted only when approved and not suspended, with reason `approved` | `awaiting_review` | `declined` | `suspended` | `undetermined`, and the validator pairs `admitted: true` exclusively with `approved` so `undetermined` can never be reported as admitted. A missing record resolves to awaiting review (deliberately opposite of suspension's missing⇒active); establishment/read failures (malformed identity key, impossible duplicate records — both raised before any write) resolve to `undetermined` while the beta is on. The switch is the deployment env var `PACKSCOUT_CLOSED_BETA` (declared `v.optional(v.literal("1"))` in `convex.config.ts`, read at request time through the repo's established deployment-configuration cast); while it is off, effective access resolves to admitted for every caller and no function accepts any argument that could influence it.
+- Divergences: (1) `recordSignIn` keeps its existing `{ created, standing }` contract (the deployed frontend calls it); `establishAccess` is the establishment-returns-effective-access call, and both funnel through the one exported `establishProductUserRecord` write path, which also materializes the default decision onto pre-task records on their next contact (dated at `firstSeenAt`, exactly what absence already reads as — no migration). (2) Provenance references are bounded strings rather than `v.id(...)` because the allowlist table (002) and operator identifiers (admin-side, 003) do not exist in this schema yet. (3) Reason precedence: a declined-and-suspended identity reads `declined` — suspension is the operative reason only for otherwise-admitted (approved) accounts. (4) While the switch is off, a failed establishment resolves to admitted, not undetermined, because admission does not depend on the record in a fully public product; with the switch on it is always `undetermined`. (5) No `packages/contracts` change: consumers read the reason vocabulary from the generated Convex API types.
+- Deferred to consumers: allowlist matching at establishment (002); operator decide/queue operations and any access-state index (003); enforcement on authenticated capabilities and the catalog read model (004/005); frontend routing on the self-read and gate status, including mapping a thrown establishment error to undetermined client-side (007).
+- Verification: `npm run typecheck:convex && npm run test:convex` → exit 0 (24 files, 184 tests passed; 17 in `convex/productUserAccess.test.ts`, and the pre-existing `convex/productUsers.test.ts` suite unchanged and green). `npm run scan:framework-standards:ratchet` → exit 0, 0 findings, 0 new findings. `npm run typecheck:frontend` → exit 0 (generated-api consumers unaffected).

@@ -39,7 +39,7 @@ The closed-beta feature excluded notifying users of access decisions, reasoning 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 001 | Establish the message delivery boundary and provider adapters | medium | in_progress | none |
+| 001 | Establish the message delivery boundary and provider adapters | medium | done | none |
 | 002 | Add the Postmark delivery adapter | medium | todo | 001 |
 | 003 | Author the message catalogue and rendering | medium | todo | 001 |
 | 004 | Deliver messages durably with retries | large | todo | 001 |

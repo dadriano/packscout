@@ -23,3 +23,4 @@ export * from "./quarantine.ts";
 export * from "./operations.ts";
 export * from "./worker-fleet.ts";
 export * from "./worker-presence.ts";
+export * from "./email-delivery.ts";

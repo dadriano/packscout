@@ -79,6 +79,73 @@ export const productUserStandingValidator = v.union(
   v.literal("suspended"),
 );
 
+/**
+ * The closed-beta admission decision, a dimension deliberately separate from
+ * standing because the two answer different questions. Standing asks "was this
+ * known account disciplined?", so a missing record reads as `active`.
+ * Admission asks "was this account let in?", so a missing record — or a record
+ * written before the closed beta existed — reads as `awaiting_review`. Both
+ * fail closed for their own question; they must never be collapsed.
+ */
+export const productUserAccessStateValidator = v.union(
+  v.literal("awaiting_review"),
+  v.literal("approved"),
+  v.literal("declined"),
+);
+
+const productUserAccessDecisionFields = {
+  state: productUserAccessStateValidator,
+  /** When the decision was established, ISO-8601 like the seen timestamps. */
+  decidedAt: v.string(),
+};
+
+/**
+ * A decision plus its provenance: what produced it, when, and a reference to
+ * the matched allowlist entry or the acting operator. Provenance is data other
+ * tasks display and audit — closed-beta-access/002 writes `allowlist`
+ * decisions, closed-beta-access/003 writes `operator` ones — never free text.
+ */
+export const productUserAccessDecisionValidator = v.union(
+  v.object({
+    ...productUserAccessDecisionFields,
+    decidedBy: v.literal("default"),
+  }),
+  v.object({
+    ...productUserAccessDecisionFields,
+    decidedBy: v.literal("allowlist"),
+    /** Stable id of the matched beta-allowlist entry. */
+    allowlistEntryId: v.string(),
+  }),
+  v.object({
+    ...productUserAccessDecisionFields,
+    decidedBy: v.literal("operator"),
+    /** The acting operator's admin-side identifier. */
+    operatorId: v.string(),
+  }),
+);
+
+/**
+ * The one composed admission answer every consumer reads. `admitted` is true
+ * only when access is approved and standing is not suspended; the reason is
+ * actionable and pairs with the verdict at the type level, so `undetermined`
+ * (or any other non-approved reason) can never be reported as admitted.
+ */
+export const productUserEffectiveAccessValidator = v.union(
+  v.object({
+    admitted: v.literal(true),
+    reason: v.literal("approved"),
+  }),
+  v.object({
+    admitted: v.literal(false),
+    reason: v.union(
+      v.literal("awaiting_review"),
+      v.literal("declined"),
+      v.literal("suspended"),
+      v.literal("undetermined"),
+    ),
+  }),
+);
+
 export const productUserDocumentValidator = v.object({
   subject: v.string(),
   authMethod: v.string(),
@@ -89,10 +156,17 @@ export const productUserDocumentValidator = v.object({
   firstSeenAt: v.string(),
   lastSeenAt: v.string(),
   standing: productUserStandingValidator,
+  /**
+   * Optional because records written before the closed beta existed lack it;
+   * absence reads as awaiting review with default provenance, and the next
+   * authenticated contact materializes exactly that decision.
+   */
+  access: v.optional(productUserAccessDecisionValidator),
 });
 
-export const productUserRecordValidator =
-  productUserDocumentValidator.omit("walletAddressKey");
+export const productUserRecordValidator = productUserDocumentValidator
+  .omit("walletAddressKey")
+  .omit("access");
 
 export const productUserDirectoryRowValidator =
   productUserRecordValidator.extend({
@@ -101,6 +175,15 @@ export const productUserDirectoryRowValidator =
   });
 
 export type ProductUserStanding = Infer<typeof productUserStandingValidator>;
+export type ProductUserAccessState = Infer<
+  typeof productUserAccessStateValidator
+>;
+export type ProductUserAccessDecision = Infer<
+  typeof productUserAccessDecisionValidator
+>;
+export type ProductUserEffectiveAccess = Infer<
+  typeof productUserEffectiveAccessValidator
+>;
 export type ProductUserDocument = Infer<typeof productUserDocumentValidator>;
 export type ProductUserRecord = Infer<typeof productUserRecordValidator>;
 export type ProductUserDirectoryRow = Infer<
@@ -271,6 +354,62 @@ export async function requireActiveProductUserStanding(
   if ((await readProductUserStanding(ctx, subject)) === "suspended") {
     refuseProductUser(PRODUCT_USER_SUSPENDED_ERROR_CODE);
   }
+}
+
+/**
+ * The decision a record holds before any explicit one is written: awaiting
+ * review, decided by default when the record was first established. New
+ * records store it at insert; legacy records read as it until their next
+ * authenticated contact materializes it.
+ */
+export function defaultProductUserAccessDecision(
+  decidedAt: string,
+): ProductUserAccessDecision {
+  return { state: "awaiting_review", decidedBy: "default", decidedAt };
+}
+
+/**
+ * The stored admission decision, or the default one derived for records
+ * written before the closed beta existed. The derived decision is dated at
+ * `firstSeenAt` — the identity has been awaiting review since it first showed
+ * up — so a later materialization stores exactly what reads already reported.
+ */
+export function productUserAccessDecisionOf(
+  document: Pick<ProductUserDocument, "access" | "firstSeenAt">,
+): ProductUserAccessDecision {
+  return (
+    document.access ?? defaultProductUserAccessDecision(document.firstSeenAt)
+  );
+}
+
+/**
+ * Composes admission and standing into the one answer consumers act on, for
+ * a deployment where the closed beta is on (the off position short-circuits
+ * to admitted before composition and never reaches this rule).
+ *
+ * - No record: awaiting review — absence means "not yet let in", never entry.
+ * - Access not approved: that state is the reason; an unadmitted identity's
+ *   suspension is not the operative fact until it would otherwise be in.
+ * - Approved but suspended: suspended, so discipline still bites.
+ * - Approved and active: admitted.
+ */
+export function composeProductUserEffectiveAccess(
+  document: Pick<
+    ProductUserDocument,
+    "access" | "firstSeenAt" | "standing"
+  > | null,
+): ProductUserEffectiveAccess {
+  if (document === null) {
+    return { admitted: false, reason: "awaiting_review" };
+  }
+  const state = productUserAccessDecisionOf(document).state;
+  if (state !== "approved") {
+    return { admitted: false, reason: state };
+  }
+  if (document.standing === "suspended") {
+    return { admitted: false, reason: "suspended" };
+  }
+  return { admitted: true, reason: "approved" };
 }
 
 export function productUserTimestamp(epochMilliseconds: number): string {

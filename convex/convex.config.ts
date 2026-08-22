@@ -21,6 +21,10 @@ export default defineApp({
     // Server-to-server secret for the admin product-user directory integration.
     // Absent by default: the HTTP surface fails closed until it is configured.
     PACKSCOUT_ADMIN_DIRECTORY_TOKEN: v.optional(v.string()),
+    // The closed-beta master switch. "1" closes PackScout to unadmitted
+    // callers; unset keeps the product fully public. Server-side deployment
+    // configuration only: no client input, header, or query can influence it.
+    PACKSCOUT_CLOSED_BETA: v.optional(v.literal("1")),
     PRIVY_APP_ID: v.optional(v.string()),
   },
 });

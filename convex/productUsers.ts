@@ -8,8 +8,10 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import {
+  defaultProductUserAccessDecision,
   deriveProductUserAttributes,
   findProductUserBySubject,
+  productUserAccessDecisionOf,
   productUserStandingValidator,
   productUserTimestamp,
   productUserTimestampMilliseconds,
@@ -30,6 +32,10 @@ import {
  *
  * Privileged operator reads live in `productUserDirectory.ts` as internal
  * functions and are not part of this public API.
+ *
+ * Establishment also stamps the closed-beta admission default (awaiting
+ * review) on records that lack a decision; the composed admission answer and
+ * its public surface live in `productUserAccess.ts`.
  */
 
 /**
@@ -39,7 +45,7 @@ import {
  */
 const LAST_SEEN_REFRESH_MILLISECONDS = 60_000;
 
-async function requireIdentity(
+export async function requireProductUserIdentity(
   ctx: Pick<QueryCtx, "auth">,
 ): Promise<UserIdentity> {
   const identity = await ctx.auth.getUserIdentity();
@@ -91,7 +97,17 @@ function lastSeenIsStale(
   );
 }
 
-async function establishRecord(
+/**
+ * Creates or refreshes the caller's directory record, the single write path
+ * both `recordSignIn` and the access establishment call share.
+ *
+ * A new record starts with the default admission decision (awaiting review); a
+ * record from before the closed beta existed has that same default
+ * materialized on its next contact. An existing decision is never altered
+ * here, so a repeat contact can never return an approved account to awaiting
+ * review — decisions move only through the allowlist and operator paths.
+ */
+export async function establishProductUserRecord(
   ctx: MutationCtx,
   identity: UserIdentity,
 ): Promise<{ created: boolean; standing: "active" | "suspended" }> {
@@ -106,14 +122,17 @@ async function establishRecord(
       firstSeenAt: observedAt,
       lastSeenAt: observedAt,
       standing: "active",
+      access: defaultProductUserAccessDecision(observedAt),
     });
     return { created: true, standing: "active" };
   }
 
   const merged = mergeAttributes(existing, attributes);
+  const decisionMissing = existing.access === undefined;
   if (
     attributesChanged(existing, merged) ||
-    lastSeenIsStale(existing, nowMilliseconds)
+    lastSeenIsStale(existing, nowMilliseconds) ||
+    decisionMissing
   ) {
     await ctx.db.patch("productUsers", existing._id, {
       authMethod: merged.authMethod,
@@ -121,6 +140,10 @@ async function establishRecord(
       walletAddress: merged.walletAddress,
       walletAddressKey: merged.walletAddressKey,
       lastSeenAt: observedAt,
+      // Materializes exactly the decision the record already reads as.
+      ...(decisionMissing
+        ? { access: productUserAccessDecisionOf(existing) }
+        : {}),
     });
   }
   return { created: false, standing: existing.standing };
@@ -138,8 +161,8 @@ export const recordSignIn = mutation({
     standing: productUserStandingValidator,
   }),
   handler: async (ctx) => {
-    const identity = await requireIdentity(ctx);
-    return await establishRecord(ctx, identity);
+    const identity = await requireProductUserIdentity(ctx);
+    return await establishProductUserRecord(ctx, identity);
   },
 });
 
@@ -152,7 +175,7 @@ export const getMyStanding = query({
   args: {},
   returns: v.object({ standing: productUserStandingValidator }),
   handler: async (ctx) => {
-    const identity = await requireIdentity(ctx);
+    const identity = await requireProductUserIdentity(ctx);
     const subject = requireProductUserSubject(identity.tokenIdentifier);
     const existing = await findProductUserBySubject(ctx, subject);
     return { standing: existing?.standing ?? "active" };
