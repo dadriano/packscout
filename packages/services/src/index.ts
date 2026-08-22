@@ -83,3 +83,7 @@ export * from "./email-delivery/adapter.ts";
 export * from "./email-delivery/delivery-service.ts";
 export * from "./email-delivery/registry.ts";
 export * from "./email-delivery/transport.ts";
+export * from "./email-delivery/postmark-adapter.ts";
+export * from "./message-catalogue/origins.ts";
+export * from "./message-catalogue/rendering.ts";
+export * from "./message-catalogue/catalogue.ts";

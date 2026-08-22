@@ -18,8 +18,10 @@ export default defineApp({
     PACKSCOUT_HEAT_PUBLICATION_KEY_IDS: v.optional(v.string()),
     PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS: v.optional(v.string()),
     PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES: v.optional(v.string()),
-    // Server-to-server secret for the admin product-user directory integration.
-    // Absent by default: the HTTP surface fails closed until it is configured.
+    // Server-to-server secret for the admin's product-user integration —
+    // directory reads and beta-allowlist management share it, because they are
+    // one integration. Absent by default: the HTTP surface fails closed until
+    // it is configured.
     PACKSCOUT_ADMIN_DIRECTORY_TOKEN: v.optional(v.string()),
     // The closed-beta master switch. "1" closes PackScout to unadmitted
     // callers; unset keeps the product fully public. Server-side deployment

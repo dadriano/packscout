@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as betaAllowlist from "../betaAllowlist.js";
+import type * as betaAllowlistRecords from "../betaAllowlistRecords.js";
 import type * as catalogManifestActivate from "../catalogManifestActivate.js";
 import type * as catalogManifestBlock from "../catalogManifestBlock.js";
 import type * as catalogManifestErrors from "../catalogManifestErrors.js";
@@ -82,6 +84,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  betaAllowlist: typeof betaAllowlist;
+  betaAllowlistRecords: typeof betaAllowlistRecords;
   catalogManifestActivate: typeof catalogManifestActivate;
   catalogManifestBlock: typeof catalogManifestBlock;
   catalogManifestErrors: typeof catalogManifestErrors;

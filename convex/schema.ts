@@ -8,6 +8,7 @@ import {
 } from "@packscout/contracts";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { betaAllowlistEntryDocumentValidator } from "./betaAllowlistRecords";
 import { productUserDocumentValidator } from "./productUserRecords";
 import { repackSearchRowValidator } from "./publicRepackValidation";
 
@@ -1357,4 +1358,14 @@ export default defineSchema({
     .index("by_last_seen_at", ["lastSeenAt"])
     .index("by_email", ["email"])
     .index("by_wallet_address_key", ["walletAddressKey"]),
+
+  // The closed-beta allowlist. The identifier indexes serve exact-match
+  // admission (establishment-time and retroactive), uniqueness checks, and
+  // bounded prefix search; the update-time index serves recency-ordered
+  // listing. Uniqueness of a normalized identifier across entries is an
+  // application invariant enforced by the allowlist mutations.
+  betaAllowlistEntries: defineTable(betaAllowlistEntryDocumentValidator)
+    .index("by_email", ["email"])
+    .index("by_wallet_address_key", ["walletAddressKey"])
+    .index("by_updated_at", ["updatedAt"]),
 });

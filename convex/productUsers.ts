@@ -8,6 +8,10 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import {
+  betaAllowlistApprovedDecision,
+  findBetaAllowlistMatch,
+} from "./betaAllowlistRecords";
+import {
   defaultProductUserAccessDecision,
   deriveProductUserAttributes,
   findProductUserBySubject,
@@ -34,8 +38,10 @@ import {
  * functions and are not part of this public API.
  *
  * Establishment also stamps the closed-beta admission default (awaiting
- * review) on records that lack a decision; the composed admission answer and
- * its public surface live in `productUserAccess.ts`.
+ * review) on records that lack a decision and consults the beta allowlist so
+ * invited identities are admitted at sign-in; the composed admission answer
+ * and its public surface live in `productUserAccess.ts`, and the allowlist
+ * itself in `betaAllowlist.ts`.
  */
 
 /**
@@ -101,11 +107,21 @@ function lastSeenIsStale(
  * Creates or refreshes the caller's directory record, the single write path
  * both `recordSignIn` and the access establishment call share.
  *
- * A new record starts with the default admission decision (awaiting review); a
- * record from before the closed beta existed has that same default
- * materialized on its next contact. An existing decision is never altered
- * here, so a repeat contact can never return an approved account to awaiting
- * review — decisions move only through the allowlist and operator paths.
+ * Establishment is also where the beta allowlist admits invited identities
+ * (closed-beta-access/002): an undecided identity whose verified identifiers
+ * match an entry is approved on the spot, with provenance naming the entry.
+ * Only identifiers the auth provider verified ever reach the match — every
+ * attribute here derives from the Convex-verified identity, and no caller
+ * argument exists — so a self-asserted or unverified attribute can never
+ * admit anyone.
+ *
+ * A new record otherwise starts with the default admission decision (awaiting
+ * review); a record from before the closed beta existed has that same default
+ * materialized on its next contact. An approved decision is never altered
+ * here, and a declined one is never overturned — an operator's explicit
+ * decline outranks the allowlist, so a declined identity stays declined no
+ * matter what the list says. Decisions move only through the allowlist and
+ * operator paths.
  */
 export async function establishProductUserRecord(
   ctx: MutationCtx,
@@ -117,22 +133,36 @@ export async function establishProductUserRecord(
   const observedAt = productUserTimestamp(nowMilliseconds);
 
   if (existing === null) {
+    const invitation = await findBetaAllowlistMatch(ctx, attributes);
     await ctx.db.insert("productUsers", {
       ...attributes,
       firstSeenAt: observedAt,
       lastSeenAt: observedAt,
       standing: "active",
-      access: defaultProductUserAccessDecision(observedAt),
+      access:
+        invitation === null
+          ? defaultProductUserAccessDecision(observedAt)
+          : betaAllowlistApprovedDecision(invitation._id, observedAt),
     });
     return { created: true, standing: "active" };
   }
 
   const merged = mergeAttributes(existing, attributes);
   const decisionMissing = existing.access === undefined;
+  // Only an undecided identity consults the allowlist, on its merged (stored
+  // plus freshly verified) identifiers, so an entry added while it waited or
+  // an identifier verified on this very contact admits it now. Approved and
+  // declined identities skip the lookup entirely: neither is ever
+  // re-evaluated here.
+  const invitation =
+    productUserAccessDecisionOf(existing).state === "awaiting_review"
+      ? await findBetaAllowlistMatch(ctx, merged)
+      : null;
   if (
     attributesChanged(existing, merged) ||
     lastSeenIsStale(existing, nowMilliseconds) ||
-    decisionMissing
+    decisionMissing ||
+    invitation !== null
   ) {
     await ctx.db.patch("productUsers", existing._id, {
       authMethod: merged.authMethod,
@@ -140,10 +170,13 @@ export async function establishProductUserRecord(
       walletAddress: merged.walletAddress,
       walletAddressKey: merged.walletAddressKey,
       lastSeenAt: observedAt,
-      // Materializes exactly the decision the record already reads as.
-      ...(decisionMissing
-        ? { access: productUserAccessDecisionOf(existing) }
-        : {}),
+      // An allowlist match decides the waiting identity now; otherwise a
+      // legacy record materializes exactly the decision it already reads as.
+      ...(invitation !== null
+        ? { access: betaAllowlistApprovedDecision(invitation._id, observedAt) }
+        : decisionMissing
+          ? { access: productUserAccessDecisionOf(existing) }
+          : {}),
     });
   }
   return { created: false, standing: existing.standing };

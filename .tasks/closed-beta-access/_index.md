@@ -39,7 +39,7 @@ Adapted rather than copied, because PackScout's stack differs: identity arrives 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
 | 001 | Establish the closed-beta access decision | medium | done | admin-tools/002 |
-| 002 | Maintain the beta allowlist | medium | todo | 001 |
+| 002 | Maintain the beta allowlist | medium | done | 001 |
 | 003 | Decide access requests through the operator integration | medium | todo | 001 |
 
 ### Enforcement

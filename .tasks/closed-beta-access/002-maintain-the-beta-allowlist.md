@@ -4,7 +4,7 @@
 **Depends on:** closed-beta-access/001
 **Blocks:** closed-beta-access/009
 **Estimated scope:** medium
-**Status:** todo
+**Status:** done
 
 ## Objective
 
@@ -51,13 +51,21 @@ Invisible to product users except in its effect: someone on the list signs in an
 
 ## Acceptance Criteria
 
-- [ ] Entries can be created with an email, a wallet address, or both; identifiers are normalized, and a duplicate normalized identifier is rejected with a clear outcome.
-- [ ] An identity with a verified matching identifier is admitted at first sign-in with allowlist provenance naming the matched entry; an unverified attribute never matches.
-- [ ] Adding an entry admits matching awaiting-review accounts immediately and reports the count; a declined account is left declined.
-- [ ] Removing an entry stops future automatic admission and leaves already-approved accounts admitted.
-- [ ] Unauthenticated and ordinary product callers cannot read or write the allowlist; only the authenticated operator integration can.
-- [ ] Listing search, recency ordering, and pagination stay within their bounds on a list large enough to page.
+- [x] Entries can be created with an email, a wallet address, or both; identifiers are normalized, and a duplicate normalized identifier is rejected with a clear outcome.
+- [x] An identity with a verified matching identifier is admitted at first sign-in with allowlist provenance naming the matched entry; an unverified attribute never matches.
+- [x] Adding an entry admits matching awaiting-review accounts immediately and reports the count; a declined account is left declined.
+- [x] Removing an entry stops future automatic admission and leaves already-approved accounts admitted.
+- [x] Unauthenticated and ordinary product callers cannot read or write the allowlist; only the authenticated operator integration can.
+- [x] Listing search, recency ordering, and pagination stay within their bounds on a list large enough to page.
 
 ## Verification
 
 Product backend tests prove normalization and duplicate rejection, verified-identifier-only matching at establishment, retroactive admission of awaiting-review accounts (and non-reversal of declined ones), removal semantics preserving existing approvals, access control on every privileged operation, and search/pagination bounds. The workspace typecheck and the product-backend test command exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: `.tasks/closed-beta-access/_index.md` ("Ported from the approved reference web app and admin"; operators are not admitted by being operators); closed-beta-access/001's Spec Compliance — this task fills in the `decidedBy: "allowlist"` + `allowlistEntryId` provenance 001 reserved; closed-beta-access/003 (operator decisions outrank the list; reversing a decline is 003's job) and 009 (the admin consumer of this integration surface).
+- Alignment: `betaAllowlistEntries` (schema) stores a normalized email, a verbatim-cased wallet address with a lowercase `walletAddressKey` for case-insensitive matching (the directory's `productUserWalletAddressKey` convention), an optional label, `createdAt`/`updatedAt`, and `createdByOperatorId`, indexed `by_email`, `by_wallet_address_key`, and `by_updated_at`. `convex/betaAllowlistRecords.ts` is the pure shared module — normalization reuses the directory's email/wallet normalizers so the list and the records can never disagree about "the same address"; fixed-string refusals; `findBetaAllowlistMatch` (email consulted before wallet for determinism); `betaAllowlistApprovedDecision`. `convex/betaAllowlist.ts` registers the internal-only operations: `createEntry` and `updateEntry` return the entry plus `admittedCount` from the bounded, idempotent retroactive admission of matching awaiting-review accounts (including records that predate the closed beta; declined and operator-approved records are never touched); `removeEntry` deletes the entry and changes no access decision; `listEntriesPage` orders by `updatedAt` recency, searches identifier prefixes case-insensitively through bounded index scans, and pages with the directory's cursor discipline. Establishment-time matching lives in the one shared write path, `establishProductUserRecord` (productUsers.ts): a first contact whose verified identifiers match an entry is inserted approved with allowlist provenance naming the entry id, and an existing awaiting-review record re-consults the list on its merged verified identifiers, so an entry added while someone waited — or an identifier the provider newly verified — admits them on that contact. Approved and declined records never re-evaluate. Matching consumes only Convex-verified identity attributes; no function argument exists through which a caller could assert an identifier. The surface is reachable only through four POST routes on the admin-integration HTTP router (`/admin/beta-allowlist/list|create|update|remove`), authenticated with the same `PACKSCOUT_ADMIN_DIRECTORY_TOKEN` bearer secret as the directory reads — they are one integration, and the `convex.config.ts` comment now says so. Identifiers travel only in JSON bodies, never in URLs, query strings, logs, or error payloads.
+- Divergences: (1) A duplicate identifier refuses with a kind-specific code (`BETA_ALLOWLIST_DUPLICATE_EMAIL` / `BETA_ALLOWLIST_DUPLICATE_WALLET_ADDRESS`, HTTP 409) that names which identifier kind collided but never the value — actionable without echoing personal data. (2) Updating or removing a vanished entry returns `{ entry: null }` / `{ removed: false }` (the directory's null-record convention) instead of refusing, so repeated operator actions converge; only a malformed entry reference refuses. (3) A change-free update re-runs the admission scan (bounded at 100 records per identifier), making update the idempotent re-sync tool; `updatedAt` bumps only on real edits. (4) Listing recency is `updatedAt` descending — equal to `createdAt` until an edit — so a just-edited entry surfaces first. (5) Decision maintenance is switch-independent: while `PACKSCOUT_CLOSED_BETA` is off a matching sign-in still records the allowlist-approved decision, so invitations recorded during a public phase are honored when the beta turns on.
+- Deferred to consumers: the admin allowlist screen, its permission gating, and restating null-entry results as "not found" (009); operator decide/reverse operations including reversing a decline (003); enforcement reads (004/005).
+- Verification: `npm run typecheck:convex && npm run test:convex` → exit 0 (25 files, 207 tests passed; 23 in `convex/betaAllowlist.test.ts`, all pre-existing suites unchanged and green). `npm run scan:framework-standards:ratchet` → exit 0, 0 findings, 0 new findings. `node scripts/check-docs.mjs` → ok, 155 markdown files. `npm run typecheck:frontend` → exit 0 (generated-api consumers unaffected).

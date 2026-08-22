@@ -277,6 +277,211 @@ const getProductUserSavedItems = httpAction(async (ctx, request) => {
   }
 });
 
+/**
+ * The beta-allowlist management surface (closed-beta-access/002), reached
+ * through the same admin integration and deployment secret as the directory
+ * reads above. Entries carry email and wallet addresses of real people, so
+ * every operation is POST with a JSON body — an identifier never appears in
+ * a URL, a query string, or an error payload — and every refusal below is a
+ * fixed string.
+ */
+
+const ALLOWLIST_BAD_REQUEST_CODES = new Set([
+  "BETA_ALLOWLIST_IDENTIFIER_REQUIRED",
+  "BETA_ALLOWLIST_EMAIL_INVALID",
+  "BETA_ALLOWLIST_WALLET_ADDRESS_INVALID",
+  "BETA_ALLOWLIST_LABEL_INVALID",
+  "BETA_ALLOWLIST_OPERATOR_INVALID",
+  "BETA_ALLOWLIST_ENTRY_INVALID",
+  "BETA_ALLOWLIST_SEARCH_INVALID",
+  "BETA_ALLOWLIST_PAGE_SIZE_INVALID",
+  "BETA_ALLOWLIST_PAGE_CURSOR_INVALID",
+]);
+
+/** A duplicate identifier is a conflict with an existing entry, not a 400. */
+const ALLOWLIST_CONFLICT_CODES = new Set([
+  "BETA_ALLOWLIST_DUPLICATE_EMAIL",
+  "BETA_ALLOWLIST_DUPLICATE_WALLET_ADDRESS",
+]);
+
+/** Transport-level bound; the allowlist module enforces the semantic ones. */
+const MAX_ALLOWLIST_FIELD_LENGTH = 1_024;
+const MAX_ALLOWLIST_ENTRY_ID_LENGTH = 128;
+
+function allowlistBadRequest(code: string): Response {
+  return errorResponse(400, code, "The beta-allowlist request was rejected.");
+}
+
+function allowlistRefusalResponse(error: unknown): Response {
+  if (error instanceof ConvexError) {
+    const data = error.data as { code?: unknown } | null;
+    const code = typeof data?.code === "string" ? data.code : null;
+    if (code !== null && ALLOWLIST_CONFLICT_CODES.has(code)) {
+      return errorResponse(
+        409,
+        code,
+        "The beta-allowlist entry conflicts with an existing entry.",
+      );
+    }
+    if (code !== null && ALLOWLIST_BAD_REQUEST_CODES.has(code)) {
+      return allowlistBadRequest(code);
+    }
+  }
+  // Anything else is an internal failure; the raw error never leaves Convex.
+  return errorResponse(
+    500,
+    "ADMIN_ALLOWLIST_UNAVAILABLE",
+    "The beta allowlist is unavailable.",
+  );
+}
+
+/**
+ * Absent and null both read as "no value"; anything else must be a bounded
+ * string. `undefined` marks a malformed field, mirroring `readSearch`.
+ */
+function readAllowlistOptionalText(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (
+    typeof value !== "string" ||
+    value.length > MAX_ALLOWLIST_FIELD_LENGTH
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function readAllowlistEntryId(value: unknown): string | null {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_ALLOWLIST_ENTRY_ID_LENGTH
+    ? value
+    : null;
+}
+
+const listBetaAllowlistEntries = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return allowlistBadRequest("ADMIN_ALLOWLIST_REQUEST_INVALID");
+  const search = readSearch(body.search);
+  const paginationOpts = readPaginationOpts(body.paginationOpts);
+  if (search === undefined || paginationOpts === null) {
+    return allowlistBadRequest("ADMIN_ALLOWLIST_REQUEST_INVALID");
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runQuery(internal.betaAllowlist.listEntriesPage, {
+        search,
+        paginationOpts,
+      }),
+    );
+  } catch (error) {
+    return allowlistRefusalResponse(error);
+  }
+});
+
+/**
+ * Creates an entry and reports how many waiting accounts it admitted, so the
+ * operator gets confirmation that the invited person is no longer stuck.
+ */
+const createBetaAllowlistEntry = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return allowlistBadRequest("ADMIN_ALLOWLIST_REQUEST_INVALID");
+  const email = readAllowlistOptionalText(body.email);
+  const walletAddress = readAllowlistOptionalText(body.walletAddress);
+  const label = readAllowlistOptionalText(body.label);
+  const operatorId = body.operatorId;
+  if (
+    email === undefined ||
+    walletAddress === undefined ||
+    label === undefined ||
+    typeof operatorId !== "string" ||
+    operatorId.length === 0 ||
+    operatorId.length > MAX_ALLOWLIST_FIELD_LENGTH
+  ) {
+    return allowlistBadRequest("ADMIN_ALLOWLIST_REQUEST_INVALID");
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runMutation(internal.betaAllowlist.createEntry, {
+        email,
+        walletAddress,
+        label,
+        operatorId,
+      }),
+    );
+  } catch (error) {
+    return allowlistRefusalResponse(error);
+  }
+});
+
+/**
+ * Edits an entry: an omitted field keeps its stored value, an explicit null
+ * clears it. Reports the admissions the edited identifiers produced. A null
+ * entry in the response means the entry no longer exists, which the admin
+ * restates as "not found" — never as a silent success.
+ */
+const updateBetaAllowlistEntry = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return allowlistBadRequest("ADMIN_ALLOWLIST_REQUEST_INVALID");
+  const entryId = readAllowlistEntryId(body.entryId);
+  if (entryId === null) {
+    return allowlistBadRequest("ADMIN_ALLOWLIST_REQUEST_INVALID");
+  }
+  const updateArgs: {
+    entryId: string;
+    email?: string | null;
+    walletAddress?: string | null;
+    label?: string | null;
+  } = { entryId };
+  for (const field of ["email", "walletAddress", "label"] as const) {
+    if (!(field in body)) continue;
+    const value = body[field];
+    if (value === null) {
+      updateArgs[field] = null;
+      continue;
+    }
+    if (typeof value !== "string" || value.length > MAX_ALLOWLIST_FIELD_LENGTH) {
+      return allowlistBadRequest("ADMIN_ALLOWLIST_REQUEST_INVALID");
+    }
+    updateArgs[field] = value;
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runMutation(internal.betaAllowlist.updateEntry, updateArgs),
+    );
+  } catch (error) {
+    return allowlistRefusalResponse(error);
+  }
+});
+
+/**
+ * Removes an entry. Removal stops future automatic admission and never
+ * changes any existing access decision; `removed: false` means the entry was
+ * already gone, so repeated operator actions converge.
+ */
+const removeBetaAllowlistEntry = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return allowlistBadRequest("ADMIN_ALLOWLIST_REQUEST_INVALID");
+  const entryId = readAllowlistEntryId(body.entryId);
+  if (entryId === null) {
+    return allowlistBadRequest("ADMIN_ALLOWLIST_REQUEST_INVALID");
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runMutation(internal.betaAllowlist.removeEntry, { entryId }),
+    );
+  } catch (error) {
+    return allowlistRefusalResponse(error);
+  }
+});
+
 const http = httpRouter();
 
 
@@ -590,6 +795,29 @@ http.route({
   path: "/admin/product-users/standing",
   method: "POST",
   handler: setProductUserStanding,
+});
+
+// POST rather than GET, like the directory routes: allowlist identifiers are
+// personal data and must not travel in a URL or query string.
+http.route({
+  path: "/admin/beta-allowlist/list",
+  method: "POST",
+  handler: listBetaAllowlistEntries,
+});
+http.route({
+  path: "/admin/beta-allowlist/create",
+  method: "POST",
+  handler: createBetaAllowlistEntry,
+});
+http.route({
+  path: "/admin/beta-allowlist/update",
+  method: "POST",
+  handler: updateBetaAllowlistEntry,
+});
+http.route({
+  path: "/admin/beta-allowlist/remove",
+  method: "POST",
+  handler: removeBetaAllowlistEntry,
 });
 
 export default http;
