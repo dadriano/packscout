@@ -38,10 +38,27 @@ const ids = {
   secondPublicRepack: "33333333-3333-5333-8333-333333333333",
 } as const;
 
-const configuredAt = new Date("2026-08-15T10:00:00.000Z");
-const sourceAt = new Date("2026-08-15T10:01:00.000Z");
-const collectedAt = new Date("2026-08-15T10:01:01.000Z");
-const committedAt = new Date("2026-08-15T10:01:02.000Z");
+/** The exact hold the schema pins with `retained_until = occurred_at + 7 days`. */
+const retentionWindowInMilliseconds = 7 * 24 * 60 * 60 * 1_000;
+
+/**
+ * Anchors every fixture timestamp to the clock the database itself guards
+ * retention against.
+ *
+ * The append-only trigger refuses a delete only while
+ * `retained_until > current_timestamp`, and `retained_until` is pinned to
+ * `occurred_at + 7 days`. A hard-coded calendar date therefore ages out of its
+ * own retention hold once real time passes it: the trigger quietly stops
+ * firing, an unrelated foreign key becomes the visible rejection, and the test
+ * starts failing on a date rather than on a defect. Anchoring an hour behind
+ * the run's clock keeps every fixture in the past — as real ingestion
+ * timestamps are — while leaving the seven-day hold comfortably open.
+ */
+const fixtureAnchor = Date.now() - 60 * 60 * 1_000;
+const configuredAt = new Date(fixtureAnchor);
+const sourceAt = new Date(fixtureAnchor + 60_000);
+const collectedAt = new Date(fixtureAnchor + 61_000);
+const committedAt = new Date(fixtureAnchor + 62_000);
 
 function packContent() {
   return {
@@ -565,8 +582,14 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       sequenceBeforeReplay.next_catalog_sequence,
     );
 
-    const retainedHistoryAt = new Date("2026-08-01T00:00:00.000Z");
-    const retainedHistoryUntil = new Date("2026-08-08T00:00:00.000Z");
+    // Two full windows behind the anchor, so this row's hold has provably
+    // elapsed against both the cleanup cutoff and the database's own clock.
+    const retainedHistoryAt = new Date(
+      configuredAt.getTime() - 2 * retentionWindowInMilliseconds,
+    );
+    const retainedHistoryUntil = new Date(
+      retainedHistoryAt.getTime() + retentionWindowInMilliseconds,
+    );
     const retainedObservationId = "55000000-0000-4000-8000-000000000040";
     await harness.client.normalized_heat_observations.create({
       data: {
@@ -610,8 +633,22 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           organization_id: ids.organization,
           id: { not: retainedObservationId },
         },
-        select: { id: true, organization_id: true },
+        // Without a total ordering PostgreSQL is free to hand back any of the
+        // committed observations, so the row under test would change between
+        // runs. `public_change_sequence` repeats across the snapshot and pull
+        // observations of one revision; `observation_key` breaks that tie.
+        orderBy: [
+          { public_change_sequence: "asc" },
+          { observation_key: "asc" },
+        ],
+        select: { id: true, organization_id: true, retained_until: true },
       });
+    assert.ok(
+      protectedObservation.retained_until.getTime() > Date.now(),
+      "the observation under test must still be inside its retention hold, "
+        + "otherwise the delete below is refused by the outcome foreign key "
+        + "and stops proving anything about the retention trigger",
+    );
     await assert.rejects(
       harness.client.normalized_heat_observations.delete({
         where: {
@@ -1147,7 +1184,8 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     });
     assert.equal(immutableHistory.length, 13);
     assert.ok(immutableHistory.every(({ retained_until, occurred_at }) =>
-      retained_until.getTime() - occurred_at.getTime() === 7 * 24 * 60 * 60 * 1_000));
+      retained_until.getTime() - occurred_at.getTime()
+        === retentionWindowInMilliseconds));
   } finally {
     await harness.close();
   }
