@@ -5,7 +5,7 @@
 **Blocks:** dataforest-source-integration/003, dataforest-source-integration/005
 **Estimated scope:** large
 **Estimated effort:** 3–4 days for one builder, including source-adapter contracts, migrations, lifecycle contracts, retention boundaries, and focused verification
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -36,7 +36,8 @@ The existing pipeline already separates transport and platform mapping adapters,
 - Give every compile-time registered source type a stable `sourceTypeKey` and adapter version, normalized-record contract version, compatible connection type, supported providers, per-provider replacement identity-namespace key, evidence-backed record-ID scope declarations, capabilities, validated configuration contracts, and safe operator label; never reuse this identity as a mapper key.
 - Require the adapter boundary to test a connection, test a source, execute or cancel one bounded request under a runtime-granted connection permit, classify failures, and report measurements without moving a checkpoint itself.
 - Normalize every successful page to one provider key, ordered observation outcomes, an adapter-owned checkpoint envelope, and exactly `{ kind: continue }` or `{ kind: poll_after, minimumDelaySeconds }`, where the delay is a required integer from 0 through 86,400.
-- Normalize each valid observation to `providerRecordIdentity = { recordIdScopeKey, providerRecordId }`, catalog/pull/trade kind, effective and collection times, scope-qualified relationship identities, approved event, money, payment, and availability facts, plus a protected native-evidence reference.
+- Normalize each valid observation to `providerRecordIdentity = { recordIdScopeKey, providerRecordId }`, catalog/pull/trade kind, effective and collection times, scope-qualified relationship identities, approved event, money, payment, and availability facts, strict source-neutral display/value/EV provider facts, plus a protected native-evidence reference.
+- Keep mapping-relevant provider facts in one closed, versioned semantic schema and include them in the semantic observation hash. Protected native evidence remains provenance/quarantine input only and can neither reach a mapper nor override normalized facts; authoritative sold out remains distinct from ordinary unavailable.
 - Keep raw wrapper fields, SDK objects, endpoint details, credentials, vendor cursors, and vendor polling values inside the registered adapter.
 
 ### Adapter operation scopes
@@ -214,34 +215,52 @@ None directly. Tasks 004 and 008 expose the masked lifecycle, progress, and log-
 
 ### Ownership proof
 
-- [ ] Four source instances share one encrypted connection profile while retaining different checkpoints, schedules, runs, health, and diagnostic events.
-- [ ] One provider cannot have overlapping active sources or imports, while different providers may own active runs concurrently.
-- [ ] Replacing one provider's active source preserves stable provider and canonical identity and does not mutate another provider.
-- [ ] Queued and running imports retain immutable source type, adapter, normalized-contract, mapper, namespace, connection, source, checkpoint, and generation pins; stale or revoked owners cannot fetch or commit.
+- [x] Four source instances share one encrypted connection profile while retaining different checkpoints, schedules, runs, health, and diagnostic events.
+- [x] One provider cannot have overlapping active sources or imports, while different providers may own active runs concurrently.
+- [x] Replacing one provider's active source preserves stable provider and canonical identity and does not mutate another provider.
+- [x] Queued and running imports retain immutable source type, adapter, normalized-contract, mapper, namespace, connection, source, checkpoint, and generation pins; stale or revoked owners cannot fetch or commit.
 
 ### Adapter proof
 
-- [ ] DataForrest and alternate-source contract fixtures map to the same normalized record, checkpoint, continuation, failure, and diagnostic contract without vendor fields reaching generic consumers; task 003 owns the executable adapters.
-- [ ] Generic code may bound, compare, store, and fingerprint opaque checkpoint bytes but cannot parse, convert, or transfer them between sources or adapters.
-- [ ] All revisions, tests, and reads under one connection profile share one cancelable FIFO request cap, while a different profile has independent capacity.
-- [ ] Every run retains its adapter, normalized-contract, connection, source, identity-namespace, checkpoint-codec, and generation pins; every delivery occurrence traces those applicable pins, while a semantic observation retains only its stable source record and contract/hash identity.
+- [x] DataForrest and alternate-source contract fixtures map to the same normalized record, checkpoint, continuation, failure, and diagnostic contract without vendor fields reaching generic consumers; task 003 owns the executable adapters.
+- [x] Generic code may bound, compare, store, and fingerprint opaque checkpoint bytes but cannot parse, convert, or transfer them between sources or adapters.
+- [x] All revisions, tests, and reads under one connection profile share one cancelable FIFO request cap, while a different profile has independent capacity.
+- [x] Every run retains its adapter, normalized-contract, connection, source, identity-namespace, checkpoint-codec, and generation pins; every delivery occurrence traces those applicable pins, while a semantic observation retains only its stable source record and contract/hash identity.
 
 ### Identity compatibility proof
 
-- [ ] Evidence-backed record-ID scopes distinguish legitimate raw-ID reuse from a kind or discriminator change inside one scope, and replacement adapters cannot silently change those scopes.
-- [ ] Every launch scope maps to exactly one distinct canonical kind, every relationship target is scope-qualified, and a second scope for the same canonical kind fails closed.
-- [ ] Four exact mapper compatibility descriptors exist before activation, remain distinct from source-adapter identities, and task 005 implementations must match them.
+- [x] Evidence-backed record-ID scopes distinguish legitimate raw-ID reuse from a kind or discriminator change inside one scope, and replacement adapters cannot silently change those scopes.
+- [x] Every launch scope maps to exactly one distinct canonical kind, every relationship target is scope-qualified, and a second scope for the same canonical kind fails closed.
+- [x] Four exact mapper compatibility descriptors exist before activation, remain distinct from source-adapter identities, and task 005 implementations must match them.
 
 ### Continuation and fencing proof
 
-- [ ] `continue` carries no delay, while `poll_after` always carries a validated 0–86,400-second integer minimum; missing, extra, fractional, negative, or excessive values are rejected.
-- [ ] A contract harness proves permit grant followed by singleton-epoch validation before one adapter request, with cancellation or lost ownership producing no request; task 007 owns live supervisor and takeover proof.
-- [ ] Immediate and cross-page checkpoint repeats are rejected for `continue`, including A-to-B-to-A after restart, while a valid `poll_after` may preserve its checkpoint.
+- [x] `continue` carries no delay, while `poll_after` always carries a validated 0–86,400-second integer minimum; missing, extra, fractional, negative, or excessive values are rejected.
+- [x] A contract harness proves permit grant followed by singleton-epoch validation before one adapter request, with cancellation or lost ownership producing no request; task 007 owns live supervisor and takeover proof.
+- [x] Immediate and cross-page checkpoint repeats are rejected for `continue`, including A-to-B-to-A after restart, while a valid `poll_after` may preserve its checkpoint.
 
 ### Data proof
 
-- [ ] The explicit catalog, pull, trade, pack, catalog-asset, market-event, platform, EV-input, and estimated-EV mapping has migration and contract coverage.
-- [ ] Exact replay creates one additional delivery occurrence but no semantic observation, canonical revision, or EV request; changed time or content creates one semantic observation plus occurrence with complete delivery lineage.
-- [ ] One raw page copy expires after seven days, quarantine evidence expires after 30 days, and durable normalized history and audits remain intact.
-- [ ] Source diagnostics and stored-once connection events merge in deterministic order only for sources bound to that profile at event time, remain redacted for 30 days, and cannot cross tenants or profiles.
-- [ ] Aggregate pages, `has_more`, sale-as-record-kind, per-stream cursors, aliases, and dual writes are absent from the replacement contract.
+- [x] The explicit catalog, pull, trade, pack, catalog-asset, market-event, platform, EV-input, and estimated-EV mapping has migration and contract coverage.
+- [x] Exact replay reuses one semantic observation while each separately delivered page can add its own occurrence; changed time or content creates one semantic observation plus occurrence with complete delivery lineage. Task 006 owns the final atomic canonical-revision and EV-request no-op proof.
+- [x] One raw page copy expires after seven days, quarantine evidence expires after 30 days, and durable normalized history and audits remain intact.
+- [x] Source diagnostics and stored-once connection events merge in deterministic order only for sources bound to that profile at event time, remain redacted for 30 days, and cannot cross tenants or profiles.
+- [x] Aggregate pages, `has_more`, sale-as-record-kind, per-stream cursors, aliases, and dual writes are absent from the replacement contract.
+
+## Verification
+
+- PASS: `npm run check:prisma`
+- PASS: `npm run test:contracts` (157 tests)
+- PASS: `npm run test:services` (458 unit tests and 1 volume test)
+- PASS: `npm run test:database` (159 tests)
+- PASS: `npm run typecheck:contracts && npm run typecheck:services && npm run typecheck:database`
+- PASS: `npm run lint:contracts && npm run lint:services && npm run lint:database`
+- PASS: `npm run scan:framework-standards:ratchet` (0 findings)
+- PASS: `git diff --check`
+
+## Spec Compliance
+
+- Related specs reviewed: none.
+- Alignment: implemented the provider/source/connection split, normalized adapter contract, exact activation compatibility gate, source-owned persistence and checkpoints, immutable run and revision pins, request fencing, diagnostic retention, and source-neutral identity model as specified.
+- Divergences: none. The legacy ingestion runtime remains intentionally unwired to these replacement tables until tasks 004, 006, and 007 complete the planned clean cutover; no compatibility read or dual-write path was added.
+- Verification: the commands above plus a final independent P1/P2 audit after the direct-PostgreSQL semantic-content guard, canonical replay normalization, immutable-history guards, and derived EV-input origin constraint were implemented; no P1/P2 finding remains.

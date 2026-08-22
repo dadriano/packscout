@@ -18,6 +18,7 @@ import {
   presentVendorReportedEv,
 } from "@/lib/metric-presentation";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
+import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import {
   ALL_REPACKS_HEADERS,
   catalogHeaderAriaSort,
@@ -95,6 +96,7 @@ function RepackRow({
     ? presentChaseMatchEvidence(desiredChase)
     : null;
   const actions = publicRowActions(repack);
+  const availability = presentPackAvailability(repack.availability);
   const displayPrice = repack.price.displayMoney ??
     (repack.price.usdComparison.status === "available"
       ? repack.price.usdComparison.value
@@ -115,11 +117,15 @@ function RepackRow({
           <span className={styles.packIdentity}>
             <span className={styles.packName}>{repack.name}</span>
             {repack.contentMode === "mixed" ? (
-              <span className={styles.soldOut}>Mixed content</span>
+              <span className={styles.secondaryBadge}>Mixed content</span>
             ) : null}
-            {repack.availability === "sold_out" ? (
-              <span className={styles.soldOut}>Sold out</span>
-            ) : null}
+            <span
+              className={styles.availabilityBadge}
+              data-state={repack.availability}
+            >
+              {availability.label}
+              <span className="sr-only">. {availability.description}</span>
+            </span>
           </span>
         </button>
       </td>

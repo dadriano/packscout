@@ -12,6 +12,7 @@ import {
 import {
   persistPageRecordsInBatches,
   writeCanonicalProjectionBatch,
+  type CanonicalProjectionWriteOrigin,
 } from "./ingestion-page-batch-writer.ts";
 import type {
   CanonicalIdentity,
@@ -57,7 +58,9 @@ interface CanonicalRevisionRow {
   content: Record<string, unknown>;
   provenance: Record<string, unknown>;
   actorKey: string | null;
-  sourceRecordId: string;
+  sourceRecordId: string | null;
+  originSemanticObservationId: string | null;
+  originEvRecomputationRequestId: string | null;
   sourceUpdatedAt: Date;
   sourceCollectedAt: Date;
   acceptedAt: Date;
@@ -122,7 +125,7 @@ export class IngestionPersistenceRepository {
       const recordCounts = {
         catalog: recordKindCount("catalog"),
         pulls: recordKindCount("pull"),
-        sales: recordKindCount("sale"),
+        trades: recordKindCount("trade"),
       };
       const insertedPages = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         insert into public.import_pages (
@@ -282,10 +285,14 @@ export class IngestionPersistenceRepository {
         input.projections.map((projection, projectionIndex) => ({
           organizationId: input.organizationId,
           providerId: input.providerId,
-          configRevisionId: input.configurationRevisionId,
-          sourceRecordId: input.sourceRecordId,
+          origin: {
+            kind: "legacy_source_record" as const,
+            configurationRevisionId: input.configurationRevisionId,
+            sourceRecordId: input.sourceRecordId,
+          },
           projection,
           projectionIndex,
+          becomesCurrent: true,
           acceptedAt: input.acceptedAt,
           publicChangeKind: "quarantine_correction",
         })),
@@ -324,24 +331,75 @@ export class IngestionPersistenceRepository {
     derivationAcknowledged: boolean;
   }> {
     return this.database.$transaction(async (transaction) => {
-      const sources = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        select source.id
-        from public.source_records as source
-        join public.provider_config_revisions as revision
-          on revision.id = ${uuid(input.configurationRevisionId)}
-         and revision.organization_id = source.organization_id
-         and revision.provider_id = source.provider_id
-        where source.id = ${uuid(input.sourceRecordId)}
-          and source.organization_id = ${uuid(input.organizationId)}
-          and source.provider_id = ${uuid(input.providerId)}
-        for update of source
-        limit 1
-      `);
-      if (!sources[0]) {
-        throw new PersistenceError(
-          "TENANT_SCOPE_VIOLATION",
-          "Derived projection source is outside the organization, provider, or configuration scope.",
-        );
+      let projectionOrigin: CanonicalProjectionWriteOrigin;
+      if (input.origin.kind === "legacy_configuration") {
+        if (input.sourceRecordId === null) {
+          throw new PersistenceError(
+            "TENANT_SCOPE_VIOLATION",
+            "Legacy derived projection requires its exact source record.",
+          );
+        }
+        const sources = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          select source.id
+          from public.source_records as source
+          join public.provider_config_revisions as revision
+            on revision.id = ${uuid(input.origin.configurationRevisionId)}
+           and revision.organization_id = source.organization_id
+           and revision.provider_id = source.provider_id
+          where source.id = ${uuid(input.sourceRecordId)}
+            and source.organization_id = ${uuid(input.organizationId)}
+            and source.provider_id = ${uuid(input.providerId)}
+          for update of source
+          limit 1
+        `);
+        if (!sources[0]) {
+          throw new PersistenceError(
+            "TENANT_SCOPE_VIOLATION",
+            "Derived projection source is outside the organization, provider, or configuration scope.",
+          );
+        }
+        projectionOrigin = {
+          kind: "legacy_source_record",
+          configurationRevisionId: input.origin.configurationRevisionId,
+          sourceRecordId: input.sourceRecordId,
+        };
+      } else {
+        if (input.sourceRecordId !== null || !input.recomputation) {
+          throw new PersistenceError(
+            "TENANT_SCOPE_VIOLATION",
+            "Source-revision derived projection requires its claimed recomputation request.",
+          );
+        }
+        const requests = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          select request.id
+          from public.estimated_ev_recomputation_requests as request
+          join public.provider_source_revisions as revision
+            on revision.id = request.source_revision_id
+           and revision.organization_id = request.organization_id
+           and revision.provider_id = request.provider_id
+           and revision.source_instance_id = request.source_instance_id
+          where request.id = ${uuid(input.recomputation.requestId)}
+            and request.organization_id = ${uuid(input.organizationId)}
+            and request.provider_id = ${uuid(input.providerId)}
+            and request.configuration_revision_id is null
+            and request.source_instance_id = ${uuid(input.origin.sourceInstanceId)}
+            and request.source_revision_id = ${uuid(input.origin.sourceRevisionId)}
+            and request.state = 'running'::public.estimated_ev_recomputation_state
+            and request.claim_token = ${uuid(input.recomputation.claimToken)}
+          for update of request
+          limit 1
+        `);
+        if (!requests[0]) {
+          throw new PersistenceError(
+            "DERIVATION_OWNERSHIP_LOST",
+            "Source-revision recomputation origin is stale or outside tenant scope.",
+          );
+        }
+        projectionOrigin = {
+          kind: "ev_recomputation",
+          sourceRevisionId: input.origin.sourceRevisionId,
+          recomputationRequestId: input.recomputation.requestId,
+        };
       }
       const results = await writeCanonicalProjectionBatch(
         transaction,
@@ -349,10 +407,10 @@ export class IngestionPersistenceRepository {
         input.projections.map((projection, projectionIndex) => ({
           organizationId: input.organizationId,
           providerId: input.providerId,
-          configRevisionId: input.configurationRevisionId,
-          sourceRecordId: input.sourceRecordId,
+          origin: projectionOrigin,
           projection,
           projectionIndex,
+          becomesCurrent: true,
           acceptedAt: input.acceptedAt,
           publicChangeKind: "estimated_ev_outcome",
         })),
@@ -496,10 +554,14 @@ export class IngestionPersistenceRepository {
         input.projections.map((projection, projectionIndex) => ({
           organizationId: input.organizationId,
           providerId: input.providerId,
-          configRevisionId: input.configurationRevisionId,
-          sourceRecordId,
+          origin: {
+            kind: "legacy_source_record" as const,
+            configurationRevisionId: input.configurationRevisionId,
+            sourceRecordId,
+          },
           projection,
           projectionIndex,
+          becomesCurrent: true,
           acceptedAt: input.acceptedAt,
           publicChangeKind: "quarantine_correction",
         })),
@@ -547,6 +609,8 @@ export class IngestionPersistenceRepository {
         revision.provenance_json as provenance,
         revision.actor_key as "actorKey",
         revision.source_record_id as "sourceRecordId",
+        revision.origin_semantic_observation_id as "originSemanticObservationId",
+        revision.origin_ev_recomputation_request_id as "originEvRecomputationRequestId",
         revision.source_updated_at as "sourceUpdatedAt",
         revision.source_collected_at as "sourceCollectedAt",
         revision.accepted_at as "acceptedAt"
@@ -588,6 +652,8 @@ export class IngestionPersistenceRepository {
         revision.provenance_json as provenance,
         revision.actor_key as "actorKey",
         revision.source_record_id as "sourceRecordId",
+        revision.origin_semantic_observation_id as "originSemanticObservationId",
+        revision.origin_ev_recomputation_request_id as "originEvRecomputationRequestId",
         revision.source_updated_at as "sourceUpdatedAt",
         revision.source_collected_at as "sourceCollectedAt",
         revision.accepted_at as "acceptedAt"

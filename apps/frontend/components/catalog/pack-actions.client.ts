@@ -1,4 +1,7 @@
-import type { PublicRepackActions } from "@packscout/contracts";
+import type {
+  PublicPackAvailability,
+  PublicRepackActions,
+} from "@packscout/contracts";
 
 type PublicRepackLink = NonNullable<PublicRepackActions["repackLink"]>;
 
@@ -8,6 +11,8 @@ export type OutboundRepackLinkResult =
       readonly ok: false;
       readonly code:
         | "MISSING_LINK"
+        | "UNAVAILABLE"
+        | "AVAILABILITY_UNKNOWN"
         | "SOLD_OUT"
         | "UNAPPROVED_ORIGIN"
         | "INVALID_REFERRAL_CONFIG";
@@ -21,10 +26,16 @@ export type ClipboardWriter = (text: string) => Promise<void>;
 
 export function buildPublishedRepackHref(
   repackLink: PublicRepackLink | undefined,
-  availability: "active" | "sold_out",
+  availability: PublicPackAvailability,
 ): OutboundRepackLinkResult {
   if (availability === "sold_out") {
     return Object.freeze({ ok: false, code: "SOLD_OUT" });
+  }
+  if (availability === "unavailable") {
+    return Object.freeze({ ok: false, code: "UNAVAILABLE" });
+  }
+  if (availability === "unknown") {
+    return Object.freeze({ ok: false, code: "AVAILABILITY_UNKNOWN" });
   }
   if (!repackLink) {
     return Object.freeze({ ok: false, code: "MISSING_LINK" });

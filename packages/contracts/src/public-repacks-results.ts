@@ -260,7 +260,7 @@ export const dashboardBundleSchema = z
     }
     bundle.opportunities.forEach((repack, index) => {
       if (
-        repack.availability !== "active" ||
+        repack.availability !== "available" ||
         repack.evEstimates.packScout.status !== "available"
       ) {
         context.addIssue({

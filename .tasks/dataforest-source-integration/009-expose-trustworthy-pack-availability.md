@@ -5,7 +5,7 @@
 **Blocks:** dataforest-source-integration/010
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder, including public contracts, query behavior, presentation, accessibility, and focused verification
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -67,12 +67,27 @@ The public pack projection preserves the existing `availability` field and expan
 
 ### Contract proof
 
-- [ ] End-to-end task-005 fixtures prove true, false, null, disappearance, and reappearance reach the correct canonical states, while the public projection consumes those states unchanged and false never becomes sold out.
-- [ ] The full catalog retains all four states while rankings and purchase actions include only available packs.
-- [ ] Public contracts reject protected ingestion data and inconsistent availability provenance.
+- [x] End-to-end task-005 fixtures prove true, false, null, disappearance, and reappearance reach the correct canonical states, while the public projection consumes those states unchanged and false never becomes sold out.
+- [x] The full catalog retains all four states while rankings and purchase actions include only available packs.
+- [x] Public contracts reject protected ingestion data and inconsistent availability provenance.
 
 ### Experience and handoff proof
 
-- [ ] Deterministic canonical fixtures prove public contract and UI readiness without claiming live ingestion reaches public storage.
-- [ ] The completion evidence names the separate production publisher and finalizer as the remaining live-publication prerequisite, with no substitute certification or eligibility state.
-- [ ] Contract, query, component, accessibility, and browser coverage proves all labels, actions, transitions, empty states, and required widths.
+- [x] Deterministic canonical fixtures prove public contract and UI readiness without claiming live ingestion reaches public storage.
+- [x] The completion evidence names the separate production publisher and finalizer as the remaining live-publication prerequisite, with no substitute certification or eligibility state.
+- [x] Contract, query, component, accessibility, and browser coverage proves all labels, actions, transitions, empty states, and required widths.
+
+## Verification
+
+- `npm run test:contracts` — 164 contract tests passed for the four-state public contract and protected-field rejection.
+- `npm run test:services` — the full services suite passed, including the canonical mapper-to-public handoff and production release projector provenance guard.
+- `npm run test:convex` — 20 files and 127 tests passed, including available-only defaults, the all-state catalog, selection retention, deterministic fallback, disappearance, and reappearance.
+- `npm run test:frontend` — 181 frontend tests passed; focused typecheck, lint, and production build checks also passed.
+- A clean loopback Convex seed and in-app browser pass at `/packs?availability=all` showed one or more rows in each of Available, Unavailable, Availability unknown, and Sold out. Nonavailable rows exposed no promo or purchase action; the default `/packs` view hid them; a selected unavailable pack survived a reload through the `selected` query parameter; the 390-by-844 viewport remained usable; and the browser console contained no errors.
+
+## Spec Compliance
+
+- The production public projector now invokes the versioned source-neutral availability handoff and rejects bare or contradictory `sold_out` provenance instead of trusting an enum alone.
+- DataForrest boolean/null behavior remains upstream in task 005; the public boundary only preserves validated canonical state.
+- Catalog history remains discoverable in the all-state view, while rankings, dashboard opportunity sets, promos, and purchase links remain available-only.
+- The separate production canonical-to-Convex publisher and finalizer remain unimplemented prerequisites for live DataForrest propagation. This task added no substitute publisher, eligibility state, certification ledger, or DataForrest-specific public branch.

@@ -5,7 +5,7 @@
 **Blocks:** none
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder plus the live full-history backfill
-**Status:** not started
+**Status:** blocked
 
 ## Start Here
 
@@ -122,3 +122,31 @@ A provider may remain operationally isolated in BLOCKED state, but this feature 
 - [ ] The final dependency check finds no DataForrest transport type or field in generic lifecycle, scheduling, import, persistence, mapper-selection, or admin-domain contracts.
 - [ ] Replacement preserves stable canonical identity only under the same record-ID scopes and replacement identity namespace and always starts a distinct source checkpoint at null.
 - [ ] Semantic observations deduplicate independently of per-delivery occurrences, and all occurrence lineage reconciles to exactly one disposition.
+
+## Verification
+
+- `node --test scripts/local/provider-source-task010-safety.test.mjs` — PASS,
+  12/12 focused safety, target, bootstrap-receipt, topology, secret-redaction,
+  and reconciliation tests.
+- `npm run verify:framework` — PASS on 2026-08-21, including Prisma validation
+  and migration tests, zero framework-ratchet findings, lint, typecheck, all
+  workspace tests, tooling, and frontend/admin production builds.
+- `npm run check:docs`, `npm run check:scripts`, `npm run check:boundaries`, and
+  `git diff --check` — PASS.
+- The read-only capacity preflight rejects this host with 30,338,781,184 bytes
+  available versus 8,757,364,735,856 required, plus the 80%-used and projected
+  threshold fences. No database, credential, admin process, supervisor, or live
+  backfill was started.
+
+## Spec Compliance
+
+- The target-bound initializer, inspection, guarded migration, idempotent
+  bootstrap, configuration-only supervisor, capacity-gated backfill start,
+  reconciliation report, executable runbook, and dated BLOCKED scorecard are
+  implemented and fail closed.
+- Live acceptance remains intentionally unchecked: the exact database target,
+  encrypted credential delivery, four real histories, operational/browser
+  exercises, resource measurements, and final reconciliation require an
+  approved backing volume and authorized DataForrest bearer.
+- The production canonical-to-public publisher/finalizer remains a separate
+  prerequisite; this task does not claim live public publication.

@@ -4,16 +4,16 @@ import type {
   ProviderFeedPageV1,
   ProviderFeedValidatedPageV1,
   PullEnvelopeV1,
-  SaleEnvelopeV1,
+  TradeEnvelopeV1,
 } from "@packscout/contracts";
 
-export type ProviderRecordKind = "catalog" | "pull" | "sale";
+export type ProviderRecordKind = "catalog" | "pull" | "trade";
 export type AdapterCandidateKind =
   | "catalog_asset"
   | "ev_input"
   | "pack"
   | "pull"
-  | "sale";
+  | "market_event";
 
 export interface ProviderConfigurationIdentity {
   readonly providerId: string;
@@ -70,7 +70,7 @@ export interface CanonicalPackCandidate extends ProviderAdapterCandidateBase {
   readonly name: string;
   readonly description?: string | null;
   readonly category?: string | null;
-  readonly availability: "active" | "disabled" | "sold_out" | "unknown";
+  readonly availability: "available" | "unavailable" | "sold_out" | "unknown";
   readonly sourceStatus?: string | null;
   readonly price?: AdapterMoney | null;
   readonly imageUrls?: readonly string[];
@@ -87,7 +87,7 @@ export interface CatalogAssetCandidate extends ProviderAdapterCandidateBase {
   readonly parentExternalId?: string | null;
   readonly name?: string | null;
   readonly category?: string | null;
-  readonly availability?: "active" | "disabled" | "sold_out" | "unknown";
+  readonly availability?: "available" | "unavailable" | "sold_out" | "unknown";
   readonly sourceStatus?: string | null;
   readonly estimatedValue?: AdapterMoney | null;
   readonly valueSource?: string | null;
@@ -104,8 +104,8 @@ export interface PullCandidate extends ProviderAdapterCandidateBase {
   readonly pseudonymizationInputs: readonly PseudonymousActorInput[];
 }
 
-export interface SaleCandidate extends ProviderAdapterCandidateBase {
-  readonly candidateKind: "sale";
+export interface MarketEventCandidate extends ProviderAdapterCandidateBase {
+  readonly candidateKind: "market_event";
   readonly eventType: string;
   readonly transactionKey: string;
   readonly assetExternalId: string | null;
@@ -140,7 +140,7 @@ export type ProviderAdapterCandidate =
   | CanonicalPackCandidate
   | CatalogAssetCandidate
   | PullCandidate
-  | SaleCandidate
+  | MarketEventCandidate
   | EvInputCandidate;
 
 export interface ProviderRecordMappingFailure {
@@ -166,7 +166,7 @@ export interface ProviderMappingPageInput {
   readonly recordIndexes: Readonly<{
     catalog: readonly number[];
     pulls: readonly number[];
-    sales: readonly number[];
+    trades: readonly number[];
   }>;
 }
 
@@ -263,7 +263,7 @@ export class ProviderTransportRequestError extends Error {
 export interface ProviderConnectionRecordCounts {
   readonly catalog: number;
   readonly pulls: number;
-  readonly sales: number;
+  readonly trades: number;
 }
 
 export type ProviderConnectionTestResult =
@@ -303,9 +303,9 @@ export type ProviderEnvelopeWithKind =
       readonly envelope: PullEnvelopeV1;
     }
   | {
-      readonly recordKind: "sale";
+      readonly recordKind: "trade";
       readonly recordIndex: number;
-      readonly envelope: SaleEnvelopeV1;
+      readonly envelope: TradeEnvelopeV1;
     };
 
 export function sourceIdentityForEnvelope(

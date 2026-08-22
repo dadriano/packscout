@@ -4,7 +4,7 @@
 
 Open task `dataforest-source-integration/001` and capture one sanitized authenticated Courtyard page plus one continuation page. The first checkpoint is an evidence record that confirms the request shape, cursor behavior, bounded response size, and safe parallel-request limit without exposing the bearer credential or provider data.
 
-**Progress:** 0/10 tasks complete
+**Progress:** 9/10 tasks complete
 
 ## Context
 
@@ -198,15 +198,15 @@ A provider identity never contains a source-instance, source-adapter, or connect
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
 | 001 | Prove the live contract and launch bounds | medium | 1–2 days | done | none |
-| 002 | Establish provider-source contracts and persistence | large | 3–4 days | not started | 001 |
-| 003 | Read DataForrest pages through the source adapter | medium | 3–4 days | not started | 002 |
-| 004 | Configure and activate platform sources | medium | 2–3 days | not started | 003 |
-| 005 | Map four platforms into canonical data | large | 4–5 days | not started | 002 |
-| 006 | Import mixed pages atomically | large | 3–4 days | not started | 003, 005 |
-| 007 | Run parallel platform processors | large | 4–5 days | not started | 004, 006 |
-| 008 | Monitor and operate platform processors | large | 3–5 days | not started | 007 |
-| 009 | Expose trustworthy pack availability | medium | 2–3 days | not started | 005 |
-| 010 | Bootstrap, backfill, and reconcile | large | 2–4 days plus live backfill | not started | 008, 009 |
+| 002 | Establish provider-source contracts and persistence | large | 3–4 days | done | 001 |
+| 003 | Read DataForrest pages through the source adapter | medium | 3–4 days | done | 002 |
+| 004 | Configure and activate platform sources | medium | 2–3 days | done | 003 |
+| 005 | Map four platforms into canonical data | large | 4–5 days | done | 002 |
+| 006 | Import mixed pages atomically | large | 3–4 days | done | 003, 005 |
+| 007 | Run parallel platform processors | large | 4–5 days | done | 004, 006 |
+| 008 | Monitor and operate platform processors | large | 3–5 days | done | 007 |
+| 009 | Expose trustworthy pack availability | medium | 2–3 days | done | 005 |
+| 010 | Bootstrap, backfill, and reconcile | large | 2–4 days plus live backfill | blocked | 008, 009 |
 
 Total estimated builder effort is 27–39 days, including focused verification but excluding external credential delays.
 
@@ -234,4 +234,7 @@ Total estimated builder effort is 27–39 days, including focused verification b
 
 ## Next Action
 
-Open `001-prove-live-contract-and-launch-bounds.md` and make one read-only authenticated request with a small Courtyard limit.
+Provision a dedicated local PostgreSQL backing volume with at least
+8,757,364,735,856 available bytes and less than 80% used. Then supply the
+authorized bearer only through the encrypted admin workflow and execute task
+010's guarded runbook, live backfill, operational proof, and reconciliation.

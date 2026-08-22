@@ -27,6 +27,39 @@ test("worker composition runs an idle cycle against one Prisma client", async ()
       observability: { metric() {}, log() {} },
     });
 
+    assert.deepEqual(runtime.sourceImports.sourceAdapters.keys(), [
+      "dataforrest-events-v1",
+    ]);
+    assert.deepEqual(
+      runtime.sourceImports.mappers.descriptors().map((descriptor) => ({
+        provider: descriptor.provider,
+        mapperKey: descriptor.mapperKey,
+        mapperVersion: descriptor.mapperVersion,
+      })),
+      [
+        {
+          provider: "courtyard",
+          mapperKey: "courtyard-provider-observation",
+          mapperVersion: "1",
+        },
+        {
+          provider: "collector_crypt",
+          mapperKey: "collector-crypt-provider-observation",
+          mapperVersion: "1",
+        },
+        {
+          provider: "phygitals",
+          mapperKey: "phygitals-provider-observation",
+          mapperVersion: "1",
+        },
+        {
+          provider: "clutchpacks",
+          mapperKey: "clutchpacks-provider-observation",
+          mapperVersion: "1",
+        },
+      ],
+    );
+
     const result = await runtime.runCycle();
 
     assert.deepEqual(result, {

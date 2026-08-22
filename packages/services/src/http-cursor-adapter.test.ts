@@ -35,7 +35,7 @@ function validPage(overrides: Record<string, unknown> = {}) {
         data: { actor: "sanitized" },
       },
     ],
-    sales: [],
+    trades: [],
     next_cursor: "fixture:cursor:complete",
     has_more: false,
     ...overrides,
@@ -386,7 +386,7 @@ test("response size, JSON, and page-structure failures use bounded safe errors",
   assert.deepEqual(invalidStructure.failure, {
     code: "invalid_response",
     retryable: false,
-    fieldPaths: ["sales"],
+    fieldPaths: ["trades"],
     issueCodes: ["invalid_type"],
   });
   assert.doesNotMatch(
@@ -461,7 +461,7 @@ test("connection tests use the initial raw page and return bounded metadata", as
     ok: true,
     latencyMs: 7,
     responseStatus: 200,
-    recordCounts: { catalog: 1, pulls: 1, sales: 0 },
+    recordCounts: { catalog: 1, pulls: 1, trades: 0 },
     hasMore: false,
     nextCursorPresent: true,
   });

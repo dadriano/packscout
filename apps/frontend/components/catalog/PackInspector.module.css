@@ -71,6 +71,12 @@
   align-items: flex-start;
 }
 
+.availabilityStatus {
+  display: grid;
+  max-width: 100%;
+  gap: 0.32rem;
+}
+
 .availability {
   width: fit-content;
   border: 1px solid color-mix(in srgb, var(--color-positive) 32%, transparent);
@@ -85,10 +91,21 @@
   text-transform: uppercase;
 }
 
+.availability[data-state="unavailable"],
+.availability[data-state="unknown"],
 .availability[data-state="sold_out"] {
   border-color: color-mix(in srgb, var(--color-status-neutral) 35%, transparent);
   background: color-mix(in srgb, var(--color-status-neutral) 10%, transparent);
   color: var(--color-status-neutral);
+}
+
+.availabilityDescription {
+  max-width: 32rem;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .category {

@@ -16,6 +16,8 @@ import "./theme.css";
 import "./index.css";
 import "./operations.css";
 import "./alerts.css";
+import "./source-configuration.css";
+import "./source-operations.css";
 
 function RootProviders() {
   return (

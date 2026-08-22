@@ -175,9 +175,6 @@ async function main(): Promise<void> {
       importOperations: createAdminImportOperationsRuntime({
         database: harness.database,
         actorPseudonymKey: providerActorKey,
-        credentialKey: providerCredentialKey,
-        environment: "local",
-        operational,
       }),
       operationalAlerts: { alerts: operational.alerts },
       operationalHealth: { health: operational.health },

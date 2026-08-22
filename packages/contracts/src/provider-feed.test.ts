@@ -13,11 +13,11 @@ import {
 interface SampleManifestEntry {
   readonly name: string;
   readonly file: string;
-  readonly counts: { readonly catalog: number; readonly pulls: number; readonly sales: number };
+  readonly counts: { readonly catalog: number; readonly pulls: number; readonly trades: number };
   readonly nullableFields: {
     readonly pullPackExternalId: boolean;
-    readonly saleAmount: boolean;
-    readonly saleCurrency: boolean;
+    readonly tradeAmount: boolean;
+    readonly tradeCurrency: boolean;
   };
 }
 
@@ -25,7 +25,7 @@ interface SampleManifest {
   readonly outerStructure: {
     readonly pageKeySets: readonly (readonly string[])[];
     readonly recordKeySets: Readonly<
-      Record<"catalog" | "pulls" | "sales", readonly (readonly string[])[]>
+      Record<"catalog" | "pulls" | "trades", readonly (readonly string[])[]>
     >;
   };
   readonly samples: readonly SampleManifestEntry[];
@@ -55,7 +55,7 @@ function expectIssues(
 
 test("sanitized fixtures align with the committed eight-sample manifest", () => {
   assert.deepEqual(manifest.outerStructure, {
-    pageKeySets: [["catalog", "pulls", "sales"]],
+    pageKeySets: [["catalog", "pulls", "trades"]],
     recordKeySets: {
       catalog: [["collected_at", "data", "external_id", "platform", "updated_at"]],
       pulls: [[
@@ -66,7 +66,7 @@ test("sanitized fixtures align with the committed eight-sample manifest", () => 
         "pack_external_id",
         "platform",
       ]],
-      sales: [[
+      trades: [[
         "amount",
         "collected_at",
         "currency",
@@ -97,18 +97,18 @@ test("sanitized fixtures align with the committed eight-sample manifest", () => 
     });
     assert.equal(parsed.catalog[0]?.platform, fixture.name);
     assert.equal(typeof parsed.catalog[0]?.data.fixture_shape, "string");
-    assert.equal(parsed.sales.length === 0, sample.counts.sales === 0);
+    assert.equal(parsed.trades.length === 0, sample.counts.trades === 0);
     assert.equal(
       parsed.pulls.some(({ pack_external_id }) => pack_external_id === null),
       sample.nullableFields.pullPackExternalId,
     );
     assert.equal(
-      parsed.sales.some(({ amount }) => amount === null),
-      sample.nullableFields.saleAmount,
+      parsed.trades.some(({ amount }) => amount === null),
+      sample.nullableFields.tradeAmount,
     );
     assert.equal(
-      parsed.sales.some(({ currency }) => currency === null),
-      sample.nullableFields.saleCurrency,
+      parsed.trades.some(({ currency }) => currency === null),
+      sample.nullableFields.tradeCurrency,
     );
   }
 });
@@ -120,7 +120,7 @@ test("a trustworthy mixed page preserves raw evidence and quarantines only inval
     ...baseFixture.page,
     catalog: [baseFixture.page.catalog[0], invalidCatalog],
     pulls: [baseFixture.page.pulls[0], invalidPull],
-    sales: [baseFixture.page.sales[0], "not-an-object"],
+    trades: [baseFixture.page.trades[0], "not-an-object"],
     next_cursor: "cursor-after-mixed-page",
     has_more: true,
   };
@@ -132,7 +132,7 @@ test("a trustworthy mixed page preserves raw evidence and quarantines only inval
   if (!result.success) assert.fail("Expected the page structure to remain trustworthy.");
   assert.equal(result.data.rawPage.catalog.length, 2);
   assert.equal(result.data.rawPage.pulls.length, 2);
-  assert.equal(result.data.rawPage.sales.length, 2);
+  assert.equal(result.data.rawPage.trades.length, 2);
   assert.deepEqual(result.data.rawPage.catalog[1], invalidCatalog);
   assert.deepEqual(result.data.rawPage.pulls[1], invalidPull);
   assert.equal(result.data.validPage.catalog.length, 1);
@@ -156,9 +156,9 @@ test("a trustworthy mixed page preserves raw evidence and quarantines only inval
         issues: [{ code: "invalid_type", path: "pulls[1].data" }],
       },
       {
-        recordKind: "sale",
+        recordKind: "trade",
         recordIndex: 1,
-        issues: [{ code: "invalid_type", path: "sales[1]" }],
+        issues: [{ code: "invalid_type", path: "trades[1]" }],
       },
     ],
   );
@@ -176,18 +176,18 @@ test("a trustworthy mixed page preserves raw evidence and quarantines only inval
     [
       { code: "empty_string", path: "catalog[1].external_id" },
       { code: "invalid_type", path: "pulls[1].data" },
-      { code: "invalid_type", path: "sales[1]" },
+      { code: "invalid_type", path: "trades[1]" },
     ],
   );
 });
 
 test("missing arrays fail page trust while invalid records get stable paths", () => {
-  const missingSales: Record<string, unknown> = { ...baseFixture.page };
-  delete missingSales.sales;
+  const missingTrades: Record<string, unknown> = { ...baseFixture.page };
+  delete missingTrades.trades;
   expectIssues(
-    missingSales,
+    missingTrades,
     { requestedPlatform: baseFixture.name },
-    [{ code: "invalid_type", path: "sales" }],
+    [{ code: "invalid_type", path: "trades" }],
   );
   expectIssues(
     {
@@ -211,15 +211,15 @@ test("malformed timestamps and non-finite amounts fail at their fields", () => {
   expectIssues(
     {
       ...baseFixture.page,
-      sales: [
+      trades: [
         {
-          ...fixtures.find(({ name }) => name === "beezie")?.page.sales[0],
+          ...fixtures.find(({ name }) => name === "beezie")?.page.trades[0],
           amount: Number.POSITIVE_INFINITY,
         },
       ],
     },
     { requestedPlatform: baseFixture.name },
-    [{ code: "invalid_number", path: "sales[0].amount" }],
+    [{ code: "invalid_number", path: "trades[0].amount" }],
   );
 });
 
@@ -241,7 +241,7 @@ test("continuing pages must contain records and advance to an unseen cursor", ()
     {
       catalog: [],
       pulls: [],
-      sales: [],
+      trades: [],
       next_cursor: "cursor-2",
       has_more: true,
     },

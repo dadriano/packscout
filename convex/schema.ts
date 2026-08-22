@@ -492,7 +492,12 @@ const publicRepackDetailValidator = v.object({
   ),
   categories: v.array(publicRepackCategoryValidator),
   collectibleTypes: v.array(collectibleTypeValidator),
-  availability: v.union(v.literal("active"), v.literal("sold_out")),
+  availability: v.union(
+    v.literal("available"),
+    v.literal("unavailable"),
+    v.literal("unknown"),
+    v.literal("sold_out"),
+  ),
   price: priceValidator,
   evEstimates: v.object({
     vendorReported: vendorReportedEvEstimateValidator,

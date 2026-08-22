@@ -23,8 +23,11 @@ tri-state `available`, and a safe aggregate concurrency of two.
 
 A 500-record Phygitals response exceeded the 2 MiB safety cap, so the launch
 page target is 250 records. The actual full-history import remains blocked until
-the final schema's measured forecast has at least 200 GB free capacity; the
-reviewed local volume did not meet that threshold.
+the target volume has at least **8,757,364,735,856 available bytes**, as required
+by the final-schema artifact. The former 200 GB provisional floor is
+superseded. Operators must run
+`npm run preflight:provider-source-backfill:local -- --database-path <postgres-data-volume-path> --unreconciled-attempts <count>`;
+the reviewed local volume is explicitly rejected.
 
 ## Current launch boundary
 

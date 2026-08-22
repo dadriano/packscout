@@ -8,6 +8,7 @@ import {
   readServiceHost,
   readPort,
   readPositiveDuration,
+  readPositiveInteger,
   readRequiredSecret,
   readTrustedProxies,
   serviceHttpOrigin,
@@ -76,6 +77,10 @@ test("admin security configuration fails closed and normalizes trusted origins",
   assert.throws(() => readRequiredSecret("short", "SECRET", 32), /SECRET/);
   assert.equal(readPositiveDuration(undefined, 60_000, "IDLE_MS"), 60_000);
   assert.throws(() => readPositiveDuration("0", 60_000, "IDLE_MS"), /IDLE_MS/);
+  assert.equal(readPositiveInteger("7", "KEY_VERSION"), 7);
+  for (const invalid of [undefined, "", "0", " 1", "1 ", "1.5", "2147483648"]) {
+    assert.throws(() => readPositiveInteger(invalid, "KEY_VERSION"), /KEY_VERSION/u);
+  }
   assert.deepEqual(
     readAllowedOrigins(
       "https://admin.packscout.test/path, https://admin.packscout.test",

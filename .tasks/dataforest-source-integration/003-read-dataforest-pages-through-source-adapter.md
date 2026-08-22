@@ -5,7 +5,7 @@
 **Blocks:** dataforest-source-integration/004, dataforest-source-integration/006
 **Estimated scope:** medium
 **Estimated effort:** 3–4 days for one builder, including adapter conformance, shared-client reuse, strict validation, bounded failures, and focused tests
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -112,35 +112,53 @@ The adapter accepts a mutually exclusive discriminated union built from two corr
 Output is either:
 
 - a masked connection or source-test result with measurements and no checkpoint effect;
-- a normalized page containing protected raw evidence, ordered valid and invalid observation results, opaque next checkpoint, `continue` or `poll_after(minimumDelaySeconds)`, response measurements, and safe diagnostic drafts; or
+- a normalized page containing protected raw evidence, ordered valid and invalid observation results with closed source-neutral provider facts, opaque next checkpoint, `continue` or `poll_after(minimumDelaySeconds)`, response measurements, and safe diagnostic drafts; or
 - a stable retryable or action-required failure with no checkpoint advancement and no protected values.
 
 ## Acceptance Criteria
 
-- [ ] `dataforrest-events-v1` passes initial, continuation, restart, empty, replay, mixed-stream, and poll-after fixtures for all four filters.
-- [ ] Fatal page defects and record-local invalid results remain distinct and deterministic.
-- [ ] Two or more source reads overlap up to the approved cap without sharing filters, checkpoints, revisions, results, or diagnostics.
-- [ ] Connection tests, source tests, and imports require the same request-lease contract and make zero calls for absent, stale, cancelled, reused, or mismatched leases.
-- [ ] Concurrent typed connection failures use detecting-request-lease CAS so one advances health, siblings coalesce, stale detectors cannot mutate it, and no profile permit wakes bound work before the durable result; exhausted persistence under the shared retry policy fences and drains the whole supervisor.
+- [x] `dataforrest-events-v1` passes initial, continuation, restart, empty, replay, mixed-stream, and poll-after fixtures for all four filters.
+- [x] Fatal page defects and record-local invalid results remain distinct and deterministic.
+- [x] Two or more source reads overlap up to the approved cap without sharing filters, checkpoints, revisions, results, or diagnostics.
+- [x] Connection tests, source tests, and imports require the same request-lease contract and make zero calls for absent, stale, cancelled, reused, or mismatched leases.
+- [x] Concurrent typed connection failures use detecting-request-lease CAS so one advances health, siblings coalesce, stale detectors cannot mutate it, and no profile permit wakes bound work before the durable result; exhausted persistence under the shared retry policy fences and drains the whole supervisor.
 
 ### Operation-shape proof
 
-- [ ] Connection-probe, filtered source-test, and filtered page-read fixtures prove mutually exclusive request and response rules without fabricated source state or durable test checkpoints.
-- [ ] Redaction tests prove secrets, full cursors, protected records, upstream bodies, and stack details cannot cross the source boundary.
+- [x] Connection-probe, filtered source-test, and filtered page-read fixtures prove mutually exclusive request and response rules without fabricated source state or durable test checkpoints.
+- [x] Redaction tests prove secrets, full cursors, protected records, upstream bodies, and stack details cannot cross the source boundary.
 
 ### Abstraction proof
 
-- [ ] DataForrest wrapper, cursor, and poll fields are absent from the provider-source contract, normalized page, and adapter conformance harness; task 010 owns the repository-wide dependency check after downstream migrations complete.
-- [ ] The test-only alternate adapter satisfies the same connection-test, source-test, page, checkpoint, continuation, failure, and diagnostic contract.
-- [ ] The adapter contract returns the alternate checkpoint without parsing it and validates its output against the fixed normalized Courtyard observation contract; task 006 owns mapper and importer integration.
-- [ ] DataForrest calls consume exactly one granted request lease and cannot create nested or unmetered upstream requests; task 007 owns live FIFO and cap proof.
-- [ ] The production source-type manifest contains only `dataforrest-events-v1`; the alternate adapter exists only in the focused conformance harness, and tasks 004 and 008 own admin exclusion.
+- [x] DataForrest wrapper, cursor, and poll fields are absent from the provider-source contract, normalized page, and adapter conformance harness; task 010 owns the repository-wide dependency check after downstream migrations complete.
+- [x] The test-only alternate adapter satisfies the same connection-test, source-test, page, checkpoint, continuation, failure, and diagnostic contract.
+- [x] The adapter contract returns the alternate checkpoint without parsing it and validates its output against the fixed normalized Courtyard observation contract; task 006 owns mapper and importer integration.
+- [x] DataForrest calls consume exactly one granted request lease and cannot create nested or unmetered upstream requests; task 007 owns live FIFO and cap proof.
+- [x] The production source-type manifest contains only `dataforrest-events-v1`; the alternate adapter exists only in the focused conformance harness, and tasks 004 and 008 own admin exclusion.
 
 ### Operation-scope proof
 
-- [ ] Compile-time and runtime conformance rejects connection tests with source fields, source tests with connection-test or page fields, page reads with test fields, and every adapter input containing mapper metadata.
-- [ ] A permit granted after its queued operation becomes stale, revoked, disabled, replaced, or generation-mismatched produces zero DataForrest requests.
+- [x] Compile-time and runtime conformance rejects connection tests with source fields, source tests with connection-test or page fields, page reads with test fields, and every adapter input containing mapper metadata.
+- [x] A permit granted after its queued operation becomes stale, revoked, disabled, replaced, or generation-mismatched produces zero DataForrest requests.
 
 ### Legacy rejection proof
 
-- [ ] Aggregate wrappers, `has_more`, stream-selector requests, and per-stream cursor fixtures are rejected and cannot be registered as the DataForrest source.
+- [x] Aggregate wrappers, `has_more`, stream-selector requests, and per-stream cursor fixtures are rejected and cannot be registered as the DataForrest source.
+
+## Verification
+
+- PASS: focused DataForrest, source-adapter, lease-authority, production-registry, and alternate-adapter conformance suites (74 tests).
+- PASS: `npm run test:contracts` (157 tests).
+- PASS: `npm run test:services` (458 unit tests and 1 volume test).
+- PASS: `npm run typecheck:contracts && npm run typecheck:services`.
+- PASS: `npm run lint:contracts && npm run lint:services`.
+- PASS: `npm run scan:framework-standards:ratchet` (0 findings).
+- PASS: independent focused rerun of 72 contract, adapter, lease, registry, and conformance tests.
+- PASS: `git diff --check`.
+
+## Spec Compliance
+
+- Related specs reviewed: none.
+- Alignment: implemented one production DataForrest adapter behind a vendor-neutral, operation-specific, two-phase request boundary; the exact admitting lease authority alone may release request capacity after durable terminalization, and every interpretation remains bound to the originating operation.
+- Divergences: none. Task 006 intentionally owns production importer composition and task 007 owns live scheduling/FIFO behavior; no compatibility adapter or provider branch was introduced.
+- Verification: the commands above and a final independent request-authority review; no P1/P2 finding remains.

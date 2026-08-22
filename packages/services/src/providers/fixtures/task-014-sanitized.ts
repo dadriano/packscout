@@ -87,10 +87,10 @@ export const beezieSanitizedPage: ProviderFeedPageV1 = {
       },
     },
   ],
-  sales: [
+  trades: [
     {
       platform: "beezie",
-      external_id: "fixture-beezie-sale",
+      external_id: "fixture-beezie-trade",
       event_type: "sale",
       tx_hash:
         "0xbf8728a1a8abbebfcab953e603f99c2367b2a32d013d0fcb99dd20cf760cb4a4",
@@ -208,19 +208,19 @@ export const clutchpacksSanitizedPage: ProviderFeedPageV1 = {
       },
     },
   ],
-  sales: [
+  trades: [
     {
       platform: "clutchpacks",
-      external_id: "0xfixture-sale",
+      external_id: "0xfixture-trade",
       event_type: "Sale",
-      tx_hash: "0xfixture-sale",
+      tx_hash: "0xfixture-trade",
       amount: 30.99,
       currency: "USD",
       occurred_at: "2026-08-04T14:09:14Z",
       collected_at: "2026-08-04T15:09:12Z",
       data: {
         transaction_type: "Sale",
-        card: { card_id: "card-sale", title: "Sanitized sale card" },
+        card: { card_id: "card-trade", title: "Sanitized trade card" },
         booster: null,
         from: "fixture-account-a",
         to: "fixture-account-b",

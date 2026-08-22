@@ -5,7 +5,7 @@
 **Blocks:** dataforest-source-integration/007
 **Estimated scope:** large
 **Estimated effort:** 3–4 days for one builder, including atomic persistence, idempotency, EV work, storage measurement, and runtime replacement
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -120,35 +120,52 @@ A failed attempt returns a stable retry or action-required class and cannot chan
 
 ### Transaction proof
 
-- [ ] Forced failures before checkpoint advancement leave no partial page, record, canonical, relationship, EV, diagnostic, counter, or checkpoint state.
-- [ ] One malformed record is quarantined while valid siblings and the complete page outcome commit with the next checkpoint.
-- [ ] Duplicate, correction, immutable conflict, identity-kind conflict, and relationship-recovery cases are deterministic.
-- [ ] Exact semantic replay across pages or credential revisions creates one new occurrence but no semantic observation, canonical revision, or EV request; changed time or content creates one semantic observation and occurrence with a deterministic catalog-revision or conflict outcome.
-- [ ] EV recomputation coalesces atomically for real input changes, enqueues nothing for duplicates, and rolls back the checkpoint on enqueue failure.
+- [x] Forced failures before checkpoint advancement leave no partial page, record, canonical, relationship, EV, diagnostic, counter, or checkpoint state.
+- [x] One malformed record is quarantined while valid siblings and the complete page outcome commit with the next checkpoint.
+- [x] Duplicate, correction, immutable conflict, identity-kind conflict, and relationship-recovery cases are deterministic.
+- [x] Exact semantic replay across pages or credential revisions creates one new occurrence but no semantic observation, canonical revision, or EV request; changed time or content creates one semantic observation and occurrence with a deterministic catalog-revision or conflict outcome.
+- [x] EV recomputation coalesces atomically for real input changes, enqueues nothing for duplicates, and rolls back the checkpoint on enqueue failure.
 
 ### Connection-fence proof
 
-- [ ] A blocking connection episode opened after response capture but before commit makes the captured page's health generation stale and rolls back every page, occurrence, canonical, EV, diagnostic, and checkpoint write.
-- [ ] Singleton renewal loss after response capture makes the page attempt's request-time supervisor epoch stale and prevents the same complete atomic write.
-- [ ] A control-plane failure that moves the still-current owner epoch to `fenced_draining` rejects captured page commits across every profile before the owner aborts or releases work.
-- [ ] A nonterminal, failed, or mismatched durable request attempt cannot coexist with a committed page; only its terminal successful-capture outcome satisfies the atomic precondition.
+- [x] A blocking connection episode opened after response capture but before commit makes the captured page's health generation stale and rolls back every page, occurrence, canonical, EV, diagnostic, and checkpoint write.
+- [x] Singleton renewal loss after response capture makes the page attempt's request-time supervisor epoch stale and prevents the same complete atomic write.
+- [x] A control-plane failure that moves the still-current owner epoch to `fenced_draining` rejects captured page commits across every profile before the owner aborts or releases work.
+- [x] A nonterminal, failed, or mismatched durable request attempt cannot coexist with a committed page; only its terminal successful-capture outcome satisfies the atomic precondition.
 
 ### Checkpoint-cycle proof
 
-- [ ] Immediate repeated checkpoints fail adapter validation, while A-to-B-to-A and longer repeats fail the generic source-generation guard before commit.
-- [ ] Restart, retry, run rollover, and credential rotation cannot erase committed checkpoint fingerprints or bypass the cycle guard.
-- [ ] `poll_after` may preserve a checkpoint, but a missing or invalid delay and a delay attached to `continue` are rejected.
+- [x] Immediate repeated checkpoints fail adapter validation, while A-to-B-to-A and longer repeats fail the generic source-generation guard before commit.
+- [x] Restart, retry, run rollover, and credential rotation cannot erase committed checkpoint fingerprints or bypass the cycle guard.
+- [x] `poll_after` may preserve a checkpoint, but a missing or invalid delay and a delay attached to `continue` are rejected.
 
 ### Abstraction proof
 
-- [ ] The generic importer resolves source adapter and mapper from separate immutable pins and contains no DataForrest transport or scheduling fields.
-- [ ] The test-only alternate adapter completes normalized continuation, atomic checkpoint commit, resume, unchanged Courtyard mapping, canonical deduplication, and source-provenance coverage.
-- [ ] A seeded alternate source starts from null, retains separate DataForrest source history, and rejects checkpoint transfer or identity-namespace mismatch; task 004 owns real replacement activation.
-- [ ] One source adapter or mapper failure remains source scoped and cannot change sibling sources or canonical identities.
+- [x] The generic importer resolves source adapter and mapper from separate immutable pins and contains no DataForrest transport or scheduling fields.
+- [x] The test-only alternate adapter completes normalized continuation, atomic checkpoint commit, resume, unchanged Courtyard mapping, canonical deduplication, and source-provenance coverage.
+- [x] A seeded alternate source starts from null, retains separate DataForrest source history, and rejects checkpoint transfer or identity-namespace mismatch; task 004 owns real replacement activation.
+- [x] One source adapter or mapper failure remains source scoped and cannot change sibling sources or canonical identities.
 
 ### Replacement and capacity proof
 
-- [ ] Production composition registers one DataForrest source adapter and four pinned launch mappers, with no obsolete, alternate, or deferred launch path.
-- [ ] Concurrent provider commits cannot exchange checkpoints, records, counters, diagnostics, leases, or revision context.
-- [ ] Representative storage, index, retention, and bounded-memory measurements produce an approved capacity preflight for task 010.
-- [ ] Seven-day page evidence and 30-day quarantine evidence remain independently enforceable without removing durable normalized history.
+- [x] Production composition registers one DataForrest source adapter and four pinned launch mappers, with no obsolete, alternate, or deferred launch path.
+- [x] Concurrent provider commits cannot exchange checkpoints, records, counters, diagnostics, leases, or revision context.
+- [x] Representative storage, index, retention, and bounded-memory measurements produce an approved capacity preflight for task 010.
+- [x] Seven-day page evidence and 30-day quarantine evidence remain independently enforceable without removing durable normalized history.
+
+## Verification
+
+- PASS: focused adapter, importer, planner, quarantine, registry, and database relationship-validation suites (40/40).
+- PASS: full atomic page integration suite (29/29), including exact replay, rollback, epoch/health fences, reversible EV, relationship races, alternate-adapter resume, and pause-boundary commit.
+- PASS: checkpoint, observation, retention, history, diagnostic, and run-pin focused database set (9/9).
+- PASS: capacity forecast v2, regenerated physical-storage artifact, authentic 100-page bounded-memory measurement, and live-volume preflight (3/3). The fail-closed one-year growth model requires 8,757,364,735,856 available bytes and correctly rejects this host for Task 010.
+- PASS: full contracts suite (167/167); contracts, database, and services typecheck/lint.
+- PASS: Prisma validate, schema, lifecycle, and setup focused gates; `git diff --check`.
+- PASS: independent final Task006 audit; no surviving P1/P2 finding.
+
+## Spec Compliance
+
+- Related specs reviewed: none.
+- Alignment: implemented the authentic completed-page capability, one atomic normalized commit, exact durable replay digest, semantic and relationship lineage, source-pinned EV lifecycle, quarantine retry, opaque checkpoint continuation, retention, production cutover, and real alternate-adapter path.
+- Divergences: none. Task 007 owns live supervisor execution and Task 008 owns monitoring. Task 010 remains intentionally blocked by the measured capacity admission gate; no backfill was started on the undersized host.
+- Verification: the commands and independent audit above; every Task006 acceptance criterion is directly covered.

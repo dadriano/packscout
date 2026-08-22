@@ -35,6 +35,8 @@ import { createProviderWorkerPublicSettlementReader } from "./provider-worker-pu
 import type { ProviderWorkerLogger } from "./provider-worker-runtime.ts";
 import { runPromotionObservabilityFanout } from "./promotion-observability-fanout.ts";
 import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
+import { createProviderSourceSupervisorRuntime } from
+  "./provider-source-supervisor-composition.ts";
 import {
   assertPromotionV2CredentialRoleIsolation,
   type PromotionV2WorkerConfiguration,
@@ -172,6 +174,10 @@ export function createProductionWorkerRuntime(
     logger: input.retentionLogger,
     fetch: input.fetch,
   });
+  const sourceSupervisor = createProviderSourceSupervisorRuntime({
+    configuration: input.provider,
+    database: input.database,
+  });
   return createProviderWorkerRuntime({
     configuration: input.provider,
     database: input.database,
@@ -180,5 +186,6 @@ export function createProductionWorkerRuntime(
     promotion,
     heatPromotion,
     catalogRetention,
+    sourceSupervisor,
   });
 }

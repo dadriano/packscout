@@ -42,7 +42,7 @@ function pack(
     name: "Standard Pack",
     description: null,
     category: null,
-    availability: "active",
+    availability: "available",
     relationships: [],
     dataQualityEvidence: [],
     ...overrides,
@@ -144,10 +144,15 @@ test("pack projection normalizes money and keeps provider EV separate with expli
     schemaVersion: "catalog-projection-v1",
     entityType: "pack",
     parentExternalId: null,
+    firstSeenAt: source.sourceTimestamp,
     name: "Standard Pack",
     category: "Sports",
     description: null,
-    availability: "active",
+    availability: "available",
+    availabilityProvenance: {
+      kind: "canonical_provider_observation",
+      observedAvailability: "available",
+    },
     sourceStatus: "published",
     priceValueMinor: 2500,
     priceCurrency: "USD",
@@ -223,7 +228,9 @@ test("supporting assets retain explicit unknown availability and late-resolvable
     assetType: "card",
     relatedPackExternalId: "pack-arrives-later",
     parentExternalId: null,
+    firstSeenAt: source.sourceTimestamp,
     name: null,
+    description: null,
     category: null,
     availability: "unknown",
     sourceStatus: null,
@@ -309,7 +316,7 @@ test("incomplete EV evidence stays accepted and does not change explicit pack av
   const evProjection = projections.find((projection) => projection.recordKind === "ev_input");
   const ev = evProjection?.content as unknown as CanonicalEvInputProjectionContent;
 
-  assert.equal(packProjection?.content.availability, "active");
+  assert.equal(packProjection?.content.availability, "available");
   assert.deepEqual(ev.readiness, {
     status: "unavailable",
     reasons: [

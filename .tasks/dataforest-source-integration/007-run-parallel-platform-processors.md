@@ -5,7 +5,7 @@
 **Blocks:** dataforest-source-integration/008
 **Estimated scope:** large
 **Estimated effort:** 4–5 days for one builder, including bounded concurrency, scheduling, continuation, recovery, diagnostics, and integration tests
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -97,39 +97,52 @@ Task 008 may observe and command these boundaries but cannot start or stop the o
 
 ### Parallel and fairness proof
 
-- [ ] With four DataForrest sources due and profile capacity two, two different sources overlap and no more than two requests under that profile are in flight.
-- [ ] Work holds neither resource until an execution slot and its profile permit are both grantable; the permit releases after bounded response-body capture or normalized request-failure classification, with a blocking episode persisted first when applicable, while page or test validation continues under its execution slot. The slot releases after page commit, failed page attempt, or terminal or fenced test result, and each free resource goes to its oldest eligible waiter before a continuation or repeated test can jump older unserved work.
-- [ ] Waiters on one saturated profile consume no execution slots while waiting, so an eligible operation on an independently capped profile starts without waiting for that saturated profile.
+- [x] With four DataForrest sources due and profile capacity two, two different sources overlap and no more than two requests under that profile are in flight.
+- [x] Work holds neither resource until an execution slot and its profile permit are both grantable; the permit releases after bounded response-body capture or normalized request-failure classification, with a blocking episode persisted first when applicable, while page or test validation continues under its execution slot. The slot releases after page commit, failed page attempt, or terminal or fenced test result, and each free resource goes to its oldest eligible waiter before a continuation or repeated test can jump older unserved work.
+- [x] Waiters on one saturated profile consume no execution slots while waiting, so an eligible operation on an independently capped profile starts without waiting for that saturated profile.
 
 ### Lane isolation proof
 
-- [ ] Pages remain checkpoint-sequential inside one source, while different providers commit independently without shared state.
-- [ ] A source failure releases its slot and permit, records only that source's outcome, and leaves sibling processors and the supervisor alive.
-- [ ] Simultaneous shared credential or endpoint failures advance one connection health generation and store one episode through detecting-lease CAS, coalesce sibling outcomes, reject stale detectors, cancel queued bound operations and uncompleted leases before another call, preserve checkpoints, grant only the single correlated recovery job a request lease with later retry, and leave independent profiles and admin operations available.
+- [x] Pages remain checkpoint-sequential inside one source, while different providers commit independently without shared state.
+- [x] A source failure releases its slot and permit, records only that source's outcome, and leaves sibling processors and the supervisor alive.
+- [x] Simultaneous shared credential or endpoint failures advance one connection health generation and store one episode through detecting-lease CAS, coalesce sibling outcomes, reject stale detectors, cancel queued bound operations and uncompleted leases before another call, preserve checkpoints, grant only the single correlated recovery job a request lease with later retry, and leave independent profiles and admin operations available.
 
 ### Scheduling and recovery proof
 
-- [ ] `continue` safely continues or requeues work, `poll_after` waits for the greater of source interval and adapter minimum, and vendor poll values never reach the supervisor.
-- [ ] Manual requests coalesce, pause stops after a committed page, resume uses the committed checkpoint, and repeated commands remain idempotent.
-- [ ] Graceful and killed-process recovery preserve page atomicity, lease ownership, queued work, and independent schedules.
-- [ ] Four providers may hold different intervals, each defaults to 60 seconds, and frequent database checks produce no early source-adapter calls.
-- [ ] An A-to-B-to-A checkpoint cycle remains rejected across run rollover and supervisor restart without parsing checkpoint bytes.
+- [x] `continue` safely continues or requeues work, `poll_after` waits for the greater of source interval and adapter minimum, and vendor poll values never reach the supervisor.
+- [x] Manual requests coalesce, pause stops after a committed page, resume uses the committed checkpoint, and repeated commands remain idempotent.
+- [x] Graceful and killed-process recovery preserve page atomicity, lease ownership, queued work, and independent schedules.
+- [x] Four providers may hold different intervals, each defaults to 60 seconds, and frequent database checks produce no early source-adapter calls.
+- [x] An A-to-B-to-A checkpoint cycle remains rejected across run rollover and supervisor restart without parsing checkpoint bytes.
 
 ### Diagnostic proof
 
-- [ ] Every durable transition produces an ordered source-scoped or explicitly connection-scoped event with the task-002 correlation required for its lifecycle, test, run, page, or connection event kind; absent identifiers are never fabricated.
-- [ ] No accepted-record log explosion occurs, and seeded secrets, checkpoints, vendor cursors, payloads, personal identifiers, transaction identities, and stack text never appear.
-- [ ] A second supervisor fails before any claim, test, or upstream call; renewal loss drains and aborts the old owner, and release or expiry plus grace permits one takeover with zero old/new request overlap.
-- [ ] Pending connection and source tests hold exactly one generic execution slot through bounded validation and their terminal or fenced result, release request capacity after boundary terminalization, and use one compare-and-transition result transaction that references the terminal attempt and requires an active request-time supervisor epoch plus current job lease, expected pre-test health generation, and applicable source revision; blocking request failures persist their result at the boundary and no attempt terminalizes twice.
-- [ ] If a queued test or page read is revoked, disabled, replaced, loses its claim, or changes checkpoint generation before paired grant, the post-grant guard atomically releases both resources with zero request attempts or adapter calls.
+- [x] Every durable transition produces an ordered source-scoped or explicitly connection-scoped event with the task-002 correlation required for its lifecycle, test, run, page, or connection event kind; absent identifiers are never fabricated.
+- [x] No accepted-record log explosion occurs, and seeded secrets, checkpoints, vendor cursors, payloads, personal identifiers, transaction identities, and stack text never appear.
+- [x] A second supervisor fails before any claim, test, or upstream call; renewal loss drains and aborts the old owner, and release or expiry plus grace permits one takeover with zero old/new request overlap.
+- [x] Pending connection and source tests hold exactly one generic execution slot through bounded validation and their terminal or fenced result, release request capacity after boundary terminalization, and use one compare-and-transition result transaction that references the terminal attempt and requires an active request-time supervisor epoch plus current job lease, expected pre-test health generation, and applicable source revision; blocking request failures persist their result at the boundary and no attempt terminalizes twice.
+- [x] If a queued test or page read is revoked, disabled, replaced, loses its claim, or changes checkpoint generation before paired grant, the post-grant guard atomically releases both resources with zero request attempts or adapter calls.
 
 ### Uncertain transition proof
 
-- [ ] Exhausted pre-call attempt insertion makes zero upstream calls and releases its paired resources; exhausted terminalization or blocking-transition persistence follows the exact shared retry policy and self-fences the owner. A successful owner-state CAS blocks later commits; an unavailable CAS stops renewal and persistence and permits only already-submitted transactions to resolve under the predecessor epoch before takeover reconciles durable state after expiry plus grace. Takeover atomically terminalizes remaining predecessor attempts as uncertain and opens or coalesces their episodes before any further call, after which admin can run the bounded recovery path.
+- [x] Exhausted pre-call attempt insertion makes zero upstream calls and releases its paired resources; exhausted terminalization or blocking-transition persistence follows the exact shared retry policy and self-fences the owner. A successful owner-state CAS blocks later commits; an unavailable CAS stops renewal and persistence and permits only already-submitted transactions to resolve under the predecessor epoch before takeover reconciles durable state after expiry plus grace. Takeover atomically terminalizes remaining predecessor attempts as uncertain and opens or coalesces their episodes before any further call, after which admin can run the bounded recovery path.
 
 ### Adapter-neutral runtime proof
 
-- [ ] Every claimed run resolves its pinned source type and mapper version through separate registries; the supervisor contains no DataForrest endpoint, auth, filter, cursor, or poll branch.
-- [ ] A test-only alternate source uses the same claim, execution-slot, permit-grant, epoch-validation, continuation, pause, recovery, and diagnostic path with an independent connection-profile cap.
-- [ ] A source adapter cannot issue unmetered parallel subrequests or consume another connection profile's permits.
-- [ ] The test-only alternate adapter is unavailable to production claims, tests, and admin configuration.
+- [x] Every claimed run resolves its pinned source type and mapper version through separate registries; the supervisor contains no DataForrest endpoint, auth, filter, cursor, or poll branch.
+- [x] A test-only alternate source uses the same claim, execution-slot, permit-grant, epoch-validation, continuation, pause, recovery, and diagnostic path with an independent connection-profile cap.
+- [x] A source adapter cannot issue unmetered parallel subrequests or consume another connection profile's permits.
+- [x] The test-only alternate adapter is unavailable to production claims, tests, and admin configuration.
+
+## Verification
+
+- `node --import tsx --test packages/services/src/provider-source-supervisor.test.ts apps/worker/src/provider-source-supervisor-executor.test.ts apps/worker/src/provider-source-supervisor-runtime.integration.test.ts packages/database/src/provider-source-supervisor-recovery.integration.test.ts` — 46/46 passed.
+- `npm run verify:framework` — passed end to end, including framework checks, Prisma validation, zero-finding standards ratchet, lint, typecheck, all workspace tests, tooling tests, volume tests, and production builds.
+- `git diff --check` — passed.
+
+## Spec Compliance
+
+- Related specs reviewed: none; this feature has no `tech-*.md` or `ux-*.md` companion specs.
+- Alignment: implemented the task contract and the related BDD scenarios through the source-neutral supervisor, durable PostgreSQL control plane, production worker composition, and test-only alternate adapter.
+- Divergences: none.
+- Verification: the Task 007 anchor suite and canonical framework verifier listed above both pass.

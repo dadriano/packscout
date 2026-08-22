@@ -1,4 +1,5 @@
 import type {
+  EstimatedEvRecomputationOrigin,
   RecalculatePackScoutEstimatedEvCommand,
   RecalculatePackScoutEstimatedEvResult,
 } from "./estimated-ev-projection-contracts.ts";
@@ -11,7 +12,7 @@ export interface EstimatedEvRecomputationClaim {
   readonly id: string;
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly origin: EstimatedEvRecomputationOrigin;
   readonly platformKey: string;
   readonly packExternalId: string;
   readonly evInputExternalId: string;
@@ -170,7 +171,7 @@ export class EstimatedEvRecomputationProcessor {
         const result = await this.calculations.recalculate({
           organizationId: claim.organizationId,
           providerId: claim.providerId,
-          configurationRevisionId: claim.configurationRevisionId,
+          origin: claim.origin,
           platformKey: claim.platformKey,
           packExternalId: claim.packExternalId,
           evInputExternalId: claim.evInputExternalId,

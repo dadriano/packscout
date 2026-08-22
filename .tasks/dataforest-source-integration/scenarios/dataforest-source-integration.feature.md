@@ -1,6 +1,6 @@
 # Feature: DataForrest Platform Source Integration
 
-Status: planned — implementation not started
+Status: tasks 001–009 implemented; task 010 blocked on local capacity and an authorized credential
 Owner: data pipeline build
 
 ## Scenario: Four platform sources share one connection without sharing processor state
@@ -449,7 +449,7 @@ When PackScout extrapolates the dated full-history baseline and fixed retention 
 Then the real backfill cannot start without approved local database capacity and headroom
 And measured growth during the real backfill stops safely before capacity exhaustion if the forecast is wrong
 
-Coverage: Manual gap — implementation has not started. Automated sample measurement plus local operational evidence is owned by tasks `dataforest-source-integration/001`, `dataforest-source-integration/006`, and `dataforest-source-integration/010` and must replace this gap before completion.
+Coverage: Automated storage measurement, authentic bounded-memory evidence, capacity forecasting, admission rejection, and Task010 target binding are implemented in `packages/services/src/provider-source-capacity-preflight.test.ts` and `scripts/local/provider-source-task010-safety.test.mjs`. Live growth evidence remains blocked until an approved volume is provisioned.
 
 ## Scenario: Local bootstrap targets the real backfill database
 
@@ -458,7 +458,7 @@ When the target-scoped bootstrap and documented runbook commands execute
 Then the organization and first administrator exist in that same migrated database and admin and worker use the same approved credential-key revision
 And no disposable database is substituted and no database URL, password, bearer, or key bytes appear in command arguments or output
 
-Coverage: Manual gap — implementation has not started. Automated target validation and bootstrap coverage plus a manual runbook smoke are owned by task `dataforest-source-integration/010` and must replace this gap before completion.
+Coverage: Automated target, private-environment, immutable fingerprint, empty-target, bootstrap-receipt, topology, and secret-safety coverage is implemented in `scripts/local/provider-source-task010-safety.test.mjs`; the executable smoke remains blocked before database creation by capacity admission.
 
 ## Scenario: Four real backfills reconcile before completion
 
@@ -467,7 +467,7 @@ When all four processors run the real DataForrest history to head
 Then every delivered record reconciles to exactly one disposition plus canonical relationship and EV outcomes
 And the feature remains incomplete until all four providers reach head with zero unresolved mapping, identity, immutable-conflict, or relationship failures
 
-Coverage: Manual gap — implementation has not started. Real local backfill, reconciliation, and scorecard evidence is owned by task `dataforest-source-integration/010` and must replace this gap before completion.
+Coverage: The fail-closed reconciliation contract and dated BLOCKED scorecard are implemented and tested in `scripts/local/provider-source-task010-safety.test.mjs`. The four real histories and final PASS evidence remain blocked on approved capacity and an authorized bearer.
 
 ## Scenario: Public data exposes availability without ingestion internals
 
@@ -476,4 +476,4 @@ When a buyer views the complete catalog
 Then every pack has the accurate label and only available packs have current ranking or purchase eligibility
 And no connection, source, checkpoint, vendor cursor, processor diagnostic, quarantine, credential, payment method, or protected provider value reaches the browser
 
-Coverage: Manual gap — implementation has not started. Automated public contract, query, component, accessibility, and browser coverage is owned by tasks `dataforest-source-integration/009` and `dataforest-source-integration/010` and must replace this gap before completion.
+Coverage: Automated public contract, projection, query, component, accessibility, production-build, and local browser evidence is recorded by task `dataforest-source-integration/009`; live publication remains explicitly outside task 010 and blocked on the separate publisher/finalizer.

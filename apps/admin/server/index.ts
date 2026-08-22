@@ -17,6 +17,7 @@ import { createAdminAuthRuntime } from "./auth/runtime.ts";
 import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
 import { createAdminOperationalRuntime } from "./operational-runtime.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
+import { createAdminProviderSourceRuntime } from "./provider-source-runtime.ts";
 import {
   adminDevelopmentAllowedOrigins,
   adminDevelopmentServerNetwork,
@@ -25,6 +26,7 @@ import {
   readServiceHost,
   readPort,
   readPositiveDuration,
+  readPositiveInteger,
   readRequiredSecret,
   readTrustedProxies,
   serviceHttpOrigin,
@@ -79,6 +81,14 @@ const providerCredentialKey = readBase64Key(
 const providerActorKey = readBase64Key(
   process.env.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
   "PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64",
+);
+const sourceConnectionConfigurationKey = readBase64Key(
+  process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64,
+  "PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64",
+);
+const sourceConnectionConfigurationKeyVersion = readPositiveInteger(
+  process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION,
+  "PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION",
 );
 const allowedOrigins = readAllowedOrigins(
   process.env.PACKSCOUT_ADMIN_ALLOWED_ORIGINS,
@@ -140,6 +150,13 @@ try {
     production: !isDevelopment,
     allowedOrigins,
   });
+  const providerSourceRuntime = createAdminProviderSourceRuntime({
+    database,
+    connectionConfigurationKey: sourceConnectionConfigurationKey,
+    connectionConfigurationKeyVersion: sourceConnectionConfigurationKeyVersion,
+    actorPseudonymKey: providerActorKey,
+    environment: isDevelopment ? "local" : "production",
+  });
   const app = createAdminApp({
     trustedProxies,
     auth,
@@ -154,12 +171,11 @@ try {
     importOperations: createAdminImportOperationsRuntime({
       database,
       actorPseudonymKey: providerActorKey,
-      credentialKey: providerCredentialKey,
-      environment: isDevelopment ? "local" : "production",
-      operational,
     }),
     operationalAlerts: { alerts: operational.alerts },
     operationalHealth: { health: operational.health },
+    providerSources: providerSourceRuntime,
+    providerSourceOperations: providerSourceRuntime,
   });
 
   if (isDevelopment) {

@@ -127,6 +127,19 @@ describe("mock V2 data release", () => {
     expect(first.repacks.some(({ contentMode }) => contentMode === "mixed")).toBe(
       true,
     );
+    expect(new Set(first.repacks.map(({ availability }) => availability))).toEqual(
+      new Set(["available", "unavailable", "unknown", "sold_out"]),
+    );
+    expect(
+      first.repacks.every((repack) =>
+        repack.availability === "available"
+          ? true
+          : !repack.actionAvailability.promo &&
+            !repack.actionAvailability.repackLink &&
+            repack.actions.promo === undefined &&
+            repack.actions.repackLink === undefined
+      ),
+    ).toBe(true);
     expect(
       first.repacks.some(
         ({ collectibleTypes }) =>
@@ -397,7 +410,7 @@ describe("mock V2 data release", () => {
     expect(getDashboardBundleResultSchema.parse(dashboard).ok).toBe(true);
     if (!dashboard.ok) throw new Error("Expected dashboard success.");
     expect(dashboard.data.metadata.publicReleaseId).toBe(seeded.publicReleaseId);
-    expect(dashboard.data.kpis.totalRepacks).toBe(5);
+    expect(dashboard.data.kpis.totalRepacks).toBe(3);
     expect(dashboard.data.selectedRepack).not.toBeNull();
     expect(dashboard.data.details.every(({ heat }) =>
       heat.status === "unavailable" && heat.reason === "NOT_PUBLISHED"
@@ -412,9 +425,50 @@ describe("mock V2 data release", () => {
     expect(dashboardWithSoldOut.data.kpis.totalRepacks).toBe(6);
     expect(
       dashboardWithSoldOut.data.opportunities.every(
-        ({ availability }) => availability === "active",
+        ({ availability }) => availability === "available",
       ),
     ).toBe(true);
+
+    const completeCatalog = await t.query(api.publicRepacks.listPublicRepacks, {
+      filters: { availability: "all" },
+      currentTime: Date.now(),
+    });
+    expect(listPublicRepacksResultSchema.parse(completeCatalog).ok).toBe(true);
+    if (!completeCatalog.ok) throw new Error("Expected complete catalog.");
+    expect(
+      new Set(completeCatalog.data.rows.map(({ availability }) => availability)),
+    ).toEqual(new Set(["available", "unavailable", "unknown", "sold_out"]));
+    expect(
+      completeCatalog.data.rows.every((repack) =>
+        repack.availability === "available"
+          ? true
+          : !repack.actionAvailability.promo &&
+            !repack.actionAvailability.repackLink
+      ),
+    ).toBe(true);
+
+    const unavailable = completeCatalog.data.rows.find(
+      ({ availability }) => availability === "unavailable",
+    );
+    if (unavailable === undefined) throw new Error("Expected unavailable repack.");
+    const retainedSelection = await t.query(api.publicRepacks.listPublicRepacks, {
+      filters: { availability: "all" },
+      selectedPublicRepackId: unavailable.publicRepackId,
+      currentTime: Date.now(),
+    });
+    if (!retainedSelection.ok) throw new Error("Expected retained selection.");
+    expect(retainedSelection.data.selectedRepack?.publicRepackId).toBe(
+      unavailable.publicRepackId,
+    );
+    const fallbackSelection = await t.query(api.publicRepacks.listPublicRepacks, {
+      selectedPublicRepackId: unavailable.publicRepackId,
+      currentTime: Date.now(),
+    });
+    if (!fallbackSelection.ok) throw new Error("Expected fallback selection.");
+    expect(fallbackSelection.data.selectedRepack?.availability).toBe("available");
+    expect(fallbackSelection.data.selectedRepack?.publicRepackId).not.toBe(
+      unavailable.publicRepackId,
+    );
 
     const list = await t.query(api.publicRepacks.listPublicRepacks, {
       currentTime: Date.now(),
@@ -456,7 +510,7 @@ describe("mock V2 data release", () => {
     ).toBe(true);
     expect(
       hierarchyResults.data.rows.every(
-        ({ availability }) => availability === "active",
+        ({ availability }) => availability === "available",
       ),
     ).toBe(true);
     expect(
@@ -488,7 +542,7 @@ describe("mock V2 data release", () => {
     expect(desiredPage.data.desiredCollectible?.publicCollectibleId).toBe(
       desiredCollectible.publicCollectibleId,
     );
-    expect(desiredPage.data.range.total).toBeGreaterThan(2);
+    expect(desiredPage.data.range.total).toBe(2);
     expect(desiredPage.data.desiredChaseMatches).toHaveLength(
       desiredPage.data.rows.length,
     );
@@ -517,8 +571,34 @@ describe("mock V2 data release", () => {
     expect(desired.data.total).toBeGreaterThan(1);
     expect(
       desired.data.matches.every(
-        ({ chase }) =>
-          chase.publicCollectibleId === desiredCollectible.publicCollectibleId,
+        ({ chase, repack }) =>
+          chase.publicCollectibleId === desiredCollectible.publicCollectibleId &&
+          repack.availability === "available",
+      ),
+    ).toBe(true);
+
+    const desiredWithCompleteCatalogFilter = await t.query(
+      api.publicRepacks.findRepacksByDesiredCollectible,
+      {
+        currentTime: Date.now(),
+        publicCollectibleId: desiredCollectible.publicCollectibleId,
+        filters: { availability: "all" },
+      },
+    );
+    expect(
+      findRepacksByDesiredCollectibleResultSchema.parse(
+        desiredWithCompleteCatalogFilter,
+      ).ok,
+    ).toBe(true);
+    if (!desiredWithCompleteCatalogFilter.ok) {
+      throw new Error("Expected complete-catalog desired chase success.");
+    }
+    expect(desiredWithCompleteCatalogFilter.data.total).toBe(
+      desired.data.total,
+    );
+    expect(
+      desiredWithCompleteCatalogFilter.data.matches.every(
+        ({ repack }) => repack.availability === "available",
       ),
     ).toBe(true);
 

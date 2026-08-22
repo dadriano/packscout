@@ -6,7 +6,7 @@
 
 **Reviewer:** PackScout engineering (automated structural capture plus manual contract review)
 
-**Verdict:** PASS for tasks 002–009; the real local backfill remains capacity-blocked until at least 200 GB is available to its dedicated PostgreSQL target.
+**Verdict:** PASS for tasks 002–009; the real local backfill remains capacity-blocked. The measured Task 010 admission requirement is 8,757,364,735,856 available bytes, and this host is explicitly rejected.
 
 ## Safety boundary
 
@@ -140,8 +140,11 @@ must stop for a separately designed identity migration.
 
 The adapter copies the two timestamps, outer relationships, event code, amount,
 currency, payment method, and tri-state availability into the versioned
-normalized observation. It retains an evidence reference to the protected
-native `data` object but does not apply provider-specific canonical rules.
+normalized observation. From native `data`, it allowlists only the evidenced
+nonblank `provider_label` as the source-neutral display-name fact; missing or
+malformed labels remain explicit and every other nested key stays protected
+provenance. The mapper never receives the native object, and the adapter does
+not apply provider-specific canonical rules.
 
 ## Failure contract
 
@@ -162,34 +165,104 @@ The announced dated baseline is 14,526,877 records. At 250 records per page it
 requires about 58,108 pages. The eight reviewed pages averaged 642,434 bytes
 (2,570 bytes per record), which extrapolates to 37.3 GB for one raw full-history
 copy. The largest reviewed page extrapolates to a conservative 98.7 GB raw
-window. A provisional 2–4 KiB per normalized row plus indexes/outcomes adds
-29.8–59.5 GB before canonical revisions and relationships are measured.
+window.
 
-Task 006 must import a representative mixed sample into the final schema and
-measure `pg_total_relation_size` for tables, indexes, and TOAST. Full backfill
-capacity is the measured structured/canonical extrapolation plus the
-conservative seven-day raw window, 30-day quarantine, page diagnostics, 30-day
-terminal request attempts, permanent compact attempt lineage, and 25% free
-headroom. Until that measurement is available, the local launch floor is 200 GB
-free on the dedicated PostgreSQL volume, with an abort threshold at 80% of
-approved capacity.
+Task 006 measured 72 representative final-schema commits across three
+independent 24-page windows: 288 input records, 216 accepted records, and 72
+quarantined records. Every retained component uses a PostgreSQL physical
+table/index/TOAST slope. The committed bound adds one measured 8 KiB allocation
+page per affected relation instead of an arbitrary multiplier. This produces
+11,520 structured/canonical bytes per input record, 2,640 bytes per record for
+the seven-day normalized payload, 9,217 bytes per permanently retained expired
+page lineage, and separately measured quarantine lineage/evidence. The complete
+machine-readable artifact is
+[`provider-source-capacity-measurement-v1.json`](./provider-source-capacity-measurement-v1.json).
 
-At 60-second head polling, four sources create 172,800 poll attempts in 30 days;
-including the initial pages gives about 230,908 first-window attempts. At 1 KiB
-per sanitized terminal row that is about 0.24 GB. A permanent 256-byte compact
-lineage grows by about 0.54 GB per year. Page-level diagnostics remain bounded;
-accepted records do not create per-record log events.
+No observed steady-state delivery rate is available. The forecast therefore
+fails closed at the transport maximum: every one of the four sources returns a
+full 250-record page on every 60-second poll throughout the 365-day growth
+horizon. That budgets 525,600,000 incremental records permanently, plus
+10,080,000 incremental records in the rolling seven-day payload window and
+43,200,000 in the rolling 30-day quarantine window. This is an admission upper
+bound, not a claim about likely provider volume; replacing it requires new
+reviewed evidence and a regenerated versioned artifact.
 
-The current development volume had about 31 GiB free during review, so task 010
-must not start its real full-history import there. This does not block contract,
-adapter, mapper, importer, scheduler, admin, or UI implementation.
+The forecast retains one conservative full-history raw copy, seven days of
+steady-poll raw pages, seven-day normalized payload, permanent expired page
+lineage, 30 days of representative quarantine evidence, page diagnostics,
+30-day terminal request attempts, and permanent compact attempt lineage. Raw
+response bytes are excluded from the normalized-payload slope and modeled only
+in the raw windows; quarantine uses the larger of measured evidence payload and
+the reviewed raw-record average, so no retained payload category is counted
+twice. It projects:
 
-Task 006's memory benchmark must run at least 100 sequential maximum-size
-sanitized pages through normalize/map/plan/discard. Peak RSS above idle is
-limited to 64 MiB per active page, the final quarter may not retain more than
-8 MiB above the first quarter after garbage-collection opportunities, and total
-history size must not affect the bound. Four execution slots therefore reserve
-at most 256 MiB of page-working-set budget before normal process overhead.
+| Component | Projected bytes |
+| --- | ---: |
+| Structured and canonical data | 6,222,261,623,040 |
+| Conservative raw full history | 98,700,000,000 |
+| Seven-day steady-poll raw pages | 25,902,938,880 |
+| Seven-day normalized page payload | 64,962,155,280 |
+| Permanent expired page lineage | 19,913,402,236 |
+| Quarantine lineage and evidence | 120,851,217,000 |
+| Page diagnostics | 473,130,492 |
+| Terminal request attempts | 946,030,076 |
+| Permanent compact attempt lineage | 14,013,054,888 |
+| **Total** | **6,568,023,551,892** |
+
+At a 60-second interval, four sources create 172,800 poll attempts in 30 days;
+including the 58,108 initial pages gives 230,908 first-window attempts. Leaving
+25% of the target volume free after the projected import requires
+**8,757,364,735,856 available bytes** before Task 010 may start. The 200 GB
+provisional floor is therefore superseded by this measured requirement. The
+80%-used abort threshold remains independently enforced.
+
+The committed host measurement reported 994,662,584,320 bytes of capacity and
+only 25,755,877,376 available bytes. Admission was rejected for insufficient
+free bytes, an already-exceeded 80% threshold, and a projected threshold
+breach. Task 010 must not start a real backfill on this host. This does not block
+contract, adapter, mapper, importer, scheduler, admin, or UI implementation.
+
+The bounded-memory benchmark processed 10 warm-up pages and five 20-page trials
+(100 measured pages total), each exactly 250 records and 2 MiB, through the
+authentic capture, durable-terminalization acknowledgement, interpretation,
+deep immutable completion, import validation, mapping, planning, and discard
+path. Peak RSS rose 27,557,888 bytes. The allocator-tolerant Theil–Sen trend over
+settled heap-plus-external samples projected only 162,600 retained bytes across
+100 pages, within the 64 MiB peak and 8 MiB retained limits. Four execution
+slots therefore reserve at most 256 MiB of page-working-set budget before normal
+process overhead.
+
+Reproduction and drift checks are executable from the repository root:
+
+```bash
+# Regenerate the complete machine-readable storage, memory, forecast, and host
+# admission artifact to stdout (the npm alias runs this same command).
+node --import tsx scripts/local/generate-provider-source-capacity-artifact.mts
+
+# Re-measure every committed relation (logical row, table, index, and TOAST)
+# and independently compare the invariant values with the JSON artifact.
+PACKSCOUT_PRINT_PROVIDER_SOURCE_CAPACITY=1 node --import tsx --test \
+  --test-name-pattern='representative mixed commit measures' \
+  packages/services/src/provider-source-atomic-page.integration.test.ts
+
+# Regenerate the authentic bounded 100-page memory measurement.
+npm run measure:provider-source-page-memory:local
+
+# Recompute every forecast value and verify the committed admission decision.
+node --import tsx --test \
+  packages/services/src/provider-source-capacity-preflight.test.ts
+
+# Read the target volume and make the live Task 010 admission decision.
+npm run preflight:provider-source-backfill:local -- \
+  --database-path <postgres-data-volume-path> \
+  --unreconciled-attempts <count>
+```
+
+The measured page duration in the artifact is an observed performance sample,
+not a deterministic invariant; the storage command emits a fresh duration on
+every run. Relation sizes, row counts, statement count, forecast values, memory
+limits, and the committed host decision are independently asserted by the named
+tests, so the JSON cannot silently drift as a hand-edited estimate.
 
 ## Fact classification
 

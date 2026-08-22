@@ -19,7 +19,7 @@ export function RunLedger({ runs }: { runs: ImportRunSummary[] }) {
             <RunStatus state={run.state} />
             <dl className="ops-ledger__facts">
               <div><dt>Started</dt><dd>{dateTime(run.startedAt ?? run.requestedAt)}</dd></div>
-              <div><dt>Progress</dt><dd>{run.counters.pages} pages · {run.counters.catalog + run.counters.pulls + run.counters.sales} records</dd></div>
+              <div><dt>Progress</dt><dd>{run.counters.pages} pages · {run.counters.catalog + run.counters.pulls + run.counters.trades} records</dd></div>
               <div><dt>Outcomes</dt><dd>{run.counters.accepted} accepted · {run.counters.unchanged} unchanged · {run.counters.revised} revised</dd></div>
               <div><dt>Quarantine</dt><dd>{run.counters.quarantined} created · {run.counters.resolvedQuarantines} now resolved</dd></div>
               <div><dt>Duration</dt><dd>{duration(run.startedAt, run.finishedAt)}</dd></div>

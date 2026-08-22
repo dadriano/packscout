@@ -36,6 +36,8 @@ export function AdminLayout() {
         ? "Operators"
         : location.pathname.startsWith("/providers")
           ? "Data Providers"
+        : location.pathname.startsWith("/source-configuration")
+          ? "Source Configuration"
         : location.pathname.startsWith("/operations")
           ? "Pipeline Status"
         : location.pathname.startsWith("/runs")
@@ -67,9 +69,10 @@ export function AdminLayout() {
   const pipelineNavigation = [
     ...(canViewProviders ? [{ to: "/operations", label: "Status", index: "01" }] : []),
     ...(canViewProviders ? [{ to: "/providers", label: "Providers", index: "02" }] : []),
-    ...(canViewProviders ? [{ to: "/runs", label: "Import Runs", index: "03" }] : []),
-    ...(canViewProviders ? [{ to: "/quarantine", label: "Quarantine", index: "04" }] : []),
-    ...(canViewProviders ? [{ to: "/alerts", label: "Alerts", index: "05" }] : []),
+    ...(canViewProviders ? [{ to: "/source-configuration", label: "Sources", index: "03" }] : []),
+    ...(canViewProviders ? [{ to: "/runs", label: "Import Runs", index: "04" }] : []),
+    ...(canViewProviders ? [{ to: "/quarantine", label: "Quarantine", index: "05" }] : []),
+    ...(canViewProviders ? [{ to: "/alerts", label: "Alerts", index: "06" }] : []),
   ];
 
   return (

@@ -6,6 +6,7 @@ import {
   parseDataReleaseManifestV2,
   type DataReleaseManifestV2,
   type PackScoutEv,
+  type PublicPackAvailability,
   type PublicCategory,
   type PublicCollectible,
   type PublicCollectibleDisplay,
@@ -65,11 +66,11 @@ export const MOCK_DATA_RELEASE_ORIGIN_SET_HASH =
 export const MOCK_DATA_RELEASE_MANIFEST_FINGERPRINT =
   "6dfc22527c62382443911af48654cab7fd3b860b929c1a46b4fa26342dab3a1b" as const;
 export const MOCK_DATA_RELEASE_CONTENT_HASH =
-  "095a18686a074a148993dcdce344af322ab729012c2b75c6517131baba14e9ce" as const;
+  "1c0e6607e1016613c8e7e95d5487fe997379ff18623bb4d1881ff97c92666de4" as const;
 export const MOCK_REPACK_SEARCH_SHARD_HASH =
-  "baef9cc7ca84d532dc3b1ebf38a373fb0a3b03536e8d8efa8bc4fec540bc4622" as const;
+  "d77ead59a39c0cd0ff85e97704e19c272338280dcf47fbfe653607810b591069" as const;
 export const MOCK_REPACK_SEARCH_INDEX_HASH =
-  "f3e3fb9409d04b862c6fd04422e6e03e3bbab5caa74c5ec66bcc8dc88935ceb5" as const;
+  "4eb6c4a54d9916e055ae68c7ff154d1fed7cc98c7ae122e90a772cc3baefb4eb" as const;
 
 const observedAt = "2026-08-11T12:00:00Z";
 const calculatedAt = "2026-08-11T12:01:00Z";
@@ -586,7 +587,7 @@ type RepackInput = Readonly<{
   knownCollectibleCount: number;
   evidenceCompleteness: "complete" | "partial" | "unknown";
   probabilityCoverageBasisPoints: number | null;
-  soldOut?: boolean;
+  availability: PublicPackAvailability;
 }>;
 
 const categoryById = new Map(
@@ -599,14 +600,17 @@ function repack(input: RepackInput): PublicRepackDetail {
       (candidate) =>
         candidate.publicRepackId === input.id && candidate.role === "top_chase",
     ) ?? null;
-  const repackLink = input.soldOut
-    ? undefined
-    : {
+  const purchaseActionsAvailable = input.availability === "available";
+  const repackLink = purchaseActionsAvailable
+    ? {
         listingUrl: `https://${input.vendor.listingHosts[0]}/packs/${input.id}`,
         listingHost: input.vendor.listingHosts[0]!,
         referralParameters: input.vendor.referralParameters,
-      };
-  const promo = input.vendor.publicPromo ?? undefined;
+      }
+    : undefined;
+  const promo = purchaseActionsAvailable
+    ? input.vendor.publicPromo ?? undefined
+    : undefined;
   return {
     publicRepackId: input.id,
     publicVendorId: input.vendor.publicVendorId,
@@ -641,7 +645,7 @@ function repack(input: RepackInput): PublicRepackDetail {
         left.publicCategoryId.localeCompare(right.publicCategoryId),
       ),
     collectibleTypes: [...input.collectibleTypes].sort(),
-    availability: input.soldOut ? "sold_out" : "active",
+    availability: input.availability,
     price: {
       displayMoney: { minorUnits: input.priceMinor, currency: "USD" },
       usdComparison: {
@@ -714,6 +718,7 @@ const repacks: readonly PublicRepackDetail[] = [
     knownCollectibleCount: 120,
     evidenceCompleteness: "complete",
     probabilityCoverageBasisPoints: 10_000,
+    availability: "available",
   }),
   repack({
     id: repackIds.pokemonMaster,
@@ -732,6 +737,7 @@ const repacks: readonly PublicRepackDetail[] = [
     knownCollectibleCount: 80,
     evidenceCompleteness: "partial",
     probabilityCoverageBasisPoints: 8_500,
+    availability: "unavailable",
   }),
   repack({
     id: repackIds.legendsMixed,
@@ -754,6 +760,7 @@ const repacks: readonly PublicRepackDetail[] = [
     knownCollectibleCount: 35,
     evidenceCompleteness: "partial",
     probabilityCoverageBasisPoints: null,
+    availability: "unknown",
   }),
   repack({
     id: repackIds.hallOfFame,
@@ -777,6 +784,7 @@ const repacks: readonly PublicRepackDetail[] = [
     knownCollectibleCount: 60,
     evidenceCompleteness: "unknown",
     probabilityCoverageBasisPoints: null,
+    availability: "available",
   }),
   repack({
     id: repackIds.vintagePokemon,
@@ -795,6 +803,7 @@ const repacks: readonly PublicRepackDetail[] = [
     knownCollectibleCount: 48,
     evidenceCompleteness: "partial",
     probabilityCoverageBasisPoints: 7_800,
+    availability: "available",
   }),
   repack({
     id: repackIds.soldOutSports,
@@ -818,7 +827,7 @@ const repacks: readonly PublicRepackDetail[] = [
     knownCollectibleCount: 20,
     evidenceCompleteness: "complete",
     probabilityCoverageBasisPoints: 10_000,
-    soldOut: true,
+    availability: "sold_out",
   }),
 ];
 

@@ -57,7 +57,12 @@ export const repackSearchRowValidator = v.object({
   normalizedName: v.string(),
   normalizedVendor: v.string(),
   normalizedCategories: v.string(),
-  availability: v.union(v.literal("active"), v.literal("sold_out")),
+  availability: v.union(
+    v.literal("available"),
+    v.literal("unavailable"),
+    v.literal("unknown"),
+    v.literal("sold_out"),
+  ),
   priceMinor: nullableNumberValidator,
   priceNullRank: nullRankValidator,
   vendorReportedGrossEvMinor: nullableNumberValidator,
@@ -398,7 +403,10 @@ export function rowMatchesFilters(
     readonly ignoreCategories?: boolean;
   },
 ): boolean {
-  if (filters.availability === "active" && row.availability !== "active") {
+  if (
+    filters.availability === "available" &&
+    row.availability !== "available"
+  ) {
     return false;
   }
   if (

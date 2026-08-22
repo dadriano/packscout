@@ -113,7 +113,7 @@ function mapCatalog(envelope: CatalogEnvelopeV1, recordIndex: number) {
     name,
     description: safeText(data.description),
     category: text(data.category),
-    availability: data.isSoldOut === true ? "sold_out" : data.isEnabled === true ? "active" : "disabled",
+    availability: data.isSoldOut === true ? "sold_out" : data.isEnabled === true ? "available" : "unavailable",
     sourceStatus: data.isSoldOut === true ? "sold_out" : data.isEnabled === true ? "enabled" : "disabled",
     price: { amount: price, currency: "USD" },
     imageUrls: imageList([data.imageUrl, data.bgImageUrl]),
@@ -210,17 +210,17 @@ export class StadiumVaultMappingAdapter implements ProviderMappingAdapter {
   mapPage(input: {
     configuration: { platform: string };
     page: ProviderFeedPageV1;
-    recordIndexes: Readonly<{ catalog: readonly number[]; pulls: readonly number[]; sales: readonly number[] }>;
+    recordIndexes: Readonly<{ catalog: readonly number[]; pulls: readonly number[]; trades: readonly number[] }>;
   }) {
     if (input.configuration.platform !== this.platformKey) throw new Error("Stadium Vault mapper platform mismatch.");
     return {
       outcomes: Object.freeze([
         ...input.recordIndexes.catalog.map((index) => mapCatalog(input.page.catalog[index]!, index)),
         ...input.recordIndexes.pulls.map((index) => mapPull(input.page.pulls[index]!, index)),
-        ...input.recordIndexes.sales.map((index) => {
-          const envelope = input.page.sales[index]!;
-          const source = sourceIdentityForEnvelope({ recordKind: "sale", recordIndex: index, envelope });
-          return invalid(source, "STADIUM_VAULT_SALE_UNSUPPORTED", "sales");
+        ...input.recordIndexes.trades.map((index) => {
+          const envelope = input.page.trades[index]!;
+          const source = sourceIdentityForEnvelope({ recordKind: "trade", recordIndex: index, envelope });
+          return invalid(source, "STADIUM_VAULT_TRADE_UNSUPPORTED", "trades");
         }),
       ]),
     };

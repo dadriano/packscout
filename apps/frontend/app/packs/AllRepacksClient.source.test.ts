@@ -10,6 +10,7 @@ test("all-repacks opens the sheet only from an explicit query selection", () => 
     /catalogSheetInspectorInitiallyOpen\(query\.selectedPublicRepackId\)/,
   );
   assert.equal(source.includes("page.selectedRepack?.publicRepackId !== undefined"), false);
+  assert.match(source, /navigate\(selectCatalogRepack\(query, publicRepackId\)\)/);
 });
 
 test("all-repacks delegates the desired-chase search to the page heading", () => {

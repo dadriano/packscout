@@ -6,6 +6,7 @@ import {
 } from "./database.ts";
 import { hashJson } from "./security.ts";
 import { advanceSettledPublicWatermark } from "./public-change-settlement-repository.ts";
+import { createPublicDerivationObligations } from "./public-change-settlement-repository.ts";
 
 const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const failureCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
@@ -24,7 +25,16 @@ export interface ClaimedEstimatedEvRecomputation
   extends EstimatedEvRecomputationIdentity {
   readonly id: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly origin:
+    | Readonly<{
+        kind: "legacy_configuration";
+        configurationRevisionId: string;
+      }>
+    | Readonly<{
+        kind: "provider_source_revision";
+        sourceInstanceId: string;
+        sourceRevisionId: string;
+      }>;
   readonly claimToken: string;
   readonly attemptCount: number;
   readonly originatingPublicChangeSequence: bigint;
@@ -64,7 +74,9 @@ interface ClaimedRequestRow {
   readonly id: string;
   readonly organization_id: string;
   readonly provider_id: string;
-  readonly configuration_revision_id: string;
+  readonly configuration_revision_id: string | null;
+  readonly source_instance_id: string | null;
+  readonly source_revision_id: string | null;
   readonly platform_key: string;
   readonly pack_external_id: string;
   readonly ev_input_external_id: string;
@@ -90,6 +102,88 @@ export function estimatedEvRecomputationRequestKey(
   });
 }
 
+/** Enqueues/coalesces one normalized-source EV request in the caller's page transaction. */
+export async function enqueueSourceEstimatedEvRecomputationInTransaction(
+  database: PackscoutTransactionClient,
+  input: EstimatedEvRecomputationIdentity & Readonly<{
+    providerId: string;
+    sourceInstanceId: string;
+    sourceRevisionId: string;
+    causeSequences: readonly bigint[];
+    createdAt: Date;
+  }>,
+): Promise<{ requestId: string; created: boolean }> {
+  if (input.causeSequences.length === 0) {
+    throw new TypeError("Estimated EV recomputation requires a public change cause.");
+  }
+  if (input.packRevisionId === null || input.evInputRevisionId === null) {
+    throw new TypeError("Estimated EV recomputation requires complete revision evidence.");
+  }
+  const requestKey = estimatedEvRecomputationRequestKey(input);
+  const originatingPublicChangeSequence = [...input.causeSequences].sort(
+    (left, right) => (left < right ? -1 : left > right ? 1 : 0),
+  )[0]!;
+  const inserted = await database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    insert into public.estimated_ev_recomputation_requests (
+      request_key, organization_id, provider_id, configuration_revision_id,
+      source_instance_id, source_revision_id,
+      platform_key, pack_external_id, ev_input_external_id,
+      pack_revision_id, ev_input_revision_id,
+      originating_public_change_sequence, available_at, created_at, updated_at
+    ) values (
+      ${requestKey}, ${input.organizationId}::uuid, ${input.providerId}::uuid, null,
+      ${input.sourceInstanceId}::uuid, ${input.sourceRevisionId}::uuid,
+      ${input.platformKey}, ${input.packExternalId}, ${input.evInputExternalId},
+      ${input.packRevisionId}::uuid, ${input.evInputRevisionId}::uuid,
+      ${originatingPublicChangeSequence}, ${input.createdAt}, ${input.createdAt},
+      ${input.createdAt}
+    )
+    on conflict (request_key) do nothing
+    returning id
+  `);
+  const existing = inserted[0]
+    ? {
+        id: inserted[0].id,
+        configurationRevisionId: null,
+        sourceInstanceId: input.sourceInstanceId,
+        sourceRevisionId: input.sourceRevisionId,
+      }
+    : (
+        await database.$queryRaw<Array<{
+          id: string;
+          configurationRevisionId: string | null;
+          sourceInstanceId: string | null;
+          sourceRevisionId: string | null;
+        }>>(Prisma.sql`
+          select id,
+                 configuration_revision_id as "configurationRevisionId",
+                 source_instance_id as "sourceInstanceId",
+                 source_revision_id as "sourceRevisionId"
+          from public.estimated_ev_recomputation_requests
+          where request_key = ${requestKey}
+          for update
+        `)
+      )[0];
+  if (
+    !existing ||
+    existing.configurationRevisionId !== null ||
+    existing.sourceInstanceId !== input.sourceInstanceId ||
+    existing.sourceRevisionId !== input.sourceRevisionId
+  ) {
+    throw new Error(
+      "Estimated EV request key is already owned by a different runtime origin.",
+    );
+  }
+  await createPublicDerivationObligations(database, {
+    organizationId: input.organizationId,
+    causeSequences: input.causeSequences,
+    derivationKind: "estimated_ev",
+    derivationKey: requestKey,
+    createdAt: input.createdAt,
+  });
+  return { requestId: existing.id, created: inserted.length === 1 };
+}
+
 function boundedInteger(
   value: number,
   minimum: number,
@@ -100,6 +194,31 @@ function boundedInteger(
     throw new RangeError(`${label} is outside its safe bounds.`);
   }
   return value;
+}
+
+function claimedOrigin(row: ClaimedRequestRow): ClaimedEstimatedEvRecomputation["origin"] {
+  if (
+    row.configuration_revision_id !== null &&
+    row.source_instance_id === null &&
+    row.source_revision_id === null
+  ) {
+    return {
+      kind: "legacy_configuration",
+      configurationRevisionId: row.configuration_revision_id,
+    };
+  }
+  if (
+    row.configuration_revision_id === null &&
+    row.source_instance_id !== null &&
+    row.source_revision_id !== null
+  ) {
+    return {
+      kind: "provider_source_revision",
+      sourceInstanceId: row.source_instance_id,
+      sourceRevisionId: row.source_revision_id,
+    };
+  }
+  throw new TypeError("Estimated EV request has an invalid runtime origin.");
 }
 
 export async function completeEstimatedEvRecomputation(
@@ -279,6 +398,8 @@ export class PrismaEstimatedEvRecomputationRepository
                     requests.organization_id,
                     requests.provider_id,
                     requests.configuration_revision_id,
+                    requests.source_instance_id,
+                    requests.source_revision_id,
                     requests.platform_key,
                     requests.pack_external_id,
                     requests.ev_input_external_id,
@@ -329,7 +450,7 @@ export class PrismaEstimatedEvRecomputationRepository
         id: row.id,
         organizationId: row.organization_id,
         providerId: row.provider_id,
-        configurationRevisionId: row.configuration_revision_id,
+        origin: claimedOrigin(row),
         platformKey: row.platform_key,
         packExternalId: row.pack_external_id,
         evInputExternalId: row.ev_input_external_id,

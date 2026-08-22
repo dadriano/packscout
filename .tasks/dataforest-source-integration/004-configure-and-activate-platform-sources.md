@@ -5,7 +5,7 @@
 **Blocks:** dataforest-source-integration/007
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder, including secret lifecycle, source activation, timing changes, and direct security tests
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -81,18 +81,35 @@ This task provides tenant-scoped commands and masked results for:
 
 ## Acceptance Criteria
 
-- [ ] One encrypted credential can bind four source instances without entering worker configuration, browser responses, diagnostics, or audit bodies in plaintext.
-- [ ] Missing, pending, failed, or outdated test results cannot activate a source, while recording a current successful result cannot move a checkpoint or create provider data; task 007 owns live test execution proof.
-- [ ] Normal credential rotation preserves pinned work and checkpoints; emergency revocation fences only affected work.
-- [ ] Source type, filter, endpoint, normalized-contract, record-ID-scope, mapper, or identity-namespace changes require a new source and cannot reuse a checkpoint, while timing-only changes preserve it.
-- [ ] Activation, pause, resume, disable, replacement, and reset affect only the selected provider and produce complete safe audit evidence.
+- [x] One encrypted credential can bind four source instances without entering worker configuration, browser responses, diagnostics, or audit bodies in plaintext.
+- [x] Missing, pending, failed, or outdated test results cannot activate a source, while recording a current successful result cannot move a checkpoint or create provider data; task 007 owns live test execution proof.
+- [x] Normal credential rotation preserves pinned work and checkpoints; emergency revocation fences only affected work.
+- [x] Source type, filter, endpoint, normalized-contract, record-ID-scope, mapper, or identity-namespace changes require a new source and cannot reuse a checkpoint, while timing-only changes preserve it.
+- [x] Activation, pause, resume, disable, replacement, and reset affect only the selected provider and produce complete safe audit evidence.
 
 ### Abstraction proof
 
-- [ ] Activation validates task 002's contract-only mapper descriptor and rejects unregistered source types, incompatible profile types, unsupported providers, normalized-contract mismatch, record-ID-scope mismatch, mapper mismatch, and identity-namespace mismatch without depending on task 005's implementation.
-- [ ] A tested compatible replacement starts paused at a null checkpoint, preserves the prior source and provenance, and cannot transfer or convert the old checkpoint.
-- [ ] Production admin can select only `dataforrest-events-v1`; the test-only adapter and dynamic adapter configuration are unavailable.
+- [x] Activation validates task 002's contract-only mapper descriptor and rejects unregistered source types, incompatible profile types, unsupported providers, normalized-contract mismatch, record-ID-scope mismatch, mapper mismatch, and identity-namespace mismatch without depending on task 005's implementation.
+- [x] A tested compatible replacement starts paused at a null checkpoint, preserves the prior source and provenance, and cannot transfer or convert the old checkpoint.
+- [x] Production admin can select only `dataforrest-events-v1`; the test-only adapter and dynamic adapter configuration are unavailable.
 
 ### Security proof
 
-- [ ] Direct tests enforce administrator-only configuration and reset, authorized operator controls, tenant isolation, confirmation, redaction, and stable errors.
+- [x] Direct tests enforce administrator-only configuration and reset, authorized operator controls, tenant isolation, confirmation, redaction, and stable errors.
+
+## Verification
+
+- PASS: focused source-connection cipher, connection lifecycle, source lifecycle, activation, masked-catalog, and recovery service suites (20 tests in the orchestrator rerun; 23 in the final implementation batch).
+- PASS: focused provider-source admin contract suite (4 tests).
+- PASS: focused admin route/runtime behavior (9 tests) and source-configuration UI cases (6 tests through the repository admin test harness).
+- PASS: provider-source activation, admin lifecycle, recovery, rotation, replacement, reset, tenant-isolation, and exact-fence database regressions (42 Task004-relevant cases in the orchestrator database pass).
+- PASS: independent post-fix acceptance audit, including the repaired exact same-revision recovery fixture; no remaining P1/P2 finding.
+- PASS: contracts, database, services, and admin focused typecheck/lint; `npm run scan:framework-standards:ratchet` reported 0 findings in the final implementation batch.
+- NOTE: the repository-wide admin lane currently reaches 80/81; its unrelated entrypoint readiness case is expected to remain red while Task007's newer in-progress migration has not yet refreshed the shared final readiness metadata. Task004-specific behavior is green, and the full lane remains a mandatory integration gate after Task007 settles.
+
+## Spec Compliance
+
+- Related specs reviewed: none.
+- Alignment: implemented one encrypted shared connection lifecycle, adapter-owned source configuration, contract-only mapper activation, latest exact test guards, paused activation/reactivation, checkpoint-preserving timing and rotation, explicit emergency recovery, safe reset, tenant-scoped audit evidence, and a production-only DataForrest admin surface.
+- Divergences: none. Live execution of queued connection/source tests, processor Run/Retry behavior, and safe page-boundary pause remain with Task007 as assigned; no alternate production adapter or compatibility path was introduced.
+- Verification: the commands and independent audit above; every Task004 acceptance criterion is directly covered.

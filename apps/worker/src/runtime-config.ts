@@ -1,6 +1,15 @@
-import type { ProviderRuntimeEnvironment } from "@packscout/services";
+import {
+  ProviderSourceSupervisorConfigurationError,
+  readProviderSourceSupervisorConfiguration,
+  type ProviderSourceSupervisorConfiguration,
+} from "./source-supervisor-runtime-config.ts";
 
-const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
+export {
+  ProviderSourceSupervisorConfigurationError,
+  readProviderSourceSupervisorConfiguration,
+  type ProviderSourceSupervisorConfiguration,
+} from "./source-supervisor-runtime-config.ts";
+
 const organizationIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const canonicalBase64Pattern =
@@ -20,6 +29,9 @@ export type ProviderWorkerConfigurationErrorCode =
   | "RETENTION_BATCH_SIZE_INVALID"
   | "RETENTION_DISCOVERY_LIMIT_INVALID"
   | "RETENTION_MAX_BATCHES_INVALID"
+  | "SOURCE_CONNECTION_KEY_INVALID"
+  | "SOURCE_CONNECTION_KEY_VERSION_INVALID"
+  | "SOURCE_DATABASE_VOLUME_PATH_INVALID"
   | "WORKER_ID_INVALID";
 
 export class ProviderWorkerConfigurationError extends Error {
@@ -29,13 +41,11 @@ export class ProviderWorkerConfigurationError extends Error {
   }
 }
 
-export interface ProviderWorkerConfiguration {
-  readonly actorPseudonymKey: Uint8Array;
+export interface ProviderWorkerConfiguration
+  extends ProviderSourceSupervisorConfiguration {
   readonly credentialKey: Uint8Array;
   readonly credentialKeyVersion: number;
   readonly databasePoolMaximum: number;
-  readonly databaseUrl: string;
-  readonly environment: ProviderRuntimeEnvironment;
   readonly estimatedEvVerifiedUsdStablecoins: readonly string[];
   readonly maximumClaimsPerCycle: number;
   readonly pollIntervalMilliseconds: number;
@@ -43,15 +53,6 @@ export interface ProviderWorkerConfiguration {
   readonly retentionBatchSize: number;
   readonly retentionMaximumBatchesPerCycle: number;
   readonly retentionOrganizationDiscoveryLimit: number;
-  readonly workerId: string;
-}
-
-function environmentFor(value: string | undefined): ProviderRuntimeEnvironment {
-  if (value === undefined || value === "development" || value === "local") {
-    return "local";
-  }
-  if (value === "production" || value === "test") return value;
-  throw new ProviderWorkerConfigurationError("NODE_ENV_INVALID");
 }
 
 function boundedInteger(
@@ -72,24 +73,6 @@ function boundedInteger(
   return parsed;
 }
 
-function databaseUrlFor(value: string | undefined): string {
-  if (!value || value.length > 2_048 || /[\r\n]/.test(value)) {
-    throw new ProviderWorkerConfigurationError("DATABASE_URL_INVALID");
-  }
-  try {
-    const parsed = new URL(value);
-    if (
-      (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") ||
-      parsed.hostname.length === 0
-    ) {
-      throw new Error("invalid");
-    }
-  } catch {
-    throw new ProviderWorkerConfigurationError("DATABASE_URL_INVALID");
-  }
-  return value;
-}
-
 function keyFor(
   value: string | undefined,
   code: "ACTOR_KEY_INVALID" | "CREDENTIAL_KEY_INVALID",
@@ -102,14 +85,6 @@ function keyFor(
     throw new ProviderWorkerConfigurationError(code);
   }
   return new Uint8Array(decoded);
-}
-
-function workerIdFor(value: string | undefined, fallback: string): string {
-  const resolved = value ?? fallback;
-  if (!workerIdPattern.test(resolved)) {
-    throw new ProviderWorkerConfigurationError("WORKER_ID_INVALID");
-  }
-  return resolved;
 }
 
 function publicOrganizationIdFor(value: string | undefined): string {
@@ -150,11 +125,20 @@ export function readProviderWorkerConfiguration(
   environment: NodeJS.ProcessEnv,
   fallbackWorkerId: string,
 ): ProviderWorkerConfiguration {
+  let sourceSupervisor: ProviderSourceSupervisorConfiguration;
+  try {
+    sourceSupervisor = readProviderSourceSupervisorConfiguration(
+      environment,
+      fallbackWorkerId,
+    );
+  } catch (error) {
+    if (error instanceof ProviderSourceSupervisorConfigurationError) {
+      throw new ProviderWorkerConfigurationError(error.code);
+    }
+    throw error;
+  }
   return Object.freeze({
-    actorPseudonymKey: keyFor(
-      environment.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
-      "ACTOR_KEY_INVALID",
-    ),
+    ...sourceSupervisor,
     credentialKey: keyFor(
       environment.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64,
       "CREDENTIAL_KEY_INVALID",
@@ -173,8 +157,6 @@ export function readProviderWorkerConfiguration(
       50,
       "DATABASE_POOL_MAX_INVALID",
     ),
-    databaseUrl: databaseUrlFor(environment.PACKSCOUT_DATABASE_URL),
-    environment: environmentFor(environment.NODE_ENV),
     estimatedEvVerifiedUsdStablecoins: verifiedUsdStablecoinsFor(
       environment.PACKSCOUT_ESTIMATED_EV_VERIFIED_USD_STABLECOINS,
     ),
@@ -216,6 +198,5 @@ export function readProviderWorkerConfiguration(
       100,
       "RETENTION_DISCOVERY_LIMIT_INVALID",
     ),
-    workerId: workerIdFor(environment.PACKSCOUT_WORKER_ID, fallbackWorkerId),
   });
 }

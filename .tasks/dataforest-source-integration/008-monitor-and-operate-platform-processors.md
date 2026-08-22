@@ -5,7 +5,7 @@
 **Blocks:** dataforest-source-integration/010
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including admin routes, progress views, controls, log feeds, accessibility, and browser verification
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -89,20 +89,34 @@ Every command returns the current masked provider state plus one stable outcome.
 
 ### Monitoring proof
 
-- [ ] The overview accurately distinguishes shared connection, supervisor, execution-capacity, request-capacity, and four independent source states.
-- [ ] Provider progress shows truthful records, pages, throughput, elapsed time, next due time, and either a defensible ETA or `Total unknown`.
-- [ ] A selected provider feed contains its own ordered events plus labeled shared events and never another provider's local diagnostics.
-- [ ] Diagnostic refresh, pause-display, filters, pagination, empty state, expiry gap, and failure recovery are bounded and accessible.
+- [x] The overview accurately distinguishes shared connection, supervisor, execution-capacity, request-capacity, and four independent source states.
+- [x] Provider progress shows truthful records, pages, throughput, elapsed time, next due time, and either a defensible ETA or `Total unknown`.
+- [x] A selected provider feed contains its own ordered events plus labeled shared events and never another provider's local diagnostics.
+- [x] Diagnostic refresh, pause-display, filters, pagination, empty state, expiry gap, and failure recovery are bounded and accessible.
 
 ### Abstraction proof
 
-- [ ] Shared monitoring and controls render from source-type-neutral summaries and contain no provider-name or DataForrest transport branch.
-- [ ] Source type, normalized-contract version, mapper version, identity namespace, continuation, and safe checkpoint ownership are visible without protected adapter configuration.
-- [ ] Production create and replacement flows expose only `dataforrest-events-v1` and reject the test adapter, contract mismatch, and identity-namespace mismatch.
+- [x] Shared monitoring and controls render from source-type-neutral summaries and contain no provider-name or DataForrest transport branch.
+- [x] Source type, normalized-contract version, mapper version, identity namespace, continuation, and safe checkpoint ownership are visible without protected adapter configuration.
+- [x] Production create and replacement flows expose only `dataforrest-events-v1` and reject the test adapter, contract mismatch, and identity-namespace mismatch.
 
 ### Control and security proof
 
-- [ ] Run now, Pause/Resume, Retry, normal or recovery connection test, source test, and interval changes return exact safe outcomes and affect only the selected provider or shared profile.
-- [ ] Data operators can operate imports and quarantine but cannot configure sources, credentials, activation, disable, replacement, or checkpoints.
-- [ ] Direct route tests prove authentication, authorization, tenant isolation, validation, rate control, redaction, confirmation, audit, and external-request boundaries.
-- [ ] Component tests and browser smoke pass for primary monitoring, diagnostics, controls, failures, accessibility, and required widths.
+- [x] Run now, Pause/Resume, Retry, normal or recovery connection test, source test, and interval changes return exact safe outcomes and affect only the selected provider or shared profile.
+- [x] Data operators can operate imports and quarantine but cannot configure sources, credentials, activation, disable, replacement, or checkpoints.
+- [x] Direct route tests prove authentication, authorization, tenant isolation, validation, rate control, redaction, confirmation, audit, and external-request boundaries.
+- [x] Component tests and browser smoke pass for primary monitoring, diagnostics, controls, failures, accessibility, and required widths.
+
+## Verification
+
+- `node --import tsx --test packages/contracts/src/provider-source-operations-v1.test.ts packages/services/src/provider-source-operations-service.test.ts apps/admin/server/routes/provider-source-operations.behavior.test.ts apps/admin/src/components/operations/SourceOperationsViews.test.tsx apps/admin/src/pages/SourceOperationsPages.test.tsx` — 14/14 passed in the final root review.
+- `npm run verify:framework` — passed end to end, including framework and Prisma checks, zero-finding standards ratchet, all workspace lint, typecheck, and tests, tooling and volume tests, and frontend/admin production builds.
+- In-app browser smoke passed at desktop and 390-by-844 widths for the exact four-row overview, source detail, five-second visible refresh, display-only pause/resume, bounded diagnostic filtering and history expiry, Run/Pause/Resume, source test, interval change, destructive confirmation, forbidden state, and zero console warnings or errors. Both widths had no horizontal overflow.
+- `git diff --check` — passed.
+
+## Spec Compliance
+
+- Related specs reviewed: none; this feature has no `tech-*.md` or `ux-*.md` companion specs.
+- Alignment: implemented the task contract and BDD scenarios through source-neutral contracts, tenant-scoped persistence and services, strict admin routes, and the existing Operations and Provider Detail surfaces.
+- Divergences: none.
+- Verification: the focused Task 008 anchor, canonical framework verifier, and authenticated local browser smoke listed above all pass.

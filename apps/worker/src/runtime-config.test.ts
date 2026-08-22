@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   ProviderWorkerConfigurationError,
+  ProviderSourceSupervisorConfigurationError,
+  readProviderSourceSupervisorConfiguration,
   readProviderWorkerConfiguration,
   type ProviderWorkerConfigurationErrorCode,
 } from "./runtime-config.ts";
 
 const credentialKey = Buffer.alloc(32, 3).toString("base64");
 const actorKey = Buffer.alloc(32, 7).toString("base64");
+const sourceConnectionKey = Buffer.alloc(32, 11).toString("base64");
 
 function validEnvironment(
   overrides: NodeJS.ProcessEnv = {},
@@ -17,6 +20,9 @@ function validEnvironment(
     PACKSCOUT_DATABASE_URL: "postgresql://worker:password@db.test/packscout",
     PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64: actorKey,
     PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64: credentialKey,
+    PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64: sourceConnectionKey,
+    PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION: "1",
+    PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH: "/tmp",
     PACKSCOUT_PUBLIC_ORGANIZATION_ID:
       "54000000-0000-4000-8000-000000000001",
     ...overrides,
@@ -25,13 +31,16 @@ function validEnvironment(
 
 function hasConfigurationCode(code: ProviderWorkerConfigurationErrorCode) {
   return (error: unknown) =>
-    error instanceof ProviderWorkerConfigurationError && error.code === code;
+    (error instanceof ProviderWorkerConfigurationError
+      || error instanceof ProviderSourceSupervisorConfigurationError)
+    && error.code === code;
 }
 
 test("worker configuration validates production defaults and bounded overrides", () => {
   const configuration = readProviderWorkerConfiguration(
     validEnvironment({
       PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION: "4",
+      PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION: "7",
       PACKSCOUT_WORKER_DATABASE_POOL_MAX: "9",
       PACKSCOUT_WORKER_ID: "worker:production:1",
       PACKSCOUT_WORKER_MAX_CLAIMS_PER_CYCLE: "12",
@@ -57,6 +66,7 @@ test("worker configuration validates production defaults and bounded overrides",
   assert.equal(configuration.retentionOrganizationDiscoveryLimit, 40);
   assert.equal(configuration.databasePoolMaximum, 9);
   assert.equal(configuration.credentialKeyVersion, 4);
+  assert.equal(configuration.sourceConnectionConfigurationKeyVersion, 7);
   assert.deepEqual(configuration.estimatedEvVerifiedUsdStablecoins, [
     "USDC",
     "USDT",
@@ -66,6 +76,105 @@ test("worker configuration validates production defaults and bounded overrides",
     [...configuration.actorPseudonymKey],
     [...Buffer.alloc(32, 7)],
   );
+  assert.deepEqual(
+    [...configuration.sourceConnectionConfigurationKey],
+    [...Buffer.alloc(32, 11)],
+  );
+});
+
+test("source supervisor reads only ingestion-owned secret boundaries", () => {
+  const configuration = readProviderSourceSupervisorConfiguration(
+    validEnvironment({
+      PACKSCOUT_CONVEX_PUBLICATION_BASE_URL: "not-a-url",
+      PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64: "not-a-key",
+      PACKSCOUT_WORKER_RETENTION_BATCH_SIZE: "0",
+      PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64:
+        ` ${sourceConnectionKey.replace(/=+$/u, "")} `,
+      PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION: "19",
+    }),
+    "source-supervisor:fallback",
+  );
+
+  assert.deepEqual(
+    [...configuration.sourceConnectionConfigurationKey],
+    [...Buffer.alloc(32, 11)],
+  );
+  assert.deepEqual(
+    [...configuration.actorPseudonymKey],
+    [...Buffer.alloc(32, 7)],
+  );
+  assert.equal(configuration.sourceConnectionConfigurationKeyVersion, 19);
+  assert.equal(configuration.sourceDatabaseVolumePath, "/tmp");
+  assert.equal(configuration.workerId, "source-supervisor:fallback");
+  assert.equal(configuration.environment, "production");
+});
+
+test("source connection encryption settings are required without provider fallback", () => {
+  assert.throws(
+    () =>
+      readProviderWorkerConfiguration(
+        validEnvironment({ PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64: undefined }),
+        "combined-worker:1",
+      ),
+    (error: unknown) =>
+      error instanceof ProviderWorkerConfigurationError
+      && error.code === "SOURCE_CONNECTION_KEY_INVALID",
+  );
+
+  for (const sourceConnectionConfigurationKey of [
+    undefined,
+    "not base64",
+    Buffer.alloc(31).toString("base64"),
+  ]) {
+    assert.throws(
+      () =>
+        readProviderSourceSupervisorConfiguration(
+          validEnvironment({
+            PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64:
+              sourceConnectionConfigurationKey,
+          }),
+          "source-supervisor:1",
+        ),
+      hasConfigurationCode("SOURCE_CONNECTION_KEY_INVALID"),
+    );
+  }
+
+  for (const sourceConnectionConfigurationKeyVersion of [
+    undefined,
+    "",
+    "0",
+    " 1",
+    "1 ",
+    "1.5",
+    "2147483648",
+  ]) {
+    assert.throws(
+      () =>
+        readProviderSourceSupervisorConfiguration(
+          validEnvironment({
+            PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION: "23",
+            PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION:
+              sourceConnectionConfigurationKeyVersion,
+          }),
+          "source-supervisor:1",
+        ),
+      hasConfigurationCode("SOURCE_CONNECTION_KEY_VERSION_INVALID"),
+    );
+  }
+});
+
+test("source database volume path is explicit, absolute, and not filesystem root", () => {
+  for (const sourceDatabaseVolumePath of [undefined, "tmp", "/", " /tmp"] ) {
+    assert.throws(
+      () => readProviderSourceSupervisorConfiguration(
+        validEnvironment({
+          PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH: sourceDatabaseVolumePath,
+        }),
+        "source-supervisor:1",
+      ),
+      hasConfigurationCode("SOURCE_DATABASE_VOLUME_PATH_INVALID"),
+    );
+  }
 });
 
 test("worker configuration selects the local endpoint policy explicitly", () => {

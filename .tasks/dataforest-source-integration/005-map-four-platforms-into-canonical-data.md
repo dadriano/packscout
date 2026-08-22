@@ -5,7 +5,7 @@
 **Blocks:** dataforest-source-integration/006, dataforest-source-integration/009
 **Estimated scope:** large
 **Estimated effort:** 4–5 days for one builder, including four mapper contracts, canonical migration, EV inputs, and focused verification
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -95,22 +95,39 @@ Pack and EV-input revisions identify the affected provider pack so task 006 can 
 
 ### Canonical proof
 
-- [ ] Sanitized fixtures cover pack, card, pull, all observed trade shapes, all nine event codes, future codes, nullable money, and payment methods across the four providers.
-- [ ] Catalog revisions, exact replay, late observations, immutable conflicts, and identity-kind conflicts have deterministic outcomes.
-- [ ] Available, unavailable, unknown, reappeared, and separately authoritative sold-out states cannot masquerade as one another.
-- [ ] Out-of-order pack and card relationships reconcile without losing or duplicating provider events.
+- [x] Sanitized fixtures cover pack, card, pull, all observed trade shapes, all nine event codes, future codes, nullable money, and payment methods across the four providers.
+- [x] Catalog revisions, exact replay, late observations, immutable conflicts, and identity-kind conflicts have deterministic outcomes.
+- [x] Available, unavailable, unknown, reappeared, and separately authoritative sold-out states cannot masquerade as one another.
+- [x] Out-of-order pack and card relationships reconcile without losing or duplicating provider events.
 
 ### Provider and EV proof
 
-- [ ] Phygitals native `BUY`, Collector Crypt native `unlisted`, and Courtyard or ClutchPacks disappearance retain the adapter-normalized meanings.
-- [ ] Complete EV evidence emits current EV-input candidates; incomplete evidence leaves EV unavailable without quarantining an otherwise valid pack.
-- [ ] Production source revisions can pin only the four approved launch mappers, while all deferred mapper code and focused tests remain compiling but unselectable.
-- [ ] Mapper selection is independent of source type, and generic source, scheduling, persistence, and public code contains no launch-provider branch.
-- [ ] Each launch implementation matches its task-002 compatibility descriptor exactly, and production composition resolves every pinned key and version once.
+- [x] Phygitals native `BUY`, Collector Crypt native `unlisted`, and Courtyard or ClutchPacks disappearance retain the adapter-normalized meanings.
+- [x] Complete EV evidence emits current EV-input candidates; incomplete evidence leaves EV unavailable without quarantining an otherwise valid pack.
+- [x] Production source revisions can pin only the four approved launch mappers, while all deferred mapper code and focused tests remain compiling but unselectable.
+- [x] Mapper selection is independent of source type, and generic source, scheduling, persistence, and public code contains no launch-provider branch.
+- [x] Each launch implementation matches its task-002 compatibility descriptor exactly, and production composition resolves every pinned key and version once.
 
 ### Adapter-independence proof
 
-- [ ] DataForrest-equivalent and alternate-source normalized fixtures feed the unchanged Courtyard mapper when they carry the same normalized contract and identity namespace; task 006 owns executable adapter integration.
-- [ ] Adapter, source, and connection lineage remains protected provenance while canonical identity and revision behavior remain stable-provider scoped.
-- [ ] Source-type, transport-wrapper, cursor, poll, endpoint, and credential fields are absent from mapper inputs.
-- [ ] Equal raw IDs in different launch scopes produce distinct canonical kinds and scope-qualified relationships resolve only to the intended target; a second scope for one canonical kind is rejected.
+- [x] DataForrest-equivalent and alternate-source normalized fixtures feed the unchanged Courtyard mapper when they carry the same normalized contract and identity namespace; task 006 owns executable adapter integration.
+- [x] Adapter, source, and connection lineage remains protected provenance while canonical identity and revision behavior remain stable-provider scoped.
+- [x] Source-type, transport-wrapper, cursor, poll, endpoint, and credential fields are absent from mapper inputs.
+- [x] Equal raw IDs in different launch scopes produce distinct canonical kinds and scope-qualified relationships resolve only to the intended target; a second scope for one canonical kind is rejected.
+
+## Verification
+
+- PASS: focused normalized mapper, canonical lifecycle, registry, relationship, EV, availability, and dormant-provider suites (29 tests).
+- PASS: `npm run test:contracts` (157 tests).
+- PASS: `npm run test:services` (458 unit tests and 1 volume test).
+- PASS: `npm run typecheck:contracts && npm run typecheck:services`.
+- PASS: `npm run lint:contracts && npm run lint:services`.
+- PASS: substantive dormant GameStop sample proof (23 records, 45 packs, 45 complete EV inputs, 1,108 assets, and 15 resolved pulls) while remaining absent from the production mapper manifest.
+- PASS: `git diff --check`.
+
+## Spec Compliance
+
+- Related specs reviewed: none.
+- Alignment: implemented the four descriptor-bound, transport-neutral launch mappers; content-only catalog revision semantics; immutable pull and market-event handling; explicit availability states; scope-qualified relationships; and complete-evidence-only EV-input candidates.
+- Divergences: none. Task 006 intentionally owns the clean production importer/composition cutover and executable alternate-adapter integration; the removed legacy mapper factory is not restored as a compatibility path.
+- Verification: the commands above plus an independent mapper release audit; no P1/P2 finding remains.

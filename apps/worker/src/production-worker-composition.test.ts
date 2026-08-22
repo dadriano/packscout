@@ -23,6 +23,9 @@ test("production composition wires provider and manifest lanes without legacy ca
         retentionBatchSize: 10,
         retentionMaximumBatchesPerCycle: 2,
         retentionOrganizationDiscoveryLimit: 10,
+        sourceConnectionConfigurationKey: new Uint8Array(32).fill(8),
+        sourceConnectionConfigurationKeyVersion: 1,
+        sourceDatabaseVolumePath: "/tmp",
         workerId: "production-composition-worker",
       },
       promotion: {
