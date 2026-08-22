@@ -37,6 +37,12 @@ const targets = {
     testFile: /\.test\.(ts|tsx)$/,
     loader: true,
   },
+  "ops-panel": {
+    cwd: "apps/ops-panel",
+    roots: ["server", "src"],
+    testFile: /\.test\.(ts|tsx)$/,
+    loader: true,
+  },
   // Self-tests for the repository's own tooling: the policy checkers, the test
   // runner, and the local developer scripts. This lane covers no product
   // behavior, so it is deliberately kept out of the product test path and run

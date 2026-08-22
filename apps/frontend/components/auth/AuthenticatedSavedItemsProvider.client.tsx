@@ -8,6 +8,11 @@ import {
 } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import {
+  isSuspendedAccountRefusal,
+  presentAccountStandingNotice,
+  readRefusalCode,
+} from "./account-standing";
 import { usePackScoutAuth } from "./AuthContext.client";
 import {
   SavedItemsContext,
@@ -32,6 +37,23 @@ export function AuthenticatedSavedItemsProvider({
     api.savedItems.getSavedItemIds,
     signedIn ? {} : "skip",
   );
+  /**
+   * The account's own standing, read once the session is established and kept
+   * live afterwards. This is presentation only — the backend re-reads the
+   * authoritative record on every write regardless of what is held here.
+   */
+  const accountStanding = useQuery(
+    api.productUsers.getMyStanding,
+    signedIn ? {} : "skip",
+  );
+  /**
+   * Set when a write comes back refused as suspended, which covers the moment
+   * between a suspension landing and the standing read answering. A later
+   * completed write clears it, and the presenter retires it outright once the
+   * live standing reports the account active again, so a reinstatement is not
+   * left waiting on the person to attempt another save.
+   */
+  const [refusedAsSuspended, setRefusedAsSuspended] = useState(false);
   const setSavedRepackBase = useMutation(api.savedItems.setSavedRepack);
   const setSavedCollectibleBase = useMutation(
     api.savedItems.setSavedCollectible,
@@ -112,6 +134,8 @@ export function AuthenticatedSavedItemsProvider({
               publicCollectibleId: id,
               saved: requested,
             });
+        // A completed write proves the account is not suspended right now.
+        setRefusedAsSuspended(false);
         setMessages((current) => ({
           ...current,
           [key]: presentSavedItemMutationMessage({
@@ -121,13 +145,16 @@ export function AuthenticatedSavedItemsProvider({
             prunedUnavailable: result.prunedUnavailable,
           }),
         }));
-      } catch {
+      } catch (error) {
+        if (isSuspendedAccountRefusal(error)) setRefusedAsSuspended(true);
         setMessages((current) => ({
           ...current,
           [key]: presentSavedItemMutationMessage({
             kind,
             saved: previous,
             outcome: "error",
+            // Only the stable code crosses over; no backend text is shown.
+            errorCode: readRefusalCode(error),
           }),
         }));
       } finally {
@@ -147,6 +174,16 @@ export function AuthenticatedSavedItemsProvider({
     ],
   );
 
+  const accountNotice = useMemo(
+    () =>
+      presentAccountStandingNotice({
+        signedIn,
+        standing: accountStanding?.standing ?? "unknown",
+        refusedAsSuspended,
+      }),
+    [accountStanding?.standing, refusedAsSuspended, signedIn],
+  );
+
   const value = useMemo<SavedItemsValue>(
     () => ({
       get(kind, id) {
@@ -159,8 +196,17 @@ export function AuthenticatedSavedItemsProvider({
           toggle: () => toggle(kind, id),
         };
       },
+      accountNotice,
     }),
-    [isSaved, messages, pendingKeys, savedItemIds, signedIn, toggle],
+    [
+      accountNotice,
+      isSaved,
+      messages,
+      pendingKeys,
+      savedItemIds,
+      signedIn,
+      toggle,
+    ],
   );
 
   return (

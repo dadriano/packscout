@@ -31,6 +31,8 @@ async function reservePorts() {
   return ports;
 }
 
+const email = "local-admin@example.com";
+
 function startEmbedded(adminPort, hmrPort) {
   return spawn(
     process.execPath,
@@ -42,12 +44,37 @@ function startEmbedded(adminPort, hmrPort) {
         PACKSCOUT_ADMIN_PORT: String(adminPort),
         PACKSCOUT_ADMIN_HMR_PORT: String(hmrPort),
         PACKSCOUT_SESSION_HASHING_SECRET: sessionSecret,
-        PACKSCOUT_BOOTSTRAP_ADMIN_EMAIL: "local-admin@example.com",
+        PACKSCOUT_BOOTSTRAP_ADMIN_EMAIL: email,
         PACKSCOUT_BOOTSTRAP_ADMIN_PASSWORD: password,
+        // The local flow this harness reproduces has no product backend, which
+        // is the state the users page must degrade through.
+        PACKSCOUT_ADMIN_DIRECTORY_URL: "",
+        PACKSCOUT_ADMIN_DIRECTORY_TOKEN: "",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
+}
+
+/** Signs in as the bootstrap administrator and returns its session headers. */
+async function signIn(origin) {
+  const response = await fetch(`${origin}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ email, password }),
+  });
+  assert.equal(response.status, 200);
+  const session = await response.json();
+  const cookie = (response.headers.getSetCookie?.() ?? [])
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  assert.notEqual(cookie, "");
+  return {
+    "Content-Type": "application/json",
+    Origin: origin,
+    Cookie: cookie,
+    "X-CSRF-Token": session.csrfToken,
+  };
 }
 
 function captureOutput(child) {
@@ -120,6 +147,55 @@ test("embedded admin closes HTTP, Vite, and Prisma resources on SIGTERM", async 
     assert.doesNotMatch(readOutput(), new RegExp(`${sessionSecret}|${password}`));
     await assertPortReleased(adminPort);
     await assertPortReleased(hmrPort);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  }
+});
+
+/**
+ * The harness shows a Users navigation item, so its product-user routes have to
+ * be mounted. With no product backend configured the page must reach the
+ * documented bounded "not connected" state rather than an unmounted endpoint,
+ * which reads as "this user is not in the directory" and is simply untrue.
+ */
+test("embedded admin mounts the product-user routes and degrades to not connected", async () => {
+  const [adminPort, hmrPort] = await reservePorts();
+  const child = startEmbedded(adminPort, hmrPort);
+  const readOutput = captureOutput(child);
+  const origin = `http://127.0.0.1:${adminPort}`;
+  try {
+    await waitForOutput(
+      child,
+      readOutput,
+      `PackScout local admin is available at ${origin}`,
+    );
+    const headers = await signIn(origin);
+
+    for (const [path, body] of [
+      ["/api/product-users/list", { limit: 20 }],
+      ["/api/product-users/detail", { subject: "https://auth.local/|local" }],
+    ]) {
+      const response = await fetch(`${origin}${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      assert.notEqual(
+        payload.code,
+        "API_ROUTE_NOT_FOUND",
+        `${path} is not mounted in the embedded harness`,
+      );
+      assert.equal(response.status, 503);
+      assert.equal(payload.code, "PRODUCT_USER_DIRECTORY_UNCONFIGURED");
+      // The bounded state names the missing capability, never a setting value.
+      assert.doesNotMatch(JSON.stringify(payload), /Bearer|token|convex/i);
+    }
+
+    const exitPromise = waitForExit(child);
+    assert.equal(child.kill("SIGTERM"), true);
+    assert.deepEqual(await exitPromise, { code: 0, signal: null });
+    assert.doesNotMatch(readOutput(), new RegExp(`${sessionSecret}|${password}`));
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
   }

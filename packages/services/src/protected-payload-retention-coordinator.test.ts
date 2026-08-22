@@ -90,7 +90,78 @@ test("a cycle round-robins due tenants with fresh execution IDs until drained", 
     knownRemaining: 0,
     deferredOrganizations: 0,
     capReached: false,
+    prunedRecords: 0,
+    prunedFailures: 0,
   });
+});
+
+test("registered record kinds are pruned to their own window inside the cycle", async () => {
+  const calls: { kind: string; cutoffAt: Date; limit: number }[] = [];
+  const coordinator = new ProtectedPayloadRetentionCoordinator(
+    { discoverEligibleOrganizations: async () => [] },
+    { run: async (input) => batch(input.executionId) },
+    idSource(),
+    { now: () => new Date(now) },
+    {
+      batchSize: 25,
+      maxBatchesPerCycle: 5,
+      organizationDiscoveryLimit: 10,
+      pruners: [
+        {
+          kind: "worker_presence",
+          retentionMs: 3 * 24 * 60 * 60 * 1_000,
+          async prune(input) {
+            calls.push({ kind: "worker_presence", ...input });
+            return 4;
+          },
+        },
+        {
+          kind: "failing_kind",
+          retentionMs: 1_000,
+          prune: async () => {
+            throw new Error("prune unavailable");
+          },
+        },
+      ],
+    },
+  );
+
+  const result = await coordinator.runCycle();
+
+  assert.deepEqual(calls, [
+    {
+      kind: "worker_presence",
+      cutoffAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1_000),
+      limit: 25,
+    },
+  ]);
+  assert.equal(result.prunedRecords, 4);
+  assert.equal(result.prunedFailures, 1);
+});
+
+test("a pruner with an invalid window or kind fails before the cycle runs", () => {
+  const build = (pruner: { kind: string; retentionMs: number }) =>
+    new ProtectedPayloadRetentionCoordinator(
+      { discoverEligibleOrganizations: async () => [] },
+      { run: async (input) => batch(input.executionId) },
+      idSource(),
+      { now: () => new Date(now) },
+      {
+        batchSize: 25,
+        maxBatchesPerCycle: 5,
+        organizationDiscoveryLimit: 10,
+        pruners: [{ ...pruner, prune: async () => 0 }],
+      },
+    );
+
+  assert.throws(
+    () => build({ kind: "worker_presence", retentionMs: 0 }),
+    /configuration is invalid/,
+  );
+  assert.throws(
+    () => build({ kind: "Worker Presence", retentionMs: 1_000 }),
+    /configuration is invalid/,
+  );
 });
 
 test("the cycle cap bounds work and leaves progress discoverable next cycle", async () => {

@@ -7,10 +7,13 @@ import {
 } from "react-router-dom";
 import * as React from "react";
 import { AdminLayout } from "./layouts/AdminLayout";
+import { BackgroundWorkPage } from "./pages/BackgroundWorkPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OperatorsPage } from "./pages/OperatorsPage";
 import { OverviewPage } from "./pages/OverviewPage";
+import { ProductUserDetailPage } from "./pages/ProductUserDetailPage";
+import { ProductUsersPage } from "./pages/ProductUsersPage";
 import { ProviderDetailPage } from "./pages/ProviderDetailPage";
 import { ProviderFormPage } from "./pages/ProviderFormPage";
 import { ProvidersPage } from "./pages/ProvidersPage";
@@ -22,6 +25,7 @@ import { RunsPage } from "./pages/RunsPage";
 import { AlertDetailPage } from "./pages/AlertDetailPage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { SourceConfigurationPage } from "./pages/SourceConfigurationPage";
+import { WorkerFleetPage } from "./pages/WorkerFleetPage";
 import { useSession } from "./providers/session";
 
 function SessionLoading() {
@@ -87,6 +91,10 @@ export const appRoutes = (
       <Route path="/" element={<AdminLayout />}>
         <Route index element={<OverviewPage />} />
         <Route path="operators" element={<OperatorsPage />} />
+        <Route path="users" element={<ProductUsersPage />} />
+        {/* An opaque handle, never the person's subject key: this path is
+            written into history, access logs, and the sign-in returnTo. */}
+        <Route path="users/:handle" element={<ProductUserDetailPage />} />
         <Route path="providers" element={<ProvidersPage />} />
         <Route path="providers/new" element={<ProviderFormPage />} />
         <Route path="providers/:providerId" element={<ProviderDetailRoute />} />
@@ -95,6 +103,8 @@ export const appRoutes = (
         <Route path="operations" element={<OperationsPage />} />
         <Route path="runs" element={<RunsPage />} />
         <Route path="runs/:runId" element={<RunDetailPage />} />
+        <Route path="background-work" element={<BackgroundWorkPage />} />
+        <Route path="workers" element={<WorkerFleetPage />} />
         <Route path="quarantine" element={<QuarantinePage />} />
         <Route path="quarantine/:quarantineId" element={<QuarantineDetailPage />} />
         <Route path="alerts" element={<AlertsPage />} />

@@ -34,7 +34,10 @@ npm run dev
 # Admin at http://localhost:5101 (HMR uses 5102)
 npm run dev:admin
 
-# Both applications
+# Local operations panel at http://127.0.0.1:5110 (HMR uses 5111)
+npm run dev:ops-panel
+
+# Both applications, each also teeing output to its per-service log file
 npm run dev:all
 ```
 
@@ -49,6 +52,31 @@ PACKSCOUT_ADMIN_PORT=5151 PACKSCOUT_ADMIN_HMR_PORT=5152 npm run dev:admin
 Both development servers bind to `127.0.0.1` by default. In development, the
 admin host accepts only explicit loopback values (`127.0.0.1`, `::1`, or
 `localhost`); production self-hosting retains an explicit configurable bind.
+
+### Local operations panel
+
+`npm run dev:ops-panel` starts a loopback-only developer tool that discovers the
+per-service log files local PackScout processes write, and shows the panel's own
+audit trail of privileged attempts. It shares no authentication or runtime with
+the product and admin apps, so it works when they do not, and it has no
+production deployment target. See `ARCHITECTURE.md` for its access model and the
+per-service log-file convention.
+
+Every locally run service can produce a discoverable log file. The supervised
+launchd workflow already does; the plain development workflow tees through a
+wrapper:
+
+```bash
+npm run dev:frontend:logged:local
+npm run dev:admin:logged:local
+npm run dev:worker:logged:local
+npm run dev:ops-panel:logged:local
+```
+
+`npm run dev:all` uses those wrapped commands, so output still reaches the
+terminal and lands in `<log directory>/<service>.log` at the same time. Set
+`PACKSCOUT_LOG_DIR` to point both the wrapper and the panel at another
+directory.
 
 ### Persistent local services on macOS
 
@@ -232,6 +260,57 @@ Before enabling authentication in a live environment, use an actual Privy app
 to verify email OTP, Google OAuth, logout, session expiry, mobile and keyboard
 flows, exact-origin rejection, and a browser console with no CSP violations.
 Do not infer live readiness from an environment-neutral build.
+
+### Optional product-user directory in the admin
+
+The admin's Users page lists people who signed up for the product. That data
+lives in Convex, so the admin server reads it through a server-to-server
+surface rather than querying Convex from the browser. Two server-only values
+configure it:
+
+```dotenv
+PACKSCOUT_ADMIN_DIRECTORY_URL=<convex-site-url>
+PACKSCOUT_ADMIN_DIRECTORY_TOKEN=<shared-secret-at-least-32-chars>
+```
+
+Set the same secret on the Convex deployment
+(`npx convex env set PACKSCOUT_ADMIN_DIRECTORY_TOKEN <value>` against the
+confirmed deployment). The Convex side fails closed: an absent or too-short
+secret refuses every request, so the directory is unreachable until both sides
+are configured.
+
+Neither value belongs in a `NEXT_PUBLIC_` or otherwise browser-visible
+variable — the token authorizes reading personal data (email addresses and
+wallet-linked identities). The admin never sends it to the browser.
+
+Leaving these unset is safe and supported: the admin still boots and the Users
+page shows a bounded "not connected" state instead of failing. Only operators
+holding the `product_users:view` permission (administrators) see the page at
+all.
+
+### Machinery alerting in the admin
+
+The admin server evaluates the pipeline's machinery conditions — a silent
+worker fleet, a stalled import run, an overdue provider schedule, a backed-up
+recomputation queue, and retention that stopped running — and raises them
+through the same operational alerts as every other condition. The cycle runs
+here rather than in the worker because the loudest condition is that no worker
+is alive; a detector inside the fleet would die with it.
+
+Its thresholds come from the settings the worker fleet publishes, so a page and
+an alert cannot disagree. Two server-only values tune the rest, and both have
+safe defaults:
+
+```dotenv
+PACKSCOUT_ADMIN_MACHINERY_ALERT_INTERVAL_MS=60000
+PACKSCOUT_ADMIN_RECOMPUTATION_BACKLOG_LIMIT=100
+```
+
+The interval decides only how quickly a condition is noticed. The backlog limit
+is the queue depth a workspace may owe before depth alone counts as a backlog,
+and the background-work page reads the same value, so the badge and the alert
+flip together. Alerts stay inside the existing notification boundary: nothing
+is emailed or posted to an external endpoint.
 
 ## Verification
 

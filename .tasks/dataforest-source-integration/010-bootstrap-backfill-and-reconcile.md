@@ -133,10 +133,11 @@ A provider may remain operationally isolated in BLOCKED state, but this feature 
   workspace tests, tooling, and frontend/admin production builds.
 - `npm run check:docs`, `npm run check:scripts`, `npm run check:boundaries`, and
   `git diff --check` — PASS.
-- The read-only capacity preflight rejects this host with 30,338,781,184 bytes
-  available versus 8,757,364,735,856 required, plus the 80%-used and projected
-  threshold fences. No database, credential, admin process, supervisor, or live
-  backfill was started.
+- A fresh read-only capacity audit on 2026-08-22 rejects this host with
+  102,168,420,352 bytes available versus 8,757,364,735,856 required: a deficit
+  of 8,655,196,315,504 bytes. The filesystem is also 89.72% used, beyond the
+  independent 80%-used fence. No database, credential, admin process,
+  supervisor, or live backfill was started.
 
 ## Spec Compliance
 

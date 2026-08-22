@@ -604,22 +604,43 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         created_at: configuredAt,
       },
     });
-    const protectedObservation =
-      await harness.client.normalized_heat_observations.findFirstOrThrow({
-        where: {
-          organization_id: ids.organization,
-          id: { not: retainedObservationId },
-        },
-        select: { id: true, organization_id: true },
-      });
     await assert.rejects(
-      harness.client.normalized_heat_observations.delete({
-        where: {
-          id_organization_id: {
-            id: protectedObservation.id,
-            organization_id: protectedObservation.organization_id,
+      harness.client.$transaction(async (transaction) => {
+        const [clock] = await transaction.$queryRaw<
+          Array<{ database_now: Date; protected_until: Date }>
+        >`select
+            date_trunc('milliseconds', current_timestamp) as database_now,
+            date_trunc('milliseconds', current_timestamp) + interval '7 days' as protected_until`;
+        assert.ok(clock);
+        const protectedObservationId = "55000000-0000-4000-8000-000000000041";
+        await transaction.normalized_heat_observations.create({
+          data: {
+            id: protectedObservationId,
+            organization_id: ids.organization,
+            observation_key: "c".repeat(64),
+            canonical_revision_id: replaySource.revisionId,
+            public_change_sequence: replaySource.publicChangeSequence,
+            mapping_public_change_sequence: 1n,
+            public_repack_id: ids.publicRepack,
+            observation_kind: "catalog_snapshot",
+            occurred_at: clock.database_now,
+            catalog_sequence: 2_000_000_001,
+            realized_return_basis_points: null,
+            value_multiple_basis_points: null,
+            available_chase_count: 0,
+            outcome_keys: [],
+            retained_until: clock.protected_until,
+            created_at: clock.database_now,
           },
-        },
+        });
+        await transaction.normalized_heat_observations.delete({
+          where: {
+            id_organization_id: {
+              id: protectedObservationId,
+              organization_id: ids.organization,
+            },
+          },
+        });
       }),
       /retention has not elapsed/,
     );

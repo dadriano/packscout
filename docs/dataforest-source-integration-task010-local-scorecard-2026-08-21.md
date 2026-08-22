@@ -1,5 +1,7 @@
 # DataForrest Task 010 local completion scorecard — 2026-08-21
 
+**Last read-only admission audit:** 2026-08-22.
+
 **Overall status: BLOCKED — not complete.** No real DataForrest backfill was
 started. No DataForrest credential was read or used.
 
@@ -11,8 +13,9 @@ started. No DataForrest credential was read or used.
 | Required available bytes                    | 8,757,364,735,856                                                                         |
 | Recorded host capacity                      | 994,662,584,320 bytes                                                                     |
 | Recorded host available                     | 25,755,877,376 bytes                                                                      |
-| Current read-only preflight available       | 30,338,781,184 bytes on 2026-08-21                                                        |
-| Recorded host utilization                   | Above the independent 80% abort fence                                                     |
+| Current read-only preflight available       | 102,168,420,352 bytes on 2026-08-22                                                       |
+| Current read-only filesystem utilization    | 89.72%, above the independent 80% abort fence                                             |
+| Current capacity deficit                    | 8,655,196,315,504 bytes                                                                   |
 | Admission                                   | Rejected: insufficient available bytes, already over 80% used, projected threshold breach |
 | Exact backfill DB fingerprint/OID/system ID | `null` — target not provisioned because admission is rejected                             |
 | Required migration                          | `20260821040000_provider_source_page_plan_digest`                                         |

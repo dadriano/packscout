@@ -4,10 +4,11 @@
 interface. This procedure never uses the disposable embedded-admin database and
 never deletes or adopts existing application data.
 
-**Current admission state (2026-08-21): BLOCKED.** The measured host has
-30,338,781,184 available bytes. Task 010 requires 8,757,364,735,856 available
-bytes and an independently enforced less-than-80%-used filesystem. Do not run a
-real backfill on this host.
+**Current admission state (2026-08-22): BLOCKED.** The read-only audit found
+102,168,420,352 available bytes, a deficit of 8,655,196,315,504 bytes against
+Task 010's required 8,757,364,735,856 available bytes. The filesystem is 89.72%
+used, beyond the independently enforced 80% fence. Do not run a real backfill
+on this host.
 
 ## 1. Install and create the private configuration file
 

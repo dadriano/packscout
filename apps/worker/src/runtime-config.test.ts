@@ -193,6 +193,97 @@ test("worker configuration selects the local endpoint policy explicitly", () => 
   assert.deepEqual(configuration.estimatedEvVerifiedUsdStablecoins, []);
 });
 
+test("worker configuration resolves the operating settings instances publish", () => {
+  const defaults = readProviderWorkerConfiguration(
+    validEnvironment(),
+    "worker:1",
+  );
+
+  assert.equal(defaults.heartbeatIntervalMilliseconds, 15_000);
+  assert.equal(defaults.presenceStaleAfterMilliseconds, 60_000);
+  assert.equal(defaults.runHeartbeatStaleAfterMilliseconds, 300_000);
+  assert.equal(defaults.scheduleClaimLeaseMilliseconds, 30_000);
+  assert.equal(defaults.importRunLeaseMilliseconds, 120_000);
+  assert.equal(defaults.presenceRetentionDays, 14);
+  assert.equal(defaults.workerVersion, "0.0.0-local");
+  assert.match(defaults.workerHost, /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
+
+  const overridden = readProviderWorkerConfiguration(
+    validEnvironment({
+      PACKSCOUT_WORKER_HEARTBEAT_MS: "9000",
+      PACKSCOUT_WORKER_PRESENCE_STALE_MS: "45000",
+      PACKSCOUT_WORKER_RUN_HEARTBEAT_STALE_MS: "222000",
+      PACKSCOUT_WORKER_SCHEDULE_CLAIM_LEASE_MS: "33000",
+      PACKSCOUT_WORKER_IMPORT_RUN_LEASE_MS: "111000",
+      PACKSCOUT_WORKER_PRESENCE_RETENTION_DAYS: "7",
+      PACKSCOUT_WORKER_HOST: "worker-host-1",
+      PACKSCOUT_WORKER_VERSION: "3.2.1+build9",
+    }),
+    "worker:1",
+  );
+
+  assert.equal(overridden.heartbeatIntervalMilliseconds, 9_000);
+  assert.equal(overridden.presenceStaleAfterMilliseconds, 45_000);
+  assert.equal(overridden.runHeartbeatStaleAfterMilliseconds, 222_000);
+  assert.equal(overridden.scheduleClaimLeaseMilliseconds, 33_000);
+  assert.equal(overridden.importRunLeaseMilliseconds, 111_000);
+  assert.equal(overridden.presenceRetentionDays, 7);
+  assert.equal(overridden.workerHost, "worker-host-1");
+  assert.equal(overridden.workerVersion, "3.2.1+build9");
+});
+
+test("worker configuration fails closed on unusable liveness settings", () => {
+  const invalid: [string, string, ProviderWorkerConfigurationErrorCode][] = [
+    ["PACKSCOUT_WORKER_HEARTBEAT_MS", "999", "HEARTBEAT_INTERVAL_INVALID"],
+    ["PACKSCOUT_WORKER_HEARTBEAT_MS", "300001", "HEARTBEAT_INTERVAL_INVALID"],
+    ["PACKSCOUT_WORKER_PRESENCE_STALE_MS", "1000", "PRESENCE_STALE_INVALID"],
+    [
+      "PACKSCOUT_WORKER_RUN_HEARTBEAT_STALE_MS",
+      "999",
+      "RUN_HEARTBEAT_STALE_INVALID",
+    ],
+    [
+      "PACKSCOUT_WORKER_SCHEDULE_CLAIM_LEASE_MS",
+      "300001",
+      "SCHEDULE_CLAIM_LEASE_INVALID",
+    ],
+    ["PACKSCOUT_WORKER_IMPORT_RUN_LEASE_MS", "29999", "IMPORT_RUN_LEASE_INVALID"],
+    [
+      "PACKSCOUT_WORKER_PRESENCE_RETENTION_DAYS",
+      "3651",
+      "PRESENCE_RETENTION_DAYS_INVALID",
+    ],
+    ["PACKSCOUT_WORKER_HOST", "worker host", "WORKER_HOST_INVALID"],
+    ["PACKSCOUT_WORKER_VERSION", "-1.0.0", "WORKER_VERSION_INVALID"],
+  ];
+
+  for (const [name, value, code] of invalid) {
+    assert.throws(
+      () =>
+        readProviderWorkerConfiguration(
+          validEnvironment({ [name]: value }),
+          "worker:1",
+        ),
+      hasConfigurationCode(code),
+      `${name}=${value}`,
+    );
+  }
+
+  // A staleness threshold inside its own bounds is still unusable when it
+  // leaves no room for a missed beat.
+  assert.throws(
+    () =>
+      readProviderWorkerConfiguration(
+        validEnvironment({
+          PACKSCOUT_WORKER_HEARTBEAT_MS: "60000",
+          PACKSCOUT_WORKER_PRESENCE_STALE_MS: "60000",
+        }),
+        "worker:1",
+      ),
+    hasConfigurationCode("PRESENCE_STALE_INVALID"),
+  );
+});
+
 test("worker configuration fails closed for invalid secrets and destinations", () => {
   assert.throws(
     () =>

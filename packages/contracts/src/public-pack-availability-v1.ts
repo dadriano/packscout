@@ -11,12 +11,14 @@ export const PUBLIC_PACK_AVAILABILITY_INPUT_VERSION =
 export const PUBLIC_PACK_AVAILABILITY_PROJECTION_VERSION =
   "public-pack-availability-v1" as const;
 
-export const publicPackAvailabilitySchema = z.enum([
+export const publicPackAvailabilities = [
   "available",
   "unavailable",
   "unknown",
   "sold_out",
-]);
+] as const;
+
+export const publicPackAvailabilitySchema = z.enum(publicPackAvailabilities);
 
 const observedAvailabilityProvenanceSchema = z
   .object({
@@ -48,7 +50,9 @@ export const canonicalPackAvailabilityInputV1Schema = z
   .strict()
   .superRefine((input, context) => {
     if (input.availability === "sold_out") {
-      if (input.availabilityProvenance.kind !== "explicit_authoritative_sold_out") {
+      if (
+        input.availabilityProvenance.kind !== "explicit_authoritative_sold_out"
+      ) {
         context.addIssue({
           code: "custom",
           path: ["availabilityProvenance"],

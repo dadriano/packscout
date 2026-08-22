@@ -208,6 +208,8 @@ test("unproven promotion bootstrap fails parent startup and stops Heat", async (
           knownRemaining: 0,
           deferredOrganizations: 0,
           capReached: false,
+          prunedRecords: 0,
+          prunedFailures: 0,
         };
       },
     },
@@ -271,6 +273,8 @@ test("fatal promotion refusal is not masked by a never-resolving import schedule
           knownRemaining: 0,
           deferredOrganizations: 0,
           capReached: false,
+          prunedRecords: 0,
+          prunedFailures: 0,
         };
       },
     },
@@ -327,6 +331,8 @@ test("fatal promotion refusal is not masked by abort-ignoring Heat", async () =>
           knownRemaining: 0,
           deferredOrganizations: 0,
           capReached: false,
+          prunedRecords: 0,
+          prunedFailures: 0,
         };
       },
     },

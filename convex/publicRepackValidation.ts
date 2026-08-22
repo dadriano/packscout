@@ -40,6 +40,13 @@ const collectibleTypeValidator = v.union(
   v.literal("other"),
 );
 
+export const publicPackAvailabilityValidator = v.union(
+  v.literal("available"),
+  v.literal("unavailable"),
+  v.literal("unknown"),
+  v.literal("sold_out"),
+);
+
 export const repackSearchRowValidator = v.object({
   publicRepackId: v.string(),
   publicVendorId: v.string(),
@@ -57,12 +64,7 @@ export const repackSearchRowValidator = v.object({
   normalizedName: v.string(),
   normalizedVendor: v.string(),
   normalizedCategories: v.string(),
-  availability: v.union(
-    v.literal("available"),
-    v.literal("unavailable"),
-    v.literal("unknown"),
-    v.literal("sold_out"),
-  ),
+  availability: publicPackAvailabilityValidator,
   priceMinor: nullableNumberValidator,
   priceNullRank: nullRankValidator,
   vendorReportedGrossEvMinor: nullableNumberValidator,
@@ -93,8 +95,7 @@ export const repackSearchRowValidator = v.object({
 });
 
 type ValidationResult<T> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false };
+  { readonly ok: true; readonly value: T } | { readonly ok: false };
 
 export function parseDashboardRequest(
   input: unknown,
@@ -143,7 +144,9 @@ function decodeBase64Url(value: string): string | null {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
   try {
     const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/") + padding);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const bytes = Uint8Array.from(binary, (character) =>
+      character.charCodeAt(0),
+    );
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     return null;
@@ -183,7 +186,9 @@ export function decodeRepackCursor(value: string): CursorEnvelope | null {
   }
 }
 
-export function decodeCursorStack(value: string | null): readonly string[] | null {
+export function decodeCursorStack(
+  value: string | null,
+): readonly string[] | null {
   if (value === null) return [];
   return decodePublicCursorStack(value);
 }
@@ -226,7 +231,8 @@ export function validateCursorSet(input: {
   readonly cursor: CursorEnvelope | null;
   readonly stack: readonly CursorEnvelope[];
 }> {
-  const cursor = input.cursor === null ? null : decodeRepackCursor(input.cursor);
+  const cursor =
+    input.cursor === null ? null : decodeRepackCursor(input.cursor);
   if (input.cursor !== null && cursor === null) return { ok: false };
   const encodedStack = decodeCursorStack(input.cursorStack);
   if (encodedStack === null) return { ok: false };
@@ -350,7 +356,10 @@ export function compareRepackRows(
     );
   }
   if (input.sort === "repack") {
-    const nameComparison = compareText(left.normalizedName, right.normalizedName);
+    const nameComparison = compareText(
+      left.normalizedName,
+      right.normalizedName,
+    );
     return (
       (input.direction === "asc" ? nameComparison : -nameComparison) ||
       compareText(left.publicRepackId, right.publicRepackId)
@@ -374,7 +383,11 @@ export function compareRepackRows(
  */
 export type CategoryHierarchy = ReadonlyMap<
   string,
-  Readonly<{ parentPublicCategoryId: string | null; depth: number; name: string }>
+  Readonly<{
+    parentPublicCategoryId: string | null;
+    depth: number;
+    name: string;
+  }>
 >;
 
 export function coveredCategoryIds(
@@ -416,21 +429,24 @@ export function rowMatchesFilters(
   ) {
     return false;
   }
-  if (
-    !options.ignoreCategories &&
-    filters.categories.length > 0
-  ) {
+  if (!options.ignoreCategories && filters.categories.length > 0) {
     const covered = coveredCategoryIds(
       row.publicCategoryIds,
       options.categoryHierarchy,
     );
-    if (!filters.categories.some((publicCategoryId) => covered.has(publicCategoryId))) {
+    if (
+      !filters.categories.some((publicCategoryId) =>
+        covered.has(publicCategoryId),
+      )
+    ) {
       return false;
     }
   }
   if (
     filters.collectibleTypes.length > 0 &&
-    !filters.collectibleTypes.some((type) => row.collectibleTypes.includes(type))
+    !filters.collectibleTypes.some((type) =>
+      row.collectibleTypes.includes(type),
+    )
   ) {
     return false;
   }
@@ -450,5 +466,7 @@ export function repackSearchRowMatchesDetail(
   row: RepackSearchRow,
   detail: PublicRepackDetail,
 ): boolean {
-  return canonicalJson(row) === canonicalJson(searchRowFromRepackDetail(detail));
+  return (
+    canonicalJson(row) === canonicalJson(searchRowFromRepackDetail(detail))
+  );
 }

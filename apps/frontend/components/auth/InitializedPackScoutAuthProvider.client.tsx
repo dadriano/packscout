@@ -15,6 +15,7 @@ import {
   useConvexAuth,
 } from "convex/react";
 import { AuthenticatedSavedItemsProvider } from "./AuthenticatedSavedItemsProvider.client";
+import { AuthenticatedSignInRecorder } from "./AuthenticatedSignInRecorder.client";
 import {
   PackScoutAuthContext,
   type PackScoutAuthValue,
@@ -80,6 +81,13 @@ function PackScoutAuthBridge({
   } = usePrivy();
   const convex = useConvexAuth();
   const loginInvoked = useRef(false);
+  // The key that generations Convex auth also bounds sign-in recording to one
+  // write per established session.
+  const sessionKey = convexAuthSessionKey({
+    ready,
+    authenticated,
+    userId: user?.id,
+  });
 
   useEffect(() => {
     syncReturningSessionHint(
@@ -151,11 +159,13 @@ function PackScoutAuthBridge({
 
   return (
     <PackScoutAuthContext.Provider value={value}>
-      <AuthenticatedSavedItemsProvider
-        key={authenticated ? user?.id : "signed-out"}
-      >
-        {children}
-      </AuthenticatedSavedItemsProvider>
+      <AuthenticatedSignInRecorder sessionKey={sessionKey}>
+        <AuthenticatedSavedItemsProvider
+          key={authenticated ? user?.id : "signed-out"}
+        >
+          {children}
+        </AuthenticatedSavedItemsProvider>
+      </AuthenticatedSignInRecorder>
     </PackScoutAuthContext.Provider>
   );
 }
