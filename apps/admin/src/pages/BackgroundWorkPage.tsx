@@ -72,7 +72,7 @@ function SectionState({
         <p>{error}</p>
         <button
           type="button"
-          className="admin-button admin-button--secondary"
+          className="admin-button admin-button-secondary"
           onClick={onRetry}
         >
           Try again
@@ -260,7 +260,7 @@ export function BackgroundWorkPage() {
         {stuck.length > 0 ? (
           <button
             type="button"
-            className="admin-button admin-button--primary"
+            className="admin-button admin-button-primary"
             onClick={() => void run("release", stuck)}
           >
             Release stuck claims ({stuck.length})
@@ -269,7 +269,7 @@ export function BackgroundWorkPage() {
         {failed.length > 0 ? (
           <button
             type="button"
-            className="admin-button admin-button--primary"
+            className="admin-button admin-button-primary"
             onClick={() => void run("requeue", failed)}
           >
             Re-queue failed ({failed.length})

@@ -5,8 +5,8 @@ import { RunStatus, dateTime, duration, humanize } from "./OperationStatus";
 export function RunLedger({ runs }: { runs: ImportRunSummary[] }) {
   return (
     <section className="ops-ledger" aria-labelledby="run-ledger-title">
-      <header className="admin-section-heading">
-        <div><span className="admin-eyebrow">Immutable run history</span><h2 id="run-ledger-title">Import attempts</h2></div>
+      <header className="admin-section-header">
+        <div><span className="admin-kicker">Immutable run history</span><h2 id="run-ledger-title">Import attempts</h2></div>
         <span className="admin-section-count">{String(runs.length).padStart(2, "0")} on page</span>
       </header>
       <div className="ops-ledger__rows">

@@ -80,11 +80,11 @@ export function ConnectionOperationsSummary({
     return (
       <section className="source-connection-band is-empty" aria-labelledby="connection-title">
         <div>
-          <span className="admin-eyebrow">Shared connection</span>
+          <span className="admin-kicker">Shared connection</span>
           <h2 id="connection-title">Not configured</h2>
           <p>Add the registered source connection before activating a processor.</p>
         </div>
-        <Link className="admin-button admin-button--secondary" to="/source-configuration">
+        <Link className="admin-button admin-button-secondary" to="/source-configuration">
           Configure connection
         </Link>
       </section>
@@ -97,7 +97,7 @@ export function ConnectionOperationsSummary({
     <section className={`source-connection-band is-${connection.health.state}`} aria-labelledby="connection-title">
       <header>
         <div>
-          <span className="admin-eyebrow">Shared connection · {connection.sourceType.label}</span>
+          <span className="admin-kicker">Shared connection · {connection.sourceType.label}</span>
           <h2 id="connection-title">{connection.displayName}</h2>
           <p>{connection.endpointHost} · Credential {connection.credential.mask} configured</p>
         </div>
@@ -140,8 +140,8 @@ export function ProviderSourceOperationsLedger({
 }) {
   return (
     <section className="source-lanes" aria-labelledby="source-lanes-title">
-      <header className="admin-section-heading">
-        <div><span className="admin-eyebrow">Independent processor lanes</span><h2 id="source-lanes-title">Platform processors</h2></div>
+      <header className="admin-section-header">
+        <div><span className="admin-kicker">Independent processor lanes</span><h2 className="admin-section-title" id="source-lanes-title">Platform processors</h2></div>
         <span className="admin-section-count">{sources.length.toString().padStart(2, "0")} registered</span>
       </header>
       <div className="source-lanes__list">
@@ -186,9 +186,9 @@ export function ProviderSourceOperationsLedger({
                 {source.progress.openQuarantine > 0 ? <Link to={`/quarantine?providerId=${source.providerId}&state=open`}>Quarantine</Link> : null}
                 {canOperate && source.source ? (
                   <div>
-                    <button type="button" className="admin-button admin-button--secondary" disabled={isPending || source.source.lifecycle !== "active"} onClick={() => onCommand(source, "run")}>{isPending ? "Working…" : runLabel}</button>
-                    {source.source.lifecycle === "active" ? <button type="button" className="admin-button admin-button--secondary" disabled={isPending || source.source.pauseRequested} onClick={() => onCommand(source, "pause")}>Pause</button> : null}
-                    {source.source.lifecycle === "paused" || source.source.pauseRequested ? <button type="button" className="admin-button admin-button--primary" disabled={isPending} onClick={() => onCommand(source, "resume")}>Resume</button> : null}
+                    <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.lifecycle !== "active"} onClick={() => onCommand(source, "run")}>{isPending ? "Working…" : runLabel}</button>
+                    {source.source.lifecycle === "active" ? <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.pauseRequested} onClick={() => onCommand(source, "pause")}>Pause</button> : null}
+                    {source.source.lifecycle === "paused" || source.source.pauseRequested ? <button type="button" className="admin-button admin-button-primary" disabled={isPending} onClick={() => onCommand(source, "resume")}>Resume</button> : null}
                   </div>
                 ) : null}
               </footer>

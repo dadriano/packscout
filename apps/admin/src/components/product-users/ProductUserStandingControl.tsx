@@ -43,7 +43,7 @@ export function ProductUserStandingControl({
   return (
     <button
       type="button"
-      className={`admin-button admin-button--${
+      className={`admin-button admin-button-${
         action.destructive ? "danger" : "secondary"
       }`}
       onClick={() => {

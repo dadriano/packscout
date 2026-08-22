@@ -53,7 +53,7 @@ function commandError(error: unknown): string {
 }
 
 export function OperationsPage() {
-  useDocumentTitle("Platform Processors");
+  useDocumentTitle("Pipeline Status");
   const { status } = useSession();
   const { showToast } = useToast();
   const canOperate = status.phase === "authenticated" &&
@@ -161,19 +161,19 @@ export function OperationsPage() {
   return (
     <div className="admin-page source-operations-page">
       <PageHeader
-        eyebrow="Data pipeline / Operations"
+        eyebrow="Data pipeline / Status"
         title="Platform processors"
         description="One shared source connection feeds four isolated processor lanes. Local checkpoints, lifecycle, freshness, and quality remain distinct when the connection is affected."
         actions={
           <>
             {canConfigure ? (
-              <Link className="admin-button admin-button--secondary" to="/source-configuration">
+              <Link className="admin-button admin-button-secondary" to="/source-configuration">
                 Configure sources
               </Link>
             ) : null}
             <button
               type="button"
-              className="admin-button admin-button--secondary"
+              className="admin-button admin-button-secondary"
               aria-pressed={displayPaused}
               onClick={() => {
                 setDisplayPaused((paused) => {
@@ -220,7 +220,7 @@ export function OperationsPage() {
       {readFailure ? (
         <div className="ops-error" role="alert">
           <p>{readFailure}</p>
-          <button type="button" className="admin-button admin-button--secondary" onClick={() => {
+          <button type="button" className="admin-button admin-button-secondary" onClick={() => {
             setLoading(true);
             refresh();
           }}>Refresh safe evidence</button>
@@ -229,7 +229,7 @@ export function OperationsPage() {
       {actionFailure ? (
         <div className="ops-error" role="alert">
           <p>{actionFailure}</p>
-          <button type="button" className="admin-button admin-button--secondary" onClick={() => setActionFailure(null)}>
+          <button type="button" className="admin-button admin-button-secondary" onClick={() => setActionFailure(null)}>
             Dismiss
           </button>
         </div>

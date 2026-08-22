@@ -57,7 +57,7 @@ export function ProvidersPage() {
         eyebrow="Data pipeline / Providers"
         title="Data providers"
         description="Configure each source, verify its connection, and monitor whether imports are current and healthy."
-        actions={canManage ? <Link className="admin-button admin-button--primary" to="/providers/new">Add provider</Link> : undefined}
+        actions={canManage ? <Link className="admin-button admin-button-primary" to="/providers/new">Add provider</Link> : undefined}
       />
 
       {!canManage ? (
@@ -88,11 +88,11 @@ export function ProvidersPage() {
       {error ? (
         <div className="provider-load-error" role="alert">
           <p>{error}</p>
-          <button className="admin-button admin-button--secondary" type="button" onClick={() => { setLoading(true); setRetry((value) => value + 1); }}>Try again</button>
+          <button className="admin-button admin-button-secondary" type="button" onClick={() => { setLoading(true); setRetry((value) => value + 1); }}>Try again</button>
         </div>
       ) : null}
       {!loading && !error && items.length === 0 ? (
-        <EmptyState title="No data providers yet" description="Create a draft provider to define the first source. It will not run until an administrator tests and enables it." action={canManage ? <Link className="admin-button admin-button--primary" to="/providers/new">Create provider</Link> : undefined} />
+        <EmptyState title="No data providers yet" description="Create a draft provider to define the first source. It will not run until an administrator tests and enables it." action={canManage ? <Link className="admin-button admin-button-primary" to="/providers/new">Create provider</Link> : undefined} />
       ) : null}
       {!loading && !error && items.length > 0 && visible.length === 0 ? (
         <EmptyState title="No providers match" description="Clear or change the filters to return to the provider ledger." />

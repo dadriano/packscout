@@ -73,10 +73,10 @@ export function SourceConnectionLedger({
 
   return (
     <section className="source-config-ledger" aria-labelledby="connection-ledger-title">
-      <header className="admin-section-heading">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Shared transport</span>
-          <h2 id="connection-ledger-title">DataForrest connection</h2>
+          <span className="admin-kicker">Shared transport</span>
+          <h2 className="admin-section-title" id="connection-ledger-title">DataForrest connection</h2>
         </div>
         <span className="admin-section-count">{connections.length} configured</span>
       </header>
@@ -117,7 +117,7 @@ export function SourceConnectionLedger({
             </div>
             <button
               type="submit"
-              className="admin-button admin-button--primary"
+              className="admin-button admin-button-primary"
               disabled={pendingKey !== null}
             >
               {pendingKey === "connection:create" ? "Saving…" : "Save inactive profile"}
@@ -162,13 +162,13 @@ export function SourceConnectionLedger({
                 <div className="source-config-ledger__actions">
                   <button
                     type="button"
-                    className="admin-button admin-button--secondary"
+                    className="admin-button admin-button-secondary"
                     disabled={pendingKey !== null || recovery !== null || revision.state === "revoked"}
                     onClick={() => onCommand("test", connection)}
                   >Test</button>
                   <button
                     type="button"
-                    className="admin-button admin-button--secondary"
+                    className="admin-button admin-button-secondary"
                     disabled={pendingKey !== null || recovery !== null || !canActivate}
                     onClick={() => onCommand("activate", connection)}
                   >Activate revision</button>
@@ -176,13 +176,13 @@ export function SourceConnectionLedger({
                     <>
                       <button
                         type="button"
-                        className="admin-button admin-button--secondary"
+                        className="admin-button admin-button-secondary"
                         disabled={pendingKey !== null}
                         onClick={() => onCommand("recovery-test", connection)}
                       >Test recovery</button>
                       <button
                         type="button"
-                        className="admin-button admin-button--primary"
+                        className="admin-button admin-button-primary"
                         disabled={pendingKey !== null || !canActivateRecovery}
                         onClick={() => onCommand("recovery-activate", connection)}
                       >Activate recovery</button>
@@ -191,7 +191,7 @@ export function SourceConnectionLedger({
                   {canTestSameRevisionRecovery ? (
                     <button
                       type="button"
-                      className="admin-button admin-button--primary"
+                      className="admin-button admin-button-primary"
                       disabled={pendingKey !== null}
                       onClick={() => onCommand("recovery-test", connection)}
                     >Test same-revision recovery</button>
@@ -199,7 +199,7 @@ export function SourceConnectionLedger({
                   {canManageSecrets ? (
                     <button
                       type="button"
-                      className="admin-button admin-button--danger"
+                      className="admin-button admin-button-danger"
                       disabled={pendingKey !== null || revision.state === "revoked"}
                       onClick={() => onCommand("revoke", connection)}
                     >Revoke</button>
@@ -228,7 +228,7 @@ export function SourceConnectionLedger({
                         autoComplete="new-password"
                       />
                     </div>
-                    <button className="admin-button admin-button--secondary" type="submit"
+                    <button className="admin-button admin-button-secondary" type="submit"
                       disabled={pendingKey !== null}>Save candidate revision</button>
                   </form>
                 </details>
@@ -250,7 +250,7 @@ export function SourceConnectionLedger({
                         type="password" required maxLength={4_096}
                         autoComplete="new-password" />
                     </div>
-                    <button className="admin-button admin-button--primary" type="submit"
+                    <button className="admin-button admin-button-primary" type="submit"
                       disabled={pendingKey !== null}>Save recovery candidate</button>
                   </form>
                 </details>
@@ -262,7 +262,6 @@ export function SourceConnectionLedger({
     </section>
   );
 }
-
 interface SourceLedgerProps {
   readonly catalog: ProviderSourceAdminCatalog;
   readonly canManage: boolean;
@@ -322,10 +321,10 @@ export function ProviderSourceLedger({
 
   return (
     <section className="source-config-ledger" aria-labelledby="source-ledger-title">
-      <header className="admin-section-heading">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Provider isolation</span>
-          <h2 id="source-ledger-title">Platform sources</h2>
+          <span className="admin-kicker">Provider isolation</span>
+          <h2 className="admin-section-title" id="source-ledger-title">Platform sources</h2>
         </div>
         <span className="admin-section-count">{catalog.sources.length} sources</span>
       </header>
@@ -388,7 +387,7 @@ export function ProviderSourceLedger({
                 ? `Mapper: ${provider.sourceRegistration.mapperKey} @ ${provider.sourceRegistration.mapperVersion} · ${provider.sourceRegistration.sourceAdapterVersion}`
                 : "Select a provider to pin its approved mapper."}
             </p>
-            <button type="submit" className="admin-button admin-button--primary"
+            <button type="submit" className="admin-button admin-button-primary"
               disabled={pendingKey !== null}>Save inactive source</button>
           </form>
         </details>
@@ -429,29 +428,29 @@ export function ProviderSourceLedger({
               </dl>
               {canManage ? (
                 <div className="source-config-ledger__actions">
-                  <button type="button" className="admin-button admin-button--secondary"
+                  <button type="button" className="admin-button admin-button-secondary"
                     disabled={pendingKey !== null || source.state === "replaced"}
                     onClick={() => onCommand("test", source)}>Test</button>
-                  <button type="button" className="admin-button admin-button--secondary"
+                  <button type="button" className="admin-button admin-button-secondary"
                     disabled={pendingKey !== null || !canActivate}
                     onClick={() => onCommand("activate", source)}>Activate paused</button>
                   {source.state === "paused" ? (
-                    <button type="button" className="admin-button admin-button--primary"
+                    <button type="button" className="admin-button admin-button-primary"
                       disabled={pendingKey !== null}
                       onClick={() => onCommand("resume", source)}>Resume from {source.checkpoint.resumeLabel}</button>
                   ) : null}
                   {source.state === "active" ? (
-                    <button type="button" className="admin-button admin-button--secondary"
+                    <button type="button" className="admin-button admin-button-secondary"
                       disabled={pendingKey !== null || source.pauseRequested}
                       onClick={() => onCommand("pause", source)}>Pause after page</button>
                   ) : null}
                   {!(["disabled", "replaced"].includes(source.state)) ? (
-                    <button type="button" className="admin-button admin-button--danger"
+                    <button type="button" className="admin-button admin-button-danger"
                       disabled={pendingKey !== null}
                       onClick={() => onCommand("disable", source)}>Disable</button>
                   ) : null}
                   {(["paused", "disabled"].includes(source.state)) ? (
-                    <button type="button" className="admin-button admin-button--danger"
+                    <button type="button" className="admin-button admin-button-danger"
                       disabled={pendingKey !== null}
                       onClick={() => onCommand("reset", source)}>Reset checkpoint</button>
                   ) : null}
@@ -467,7 +466,7 @@ export function ProviderSourceLedger({
                   <label htmlFor={`interval-${source.sourceInstanceId}`}>Revise interval</label>
                   <input id={`interval-${source.sourceInstanceId}`} name="intervalSeconds"
                     type="number" min="60" max="86400" defaultValue={source.intervalSeconds} />
-                  <button type="submit" className="admin-button admin-button--secondary"
+                  <button type="submit" className="admin-button admin-button-secondary"
                     disabled={pendingKey !== null}>Save timing</button>
                 </form>
               ) : null}

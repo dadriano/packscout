@@ -183,7 +183,7 @@ export function OperatorsPage() {
         actions={
           <button
             type="button"
-            className="admin-button admin-button--primary"
+            className="admin-button admin-button-primary"
             onClick={() => {
               setDialogError(null);
               setActiveDialog({ mode: "create" });
@@ -194,8 +194,8 @@ export function OperatorsPage() {
         }
       />
 
-      <form className="admin-ledger" aria-label="Filter operators" onSubmit={applyFilters}>
-        <div className="admin-section-heading">
+      <form className="admin-surface admin-panel" aria-label="Filter operators" onSubmit={applyFilters}>
+        <div className="admin-section-header">
           <div className="admin-field">
             <label htmlFor="operator-search">Search name or email</label>
             <input
@@ -233,15 +233,15 @@ export function OperatorsPage() {
               <option value="disabled">Disabled</option>
             </select>
           </div>
-          <button className="admin-button admin-button--secondary" type="submit">
+          <button className="admin-button admin-button-secondary" type="submit">
             Apply filters
           </button>
         </div>
       </form>
 
       {loading ? (
-        <section className="admin-ledger" aria-busy="true" aria-live="polite">
-          <span className="admin-eyebrow">Loading access ledger…</span>
+        <section className="admin-surface admin-panel" aria-busy="true" aria-live="polite">
+          <span className="admin-kicker">Loading access ledger…</span>
         </section>
       ) : loadError ? (
         <EmptyState
@@ -251,7 +251,7 @@ export function OperatorsPage() {
           action={
             <button
               type="button"
-              className="admin-button admin-button--secondary"
+              className="admin-button admin-button-secondary"
               onClick={() => {
                 setLoading(true);
                 setRefreshIndex((current) => current + 1);
@@ -269,7 +269,7 @@ export function OperatorsPage() {
           action={
             <button
               type="button"
-              className="admin-button admin-button--primary"
+              className="admin-button admin-button-primary"
               onClick={() => setActiveDialog({ mode: "create" })}
             >
               Add operator

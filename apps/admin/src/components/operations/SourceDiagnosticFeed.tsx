@@ -53,10 +53,10 @@ export function SourceDiagnosticFeed({
   const hasFilter = Boolean(filter.severity || filter.phase || filter.runId);
   return (
     <section className="source-diagnostics" aria-labelledby="source-diagnostics-title">
-      <header className="admin-section-heading">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Bounded safe history · newest first</span>
-          <h2 id="source-diagnostics-title">Processor diagnostics</h2>
+          <span className="admin-kicker">Bounded safe history · newest first</span>
+          <h2 className="admin-section-title" id="source-diagnostics-title">Processor diagnostics</h2>
         </div>
         <span className="admin-section-count">{eventCount} shown</span>
       </header>
@@ -116,7 +116,7 @@ export function SourceDiagnosticFeed({
         </div>
         <button
           type="button"
-          className="admin-button admin-button--secondary"
+          className="admin-button admin-button-secondary"
           disabled={!hasFilter}
           onClick={() => onFilterChange({})}
         >
@@ -132,7 +132,7 @@ export function SourceDiagnosticFeed({
       {error ? (
         <div className="ops-error" role="alert">
           <p>{error} Previously loaded safe diagnostics remain visible.</p>
-          <button type="button" className="admin-button admin-button--secondary" onClick={onRetry}>
+          <button type="button" className="admin-button admin-button-secondary" onClick={onRetry}>
             Retry diagnostics
           </button>
         </div>
@@ -206,7 +206,7 @@ export function SourceDiagnosticFeed({
         <div className="source-diagnostic-pagination">
           <button
             type="button"
-            className="admin-button admin-button--secondary"
+            className="admin-button admin-button-secondary"
             disabled={loadingOlder}
             onClick={onLoadOlder}
           >

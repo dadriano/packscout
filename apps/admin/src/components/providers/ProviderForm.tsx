@@ -141,7 +141,7 @@ export function ProviderForm({
 
       <footer className="provider-form__footer">
         <p aria-live="polite">{dirty ? "Unsaved changes" : "No unsaved changes"}</p>
-        <button type="submit" className="admin-button admin-button--primary" disabled={pending}>
+        <button type="submit" className="admin-button admin-button-primary" disabled={pending}>
           {pending ? "Saving…" : provider ? "Save new revision" : "Create draft"}
         </button>
       </footer>

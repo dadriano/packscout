@@ -309,7 +309,7 @@ export function ProviderDetailPage() {
     return (
       <div className="ops-error" role="alert">
         <p>{detailFailure ?? "Provider source not found."}</p>
-        <Link className="admin-button admin-button--secondary" to="/operations">Return to operations</Link>
+        <Link className="admin-button admin-button-secondary" to="/operations">Return to operations</Link>
       </div>
     );
   }
@@ -327,11 +327,11 @@ export function ProviderDetailPage() {
           : "No current source revision"}
         actions={
           <>
-            <Link className="admin-button admin-button--secondary" to="/operations">All processors</Link>
-            {canConfigure ? <Link className="admin-button admin-button--secondary" to="/source-configuration">Configuration</Link> : null}
+            <Link className="admin-button admin-button-secondary" to="/operations">All processors</Link>
+            {canConfigure ? <Link className="admin-button admin-button-secondary" to="/source-configuration">Configuration</Link> : null}
             <button
               type="button"
-              className="admin-button admin-button--secondary"
+              className="admin-button admin-button-secondary"
               aria-pressed={displayPaused}
               onClick={() => {
                 setDisplayPaused((paused) => {
@@ -360,8 +360,8 @@ export function ProviderDetailPage() {
         </div>
         <span>{canConfigure ? "Administrator configuration enabled" : canOperate ? "Data operator · operation controls only" : "Read-only access"}</span>
       </section>
-      {detailFailure ? <div className="ops-error" role="alert"><p>{detailFailure}</p><button type="button" className="admin-button admin-button--secondary" onClick={refresh}>Refresh current state</button></div> : null}
-      {actionFailure ? <div className="ops-error" role="alert"><p>{actionFailure}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => setActionFailure(null)}>Dismiss</button></div> : null}
+      {detailFailure ? <div className="ops-error" role="alert"><p>{detailFailure}</p><button type="button" className="admin-button admin-button-secondary" onClick={refresh}>Refresh current state</button></div> : null}
+      {actionFailure ? <div className="ops-error" role="alert"><p>{actionFailure}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => setActionFailure(null)}>Dismiss</button></div> : null}
 
       <ConnectionOperationsSummary connection={detail.connection} />
       <ProviderSourceOperationsLedger
@@ -381,12 +381,12 @@ export function ProviderDetailPage() {
       ) : (
         <section className="source-admin-inline" aria-labelledby="source-admin-inline-title">
           <div>
-            <span className="admin-eyebrow">Selected provider only</span>
+            <span className="admin-kicker">Selected provider only</span>
             <h2 id="source-admin-inline-title">Test and timing</h2>
             <p>These controls affect {source.displayName} only. Shared credential and destructive lifecycle controls remain in Source configuration.</p>
           </div>
           <div className="source-admin-inline__actions">
-            <button type="button" className="admin-button admin-button--secondary" disabled={pendingKey !== null} onClick={() => { void requestSourceTest(); }}>
+            <button type="button" className="admin-button admin-button-secondary" disabled={pendingKey !== null} onClick={() => { void requestSourceTest(); }}>
               {pendingKey?.endsWith(":test") ? "Requesting test…" : "Test source"}
             </button>
             <form onSubmit={(event) => { void reviseInterval(event); }}>
@@ -394,7 +394,7 @@ export function ProviderDetailPage() {
                 <label htmlFor="provider-source-interval">Interval seconds</label>
                 <input id="provider-source-interval" type="number" min="60" max="86400" required value={intervalDraft} onChange={(event) => setIntervalDraft(event.target.value)} />
               </div>
-              <button type="submit" className="admin-button admin-button--secondary" disabled={pendingKey !== null}>
+              <button type="submit" className="admin-button admin-button-secondary" disabled={pendingKey !== null}>
                 {pendingKey?.endsWith(":interval") ? "Saving timing…" : "Save timing"}
               </button>
             </form>
@@ -405,7 +405,7 @@ export function ProviderDetailPage() {
       {sourceRevision ? (
         <div className="source-detail-grid">
           <section className="source-detail-panel" aria-labelledby="source-contract-title">
-            <header><span className="admin-eyebrow">Immutable source ownership</span><h2 id="source-contract-title">Source contract</h2></header>
+            <header><span className="admin-kicker">Immutable source ownership</span><h2 id="source-contract-title">Source contract</h2></header>
             <dl>
               <div><dt>Source type</dt><dd>{sourceRevision.sourceTypeKey}</dd></div>
               <div><dt>Adapter revision</dt><dd>{sourceRevision.sourceAdapterVersion}</dd></div>
@@ -417,7 +417,7 @@ export function ProviderDetailPage() {
             </dl>
           </section>
           <section className="source-detail-panel" aria-labelledby="source-checkpoint-title">
-            <header><span className="admin-eyebrow">Durable committed position</span><h2 id="source-checkpoint-title">Checkpoint and schedule</h2></header>
+            <header><span className="admin-kicker">Durable committed position</span><h2 id="source-checkpoint-title">Checkpoint and schedule</h2></header>
             <dl>
               <div><dt>Checkpoint owner</dt><dd>{sourceRevision.sourceInstanceId}</dd></div>
               <div><dt>Generation</dt><dd>{source.checkpoint?.generation ?? "Not established"}</dd></div>
@@ -428,11 +428,11 @@ export function ProviderDetailPage() {
             </dl>
           </section>
           <section className="source-detail-panel" aria-labelledby="source-config-summary-title">
-            <header><span className="admin-eyebrow">Adapter-validated safe summary</span><h2 id="source-config-summary-title">Masked configuration</h2></header>
+            <header><span className="admin-kicker">Adapter-validated safe summary</span><h2 id="source-config-summary-title">Masked configuration</h2></header>
             <dl>{sourceRevision.configuration.fields.map((field) => <div key={field.label}><dt>{field.label}</dt><dd>{field.value}{field.masked ? " · masked" : ""}</dd></div>)}</dl>
           </section>
           <section className="source-detail-panel" aria-labelledby="source-test-title">
-            <header><span className="admin-eyebrow">Current revision evidence</span><h2 id="source-test-title">Source test and quality</h2></header>
+            <header><span className="admin-kicker">Current revision evidence</span><h2 id="source-test-title">Source test and quality</h2></header>
             <dl>
               <div><dt>Test state</dt><dd>{detail.sourceTest ? humanize(detail.sourceTest.state) : "Not recorded"}</dd></div>
               <div><dt>Test outcome</dt><dd>{detail.sourceTest?.outcome ? humanize(detail.sourceTest.outcome) : "Not recorded"}</dd></div>
@@ -446,12 +446,12 @@ export function ProviderDetailPage() {
       ) : null}
 
       <section className="source-run-history" aria-labelledby="source-run-history-title">
-        <header className="admin-section-heading"><div><span className="admin-eyebrow">Selected source only</span><h2 id="source-run-history-title">Run history</h2></div><Link to={`/runs?providerId=${source.providerId}`}>All runs</Link></header>
+        <header className="admin-section-header"><div><span className="admin-kicker">Selected source only</span><h2 id="source-run-history-title">Run history</h2></div><Link to={`/runs?providerId=${source.providerId}`}>All runs</Link></header>
         {detail.runHistory.length === 0 ? <EmptyState title="No runs recorded" description="Run now or wait for the next scheduled interval. A queued run may wait for worker or connection capacity." /> : <div className="source-run-history__rows">{detail.runHistory.map((run) => <article key={run.id}><div><Link to={`/runs/${run.id}`}>{humanize(run.trigger)} run</Link><span>{dateTime(run.requestedAt)}</span></div><StatusBadge label={humanize(run.state)} tone={run.state === "failed" ? "danger" : run.state === "succeeded" ? "ready" : "pending"} /><dl><div><dt>Progress</dt><dd>{dateTime(run.lastProgressAt)}</dd></div><div><dt>Elapsed</dt><dd>{run.startedAt ? milliseconds(Math.max(0, Date.parse(run.finishedAt ?? detail.refreshedAt) - Date.parse(run.startedAt))) : "Not started"}</dd></div><div><dt>Provider head</dt><dd>{run.reachedHead ? "Reached" : "Not reached"}</dd></div><div><dt>Failure</dt><dd>{run.failureCode ?? "None"}</dd></div></dl></article>)}</div>}
       </section>
 
       <section className="source-page-progress" aria-labelledby="source-page-progress-title">
-        <header className="admin-section-heading"><div><span className="admin-eyebrow">Atomic committed pages</span><h2 id="source-page-progress-title">Page progress</h2></div><span className="admin-section-count">{detail.pageProgress.length} shown</span></header>
+        <header className="admin-section-header"><div><span className="admin-kicker">Atomic committed pages</span><h2 id="source-page-progress-title">Page progress</h2></div><span className="admin-section-count">{detail.pageProgress.length} shown</span></header>
         {detail.pageProgress.length === 0 ? <EmptyState title="No committed pages" description="A queued run, no live worker, or a failure before commit has no page progress." /> : <div className="source-page-progress__rows">{detail.pageProgress.map((page) => <article key={`${page.runId}:${page.pageNumber}`}><header><strong>Page {page.pageNumber}</strong><Link to={`/runs/${page.runId}`}>Open run</Link><time dateTime={page.committedAt}>{dateTime(page.committedAt)}</time></header><dl><div><dt>Streams</dt><dd>{page.records.catalog} catalog · {page.records.pulls} pulls · {page.records.trades} trades · {page.records.total} total</dd></div><div><dt>Dispositions</dt><dd>{page.dispositions.inserted} inserted · {page.dispositions.revised} revised · {page.dispositions.duplicate} duplicate · {page.dispositions.quarantined} quarantined</dd></div><div><dt>Continuation</dt><dd>{page.continuation ? humanize(page.continuation.kind) : "Provider head"}</dd></div><div><dt>Checkpoint</dt><dd className="ops-cursor">{page.checkpointFingerprint ?? "Not attached"}</dd></div></dl></article>)}</div>}
       </section>
 

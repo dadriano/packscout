@@ -293,7 +293,7 @@ export function SourceConfigurationPage() {
       {loadError ? (
         <div className="ops-error" role="alert">
           <p>{loadError}</p>
-          <button type="button" className="admin-button admin-button--secondary"
+          <button type="button" className="admin-button admin-button-secondary"
             onClick={() => {
               setLoading(true);
               setLoadIndex((value) => value + 1);
@@ -301,7 +301,7 @@ export function SourceConfigurationPage() {
         </div>
       ) : null}
       <div className="source-config-announcer" aria-live="polite" aria-atomic="true">
-        {actionError ? <p className="admin-inline-error" role="alert">{actionError}</p> : null}
+        {actionError ? <p className="admin-form-error" role="alert">{actionError}</p> : null}
         {notice ? <p className="source-config-success">{notice}</p> : null}
       </div>
       {!loading && !loadError && catalog ? (

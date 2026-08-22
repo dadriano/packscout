@@ -98,7 +98,7 @@ export function OperatorDialog({
         <>
           <button
             type="button"
-            className="admin-button admin-button--secondary"
+            className="admin-button admin-button-secondary"
             disabled={pending}
             onClick={onClose}
           >
@@ -107,7 +107,7 @@ export function OperatorDialog({
           <button
             type="submit"
             form="operator-access-form"
-            className="admin-button admin-button--primary"
+            className="admin-button admin-button-primary"
             disabled={pending}
           >
             {pending ? copy.pendingAction : copy.action}
