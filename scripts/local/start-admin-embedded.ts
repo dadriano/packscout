@@ -15,13 +15,18 @@ import {
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { createAdminApp } from "../../apps/admin/server/app.ts";
+import { createAdminBackgroundWorkRuntime } from "../../apps/admin/server/background-work-runtime.ts";
 import { createNodeAuthSecurity } from "../../apps/admin/server/auth/crypto.ts";
 import { createAdminAuthRuntime } from "../../apps/admin/server/auth/runtime.ts";
 import { createAdminImportOperationsRuntime } from "../../apps/admin/server/import-operations-runtime.ts";
 import { createAdminOperationalRuntime } from "../../apps/admin/server/operational-runtime.ts";
+import { createProductUserAuditSink } from "../../apps/admin/server/product-user-audit.ts";
+import { createProductUserDirectoryReader } from "../../apps/admin/server/product-user-directory.ts";
 import { createProviderAdminRuntime } from "../../apps/admin/server/provider-runtime.ts";
+import { createAdminWorkerFleetRuntime } from "../../apps/admin/server/worker-fleet-runtime.ts";
 import {
   readPort,
+  readProductUserDirectoryConfig,
   readRequiredSecret,
 } from "../../apps/admin/server/runtime-config.ts";
 
@@ -179,6 +184,27 @@ async function main(): Promise<void> {
         environment: "local",
         operational,
       }),
+      backgroundWork: createAdminBackgroundWorkRuntime({
+        database: harness.database,
+        actorPseudonymKey: providerActorKey,
+      }),
+      workerFleet: createAdminWorkerFleetRuntime({ database: harness.database }),
+      // The Users navigation item this harness shows must reach a mounted
+      // route. With no product-backend settings the reader is simply
+      // unconfigured, so the page renders the bounded "not connected" state
+      // instead of an unmounted endpoint's route-not-found.
+      productUsers: {
+        directory: createProductUserDirectoryReader({
+          config: readProductUserDirectoryConfig({
+            baseUrl: process.env.PACKSCOUT_ADMIN_DIRECTORY_URL,
+            token: process.env.PACKSCOUT_ADMIN_DIRECTORY_TOKEN,
+          }),
+        }),
+        audit: createProductUserAuditSink({
+          database: harness.database,
+          actorPseudonymKey: providerActorKey,
+        }),
+      },
       operationalAlerts: { alerts: operational.alerts },
       operationalHealth: { health: operational.health },
     });

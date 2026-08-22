@@ -12,9 +12,15 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { loadValidatedCatalogManifest } from "./catalogManifestState";
+import { requireActiveProductUserStanding } from "./productUserRecords";
 
-const MAX_SAVED_ITEMS_PER_KIND = 250;
+export const MAX_SAVED_ITEMS_PER_KIND = 250;
 
+/**
+ * Codes this module raises itself. Write paths additionally raise the shared
+ * `ACCOUNT_SUSPENDED` refusal from `productUserRecords`, which is the one
+ * stable outcome every authenticated capability uses for a suspended account.
+ */
 type SavedItemsErrorCode =
   | "AUTH_REQUIRED"
   | "AUTH_IDENTITY_INVALID"
@@ -66,6 +72,26 @@ async function requireOwner(ctx: Pick<QueryCtx, "auth">): Promise<string> {
   ) {
     refuse("AUTH_IDENTITY_INVALID");
   }
+  return ownerTokenIdentifier;
+}
+
+/**
+ * The owner of an authenticated write.
+ *
+ * Standing is re-read from the authoritative directory record inside this
+ * transaction rather than taken from the session, so a session established
+ * before a suspension gains nothing and a reinstatement takes effect on the
+ * very next request. An identity with no directory record stays fully capable.
+ *
+ * The self-read `getSavedItemIds` deliberately does not gate on standing:
+ * suspension stops what a signed-in account can *do*, and never hides or
+ * destroys what it already owns.
+ */
+async function requireActiveOwner(
+  ctx: Pick<MutationCtx, "auth" | "db">,
+): Promise<string> {
+  const ownerTokenIdentifier = await requireOwner(ctx);
+  await requireActiveProductUserStanding(ctx, ownerTokenIdentifier);
   return ownerTokenIdentifier;
 }
 
@@ -262,7 +288,7 @@ export const setSavedRepack = mutation({
   args: { publicRepackId: v.string(), saved: v.boolean() },
   returns: setSavedResultValidator,
   handler: async (ctx, args): Promise<SetSavedResult> => {
-    const ownerTokenIdentifier = await requireOwner(ctx);
+    const ownerTokenIdentifier = await requireActiveOwner(ctx);
     validatePublicRepackId(args.publicRepackId);
     const matches = await ctx.db
       .query("savedRepacks")
@@ -320,7 +346,7 @@ export const setSavedCollectible = mutation({
   args: { publicCollectibleId: v.string(), saved: v.boolean() },
   returns: setSavedResultValidator,
   handler: async (ctx, args): Promise<SetSavedResult> => {
-    const ownerTokenIdentifier = await requireOwner(ctx);
+    const ownerTokenIdentifier = await requireActiveOwner(ctx);
     validatePublicCollectibleId(args.publicCollectibleId);
     const matches = await ctx.db
       .query("savedCollectibles")

@@ -5,13 +5,13 @@
     "migration": "packages/database/prisma/migrations/20260816040000_catalog_promotion_retention/migration.sql"
   },
   "expectedCounts": {
-    "tables": 56,
-    "enums": 22,
-    "columns": 792,
-    "indexes": 68,
+    "tables": 57,
+    "enums": 24,
+    "columns": 812,
+    "indexes": 70,
     "uniqueConstraints": 50,
     "foreignKeys": 175,
-    "checkConstraints": 181
+    "checkConstraints": 188
   },
   "enums": {
     "admin_alert_state": [
@@ -67,7 +67,13 @@
       "promotion_activation_delayed",
       "promotion_settlement_blocked",
       "promotion_failed",
-      "promotion_recovered"
+      "promotion_recovered",
+      "worker_fleet_silent",
+      "import_run_stalled",
+      "provider_schedule_overdue",
+      "recomputation_backlogged",
+      "retention_overdue",
+      "machinery_recovered"
     ],
     "operational_severity": [
       "info",
@@ -140,6 +146,17 @@
       "accepted",
       "duplicate",
       "quarantined"
+    ],
+    "worker_activity_kind": [
+      "idle",
+      "scheduling",
+      "importing",
+      "estimated_ev",
+      "retention"
+    ],
+    "worker_instance_state": [
+      "running",
+      "stopped"
     ]
   },
   "tables": {
@@ -10020,6 +10037,192 @@
       "checkConstraints": {
         "source_records_external_id_not_blank": {
           "value": "(length(TRIM(BOTH FROM external_id)) > 0)"
+        }
+      }
+    },
+    "worker_instances": {
+      "columns": {
+        "activity_kind": {
+          "type": "worker_activity_kind",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'idle'::worker_activity_kind"
+        },
+        "activity_organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "activity_provider_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "activity_run_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "activity_started_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "heartbeat_interval_ms": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "host": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "import_run_lease_ms": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "instance_id": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "last_heartbeat_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "presence_retention_days": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "presence_stale_after_ms": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "protected_payload_retention_days": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "run_heartbeat_stale_after_ms": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "runtime_version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "schedule_claim_lease_ms": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "started_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "state": {
+          "type": "worker_instance_state",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'running'::worker_instance_state"
+        },
+        "stopped_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "worker_instances_heartbeat_idx": {
+          "columns": [
+            "last_heartbeat_at"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "worker_instances_state_heartbeat_idx": {
+          "columns": [
+            "state",
+            "last_heartbeat_at"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {},
+      "checkConstraints": {
+        "worker_instances_activity_bounded": {
+          "value": "(((activity_kind = 'idle'::worker_activity_kind) AND (activity_organization_id IS NULL) AND (activity_provider_id IS NULL) AND (activity_run_id IS NULL) AND (activity_started_at IS NULL)) OR ((activity_kind <> 'idle'::worker_activity_kind) AND (activity_started_at IS NOT NULL)))"
+        },
+        "worker_instances_activity_import_scoped": {
+          "value": "((activity_kind <> 'importing'::worker_activity_kind) OR ((activity_organization_id IS NOT NULL) AND (activity_provider_id IS NOT NULL) AND (activity_run_id IS NOT NULL)))"
+        },
+        "worker_instances_descriptor_bounded": {
+          "value": "((length(instance_id) >= 1) AND (length(instance_id) <= 256) AND ((length(version) >= 1) AND (length(version) <= 128)) AND ((length(host) >= 1) AND (length(host) <= 128)) AND ((length(runtime_version) >= 1) AND (length(runtime_version) <= 64)))"
+        },
+        "worker_instances_heartbeat_ordered": {
+          "value": "(last_heartbeat_at >= started_at)"
+        },
+        "worker_instances_retention_bounded": {
+          "value": "((protected_payload_retention_days >= 1) AND (protected_payload_retention_days <= 3650) AND ((presence_retention_days >= 1) AND (presence_retention_days <= 3650)))"
+        },
+        "worker_instances_settings_bounded": {
+          "value": "((heartbeat_interval_ms >= 1000) AND (heartbeat_interval_ms <= 300000) AND (presence_stale_after_ms > heartbeat_interval_ms) AND (presence_stale_after_ms <= 86400000) AND ((run_heartbeat_stale_after_ms >= 1000) AND (run_heartbeat_stale_after_ms <= 86400000)) AND ((schedule_claim_lease_ms >= 1000) AND (schedule_claim_lease_ms <= 3600000)) AND ((import_run_lease_ms >= 1000) AND (import_run_lease_ms <= 3600000)))"
+        },
+        "worker_instances_stopped_consistent": {
+          "value": "(((state = 'stopped'::worker_instance_state) AND (stopped_at IS NOT NULL) AND (stopped_at >= started_at)) OR ((state = 'running'::worker_instance_state) AND (stopped_at IS NULL)))"
         }
       }
     }

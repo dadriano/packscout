@@ -1504,6 +1504,33 @@ model source_records {
   @@index([organization_id, expires_at], map: "source_records_expiry_idx")
 }
 
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model worker_instances {
+  instance_id                      String                @id
+  state                            worker_instance_state @default(running)
+  version                          String
+  host                             String
+  runtime_version                  String
+  started_at                       DateTime              @db.Timestamptz(6)
+  last_heartbeat_at                DateTime              @db.Timestamptz(6)
+  stopped_at                       DateTime?             @db.Timestamptz(6)
+  activity_kind                    worker_activity_kind  @default(idle)
+  activity_organization_id         String?               @db.Uuid
+  activity_provider_id             String?               @db.Uuid
+  activity_run_id                  String?               @db.Uuid
+  activity_started_at              DateTime?             @db.Timestamptz(6)
+  heartbeat_interval_ms            Int
+  presence_stale_after_ms          Int
+  run_heartbeat_stale_after_ms     Int
+  schedule_claim_lease_ms          Int
+  import_run_lease_ms              Int
+  protected_payload_retention_days Int
+  presence_retention_days          Int
+
+  @@index([last_heartbeat_at], map: "worker_instances_heartbeat_idx")
+  @@index([state, last_heartbeat_at], map: "worker_instances_state_heartbeat_idx")
+}
+
 enum admin_alert_state {
   active
   acknowledged
@@ -1565,6 +1592,12 @@ enum operational_event_kind {
   promotion_settlement_blocked
   promotion_failed
   promotion_recovered
+  worker_fleet_silent
+  import_run_stalled
+  provider_schedule_overdue
+  recomputation_backlogged
+  retention_overdue
+  machinery_recovered
 }
 
 enum operational_severity {
@@ -1651,4 +1684,17 @@ enum source_record_outcome {
   accepted
   duplicate
   quarantined
+}
+
+enum worker_activity_kind {
+  idle
+  scheduling
+  importing
+  estimated_ev
+  retention
+}
+
+enum worker_instance_state {
+  running
+  stopped
 }

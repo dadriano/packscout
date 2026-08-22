@@ -1,3 +1,5 @@
+import { PRODUCT_USER_SUSPENDED_ERROR_CODE } from "@packscout/contracts";
+import { SUSPENDED_ACCOUNT_NOTICE } from "./account-standing";
 import type { PackScoutAuthStatus } from "./AuthContext.client";
 
 export type SavedItemKind = "repack" | "collectible";
@@ -24,11 +26,17 @@ export function presentSavedItemMutationMessage(input: Readonly<{
   saved: boolean;
   outcome: "success" | "error";
   prunedUnavailable?: boolean;
+  /** The refusal code a rejected write carried, when it carried one. */
+  errorCode?: string | null;
 }>): SavedItemMessage {
   const label = input.kind === "repack" ? "Repack" : "Desired collectible";
   if (input.outcome === "error") {
+    // A suspended account is a standing explanation, not a transient fault:
+    // telling this person to try again would be untrue and unhelpful.
     return {
-      copy: `We couldn't update this ${label.toLowerCase()}. Try again.`,
+      copy: input.errorCode === PRODUCT_USER_SUSPENDED_ERROR_CODE
+        ? SUSPENDED_ACCOUNT_NOTICE
+        : `We couldn't update this ${label.toLowerCase()}. Try again.`,
       tone: "error",
     };
   }

@@ -1,3 +1,8 @@
+import {
+  IDLE_WORKER_ACTIVITY,
+  type WorkerActivity,
+  type WorkerActivityKind,
+} from "@packscout/contracts";
 import type {
   ProviderImportExecutionPort,
   ProviderImportQueueExecutionPort,
@@ -41,6 +46,17 @@ export interface ProviderWorkerEstimatedEvPort {
   runCycle(): Promise<EstimatedEvRecomputationCycleResult>;
 }
 
+/**
+ * Durable liveness reporting. Every member is best-effort by contract: the
+ * runtime never awaits `activity`, and a failed presence write must not
+ * interrupt or fail import work.
+ */
+export interface ProviderWorkerPresencePort {
+  start(): Promise<void>;
+  activity(activity: WorkerActivity): void;
+  stop(): Promise<void>;
+}
+
 export type ProviderWorkerLogEventName =
   | "provider_database_pool_failed"
   | "provider_promotion_v2_runtime_failed"
@@ -57,6 +73,10 @@ export type ProviderWorkerLogEventName =
   | "provider_schedule_invalid"
   | "provider_schedule_processed"
   | "provider_scheduler_failed"
+  | "provider_worker_presence_degraded"
+  | "provider_worker_presence_recovered"
+  | "provider_worker_presence_registered"
+  | "provider_worker_presence_stopped"
   | "provider_worker_started"
   | "provider_worker_stopped";
 
@@ -80,6 +100,10 @@ export interface ProviderWorkerLogEvent {
   readonly evUnavailable?: number;
   readonly evFailures?: number;
   readonly evCapReached?: boolean;
+  readonly retentionPruned?: number;
+  readonly retentionPruneFailures?: number;
+  readonly activityKind?: WorkerActivityKind;
+  readonly presenceFailures?: number;
 }
 
 export interface ProviderWorkerLogger {
@@ -109,6 +133,7 @@ export interface ProviderWorkerRuntimeDependencies {
   readonly heatPromotion?: HeatPromotionWorkerRuntimePort;
   readonly catalogRetention?: CatalogRetentionWorkerRuntimePort;
   readonly retention: ProviderWorkerRetentionPort;
+  readonly presence?: ProviderWorkerPresencePort;
   readonly logger: ProviderWorkerLogger;
   readonly workerId: string;
   readonly pollIntervalMilliseconds?: number;
@@ -211,6 +236,15 @@ export class ProviderWorkerRuntime {
     this.#sleeper = dependencies.sleeper ?? defaultSleeper;
   }
 
+  /**
+   * The identity this instance stamps on every schedule claim and import-run
+   * lease. It is the same string the instance publishes as its presence record,
+   * which is how the fleet view attributes a held run to a live worker.
+   */
+  get workerId(): string {
+    return this.dependencies.workerId;
+  }
+
   async start(): Promise<void> {
     if (this.#running) throw new Error("Provider worker is already running.");
     this.#running = true;
@@ -259,6 +293,17 @@ export class ProviderWorkerRuntime {
             failureCode: "CATALOG_RETENTION_RUNTIME_ERROR",
           });
         });
+    // Registration is durable but best-effort: an instance that cannot publish
+    // its presence still performs pipeline work.
+    try {
+      await this.dependencies.presence?.start();
+    } catch {
+      this.log({
+        level: "error",
+        event: "provider_worker_presence_degraded",
+        failureCode: "WORKER_PRESENCE_START_FAILED",
+      });
+    }
     try {
       while (!this.#stopRequested) {
         const cycle = this.runCycle();
@@ -278,6 +323,7 @@ export class ProviderWorkerRuntime {
           break;
         }
         if (this.#stopRequested) break;
+        this.reportActivity(IDLE_WORKER_ACTIVITY);
         const controller = new AbortController();
         this.#sleepController = controller;
         await this.#sleeper.sleep(
@@ -304,9 +350,35 @@ export class ProviderWorkerRuntime {
       }
       this.#sleepController = null;
       this.#running = false;
+      try {
+        await this.dependencies.presence?.stop();
+      } catch {
+        this.log({
+          level: "error",
+          event: "provider_worker_presence_degraded",
+          failureCode: "WORKER_PRESENCE_STOP_FAILED",
+        });
+      }
       this.log({ level: "info", event: "provider_worker_stopped" });
     }
     if (promotionFailed) throw promotionFailure;
+  }
+
+  /**
+   * Publishes coarse current activity. Presence is observational, so a throwing
+   * reporter is swallowed rather than allowed to abort the cycle.
+   */
+  private reportActivity(activity: WorkerActivity): void {
+    try {
+      this.dependencies.presence?.activity(activity);
+    } catch {
+      this.log({
+        level: "error",
+        event: "provider_worker_presence_degraded",
+        failureCode: "WORKER_PRESENCE_ACTIVITY_FAILED",
+        activityKind: activity.kind,
+      });
+    }
   }
 
   stop(): void {
@@ -332,11 +404,18 @@ export class ProviderWorkerRuntime {
       return result;
     } finally {
       this.#cycleInProgress = false;
+      this.reportActivity(IDLE_WORKER_ACTIVITY);
     }
   }
 
   private async processEstimatedEv(): Promise<void> {
     if (!this.dependencies.estimatedEv) return;
+    this.reportActivity({
+      kind: "estimated_ev",
+      organizationId: null,
+      providerId: null,
+      runId: null,
+    });
     let result: EstimatedEvRecomputationCycleResult;
     try {
       result = await this.dependencies.estimatedEv.runCycle();
@@ -390,6 +469,12 @@ export class ProviderWorkerRuntime {
   }
 
   private async processRetention(): Promise<void> {
+    this.reportActivity({
+      kind: "retention",
+      organizationId: null,
+      providerId: null,
+      runId: null,
+    });
     let result: ProtectedPayloadRetentionCycleResult;
     try {
       result = await this.dependencies.retention.runCycle();
@@ -401,7 +486,7 @@ export class ProviderWorkerRuntime {
       });
       return;
     }
-    const failures = safeCount(result.failed);
+    const failures = safeCount(result.failed) + safeCount(result.prunedFailures);
     this.log({
       level: failures > 0 ? "error" : "info",
       event: "provider_retention_cycle_finished",
@@ -411,6 +496,8 @@ export class ProviderWorkerRuntime {
       retentionFailures: failures,
       retentionDeferredOrganizations: safeCount(result.deferredOrganizations),
       retentionCapReached: result.capReached === true,
+      retentionPruned: safeCount(result.prunedRecords),
+      retentionPruneFailures: safeCount(result.prunedFailures),
       ...(failures > 0 ? { failureCode: "RETENTION_BATCH_FAILED" } : {}),
     });
   }
@@ -424,6 +511,12 @@ export class ProviderWorkerRuntime {
     },
   ): Promise<"failed" | "idle" | "processed"> {
     let scheduled: ProviderSchedulerResult;
+    this.reportActivity({
+      kind: "scheduling",
+      organizationId: null,
+      providerId: null,
+      runId: null,
+    });
     try {
       scheduled = await this.dependencies.scheduler.runOnce(
         this.dependencies.workerId,
@@ -457,6 +550,14 @@ export class ProviderWorkerRuntime {
       });
       return "processed";
     }
+    // The claimed run is stamped with this instance's lease owner identity, so
+    // publishing the same identity's activity ties a stalled run to a name.
+    this.reportActivity({
+      kind: "importing",
+      organizationId: scheduled.organizationId,
+      providerId: scheduled.providerId,
+      runId: scheduled.runId,
+    });
     try {
       const run = await this.dependencies.imports.executeImport({
         organizationId: scheduled.organizationId,
@@ -498,6 +599,14 @@ export class ProviderWorkerRuntime {
     contentions: number;
     failures: number;
   }): Promise<"failed" | "idle" | "processed"> {
+    // The queue claim resolves its run inside the import service, so the
+    // instance publishes the claim itself rather than a run it cannot name yet.
+    this.reportActivity({
+      kind: "scheduling",
+      organizationId: null,
+      providerId: null,
+      runId: null,
+    });
     try {
       const result = await this.dependencies.imports.executeNextImport({
         workerId: this.dependencies.workerId,

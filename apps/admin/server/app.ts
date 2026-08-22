@@ -21,6 +21,18 @@ import {
   createOperationalHealthRouter,
   type OperationalHealthRouterDependencies,
 } from "./routes/operational-health.ts";
+import {
+  createBackgroundWorkRouter,
+  type BackgroundWorkRouterDependencies,
+} from "./routes/background-work.ts";
+import {
+  createProductUsersRouter,
+  type ProductUsersRouterDependencies,
+} from "./routes/product-users.ts";
+import {
+  createWorkerFleetRouter,
+  type WorkerFleetRouterDependencies,
+} from "./routes/worker-fleet.ts";
 
 export interface AdminAuthHttpDependencies {
   service: AuthService;
@@ -47,6 +59,15 @@ export interface AdminAppDependencies {
     OperationalHealthRouterDependencies,
     "auth" | "cookiePolicy"
   >;
+  backgroundWork?: Omit<
+    BackgroundWorkRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  productUsers?: Omit<
+    ProductUsersRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
@@ -142,6 +163,38 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         "/api/operational-alerts",
         createOperationalAlertsRouter({
           ...dependencies.operationalAlerts,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.backgroundWork) {
+      app.use(
+        "/api/background-work",
+        createBackgroundWorkRouter({
+          ...dependencies.backgroundWork,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.workerFleet) {
+      app.use(
+        "/api/worker-fleet",
+        createWorkerFleetRouter({
+          ...dependencies.workerFleet,
+          auth: service,
+          cookiePolicy,
+        }),
+      );
+    }
+    if (dependencies.productUsers) {
+      app.use(
+        "/api/product-users",
+        createProductUsersRouter({
+          ...dependencies.productUsers,
           auth: service,
           cookiePolicy,
           sameOrigin,

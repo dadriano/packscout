@@ -8,6 +8,7 @@ import {
 } from "@packscout/contracts";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { productUserDocumentValidator } from "./productUserRecords";
 import { repackSearchRowValidator } from "./publicRepackValidation";
 
 const sha256Validator = v.string();
@@ -1350,4 +1351,10 @@ export default defineSchema({
     "ownerTokenIdentifier",
     "publicCollectibleId",
   ]),
+
+  productUsers: defineTable(productUserDocumentValidator)
+    .index("by_subject", ["subject"])
+    .index("by_last_seen_at", ["lastSeenAt"])
+    .index("by_email", ["email"])
+    .index("by_wallet_address_key", ["walletAddressKey"]),
 });

@@ -102,6 +102,66 @@ export function readBase64Key(
   return decoded;
 }
 
+/** Shortest accepted product-backend integration secret. */
+const MINIMUM_DIRECTORY_TOKEN_LENGTH = 32;
+
+export interface ProductUserDirectoryConfig {
+  /** Origin of the product backend's server-to-server admin surface. */
+  readonly baseUrl: string;
+  /** Bearer secret for that surface. Server-side only, never serialized. */
+  readonly token: string;
+}
+
+/**
+ * Development origins that may be reached over cleartext. A request to any of
+ * these never leaves the machine, so it cannot be observed on a network.
+ */
+const CLEARTEXT_DIRECTORY_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+function isLoopbackDevelopmentOrigin(parsed: URL): boolean {
+  return CLEARTEXT_DIRECTORY_HOSTS.has(parsed.hostname.toLowerCase());
+}
+
+/**
+ * Reads the product-user directory integration configuration.
+ *
+ * Unlike the admin's own secrets, this pair is deliberately optional and never
+ * throws: the admin must stay operable for every pipeline workflow when the
+ * product-backend integration is absent or mis-set. An unusable pair yields
+ * `null`, and the directory route degrades to a bounded "unconfigured" state
+ * instead of taking the service down. The token is only ever compared and
+ * forwarded as a header; it is never returned in an error message.
+ *
+ * A remote origin must be HTTPS. Every call on this integration carries the
+ * bearer secret, and subject keys and search terms besides, so a mistyped
+ * `http://` origin would put a credential and personal data on the wire in
+ * cleartext. Only an explicit loopback origin — the local product backend a
+ * developer runs — is allowed to be cleartext, because it never reaches a
+ * network. Anything else yields `null` and the directory reads as unconfigured
+ * rather than silently disclosing.
+ */
+export function readProductUserDirectoryConfig(input: {
+  baseUrl: string | undefined;
+  token: string | undefined;
+}): ProductUserDirectoryConfig | null {
+  const token = input.token?.trim() ?? "";
+  const candidate = input.baseUrl?.trim() ?? "";
+  if (token.length < MINIMUM_DIRECTORY_TOKEN_LENGTH || candidate.length === 0) {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol === "https:") return { baseUrl: parsed.origin, token };
+  if (parsed.protocol === "http:" && isLoopbackDevelopmentOrigin(parsed)) {
+    return { baseUrl: parsed.origin, token };
+  }
+  return null;
+}
+
 export function readPositiveDuration(
   value: string | undefined,
   fallbackMs: number,
@@ -110,6 +170,29 @@ export function readPositiveDuration(
   const candidate = value === undefined ? fallbackMs : Number(value);
   if (!Number.isSafeInteger(candidate) || candidate <= 0) {
     throw new Error(`${variableName} must be a positive integer in milliseconds.`);
+  }
+  return candidate;
+}
+
+/**
+ * A bounded whole-number setting, such as a queue-depth alert threshold. The
+ * upper bound keeps a mistyped value from disabling a condition outright.
+ */
+export function readPositiveCount(
+  value: string | undefined,
+  fallback: number,
+  variableName: string,
+  maximum = 1_000_000,
+): number {
+  const candidate = value === undefined ? fallback : Number(value);
+  if (
+    !Number.isSafeInteger(candidate) ||
+    candidate <= 0 ||
+    candidate > maximum
+  ) {
+    throw new Error(
+      `${variableName} must be an integer between 1 and ${maximum}.`,
+    );
   }
   return candidate;
 }

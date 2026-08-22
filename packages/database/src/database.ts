@@ -27,11 +27,21 @@ export const PACKSCOUT_TRANSACTION_OPTIONS = Object.freeze({
   timeout: 30_000,
 });
 
-const EXPECTED_MIGRATION = Object.freeze({
-  name: "20260816040000_catalog_promotion_retention",
-  checksum: "98e762ab1ec5d877b418a5bebd8f9d605f557e5a8cf6d386a56a0d269ad3a865",
-  tableCount: 56,
-});
+const EXPECTED_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    name: "20260816040000_catalog_promotion_retention",
+    checksum: "98e762ab1ec5d877b418a5bebd8f9d605f557e5a8cf6d386a56a0d269ad3a865",
+  }),
+  Object.freeze({
+    name: "20260819000000_worker_presence",
+    checksum: "25dd46c5d182320654c3e5382b39f81fb82ce194717a3237e6dcfa7dc33d3608",
+  }),
+  Object.freeze({
+    name: "20260820000000_machinery_alerts",
+    checksum: "ef91ca0c3cc94a6d9e87215748e2efb35b687441a8d912f635ed4f1d88cdaddc",
+  }),
+]);
+const EXPECTED_TABLE_COUNT = 57;
 
 interface MigrationReadinessRow {
   migrationName: string;
@@ -59,19 +69,24 @@ async function assertMigrationReadiness(
                and table_class.relname <> '_prisma_migrations'
            ) as "tableCount"
     from public."_prisma_migrations" as migration
-    where migration.migration_name = ${EXPECTED_MIGRATION.name}
+    where migration.migration_name in (${Prisma.join(
+      EXPECTED_MIGRATIONS.map(({ name }) => name),
+    )})
     order by migration.started_at desc
-    limit 1
   `);
-  const migration = rows[0];
-  if (
-    !migration
-    || migration.checksum !== EXPECTED_MIGRATION.checksum
-    || migration.finishedAt === null
-    || migration.rolledBackAt !== null
-    || migration.tableCount !== EXPECTED_MIGRATION.tableCount
-  ) {
-    throw new Error("schema not ready");
+  for (const expected of EXPECTED_MIGRATIONS) {
+    const migration = rows.find(
+      (row) => row.migrationName === expected.name,
+    );
+    if (
+      !migration
+      || migration.checksum !== expected.checksum
+      || migration.finishedAt === null
+      || migration.rolledBackAt !== null
+      || migration.tableCount !== EXPECTED_TABLE_COUNT
+    ) {
+      throw new Error("schema not ready");
+    }
   }
 }
 

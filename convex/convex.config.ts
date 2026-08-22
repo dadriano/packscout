@@ -18,6 +18,9 @@ export default defineApp({
     PACKSCOUT_HEAT_PUBLICATION_KEY_IDS: v.optional(v.string()),
     PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS: v.optional(v.string()),
     PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES: v.optional(v.string()),
+    // Server-to-server secret for the admin product-user directory integration.
+    // Absent by default: the HTTP surface fails closed until it is configured.
+    PACKSCOUT_ADMIN_DIRECTORY_TOKEN: v.optional(v.string()),
     PRIVY_APP_ID: v.optional(v.string()),
   },
 });

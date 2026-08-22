@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePackScoutAuth } from "./AuthContext.client";
+import { useAccountNotice } from "./SavedItemsContext.client";
 import styles from "./AccountControl.module.css";
 
 function AccountIcon() {
@@ -20,6 +21,13 @@ function AccountIcon() {
 
 export function AccountControl() {
   const auth = usePackScoutAuth();
+  /**
+   * An account-level notice, today only the suspended-account explanation. It
+   * lives in the account menu because that is where this person looks when
+   * something about their account, rather than one item, has changed. Public
+   * browsing is unaffected, so nothing here interrupts the page.
+   */
+  const accountNotice = useAccountNotice();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
   const [logoutState, setLogoutState] = useState<
@@ -108,22 +116,39 @@ export function AccountControl() {
         ref={detailsRef}
       >
         <summary
-          aria-label={auth.status === "error" ? "Session issue" : "Account menu"}
+          aria-label={
+            auth.status === "error"
+              ? "Session issue"
+              : accountNotice
+                ? "Account suspended"
+                : "Account menu"
+          }
           className={styles.trigger}
           ref={summaryRef}
         >
           <AccountIcon />
-          <span>{auth.status === "error" ? "Session issue" : "Account"}</span>
+          <span>
+            {auth.status === "error"
+              ? "Session issue"
+              : accountNotice
+                ? "Account suspended"
+                : "Account"}
+          </span>
           <span aria-hidden="true" className={styles.chevron}>⌄</span>
         </summary>
         <div className={styles.panel}>
           <p className={styles.eyebrow}>
-            {auth.status === "error" ? "Session unavailable" : "Signed in"}
+            {auth.status === "error"
+              ? "Session unavailable"
+              : accountNotice
+                ? "Account suspended"
+                : "Signed in"}
           </p>
           <p className={styles.description}>
             {auth.status === "error"
               ? "Your session could not be verified. Sign out, then try again."
-              : "Saved repacks and chase collectibles sync to this account."}
+              : (accountNotice ??
+                "Saved repacks and chase collectibles sync to this account.")}
           </p>
           <button
             className={styles.signOut}
