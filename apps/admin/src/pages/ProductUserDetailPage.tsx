@@ -3,6 +3,7 @@ import {
   boundedProductUserSubjectLabel,
   describeProductUserEstimatedEv,
   describeProductUserIdentity,
+  describeProductUserRepackAvailability,
   type ProductUserDetail,
   type ProductUserSavedCollectible,
   type ProductUserSavedRepack,
@@ -56,7 +57,7 @@ function repackRow(item: ProductUserSavedRepack): SavedItemRow {
       { term: "Vendor", value: item.vendorDisplayName },
       {
         term: "Availability",
-        value: item.availability === "active" ? "Available now" : "Sold out",
+        value: describeProductUserRepackAvailability(item.availability),
       },
       {
         term: "Estimated value",
@@ -123,7 +124,8 @@ export function ProductUserDetailPage() {
         setForbidden(false);
       })
       .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (error instanceof DOMException && error.name === "AbortError")
+          return;
         setDetail(null);
         if (error instanceof AdminApiError && error.status === 403) {
           setForbidden(true);
@@ -142,16 +144,19 @@ export function ProductUserDetailPage() {
    * place. Nothing else about the account changed, and the saved-item
    * collections below are deliberately left exactly as they were.
    */
-  const applyStandingChange = useCallback((change: ProductUserStandingChange) => {
-    setDetail((current) =>
-      current === null
-        ? current
-        : {
-            ...current,
-            user: { ...current.user, standing: change.user.standing },
-          },
-    );
-  }, []);
+  const applyStandingChange = useCallback(
+    (change: ProductUserStandingChange) => {
+      setDetail((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              user: { ...current.user, standing: change.user.standing },
+            },
+      );
+    },
+    [],
+  );
 
   const backToUsers = (
     <Link className="admin-button admin-button-secondary" to="/users">

@@ -158,7 +158,7 @@ async function seed() {
       requestedCursor: index === 0 ? null : `cursor-${index}`,
       nextCursor: `cursor-${index + 1}`,
       hasMore: false,
-      payload: { catalog: [envelope], pulls: [], sales: [], rawSecret },
+      payload: { catalog: [envelope], pulls: [], trades: [], rawSecret },
       records: [{
         recordKind: "catalog",
         recordIndex: 0,
@@ -178,11 +178,11 @@ async function seed() {
       ...(index === 0
         ? {
             quarantines: [{
-              recordKind: "sale" as const,
+              recordKind: "trade" as const,
               recordIndex: 0,
               externalId: "private-user",
               reasonCode: "INVALID_SALE",
-              fieldPath: "sales[0].wallet",
+              fieldPath: "trades[0].wallet",
               sanitizedSummary: "Sale envelope failed validation.",
               payload: { rawSecret },
             }],
@@ -255,7 +255,7 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
       pages: 1,
       catalog: 1,
       pulls: 0,
-      sales: 0,
+      trades: 0,
       accepted: 0,
       unchanged: 0,
       revised: 1,
@@ -278,7 +278,7 @@ test("admin operation reads are keyset-paginated, tenant-scoped, and reconcile r
     assert.equal(nextRuns.items[0]?.counters.unchanged, 1);
     assert.equal(nextRuns.items[1]?.counters.accepted, 1);
     assert.equal(nextRuns.items[1]?.counters.quarantined, 1);
-    assert.equal(nextRuns.items[1]?.counters.sales, 1);
+    assert.equal(nextRuns.items[1]?.counters.trades, 1);
     const scheduledRuns = await runs.listPage({
       organizationId: ids.organization,
       state: "succeeded",
@@ -334,7 +334,7 @@ test("quarantine keysets apply run, kind, reason, and effective-state filters be
       ids.organization,
       {
         runId: ids.acceptedRun,
-        recordKind: "sale",
+        recordKind: "trade",
         reasonCode: "INVALID_SALE",
         state: "retrying",
         limit: 1,

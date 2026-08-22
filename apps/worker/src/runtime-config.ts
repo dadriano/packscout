@@ -1,9 +1,18 @@
 import { hostname } from "node:os";
-import type { ProviderRuntimeEnvironment } from "@packscout/services";
+import {
+  ProviderSourceSupervisorConfigurationError,
+  readProviderSourceSupervisorConfiguration,
+  type ProviderSourceSupervisorConfiguration,
+} from "./source-supervisor-runtime-config.ts";
+
+export {
+  ProviderSourceSupervisorConfigurationError,
+  readProviderSourceSupervisorConfiguration,
+  type ProviderSourceSupervisorConfiguration,
+} from "./source-supervisor-runtime-config.ts";
 
 const organizationIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
 const workerHostPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const workerVersionPattern = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/;
 const canonicalBase64Pattern =
@@ -29,6 +38,9 @@ export type ProviderWorkerConfigurationErrorCode =
   | "RETENTION_MAX_BATCHES_INVALID"
   | "RUN_HEARTBEAT_STALE_INVALID"
   | "SCHEDULE_CLAIM_LEASE_INVALID"
+  | "SOURCE_CONNECTION_KEY_INVALID"
+  | "SOURCE_CONNECTION_KEY_VERSION_INVALID"
+  | "SOURCE_DATABASE_VOLUME_PATH_INVALID"
   | "WORKER_HOST_INVALID"
   | "WORKER_ID_INVALID"
   | "WORKER_VERSION_INVALID";
@@ -40,13 +52,11 @@ export class ProviderWorkerConfigurationError extends Error {
   }
 }
 
-export interface ProviderWorkerConfiguration {
-  readonly actorPseudonymKey: Uint8Array;
+export interface ProviderWorkerConfiguration
+  extends ProviderSourceSupervisorConfiguration {
   readonly credentialKey: Uint8Array;
   readonly credentialKeyVersion: number;
   readonly databasePoolMaximum: number;
-  readonly databaseUrl: string;
-  readonly environment: ProviderRuntimeEnvironment;
   readonly estimatedEvVerifiedUsdStablecoins: readonly string[];
   readonly heartbeatIntervalMilliseconds: number;
   readonly importRunLeaseMilliseconds: number;
@@ -61,16 +71,7 @@ export interface ProviderWorkerConfiguration {
   readonly runHeartbeatStaleAfterMilliseconds: number;
   readonly scheduleClaimLeaseMilliseconds: number;
   readonly workerHost: string;
-  readonly workerId: string;
   readonly workerVersion: string;
-}
-
-function environmentFor(value: string | undefined): ProviderRuntimeEnvironment {
-  if (value === undefined || value === "development" || value === "local") {
-    return "local";
-  }
-  if (value === "production" || value === "test") return value;
-  throw new ProviderWorkerConfigurationError("NODE_ENV_INVALID");
 }
 
 function boundedInteger(
@@ -91,24 +92,6 @@ function boundedInteger(
   return parsed;
 }
 
-function databaseUrlFor(value: string | undefined): string {
-  if (!value || value.length > 2_048 || /[\r\n]/.test(value)) {
-    throw new ProviderWorkerConfigurationError("DATABASE_URL_INVALID");
-  }
-  try {
-    const parsed = new URL(value);
-    if (
-      (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") ||
-      parsed.hostname.length === 0
-    ) {
-      throw new Error("invalid");
-    }
-  } catch {
-    throw new ProviderWorkerConfigurationError("DATABASE_URL_INVALID");
-  }
-  return value;
-}
-
 function keyFor(
   value: string | undefined,
   code: "ACTOR_KEY_INVALID" | "CREDENTIAL_KEY_INVALID",
@@ -121,14 +104,6 @@ function keyFor(
     throw new ProviderWorkerConfigurationError(code);
   }
   return new Uint8Array(decoded);
-}
-
-function workerIdFor(value: string | undefined, fallback: string): string {
-  const resolved = value ?? fallback;
-  if (!workerIdPattern.test(resolved)) {
-    throw new ProviderWorkerConfigurationError("WORKER_ID_INVALID");
-  }
-  return resolved;
 }
 
 function publicOrganizationIdFor(value: string | undefined): string {
@@ -196,6 +171,18 @@ export function readProviderWorkerConfiguration(
   environment: NodeJS.ProcessEnv,
   fallbackWorkerId: string,
 ): ProviderWorkerConfiguration {
+  let sourceSupervisor: ProviderSourceSupervisorConfiguration;
+  try {
+    sourceSupervisor = readProviderSourceSupervisorConfiguration(
+      environment,
+      fallbackWorkerId,
+    );
+  } catch (error) {
+    if (error instanceof ProviderSourceSupervisorConfigurationError) {
+      throw new ProviderWorkerConfigurationError(error.code);
+    }
+    throw error;
+  }
   const heartbeatIntervalMilliseconds = boundedInteger(
     environment.PACKSCOUT_WORKER_HEARTBEAT_MS,
     15_000,
@@ -216,10 +203,7 @@ export function readProviderWorkerConfiguration(
     throw new ProviderWorkerConfigurationError("PRESENCE_STALE_INVALID");
   }
   return Object.freeze({
-    actorPseudonymKey: keyFor(
-      environment.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
-      "ACTOR_KEY_INVALID",
-    ),
+    ...sourceSupervisor,
     credentialKey: keyFor(
       environment.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64,
       "CREDENTIAL_KEY_INVALID",
@@ -238,8 +222,6 @@ export function readProviderWorkerConfiguration(
       50,
       "DATABASE_POOL_MAX_INVALID",
     ),
-    databaseUrl: databaseUrlFor(environment.PACKSCOUT_DATABASE_URL),
-    environment: environmentFor(environment.NODE_ENV),
     estimatedEvVerifiedUsdStablecoins: verifiedUsdStablecoinsFor(
       environment.PACKSCOUT_ESTIMATED_EV_VERIFIED_USD_STABLECOINS,
     ),
@@ -312,7 +294,6 @@ export function readProviderWorkerConfiguration(
       "SCHEDULE_CLAIM_LEASE_INVALID",
     ),
     workerHost: workerHostFor(environment.PACKSCOUT_WORKER_HOST),
-    workerId: workerIdFor(environment.PACKSCOUT_WORKER_ID, fallbackWorkerId),
     workerVersion: workerVersionFor(environment.PACKSCOUT_WORKER_VERSION),
   });
 }

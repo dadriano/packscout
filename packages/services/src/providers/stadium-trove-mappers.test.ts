@@ -36,11 +36,18 @@ function sample(platform: keyof typeof expectedHashes): ProviderFeedPageV1 | nul
     expectedHashes[platform],
     `${platform} sample changed; review and version its mapper fixture contract`,
   );
-  const value = JSON.parse(bytes.toString("utf8")) as Omit<
-    ProviderFeedPageV1,
-    "has_more" | "next_cursor"
-  >;
-  return { ...value, next_cursor: "sample-end", has_more: false };
+  const rawEvidence = JSON.parse(bytes.toString("utf8")) as {
+    readonly catalog: ProviderFeedPageV1["catalog"];
+    readonly pulls: ProviderFeedPageV1["pulls"];
+    readonly sales: ProviderFeedPageV1["trades"];
+  };
+  return {
+    catalog: rawEvidence.catalog,
+    pulls: rawEvidence.pulls,
+    trades: rawEvidence.sales,
+    next_cursor: "sample-end",
+    has_more: false,
+  };
 }
 
 async function mapAll(mapper: ProviderMappingAdapter, page: ProviderFeedPageV1) {
@@ -55,7 +62,7 @@ async function mapAll(mapper: ProviderMappingAdapter, page: ProviderFeedPageV1) 
     recordIndexes: {
       catalog: page.catalog.map((_, index) => index),
       pulls: page.pulls.map((_, index) => index),
-      sales: page.sales.map((_, index) => index),
+      trades: page.trades.map((_, index) => index),
     },
   });
 }
@@ -160,7 +167,7 @@ test("Stadium Vault sample maps complete effective odds, top-pull evidence, and 
   const projected = candidates(first);
   assert.equal(byKind(projected, "pack").length, 14);
   assert.equal(byKind(projected, "pull").length, 15);
-  assert.equal(byKind(projected, "sale").length, 0);
+  assert.equal(byKind(projected, "market_event").length, 0);
   assert.equal(byKind(projected, "ev_input").length, 14);
   assert.equal(byKind(projected, "catalog_asset").length, 168);
   assert.ok(
@@ -189,7 +196,7 @@ test("Trove sample maps active tier distributions, grail evidence, and pseudonym
   const projected = candidates(first);
   assert.equal(byKind(projected, "pack").length, 15);
   assert.equal(byKind(projected, "pull").length, 15);
-  assert.equal(byKind(projected, "sale").length, 0);
+  assert.equal(byKind(projected, "market_event").length, 0);
   assert.equal(byKind(projected, "ev_input").length, 15);
   assert.equal(byKind(projected, "catalog_asset").length, 180);
   assert.ok(
@@ -213,7 +220,7 @@ test("Stadium Vault and Trove mapper drift is isolated to the affected record", 
       data: { title: "Missing price" },
     }],
     pulls: [],
-    sales: [],
+    trades: [],
     next_cursor: "end",
     has_more: false,
   };
@@ -226,7 +233,7 @@ test("Stadium Vault and Trove mapper drift is isolated to the affected record", 
       data: { name: "Missing price and draw count" },
     }],
     pulls: [],
-    sales: [],
+    trades: [],
     next_cursor: "end",
     has_more: false,
   };

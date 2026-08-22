@@ -1,31 +1,23 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
-  PrismaImportRunRepository,
-  PrismaProviderConfigurationRepository,
-  PrismaProviderHealthRepository,
-  PrismaProviderScheduleRepository,
   PrismaWorkerPresenceRepository,
   IngestionPersistenceRepository,
   PROTECTED_PAYLOAD_RETENTION_DAYS,
   type PackscoutPrismaClient,
 } from "@packscout/database";
 import {
-  AesGcmProviderCredentialCipher,
-  CatalogProjectionService,
-  createProviderMappingAdapterRegistryFromManifest,
-  DefaultProviderImportPagePlanner,
-  EventProjectionService,
-  HmacProviderActorPseudonymizer,
-  HttpCursorAdapter,
-  ProviderImportService,
-  ProviderImportWorkerService,
-  ProviderProjectionService,
-  ProviderSchedulerService,
-  ProviderTransportAdapterRegistry,
   WorkerPresenceService,
   type OperationalObservability,
-  type ProviderActorKeyer,
 } from "@packscout/services";
+import {
+  createProviderSourceImportComposition,
+  type ProviderSourceImportComposition,
+} from "./provider-source-import-composition.ts";
+
+export {
+  createProviderSourceImportComposition,
+  type ProviderSourceImportComposition,
+} from "./provider-source-import-composition.ts";
 import { createProviderWorkerOperationalRuntime } from "./provider-worker-operational-runtime.ts";
 import { createProviderWorkerEstimatedEvProcessor } from "./provider-worker-estimated-ev.ts";
 import {
@@ -80,28 +72,18 @@ export interface ProviderWorkerCompositionInput {
   readonly promotion?: PromotionV2WorkerRuntimePort;
   readonly heatPromotion?: HeatPromotionWorkerRuntimePort;
   readonly catalogRetention?: CatalogRetentionWorkerRuntimePort;
+  readonly sourceSupervisor?: Readonly<{
+    start(): Promise<void>;
+    stop(): Promise<void> | void;
+  }>;
   readonly heartbeatTimer?: ProviderWorkerHeartbeatTimer;
-}
-
-function createActorKeyer(key: Uint8Array): ProviderActorKeyer {
-  const secret = Buffer.from(key);
-  if (secret.byteLength < 32) {
-    throw new Error("Provider actor key must be at least 32 bytes.");
-  }
-  return {
-    keyFor({ organizationId, operatorId }) {
-      return `actor:v1:${createHmac("sha256", secret)
-        .update(
-          `packscout-provider-request:v1\u0000${organizationId}\u0000${operatorId}`,
-        )
-        .digest("hex")}`;
-    },
-  };
 }
 
 export function createProviderWorkerRuntime(
   input: ProviderWorkerCompositionInput,
-): ProviderWorkerRuntime {
+): ProviderWorkerRuntime & {
+  readonly sourceImports: ProviderSourceImportComposition;
+} {
   const clock = { now: () => new Date() };
   const ids = { id: randomUUID };
   // One resolved settings object drives the collaborators below and is the same
@@ -143,59 +125,24 @@ export function createProviderWorkerRuntime(
       ],
     },
   });
-  const runs = new PrismaImportRunRepository(input.database);
   const pages = new IngestionPersistenceRepository(input.database, {
     retentionDays: PROTECTED_PAYLOAD_RETENTION_DAYS,
     actorPseudonymKey: input.configuration.actorPseudonymKey,
   });
-  const imports = new ProviderImportService({
-    runs,
-    revisions: new PrismaProviderConfigurationRepository(input.database),
-    pages,
-    transportAdapters: new ProviderTransportAdapterRegistry([
-      new HttpCursorAdapter(),
-    ]),
-    pagePlanner: new DefaultProviderImportPagePlanner(
-      createProviderMappingAdapterRegistryFromManifest(),
-      new ProviderProjectionService(
-        new CatalogProjectionService(),
-        new EventProjectionService(
-          new HmacProviderActorPseudonymizer(
-            input.configuration.actorPseudonymKey,
-          ),
-        ),
-      ),
-    ),
-    credentialCipher: new AesGcmProviderCredentialCipher({
-      primaryVersion: input.configuration.credentialKeyVersion,
-      keys: new Map([
-        [
-          input.configuration.credentialKeyVersion,
-          input.configuration.credentialKey,
-        ],
-      ]),
-    }),
-    actorKeyer: createActorKeyer(input.configuration.actorPseudonymKey),
-    clock,
-    ids,
-    environment: input.configuration.environment,
-    leaseDurationMs: effectiveSettings.importRunLeaseMs,
+  const sourceImports = createProviderSourceImportComposition({
+    database: input.database,
+    actorPseudonymKey: input.configuration.actorPseudonymKey,
   });
-  return new ProviderWorkerRuntime({
-    scheduler: new ProviderSchedulerService({
-      schedules: new PrismaProviderScheduleRepository(input.database),
-      imports,
-      clock,
-      leaseMilliseconds: effectiveSettings.scheduleClaimLeaseMs,
-    }),
-    imports: new ProviderImportWorkerService(
-      imports,
-      new PrismaProviderHealthRepository(input.database),
-      {
-        events: operational.events,
-        reporter: operational.reporter,
+  const runtime = new ProviderWorkerRuntime({
+    // Task 007 owns durable source schedule claims and execution. Keeping this
+    // lane idle makes Task 006 request-only and prevents a legacy feed fallback.
+    scheduler: { async runOnce() { return { kind: "idle" }; } },
+    imports: {
+      async executeImport() {
+        throw new Error("Provider source execution requires the Task 007 supervisor.");
       },
-    ),
+      async executeNextImport() { return { kind: "idle" }; },
+    },
     estimatedEv: createProviderWorkerEstimatedEvProcessor({
       database: input.database,
       canonical: pages,
@@ -208,6 +155,7 @@ export function createProviderWorkerRuntime(
     promotion: input.promotion,
     heatPromotion: input.heatPromotion,
     catalogRetention: input.catalogRetention,
+    sourceSupervisor: input.sourceSupervisor,
     retention,
     presence: new ProviderWorkerPresence({
       service: new WorkerPresenceService({
@@ -225,4 +173,5 @@ export function createProviderWorkerRuntime(
     pollIntervalMilliseconds: input.configuration.pollIntervalMilliseconds,
     maximumClaimsPerCycle: input.configuration.maximumClaimsPerCycle,
   });
+  return Object.assign(runtime, { sourceImports });
 }

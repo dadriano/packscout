@@ -37,6 +37,125 @@ test("provider projection is stable for shuffled canonical source rows", () => {
   assert.equal(ordered.repackChases.length, 1);
 });
 
+test("provider projection copies four canonical availability states unchanged", () => {
+  for (const availability of [
+    "available",
+    "unavailable",
+    "unknown",
+    "sold_out",
+  ] as const) {
+    const snapshot = providerFixtureSnapshot();
+    const revisions = snapshot.revisions.map((revision) =>
+      revision.recordKind === "pack"
+        ? {
+            ...revision,
+            content: {
+              ...(revision.content as Record<string, unknown>),
+              availability,
+              availabilityProvenance:
+                availability === "sold_out"
+                  ? {
+                      kind: "explicit_authoritative_sold_out",
+                      authority: "provider_explicit_sold_out",
+                    }
+                  : {
+                      kind: "canonical_provider_observation",
+                      observedAvailability: availability,
+                    },
+            },
+          }
+        : revision,
+    );
+    const projection = projectProviderCatalogRelease({
+      configuration: providerFixtureApprovedConfiguration(),
+      platformKey: "alpha",
+      revisions,
+      repackIdentities: snapshot.repackIdentities,
+    });
+
+    assert.equal(projection.repacks[0]?.availability, availability);
+    assert.equal(
+      projection.repacks[0]?.actionAvailability.promo,
+      availability === "available",
+    );
+    assert.equal(
+      projection.repacks[0]?.actions.promo === undefined,
+      availability !== "available",
+    );
+  }
+});
+
+test("provider projection rejects the legacy active and disabled vocabulary", () => {
+  for (const availability of ["active", "disabled"] as const) {
+    const snapshot = providerFixtureSnapshot();
+    const revisions = snapshot.revisions.map((revision) =>
+      revision.recordKind === "pack"
+        ? {
+            ...revision,
+            content: {
+              ...(revision.content as Record<string, unknown>),
+              availability,
+            },
+          }
+        : revision,
+    );
+    assert.throws(
+      () => projectProviderCatalogRelease({
+        configuration: providerFixtureApprovedConfiguration(),
+        platformKey: "alpha",
+        revisions,
+        repackIdentities: snapshot.repackIdentities,
+      }),
+      { message: "CANONICAL_PROJECTION_INVALID" },
+    );
+  }
+});
+
+test("provider projection rejects bare or contradictory sold-out provenance", () => {
+  const snapshot = providerFixtureSnapshot();
+  for (const contentPatch of [
+    {
+      availability: "sold_out",
+      availabilityProvenance: undefined,
+    },
+    {
+      availability: "sold_out",
+      availabilityProvenance: {
+        kind: "canonical_provider_observation",
+        observedAvailability: "unavailable",
+      },
+    },
+    {
+      availability: "unavailable",
+      availabilityProvenance: {
+        kind: "explicit_authoritative_sold_out",
+        authority: "provider_explicit_sold_out",
+      },
+    },
+  ] as const) {
+    const revisions = snapshot.revisions.map((revision) =>
+      revision.recordKind === "pack"
+        ? {
+            ...revision,
+            content: {
+              ...(revision.content as Record<string, unknown>),
+              ...contentPatch,
+            },
+          }
+        : revision,
+    );
+    assert.throws(
+      () => projectProviderCatalogRelease({
+        configuration: providerFixtureApprovedConfiguration(),
+        platformKey: "alpha",
+        revisions,
+        repackIdentities: snapshot.repackIdentities,
+      }),
+      { message: "CANONICAL_PROJECTION_INVALID" },
+    );
+  }
+});
+
 test("provider projection excludes unreferenced shared categories", () => {
   const unrelatedCategory = {
     publicCategoryId: "99999999-9999-5999-8999-999999999999",

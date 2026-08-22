@@ -43,12 +43,30 @@ const resolvedRepack: ProductUserSavedRepack = {
   savedAt: "2026-08-19T12:00:03.000Z",
   name: "Mythic Pokemon Gacha",
   vendorDisplayName: "Collector Crypt",
-  availability: "active",
+  availability: "available",
   estimatedEv: {
     evDollarsMinorUnits: 12_500,
     grossReturnBasisPoints: 10_500,
     confidenceBand: "high",
   },
+};
+const unavailableRepack: ProductUserSavedRepack = {
+  resolution: "resolved",
+  publicRepackId: "40000000-0000-5000-8000-000000000002",
+  savedAt: "2026-08-19T12:00:02.800Z",
+  name: "Temporarily Unavailable Pack",
+  vendorDisplayName: "Phygitals",
+  availability: "unavailable",
+  estimatedEv: null,
+};
+const unknownRepack: ProductUserSavedRepack = {
+  resolution: "resolved",
+  publicRepackId: "40000000-0000-5000-8000-000000000003",
+  savedAt: "2026-08-19T12:00:02.600Z",
+  name: "Unconfirmed Availability Pack",
+  vendorDisplayName: "ClutchPacks",
+  availability: "unknown",
+  estimatedEv: null,
 };
 const soldOutRepack: ProductUserSavedRepack = {
   resolution: "resolved",
@@ -68,7 +86,13 @@ const unresolvedRepack: ProductUserSavedRepack = {
 const detail = {
   user,
   catalogAvailable: true,
-  savedRepacks: [resolvedRepack, soldOutRepack, unresolvedRepack],
+  savedRepacks: [
+    resolvedRepack,
+    unavailableRepack,
+    unknownRepack,
+    soldOutRepack,
+    unresolvedRepack,
+  ],
   savedCollectibles: [
     {
       resolution: "resolved",
@@ -123,7 +147,10 @@ function route(
         <SessionProvider initialSession={session(permissions)}>
           <MemoryRouter initialEntries={[entry]}>
             <Routes>
-              <Route path="/users/:handle" element={<ProductUserDetailPage />} />
+              <Route
+                path="/users/:handle"
+                element={<ProductUserDetailPage />}
+              />
             </Routes>
           </MemoryRouter>
         </SessionProvider>
@@ -159,6 +186,9 @@ test("a user's identity and both saved collections render, newest save first", a
   assert.match(text, /Saved collectibles/);
   assert.match(text, /Mythic Pokemon Gacha/);
   assert.match(text, /Collector Crypt/);
+  assert.match(text, /Available now/);
+  assert.match(text, /Unavailable/);
+  assert.match(text, /Availability unknown/);
   assert.match(text, /Sold out/);
   assert.match(text, /\+\$125\.00 EV · 105% of price · high confidence/);
   assert.match(text, /No current estimate/);
@@ -171,6 +201,8 @@ test("a user's identity and both saved collections render, newest save first", a
   ].map((node) => node.textContent);
   assert.deepEqual(repackNames, [
     "Mythic Pokemon Gacha",
+    "Temporarily Unavailable Pack",
+    "Unconfirmed Availability Pack",
     "Sold Out Basketball Grails",
     "No longer in the current catalog",
   ]);
@@ -240,7 +272,10 @@ test("an item the catalog no longer carries stays listed and identified", async 
   // Its stable identifier stays on the row so it remains investigable.
   assert.match(text, /40000000-0000-5000-8000-000000000999/);
   // Such a row can vanish through the user's own saving, which is stated.
-  assert.match(text, /saving another item drops their oldest item of that kind/);
+  assert.match(
+    text,
+    /saving another item drops their oldest item of that kind/,
+  );
   assert.doesNotMatch(text, /Mythic Pokemon Gacha/);
   // The collection with nothing in it reads as empty, not as an error.
   assert.match(text, /This user has not saved any collectibles/);
@@ -376,7 +411,10 @@ test("an unknown user and an unavailable service degrade without inventing data"
   assert.match(missing, /This user is not in the directory/);
   assert.match(missing, /Nothing has been changed/);
   assert.ok(renderer.container.querySelector('[role="alert"]'));
-  assert.equal(renderer.container.querySelectorAll(".saved-items__rows").length, 0);
+  assert.equal(
+    renderer.container.querySelectorAll(".saved-items__rows").length,
+    0,
+  );
   // An unrecoverable state offers the way back rather than a pointless retry.
   assert.equal(
     [...renderer.container.querySelectorAll("a")].some(
@@ -485,7 +523,10 @@ test("a repeat action reports the authoritative standing without claiming a chan
 
   const text = pageText(renderer);
   assert.match(text, /That account was already suspended\./);
-  assert.doesNotMatch(text, /Account suspended\. Everything they saved is kept\./);
+  assert.doesNotMatch(
+    text,
+    /Account suspended\. Everything they saved is kept\./,
+  );
   // The view converges on the authoritative standing rather than an error.
   assert.match(text, /Suspended/);
   assert.doesNotMatch(text, /failed/i);

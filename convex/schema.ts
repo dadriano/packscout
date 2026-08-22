@@ -9,7 +9,10 @@ import {
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { productUserDocumentValidator } from "./productUserRecords";
-import { repackSearchRowValidator } from "./publicRepackValidation";
+import {
+  publicPackAvailabilityValidator,
+  repackSearchRowValidator,
+} from "./publicRepackValidation";
 
 const sha256Validator = v.string();
 const timestampValidator = v.string();
@@ -493,7 +496,7 @@ const publicRepackDetailValidator = v.object({
   ),
   categories: v.array(publicRepackCategoryValidator),
   collectibleTypes: v.array(collectibleTypeValidator),
-  availability: v.union(v.literal("active"), v.literal("sold_out")),
+  availability: publicPackAvailabilityValidator,
   price: priceValidator,
   evEstimates: v.object({
     vendorReported: vendorReportedEvEstimateValidator,
@@ -674,10 +677,7 @@ export const globalCatalogProviderActiveObservationValidator = v.object({
   latestAffectedSourceHeadSequence: v.string(),
   initialBackfillComplete: v.boolean(),
   affectedDerivationsSettled: v.boolean(),
-  settledSourceFreshness: v.union(
-    v.literal("fresh"),
-    v.literal("delayed"),
-  ),
+  settledSourceFreshness: v.union(v.literal("fresh"), v.literal("delayed")),
   lastSuccessfulObservationAt: timestampValidator,
   staleAt: timestampValidator,
 });
@@ -753,15 +753,12 @@ export default defineSchema({
       "lifecycle",
       "retentionEligibleAt",
     ])
-    .index(
-      "by_platform_lifecycle_retention_public_id",
-      [
-        "platformKey",
-        "lifecycle",
-        "retentionEligibleAt",
-        "publicProviderReleaseId",
-      ],
-    )
+    .index("by_platform_lifecycle_retention_public_id", [
+      "platformKey",
+      "lifecycle",
+      "retentionEligibleAt",
+      "publicProviderReleaseId",
+    ])
     .index("by_lifecycle_and_retention_eligible_at", [
       "lifecycle",
       "retentionEligibleAt",
@@ -787,10 +784,7 @@ export default defineSchema({
   providerCatalogTerminalReceiptProofs: defineTable({
     releaseId: v.id("providerCatalogReleases"),
     operationId: v.string(),
-    operationKind: v.union(
-      v.literal("finalize"),
-      v.literal("confirmReuse"),
-    ),
+    operationKind: v.union(v.literal("finalize"), v.literal("confirmReuse")),
     requestDigest: sha256Validator,
     platformKey: v.string(),
     publicProviderReleaseId: v.string(),
@@ -1262,10 +1256,7 @@ export default defineSchema({
       "signalSetId",
       "publicRepackId",
     ])
-    .index("by_signal_set_id_and_repack_id", [
-      "signalSetId",
-      "repackId",
-    ]),
+    .index("by_signal_set_id_and_repack_id", ["signalSetId", "repackId"]),
 
   repackHeatPublications: defineTable({
     publicationId: v.string(),
@@ -1310,10 +1301,7 @@ export default defineSchema({
     acceptedAt: timestampValidator,
     operationId: v.string(),
   })
-    .index("by_publication_id_and_batch_index", [
-      "publicationId",
-      "batchIndex",
-    ])
+    .index("by_publication_id_and_batch_index", ["publicationId", "batchIndex"])
     .index("by_idempotency_key", ["idempotencyKey"])
     .index("by_manifest_id", ["manifestId"]),
 

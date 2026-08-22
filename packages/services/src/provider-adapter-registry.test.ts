@@ -39,11 +39,11 @@ test("real mapping and transport capabilities register through separate generic 
       page: {
         catalog: [],
         pulls: [],
-        sales: [],
+        trades: [],
         next_cursor: "fixture-complete",
         has_more: false,
       },
-      recordIndexes: { catalog: [], pulls: [], sales: [] },
+      recordIndexes: { catalog: [], pulls: [], trades: [] },
     }),
     { outcomes: [] },
   );

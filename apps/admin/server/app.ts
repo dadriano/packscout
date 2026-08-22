@@ -22,6 +22,14 @@ import {
   type OperationalHealthRouterDependencies,
 } from "./routes/operational-health.ts";
 import {
+  createProviderSourcesRouter,
+  type ProviderSourcesRouterDependencies,
+} from "./routes/provider-sources.ts";
+import {
+  createProviderSourceOperationsRouter,
+  type ProviderSourceOperationsRouterDependencies,
+} from "./routes/provider-source-operations.ts";
+import {
   createBackgroundWorkRouter,
   type BackgroundWorkRouterDependencies,
 } from "./routes/background-work.ts";
@@ -57,6 +65,14 @@ export interface AdminAppDependencies {
   >;
   operationalHealth?: Omit<
     OperationalHealthRouterDependencies,
+    "auth" | "cookiePolicy"
+  >;
+  providerSources?: Omit<
+    ProviderSourcesRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  providerSourceOperations?: Omit<
+    ProviderSourceOperationsRouterDependencies,
     "auth" | "cookiePolicy"
   >;
   backgroundWork?: Omit<
@@ -206,6 +222,27 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         "/api/operational-health",
         createOperationalHealthRouter({
           ...dependencies.operationalHealth,
+          auth: service,
+          cookiePolicy,
+        }),
+      );
+    }
+    if (dependencies.providerSources) {
+      app.use(
+        "/api/provider-sources",
+        createProviderSourcesRouter({
+          ...dependencies.providerSources,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.providerSourceOperations) {
+      app.use(
+        "/api/provider-source-operations",
+        createProviderSourceOperationsRouter({
+          ...dependencies.providerSourceOperations,
           auth: service,
           cookiePolicy,
         }),

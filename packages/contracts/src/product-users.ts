@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  publicPackAvailabilities,
+  type PublicPackAvailability,
+} from "./public-pack-availability-v1.ts";
 
 /**
  * Shared product-user directory vocabulary.
@@ -81,7 +85,12 @@ export const listProductUsersRequestSchema = z
       .min(1, "Enter something to search for.")
       .max(PRODUCT_USER_MAX_SEARCH_LENGTH)
       .optional(),
-    cursor: z.string().trim().min(1).max(PRODUCT_USER_MAX_CURSOR_LENGTH).optional(),
+    cursor: z
+      .string()
+      .trim()
+      .min(1)
+      .max(PRODUCT_USER_MAX_CURSOR_LENGTH)
+      .optional(),
     limit: z.coerce
       .number()
       .int()
@@ -91,7 +100,9 @@ export const listProductUsersRequestSchema = z
   })
   .strict();
 
-export type ListProductUsersRequest = z.input<typeof listProductUsersRequestSchema>;
+export type ListProductUsersRequest = z.input<
+  typeof listProductUsersRequestSchema
+>;
 export type NormalizedListProductUsersRequest = z.output<
   typeof listProductUsersRequestSchema
 >;
@@ -182,7 +193,8 @@ const REINSTATE_ACTION: ProductUserStandingAction = Object.freeze({
   description:
     "Reinstating restores this person's signed-in capabilities on their very next request, with everything they had saved still in place. Nothing was removed while they were suspended.",
   confirmLabel: "Reinstate account",
-  successMessage: "Account reinstated, with everything they saved still in place.",
+  successMessage:
+    "Account reinstated, with everything they saved still in place.",
   unchangedMessage: "That account was already active.",
   destructive: false,
 });
@@ -231,10 +243,9 @@ export type ProductUserDirectoryErrorCode =
  */
 export type ProductUserSavedItemResolution = "resolved" | "unresolved";
 
-export const productUserRepackAvailabilities = ["active", "sold_out"] as const;
+export const productUserRepackAvailabilities = publicPackAvailabilities;
 
-export type ProductUserRepackAvailability =
-  (typeof productUserRepackAvailabilities)[number];
+export type ProductUserRepackAvailability = PublicPackAvailability;
 
 export const productUserCollectibleTypes = [
   "card",
@@ -282,7 +293,10 @@ export type ProductUserSavedCollectible = SavedItemBase &
         readonly name: string;
         readonly collectibleType: ProductUserCollectibleType;
       }
-    | { readonly resolution: "unresolved"; readonly publicCollectibleId: string }
+    | {
+        readonly resolution: "unresolved";
+        readonly publicCollectibleId: string;
+      }
   );
 
 /**
@@ -322,6 +336,22 @@ export function describeProductUserEstimatedEv(
   return `${usdFromMinorUnits(estimate.evDollarsMinorUnits)} EV · ${Math.round(
     estimate.grossReturnBasisPoints / 100,
   )}% of price · ${estimate.confidenceBand} confidence`;
+}
+
+/** Exact source-neutral public availability, phrased for an administrator. */
+export function describeProductUserRepackAvailability(
+  availability: ProductUserRepackAvailability,
+): string {
+  switch (availability) {
+    case "available":
+      return "Available now";
+    case "unavailable":
+      return "Unavailable";
+    case "unknown":
+      return "Availability unknown";
+    case "sold_out":
+      return "Sold out";
+  }
 }
 
 export type ProductUserIdentityKind = "email" | "wallet" | "subject";

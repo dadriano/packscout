@@ -4,7 +4,7 @@ import type {
   ProviderConfigurationIdentity,
   ProviderSourceIdentity,
   PullCandidate,
-  SaleCandidate,
+  MarketEventCandidate,
 } from "./provider-adapter.ts";
 import {
   EventProjectionService,
@@ -25,11 +25,11 @@ const pullSource: ProviderSourceIdentity = {
   sourceTimestamp: "2026-08-06T10:00:00.000Z",
   collectedAt: "2026-08-06T10:01:00.000Z",
 };
-const saleSource: ProviderSourceIdentity = {
+const tradeSource: ProviderSourceIdentity = {
   ...pullSource,
-  recordKind: "sale",
+  recordKind: "trade",
   recordIndex: 4,
-  externalId: "sale-1",
+  externalId: "trade-1",
 };
 
 function pull(overrides: Partial<PullCandidate> = {}): PullCandidate {
@@ -54,17 +54,19 @@ function pull(overrides: Partial<PullCandidate> = {}): PullCandidate {
   };
 }
 
-function sale(overrides: Partial<SaleCandidate> = {}): SaleCandidate {
+function marketEvent(
+  overrides: Partial<MarketEventCandidate> = {},
+): MarketEventCandidate {
   return {
-    candidateKind: "sale",
-    source: saleSource,
+    candidateKind: "market_event",
+    source: tradeSource,
     relationships: [],
     dataQualityEvidence: [],
     eventType: "sale",
     transactionKey: "tx-1",
     packExternalId: "pack-1",
     assetExternalId: "asset-1",
-    occurredAt: saleSource.sourceTimestamp,
+    occurredAt: tradeSource.sourceTimestamp,
     amount: { amount: 40, currency: "USD" },
     pseudonymizationInputs: [
       {
@@ -136,15 +138,17 @@ test("pull projection preserves nullable links, value provenance, and resolvable
   }
 });
 
-test("sale projection keeps provider type separate from constrained category and accepts nullable money", () => {
+test("market-event projection keeps provider type separate from constrained category and accepts nullable money", () => {
   const known = service().project({
     configuration,
-    source: saleSource,
-    candidates: [sale({ eventType: "buyback" })],
+    source: tradeSource,
+    candidates: [marketEvent()],
   });
   assert.equal(known.status, "accepted");
   if (known.status === "accepted") {
-    assert.equal(known.projections[0]?.content.providerEventType, "buyback");
+    assert.equal(known.projections[0]?.recordKind, "market_event");
+    assert.equal(known.projections[0]?.content.eventKind, "market_event");
+    assert.equal(known.projections[0]?.content.providerEventType, "sale");
     assert.equal(known.projections[0]?.content.eventCategory, "sale");
     assert.equal(
       JSON.stringify(known).includes("0xraw-wallet-address"),
@@ -153,8 +157,8 @@ test("sale projection keeps provider type separate from constrained category and
   }
   const unknown = service().project({
     configuration,
-    source: saleSource,
-    candidates: [sale({ eventType: "raffle_settlement", amount: null })],
+    source: tradeSource,
+    candidates: [marketEvent({ eventType: "raffle_settlement", amount: null })],
   });
   assert.equal(unknown.status, "accepted");
   if (unknown.status === "accepted") {

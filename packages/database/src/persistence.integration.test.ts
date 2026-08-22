@@ -105,7 +105,7 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
   const payload = {
     catalog: [{ external_id: "catalog-envelope", data: { username: "public-user" } }],
     pulls: [{ external_id: "pull-1", data: { wallet_address: "0xraw-wallet" } }],
-    sales: [],
+    trades: [],
     next_cursor: "cursor-1",
     has_more: true,
   };
@@ -175,12 +175,12 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
     ],
     quarantines: [
       {
-        recordKind: "sale",
+        recordKind: "trade",
         recordIndex: 0,
         externalId: null,
         reasonCode: "MISSING_EXTERNAL_ID",
-        fieldPath: "sales[0].external_id",
-        sanitizedSummary: "A sale record is missing its identity.",
+        fieldPath: "trades[0].external_id",
+        sanitizedSummary: "A trade record is missing its identity.",
         payload: { wallet_address: "0xquarantine-only" },
       },
     ],
@@ -478,12 +478,12 @@ test("large page commits batch writes while preserving evidence, projections, an
           payload: { invalid: "pull" },
         },
         {
-          recordKind: "sale",
+          recordKind: "trade",
           recordIndex: recordCount + 1,
           externalId: null,
           reasonCode: "INVALID_SALE_RECORD",
-          sanitizedSummary: "The sale record failed envelope validation.",
-          payload: { invalid: "sale" },
+          sanitizedSummary: "The trade record failed envelope validation.",
+          payload: { invalid: "trade" },
         },
       ],
     });
@@ -515,7 +515,7 @@ test("large page commits batch writes while preserving evidence, projections, an
     assert.deepEqual(storedPage?.record_counts_json, {
       catalog: recordCount,
       pulls: 1,
-      sales: 1,
+      trades: 1,
     });
     assert.equal(await harness.database.source_records.count(), recordCount);
     assert.equal(await harness.database.source_record_observations.count(), recordCount);

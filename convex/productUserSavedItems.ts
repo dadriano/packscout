@@ -11,6 +11,7 @@ import {
   compareSavedItemCandidateOrder,
   MAX_SAVED_ITEMS_PER_KIND,
 } from "./savedItems";
+import { publicPackAvailabilityValidator } from "./publicRepackValidation";
 
 /**
  * Privileged per-subject saved-item reads for the admin integration.
@@ -72,7 +73,7 @@ const savedRepackValidator = v.object({
     v.object({
       name: v.string(),
       vendorDisplayName: v.string(),
-      availability: v.union(v.literal("active"), v.literal("sold_out")),
+      availability: publicPackAvailabilityValidator,
       estimatedEv: v.union(v.null(), estimatedEvValidator),
     }),
   ),
@@ -120,7 +121,8 @@ async function loadActiveCatalog(ctx: QueryCtx): Promise<ActiveCatalog> {
   let releaseIds: readonly Id<"providerCatalogReleases">[];
   try {
     const loaded = await loadValidatedCatalogManifest(ctx);
-    releaseIds = loaded === null ? [] : loaded.providerReleases.map(({ _id }) => _id);
+    releaseIds =
+      loaded === null ? [] : loaded.providerReleases.map(({ _id }) => _id);
   } catch (error) {
     if (!(error instanceof ConvexError)) throw error;
     releaseIds = [];
@@ -239,7 +241,8 @@ export const listSavedRepacksForSubject = internalQuery({
       items.push({
         publicRepackId: row.publicRepackId,
         savedAt: productUserTimestamp(row._creationTime),
-        resolution: document === null ? ("unresolved" as const) : ("resolved" as const),
+        resolution:
+          document === null ? ("unresolved" as const) : ("resolved" as const),
         repack: document === null ? null : displayRepack(document.detail),
       });
     }
@@ -258,8 +261,9 @@ export const listSavedCollectiblesForSubject = internalQuery({
     const subject = requireProductUserSubjectArgument(args.subject);
     const saved = await ctx.db
       .query("savedCollectibles")
-      .withIndex("by_owner_token_identifier_and_public_collectible_id", (index) =>
-        index.eq("ownerTokenIdentifier", subject),
+      .withIndex(
+        "by_owner_token_identifier_and_public_collectible_id",
+        (index) => index.eq("ownerTokenIdentifier", subject),
       )
       .take(MAX_SAVED_ITEMS_PER_KIND + 1);
     requireBoundedCollection(saved.length);
@@ -279,7 +283,8 @@ export const listSavedCollectiblesForSubject = internalQuery({
       items.push({
         publicCollectibleId: row.publicCollectibleId,
         savedAt: productUserTimestamp(row._creationTime),
-        resolution: document === null ? ("unresolved" as const) : ("resolved" as const),
+        resolution:
+          document === null ? ("unresolved" as const) : ("resolved" as const),
         collectible:
           document === null
             ? null

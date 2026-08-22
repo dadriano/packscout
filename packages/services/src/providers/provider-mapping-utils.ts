@@ -1,7 +1,7 @@
 import type {
   CatalogEnvelopeV1,
   PullEnvelopeV1,
-  SaleEnvelopeV1,
+  TradeEnvelopeV1,
 } from "@packscout/contracts";
 import {
   sourceIdentityForEnvelope,
@@ -115,14 +115,14 @@ export function sourceFor(
   envelope: PullEnvelopeV1,
 ): ProviderSourceIdentity;
 export function sourceFor(
-  recordKind: "sale",
+  recordKind: "trade",
   recordIndex: number,
-  envelope: SaleEnvelopeV1,
+  envelope: TradeEnvelopeV1,
 ): ProviderSourceIdentity;
 export function sourceFor(
   recordKind: ProviderRecordKind,
   recordIndex: number,
-  envelope: CatalogEnvelopeV1 | PullEnvelopeV1 | SaleEnvelopeV1,
+  envelope: CatalogEnvelopeV1 | PullEnvelopeV1 | TradeEnvelopeV1,
 ): ProviderSourceIdentity {
   return sourceIdentityForEnvelope({
     recordKind,

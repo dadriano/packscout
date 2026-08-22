@@ -174,6 +174,20 @@ export function readPositiveDuration(
   return candidate;
 }
 
+export function readPositiveInteger(
+  value: string | undefined,
+  variableName: string,
+): number {
+  if (!value || !/^[1-9][0-9]*$/u.test(value)) {
+    throw new Error(`${variableName} must be a positive integer.`);
+  }
+  const candidate = Number(value);
+  if (!Number.isSafeInteger(candidate) || candidate > 2_147_483_647) {
+    throw new Error(`${variableName} must be a positive integer.`);
+  }
+  return candidate;
+}
+
 /**
  * A bounded whole-number setting, such as a queue-depth alert threshold. The
  * upper bound keeps a mistyped value from disabling a condition outright.

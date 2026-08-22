@@ -1,6 +1,8 @@
 # Data Pipeline Launch Scorecard
 
-**Evidence date:** 2026-08-11
+**Evidence date:** 2026-08-20
+
+**DataForrest Events V1 transport gate:** PASS WITH 250-RECORD PAGE BOUND
 
 **ProviderStreamContractV2 record gate:** PARTIAL PASS — real record envelopes only
 
@@ -8,7 +10,24 @@
 
 **Repository `npm run verify:framework` gate:** NOT RUN FOR V2
 
-**Real-provider deployment gate:** BLOCKED — transport/page evidence is not supplied
+**Real-provider deployment gate:** PARTIAL — live transport is proven; implementation, capacity preflight, and full backfill remain
+
+## Current DataForrest Events V1 evidence
+
+The authenticated read-only evidence package in
+[`dataforest-events-v1-live-evidence.md`](./dataforest-events-v1-live-evidence.md)
+supersedes the transport unknowns recorded below. It proves one profile-only
+probe, four filtered initial/continuation/restart paths, cursor/filter isolation,
+the `records` / `next_cursor` / `poll_after_seconds` wrapper, `payment_method`,
+tri-state `available`, and a safe aggregate concurrency of two.
+
+A 500-record Phygitals response exceeded the 2 MiB safety cap, so the launch
+page target is 250 records. The actual full-history import remains blocked until
+the target volume has at least **8,757,364,735,856 available bytes**, as required
+by the final-schema artifact. The former 200 GB provisional floor is
+superseded. Operators must run
+`npm run preflight:provider-source-backfill:local -- --database-path <postgres-data-volume-path> --unreconciled-attempts <count>`;
+the reviewed local volume is explicitly rejected.
 
 ## Current launch boundary
 

@@ -4,10 +4,20 @@ export const CATALOG_PROJECTION_VERSION = "catalog-projection-v1" as const;
 export const EV_INPUT_COVERAGE_TOLERANCE = 0.000_001;
 
 export type CanonicalAvailability =
-  | "active"
-  | "disabled"
+  | "available"
+  | "unavailable"
   | "sold_out"
   | "unknown";
+
+export type CanonicalAvailabilityProvenance =
+  | Readonly<{
+      kind: "canonical_provider_observation";
+      observedAvailability: Exclude<CanonicalAvailability, "sold_out">;
+    }>
+  | Readonly<{
+      kind: "explicit_authoritative_sold_out";
+      authority: "provider_explicit_sold_out";
+    }>;
 
 export interface CanonicalDataQualityEvidence {
   readonly code: string;
@@ -19,10 +29,12 @@ export interface CanonicalPackProjectionContent {
   readonly schemaVersion: typeof CATALOG_PROJECTION_VERSION;
   readonly entityType: "pack";
   readonly parentExternalId: string | null;
+  readonly firstSeenAt: string;
   readonly name: string;
   readonly category: string | null;
   readonly description: string | null;
   readonly availability: CanonicalAvailability;
+  readonly availabilityProvenance: CanonicalAvailabilityProvenance;
   readonly sourceStatus: string | null;
   readonly priceValueMinor: number | null;
   readonly priceCurrency: string | null;
@@ -40,7 +52,9 @@ export interface CanonicalCatalogAssetProjectionContent {
   readonly assetType: string | null;
   readonly relatedPackExternalId: string | null;
   readonly parentExternalId: string | null;
+  readonly firstSeenAt: string;
   readonly name: string | null;
+  readonly description: string | null;
   readonly category: string | null;
   readonly availability: CanonicalAvailability;
   readonly sourceStatus: string | null;
@@ -101,6 +115,14 @@ export interface CanonicalEvInputProjectionContent {
   readonly currency: string | null;
   readonly unitBasis: "per_draw" | "per_pack" | null;
   readonly drawCount: number | null;
+  readonly buybackPercent: number | null;
+  readonly inventory: Readonly<{
+    readonly totalQuantity: number;
+    readonly bucketQuantities: readonly Readonly<{
+      readonly bucketId: string;
+      readonly quantity: number;
+    }>[];
+  }> | null;
   readonly evidenceCompleteness: "complete" | "partial" | "unknown";
   readonly coverage: CanonicalEvCoverageEvidence;
   readonly probabilityBuckets: readonly CanonicalProbabilityBucketEvidence[];
@@ -114,7 +136,7 @@ export interface CanonicalCatalogProjectionProvenance {
   readonly providerId: string;
   readonly configurationRevisionId: string;
   readonly adapterKey: string;
-  readonly sourceRecordKind: "catalog" | "pull" | "sale";
+  readonly sourceRecordKind: "catalog" | "pull" | "trade";
   readonly sourceRecordIndex: number;
   readonly sourceExternalId: string;
 }

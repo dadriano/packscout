@@ -5,7 +5,7 @@ export type AdminImportRunState =
   | "incomplete"
   | "failed";
 
-export type AdminImportTrigger = "scheduled" | "manual" | "recovery";
+export type AdminImportTrigger = "scheduled" | "manual" | "continuation" | "recovery";
 
 export interface AdminProviderOperationRecord {
   readonly providerId: string;
@@ -28,7 +28,7 @@ export interface AdminImportRunCountersRecord {
   readonly pages: number;
   readonly catalog: number;
   readonly pulls: number;
-  readonly sales: number;
+  readonly trades: number;
   readonly accepted: number;
   readonly unchanged: number;
   readonly revised: number;
@@ -44,7 +44,7 @@ export interface AdminImportPageRecord {
   readonly committedAt: Date;
   readonly catalog: number;
   readonly pulls: number;
-  readonly sales: number;
+  readonly trades: number;
   readonly accepted: number;
   readonly unchanged: number;
   readonly revised: number;

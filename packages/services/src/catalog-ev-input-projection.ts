@@ -216,6 +216,8 @@ export function projectEvInputContent(
     currency,
     unitBasis,
     drawCount,
+    buybackPercent: null,
+    inventory: null,
     evidenceCompleteness,
     coverage: {
       declaredCoverage,

@@ -1,7 +1,7 @@
 import type {
   CatalogEnvelopeV1,
   PullEnvelopeV1,
-  SaleEnvelopeV1,
+  TradeEnvelopeV1,
 } from "@packscout/contracts";
 import type {
   CatalogAssetCandidate,
@@ -12,7 +12,7 @@ import type {
   ProviderMappingPageInput,
   ProviderRecordMappingOutcome,
   PullCandidate,
-  SaleCandidate,
+  MarketEventCandidate,
 } from "../../provider-adapter.ts";
 import { PACKSCOUT_ESTIMATED_EV_PROBABILITY_TOLERANCE_RATIO } from "../../estimated-ev-calculator.ts";
 import {
@@ -71,10 +71,10 @@ function microUsdc(value: unknown, fieldPath: string): number {
 
 function normalizedAvailability(data: JsonObject) {
   const sourceStatus = optionalString(data.status);
-  if (data.isVisible === false) return "disabled" as const;
-  if (sourceStatus?.toLowerCase() === "active") return "active" as const;
+  if (data.isVisible === false) return "unavailable" as const;
+  if (sourceStatus?.toLowerCase() === "active") return "available" as const;
   if (sourceStatus?.toLowerCase() === "sold_out") return "sold_out" as const;
-  if (sourceStatus?.toLowerCase() === "disabled") return "disabled" as const;
+  if (sourceStatus?.toLowerCase() === "disabled") return "unavailable" as const;
   return "unknown" as const;
 }
 
@@ -196,7 +196,7 @@ function grailCandidates(
           parentExternalId: null,
           name,
           category: category ? optionalString(category.name) : null,
-          availability: "active",
+          availability: "available",
           sourceStatus: null,
           estimatedValue:
             value === null ? null : { amount: value, currency: "USDC" },
@@ -366,18 +366,18 @@ function mapPull(
   }
 }
 
-function mapSale(
-  envelope: SaleEnvelopeV1,
+function mapTrade(
+  envelope: TradeEnvelopeV1,
   recordIndex: number,
 ): ProviderRecordMappingOutcome {
-  const source = sourceFor("sale", recordIndex, envelope);
+  const source = sourceFor("trade", recordIndex, envelope);
   try {
     const data = asObject(envelope.data, "data");
     const tokenId = stringId(data.tokenId);
     if (tokenId === null) requiredString(data.tokenId, "data.tokenId");
     const currency = envelope.currency;
-    const candidate: SaleCandidate = {
-      candidateKind: "sale",
+    const candidate: MarketEventCandidate = {
+      candidateKind: "market_event",
       source,
       eventType: envelope.event_type,
       transactionKey: envelope.tx_hash,
@@ -411,7 +411,7 @@ function mapSale(
 }
 
 function assertedIndexes(
-  kind: "catalog" | "pull" | "sale",
+  kind: "catalog" | "pull" | "trade",
   expectedLength: number,
   values: readonly number[],
 ): readonly number[] {
@@ -445,10 +445,10 @@ export class BeezieProviderMappingAdapter implements ProviderMappingAdapter {
       input.page.pulls.length,
       input.recordIndexes.pulls,
     );
-    const saleIndexes = assertedIndexes(
-      "sale",
-      input.page.sales.length,
-      input.recordIndexes.sales,
+    const tradeIndexes = assertedIndexes(
+      "trade",
+      input.page.trades.length,
+      input.recordIndexes.trades,
     );
     return {
       outcomes: [
@@ -458,8 +458,8 @@ export class BeezieProviderMappingAdapter implements ProviderMappingAdapter {
         ...input.page.pulls.map((record, index) =>
           mapPull(record, pullIndexes[index]!),
         ),
-        ...input.page.sales.map((record, index) =>
-          mapSale(record, saleIndexes[index]!),
+        ...input.page.trades.map((record, index) =>
+          mapTrade(record, tradeIndexes[index]!),
         ),
       ],
     };

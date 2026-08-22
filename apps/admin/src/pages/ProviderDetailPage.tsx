@@ -1,221 +1,471 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import type { ProviderConfigurationSummary } from "@packscout/contracts";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import type {
+  ProviderSourceDiagnosticFilter,
+  ProviderSourceDiagnosticHistory,
+  ProviderSourceOperationsDetail,
+  ProviderSourceOperationsSource,
+} from "@packscout/contracts";
+import { Link, useParams } from "react-router-dom";
 import { AdminApiError } from "../api/client";
 import { requestManualImport } from "../api/import-operations";
 import {
-  changeProviderLifecycle,
-  getProvider,
-  testProviderConnection,
-  type ProviderHealthSummary,
-} from "../api/providers";
+  getProviderSourceDiagnostics,
+  getProviderSourceOperationsDetail,
+} from "../api/provider-source-operations";
+import {
+  commandProviderSource,
+  reviseProviderSourceInterval,
+} from "../api/provider-sources";
+import { EmptyState } from "../components/EmptyState";
+import { SourceDiagnosticFeed } from "../components/operations/SourceDiagnosticFeed";
+import {
+  ConnectionOperationsSummary,
+  ProviderSourceOperationsLedger,
+  sourceOperationalLabel,
+  type SourceOperationCommand,
+} from "../components/operations/SourceOperationsViews";
+import { dateTime, humanize, interval } from "../components/operations/OperationStatus";
 import { PageHeader } from "../components/PageHeader";
-import { StatusBadge, type StatusTone } from "../components/StatusBadge";
+import { StatusBadge } from "../components/StatusBadge";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
-import { useConfirm } from "../providers/confirm";
 import { useSession } from "../providers/session";
 import { useToast } from "../providers/toast";
 
-function label(value: string): string {
-  return value.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
-}
+const REFRESH_INTERVAL_MS = 5_000;
 
-function tone(value: string): StatusTone {
-  if (["active", "fresh", "healthy", "success", "succeeded"].includes(value)) return "ready";
-  if (["draft", "warning", "queued", "running"].includes(value)) return "pending";
-  if (["disabled", "stale", "degraded", "failed", "authentication_failure", "contract_failure", "timeout", "unreachable", "http_failure", "invalid_json", "stale_test"].includes(value)) return "danger";
-  return "neutral";
-}
-
-function dateTime(value: string | null): string {
-  return value ? new Date(value).toLocaleString() : "Not recorded";
-}
-
-function duration(seconds: number): string {
-  if (seconds % 3_600 === 0) return `${seconds / 3_600} hours`;
-  if (seconds % 60 === 0) return `${seconds / 60} minutes`;
-  return `${seconds} seconds`;
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof AdminApiError) {
-    if (error.code === "CONFIG_REVISION_CONFLICT") return "A newer configuration exists. Reload before trying this action again.";
-    return error.message;
+function readError(error: unknown, subject: "detail" | "diagnostics"): string {
+  const fallback = subject === "detail"
+    ? "Processor detail is temporarily unavailable. Prior safe evidence remains visible."
+    : "Recent diagnostics are temporarily unavailable.";
+  if (!(error instanceof AdminApiError)) return fallback;
+  if (error.status === 403) {
+    return "Your role no longer permits access to this provider source.";
   }
-  return "Provider operations are temporarily unavailable. No configuration was changed.";
+  if (error.status === 404) {
+    return "This provider does not have a current registered source.";
+  }
+  if (error.status === 429) {
+    return "Too many operation requests. Display refresh is waiting before it tries again.";
+  }
+  if (error.code === "INVALID_DIAGNOSTIC_CURSOR") {
+    return "Older diagnostic history changed or expired. Reload the current bounded history.";
+  }
+  if (error.code === "SOURCE_OPERATIONS_UNAVAILABLE") return fallback;
+  return error.message || fallback;
+}
+
+function mutationError(error: unknown): string {
+  if (!(error instanceof AdminApiError)) {
+    return "The selected provider command could not be completed. Current evidence and form values remain unchanged.";
+  }
+  if (error.status === 403) {
+    return "Your role cannot perform this command. The selected provider was not changed.";
+  }
+  if (error.code === "SOURCE_CONFLICT" || error.code === "SOURCE_REVISION_CONFLICT") {
+    return "This source or schedule changed in another session. Refresh before using its current revision.";
+  }
+  if (error.code === "SOURCE_DEPENDENCY_REQUIRED") {
+    return "The shared connection must recover before this selected provider can continue.";
+  }
+  if (error.code === "SOURCE_TEST_REQUIRED") {
+    return "A current successful test is required before this source can continue.";
+  }
+  return error.message || "The selected provider command could not be completed.";
+}
+
+function milliseconds(value: number): string {
+  const seconds = Math.floor(value / 1_000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60
+    ? `${minutes}m ${seconds % 60}s`
+    : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 export function ProviderDetailPage() {
   const { providerId = "" } = useParams();
-  const { confirm } = useConfirm();
-  const navigate = useNavigate();
-  const { showToast } = useToast();
   const { status } = useSession();
-  const canManage = status.phase === "authenticated" && status.session.permissions.includes("providers:manage");
-  const canStartImports = status.phase === "authenticated" && status.session.permissions.includes("imports:start");
-  const [provider, setProvider] = useState<ProviderConfigurationSummary | null>(null);
-  const [health, setHealth] = useState<ProviderHealthSummary | null>(null);
+  const { showToast } = useToast();
+  const canOperate = status.phase === "authenticated" &&
+    status.session.permissions.includes("imports:start");
+  const canConfigure = status.phase === "authenticated" &&
+    status.session.permissions.includes("providers:manage");
+  const [detail, setDetail] = useState<ProviderSourceOperationsDetail | null>(null);
+  const [diagnosticPages, setDiagnosticPages] = useState<ProviderSourceDiagnosticHistory[]>([]);
+  const [diagnosticFilter, setDiagnosticFilter] = useState<ProviderSourceDiagnosticFilter>({});
   const [loading, setLoading] = useState(true);
-  const [testing, setTesting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadIndex, setReloadIndex] = useState(0);
-  useDocumentTitle(provider?.displayName ?? "Data Provider");
+  const [diagnosticLoading, setDiagnosticLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [detailFailure, setDetailFailure] = useState<string | null>(null);
+  const [diagnosticFailure, setDiagnosticFailure] = useState<string | null>(null);
+  const [actionFailure, setActionFailure] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const [displayPaused, setDisplayPaused] = useState(false);
+  const [refreshIndex, setRefreshIndex] = useState(0);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [intervalDraft, setIntervalDraft] = useState("");
+  const priorOperationalState = useRef<string | null>(null);
+  const intervalOwner = useRef<string | null>(null);
+  useDocumentTitle(detail?.source.displayName ?? "Provider Processor");
+
+  const refresh = useCallback(() => {
+    setRefreshIndex((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     let active = true;
-    void getProvider(providerId)
+    void getProviderSourceOperationsDetail(providerId)
       .then((result) => {
         if (!active) return;
-        setProvider(result.provider);
-        setHealth(result.health);
-        setError(null);
+        const nextState = sourceOperationalLabel(result.source);
+        if (priorOperationalState.current && priorOperationalState.current !== nextState) {
+          setAnnouncement(`${result.source.displayName} changed from ${priorOperationalState.current} to ${nextState}.`);
+        }
+        priorOperationalState.current = nextState;
+        if (result.source.source && intervalOwner.current !== result.source.source.sourceInstanceId) {
+          intervalOwner.current = result.source.source.sourceInstanceId;
+          setIntervalDraft(String(result.source.schedule?.intervalSeconds ?? ""));
+        }
+        setDetail(result);
+        setDetailFailure(null);
       })
-      .catch((reason: unknown) => { if (active) setError(errorMessage(reason)); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [providerId, reloadIndex]);
-
-  async function runTest(): Promise<void> {
-    if (!provider) return;
-    setTesting(true);
-    setError(null);
-    try {
-      const { test } = await testProviderConnection(provider.id, provider.latestRevision.id);
-      setProvider({
-        ...provider,
-        latestRevision: {
-          ...provider.latestRevision,
-          testedAt: test.checkedAt,
-          lastConnectionTest: test,
-        },
+      .catch((error: unknown) => {
+        if (active) setDetailFailure(readError(error, "detail"));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
-      showToast(test.verdict === "success" ? "Connection test passed." : `Connection test returned ${label(test.verdict).toLowerCase()}.`, test.verdict === "success" ? "success" : "error");
-    } catch (reason) {
-      setError(errorMessage(reason));
+    return () => { active = false; };
+  }, [providerId, refreshIndex]);
+
+  useEffect(() => {
+    let active = true;
+    void getProviderSourceDiagnostics(providerId, {
+      filter: diagnosticFilter,
+      limit: 25,
+    })
+      .then((result) => {
+        if (!active) return;
+        setDiagnosticPages((current) => current.length === 0
+          ? [result]
+          : [result, ...current.slice(1)]);
+        setDiagnosticFailure(null);
+      })
+      .catch((error: unknown) => {
+        if (active) setDiagnosticFailure(readError(error, "diagnostics"));
+      })
+      .finally(() => {
+        if (active) setDiagnosticLoading(false);
+      });
+    return () => { active = false; };
+  }, [
+    providerId,
+    refreshIndex,
+    diagnosticFilter,
+  ]);
+
+  useEffect(() => {
+    if (displayPaused) return;
+    const poll = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    const intervalId = window.setInterval(poll, REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, [displayPaused, refresh]);
+
+  function changeFilter(next: ProviderSourceDiagnosticFilter): void {
+    setDiagnosticPages([]);
+    setDiagnosticFailure(null);
+    setDiagnosticLoading(true);
+    setDiagnosticFilter(next);
+    setAnnouncement("Diagnostic filters updated.");
+  }
+
+  async function loadOlder(): Promise<void> {
+    const cursor = diagnosticPages.at(-1)?.nextCursor;
+    if (!cursor) return;
+    setLoadingOlder(true);
+    setDiagnosticFailure(null);
+    try {
+      const page = await getProviderSourceDiagnostics(providerId, {
+        filter: diagnosticFilter,
+        cursor,
+        limit: 25,
+      });
+      setDiagnosticPages((current) => [...current, page]);
+      setAnnouncement(page.history.state === "expired"
+        ? page.history.message
+        : `${page.events.length} older diagnostic events loaded.`);
+    } catch (error) {
+      setDiagnosticFailure(readError(error, "diagnostics"));
     } finally {
-      setTesting(false);
+      setLoadingOlder(false);
     }
   }
 
-  async function lifecycle(action: "activate" | "disable" | "archive"): Promise<void> {
-    if (!provider) return;
-    const actionLabel = action === "activate" ? "Enable" : action === "disable" ? "Disable" : "Archive";
-    await confirm({
-      tier: action === "activate" ? "standard" : "danger",
-      title: `${actionLabel} ${provider.displayName}?`,
-      description: action === "activate"
-        ? "This tested revision becomes the source for scheduled imports on its platform."
-        : action === "disable"
-          ? "No new imports will start. An import already running is allowed to finish."
-          : "This provider stays in history and cannot start new imports. Any active run is allowed to finish.",
-      confirmLabel: `${actionLabel} provider`,
-      successMessage: `${provider.displayName} ${action === "activate" ? "enabled" : action === "disable" ? "disabled" : "archived"}.`,
-      action: async () => {
-        const result = await changeProviderLifecycle(provider.id, action, provider.latestRevision.id);
-        setProvider(result.provider);
-      },
-    });
+  async function operate(
+    source: ProviderSourceOperationsSource,
+    command: SourceOperationCommand,
+  ): Promise<void> {
+    if (!source.source) return;
+    setPendingKey(`${source.providerId}:${command}`);
+    setActionFailure(null);
+    try {
+      let message: string;
+      if (command === "run") {
+        const result = await requestManualImport(source.providerId, source.source.sourceRevisionId);
+        message = result.outcome === "coalesced"
+          ? `${source.displayName}: request coalesced into the existing ${result.run.state} run.`
+          : `${source.displayName}: manual run created and queued.`;
+      } else {
+        const result = await commandProviderSource(
+          source.providerId,
+          source.source.sourceInstanceId,
+          command,
+          source.source.sourceRevisionId,
+        );
+        message = result.state === "pause_requested"
+          ? `${source.displayName}: pause requested; the current page may commit.`
+          : result.state === "paused"
+            ? `${source.displayName}: paused before another page began.`
+            : `${source.displayName}: resumed from ${source.checkpoint?.resumeLabel ?? "the committed checkpoint"}.`;
+      }
+      setAnnouncement(message);
+      showToast(message, "success");
+      refresh();
+    } catch (error) {
+      const message = mutationError(error);
+      setActionFailure(message);
+      setAnnouncement(message);
+    } finally {
+      setPendingKey(null);
+    }
   }
 
-  async function startManualImport(): Promise<void> {
-    if (!provider) return;
-    await confirm({
-      title: `Run import for ${provider.displayName}?`,
-      description: `${provider.platformKey} active configuration ${provider.activeRevisionId?.slice(0, 8) ?? "unavailable"} will start from its durable cursor. Only one queued or running import is allowed for this provider.`,
-      confirmLabel: "Run import",
-      action: async () => {
-        const result = await requestManualImport(provider.id, provider.activeRevisionId ?? provider.latestRevision.id);
-        showToast(result.deduplicated
-          ? "An import is already in progress. We opened the active run."
-          : "Manual import requested.");
-        navigate(`/runs/${result.run.id}`);
-      },
-    });
+  async function requestSourceTest(): Promise<void> {
+    const source = detail?.source.source;
+    if (!source) return;
+    setPendingKey(`${detail.source.providerId}:test`);
+    setActionFailure(null);
+    try {
+      const result = await commandProviderSource(
+        detail.source.providerId,
+        source.sourceInstanceId,
+        "test",
+        source.sourceRevisionId,
+      );
+      const message = `${detail.source.displayName}: source test ${result.state ?? "pending"}.`;
+      setAnnouncement(message);
+      showToast(message, "success");
+      refresh();
+    } catch (error) {
+      setActionFailure(mutationError(error));
+    } finally {
+      setPendingKey(null);
+    }
   }
 
-  if (loading) return <div className="provider-loading" aria-busy="true">Loading provider and health…</div>;
-  if (!provider || !health) {
-    return <div className="provider-load-error" role="alert"><p>{error ?? "Provider not found."}</p><Link className="admin-button admin-button-secondary" to="/providers">Return to providers</Link></div>;
+  async function reviseInterval(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const source = detail?.source.source;
+    const schedule = detail?.source.schedule;
+    if (!source || !schedule) return;
+    const seconds = Number(intervalDraft);
+    if (!Number.isInteger(seconds) || seconds < 60 || seconds > 86_400) {
+      setActionFailure("Enter an interval from 60 through 86,400 seconds. Your value remains available to edit.");
+      return;
+    }
+    setPendingKey(`${detail.source.providerId}:interval`);
+    setActionFailure(null);
+    try {
+      await reviseProviderSourceInterval(
+        detail.source.providerId,
+        source.sourceInstanceId,
+        {
+          expectedSourceRevisionId: source.sourceRevisionId,
+          expectedScheduleRevisionId: schedule.scheduleRevisionId,
+          intervalSeconds: seconds,
+        },
+      );
+      const message = `${detail.source.displayName}: interval changed to ${interval(seconds)}; current work and checkpoint were preserved.`;
+      setAnnouncement(message);
+      showToast(message, "success");
+      refresh();
+    } catch (error) {
+      setActionFailure(mutationError(error));
+    } finally {
+      setPendingKey(null);
+    }
   }
 
-  const revision = provider.latestRevision;
-  const test = revision.lastConnectionTest;
-  const enableReady = test?.verdict === "success";
+  if (loading && !detail) {
+    return <div className="ops-loading" aria-busy="true">Loading current provider-source evidence…</div>;
+  }
+  if (!detail) {
+    return (
+      <div className="ops-error" role="alert">
+        <p>{detailFailure ?? "Provider source not found."}</p>
+        <Link className="admin-button admin-button-secondary" to="/operations">Return to operations</Link>
+      </div>
+    );
+  }
+
+  const source = detail.source;
+  const sourceRevision = source.source;
+  const staleDisplay = displayPaused || detailFailure !== null || diagnosticFailure !== null;
   return (
-    <div className="admin-page">
+    <div className="admin-page source-operations-page">
       <PageHeader
-        eyebrow={`Data providers / ${provider.platformKey}`}
-        title={provider.displayName}
-        description={`Revision ${revision.version} · ${revision.adapterKey} · ${revision.endpointHost}`}
-        actions={<Link className="admin-button admin-button-secondary" to="/providers">All providers</Link>}
+        eyebrow={`Platform processor / ${humanize(source.provider)}`}
+        title={source.displayName}
+        description={sourceRevision
+          ? `${sourceRevision.sourceTypeKey} · adapter ${sourceRevision.sourceAdapterVersion} · normalized contract ${sourceRevision.normalizedContractVersion}`
+          : "No current source revision"}
+        actions={
+          <>
+            <Link className="admin-button admin-button-secondary" to="/operations">All processors</Link>
+            {canConfigure ? <Link className="admin-button admin-button-secondary" to="/source-configuration">Configuration</Link> : null}
+            <button
+              type="button"
+              className="admin-button admin-button-secondary"
+              aria-pressed={displayPaused}
+              onClick={() => {
+                setDisplayPaused((paused) => {
+                  const next = !paused;
+                  setAnnouncement(next
+                    ? "Display refresh paused. This provider continues ingesting."
+                    : "Display refresh resumed.");
+                  if (paused) refresh();
+                  return next;
+                });
+              }}
+            >
+              {displayPaused ? "Resume display" : "Pause display"}
+            </button>
+          </>
+        }
       />
 
-      {!canManage ? <aside className="provider-read-only-note"><strong>Read-only access</strong><p>Credential contents and configuration controls are restricted. Stored credentials remain masked.</p></aside> : null}
-      {error ? <div className="provider-load-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => setReloadIndex((value) => value + 1)}>Reload current state</button></div> : null}
-
-      <section className="provider-detail-status" aria-label="Provider status">
-        <StatusBadge label={label(provider.state)} tone={tone(provider.state)} />
-        <StatusBadge label={label(health.freshnessState)} tone={tone(health.freshnessState)} />
-        <StatusBadge label={`${label(health.qualityState)} quality`} tone={tone(health.qualityState)} />
-        {health.activeRun ? <StatusBadge label={`Run ${label(health.activeRun.state)}`} tone="pending" /> : null}
+      <p className="admin-visually-hidden" aria-live="polite" aria-atomic="true">{announcement}</p>
+      <section className="source-refresh-strip" aria-label="Display refresh status">
+        <div>
+          <StatusBadge label={staleDisplay ? "Stale display" : "Live display"} tone={staleDisplay ? "pending" : "ready"} />
+          <span>{displayPaused
+            ? "Display paused only; ingestion, retries, leases, and scheduling continue."
+            : `Visible-page refresh every 5 seconds · evidence time ${dateTime(detail.refreshedAt)}`}</span>
+        </div>
+        <span>{canConfigure ? "Administrator configuration enabled" : canOperate ? "Data operator · operation controls only" : "Read-only access"}</span>
       </section>
+      {detailFailure ? <div className="ops-error" role="alert"><p>{detailFailure}</p><button type="button" className="admin-button admin-button-secondary" onClick={refresh}>Refresh current state</button></div> : null}
+      {actionFailure ? <div className="ops-error" role="alert"><p>{actionFailure}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => setActionFailure(null)}>Dismiss</button></div> : null}
 
-      {canStartImports ? (
-        <section className="provider-actions" aria-labelledby="provider-import-actions-title">
-          <div><span className="admin-kicker">Import operations</span><h2 id="provider-import-actions-title">Manual import</h2><p>Manual and scheduled imports share one active-run limit and the same durable cursor.</p></div>
+      <ConnectionOperationsSummary connection={detail.connection} />
+      <ProviderSourceOperationsLedger
+        sources={[source]}
+        canOperate={canOperate}
+        pendingKey={pendingKey}
+        onCommand={(selected, command) => { void operate(selected, command); }}
+      />
+
+      {!canConfigure ? (
+        <aside className="source-operator-boundary">
+          <strong>{canOperate ? "Operation access, not configuration access" : "Read-only provider evidence"}</strong>
+          <p>{canOperate
+            ? "You may run, pause, resume, and retry authorized quarantine records. Credential, binding, interval, activation, replacement, disable, and checkpoint controls remain administrator-only."
+            : "Your role can inspect current safe processor, run, page, and diagnostic evidence but cannot operate or configure this source."}</p>
+        </aside>
+      ) : (
+        <section className="source-admin-inline" aria-labelledby="source-admin-inline-title">
           <div>
-            <Link className="admin-button admin-button-secondary" to={`/runs?providerId=${provider.id}`}>Run history</Link>
-            {health.openQuarantineCount > 0 ? <Link className="admin-button admin-button-secondary" to={`/quarantine?providerId=${provider.id}&state=open`}>Review quarantine ({health.openQuarantineCount})</Link> : null}
-            {health.activeRun ? <Link className="admin-button admin-button-primary" to={`/runs/${health.activeRun.id}`}>Open active run</Link> : <button type="button" className="admin-button admin-button-primary" disabled={provider.state !== "active"} title={provider.state !== "active" ? "Enable the tested provider before requesting an import." : undefined} onClick={() => void startManualImport()}>Run import</button>}
+            <span className="admin-kicker">Selected provider only</span>
+            <h2 id="source-admin-inline-title">Test and timing</h2>
+            <p>These controls affect {source.displayName} only. Shared credential and destructive lifecycle controls remain in Source configuration.</p>
           </div>
-          {health.activeRun ? <p className="provider-actions__gate">A {health.activeRun.state} import already owns this provider. Open it instead of starting duplicate work.</p> : null}
+          <div className="source-admin-inline__actions">
+            <button type="button" className="admin-button admin-button-secondary" disabled={pendingKey !== null} onClick={() => { void requestSourceTest(); }}>
+              {pendingKey?.endsWith(":test") ? "Requesting test…" : "Test source"}
+            </button>
+            <form onSubmit={(event) => { void reviseInterval(event); }}>
+              <div className="admin-field">
+                <label htmlFor="provider-source-interval">Interval seconds</label>
+                <input id="provider-source-interval" type="number" min="60" max="86400" required value={intervalDraft} onChange={(event) => setIntervalDraft(event.target.value)} />
+              </div>
+              <button type="submit" className="admin-button admin-button-secondary" disabled={pendingKey !== null}>
+                {pendingKey?.endsWith(":interval") ? "Saving timing…" : "Save timing"}
+              </button>
+            </form>
+          </div>
         </section>
+      )}
+
+      {sourceRevision ? (
+        <div className="source-detail-grid">
+          <section className="source-detail-panel" aria-labelledby="source-contract-title">
+            <header><span className="admin-kicker">Immutable source ownership</span><h2 id="source-contract-title">Source contract</h2></header>
+            <dl>
+              <div><dt>Source type</dt><dd>{sourceRevision.sourceTypeKey}</dd></div>
+              <div><dt>Adapter revision</dt><dd>{sourceRevision.sourceAdapterVersion}</dd></div>
+              <div><dt>Normalized contract</dt><dd>{sourceRevision.normalizedContractVersion}</dd></div>
+              <div><dt>Mapper</dt><dd>{sourceRevision.mapperKey} @ {sourceRevision.mapperVersion}</dd></div>
+              <div><dt>Identity namespace</dt><dd>{sourceRevision.identityNamespaceKey}</dd></div>
+              <div><dt>Record-ID scopes</dt><dd>{sourceRevision.recordIdScopes.join(" · ")}</dd></div>
+              <div><dt>Capabilities</dt><dd>{detail.connection ? Object.entries(detail.connection.sourceType.capabilities).filter(([, enabled]) => enabled).map(([name]) => humanize(name)).join(" · ") : "Unavailable"}</dd></div>
+            </dl>
+          </section>
+          <section className="source-detail-panel" aria-labelledby="source-checkpoint-title">
+            <header><span className="admin-kicker">Durable committed position</span><h2 id="source-checkpoint-title">Checkpoint and schedule</h2></header>
+            <dl>
+              <div><dt>Checkpoint owner</dt><dd>{sourceRevision.sourceInstanceId}</dd></div>
+              <div><dt>Generation</dt><dd>{source.checkpoint?.generation ?? "Not established"}</dd></div>
+              <div><dt>Safe fingerprint</dt><dd className="ops-cursor">{source.checkpoint?.fingerprint ?? "Feed start"}</dd></div>
+              <div><dt>Resume</dt><dd>{source.checkpoint?.resumeLabel ?? "Feed start"}</dd></div>
+              <div><dt>Interval / grace</dt><dd>{source.schedule ? `${interval(source.schedule.intervalSeconds)} / ${interval(source.schedule.freshnessGraceSeconds)}` : "Not scheduled"}</dd></div>
+              <div><dt>Next due</dt><dd>{dateTime(source.schedule?.nextDueAt ?? null)}</dd></div>
+            </dl>
+          </section>
+          <section className="source-detail-panel" aria-labelledby="source-config-summary-title">
+            <header><span className="admin-kicker">Adapter-validated safe summary</span><h2 id="source-config-summary-title">Masked configuration</h2></header>
+            <dl>{sourceRevision.configuration.fields.map((field) => <div key={field.label}><dt>{field.label}</dt><dd>{field.value}{field.masked ? " · masked" : ""}</dd></div>)}</dl>
+          </section>
+          <section className="source-detail-panel" aria-labelledby="source-test-title">
+            <header><span className="admin-kicker">Current revision evidence</span><h2 id="source-test-title">Source test and quality</h2></header>
+            <dl>
+              <div><dt>Test state</dt><dd>{detail.sourceTest ? humanize(detail.sourceTest.state) : "Not recorded"}</dd></div>
+              <div><dt>Test outcome</dt><dd>{detail.sourceTest?.outcome ? humanize(detail.sourceTest.outcome) : "Not recorded"}</dd></div>
+              <div><dt>Safe code</dt><dd>{detail.sourceTest?.safeCode ?? "None"}</dd></div>
+              <div><dt>Tested</dt><dd>{dateTime(detail.sourceTest?.testedAt ?? null)}</dd></div>
+              <div><dt>Quality</dt><dd>{humanize(source.quality.state)} · {source.quality.consecutiveFailures} consecutive failures</dd></div>
+              <div><dt>Quarantine</dt><dd><Link to={`/quarantine?providerId=${source.providerId}&state=open`}>{source.progress.openQuarantine} open records</Link></dd></div>
+            </dl>
+          </section>
+        </div>
       ) : null}
 
-      {canManage ? (
-        <section className="provider-actions" aria-labelledby="provider-actions-title">
-          <div><span className="admin-kicker">Administrator controls</span><h2 id="provider-actions-title">Test before enablement</h2><p>A successful test is required for this exact revision. Changes never overwrite revision history.</p></div>
-          <div>
-            {provider.state !== "archived" ? <Link className="admin-button admin-button-secondary" to={`/providers/${provider.id}/edit`}>Create revision</Link> : null}
-            {provider.state !== "archived" ? <button type="button" className="admin-button admin-button-secondary" disabled={testing} onClick={() => void runTest()}>{testing ? "Testing…" : "Test connection"}</button> : null}
-            {provider.state !== "active" && provider.state !== "archived" ? <button type="button" className="admin-button admin-button-primary" disabled={!enableReady} title={!enableReady ? "Run a successful connection test for this revision first." : undefined} onClick={() => void lifecycle("activate")}>Enable provider</button> : null}
-            {provider.state === "active" ? <button type="button" className="admin-button admin-button-danger" onClick={() => void lifecycle("disable")}>Disable provider</button> : null}
-            {provider.state === "disabled" ? <button type="button" className="admin-button admin-button-danger" onClick={() => void lifecycle("archive")}>Archive provider</button> : null}
-          </div>
-          {!enableReady && provider.state !== "active" && provider.state !== "archived" ? <p className="provider-actions__gate">Enablement is locked until this revision passes its connection test.</p> : null}
-        </section>
-      ) : null}
-
-      <div className="provider-detail-grid">
-        <section className="provider-detail-card" aria-labelledby="provider-config-title">
-          <header><span className="admin-kicker">Masked settings</span><h2 id="provider-config-title">Configuration</h2></header>
-          <dl>
-            <div><dt>Platform</dt><dd>{provider.platformKey}</dd></div>
-            <div><dt>Adapter</dt><dd>{revision.adapterKey}</dd></div>
-            <div><dt>Endpoint host</dt><dd>{revision.endpointHost}</dd></div>
-            <div><dt>Authentication</dt><dd>{revision.authMode === "bearer" ? (revision.hasBearerSecret ? "Bearer · credential configured" : "Bearer · credential missing") : "None"}</dd></div>
-            <div><dt>Schedule</dt><dd>Every {duration(revision.scheduleSeconds)}</dd></div>
-            <div><dt>Stale threshold</dt><dd>{duration(revision.staleAfterSeconds)}</dd></div>
-            <div><dt>Active revision</dt><dd>{provider.activeRevisionId === revision.id ? `Revision ${revision.version}` : "Earlier or none"}</dd></div>
-          </dl>
-        </section>
-        <section className="provider-detail-card" aria-labelledby="provider-health-title">
-          <header><span className="admin-kicker">Operational evidence</span><h2 id="provider-health-title">Health</h2></header>
-          <dl>
-            <div><dt>Last provider head</dt><dd>{dateTime(health.lastHeadReachedAt)}</dd></div>
-            <div><dt>Next due</dt><dd>{dateTime(health.nextDueAt)}</dd></div>
-            <div><dt>Latest run</dt><dd>{health.latestRun ? <Link to={`/runs/${health.latestRun.id}`}>{label(health.latestRun.state)}</Link> : "No runs"}</dd></div>
-            <div><dt>Open quarantine</dt><dd>{health.openQuarantineCount}</dd></div>
-            <div><dt>Consecutive failures</dt><dd>{health.consecutiveFailures}</dd></div>
-            <div><dt>Recovery</dt><dd>{health.recoveryHint}</dd></div>
-          </dl>
-        </section>
-      </div>
-
-      <section className="provider-test-result" aria-labelledby="provider-test-title" aria-live="polite">
-        <header><span className="admin-kicker">Revision {revision.version}</span><h2 id="provider-test-title">Latest connection test</h2></header>
-        {test ? <div><StatusBadge label={label(test.verdict)} tone={tone(test.verdict)} /><p>Checked {dateTime(test.checkedAt)} · {test.latencyMs} ms{test.responseStatus ? ` · HTTP ${test.responseStatus}` : ""}</p>{test.recordCounts ? <p>{test.recordCounts.catalog} catalog · {test.recordCounts.pulls} pulls · {test.recordCounts.sales} sales</p> : null}{test.sanitizedCode ? <code>{test.sanitizedCode}</code> : null}</div> : <p>No connection test has been recorded for this revision.</p>}
+      <section className="source-run-history" aria-labelledby="source-run-history-title">
+        <header className="admin-section-header"><div><span className="admin-kicker">Selected source only</span><h2 id="source-run-history-title">Run history</h2></div><Link to={`/runs?providerId=${source.providerId}`}>All runs</Link></header>
+        {detail.runHistory.length === 0 ? <EmptyState title="No runs recorded" description="Run now or wait for the next scheduled interval. A queued run may wait for worker or connection capacity." /> : <div className="source-run-history__rows">{detail.runHistory.map((run) => <article key={run.id}><div><Link to={`/runs/${run.id}`}>{humanize(run.trigger)} run</Link><span>{dateTime(run.requestedAt)}</span></div><StatusBadge label={humanize(run.state)} tone={run.state === "failed" ? "danger" : run.state === "succeeded" ? "ready" : "pending"} /><dl><div><dt>Progress</dt><dd>{dateTime(run.lastProgressAt)}</dd></div><div><dt>Elapsed</dt><dd>{run.startedAt ? milliseconds(Math.max(0, Date.parse(run.finishedAt ?? detail.refreshedAt) - Date.parse(run.startedAt))) : "Not started"}</dd></div><div><dt>Provider head</dt><dd>{run.reachedHead ? "Reached" : "Not reached"}</dd></div><div><dt>Failure</dt><dd>{run.failureCode ?? "None"}</dd></div></dl></article>)}</div>}
       </section>
+
+      <section className="source-page-progress" aria-labelledby="source-page-progress-title">
+        <header className="admin-section-header"><div><span className="admin-kicker">Atomic committed pages</span><h2 id="source-page-progress-title">Page progress</h2></div><span className="admin-section-count">{detail.pageProgress.length} shown</span></header>
+        {detail.pageProgress.length === 0 ? <EmptyState title="No committed pages" description="A queued run, no live worker, or a failure before commit has no page progress." /> : <div className="source-page-progress__rows">{detail.pageProgress.map((page) => <article key={`${page.runId}:${page.pageNumber}`}><header><strong>Page {page.pageNumber}</strong><Link to={`/runs/${page.runId}`}>Open run</Link><time dateTime={page.committedAt}>{dateTime(page.committedAt)}</time></header><dl><div><dt>Streams</dt><dd>{page.records.catalog} catalog · {page.records.pulls} pulls · {page.records.trades} trades · {page.records.total} total</dd></div><div><dt>Dispositions</dt><dd>{page.dispositions.inserted} inserted · {page.dispositions.revised} revised · {page.dispositions.duplicate} duplicate · {page.dispositions.quarantined} quarantined</dd></div><div><dt>Continuation</dt><dd>{page.continuation ? humanize(page.continuation.kind) : "Provider head"}</dd></div><div><dt>Checkpoint</dt><dd className="ops-cursor">{page.checkpointFingerprint ?? "Not attached"}</dd></div></dl></article>)}</div>}
+      </section>
+
+      <SourceDiagnosticFeed
+        pages={diagnosticPages}
+        filter={diagnosticFilter}
+        runs={detail.runHistory}
+        loading={diagnosticLoading}
+        loadingOlder={loadingOlder}
+        error={diagnosticFailure}
+        onFilterChange={changeFilter}
+        onLoadOlder={() => { void loadOlder(); }}
+        onRetry={refresh}
+      />
     </div>
   );
 }

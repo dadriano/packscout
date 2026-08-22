@@ -9,6 +9,7 @@ import {
   readPort,
   readPositiveCount,
   readPositiveDuration,
+  readPositiveInteger,
   readProductUserDirectoryConfig,
   readRequiredSecret,
   readTrustedProxies,
@@ -78,6 +79,10 @@ test("admin security configuration fails closed and normalizes trusted origins",
   assert.throws(() => readRequiredSecret("short", "SECRET", 32), /SECRET/);
   assert.equal(readPositiveDuration(undefined, 60_000, "IDLE_MS"), 60_000);
   assert.throws(() => readPositiveDuration("0", 60_000, "IDLE_MS"), /IDLE_MS/);
+  assert.equal(readPositiveInteger("7", "KEY_VERSION"), 7);
+  for (const invalid of [undefined, "", "0", " 1", "1 ", "1.5", "2147483648"]) {
+    assert.throws(() => readPositiveInteger(invalid, "KEY_VERSION"), /KEY_VERSION/u);
+  }
   // Alert thresholds fail closed the same way: a mistyped ceiling must stop
   // the service rather than quietly disable the condition it bounds.
   assert.equal(readPositiveCount(undefined, 100, "BACKLOG_LIMIT"), 100);

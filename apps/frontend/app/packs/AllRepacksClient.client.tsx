@@ -37,6 +37,7 @@ import {
   nextCatalogPage,
   previousCatalogPage,
   resetCatalogPagination,
+  selectCatalogRepack,
   serializeCatalogViewState,
 } from "@/lib/catalog-query-state.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
@@ -81,7 +82,10 @@ function activeConstraints(page: ListPublicRepacksPage) {
     });
   }
   if (page.activeQuery.filters.availability === "all") {
-    constraints.push({ label: "Availability", value: "Including sold out" });
+    constraints.push({
+      label: "Availability",
+      value: "Including unavailable, unknown, and sold-out packs",
+    });
   }
   if (page.activeQuery.filters.price.mode === "narrowed") {
     constraints.push({
@@ -100,11 +104,12 @@ function activeConstraints(page: ListPublicRepacksPage) {
 
 function activeFilterCount(
   filters: PublicRepackFilters,
-): 0 | 1 | 2 | 3 | 4 {
+): 0 | 1 | 2 | 3 | 4 | 5 {
   return (Number(filters.vendors.length > 0) +
     Number(filters.categories.length > 0) +
     Number(filters.collectibleTypes.length > 0) +
-    Number(filters.price.mode === "narrowed")) as 0 | 1 | 2 | 3 | 4;
+    Number(filters.price.mode === "narrowed") +
+    Number(filters.availability === "all")) as 0 | 1 | 2 | 3 | 4 | 5;
 }
 
 export function AllRepacksClient({
@@ -203,6 +208,12 @@ export function AllRepacksClient({
     navigate(resetCatalogPagination(query, { filters }));
   }
 
+  function selectRepack(publicRepackId: string) {
+    setSelectedPublicRepackId(publicRepackId);
+    setInspectorOpen(true);
+    navigate(selectCatalogRepack(query, publicRepackId));
+  }
+
   function sortCatalog(sort: PublicRepackSort, direction: "asc" | "desc") {
     navigate(resetCatalogPagination(query, { sort, direction }));
   }
@@ -212,8 +223,7 @@ export function AllRepacksClient({
   }
 
   async function copyPromo(publicRepackId: string) {
-    setSelectedPublicRepackId(publicRepackId);
-    setInspectorOpen(true);
+    selectRepack(publicRepackId);
     const detail = detailById.get(publicRepackId);
     const promo = detail?.actions.promo;
     if (!promo) {
@@ -248,8 +258,7 @@ export function AllRepacksClient({
   }
 
   function openRepack(publicRepackId: string) {
-    setSelectedPublicRepackId(publicRepackId);
-    setInspectorOpen(true);
+    selectRepack(publicRepackId);
     const detail = detailById.get(publicRepackId);
     const outbound = detail
       ? buildPublishedRepackHref(
@@ -332,8 +341,7 @@ export function AllRepacksClient({
               onOpenRepack={openRepack}
               onSelect={(publicRepackId, trigger) => {
                 selectionTriggerRef.current = trigger;
-                setSelectedPublicRepackId(publicRepackId);
-                setInspectorOpen(true);
+                selectRepack(publicRepackId);
               }}
               onSort={sortCatalog}
               page={page}
@@ -344,8 +352,7 @@ export function AllRepacksClient({
               controls={resultsControls}
               onSelect={(publicRepackId, trigger) => {
                 selectionTriggerRef.current = trigger;
-                setSelectedPublicRepackId(publicRepackId);
-                setInspectorOpen(true);
+                selectRepack(publicRepackId);
               }}
               page={page}
               selectedPublicRepackId={selectedPublicRepackId}

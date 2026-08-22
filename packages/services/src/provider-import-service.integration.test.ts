@@ -80,7 +80,7 @@ class FixtureTransportAdapter implements ProviderTransportAdapter {
       ok: true as const,
       latencyMs: 1,
       responseStatus: 200,
-      recordCounts: { catalog: 0, pulls: 0, sales: 0 },
+      recordCounts: { catalog: 0, pulls: 0, trades: 0 },
       hasMore: false,
       nextCursorPresent: true,
     };
@@ -103,7 +103,7 @@ class FixtureTransportAdapter implements ProviderTransportAdapter {
 }
 
 function source(
-  recordKind: "catalog" | "pull" | "sale",
+  recordKind: "catalog" | "pull" | "trade",
   recordIndex: number,
   envelope: { external_id: string; collected_at: string; updated_at?: string; occurred_at?: string },
 ): ProviderSourceIdentity {
@@ -317,7 +317,7 @@ async function createHarness(
   return { ...harness, clock, service, transport };
 }
 
-test("manual and scheduled requests share one run while a disabled-after-start import reaches head with linked quarantine", async () => {
+test("manual, scheduled, and continuation requests share one run while a disabled-after-start import reaches head with linked quarantine", async () => {
   let disabled = false;
   const pages = new Map<string | null, ProviderFeedPageStructureV1>([
     [
@@ -325,7 +325,7 @@ test("manual and scheduled requests share one run while a disabled-after-start i
       {
         catalog: [catalog("good-1"), catalog("bad-map"), { platform, data: {} }],
         pulls: [pull("projection-bad")],
-        sales: [],
+        trades: [],
         next_cursor: "opaque-page-2",
         has_more: true,
       },
@@ -335,7 +335,7 @@ test("manual and scheduled requests share one run while a disabled-after-start i
       {
         catalog: [catalog("good-2")],
         pulls: [],
-        sales: [],
+        trades: [],
         next_cursor: "opaque-head",
         has_more: false,
       },
@@ -353,7 +353,7 @@ test("manual and scheduled requests share one run while a disabled-after-start i
   try {
     const raced = await Promise.all([
       harness.service.requestImport({
-        trigger: "scheduled",
+        trigger: "continuation",
         organizationId: ids.organization,
         providerId: ids.provider,
       }),
@@ -452,7 +452,7 @@ test("the shared import workflow claims and executes a queued manual run", async
         {
           catalog: [catalog("manual-queue-record")],
           pulls: [],
-          sales: [],
+          trades: [],
           next_cursor: "manual-queue-head",
           has_more: false,
         },
@@ -499,7 +499,7 @@ test("a crash after atomic page commit resumes from the durable opaque cursor wi
       {
         catalog: [catalog("crash-page-1")],
         pulls: [],
-        sales: [],
+        trades: [],
         next_cursor: "opaque-resume",
         has_more: true,
       },
@@ -509,7 +509,7 @@ test("a crash after atomic page commit resumes from the durable opaque cursor wi
       {
         catalog: [catalog("crash-page-2")],
         pulls: [],
-        sales: [],
+        trades: [],
         next_cursor: "opaque-final",
         has_more: false,
       },
@@ -664,7 +664,7 @@ test("a page persistence failure leaves the checkpoint untouched and records onl
       {
         catalog: [catalog("persistence-failure")],
         pulls: [],
-        sales: [],
+        trades: [],
         next_cursor: "must-not-advance",
         has_more: false,
       },

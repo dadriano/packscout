@@ -16,6 +16,8 @@ interface RunRow {
   readonly platformKey: string;
   readonly configurationRevisionId: string;
   readonly configurationVersion: number;
+  readonly sourceInstanceId: string | null;
+  readonly counters: unknown;
   readonly trigger: AdminImportTrigger;
   readonly state: AdminImportRunState;
   readonly requestedAt: Date;
@@ -36,12 +38,14 @@ interface PageRow {
   readonly nextCursor: string | null;
   readonly hasMore: boolean;
   readonly committedAt: Date;
+  readonly sourceInstanceId: string | null;
+  readonly counters: unknown;
 }
 
 interface OutcomeAggregate {
   readonly runId: string;
   readonly pageId: string;
-  readonly recordKind: "catalog" | "pull" | "sale";
+  readonly recordKind: "catalog" | "pull" | "trade";
   readonly outcome: "accepted" | "duplicate" | "quarantined";
   readonly total: number;
 }
@@ -50,6 +54,40 @@ interface RevisionAggregate {
   readonly run_id?: string;
   readonly page_id?: string;
   readonly total: bigint;
+}
+
+interface SourceDispositionAggregate {
+  readonly run_id: string;
+  readonly page_id?: string;
+  readonly disposition: "inserted" | "revised" | "duplicate" | "quarantined";
+  readonly total: bigint;
+}
+
+function sourceCounter(
+  value: unknown,
+  key: "catalog" | "pulls" | "trades",
+): number {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return 0;
+  const candidate = (value as Record<string, unknown>)[key];
+  return Number.isSafeInteger(candidate) && Number(candidate) >= 0
+    ? Number(candidate)
+    : 0;
+}
+
+function sourceDispositionTotal(
+  rows: readonly SourceDispositionAggregate[],
+  input: Readonly<{
+    runId: string;
+    pageId?: string;
+    disposition: SourceDispositionAggregate["disposition"];
+  }>,
+): number {
+  return Number(rows
+    .filter((row) =>
+      row.run_id === input.runId &&
+      (input.pageId === undefined || row.page_id === input.pageId) &&
+      row.disposition === input.disposition)
+    .reduce((total, row) => total + row.total, 0n));
 }
 
 function aggregateTotal(
@@ -144,6 +182,10 @@ export class PrismaAdminImportRunRepository {
         id: true,
         provider_id: true,
         config_revision_id: true,
+        source_revision_id: true,
+        source_instance_id: true,
+        requested_checkpoint_fingerprint: true,
+        counters_json: true,
         trigger: true,
         state: true,
         created_at: true,
@@ -171,9 +213,12 @@ export class PrismaAdminImportRunRepository {
         row.provider_sources_import_runs_provider_idToprovider_sources.display_name,
       platformKey:
         row.provider_sources_import_runs_provider_idToprovider_sources.platform_key,
-      configurationRevisionId: row.config_revision_id,
+      configurationRevisionId:
+        row.config_revision_id ?? row.source_revision_id ?? "source-revision-unavailable",
       configurationVersion:
-        row.provider_config_revisions_import_runs_config_revision_idToprovider_config_revisions.version,
+        row.provider_config_revisions_import_runs_config_revision_idToprovider_config_revisions?.version ?? 1,
+      sourceInstanceId: row.source_instance_id,
+      counters: row.counters_json,
       trigger: row.trigger,
       state: row.state,
       requestedAt: row.created_at,
@@ -182,7 +227,8 @@ export class PrismaAdminImportRunRepository {
       heartbeatAt: row.heartbeat_at,
       reachedProviderHead: row.reached_provider_head,
       failureCode: row.failure_code,
-      requestedCursor: row.requested_cursor,
+      requestedCursor:
+        row.requested_cursor ?? row.requested_checkpoint_fingerprint,
       finalCursor: row.final_cursor,
     }));
   }
@@ -193,19 +239,31 @@ export class PrismaAdminImportRunRepository {
   ): Promise<readonly AdminImportRunRecord[]> {
     if (runs.length === 0) return [];
     const runIds = runs.map(({ id }) => id);
-    const [pageTotals, outcomeGroups, revisions, resolvedGroups] = await Promise.all([
+    const legacyRunIds = runs
+      .filter(({ sourceInstanceId }) => sourceInstanceId === null)
+      .map(({ id }) => id);
+    const sourceRunIds = runs
+      .filter(({ sourceInstanceId }) => sourceInstanceId !== null)
+      .map(({ id }) => id);
+    const [
+      pageTotals,
+      outcomeGroups,
+      revisions,
+      sourceDispositionGroups,
+      resolvedGroups,
+    ] = await Promise.all([
       this.database.import_pages.groupBy({
         by: ["run_id"],
         where: { organization_id: organizationId, run_id: { in: runIds } },
         _count: { _all: true },
         _max: { committed_at: true },
       }),
-      this.database.source_record_outcomes.groupBy({
+      legacyRunIds.length === 0 ? Promise.resolve([]) : this.database.source_record_outcomes.groupBy({
         by: ["run_id", "record_kind", "outcome"],
-        where: { organization_id: organizationId, run_id: { in: runIds } },
+        where: { organization_id: organizationId, run_id: { in: legacyRunIds } },
         _count: { _all: true },
       }),
-      this.database.$queryRaw<RevisionAggregate[]>(Prisma.sql`
+      legacyRunIds.length === 0 ? Promise.resolve([]) : this.database.$queryRaw<RevisionAggregate[]>(Prisma.sql`
         select outcomes.run_id, count(distinct outcomes.source_record_id) as total
         from source_record_outcomes as outcomes
         inner join source_record_projection_revisions as projections
@@ -215,11 +273,19 @@ export class PrismaAdminImportRunRepository {
           on revisions.id = projections.canonical_revision_id
          and revisions.organization_id = projections.organization_id
         where outcomes.organization_id = ${organizationId}::uuid
-          and outcomes.run_id in (${uuidList(runIds)})
+          and outcomes.run_id in (${uuidList(legacyRunIds)})
           and outcomes.outcome = 'accepted'::source_record_outcome
           and revisions.revision_number > 1
         group by outcomes.run_id
       `),
+      sourceRunIds.length === 0 ? Promise.resolve([]) :
+        this.database.$queryRaw<SourceDispositionAggregate[]>(Prisma.sql`
+          select run_id, disposition::text as disposition, count(*) as total
+          from public.source_delivery_occurrences
+          where organization_id = ${organizationId}::uuid
+            and run_id in (${uuidList(sourceRunIds)})
+          group by run_id, disposition
+        `),
       this.database.quarantine_records.groupBy({
         by: ["run_id"],
         where: {
@@ -239,6 +305,7 @@ export class PrismaAdminImportRunRepository {
     }));
     return runs.map((run) => {
       const pageTotal = pageTotals.find(({ run_id }) => run_id === run.id);
+      const sourceOwned = run.sourceInstanceId !== null;
       const revisedTotal = Number(
         revisions.find(({ run_id }) => run_id === run.id)?.total ?? 0,
       );
@@ -256,13 +323,39 @@ export class PrismaAdminImportRunRepository {
         ]),
         counters: {
           pages: pageTotal?._count._all ?? 0,
-          catalog: aggregateTotal(outcomes, { runId: run.id, recordKind: "catalog" }),
-          pulls: aggregateTotal(outcomes, { runId: run.id, recordKind: "pull" }),
-          sales: aggregateTotal(outcomes, { runId: run.id, recordKind: "sale" }),
-          accepted: Math.max(0, acceptedTotal - revisedTotal),
-          unchanged: aggregateTotal(outcomes, { runId: run.id, outcome: "duplicate" }),
-          revised: revisedTotal,
-          quarantined: aggregateTotal(outcomes, { runId: run.id, outcome: "quarantined" }),
+          catalog: sourceOwned
+            ? sourceCounter(run.counters, "catalog")
+            : aggregateTotal(outcomes, { runId: run.id, recordKind: "catalog" }),
+          pulls: sourceOwned
+            ? sourceCounter(run.counters, "pulls")
+            : aggregateTotal(outcomes, { runId: run.id, recordKind: "pull" }),
+          trades: sourceOwned
+            ? sourceCounter(run.counters, "trades")
+            : aggregateTotal(outcomes, { runId: run.id, recordKind: "trade" }),
+          accepted: sourceOwned
+            ? sourceDispositionTotal(sourceDispositionGroups, {
+                runId: run.id,
+                disposition: "inserted",
+              })
+            : Math.max(0, acceptedTotal - revisedTotal),
+          unchanged: sourceOwned
+            ? sourceDispositionTotal(sourceDispositionGroups, {
+                runId: run.id,
+                disposition: "duplicate",
+              })
+            : aggregateTotal(outcomes, { runId: run.id, outcome: "duplicate" }),
+          revised: sourceOwned
+            ? sourceDispositionTotal(sourceDispositionGroups, {
+                runId: run.id,
+                disposition: "revised",
+              })
+            : revisedTotal,
+          quarantined: sourceOwned
+            ? sourceDispositionTotal(sourceDispositionGroups, {
+                runId: run.id,
+                disposition: "quarantined",
+              })
+            : aggregateTotal(outcomes, { runId: run.id, outcome: "quarantined" }),
           resolvedQuarantines:
             resolvedGroups.find(({ run_id }) => run_id === run.id)?._count._all ?? 0,
         },
@@ -284,6 +377,11 @@ export class PrismaAdminImportRunRepository {
         requested_cursor: true,
         next_cursor: true,
         has_more: true,
+        continuation_kind: true,
+        requested_checkpoint_fingerprint: true,
+        next_checkpoint_fingerprint: true,
+        source_instance_id: true,
+        record_counts_json: true,
         committed_at: true,
       },
       orderBy: { page_number: "asc" },
@@ -293,15 +391,19 @@ export class PrismaAdminImportRunRepository {
       id: page.id,
       runId: page.run_id,
       pageNumber: page.page_number,
-      requestedCursor: page.requested_cursor,
-      nextCursor: page.next_cursor,
-      hasMore: page.has_more,
+      requestedCursor:
+        page.requested_cursor ?? page.requested_checkpoint_fingerprint,
+      nextCursor: page.next_cursor ?? page.next_checkpoint_fingerprint,
+      hasMore: page.has_more ?? page.continuation_kind === "continue",
       committedAt: page.committed_at,
+      sourceInstanceId: page.source_instance_id,
+      counters: page.record_counts_json,
     }));
     if (pages.length === 0) return [];
     const pageIds = pages.map(({ id }) => id);
-    const [outcomeGroups, revisions] = await Promise.all([
-      this.database.source_record_outcomes.groupBy({
+    const sourceOwned = pages[0]!.sourceInstanceId !== null;
+    const [outcomeGroups, revisions, sourceDispositionGroups] = await Promise.all([
+      sourceOwned ? Promise.resolve([]) : this.database.source_record_outcomes.groupBy({
         by: ["run_id", "page_id", "record_kind", "outcome"],
         where: {
           organization_id: organizationId,
@@ -310,7 +412,7 @@ export class PrismaAdminImportRunRepository {
         },
         _count: { _all: true },
       }),
-      this.database.$queryRaw<RevisionAggregate[]>(Prisma.sql`
+      sourceOwned ? Promise.resolve([]) : this.database.$queryRaw<RevisionAggregate[]>(Prisma.sql`
         select outcomes.page_id, count(distinct outcomes.source_record_id) as total
         from source_record_outcomes as outcomes
         inner join source_record_projection_revisions as projections
@@ -326,6 +428,14 @@ export class PrismaAdminImportRunRepository {
           and revisions.revision_number > 1
         group by outcomes.page_id
       `),
+      sourceOwned ? this.database.$queryRaw<SourceDispositionAggregate[]>(Prisma.sql`
+        select run_id, page_id, disposition::text as disposition, count(*) as total
+        from public.source_delivery_occurrences
+        where organization_id = ${organizationId}::uuid
+          and run_id = ${runId}::uuid
+          and page_id in (${uuidList(pageIds)})
+        group by run_id, page_id, disposition
+      `) : Promise.resolve([]),
     ]);
     const outcomes: OutcomeAggregate[] = outcomeGroups.map((row) => ({
       runId: row.run_id,
@@ -349,13 +459,43 @@ export class PrismaAdminImportRunRepository {
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
         committedAt: page.committedAt,
-        catalog: aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "catalog" }),
-        pulls: aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "pull" }),
-        sales: aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "sale" }),
-        accepted: Math.max(0, acceptedTotal - revisedTotal),
-        unchanged: aggregateTotal(outcomes, { runId, pageId: page.id, outcome: "duplicate" }),
-        revised: revisedTotal,
-        quarantined: aggregateTotal(outcomes, { runId, pageId: page.id, outcome: "quarantined" }),
+        catalog: sourceOwned
+          ? sourceCounter(page.counters, "catalog")
+          : aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "catalog" }),
+        pulls: sourceOwned
+          ? sourceCounter(page.counters, "pulls")
+          : aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "pull" }),
+        trades: sourceOwned
+          ? sourceCounter(page.counters, "trades")
+          : aggregateTotal(outcomes, { runId, pageId: page.id, recordKind: "trade" }),
+        accepted: sourceOwned
+          ? sourceDispositionTotal(sourceDispositionGroups, {
+              runId,
+              pageId: page.id,
+              disposition: "inserted",
+            })
+          : Math.max(0, acceptedTotal - revisedTotal),
+        unchanged: sourceOwned
+          ? sourceDispositionTotal(sourceDispositionGroups, {
+              runId,
+              pageId: page.id,
+              disposition: "duplicate",
+            })
+          : aggregateTotal(outcomes, { runId, pageId: page.id, outcome: "duplicate" }),
+        revised: sourceOwned
+          ? sourceDispositionTotal(sourceDispositionGroups, {
+              runId,
+              pageId: page.id,
+              disposition: "revised",
+            })
+          : revisedTotal,
+        quarantined: sourceOwned
+          ? sourceDispositionTotal(sourceDispositionGroups, {
+              runId,
+              pageId: page.id,
+              disposition: "quarantined",
+            })
+          : aggregateTotal(outcomes, { runId, pageId: page.id, outcome: "quarantined" }),
       };
     });
   }

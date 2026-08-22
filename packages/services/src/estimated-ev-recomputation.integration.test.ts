@@ -55,7 +55,7 @@ function pack(
     name: "Synthetic Pack",
     description: null,
     category: "fixture",
-    availability: "active",
+    availability: "available",
     price: { amount: price, currency: "USD" },
     providerReportedEv: null,
     relationships: [],
@@ -366,7 +366,7 @@ test("expired claims are recovered without duplicate calculation history or stal
     const calculated = await harness.service.recalculate({
       organizationId: crashed.organizationId,
       providerId: crashed.providerId,
-      configurationRevisionId: crashed.configurationRevisionId,
+      origin: crashed.origin,
       platformKey: crashed.platformKey,
       packExternalId: crashed.packExternalId,
       evInputExternalId: crashed.evInputExternalId,

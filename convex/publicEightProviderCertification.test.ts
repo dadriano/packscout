@@ -215,6 +215,12 @@ describe("eight-provider public catalog certification", () => {
     expect(seeded.manifest.enabledPlatformKeys).toHaveLength(8);
     expect(seeded.manifest.providerReferences).toHaveLength(8);
 
+    const fixture = buildMockDataReleaseV2();
+    const availableRepackCount = fixture.repacks.filter(
+      ({ availability }) => availability === "available",
+    ).length;
+    expect(availableRepackCount).toBe(3);
+
     const dashboard = await t.query(api.publicRepacks.getDashboardBundle, {
       currentTime: Date.now(),
     });
@@ -225,17 +231,43 @@ describe("eight-provider public catalog certification", () => {
       ok: true,
       data: {
         metadata: { publicReleaseId: seeded.publicReleaseId },
-        kpis: { totalRepacks: 5 },
+        kpis: { totalRepacks: availableRepackCount },
       },
     });
+    expect(
+      dashboard.data.opportunities.every(
+        ({ availability }) => availability === "available",
+      ),
+    ).toBe(true);
     expect(dashboard.data.facets.vendors.length).toBeGreaterThan(1);
     expect(dashboard.data.selectedRepack).not.toBeNull();
 
-    const fixture = buildMockDataReleaseV2();
+    const defaultCatalog = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+    });
+    if (!defaultCatalog.ok) throw new Error("Expected default catalog success.");
+    expect(defaultCatalog.data.range.total).toBe(availableRepackCount);
+    expect(
+      defaultCatalog.data.rows.every(
+        ({ availability }) => availability === "available",
+      ),
+    ).toBe(true);
+
+    const completeCatalog = await t.query(api.publicRepacks.listPublicRepacks, {
+      currentTime: Date.now(),
+      filters: { availability: "all" },
+    });
+    if (!completeCatalog.ok) throw new Error("Expected complete catalog success.");
+    expect(completeCatalog.data.range.total).toBe(6);
+    expect(
+      new Set(completeCatalog.data.rows.map(({ availability }) => availability)),
+    ).toEqual(new Set(["available", "unavailable", "unknown", "sold_out"]));
+
     const desiredCollectible = fixture.collectibles[0]!;
     const firstPage = await t.query(api.publicRepacks.listPublicRepacks, {
       currentTime: Date.now(),
       search: "pokemon",
+      filters: { availability: "all" },
       sort: "repack_price",
       direction: "asc",
       pageSize: 2,
@@ -251,6 +283,7 @@ describe("eight-provider public catalog certification", () => {
     const secondPage = await t.query(api.publicRepacks.listPublicRepacks, {
       currentTime: Date.now(),
       search: "pokemon",
+      filters: { availability: "all" },
       sort: "repack_price",
       direction: "asc",
       pageSize: 2,

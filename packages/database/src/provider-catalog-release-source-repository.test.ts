@@ -846,7 +846,7 @@ async function addUnrelatedPullRelationship(
       source_entity_id: entityId,
       relationship_kind: "observed_with",
       target_platform_key: "alpha",
-      target_record_kind: "sale",
+      target_record_kind: "market_event",
       target_external_id: "unresolved-sale",
       created_public_change_sequence: cause!.sequence,
     },

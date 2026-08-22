@@ -29,6 +29,7 @@ import {
   publicVendorKeySchema,
   timestampSchema,
 } from "./data-release-v2-values.ts";
+import { publicPackAvailabilitySchema } from "./public-pack-availability-v1.ts";
 
 export const publicVendorSchema = z
   .object({
@@ -311,7 +312,7 @@ export const publicRepackChaseSchema = z
 
 export const publicRepackFormatSchema = z.enum(["repack", "gacha"]);
 export const publicContentModeSchema = z.enum(["focused", "mixed", "unknown"]);
-export const publicRepackAvailabilitySchema = z.enum(["active", "sold_out"]);
+export const publicRepackAvailabilitySchema = publicPackAvailabilitySchema;
 
 export const publicContentSummarySchema = z
   .object({
@@ -387,6 +388,16 @@ function validateRepackSummary(
   repack: z.infer<z.ZodObject<typeof repackSummaryShape>>,
   context: z.RefinementCtx,
 ): void {
+  if (
+    repack.availability !== "available" &&
+    (repack.actionAvailability.promo || repack.actionAvailability.repackLink)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["actionAvailability"],
+      message: "public_repack.unavailable_actionable",
+    });
+  }
   if (
     repack.contentSummary.categoryCount !== repack.categories.length ||
     repack.contentSummary.collectibleTypeCount !== repack.collectibleTypes.length
@@ -464,11 +475,15 @@ export const publicRepackDetailSchema = z
         message: "public_repack.action_availability_mismatch",
       });
     }
-    if (repack.availability === "sold_out" && repack.actions.repackLink) {
+    if (
+      repack.availability !== "available" &&
+      (repack.actions.promo !== undefined ||
+        repack.actions.repackLink !== undefined)
+    ) {
       context.addIssue({
         code: "custom",
-        path: ["actions", "repackLink"],
-        message: "public_repack.sold_out_actionable",
+        path: ["actions"],
+        message: "public_repack.unavailable_actionable",
       });
     }
   });

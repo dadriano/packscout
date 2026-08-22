@@ -400,11 +400,13 @@ function CatalogFiltersDraft({
             <input
               checked={availability === "all"}
               onChange={(event) =>
-                setAvailability(event.currentTarget.checked ? "all" : "active")
+                setAvailability(event.currentTarget.checked ? "all" : "available")
               }
               type="checkbox"
             />
-            <span>Include sold out</span>
+            <span>
+              Include packs labeled Unavailable, Availability unknown, or Sold out
+            </span>
           </label>
           <p
             aria-live="polite"
