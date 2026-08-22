@@ -288,3 +288,77 @@ test("worker configuration rejects ambiguous environments and unsafe bounds", ()
     );
   }
 });
+
+test("message outbox settings default sanely and honor bounded overrides", () => {
+  const defaults = readProviderWorkerConfiguration(validEnvironment(), "worker:1");
+  assert.equal(defaults.messageOutboxBatchSize, 25);
+  assert.equal(defaults.messageOutboxPerRecipientLimit, 5);
+  assert.equal(defaults.messageOutboxLeaseMilliseconds, 60_000);
+  assert.equal(defaults.messageOutboxMaximumAttempts, 6);
+  assert.equal(defaults.messageOutboxBackoffBaseMilliseconds, 30_000);
+  assert.equal(defaults.messageOutboxBackoffCapMilliseconds, 3_600_000);
+  assert.equal(defaults.messageOutboxPollMilliseconds, 5_000);
+  assert.equal(defaults.messageOutboxRetentionDays, 90);
+
+  const configured = readProviderWorkerConfiguration(
+    validEnvironment({
+      PACKSCOUT_WORKER_MESSAGE_OUTBOX_BATCH_SIZE: "40",
+      PACKSCOUT_WORKER_MESSAGE_OUTBOX_PER_RECIPIENT_LIMIT: "2",
+      PACKSCOUT_WORKER_MESSAGE_OUTBOX_LEASE_MS: "120000",
+      PACKSCOUT_WORKER_MESSAGE_OUTBOX_MAX_ATTEMPTS: "8",
+      PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_BASE_MS: "10000",
+      PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_CAP_MS: "600000",
+      PACKSCOUT_WORKER_MESSAGE_OUTBOX_POLL_MS: "2000",
+      PACKSCOUT_WORKER_MESSAGE_OUTBOX_RETENTION_DAYS: "30",
+    }),
+    "worker:1",
+  );
+  assert.equal(configured.messageOutboxBatchSize, 40);
+  assert.equal(configured.messageOutboxPerRecipientLimit, 2);
+  assert.equal(configured.messageOutboxLeaseMilliseconds, 120_000);
+  assert.equal(configured.messageOutboxMaximumAttempts, 8);
+  assert.equal(configured.messageOutboxBackoffBaseMilliseconds, 10_000);
+  assert.equal(configured.messageOutboxBackoffCapMilliseconds, 600_000);
+  assert.equal(configured.messageOutboxPollMilliseconds, 2_000);
+  assert.equal(configured.messageOutboxRetentionDays, 30);
+});
+
+test("message outbox settings refuse out-of-bounds values with their own codes", () => {
+  const invalidSettings = [
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_BATCH_SIZE", "0", "MESSAGE_OUTBOX_BATCH_SIZE_INVALID"],
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_BATCH_SIZE", "101", "MESSAGE_OUTBOX_BATCH_SIZE_INVALID"],
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_PER_RECIPIENT_LIMIT", "101", "MESSAGE_OUTBOX_PER_RECIPIENT_INVALID"],
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_LEASE_MS", "999", "MESSAGE_OUTBOX_LEASE_INVALID"],
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_LEASE_MS", "900001", "MESSAGE_OUTBOX_LEASE_INVALID"],
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_MAX_ATTEMPTS", "21", "MESSAGE_OUTBOX_ATTEMPTS_INVALID"],
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_BASE_MS", "99", "MESSAGE_OUTBOX_BACKOFF_BASE_INVALID"],
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_CAP_MS", "86400001", "MESSAGE_OUTBOX_BACKOFF_CAP_INVALID"],
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_POLL_MS", "99", "MESSAGE_OUTBOX_POLL_INVALID"],
+    ["PACKSCOUT_WORKER_MESSAGE_OUTBOX_RETENTION_DAYS", "0", "MESSAGE_OUTBOX_RETENTION_DAYS_INVALID"],
+  ] as const;
+  for (const [variable, value, code] of invalidSettings) {
+    assert.throws(
+      () =>
+        readProviderWorkerConfiguration(
+          validEnvironment({ [variable]: value }),
+          "worker:1",
+        ),
+      hasConfigurationCode(code),
+      `${variable}=${value} refuses with ${code}`,
+    );
+  }
+});
+
+test("a backoff cap below the base is refused so retries can never shrink", () => {
+  assert.throws(
+    () =>
+      readProviderWorkerConfiguration(
+        validEnvironment({
+          PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_BASE_MS: "60000",
+          PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_CAP_MS: "30000",
+        }),
+        "worker:1",
+      ),
+    hasConfigurationCode("MESSAGE_OUTBOX_BACKOFF_CAP_INVALID"),
+  );
+});

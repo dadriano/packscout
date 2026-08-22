@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const pageSource = readFileSync(
@@ -18,8 +18,8 @@ const stylesSource = readFileSync(
   new URL("./Landing.module.css", import.meta.url),
   "utf8",
 );
-const routeSource = readFileSync(
-  new URL("../../app/welcome/page.tsx", import.meta.url),
+const rootRouteSource = readFileSync(
+  new URL("../../app/page.tsx", import.meta.url),
   "utf8",
 );
 const contentSource = readFileSync(
@@ -31,7 +31,6 @@ const allLandingSources = [
   pageSource,
   ctaSource,
   presentationSource,
-  routeSource,
   contentSource,
 ];
 
@@ -50,11 +49,14 @@ test("rendering the landing surface performs no catalog or authenticated read", 
     assert.equal(source.includes("fetch("), false);
     assert.equal(source.includes("next/headers"), false);
   }
-  // The one shell status the standalone address reports is a static literal,
-  // not a read, mirroring the dashboard's own no-data branches.
-  assert.match(routeSource, /status=\{\{ state: "unavailable" \}\}/);
-  assert.equal(routeSource.includes("async"), false);
-  assert.equal(routeSource.includes("await"), false);
+  // The root serves the surface from its landing branch, which returns
+  // before the dashboard read: the access decision is the only thing that
+  // runs ahead of it, and the branch itself renders the pared-back shell
+  // face plus the static landing markup.
+  const landingBranch = rootRouteSource.indexOf('route.kind === "landing"');
+  const dashboardRead = rootRouteSource.indexOf("readDashboardBundle(");
+  assert.ok(landingBranch !== -1 && dashboardRead !== -1);
+  assert.ok(landingBranch < dashboardRead);
 });
 
 test("the provider boot stays intent-based with no eager identity dependency", () => {
@@ -108,18 +110,22 @@ test("nothing on the surface points a signed-out visitor at a gated route", () =
   assert.match(presentationSource, /href: "\/"/);
 });
 
-test("the standalone address stays additive and exports the marketing metadata", () => {
+test("the root is the landing surface's address and carries its marketing metadata", () => {
+  // closed-beta-access/007 wired the branch: the standalone /welcome route
+  // from 006 is retired because the root now serves the surface to every
+  // visitor who is not admitted, so a second indexable copy would only
+  // compete with it.
+  assert.equal(
+    existsSync(new URL("../../app/welcome", import.meta.url)),
+    false,
+  );
   assert.match(
-    routeSource,
+    rootRouteSource,
     /import \{ LandingPage \} from "@\/components\/landing\/LandingPage"/,
   );
-  assert.match(
-    routeSource,
-    /import \{ LANDING_METADATA \} from "@\/lib\/landing-content"/,
-  );
-  assert.match(
-    routeSource,
-    /export const metadata: Metadata = LANDING_METADATA;/,
-  );
-  assert.match(routeSource, /<LandingPage \/>/);
+  assert.match(rootRouteSource, /<LandingPage \/>/);
+  // The landing metadata travels through the access decision: the root's
+  // generateMetadata serves LANDING_METADATA for visitors who get the
+  // landing surface (asserted behaviorally in lib/access-gate.server.test.ts).
+  assert.match(rootRouteSource, /rootRouteMetadata\(await resolveVisitorAccess\(\)\)/);
 });

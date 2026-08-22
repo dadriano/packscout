@@ -42,7 +42,7 @@ The closed-beta feature excluded notifying users of access decisions, reasoning 
 | 001 | Establish the message delivery boundary and provider adapters | medium | done | none |
 | 002 | Add the Postmark delivery adapter | medium | done | 001 |
 | 003 | Author the message catalogue and rendering | medium | done | 001 |
-| 004 | Deliver messages durably with retries | large | in_progress | 001 |
+| 004 | Deliver messages durably with retries | large | done | 001 |
 
 ### Messages
 

@@ -41,6 +41,7 @@ const activityKinds = new Set<WorkerActivityKind>([
   "importing",
   "estimated_ev",
   "retention",
+  "message_outbox",
 ]);
 
 interface WorkerInstanceRow {

@@ -1531,6 +1531,55 @@ model worker_instances {
   @@index([state, last_heartbeat_at], map: "worker_instances_state_heartbeat_idx")
 }
 
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model email_message_intents {
+  id                     String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind                   String
+  input_json             Json
+  recipient              String
+  idempotency_key        String                     @unique(map: "email_message_intents_idempotency_key_unique")
+  source                 String
+  state                  email_message_intent_state @default(pending)
+  due_at                 DateTime                   @db.Timestamptz(6)
+  attempt_count          Int                        @default(0)
+  claim_owner            String?
+  claim_token            String?                    @db.Uuid
+  claim_expires_at       DateTime?                  @db.Timestamptz(6)
+  last_provider          String?
+  last_error_code        String?
+  last_skip_reason       String?
+  last_attempted_at      DateTime?                  @db.Timestamptz(6)
+  finalized_at           DateTime?                  @db.Timestamptz(6)
+  created_at             DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                   @default(now()) @db.Timestamptz(6)
+  email_message_attempts email_message_attempts[]
+
+  @@index([state, due_at, id], map: "email_message_intents_state_due_idx")
+  @@index([source, state], map: "email_message_intents_source_state_idx")
+  @@index([created_at, id], map: "email_message_intents_created_idx")
+  @@index([state, finalized_at], map: "email_message_intents_state_finalized_idx")
+  @@index([recipient, created_at], map: "email_message_intents_recipient_created_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model email_message_attempts {
+  id                    String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  intent_id             String                        @db.Uuid
+  attempt_number        Int
+  attempted_at          DateTime                      @db.Timestamptz(6)
+  outcome               email_message_attempt_outcome
+  provider              String?
+  provider_message_id   String?
+  error_code            String?
+  error_message         String?
+  error_retryable       Boolean?
+  skip_reason           String?
+  email_message_intents email_message_intents         @relation(fields: [intent_id], references: [id], onUpdate: NoAction, map: "email_message_attempts_intent_id_email_message_intents_id_fk")
+
+  @@unique([intent_id, attempt_number], map: "email_message_attempts_intent_attempt_unique")
+  @@index([attempted_at], map: "email_message_attempts_attempted_idx")
+}
+
 enum admin_alert_state {
   active
   acknowledged
@@ -1692,6 +1741,21 @@ enum worker_activity_kind {
   importing
   estimated_ev
   retention
+  message_outbox
+}
+
+enum email_message_intent_state {
+  pending
+  retrying
+  sent
+  skipped
+  failed
+}
+
+enum email_message_attempt_outcome {
+  sent
+  skipped
+  failed
 }
 
 enum worker_instance_state {

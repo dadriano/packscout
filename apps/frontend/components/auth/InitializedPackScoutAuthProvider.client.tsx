@@ -17,6 +17,10 @@ import {
 import { AuthenticatedSavedItemsProvider } from "./AuthenticatedSavedItemsProvider.client";
 import { AuthenticatedSignInRecorder } from "./AuthenticatedSignInRecorder.client";
 import {
+  clearBrowserIdentityCookie,
+  IdentityAccessCookieSync,
+} from "./IdentityCookieSync.client";
+import {
   PackScoutAuthContext,
   type PackScoutAuthValue,
 } from "./AuthContext.client";
@@ -133,14 +137,15 @@ function PackScoutAuthBridge({
     ready,
   ]);
 
-  const logout = useCallback(
-    () =>
-      logoutAndClearReturningSessionHint(
-        privyLogout,
-        browserAuthSessionHintStorage(),
-      ),
-    [privyLogout],
-  );
+  const logout = useCallback(async () => {
+    await logoutAndClearReturningSessionHint(
+      privyLogout,
+      browserAuthSessionHintStorage(),
+    );
+    // The server-readable credential dies with the session, so the very next
+    // server-rendered request reads as signed out (closed-beta-access/007).
+    clearBrowserIdentityCookie();
+  }, [privyLogout]);
   const status: PackScoutAuthValue["status"] = error
     ? "error"
     : !ready
@@ -192,6 +197,7 @@ export function InitializedPackScoutAuthProvider({
 
   return (
     <PrivyProvider appId={configuration.privyAppId} config={privyConfig}>
+      <IdentityAccessCookieSync />
       <ConvexProviderWithAuth
         client={convexClient}
         useAuth={usePrivyAuthForConvex}

@@ -1,17 +1,17 @@
 {
-  "source": "provider and manifest promotion durable ledgers",
+  "source": "email message outbox durable delivery",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260816040000_catalog_promotion_retention/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260822000000_email_message_outbox/migration.sql"
   },
   "expectedCounts": {
-    "tables": 57,
-    "enums": 24,
-    "columns": 812,
-    "indexes": 70,
-    "uniqueConstraints": 50,
-    "foreignKeys": 175,
-    "checkConstraints": 188
+    "tables": 59,
+    "enums": 26,
+    "columns": 842,
+    "indexes": 76,
+    "uniqueConstraints": 52,
+    "foreignKeys": 176,
+    "checkConstraints": 207
   },
   "enums": {
     "admin_alert_state": [
@@ -32,6 +32,18 @@
       "pull",
       "sale",
       "estimated_ev"
+    ],
+    "email_message_attempt_outcome": [
+      "sent",
+      "skipped",
+      "failed"
+    ],
+    "email_message_intent_state": [
+      "pending",
+      "retrying",
+      "sent",
+      "skipped",
+      "failed"
     ],
     "estimated_ev_recomputation_result": [
       "estimated",
@@ -152,7 +164,8 @@
       "scheduling",
       "importing",
       "estimated_ev",
-      "retention"
+      "retention",
+      "message_outbox"
     ],
     "worker_instance_state": [
       "running",
@@ -2224,6 +2237,368 @@
         },
         "catalog_promotion_retention_operations_state_check": {
           "value": "((state = ANY (ARRAY['pending'::text, 'sent'::text, 'acknowledged'::text])) AND (send_count >= 0) AND (((state = 'pending'::text) AND (send_count = 0) AND (last_sent_at IS NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL) AND (terminal_state IS NULL) AND (has_more IS NULL) AND (selected_platform_key IS NULL) AND (selected_public_provider_release_id IS NULL) AND (selected_provider_release_fingerprint IS NULL) AND (postgres_cleanup_complete = false)) OR ((state = 'sent'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL) AND (terminal_state IS NULL) AND (has_more IS NULL) AND (selected_platform_key IS NULL) AND (selected_public_provider_release_id IS NULL) AND (selected_provider_release_fingerprint IS NULL) AND (postgres_cleanup_complete = false)) OR ((state = 'acknowledged'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NOT NULL) AND ((octet_length(canonical_receipt_body) >= 2) AND (octet_length(canonical_receipt_body) <= 393216)) AND promotion_v2_sha256_valid(receipt_sha256) AND ((octet_length(exact_response_body) >= 2) AND (octet_length(exact_response_body) <= 524288)) AND promotion_v2_sha256_valid(response_sha256) AND (terminal_state = ANY (ARRAY['complete'::text, 'continuation_required'::text])) AND (has_more = (terminal_state = 'continuation_required'::text)))))"
+        }
+      }
+    },
+    "email_message_attempts": {
+      "columns": {
+        "attempt_number": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "attempted_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "error_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "error_message": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "error_retryable": {
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "intent_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "outcome": {
+          "type": "email_message_attempt_outcome",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_message_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "skip_reason": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "email_message_attempts_attempted_idx": {
+          "columns": [
+            "attempted_at"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "email_message_attempts_intent_attempt_unique": {
+          "columns": [
+            "intent_id",
+            "attempt_number"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "email_message_attempts_intent_id_email_message_intents_id_fk": {
+          "columns": [
+            "intent_id"
+          ],
+          "referencedTable": "email_message_intents",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "email_message_attempts_error_code_bounded": {
+          "value": "((error_code IS NULL) OR (error_code ~ '^[A-Z][A-Z0-9_]{0,127}$'::text))"
+        },
+        "email_message_attempts_error_message_bounded": {
+          "value": "((error_message IS NULL) OR (length(error_message) <= 200))"
+        },
+        "email_message_attempts_number_positive": {
+          "value": "(attempt_number >= 1)"
+        },
+        "email_message_attempts_outcome_consistent": {
+          "value": "(((outcome = 'sent'::email_message_attempt_outcome) AND (provider IS NOT NULL) AND (error_code IS NULL) AND (error_message IS NULL) AND (error_retryable IS NULL) AND (skip_reason IS NULL)) OR ((outcome = 'skipped'::email_message_attempt_outcome) AND (skip_reason IS NOT NULL) AND (provider_message_id IS NULL) AND (error_code IS NULL) AND (error_message IS NULL) AND (error_retryable IS NULL)) OR ((outcome = 'failed'::email_message_attempt_outcome) AND (error_code IS NOT NULL) AND (error_retryable IS NOT NULL) AND (provider_message_id IS NULL) AND (skip_reason IS NULL)))"
+        },
+        "email_message_attempts_provider_bounded": {
+          "value": "((provider IS NULL) OR ((length(provider) >= 1) AND (length(provider) <= 64)))"
+        },
+        "email_message_attempts_provider_message_id_bounded": {
+          "value": "((provider_message_id IS NULL) OR ((length(provider_message_id) >= 1) AND (length(provider_message_id) <= 256)))"
+        },
+        "email_message_attempts_skip_reason_valid": {
+          "value": "((skip_reason IS NULL) OR (skip_reason = ANY (ARRAY['delivery_disabled'::text, 'console_mode'::text, 'missing_configuration'::text])))"
+        }
+      }
+    },
+    "email_message_intents": {
+      "columns": {
+        "attempt_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "claim_expires_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_owner": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_token": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "now()"
+        },
+        "due_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "finalized_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "idempotency_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "input_json": {
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "last_attempted_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "last_error_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "last_provider": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "last_skip_reason": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "recipient": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "state": {
+          "type": "email_message_intent_state",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'pending'::email_message_intent_state"
+        },
+        "updated_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "email_message_intents_created_idx": {
+          "columns": [
+            "created_at",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_message_intents_recipient_created_idx": {
+          "columns": [
+            "recipient",
+            "created_at"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_message_intents_source_state_idx": {
+          "columns": [
+            "source",
+            "state"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_message_intents_state_due_idx": {
+          "columns": [
+            "state",
+            "due_at",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_message_intents_state_finalized_idx": {
+          "columns": [
+            "state",
+            "finalized_at"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "email_message_intents_idempotency_key_unique": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {},
+      "checkConstraints": {
+        "email_message_intents_attempts_nonnegative": {
+          "value": "(attempt_count >= 0)"
+        },
+        "email_message_intents_claim_consistent": {
+          "value": "(((claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL)) OR ((claim_owner IS NOT NULL) AND (claim_token IS NOT NULL) AND (claim_expires_at IS NOT NULL)))"
+        },
+        "email_message_intents_claim_owner_bounded": {
+          "value": "((claim_owner IS NULL) OR ((length(claim_owner) >= 1) AND (length(claim_owner) <= 256)))"
+        },
+        "email_message_intents_error_code_bounded": {
+          "value": "((last_error_code IS NULL) OR (last_error_code ~ '^[A-Z][A-Z0-9_]{0,127}$'::text))"
+        },
+        "email_message_intents_idempotency_key_bounded": {
+          "value": "((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 256))"
+        },
+        "email_message_intents_input_bounded": {
+          "value": "(length((input_json)::text) <= 16384)"
+        },
+        "email_message_intents_kind_bounded": {
+          "value": "(kind ~ '^[a-z][a-z0-9_]{0,63}$'::text)"
+        },
+        "email_message_intents_provider_bounded": {
+          "value": "((last_provider IS NULL) OR ((length(last_provider) >= 1) AND (length(last_provider) <= 64)))"
+        },
+        "email_message_intents_recipient_bounded": {
+          "value": "((length(recipient) >= 3) AND (length(recipient) <= 320) AND (strpos(recipient, '@'::text) > 1))"
+        },
+        "email_message_intents_skip_reason_valid": {
+          "value": "((last_skip_reason IS NULL) OR (last_skip_reason = ANY (ARRAY['delivery_disabled'::text, 'console_mode'::text, 'missing_configuration'::text])))"
+        },
+        "email_message_intents_source_bounded": {
+          "value": "(source ~ '^[a-z][a-z0-9_]{0,63}$'::text)"
+        },
+        "email_message_intents_terminal_consistent": {
+          "value": "(((state = ANY (ARRAY['sent'::email_message_intent_state, 'skipped'::email_message_intent_state, 'failed'::email_message_intent_state])) AND (finalized_at IS NOT NULL) AND (claim_owner IS NULL)) OR ((state = ANY (ARRAY['pending'::email_message_intent_state, 'retrying'::email_message_intent_state])) AND (finalized_at IS NULL)))"
         }
       }
     },

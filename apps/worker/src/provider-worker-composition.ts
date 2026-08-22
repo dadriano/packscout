@@ -1,5 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
+  PrismaEmailMessageOutboxRepository,
   PrismaImportRunRepository,
   PrismaProviderConfigurationRepository,
   PrismaProviderHealthRepository,
@@ -12,8 +13,11 @@ import {
 import {
   AesGcmProviderCredentialCipher,
   CatalogProjectionService,
+  createPostmarkEmailDeliveryAdapter,
   createProviderMappingAdapterRegistryFromManifest,
   DefaultProviderImportPagePlanner,
+  EmailDeliveryAdapterRegistry,
+  EmailDeliveryService,
   EventProjectionService,
   HmacProviderActorPseudonymizer,
   HttpCursorAdapter,
@@ -22,12 +26,14 @@ import {
   ProviderProjectionService,
   ProviderSchedulerService,
   ProviderTransportAdapterRegistry,
+  resolveMessageCatalogueOrigins,
   WorkerPresenceService,
   type OperationalObservability,
   type ProviderActorKeyer,
 } from "@packscout/services";
 import { createProviderWorkerOperationalRuntime } from "./provider-worker-operational-runtime.ts";
 import { createProviderWorkerEstimatedEvProcessor } from "./provider-worker-estimated-ev.ts";
+import { createProviderWorkerMessageOutboxProcessor } from "./provider-worker-message-outbox.ts";
 import {
   createProviderWorkerPresenceObserver,
   describeWorkerInstance,
@@ -59,6 +65,14 @@ type RuntimeConfiguration = Pick<
   | "heartbeatIntervalMilliseconds"
   | "importRunLeaseMilliseconds"
   | "maximumClaimsPerCycle"
+  | "messageOutboxBackoffBaseMilliseconds"
+  | "messageOutboxBackoffCapMilliseconds"
+  | "messageOutboxBatchSize"
+  | "messageOutboxLeaseMilliseconds"
+  | "messageOutboxMaximumAttempts"
+  | "messageOutboxPerRecipientLimit"
+  | "messageOutboxPollMilliseconds"
+  | "messageOutboxRetentionDays"
   | "pollIntervalMilliseconds"
   | "presenceRetentionDays"
   | "presenceStaleAfterMilliseconds"
@@ -75,6 +89,8 @@ type RuntimeConfiguration = Pick<
 export interface ProviderWorkerCompositionInput {
   readonly configuration: RuntimeConfiguration;
   readonly database: PackscoutPrismaClient;
+  /** Delivery mode, provider credentials, and public origins read here. */
+  readonly env?: NodeJS.ProcessEnv;
   readonly logger: ProviderWorkerLogger;
   readonly observability: OperationalObservability;
   readonly promotion?: PromotionV2WorkerRuntimePort;
@@ -115,6 +131,10 @@ export function createProviderWorkerRuntime(
   const descriptor = describeWorkerInstance(input.configuration);
   const instanceId = descriptor.instanceId;
   const presenceRepository = new PrismaWorkerPresenceRepository(input.database);
+  const environment = input.env ?? process.env;
+  const outboxRepository = new PrismaEmailMessageOutboxRepository(
+    input.database,
+  );
   const operational = createProviderWorkerOperationalRuntime({
     database: input.database,
     ids,
@@ -139,6 +159,16 @@ export function createProviderWorkerRuntime(
           retentionMs:
             effectiveSettings.presenceRetentionDays * 24 * 60 * 60 * 1_000,
           prune: (request) => presenceRepository.prune(request),
+        },
+        {
+          // Delivered message history ages out with the platform's other
+          // fleet-scoped records; the repository itself refuses to touch an
+          // intent that is still pending or retrying.
+          kind: "email_message_history",
+          retentionMs:
+            input.configuration.messageOutboxRetentionDays *
+            24 * 60 * 60 * 1_000,
+          prune: (request) => outboxRepository.pruneHistory(request),
         },
       ],
     },
@@ -209,6 +239,30 @@ export function createProviderWorkerRuntime(
     heatPromotion: input.heatPromotion,
     catalogRetention: input.catalogRetention,
     retention,
+    messageOutbox: createProviderWorkerMessageOutboxProcessor({
+      queue: outboxRepository,
+      delivery: new EmailDeliveryService(
+        new EmailDeliveryAdapterRegistry([
+          createPostmarkEmailDeliveryAdapter(),
+        ]),
+        { env: environment, clock },
+      ),
+      origins: resolveMessageCatalogueOrigins(environment),
+      clock,
+      workerId: instanceId,
+      settings: {
+        batchSize: input.configuration.messageOutboxBatchSize,
+        perRecipientLimit: input.configuration.messageOutboxPerRecipientLimit,
+        leaseMilliseconds: input.configuration.messageOutboxLeaseMilliseconds,
+        maximumAttempts: input.configuration.messageOutboxMaximumAttempts,
+        backoffBaseMilliseconds:
+          input.configuration.messageOutboxBackoffBaseMilliseconds,
+        backoffCapMilliseconds:
+          input.configuration.messageOutboxBackoffCapMilliseconds,
+        pollIntervalMilliseconds:
+          input.configuration.messageOutboxPollMilliseconds,
+      },
+    }),
     presence: new ProviderWorkerPresence({
       service: new WorkerPresenceService({
         store: presenceRepository,

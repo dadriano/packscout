@@ -18,6 +18,7 @@ export const PRODUCT_USER_MAX_SUBJECT_LENGTH = 1_024;
 export const PRODUCT_USER_MAX_TEXT_LENGTH = 320;
 export const PRODUCT_USER_MAX_WALLET_ADDRESS_LENGTH = 128;
 export const PRODUCT_USER_MAX_AUTH_METHOD_LENGTH = 128;
+export const PRODUCT_USER_MAX_OPERATOR_LENGTH = 128;
 export const PRODUCT_USER_UNKNOWN_AUTH_METHOD = "unknown";
 export const PRODUCT_USER_DIRECTORY_MAX_PAGE_SIZE = 20;
 
@@ -46,7 +47,8 @@ export type ProductUserErrorCode =
   | "PRODUCT_USER_SEARCH_INVALID"
   | "PRODUCT_USER_PAGE_SIZE_INVALID"
   | "PRODUCT_USER_PAGE_CURSOR_INVALID"
-  | "PRODUCT_USER_SUBJECT_INVALID";
+  | "PRODUCT_USER_SUBJECT_INVALID"
+  | "PRODUCT_USER_OPERATOR_INVALID";
 
 /**
  * `ACCOUNT_SUSPENDED` is the stable, distinguishable outcome every
@@ -68,6 +70,8 @@ const PRODUCT_USER_MESSAGES: Readonly<Record<ProductUserErrorCode, string>> =
     PRODUCT_USER_PAGE_CURSOR_INVALID: "The product-user page cursor is invalid.",
     PRODUCT_USER_SUBJECT_INVALID:
       "The requested product-user subject is invalid.",
+    PRODUCT_USER_OPERATOR_INVALID:
+      "The product-user operator reference is invalid.",
   });
 
 export function refuseProductUser(code: ProductUserErrorCode): never {
@@ -166,7 +170,16 @@ export const productUserDocumentValidator = v.object({
 
 export const productUserRecordValidator = productUserDocumentValidator
   .omit("walletAddressKey")
-  .omit("access");
+  .omit("access")
+  .extend({
+    /**
+     * The authoritative admission decision, always present on a returned
+     * record: the stored decision when the record carries one, otherwise the
+     * default derived exactly as reads derive it for records that predate
+     * the closed beta (closed-beta-access/003 exposes it to operators).
+     */
+    access: productUserAccessDecisionValidator,
+  });
 
 export const productUserDirectoryRowValidator =
   productUserRecordValidator.extend({
@@ -259,6 +272,25 @@ export function requireProductUserSubjectArgument(subject: string): string {
   return subject;
 }
 
+/**
+ * Bounds the acting operator's admin-side reference on a decision operation.
+ * Like the allowlist's creating-operator field, it is a bounded opaque string
+ * rather than a foreign key because operator identities live in the admin's
+ * own store. It is provenance supplied by the trusted integration, never an
+ * authorization claim.
+ */
+export function requireProductUserOperatorArgument(operatorId: string): string {
+  const trimmed = operatorId.trim();
+  if (
+    trimmed.length === 0 ||
+    trimmed.length > PRODUCT_USER_MAX_OPERATOR_LENGTH ||
+    CONTROL_CHARACTERS.test(trimmed)
+  ) {
+    refuseProductUser("PRODUCT_USER_OPERATOR_INVALID");
+  }
+  return trimmed;
+}
+
 export function requireProductUserSubject(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -301,6 +333,7 @@ export function toProductUserRecord(
     firstSeenAt: document.firstSeenAt,
     lastSeenAt: document.lastSeenAt,
     standing: document.standing,
+    access: productUserAccessDecisionOf(document),
   };
 }
 

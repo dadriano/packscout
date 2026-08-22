@@ -37,6 +37,7 @@ const REQUEST_ERROR_CODES = new Set([
   "PRODUCT_USER_PAGE_SIZE_INVALID",
   "PRODUCT_USER_PAGE_CURSOR_INVALID",
   "PRODUCT_USER_SUBJECT_INVALID",
+  "PRODUCT_USER_OPERATOR_INVALID",
 ]);
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -482,6 +483,134 @@ const removeBetaAllowlistEntry = httpAction(async (ctx, request) => {
   }
 });
 
+/**
+ * The closed-beta review surface (closed-beta-access/003), reached through
+ * the same admin integration and deployment secret as the directory reads:
+ * operator decisions about an identity's admission — approve, decline,
+ * revoke — plus the queue of identities awaiting one and its bounded count.
+ * Subjects and operator references are audit-relevant identifiers, so every
+ * operation is POST with a JSON body and every refusal is a fixed string.
+ */
+
+/** Transport-level bound; the review module enforces the semantic one. */
+const MAX_OPERATOR_ID_LENGTH = 1_024;
+
+function readOperatorId(value: unknown): string | null {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_OPERATOR_ID_LENGTH
+    ? value
+    : null;
+}
+
+/**
+ * Absent and null read as the default queue (awaiting review); anything else
+ * must be one of the three decision states. `undefined` marks a malformed
+ * field, mirroring `readSearch`.
+ */
+function readAccessState(
+  value: unknown,
+): "awaiting_review" | "approved" | "declined" | null | undefined {
+  if (value === undefined || value === null) return null;
+  return value === "awaiting_review" ||
+    value === "approved" ||
+    value === "declined"
+    ? value
+    : undefined;
+}
+
+/**
+ * One reversible decision operation: keyed by subject, stamped with the
+ * acting operator, reporting the previous and resulting decisions plus the
+ * resulting effective access. A subject the directory has never recorded
+ * reports `nothing_to_decide` rather than inventing a record, and repeating
+ * a decision converges on the authoritative one rather than failing.
+ */
+function decideProductUserAccessRoute(
+  operation:
+    | typeof internal.productUserAccessReview.approveAccess
+    | typeof internal.productUserAccessReview.declineAccess
+    | typeof internal.productUserAccessReview.revokeAccess,
+) {
+  return httpAction(async (ctx, request) => {
+    if (!isAuthorized(request)) return unauthorized();
+    const body = await readJsonObject(request);
+    if (body === null) return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+    const subject = readSubject(body.subject);
+    const operatorId = readOperatorId(body.operatorId);
+    if (subject === null || operatorId === null) {
+      return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+    }
+    try {
+      return jsonResponse(
+        200,
+        await ctx.runMutation(operation, { subject, operatorId }),
+      );
+    } catch (error) {
+      return refusalResponse(error);
+    }
+  });
+}
+
+const approveProductUserAccess = decideProductUserAccessRoute(
+  internal.productUserAccessReview.approveAccess,
+);
+const declineProductUserAccess = decideProductUserAccessRoute(
+  internal.productUserAccessReview.declineAccess,
+);
+const revokeProductUserAccess = decideProductUserAccessRoute(
+  internal.productUserAccessReview.revokeAccess,
+);
+
+/**
+ * One bounded page of the review queue: identities in a decision state
+ * (awaiting review when the caller names none), oldest-request-first, as
+ * full directory rows. The pagination contract matches the directory
+ * listing's; cursors are passed back unchanged.
+ */
+const listProductUserAccessQueue = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  const accessState = readAccessState(body.accessState);
+  const paginationOpts = readPaginationOpts(body.paginationOpts);
+  if (accessState === undefined || paginationOpts === null) {
+    return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runQuery(internal.productUserAccessReview.listAccessQueuePage, {
+        accessState: accessState ?? "awaiting_review",
+        paginationOpts,
+      }),
+    );
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
+/**
+ * The bounded awaiting-review count, so the admin can show that work is
+ * waiting without paging the whole queue.
+ */
+const countProductUserAccessQueue = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runQuery(
+        internal.productUserAccessReview.countAwaitingReview,
+        {},
+      ),
+    );
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
 const http = httpRouter();
 
 
@@ -795,6 +924,35 @@ http.route({
   path: "/admin/product-users/standing",
   method: "POST",
   handler: setProductUserStanding,
+});
+
+// The closed-beta review surface: POST for the same reason as above — the
+// subject keys and operator references in these bodies are identifiers that
+// must not travel in a URL or query string.
+http.route({
+  path: "/admin/product-users/access/approve",
+  method: "POST",
+  handler: approveProductUserAccess,
+});
+http.route({
+  path: "/admin/product-users/access/decline",
+  method: "POST",
+  handler: declineProductUserAccess,
+});
+http.route({
+  path: "/admin/product-users/access/revoke",
+  method: "POST",
+  handler: revokeProductUserAccess,
+});
+http.route({
+  path: "/admin/product-users/access/queue",
+  method: "POST",
+  handler: listProductUserAccessQueue,
+});
+http.route({
+  path: "/admin/product-users/access/queue-count",
+  method: "POST",
+  handler: countProductUserAccessQueue,
 });
 
 // POST rather than GET, like the directory routes: allowlist identifiers are

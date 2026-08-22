@@ -87,3 +87,6 @@ export * from "./email-delivery/postmark-adapter.ts";
 export * from "./message-catalogue/origins.ts";
 export * from "./message-catalogue/rendering.ts";
 export * from "./message-catalogue/catalogue.ts";
+export * from "./message-outbox/outbox-service.ts";
+export * from "./message-outbox/drain-service.ts";
+export * from "./message-outbox/renderers.ts";

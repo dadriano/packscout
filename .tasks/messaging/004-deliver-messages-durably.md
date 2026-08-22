@@ -4,7 +4,7 @@
 **Depends on:** messaging/001
 **Blocks:** messaging/005, messaging/006, messaging/007, messaging/008, messaging/011
 **Estimated scope:** large
-**Status:** in_progress
+**Status:** done
 
 ## Objective
 
@@ -48,16 +48,16 @@ Invisible when it works. Its effect is that a message triggered during a provide
 
 ## Acceptance Criteria
 
-- [ ] An enqueued intent survives process restart and is delivered afterwards.
-- [ ] Duplicate enqueues for the same triggering event converge on one intent, including under concurrent arrival, and the recipient receives one message.
-- [ ] Two concurrent drains never deliver the same intent twice.
-- [ ] Retryable failures retry with bounded backoff to the attempt limit, then rest as terminally failed; terminal failures and rendering failures are never retried.
-- [ ] Skipped outcomes are recorded as skipped rather than as failures in disabled or console environments.
-- [ ] Attempt records carry outcome, provider, stable error code, provider message identifier, and attempt number, and retain no message body, credential, or raw provider error.
-- [ ] Pending, due, retrying, and terminally failed counts are answerable without a full scan, and per-source enqueue volume is bounded.
-- [ ] A slow or poisoned intent does not starve the rest of the queue.
-- [ ] Enqueueing succeeds and intents wait when delivery is unconfigured or unreachable; nothing is dropped.
-- [ ] A caller's own operation is unaffected by any delivery outcome.
+- [x] An enqueued intent survives process restart and is delivered afterwards.
+- [x] Duplicate enqueues for the same triggering event converge on one intent, including under concurrent arrival, and the recipient receives one message.
+- [x] Two concurrent drains never deliver the same intent twice.
+- [x] Retryable failures retry with bounded backoff to the attempt limit, then rest as terminally failed; terminal failures and rendering failures are never retried.
+- [x] Skipped outcomes are recorded as skipped rather than as failures in disabled or console environments.
+- [x] Attempt records carry outcome, provider, stable error code, provider message identifier, and attempt number, and retain no message body, credential, or raw provider error.
+- [x] Pending, due, retrying, and terminally failed counts are answerable without a full scan, and per-source enqueue volume is bounded.
+- [x] A slow or poisoned intent does not starve the rest of the queue.
+- [x] Enqueueing succeeds and intents wait when delivery is unconfigured or unreachable; nothing is dropped.
+- [x] A caller's own operation is unaffected by any delivery outcome.
 
 ## Verification
 

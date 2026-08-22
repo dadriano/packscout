@@ -1353,11 +1353,21 @@ export default defineSchema({
     "publicCollectibleId",
   ]),
 
+  // The decision-state index serves the operator review queue (identities in
+  // one decision state, oldest decision first) and the bounded
+  // awaiting-review count. Records that predate the closed beta store no
+  // `access` at all: they sit in that index's undefined segment, ordered by
+  // creation time (their first sign-in), and the queue reads merge them into
+  // awaiting review — which is what absence already means.
   productUsers: defineTable(productUserDocumentValidator)
     .index("by_subject", ["subject"])
     .index("by_last_seen_at", ["lastSeenAt"])
     .index("by_email", ["email"])
-    .index("by_wallet_address_key", ["walletAddressKey"]),
+    .index("by_wallet_address_key", ["walletAddressKey"])
+    .index("by_access_state_and_access_decided_at", [
+      "access.state",
+      "access.decidedAt",
+    ]),
 
   // The closed-beta allowlist. The identifier indexes serve exact-match
   // admission (establishment-time and retroactive), uniqueness checks, and

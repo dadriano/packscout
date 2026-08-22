@@ -9,6 +9,7 @@ export * from "./admin-operation-read-model.ts";
 export * from "./admin-provider-operation-repository.ts";
 export * from "./background-work-repository.ts";
 export * from "./database.ts";
+export * from "./email-message-outbox-repository.ts";
 export * from "./estimated-ev-recomputation-repository.ts";
 export * from "./active-catalog-heat-manifest.ts";
 export * from "./heat-promotion-manifest-repository.ts";

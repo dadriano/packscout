@@ -19,6 +19,14 @@ export type ProviderWorkerConfigurationErrorCode =
   | "HEARTBEAT_INTERVAL_INVALID"
   | "IMPORT_RUN_LEASE_INVALID"
   | "MAXIMUM_CLAIMS_INVALID"
+  | "MESSAGE_OUTBOX_ATTEMPTS_INVALID"
+  | "MESSAGE_OUTBOX_BACKOFF_BASE_INVALID"
+  | "MESSAGE_OUTBOX_BACKOFF_CAP_INVALID"
+  | "MESSAGE_OUTBOX_BATCH_SIZE_INVALID"
+  | "MESSAGE_OUTBOX_LEASE_INVALID"
+  | "MESSAGE_OUTBOX_PER_RECIPIENT_INVALID"
+  | "MESSAGE_OUTBOX_POLL_INVALID"
+  | "MESSAGE_OUTBOX_RETENTION_DAYS_INVALID"
   | "NODE_ENV_INVALID"
   | "POLL_INTERVAL_INVALID"
   | "PUBLIC_ORGANIZATION_ID_INVALID"
@@ -51,6 +59,14 @@ export interface ProviderWorkerConfiguration {
   readonly heartbeatIntervalMilliseconds: number;
   readonly importRunLeaseMilliseconds: number;
   readonly maximumClaimsPerCycle: number;
+  readonly messageOutboxBackoffBaseMilliseconds: number;
+  readonly messageOutboxBackoffCapMilliseconds: number;
+  readonly messageOutboxBatchSize: number;
+  readonly messageOutboxLeaseMilliseconds: number;
+  readonly messageOutboxMaximumAttempts: number;
+  readonly messageOutboxPerRecipientLimit: number;
+  readonly messageOutboxPollMilliseconds: number;
+  readonly messageOutboxRetentionDays: number;
   readonly pollIntervalMilliseconds: number;
   readonly publicOrganizationId: string;
   readonly presenceRetentionDays: number;
@@ -215,6 +231,26 @@ export function readProviderWorkerConfiguration(
   if (presenceStaleAfterMilliseconds <= heartbeatIntervalMilliseconds) {
     throw new ProviderWorkerConfigurationError("PRESENCE_STALE_INVALID");
   }
+  const messageOutboxBackoffBaseMilliseconds = boundedInteger(
+    environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_BASE_MS,
+    30_000,
+    100,
+    3_600_000,
+    "MESSAGE_OUTBOX_BACKOFF_BASE_INVALID",
+  );
+  const messageOutboxBackoffCapMilliseconds = boundedInteger(
+    environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_CAP_MS,
+    3_600_000,
+    100,
+    86_400_000,
+    "MESSAGE_OUTBOX_BACKOFF_CAP_INVALID",
+  );
+  // A cap below the base would make the "exponential" schedule shrink.
+  if (messageOutboxBackoffCapMilliseconds < messageOutboxBackoffBaseMilliseconds) {
+    throw new ProviderWorkerConfigurationError(
+      "MESSAGE_OUTBOX_BACKOFF_CAP_INVALID",
+    );
+  }
   return Object.freeze({
     actorPseudonymKey: keyFor(
       environment.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
@@ -257,6 +293,50 @@ export function readProviderWorkerConfiguration(
       1,
       100,
       "MAXIMUM_CLAIMS_INVALID",
+    ),
+    messageOutboxBackoffBaseMilliseconds,
+    messageOutboxBackoffCapMilliseconds,
+    messageOutboxBatchSize: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_BATCH_SIZE,
+      25,
+      1,
+      100,
+      "MESSAGE_OUTBOX_BATCH_SIZE_INVALID",
+    ),
+    messageOutboxLeaseMilliseconds: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_LEASE_MS,
+      60_000,
+      1_000,
+      900_000,
+      "MESSAGE_OUTBOX_LEASE_INVALID",
+    ),
+    messageOutboxMaximumAttempts: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_MAX_ATTEMPTS,
+      6,
+      1,
+      20,
+      "MESSAGE_OUTBOX_ATTEMPTS_INVALID",
+    ),
+    messageOutboxPerRecipientLimit: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_PER_RECIPIENT_LIMIT,
+      5,
+      1,
+      100,
+      "MESSAGE_OUTBOX_PER_RECIPIENT_INVALID",
+    ),
+    messageOutboxPollMilliseconds: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_POLL_MS,
+      5_000,
+      100,
+      300_000,
+      "MESSAGE_OUTBOX_POLL_INVALID",
+    ),
+    messageOutboxRetentionDays: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_RETENTION_DAYS,
+      90,
+      1,
+      3_650,
+      "MESSAGE_OUTBOX_RETENTION_DAYS_INVALID",
     ),
     pollIntervalMilliseconds: boundedInteger(
       environment.PACKSCOUT_WORKER_POLL_MS,
