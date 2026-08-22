@@ -4,7 +4,7 @@
 **Depends on:** closed-beta-access/001, closed-beta-access/006
 **Blocks:** closed-beta-access/008, closed-beta-access/011
 **Estimated scope:** large
-**Status:** todo
+**Status:** in_progress
 
 ## Objective
 

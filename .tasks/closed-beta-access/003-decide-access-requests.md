@@ -4,7 +4,7 @@
 **Depends on:** closed-beta-access/001
 **Blocks:** closed-beta-access/010
 **Estimated scope:** medium
-**Status:** todo
+**Status:** in_progress
 
 ## Objective
 

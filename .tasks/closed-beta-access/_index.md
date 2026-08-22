@@ -40,7 +40,7 @@ Adapted rather than copied, because PackScout's stack differs: identity arrives 
 |---|---|---|---|---|
 | 001 | Establish the closed-beta access decision | medium | done | admin-tools/002 |
 | 002 | Maintain the beta allowlist | medium | done | 001 |
-| 003 | Decide access requests through the operator integration | medium | todo | 001 |
+| 003 | Decide access requests through the operator integration | medium | in_progress | 001 |
 
 ### Enforcement
 
@@ -54,7 +54,7 @@ Adapted rather than copied, because PackScout's stack differs: identity arrives 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
 | 006 | Add the public landing page | medium | done | none |
-| 007 | Gate the product behind approved access | large | todo | 001, 006 |
+| 007 | Gate the product behind approved access | large | in_progress | 001, 006 |
 | 008 | Awaiting-approval and declined experience | medium | todo | 007 |
 
 ### Operator surfaces (admin)
