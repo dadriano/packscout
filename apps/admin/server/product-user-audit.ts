@@ -1,14 +1,22 @@
 import { PrismaAuthAuditSink } from "@packscout/database";
-import type { ProductUserStanding } from "@packscout/contracts";
+import type {
+  ProductUserAccessAction,
+  ProductUserAccessDecider,
+  ProductUserAccessState,
+  ProductUserStanding,
+} from "@packscout/contracts";
 import { createRecordReferencer } from "./auth/actor-key.ts";
 
 /**
  * The audit trail for product-user account control.
  *
- * Suspension and reinstatement are the only administrator actions that change
- * a product user's account, so every attempt at one is recorded on the admin's
- * existing `audit_events` trail, in the same shape its operator actions use:
- * the acting operator, the target, the action, the outcome, and when.
+ * The administrator actions that change a product user's account — the
+ * standing flip, and the three closed-beta access decisions — are each
+ * recorded on the admin's existing `audit_events` trail, in the same shape its
+ * operator actions use: the acting operator, the target, the action, the
+ * outcome, and when. Access decisions additionally record the previous and
+ * resulting decision with its provenance, so the trail shows what each
+ * decision displaced, never just what it produced.
  *
  * The target is written as a pseudonymous reference rather than the subject
  * key itself. The subject key is issuer-qualified personal data, and the audit
@@ -24,9 +32,31 @@ type ProductUserAuditDatabase = ConstructorParameters<
 
 export type ProductUserAuditAction =
   | "product_user.suspend"
-  | "product_user.reinstate";
+  | "product_user.reinstate"
+  | "product_user.approve_access"
+  | "product_user.decline_access"
+  | "product_user.revoke_access";
 
 export type ProductUserAuditOutcome = "success" | "failure" | "blocked";
+
+/**
+ * A decision as the trail records it: state and provenance kind, both from
+ * closed non-personal vocabularies. The stored decision's operator and
+ * allowlist references stay out — the acting operator is already the event's
+ * actor, and a displaced decision's author is not this event's business.
+ */
+export interface ProductUserAuditDecision {
+  readonly state: ProductUserAccessState;
+  readonly decidedBy: ProductUserAccessDecider;
+}
+
+/** What an access decision displaced and produced, for the trail. */
+export interface ProductUserAuditAccessChange {
+  readonly previous: ProductUserAuditDecision;
+  readonly resulting: ProductUserAuditDecision;
+  /** False when the record already held the target decision. */
+  readonly changed: boolean;
+}
 
 export interface ProductUserAuditEvent {
   readonly organizationId: string | null;
@@ -38,6 +68,8 @@ export interface ProductUserAuditEvent {
   readonly occurredAt: Date;
   /** The standing the directory reports afterwards, when it is known. */
   readonly standing?: ProductUserStanding;
+  /** The access decision movement, when the action was an access decision. */
+  readonly accessChange?: ProductUserAuditAccessChange;
   /** A short, non-personal code describing why an attempt did not succeed. */
   readonly reason?: string;
 }
@@ -57,6 +89,20 @@ export function productUserAuditAction(
   return standing === "suspended"
     ? "product_user.suspend"
     : "product_user.reinstate";
+}
+
+/** The trail's name for each access decision operation. */
+export function productUserAccessAuditAction(
+  action: ProductUserAccessAction,
+): ProductUserAuditAction {
+  switch (action) {
+    case "approve":
+      return "product_user.approve_access";
+    case "decline":
+      return "product_user.decline_access";
+    case "revoke":
+      return "product_user.revoke_access";
+  }
 }
 
 /**
@@ -87,6 +133,15 @@ export function createProductUserAuditSink(input: {
           metadata_json: {
             reference: reference([event.subject]),
             ...(event.standing === undefined ? {} : { standing: event.standing }),
+            ...(event.accessChange === undefined
+              ? {}
+              : {
+                  previousAccess: event.accessChange.previous.state,
+                  previousDecidedBy: event.accessChange.previous.decidedBy,
+                  resultingAccess: event.accessChange.resulting.state,
+                  resultingDecidedBy: event.accessChange.resulting.decidedBy,
+                  changed: event.accessChange.changed,
+                }),
             ...(event.reason === undefined ? {} : { reason: event.reason }),
           },
           occurred_at: event.occurredAt,

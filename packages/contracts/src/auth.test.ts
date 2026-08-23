@@ -98,3 +98,22 @@ test("beta-allowlist administration is granted to administrators only", () => {
     "imports:retry",
   ]);
 });
+
+test("message-delivery inspection is granted to administrators only", () => {
+  assert.ok(operatorPermissions.includes("message_delivery:view"));
+  assert.ok(operatorPermissions.includes("message_delivery:manage"));
+
+  const administrator = permissionsForOperatorRole("admin");
+  assert.ok(administrator.includes("message_delivery:view"));
+  assert.ok(administrator.includes("message_delivery:manage"));
+
+  const dataOperator = permissionsForOperatorRole("data_operator");
+  assert.equal(dataOperator.includes("message_delivery:view"), false);
+  assert.equal(dataOperator.includes("message_delivery:manage"), false);
+  // The data operator's existing capability set is unchanged by this feature.
+  assert.deepEqual(dataOperator, [
+    "providers:view",
+    "imports:start",
+    "imports:retry",
+  ]);
+});

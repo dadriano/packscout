@@ -62,7 +62,7 @@ Adapted rather than copied, because PackScout's stack differs: identity arrives 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
 | 009 | Manage the beta allowlist in the admin | medium | done | 002, admin-tools/001 |
-| 010 | Review and decide access requests in the admin | medium | todo | 003, admin-tools/003 |
+| 010 | Review and decide access requests in the admin | medium | done | 003, admin-tools/003 |
 
 ### Launch
 

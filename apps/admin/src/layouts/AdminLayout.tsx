@@ -60,6 +60,8 @@ export function AdminLayout() {
           ? "Workers"
         : location.pathname.startsWith("/alerts")
           ? "Operational Alerts"
+        : location.pathname.startsWith("/messages")
+          ? "Messages"
         : "Not found";
   useDocumentTitle(title);
 
@@ -80,11 +82,13 @@ export function AdminLayout() {
   const canViewBetaAllowlist = session.permissions.includes(
     "beta_allowlist:view",
   );
+  const canViewMessages = session.permissions.includes("message_delivery:view");
   const workspaceNavigation = [
     ...baseNavigation,
     ...(canManageOperators ? [{ to: "/operators", label: "Operators" }] : []),
     ...(canViewProductUsers ? [{ to: "/users", label: "Users" }] : []),
     ...(canViewBetaAllowlist ? [{ to: "/allowlist", label: "Allowlist" }] : []),
+    ...(canViewMessages ? [{ to: "/messages", label: "Messages" }] : []),
   ];
   const pipelineNavigation = canViewProviders
     ? [

@@ -867,4 +867,47 @@ export class PrismaEmailMessageOutboxRepository {
       return pruned.length;
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
+
+  /**
+   * Re-enters one terminally failed intent into the normal queue, for an
+   * explicit operator retry: `failed` becomes `pending`, due immediately, and
+   * the next drain pass claims and delivers it through the ordinary path —
+   * nothing is sent inline. Attempt history and the attempt counter are
+   * preserved, so the retry is bounded: the drain's claim increments the
+   * counter as usual and a further retryable failure rests terminal again
+   * rather than re-entering the old backoff ladder.
+   *
+   * The transition is a single guarded UPDATE on `state = 'failed'`, so
+   * concurrent retries of the same intent converge on one: the first request
+   * performs the requeue and every other one observes a live intent and
+   * reports `null`. Any non-terminal-failed state — live, sent, or skipped —
+   * likewise reports `null` and changes nothing.
+   */
+  async requeueTerminalIntent(input: {
+    intentId: string;
+    now: Date;
+  }): Promise<EmailMessageIntentRecord | null> {
+    if (!uuidPattern.test(input.intentId)) {
+      throw new RangeError("Email outbox intent ID is invalid.");
+    }
+    assertTimestamp(input.now, "Email outbox requeue time");
+    const rows = await this.database.$queryRaw<IntentRow[]>(Prisma.sql`
+      update email_message_intents
+      set state = 'pending'::email_message_intent_state,
+          due_at = ${input.now},
+          finalized_at = null,
+          claim_owner = null,
+          claim_token = null,
+          claim_expires_at = null,
+          updated_at = ${input.now}
+      where id = ${input.intentId}::uuid
+        and state = 'failed'::email_message_intent_state
+      returning id, kind, recipient, source,
+                state, due_at, attempt_count,
+                claim_owner, claim_expires_at,
+                last_provider, last_error_code, last_skip_reason,
+                last_attempted_at, finalized_at, created_at, updated_at
+    `);
+    return rows[0] ? toIntentRecord(rows[0]) : null;
+  }
 }

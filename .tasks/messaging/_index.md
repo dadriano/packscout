@@ -64,7 +64,7 @@ The closed-beta feature excluded notifying users of access decisions, reasoning 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 011 | Inspect message delivery in the admin | medium | todo | 004, admin-tools/001 |
+| 011 | Inspect message delivery in the admin | medium | done | 004, admin-tools/001 |
 | 012 | Verify and operate the messaging layer | medium | todo | 002, 005, 006, 007, 009, 010, 011 |
 
 ## Build Order

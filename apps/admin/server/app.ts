@@ -37,6 +37,10 @@ import {
   createWorkerFleetRouter,
   type WorkerFleetRouterDependencies,
 } from "./routes/worker-fleet.ts";
+import {
+  createMessagesRouter,
+  type MessagesRouterDependencies,
+} from "./routes/messages.ts";
 
 export interface AdminAuthHttpDependencies {
   service: AuthService;
@@ -76,6 +80,10 @@ export interface AdminAppDependencies {
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
+  messages?: Omit<
+    MessagesRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
@@ -227,6 +235,17 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
           ...dependencies.operationalHealth,
           auth: service,
           cookiePolicy,
+        }),
+      );
+    }
+    if (dependencies.messages) {
+      app.use(
+        "/api/messages",
+        createMessagesRouter({
+          ...dependencies.messages,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
         }),
       );
     }

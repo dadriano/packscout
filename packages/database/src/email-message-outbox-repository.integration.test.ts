@@ -821,3 +821,190 @@ test("the read model lists newest-first with filters and bounded pages", async (
     await harness.close();
   }
 });
+
+test("an operator requeue re-enters a terminal failure into the normal queue, bounded and history-preserving", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const repository = new PrismaEmailMessageOutboxRepository(harness.database);
+    const intentId = enqueuedId(
+      await repository.enqueue(enqueueInput({ idempotencyKey: "requeue:1" })),
+    );
+    const failedAt = new Date(enqueuedAt.getTime() + 1_000);
+    const [claim] = await repository.claimDueBatch({
+      workerId: "worker:alpha",
+      now: failedAt,
+      limit: 5,
+      perRecipientLimit: 5,
+      leaseMilliseconds: 30_000,
+    });
+    assert.ok(claim);
+    assert.equal(
+      await repository.recordAttemptOutcome({
+        intentId,
+        claimToken: claim.claimToken,
+        attemptNumber: claim.attemptNumber,
+        occurredAt: failedAt,
+        outcome: {
+          status: "failed",
+          provider: "postmark",
+          errorCode: "EMAIL_POSTMARK_REJECTED",
+          errorMessage: "The provider rejected the message.",
+          retryable: false,
+          retryAt: new Date(failedAt.getTime() + 60_000),
+          maximumAttempts: 2,
+        },
+      }),
+      "failed",
+    );
+
+    // The retry: failed becomes pending, due immediately, with the attempt
+    // counter and history preserved and the last failure still readable.
+    const requeuedAt = new Date(failedAt.getTime() + 3_600_000);
+    const requeued = await repository.requeueTerminalIntent({
+      intentId,
+      now: requeuedAt,
+    });
+    assert.equal(requeued?.state, "pending");
+    assert.deepEqual(requeued?.dueAt, requeuedAt);
+    assert.equal(requeued?.attemptCount, 1);
+    assert.equal(requeued?.finalizedAt, null);
+    assert.equal(requeued?.claimedBy, null);
+    assert.equal(requeued?.lastErrorCode, "EMAIL_POSTMARK_REJECTED");
+    assert.equal(requeued?.lastAttemptedAt?.getTime(), failedAt.getTime());
+    assert.deepEqual(
+      (await repository.listAttempts(intentId)).map(
+        (attempt) => attempt.attemptNumber,
+      ),
+      [1],
+    );
+
+    // The ordinary drain — not anything inline — picks it up again.
+    const [reclaim] = await repository.claimDueBatch({
+      workerId: "worker:beta",
+      now: requeuedAt,
+      limit: 5,
+      perRecipientLimit: 5,
+      leaseMilliseconds: 30_000,
+    });
+    assert.equal(reclaim?.intentId, intentId);
+    assert.equal(reclaim?.attemptNumber, 2);
+
+    // Bounded: the preserved counter means one more failure at the attempt
+    // limit rests the intent terminally failed again, not back on a ladder.
+    assert.equal(
+      await repository.recordAttemptOutcome({
+        intentId,
+        claimToken: reclaim.claimToken,
+        attemptNumber: reclaim.attemptNumber,
+        occurredAt: requeuedAt,
+        outcome: {
+          status: "failed",
+          provider: "postmark",
+          errorCode: "EMAIL_POSTMARK_TRANSPORT_FAILED",
+          errorMessage: "Provider connection reset.",
+          retryable: true,
+          retryAt: new Date(requeuedAt.getTime() + 60_000),
+          maximumAttempts: 2,
+        },
+      }),
+      "failed",
+    );
+    assert.equal((await repository.getIntent(intentId))?.state, "failed");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("requeueing refuses every non-terminal-failed state and concurrent requeues converge on one", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const repository = new PrismaEmailMessageOutboxRepository(harness.database);
+    const now = new Date(enqueuedAt.getTime() + 1_000);
+
+    async function settle(
+      idempotencyKey: string,
+      outcome: "sent" | "skipped" | "failed",
+    ): Promise<string> {
+      const intentId = enqueuedId(
+        await repository.enqueue(enqueueInput({ idempotencyKey })),
+      );
+      const claims = await repository.claimDueBatch({
+        workerId: "worker:alpha",
+        now,
+        limit: 5,
+        perRecipientLimit: 5,
+        leaseMilliseconds: 30_000,
+      });
+      const claim = claims.find((candidate) => candidate.intentId === intentId);
+      assert.ok(claim, `${idempotencyKey} was claimable`);
+      await repository.recordAttemptOutcome({
+        intentId,
+        claimToken: claim.claimToken,
+        attemptNumber: claim.attemptNumber,
+        occurredAt: now,
+        outcome:
+          outcome === "sent"
+            ? { status: "sent", provider: "postmark", providerMessageId: "pm-1" }
+            : outcome === "skipped"
+              ? { status: "skipped", provider: null, reason: "delivery_disabled" }
+              : {
+                  status: "failed",
+                  provider: "postmark",
+                  errorCode: "EMAIL_POSTMARK_REJECTED",
+                  errorMessage: "Rejected.",
+                  retryable: false,
+                  retryAt: new Date(now.getTime() + 60_000),
+                  maximumAttempts: 2,
+                },
+      });
+      return intentId;
+    }
+
+    // Live and terminal-but-delivered states all refuse: only `failed` moves.
+    const pendingId = enqueuedId(
+      await repository.enqueue(
+        enqueueInput({
+          idempotencyKey: "requeue:pending",
+          recipient: "pending@example.test",
+          dueAt: new Date(now.getTime() + 86_400_000),
+        }),
+      ),
+    );
+    const sentId = await settle("requeue:sent", "sent");
+    const skippedId = await settle("requeue:skipped", "skipped");
+    for (const refusedId of [pendingId, sentId, skippedId]) {
+      assert.equal(
+        await repository.requeueTerminalIntent({ intentId: refusedId, now }),
+        null,
+      );
+    }
+    assert.equal((await repository.getIntent(pendingId))?.state, "pending");
+    assert.equal((await repository.getIntent(sentId))?.state, "sent");
+    assert.equal((await repository.getIntent(skippedId))?.state, "skipped");
+
+    // Concurrent retries of the same failed intent converge on exactly one
+    // requeue: the guarded single UPDATE lets one through and the rest see a
+    // live intent.
+    const failedId = await settle("requeue:failed", "failed");
+    const requeuedAt = new Date(now.getTime() + 120_000);
+    const outcomes = await Promise.all([
+      repository.requeueTerminalIntent({ intentId: failedId, now: requeuedAt }),
+      repository.requeueTerminalIntent({ intentId: failedId, now: requeuedAt }),
+    ]);
+    assert.equal(outcomes.filter((outcome) => outcome !== null).length, 1);
+    const converged = await repository.getIntent(failedId);
+    assert.equal(converged?.state, "pending");
+    assert.equal(converged?.attemptCount, 1);
+
+    // An unknown intent refuses the same way rather than erroring.
+    assert.equal(
+      await repository.requeueTerminalIntent({
+        intentId: "00000000-0000-4000-8000-00000000dead",
+        now,
+      }),
+      null,
+    );
+  } finally {
+    await harness.close();
+  }
+});

@@ -1,6 +1,9 @@
 import { Router, type RequestHandler, type Response } from "express";
 import {
+  decideProductUserAccessRequestSchema,
+  listProductUserAccessQueueRequestSchema,
   listProductUsersRequestSchema,
+  productUserAccessActions,
   productUserDetailRequestSchema,
   setProductUserStandingRequestSchema,
   PRODUCT_USER_MAX_AUTH_METHOD_LENGTH,
@@ -11,6 +14,7 @@ import {
   PRODUCT_USER_MAX_SUBJECT_LENGTH,
   PRODUCT_USER_MAX_TEXT_LENGTH,
   PRODUCT_USER_MAX_WALLET_ADDRESS_LENGTH,
+  type ProductUserAccessDecision,
   type ProductUserDirectoryRow,
   type ProductUserRecord,
   type ProductUserSavedCollectible,
@@ -22,6 +26,7 @@ import type { AuthService } from "@packscout/services";
 import type { SessionCookiePolicy } from "../auth/cookies.ts";
 import { createRequireSession, getAuthenticatedActor } from "../auth/middleware.ts";
 import {
+  productUserAccessAuditAction,
   productUserAuditAction,
   type ProductUserAuditAction,
   type ProductUserAuditOutcome,
@@ -44,10 +49,12 @@ import {
  * data: carrying them in a request body keeps them out of URLs, browser
  * history, referrers, and access logs. Reads perform no mutation, so the
  * same-origin guard — not a CSRF token — is what keeps them same-site; the
- * standing control is a state change and additionally requires the token.
+ * standing control and the access decisions are state changes and additionally
+ * require the token.
  *
- * There is exactly one write here and it is a reversible standing flip. No
- * route on this surface deletes a product user or edits what they have saved.
+ * Every write here is a reversible flip — the standing control, and the three
+ * closed-beta access decisions (approve, decline, revoke). No route on this
+ * surface deletes a product user or edits what they have saved.
  */
 
 /**
@@ -81,6 +88,21 @@ function boundedOrNull(value: string | null, maximum: number): string | null {
 }
 
 /**
+ * The access decision is relayed as exactly its three display fields. The
+ * integration already dropped the stored decision's operator and allowlist
+ * references; this projection makes sure nothing new can ever ride along.
+ */
+function sanitizeDecision(
+  decision: ProductUserAccessDecision,
+): ProductUserAccessDecision {
+  return {
+    state: decision.state,
+    decidedBy: decision.decidedBy,
+    decidedAt: decision.decidedAt,
+  };
+}
+
+/**
  * Explicit field-by-field projection. Nothing the browser has no business
  * seeing can ride along, whatever the upstream record happens to carry.
  */
@@ -96,6 +118,7 @@ function sanitizeRecord(record: ProductUserRecord): ProductUserRecord {
     firstSeenAt: record.firstSeenAt,
     lastSeenAt: record.lastSeenAt,
     standing: record.standing,
+    access: sanitizeDecision(record.access),
   };
 }
 
@@ -345,6 +368,204 @@ export function createProductUsersRouter(
       changed: change.changed,
     });
   });
+
+  /**
+   * The review queue: identities in one decision state — awaiting review by
+   * default — oldest request first with the directory's bounded pagination.
+   * It is a read guarded like the listing, and its rows are the same bounded
+   * projection, so the queue can never show more about a person than the
+   * ledger does.
+   */
+  router.post(
+    "/access/queue",
+    dependencies.sameOrigin,
+    read,
+    async (request, response) => {
+      const body = listProductUserAccessQueueRequestSchema.safeParse(
+        request.body ?? {},
+      );
+      if (!body.success) return invalid(response, body.error.flatten().fieldErrors);
+      try {
+        const page = await dependencies.directory.listProductUserAccessQueue({
+          accessState: body.data.accessState,
+          ...(body.data.cursor === undefined ? {} : { cursor: body.data.cursor }),
+          limit: body.data.limit,
+        });
+        // Personal data must not be stored by any intermediary or the browser.
+        response.setHeader("Cache-Control", "no-store");
+        response.status(200).json({
+          items: page.items.slice(0, body.data.limit).map(sanitizeRow),
+          nextCursor:
+            page.nextCursor === null
+              ? null
+              : bounded(page.nextCursor, PRODUCT_USER_MAX_CURSOR_LENGTH),
+          queueTruncated: page.queueTruncated,
+        });
+      } catch (error) {
+        failure(response, error);
+      }
+    },
+  );
+
+  /**
+   * The bounded awaiting-review count for the page header, so operators see
+   * that work is waiting without paging the queue. It consumes nothing from
+   * the request — there is no parameter to validate — and it carries no
+   * personal data, only a number and whether the counting bound was hit.
+   */
+  router.post(
+    "/access/queue-count",
+    dependencies.sameOrigin,
+    read,
+    async (_request, response) => {
+      try {
+        const count = await dependencies.directory.countAwaitingReview();
+        response.setHeader("Cache-Control", "no-store");
+        response.status(200).json({
+          count: count.count,
+          truncated: count.truncated,
+        });
+      } catch (error) {
+        failure(response, error);
+      }
+    },
+  );
+
+  /**
+   * The three closed-beta access decisions: approve admits, decline refuses,
+   * revoke returns the person to awaiting review. Each is a reversible flip
+   * guarded by `product_users:manage` and a CSRF token, keyed by the subject
+   * in the body, stamped with the session's own operator — no request shape
+   * can act as someone else — and audited whichever way it goes, with the
+   * previous and resulting decision recorded alongside the outcome.
+   *
+   * The product backend owns the flip, so repeated or concurrent decisions
+   * converge there: an operation whose target state already holds reports
+   * `changed: false` with the authoritative decision, which the response
+   * restates rather than failing. A subject with no directory record is
+   * "nothing to decide" upstream and is restated here as the same not-found
+   * outcome an unknown subject gets everywhere else on this surface.
+   */
+  for (const accessAction of productUserAccessActions) {
+    router.post(
+      `/access/${accessAction}`,
+      dependencies.sameOrigin,
+      manage,
+      async (request, response) => {
+        const body = decideProductUserAccessRequestSchema.safeParse(
+          request.body ?? {},
+        );
+        if (!body.success) {
+          return invalid(response, body.error.flatten().fieldErrors);
+        }
+        const actor = getAuthenticatedActor(response);
+        const { subject } = body.data;
+        const action = productUserAccessAuditAction(accessAction);
+        const event = {
+          organizationId: actor.organizationId,
+          actorId: actor.operatorId,
+          action,
+          subject,
+          occurredAt: new Date(),
+        } as const;
+        /** Records the attempt without letting the recording decide the outcome. */
+        async function record(
+          outcome: ProductUserAuditOutcome,
+          detail: {
+            accessChange?: {
+              previous: ProductUserAccessDecision;
+              resulting: ProductUserAccessDecision;
+              changed: boolean;
+            };
+            reason?: string;
+          },
+          afterCommit: boolean,
+        ): Promise<void> {
+          try {
+            await dependencies.audit.append({
+              ...event,
+              outcome,
+              ...(detail.reason === undefined ? {} : { reason: detail.reason }),
+              ...(detail.accessChange === undefined
+                ? {}
+                : {
+                    accessChange: {
+                      previous: {
+                        state: detail.accessChange.previous.state,
+                        decidedBy: detail.accessChange.previous.decidedBy,
+                      },
+                      resulting: {
+                        state: detail.accessChange.resulting.state,
+                        decidedBy: detail.accessChange.resulting.decidedBy,
+                      },
+                      changed: detail.accessChange.changed,
+                    },
+                  }),
+            });
+          } catch {
+            try {
+              reportAuditFailure({ action, outcome, afterCommit });
+            } catch {
+              // Reporting the gap must not become a third failure domain.
+            }
+          }
+        }
+
+        let decided: Awaited<
+          ReturnType<ProductUserDirectoryReader["decideProductUserAccess"]>
+        >;
+        try {
+          decided = await dependencies.directory.decideProductUserAccess({
+            action: accessAction,
+            subject,
+            operatorId: actor.operatorId,
+          });
+        } catch (error) {
+          // Nothing committed: this attempt on someone's account is still
+          // recorded before the refusal is reported.
+          await record("failure", { reason: failureReason(error) }, false);
+          failure(response, error);
+          return;
+        }
+
+        if (decided.outcome === "nothing_to_decide") {
+          // Deciding about an identity with no record is reported, never
+          // invented; pre-admitting someone is the allowlist's job.
+          await record("failure", { reason: "PRODUCT_USER_NOT_FOUND" }, false);
+          response.status(404).json({
+            error:
+              "That product user is not in the directory, so there is nothing to decide.",
+            code: "PRODUCT_USER_NOT_FOUND",
+          });
+          return;
+        }
+
+        // Past this point the decision is whatever the backend now holds, so
+        // the response says so whatever the trail manages to record.
+        await record(
+          "success",
+          {
+            accessChange: {
+              previous: decided.previous,
+              resulting: decided.resulting,
+              changed: decided.changed,
+            },
+          },
+          true,
+        );
+        // Personal data must not be stored by any intermediary or the browser.
+        response.setHeader("Cache-Control", "no-store");
+        response.status(200).json({
+          action: accessAction,
+          changed: decided.changed,
+          access: sanitizeDecision(decided.resulting),
+          effectiveAccess: decided.effectiveAccess.admitted
+            ? { admitted: true, reason: "approved" }
+            : { admitted: false, reason: decided.effectiveAccess.reason },
+        });
+      },
+    );
+  }
 
   return router;
 }

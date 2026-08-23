@@ -31,6 +31,7 @@ import { createProductUserAuditSink } from "./product-user-audit.ts";
 import { createProductUserDirectoryReader } from "./product-user-directory.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
 import { createAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
+import { createAdminMessageDeliveryRuntime } from "./message-delivery-runtime.ts";
 import {
   adminDevelopmentAllowedOrigins,
   adminDevelopmentServerNetwork,
@@ -229,6 +230,11 @@ try {
     },
     operationalAlerts: { alerts: operational.alerts },
     operationalHealth: { health: operational.health },
+    // The delivery history reads the same durable outbox the worker drains.
+    messages: createAdminMessageDeliveryRuntime({
+      database,
+      actorPseudonymKey: providerActorKey,
+    }),
   });
 
   if (isDevelopment) {

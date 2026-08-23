@@ -109,3 +109,12 @@ test("both operator roles reach the worker fleet under the pipeline view permiss
     assert.match(html, /Data pipeline \/ Workers/);
   }
 });
+
+test("message-delivery navigation is administrator-only", () => {
+  const adminHtml = renderRoute("/messages", session("admin"));
+  assert.match(adminHtml, /href="\/messages"/);
+  assert.match(adminHtml, /Message delivery/);
+
+  const dataOperatorHtml = renderRoute("/", session("data_operator"));
+  assert.doesNotMatch(dataOperatorHtml, /href="\/messages"/);
+});

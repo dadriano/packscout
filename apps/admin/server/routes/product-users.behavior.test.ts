@@ -3,6 +3,10 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import express, { type Express } from "express";
 import type {
+  ProductUserAccessAction,
+  ProductUserAccessDecision,
+  ProductUserAccessQueuePage,
+  ProductUserAccessState,
   ProductUserDetail,
   ProductUserDirectoryPage,
   ProductUserStandingChange,
@@ -11,7 +15,10 @@ import { AuthServiceError, type AuthenticatedActor } from "@packscout/services";
 import { createSessionCookiePolicy } from "../auth/cookies.ts";
 import { createSameOriginGuard } from "../auth/request-protection.ts";
 import type { ProductUserAuditEvent } from "../product-user-audit.ts";
-import { ProductUserDirectoryError } from "../product-user-directory.ts";
+import {
+  ProductUserDirectoryError,
+  type ProductUserAccessDecisionOutcome,
+} from "../product-user-directory.ts";
 import {
   createProductUsersRouter,
   type ProductUserAuditFailure,
@@ -65,6 +72,12 @@ const walletOnly = {
   firstSeenAt: "2026-08-01T09:00:00.000Z",
   lastSeenAt: "2026-08-19T11:59:00.000Z",
   standing: "active",
+  access: {
+    state: "approved",
+    decidedBy: "allowlist",
+    decidedAt: "2026-08-01T09:00:05.000Z",
+    allowlistEntryId: "allowlist-entry-never-serialize",
+  },
   savedRepackCount: 3,
   savedCollectibleCount: 1,
   walletAddressKey: "0xwalletaddress0001",
@@ -76,6 +89,11 @@ const subjectOnly = {
   subject: "https://auth.example.test/|did:example:opaque-only-user",
   walletAddress: null,
   standing: "suspended",
+  access: {
+    state: "awaiting_review",
+    decidedBy: "default",
+    decidedAt: "2026-08-01T09:00:00.000Z",
+  },
   lastSeenAt: "2026-08-18T08:00:00.000Z",
   savedRepackCount: 0,
   savedCollectibleCount: 0,
@@ -84,6 +102,11 @@ const emailUser = {
   ...walletOnly,
   subject: "https://auth.example.test/|did:example:email-user",
   email: "ada@example.test",
+  access: {
+    state: "awaiting_review",
+    decidedBy: "default",
+    decidedAt: "2026-08-01T09:00:00.000Z",
+  },
   lastSeenAt: "2026-08-19T12:00:00.000Z",
 } as const;
 
@@ -156,6 +179,71 @@ interface DirectoryRequest {
 
 type StandingRequest = { subject: string; standing: "active" | "suspended" };
 
+interface QueueRequest {
+  readonly accessState: ProductUserAccessState;
+  readonly cursor?: string;
+  readonly limit: number;
+}
+
+type DecisionRequest = {
+  action: ProductUserAccessAction;
+  subject: string;
+  operatorId: string;
+};
+
+const DECISION_TARGET_STATE: Record<ProductUserAccessAction, ProductUserAccessState> = {
+  approve: "approved",
+  decline: "declined",
+  revoke: "awaiting_review",
+};
+
+/**
+ * A decision store that behaves like the product backend: convergent flips
+ * keyed by subject, `nothing_to_decide` for unknown subjects, provenance kept
+ * intact on repeats, and effective access composed with the fixed standing.
+ */
+function createDecisionDirectory(
+  initial: Record<string, ProductUserAccessDecision>,
+  suspended: ReadonlySet<string> = new Set(),
+) {
+  const decisions = { ...initial };
+  return async function decideProductUserAccess(
+    request: DecisionRequest,
+  ): Promise<ProductUserAccessDecisionOutcome> {
+    const previous = decisions[request.subject];
+    if (previous === undefined) return { outcome: "nothing_to_decide" };
+    const target = DECISION_TARGET_STATE[request.action];
+    const changed = previous.state !== target;
+    const resulting: ProductUserAccessDecision = changed
+      ? {
+          state: target,
+          decidedBy: "operator",
+          decidedAt: "2026-08-20T10:00:00.000Z",
+        }
+      : previous;
+    decisions[request.subject] = resulting;
+    const admitted = resulting.state === "approved" && !suspended.has(request.subject);
+    return {
+      outcome: "decided",
+      changed,
+      previous,
+      resulting,
+      effectiveAccess: admitted
+        ? { admitted: true, reason: "approved" }
+        : {
+            admitted: false,
+            reason: suspended.has(request.subject)
+              ? resulting.state === "approved"
+                ? "suspended"
+                : resulting.state
+              : resulting.state === "approved"
+                ? "undetermined"
+                : resulting.state,
+          },
+    };
+  };
+}
+
 /**
  * A directory that behaves like the product backend: standing is stored per
  * subject, the flip is idempotent, and the authoritative result — not the
@@ -189,15 +277,43 @@ function createHarness(
   setProductUserStanding?: ProductUsersRouterDependencies["directory"]["setProductUserStanding"],
   /** A trail that cannot be written, to separate it from a refused change. */
   appendAudit?: ProductUsersRouterDependencies["audit"]["append"],
+  access?: {
+    listQueue?: ProductUsersRouterDependencies["directory"]["listProductUserAccessQueue"];
+    count?: ProductUsersRouterDependencies["directory"]["countAwaitingReview"];
+    decide?: ProductUsersRouterDependencies["directory"]["decideProductUserAccess"];
+  },
 ) {
   const requests: DirectoryRequest[] = [];
   const detailRequests: { subject: string }[] = [];
   const standingRequests: StandingRequest[] = [];
+  const queueRequests: QueueRequest[] = [];
+  const countRequests: number[] = [];
+  const decisionRequests: DecisionRequest[] = [];
   const auditEvents: ProductUserAuditEvent[] = [];
   const auditFailures: ProductUserAuditFailure[] = [];
   const fallbackStanding = createStandingDirectory({
     [emailUser.subject]: "active",
   });
+  const fallbackDecision = createDecisionDirectory(
+    {
+      [emailUser.subject]: {
+        state: "awaiting_review",
+        decidedBy: "default",
+        decidedAt: "2026-08-01T09:00:00.000Z",
+      },
+      [walletOnly.subject]: {
+        state: "approved",
+        decidedBy: "allowlist",
+        decidedAt: "2026-08-01T09:00:05.000Z",
+      },
+      [subjectOnly.subject]: {
+        state: "awaiting_review",
+        decidedBy: "default",
+        decidedAt: "2026-08-01T09:00:00.000Z",
+      },
+    },
+    new Set([subjectOnly.subject]),
+  );
   const auth: ProductUsersRouterDependencies["auth"] = {
     async resolveSession({ sessionToken }) {
       if (!sessionToken) {
@@ -250,6 +366,27 @@ function createHarness(
             ? await setProductUserStanding(request)
             : await fallbackStanding(request);
         },
+        async listProductUserAccessQueue(request) {
+          queueRequests.push(request);
+          if (access?.listQueue) return access.listQueue(request);
+          // The queue is the directory oldest request first.
+          return {
+            items: [subjectOnly, emailUser],
+            nextCursor: "queue-cursor-two",
+            queueTruncated: false,
+          } as unknown as ProductUserAccessQueuePage;
+        },
+        async countAwaitingReview() {
+          countRequests.push(countRequests.length);
+          if (access?.count) return access.count();
+          return { count: 2, truncated: false };
+        },
+        async decideProductUserAccess(request) {
+          decisionRequests.push(request);
+          return access?.decide
+            ? await access.decide(request)
+            : await fallbackDecision(request);
+        },
       },
       audit: {
         async append(event) {
@@ -268,6 +405,9 @@ function createHarness(
     requests,
     detailRequests,
     standingRequests,
+    queueRequests,
+    countRequests,
+    decisionRequests,
     auditEvents,
     auditFailures,
   };
@@ -289,7 +429,9 @@ function headers(cookieName: string, session?: string) {
 function assertBrowserSafe(serialized: string) {
   assert.doesNotMatch(
     serialized,
-    new RegExp(`${integrationToken}|never-serialize|walletAddressKey|rawIdentity`),
+    new RegExp(
+      `${integrationToken}|never-serialize|walletAddressKey|rawIdentity|allowlistEntryId|operatorId`,
+    ),
   );
 }
 
@@ -360,6 +502,7 @@ test("directory rows reach the browser as a bounded, explicit projection", async
       [emailUser.subject, walletOnly.subject, subjectOnly.subject],
     );
     assert.deepEqual(Object.keys(payload.items[1]).sort(), [
+      "access",
       "authMethod",
       "email",
       "firstSeenAt",
@@ -370,6 +513,13 @@ test("directory rows reach the browser as a bounded, explicit projection", async
       "subject",
       "walletAddress",
     ]);
+    // The decision is exactly its three display fields; the stored decision's
+    // allowlist reference was dropped by the projection.
+    assert.deepEqual(payload.items[1].access, {
+      state: "approved",
+      decidedBy: "allowlist",
+      decidedAt: "2026-08-01T09:00:05.000Z",
+    });
     // A record with neither email nor wallet keeps its addressable identity.
     assert.equal(payload.items[2].email, null);
     assert.equal(payload.items[2].walletAddress, null);
@@ -807,6 +957,7 @@ test("suspending and reinstating report the authoritative standing and converge 
     assert.equal(suspended.payload.user.standing, "suspended");
     // The record is the same bounded projection every other route returns.
     assert.deepEqual(Object.keys(suspended.payload.user).sort(), [
+      "access",
       "authMethod",
       "email",
       "firstSeenAt",
@@ -1112,4 +1263,540 @@ test("standing requests are validated and no method here can delete a user", asy
     }
   });
   assert.deepEqual(standingRequests, []);
+});
+
+test("the review queue and its count enforce the product-user view matrix", async () => {
+  const { app, cookiePolicy, queueRequests, countRequests } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    for (const path of [
+      `${baseUrl}/api/product-users/access/queue`,
+      `${baseUrl}/api/product-users/access/queue-count`,
+    ]) {
+      const anonymous = await fetch(path, {
+        method: "POST",
+        headers: headers(cookiePolicy.name),
+        body: "{}",
+      });
+      assert.equal(anonymous.status, 401);
+      assert.equal((await anonymous.json()).code, "AUTH_REQUIRED");
+
+      const restricted = await fetch(path, {
+        method: "POST",
+        headers: headers(cookiePolicy.name, "data-session"),
+        body: "{}",
+      });
+      assert.equal(restricted.status, 403);
+      assert.equal((await restricted.json()).code, "FORBIDDEN");
+
+      const crossOrigin = await fetch(path, {
+        method: "POST",
+        headers: {
+          ...headers(cookiePolicy.name, "admin-session"),
+          Origin: "https://attacker.test",
+        },
+        body: "{}",
+      });
+      assert.equal(crossOrigin.status, 403);
+
+      const authorized = await fetch(path, {
+        method: "POST",
+        headers: headers(cookiePolicy.name, "admin-session"),
+        body: "{}",
+      });
+      assert.equal(authorized.status, 200);
+      assert.equal(authorized.headers.get("cache-control"), "no-store");
+    }
+  });
+  // Only the authorized requests reached the product backend.
+  assert.equal(queueRequests.length, 1);
+  assert.equal(countRequests.length, 1);
+});
+
+test("the queue lists waiting identities oldest-first as the bounded projection", async () => {
+  const { app, cookiePolicy, queueRequests } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/product-users/access/queue`, {
+      method: "POST",
+      headers: headers(cookiePolicy.name, "admin-session"),
+      body: "{}",
+    });
+    assert.equal(response.status, 200);
+    const serialized = await response.text();
+    assertBrowserSafe(serialized);
+    const payload = JSON.parse(serialized);
+
+    // The backend's oldest-request-first ordering is preserved verbatim.
+    assert.deepEqual(
+      payload.items.map((item: { subject: string }) => item.subject),
+      [subjectOnly.subject, emailUser.subject],
+    );
+    assert.equal(payload.nextCursor, "queue-cursor-two");
+    assert.equal(payload.queueTruncated, false);
+    // Queue rows are the ledger's own bounded projection, access included.
+    assert.deepEqual(Object.keys(payload.items[0]).sort(), [
+      "access",
+      "authMethod",
+      "email",
+      "firstSeenAt",
+      "lastSeenAt",
+      "savedCollectibleCount",
+      "savedRepackCount",
+      "standing",
+      "subject",
+      "walletAddress",
+    ]);
+    assert.deepEqual(payload.items[0].access, {
+      state: "awaiting_review",
+      decidedBy: "default",
+      decidedAt: "2026-08-01T09:00:00.000Z",
+    });
+  });
+  // An unstated access state means the queue that matters: awaiting review.
+  assert.deepEqual(queueRequests, [
+    { accessState: "awaiting_review", limit: 20 },
+  ]);
+});
+
+test("queue requests are validated, bounded, and never expressible as a URL", async () => {
+  const { app, cookiePolicy, queueRequests } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    const path = `${baseUrl}/api/product-users/access/queue`;
+    for (const body of [
+      { accessState: "suspended" },
+      { accessState: "" },
+      { limit: 0 },
+      { limit: 21 },
+      { cursor: "" },
+      { cursor: "c".repeat(4_097) },
+      { search: "ada@example.test" },
+    ]) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: headers(cookiePolicy.name, "admin-session"),
+        body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 422);
+      assert.equal((await response.json()).code, "INVALID_PRODUCT_USER_REQUEST");
+    }
+
+    // The queue accepts named states and passes cursors through unchanged.
+    const declined = await fetch(path, {
+      method: "POST",
+      headers: headers(cookiePolicy.name, "admin-session"),
+      body: JSON.stringify({ accessState: "declined", cursor: "queue-cursor-two", limit: 5 }),
+    });
+    assert.equal(declined.status, 200);
+
+    // The queue is POST-only, so its filter can never be expressed as a URL.
+    const asQuery = await fetch(`${path}?accessState=awaiting_review`, {
+      headers: headers(cookiePolicy.name, "admin-session"),
+    });
+    assert.equal(asQuery.status, 404);
+  });
+  assert.deepEqual(queueRequests, [
+    { accessState: "declined", cursor: "queue-cursor-two", limit: 5 },
+  ]);
+});
+
+test("the awaiting count is relayed with its truncation flag for 500+ display", async () => {
+  const { app, cookiePolicy } = createHarness(undefined, undefined, undefined, undefined, {
+    count: async () => ({ count: 500, truncated: true }),
+  });
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/product-users/access/queue-count`, {
+      method: "POST",
+      headers: headers(cookiePolicy.name, "admin-session"),
+      body: "{}",
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { count: 500, truncated: true });
+  });
+});
+
+test("queue and count integration failures map to stable codes without leaking", async () => {
+  const upstream = async () => {
+    throw new Error(
+      `upstream 500 from https://backend.example.test with ${integrationToken}`,
+    );
+  };
+  const { app, cookiePolicy } = createHarness(undefined, undefined, undefined, undefined, {
+    listQueue: upstream,
+    count: upstream,
+  });
+  await withServer(app, async (baseUrl) => {
+    for (const path of [
+      `${baseUrl}/api/product-users/access/queue`,
+      `${baseUrl}/api/product-users/access/queue-count`,
+    ]) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: headers(cookiePolicy.name, "admin-session"),
+        body: "{}",
+      });
+      assert.equal(response.status, 503);
+      const body = await response.text();
+      assertBrowserSafe(body);
+      assert.doesNotMatch(body, /backend\.example\.test|upstream 500/);
+      assert.equal(JSON.parse(body).code, "PRODUCT_USER_DIRECTORY_UNAVAILABLE");
+    }
+  });
+});
+
+test("each access decision enforces the manage-product-users matrix", async () => {
+  const { app, cookiePolicy, decisionRequests, auditEvents } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    for (const action of ["approve", "decline", "revoke"] as const) {
+      const path = `${baseUrl}/api/product-users/access/${action}`;
+      const body = JSON.stringify({ subject: emailUser.subject });
+
+      const anonymous = await fetch(path, {
+        method: "POST",
+        headers: mutationHeaders(cookiePolicy.name),
+        body,
+      });
+      assert.equal(anonymous.status, 401);
+      assert.equal((await anonymous.json()).code, "AUTH_REQUIRED");
+
+      // A data operator holds neither product-user permission.
+      const restricted = await fetch(path, {
+        method: "POST",
+        headers: mutationHeaders(cookiePolicy.name, "data-session"),
+        body,
+      });
+      assert.equal(restricted.status, 403);
+      assert.deepEqual(await restricted.json(), {
+        error: "You do not have permission to perform this action.",
+        code: "FORBIDDEN",
+      });
+
+      const crossOrigin = await fetch(path, {
+        method: "POST",
+        headers: {
+          ...mutationHeaders(cookiePolicy.name, "admin-session"),
+          Origin: "https://attacker.test",
+        },
+        body,
+      });
+      assert.equal(crossOrigin.status, 403);
+
+      // A state change additionally requires the CSRF token a read does not.
+      const withoutToken = await fetch(path, {
+        method: "POST",
+        headers: headers(cookiePolicy.name, "admin-session"),
+        body,
+      });
+      assert.equal(withoutToken.status, 403);
+      assert.equal((await withoutToken.json()).code, "FORBIDDEN");
+
+      const authorized = await fetch(path, {
+        method: "POST",
+        headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+        body,
+      });
+      assert.equal(authorized.status, 200);
+      assert.equal(authorized.headers.get("cache-control"), "no-store");
+    }
+  });
+  // Only the authorized requests reached the product backend, and only they
+  // are recorded: a refused attempt never touched anyone's account.
+  assert.equal(decisionRequests.length, 3);
+  assert.equal(auditEvents.length, 3);
+});
+
+test("decisions are stamped with the session operator and converge on repeats", async () => {
+  const { app, cookiePolicy, decisionRequests } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    async function decide(action: string, subject: string) {
+      const response = await fetch(
+        `${baseUrl}/api/product-users/access/${action}`,
+        {
+          method: "POST",
+          headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+          body: JSON.stringify({ subject: `  ${subject}  ` }),
+        },
+      );
+      const serialized = await response.text();
+      assertBrowserSafe(serialized);
+      return { status: response.status, payload: JSON.parse(serialized) };
+    }
+
+    const approved = await decide("approve", emailUser.subject);
+    assert.equal(approved.status, 200);
+    assert.deepEqual(Object.keys(approved.payload).sort(), [
+      "access",
+      "action",
+      "changed",
+      "effectiveAccess",
+    ]);
+    assert.equal(approved.payload.action, "approve");
+    assert.equal(approved.payload.changed, true);
+    assert.deepEqual(approved.payload.access, {
+      state: "approved",
+      decidedBy: "operator",
+      decidedAt: "2026-08-20T10:00:00.000Z",
+    });
+    assert.deepEqual(approved.payload.effectiveAccess, {
+      admitted: true,
+      reason: "approved",
+    });
+
+    // Approving an already-approved identity converges: the authoritative
+    // decision is stated, and the outcome says this call changed nothing.
+    const again = await decide("approve", emailUser.subject);
+    assert.equal(again.status, 200);
+    assert.equal(again.payload.changed, false);
+    assert.equal(again.payload.access.state, "approved");
+
+    const declined = await decide("decline", emailUser.subject);
+    assert.equal(declined.payload.changed, true);
+    assert.equal(declined.payload.access.state, "declined");
+    assert.deepEqual(declined.payload.effectiveAccess, {
+      admitted: false,
+      reason: "declined",
+    });
+
+    const revoked = await decide("revoke", emailUser.subject);
+    assert.equal(revoked.payload.changed, true);
+    assert.equal(revoked.payload.access.state, "awaiting_review");
+
+    // Approving a suspended account reports the composed truth, never a
+    // bare success that would read as the person being let in.
+    const suspendedApproval = await decide("approve", subjectOnly.subject);
+    assert.equal(suspendedApproval.payload.changed, true);
+    assert.deepEqual(suspendedApproval.payload.effectiveAccess, {
+      admitted: false,
+      reason: "suspended",
+    });
+  });
+
+  // Every decision was stamped with the acting session's operator — the
+  // request named nobody — and the subject was trimmed at the boundary.
+  assert.equal(decisionRequests.length, 5);
+  for (const request of decisionRequests) {
+    assert.equal(request.operatorId, admin.operatorId);
+  }
+  assert.deepEqual(
+    decisionRequests.map(({ action }) => action),
+    ["approve", "approve", "decline", "revoke", "approve"],
+  );
+  assert.deepEqual(
+    new Set(decisionRequests.map(({ subject }) => subject)),
+    new Set([emailUser.subject, subjectOnly.subject]),
+  );
+});
+
+test("every decision is audited with operator, target, movement, and outcome", async () => {
+  const { app, cookiePolicy, auditEvents } = createHarness();
+  const before = Date.now();
+  await withServer(app, async (baseUrl) => {
+    for (const action of ["approve", "decline", "revoke"] as const) {
+      const response = await fetch(
+        `${baseUrl}/api/product-users/access/${action}`,
+        {
+          method: "POST",
+          headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+          body: JSON.stringify({ subject: emailUser.subject }),
+        },
+      );
+      assert.equal(response.status, 200);
+    }
+  });
+
+  assert.deepEqual(
+    auditEvents.map(({ action, outcome, accessChange }) => ({
+      action,
+      outcome,
+      accessChange,
+    })),
+    [
+      {
+        action: "product_user.approve_access",
+        outcome: "success",
+        accessChange: {
+          previous: { state: "awaiting_review", decidedBy: "default" },
+          resulting: { state: "approved", decidedBy: "operator" },
+          changed: true,
+        },
+      },
+      {
+        action: "product_user.decline_access",
+        outcome: "success",
+        accessChange: {
+          previous: { state: "approved", decidedBy: "operator" },
+          resulting: { state: "declined", decidedBy: "operator" },
+          changed: true,
+        },
+      },
+      {
+        action: "product_user.revoke_access",
+        outcome: "success",
+        accessChange: {
+          previous: { state: "declined", decidedBy: "operator" },
+          resulting: { state: "awaiting_review", decidedBy: "operator" },
+          changed: true,
+        },
+      },
+    ],
+  );
+  for (const event of auditEvents) {
+    assert.equal(event.actorId, admin.operatorId);
+    assert.equal(event.organizationId, organizationId);
+    assert.equal(event.subject, emailUser.subject);
+    assert.ok(event.occurredAt.getTime() >= before);
+    assert.ok(event.occurredAt.getTime() <= Date.now());
+  }
+});
+
+test("a refused decision is still audited and never leaks the upstream", async () => {
+  const { app, cookiePolicy, auditEvents } = createHarness(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      decide: async () => {
+        throw new Error(
+          `upstream 500 from https://backend.example.test with ${integrationToken}`,
+        );
+      },
+    },
+  );
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/product-users/access/decline`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+      body: JSON.stringify({ subject: emailUser.subject }),
+    });
+    assert.equal(response.status, 503);
+    const serialized = await response.text();
+    assertBrowserSafe(serialized);
+    assert.doesNotMatch(serialized, /backend\.example\.test|upstream 500/);
+    assert.equal(
+      JSON.parse(serialized).code,
+      "PRODUCT_USER_DIRECTORY_UNAVAILABLE",
+    );
+  });
+
+  assert.deepEqual(
+    auditEvents.map(({ action, outcome, reason, accessChange }) => ({
+      action,
+      outcome,
+      reason,
+      accessChange,
+    })),
+    [
+      {
+        action: "product_user.decline_access",
+        outcome: "failure",
+        reason: "PRODUCT_USER_DIRECTORY_UNAVAILABLE",
+        accessChange: undefined,
+      },
+    ],
+  );
+});
+
+test("deciding about an unknown subject reports nothing to decide, not a record", async () => {
+  const { app, cookiePolicy, auditEvents } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/product-users/access/approve`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+      body: JSON.stringify({
+        subject: "https://auth.example.test/|did:example:never-signed-in",
+      }),
+    });
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), {
+      error:
+        "That product user is not in the directory, so there is nothing to decide.",
+      code: "PRODUCT_USER_NOT_FOUND",
+    });
+  });
+  // The failed attempt is still on the trail, in non-personal terms.
+  assert.deepEqual(
+    auditEvents.map(({ action, outcome, reason }) => ({ action, outcome, reason })),
+    [
+      {
+        action: "product_user.approve_access",
+        outcome: "failure",
+        reason: "PRODUCT_USER_NOT_FOUND",
+      },
+    ],
+  );
+});
+
+/**
+ * The decision commits remotely and cannot be rolled back from here, so once
+ * it has committed the response reports it — an unwritable trail is reported
+ * as an audit failure, never restated as a decision failure.
+ */
+test("a committed decision is reported as committed even when the audit write fails", async () => {
+  const { app, cookiePolicy, decisionRequests, auditFailures } = createHarness(
+    undefined,
+    undefined,
+    undefined,
+    async () => {
+      throw new Error(`audit sink unavailable with ${integrationToken}`);
+    },
+  );
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/product-users/access/approve`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+      body: JSON.stringify({ subject: emailUser.subject }),
+    });
+    const serialized = await response.text();
+    assertBrowserSafe(serialized);
+    assert.equal(response.status, 200);
+    const payload = JSON.parse(serialized);
+    assert.equal(payload.changed, true);
+    assert.equal(payload.access.state, "approved");
+  });
+  assert.equal(decisionRequests.length, 1);
+  // The unwritten record is reported in its own terms, with nothing personal
+  // in it, and is marked as having happened after the decision committed.
+  assert.deepEqual(auditFailures, [
+    {
+      action: "product_user.approve_access",
+      outcome: "success",
+      afterCommit: true,
+    },
+  ]);
+});
+
+test("decision requests are validated and can never name the acting operator", async () => {
+  const { app, cookiePolicy, decisionRequests } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    const path = `${baseUrl}/api/product-users/access/approve`;
+    for (const body of [
+      {},
+      { subject: "" },
+      { subject: "   " },
+      { subject: "s".repeat(1_025) },
+      // The acting operator is always the session, never a request field.
+      { subject: emailUser.subject, operatorId: admin.operatorId },
+      { subject: emailUser.subject, action: "decline" },
+    ]) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+        body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 422);
+      assert.equal((await response.json()).code, "INVALID_PRODUCT_USER_REQUEST");
+    }
+
+    // The decision surface offers three reversible flips and no removal.
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
+      const response = await fetch(path, {
+        method,
+        headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+        ...(method === "GET"
+          ? {}
+          : { body: JSON.stringify({ subject: emailUser.subject }) }),
+      });
+      assert.equal(response.status, 404);
+    }
+  });
+  assert.deepEqual(decisionRequests, []);
 });

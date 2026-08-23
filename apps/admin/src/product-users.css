@@ -1,5 +1,22 @@
 /* Product-user directory surfaces, on the shared admin template. */
 
+/*
+ * The two parallel views over the directory — the full ledger and the review
+ * queue. The active view is marked with the primary family so the mode reads
+ * at a glance without inventing a second control vocabulary.
+ */
+.product-users__views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.product-users__views .admin-button.is-active {
+  border-color: var(--admin-primary);
+  background: var(--admin-primary-bg-muted);
+  color: var(--admin-primary);
+}
+
 .product-users__search {
   flex: 1 1 22rem;
   min-width: 0;

@@ -19,6 +19,11 @@ function row(overrides: Record<string, unknown> = {}) {
     firstSeenAt: "2026-08-01T09:00:00.000Z",
     lastSeenAt: "2026-08-19T12:00:00.000Z",
     standing: "active",
+    access: {
+      state: "approved",
+      decidedBy: "allowlist",
+      decidedAt: "2026-08-02T09:00:00.000Z",
+    },
     savedRepackCount: 2,
     savedCollectibleCount: 5,
     ...overrides,
@@ -168,6 +173,7 @@ test("rows are normalized to the bounded browser-facing shape", async () => {
   assert.equal(item.savedRepackCount, 250);
   assert.equal(item.savedCollectibleCount, 0);
   assert.deepEqual(Object.keys(item).sort(), [
+    "access",
     "authMethod",
     "email",
     "firstSeenAt",
@@ -184,6 +190,22 @@ test("a broken directory contract is an unavailable directory, not a half row", 
   const brokenPayloads = [
     { page: [row({ subject: "" })], isDone: true, continueCursor: null },
     { page: [row({ standing: "banned" })], isDone: true, continueCursor: null },
+    { page: [row({ access: undefined })], isDone: true, continueCursor: null },
+    {
+      page: [row({ access: { state: "banished", decidedBy: "operator", decidedAt: "2026-08-02T09:00:00.000Z" } })],
+      isDone: true,
+      continueCursor: null,
+    },
+    {
+      page: [row({ access: { state: "approved", decidedBy: "magic", decidedAt: "2026-08-02T09:00:00.000Z" } })],
+      isDone: true,
+      continueCursor: null,
+    },
+    {
+      page: [row({ access: { state: "approved", decidedBy: "allowlist", decidedAt: "not-a-timestamp" } })],
+      isDone: true,
+      continueCursor: null,
+    },
     { page: [row({ lastSeenAt: "not-a-timestamp" })], isDone: true, continueCursor: null },
     { page: [null], isDone: true, continueCursor: null },
     { page: "not-an-array", isDone: true, continueCursor: null },
@@ -315,6 +337,7 @@ test("the detail read joins the record lookup to the resolved saved items", asyn
   assert.equal(detail.user.subject, subject);
   // The record projection carries identity, not saved-item counts.
   assert.deepEqual(Object.keys(detail.user).sort(), [
+    "access",
     "authMethod",
     "email",
     "firstSeenAt",
@@ -476,4 +499,334 @@ test("directory configuration is optional, bounded, and never partially trusted"
   for (const input of unusable) {
     assert.equal(readProductUserDirectoryConfig(input), null);
   }
+});
+
+test("a stored decision's operator and allowlist references never leave the integration", async () => {
+  const { implementation } = recordingFetch(() =>
+    jsonResponse({
+      page: [
+        row({
+          access: {
+            state: "approved",
+            decidedBy: "allowlist",
+            decidedAt: "2026-08-02T09:00:00.000Z",
+            allowlistEntryId: "entry-reference-never-serialize",
+            operatorId: "operator-reference-never-serialize",
+          },
+        }),
+      ],
+      isDone: true,
+      continueCursor: null,
+      searchTruncated: false,
+    }),
+  );
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: implementation,
+  });
+  const page = await reader.listProductUsers({ limit: 20 });
+  assert.deepEqual(page.items[0]?.access, {
+    state: "approved",
+    decidedBy: "allowlist",
+    decidedAt: "2026-08-02T09:00:00.000Z",
+  });
+  assert.doesNotMatch(JSON.stringify(page), /never-serialize/);
+});
+
+test("the queue read posts the state and cursor and relays rows oldest-first", async () => {
+  const oldest = row({
+    subject: "https://auth.example.test/|did:example:oldest",
+    access: {
+      state: "awaiting_review",
+      decidedBy: "default",
+      decidedAt: "2026-08-01T09:00:00.000Z",
+    },
+  });
+  const newer = row({
+    subject: "https://auth.example.test/|did:example:newer",
+    access: {
+      state: "awaiting_review",
+      decidedBy: "operator",
+      decidedAt: "2026-08-03T09:00:00.000Z",
+    },
+  });
+  const { calls, implementation } = recordingFetch(() =>
+    jsonResponse({
+      page: [oldest, newer],
+      isDone: false,
+      continueCursor: "queue-cursor-two",
+      queueTruncated: true,
+    }),
+  );
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: implementation,
+  });
+
+  const page = await reader.listProductUserAccessQueue({
+    accessState: "awaiting_review",
+    cursor: "queue-cursor-one",
+    limit: 20,
+  });
+  // The backend's oldest-first ordering is preserved verbatim.
+  assert.deepEqual(page, {
+    items: [oldest, newer],
+    nextCursor: "queue-cursor-two",
+    queueTruncated: true,
+  });
+
+  const [call] = calls;
+  assert.ok(call);
+  assert.equal(
+    call.url,
+    "https://backend.example.test/admin/product-users/access/queue",
+  );
+  assert.equal(call.init?.method, "POST");
+  assert.equal(
+    (call.init?.headers as Record<string, string>).authorization,
+    `Bearer ${token}`,
+  );
+  assert.doesNotMatch(call.url, /did:example|\?/);
+  assert.deepEqual(JSON.parse(String(call.init?.body)), {
+    accessState: "awaiting_review",
+    paginationOpts: { numItems: 20, cursor: "queue-cursor-one" },
+  });
+});
+
+test("an exhausted queue reports no continuation and a broken one is unavailable", async () => {
+  const done = recordingFetch(() =>
+    jsonResponse({
+      page: [],
+      isDone: true,
+      continueCursor: "cursor-that-must-not-be-followed",
+      queueTruncated: false,
+    }),
+  );
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: done.implementation,
+  });
+  assert.deepEqual(
+    await reader.listProductUserAccessQueue({
+      accessState: "awaiting_review",
+      limit: 20,
+    }),
+    { items: [], nextCursor: null, queueTruncated: false },
+  );
+
+  for (const payload of [
+    { page: "not-an-array", isDone: true, continueCursor: null },
+    { page: [], isDone: "yes", continueCursor: null },
+    { page: [row({ access: undefined })], isDone: true, continueCursor: null },
+  ]) {
+    const broken = recordingFetch(() => jsonResponse(payload));
+    const brokenReader = createProductUserDirectoryReader({
+      config,
+      fetchImplementation: broken.implementation,
+    });
+    const error = await refusal(
+      brokenReader.listProductUserAccessQueue({
+        accessState: "awaiting_review",
+        limit: 20,
+      }),
+    );
+    assert.equal(error.code, "PRODUCT_USER_DIRECTORY_UNAVAILABLE");
+  }
+});
+
+test("the awaiting count is bounded, boolean-flagged, and never trusted blindly", async () => {
+  const { calls, implementation } = recordingFetch(() =>
+    jsonResponse({ count: 500.9, truncated: true, extra: "never-serialize" }),
+  );
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: implementation,
+  });
+  assert.deepEqual(await reader.countAwaitingReview(), {
+    count: 500,
+    truncated: true,
+  });
+  assert.equal(
+    calls[0]?.url,
+    "https://backend.example.test/admin/product-users/access/queue-count",
+  );
+
+  for (const payload of [{ truncated: false }, { count: "many" }, []]) {
+    const broken = recordingFetch(() => jsonResponse(payload));
+    const brokenReader = createProductUserDirectoryReader({
+      config,
+      fetchImplementation: broken.implementation,
+    });
+    const error = await refusal(brokenReader.countAwaitingReview());
+    assert.equal(error.code, "PRODUCT_USER_DIRECTORY_UNAVAILABLE");
+  }
+});
+
+test("decision operations post subject and operator to their own endpoints", async () => {
+  const previous = {
+    state: "awaiting_review",
+    decidedBy: "default",
+    decidedAt: "2026-08-01T09:00:00.000Z",
+  };
+  const resulting = {
+    state: "approved",
+    decidedBy: "operator",
+    decidedAt: "2026-08-20T10:00:00.000Z",
+    operatorId: "operator-reference-never-serialize",
+  };
+  const { calls, implementation } = recordingFetch(() =>
+    jsonResponse({
+      outcome: "decided",
+      action: "approve",
+      subject,
+      operatorId: "operator-reference-never-serialize",
+      decidedAt: "2026-08-20T10:00:00.000Z",
+      changed: true,
+      previous,
+      resulting,
+      effectiveAccess: { admitted: true, reason: "approved" },
+    }),
+  );
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: implementation,
+  });
+
+  const outcome = await reader.decideProductUserAccess({
+    action: "approve",
+    subject,
+    operatorId: "00000000-0000-4000-8000-000000000001",
+  });
+  // The upstream echo of subject and operator is not relayed, and the stored
+  // decision's operator reference is dropped at this boundary.
+  assert.deepEqual(outcome, {
+    outcome: "decided",
+    changed: true,
+    previous,
+    resulting: {
+      state: "approved",
+      decidedBy: "operator",
+      decidedAt: "2026-08-20T10:00:00.000Z",
+    },
+    effectiveAccess: { admitted: true, reason: "approved" },
+  });
+  assert.doesNotMatch(JSON.stringify(outcome), /never-serialize/);
+
+  const [call] = calls;
+  assert.ok(call);
+  assert.equal(
+    call.url,
+    "https://backend.example.test/admin/product-users/access/approve",
+  );
+  assert.doesNotMatch(call.url, /did:example|\?/);
+  assert.deepEqual(JSON.parse(String(call.init?.body)), {
+    subject,
+    operatorId: "00000000-0000-4000-8000-000000000001",
+  });
+});
+
+test("decline and revoke address their own endpoints", async () => {
+  for (const [action, path] of [
+    ["decline", "/admin/product-users/access/decline"],
+    ["revoke", "/admin/product-users/access/revoke"],
+  ] as const) {
+    const { calls, implementation } = recordingFetch(() =>
+      jsonResponse({
+        outcome: "nothing_to_decide",
+        action,
+        subject,
+        operatorId: "00000000-0000-4000-8000-000000000001",
+        decidedAt: "2026-08-20T10:00:00.000Z",
+      }),
+    );
+    const reader = createProductUserDirectoryReader({
+      config,
+      fetchImplementation: implementation,
+    });
+    const outcome = await reader.decideProductUserAccess({
+      action,
+      subject,
+      operatorId: "00000000-0000-4000-8000-000000000001",
+    });
+    // An unknown subject is reported, never invented — and the echo of the
+    // personal fields is not relayed.
+    assert.deepEqual(outcome, { outcome: "nothing_to_decide" });
+    assert.equal(calls[0]?.url, `https://backend.example.test${path}`);
+  }
+});
+
+test("a broken decision payload is an unavailable directory, not a guessed outcome", async () => {
+  const wellFormed = {
+    state: "approved",
+    decidedBy: "operator",
+    decidedAt: "2026-08-20T10:00:00.000Z",
+  };
+  for (const payload of [
+    { outcome: "decided" },
+    {
+      outcome: "decided",
+      changed: "yes",
+      previous: wellFormed,
+      resulting: wellFormed,
+      effectiveAccess: { admitted: true, reason: "approved" },
+    },
+    {
+      outcome: "decided",
+      changed: true,
+      previous: wellFormed,
+      resulting: { state: "approved", decidedBy: "operator" },
+      effectiveAccess: { admitted: true, reason: "approved" },
+    },
+    {
+      // A verdict that disagrees with its reason must never be relayed.
+      outcome: "decided",
+      changed: true,
+      previous: wellFormed,
+      resulting: wellFormed,
+      effectiveAccess: { admitted: true, reason: "suspended" },
+    },
+    {
+      outcome: "decided",
+      changed: true,
+      previous: wellFormed,
+      resulting: wellFormed,
+      effectiveAccess: { admitted: false, reason: "approved" },
+    },
+    { outcome: "vetoed" },
+  ]) {
+    const { implementation } = recordingFetch(() => jsonResponse(payload));
+    const reader = createProductUserDirectoryReader({
+      config,
+      fetchImplementation: implementation,
+    });
+    const error = await refusal(
+      reader.decideProductUserAccess({
+        action: "approve",
+        subject,
+        operatorId: "00000000-0000-4000-8000-000000000001",
+      }),
+    );
+    assert.equal(error.code, "PRODUCT_USER_DIRECTORY_UNAVAILABLE");
+  }
+});
+
+test("an unconfigured integration refuses queue reads and decisions without contact", async () => {
+  const { calls, implementation } = recordingFetch(() => jsonResponse({}));
+  const reader = createProductUserDirectoryReader({
+    config: null,
+    fetchImplementation: implementation,
+  });
+  for (const attempt of [
+    reader.listProductUserAccessQueue({ accessState: "awaiting_review", limit: 20 }),
+    reader.countAwaitingReview(),
+    reader.decideProductUserAccess({
+      action: "approve",
+      subject,
+      operatorId: "00000000-0000-4000-8000-000000000001",
+    }),
+  ]) {
+    const error = await refusal(attempt);
+    assert.equal(error.code, "PRODUCT_USER_DIRECTORY_UNCONFIGURED");
+  }
+  assert.equal(calls.length, 0);
 });

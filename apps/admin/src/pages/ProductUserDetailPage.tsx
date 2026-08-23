@@ -3,6 +3,7 @@ import {
   boundedProductUserSubjectLabel,
   describeProductUserEstimatedEv,
   describeProductUserIdentity,
+  type ProductUserAccessDecisionChange,
   type ProductUserDetail,
   type ProductUserSavedCollectible,
   type ProductUserSavedRepack,
@@ -21,6 +22,11 @@ import {
   OPAQUE_USER_LINK_FAILURE,
   type DirectoryFailure,
 } from "../components/product-users/directory-failure";
+import {
+  ProductUserAccessBadge,
+  ProductUserAccessControl,
+  productUserAccessProvenanceLine,
+} from "../components/product-users/ProductUserAccessControl";
 import { ProductUserStandingControl } from "../components/product-users/ProductUserStandingControl";
 import {
   SavedItemCollection,
@@ -35,8 +41,9 @@ import { useSession } from "../providers/session";
  *
  * Saved items belong to the user: they are shown so an administrator can see
  * what an account holds before acting on it, and no control here adds,
- * removes, or edits one. The single account control is the reversible standing
- * flip beside the standing badge, which never touches saved data.
+ * removes, or edits one. The account controls are the reversible standing
+ * flip and the reversible beta-access decisions beside their badges; none of
+ * them touches saved data.
  */
 
 function repackRow(item: ProductUserSavedRepack): SavedItemRow {
@@ -153,6 +160,24 @@ export function ProductUserDetailPage() {
     );
   }, []);
 
+  /**
+   * A decision shows the decision the backend now holds, applied in place —
+   * which may be another administrator's when they acted first.
+   */
+  const applyAccessDecision = useCallback(
+    (_subject: string, change: ProductUserAccessDecisionChange) => {
+      setDetail((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              user: { ...current.user, access: change.access },
+            },
+      );
+    },
+    [],
+  );
+
   const backToUsers = (
     <Link className="admin-button admin-button--secondary" to="/users">
       Back to users
@@ -244,18 +269,25 @@ export function ProductUserDetailPage() {
         <header className="admin-section-heading">
           <div>
             <span className="admin-eyebrow">Sign-up record</span>
-            <h2 id="product-user-identity">Identity and standing</h2>
+            <h2 id="product-user-identity">Identity, standing, and access</h2>
           </div>
           <div className="product-users__row-actions">
+            <ProductUserAccessBadge state={user.access.state} />
             <StatusBadge
               label={user.standing === "active" ? "Active" : "Suspended"}
               tone={user.standing === "active" ? "ready" : "danger"}
             />
             {canManage ? (
-              <ProductUserStandingControl
-                user={user}
-                onChanged={applyStandingChange}
-              />
+              <>
+                <ProductUserAccessControl
+                  user={user}
+                  onDecided={applyAccessDecision}
+                />
+                <ProductUserStandingControl
+                  user={user}
+                  onChanged={applyStandingChange}
+                />
+              </>
             ) : null}
           </div>
         </header>
@@ -279,6 +311,10 @@ export function ProductUserDetailPage() {
           <div>
             <dt>Last seen</dt>
             <dd>{dateTime(user.lastSeenAt)}</dd>
+          </div>
+          <div>
+            <dt>Beta access</dt>
+            <dd>{productUserAccessProvenanceLine(user.access)}</dd>
           </div>
           <div>
             <dt>Subject key</dt>
