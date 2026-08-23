@@ -332,6 +332,18 @@ deciding people, revoking access, what an unadmitted party can still observe,
 and opening the product to the public with one switch — are documented in
 [docs/closed-beta-operations.md](docs/closed-beta-operations.md).
 
+### Transactional email
+
+Operational alerts, beta access decisions, the welcome message, and the
+operator account links are delivered by one abstracted messaging layer:
+messages are enqueued as durable intents and drained by the worker, so a
+provider outage delays delivery rather than losing it. The provider is
+swappable by configuration — set `PACKSCOUT_EMAIL_DELIVERY_MODE=console` to
+render every message locally without a provider account or a real send.
+Configuration, the delivery-state runbook, adapter requirements, and the
+deliberately deferred bounce handling are documented in
+[docs/messaging-operations.md](docs/messaging-operations.md).
+
 ### Machinery alerting in the admin
 
 The admin server evaluates the pipeline's machinery conditions — a silent

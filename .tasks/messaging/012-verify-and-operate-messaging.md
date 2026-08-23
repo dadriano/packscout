@@ -4,7 +4,7 @@
 **Depends on:** messaging/002, messaging/005, messaging/006, messaging/007, messaging/009, messaging/010, messaging/011
 **Blocks:** none
 **Estimated scope:** medium
-**Status:** in_progress
+**Status:** done
 
 ## Objective
 
@@ -40,15 +40,22 @@ No new surface. The outcome is that messages arrive reliably, that an operator c
 
 ## Acceptance Criteria
 
-- [ ] The end-to-end scenario set exists with every listed journey covered, each marked automated with its check or as an explicit manual gap.
-- [ ] Switching delivery mode between console and the provider adapter changes behavior with no caller change, and the adapter contract suite passes for every registered adapter.
-- [ ] Every configuration value is documented with its purpose, location, browser-visibility rule, and missing-value behavior.
-- [ ] The runbook covers delivery investigation, delivery states and common provider error codes, retrying, changing alert recipients, and disabling an individual message kind.
-- [ ] The deferred bounce, complaint, and suppression gap is documented with its consequence and with what a later implementation would attach to.
-- [ ] The absence of a preference centre is documented, with the rule that promotional messages cannot be added without one.
-- [ ] A developer can exercise every message kind locally without a provider account and see what would have been sent.
-- [ ] The closed-beta feature's index no longer contradicts this feature on decision notifications.
+- [x] The end-to-end scenario set exists with every listed journey covered, each marked automated with its check or as an explicit manual gap.
+- [x] Switching delivery mode between console and the provider adapter changes behavior with no caller change, and the adapter contract suite passes for every registered adapter.
+- [x] Every configuration value is documented with its purpose, location, browser-visibility rule, and missing-value behavior.
+- [x] The runbook covers delivery investigation, delivery states and common provider error codes, retrying, changing alert recipients, and disabling an individual message kind.
+- [x] The deferred bounce, complaint, and suppression gap is documented with its consequence and with what a later implementation would attach to.
+- [x] The absence of a preference centre is documented, with the rule that promotional messages cannot be added without one.
+- [x] A developer can exercise every message kind locally without a provider account and see what would have been sent.
+- [x] The closed-beta feature's index no longer contradicts this feature on decision notifications.
 
 ## Verification
 
 The workspace's full verification command — lint, typecheck, tests, build, and the framework and documentation checks across the services layer, worker, admin, and product backend — exits 0, and the recorded end-to-end scenario set shows every listed journey either covered by a named automated check or marked as an explicit manual gap.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no `tech-*.md` or `ux-*.md` companions in this feature)
+- Alignment: `.tasks/messaging/scenarios/messaging.feature.md` records twelve scenarios covering every journey the spec enumerates — alert routing with flood control, alert-failure isolation, access decisions in both directions, decision survival under enqueue failure, once-ever welcome, operator password recovery with session invalidation, invitation activation, admin retry, outage-delays-not-loses, disabled/console modes, provider swappability, and the no-secrets guarantee — each citing named tests that were verified to exist on disk before being cited. `docs/messaging-operations.md` documents every configuration value (extracted from the code, not from build reports), the delivery-state and provider-error-code runbook, how to retry, how to change alert recipients, how to turn any individual kind off, the local console-mode development path, the adapter contract a new provider must satisfy, and — explicitly — the deferred bounce/complaint gap with its consequences and the recorded fields a later webhook ingestion would attach to, plus the absence of a preference centre and the structural rule that keeps promotional messages out until one exists. The citation-integrity suite from closed-beta-access/011 was extended to cover both new documents, so an "Automated" claim naming a nonexistent test now fails `npm run test:tooling`.
+- Divergences: (1) The spec asks that the closed-beta index be updated where this feature supersedes it; that reconciliation was made earlier in the build (its notification exclusion now points at `messaging/006`) and was verified still present rather than rewritten. (2) The spec's "provider abstraction demonstrated, not asserted" is met by the adapter contract suite running against both a conforming stub and the real Postmark adapter, plus the named-mode delivery test proving a caller never names a provider — not by shipping a second production adapter, which the feature deliberately does not do. (3) One integration defect was fixed here rather than deferred: `createEmailLinkTokenPruner` was left unwired by messaging/008 (outside its write scope), so spent and expired one-time links would never have aged out; it is now registered in the worker's retention coordinator beside the message-history pruner.
+- Verification: `node scripts/check-docs.mjs` → ok. `node --test scripts/scenario-coverage-citations.test.mjs` → 3 pass, 0 fail with both messaging documents in scope. `npm run typecheck:worker && npm run test:worker` → exit 0 (105 tests) with the token pruner wired. Full-tree `npm run verify:framework` runs in the integration pass.

@@ -31,8 +31,12 @@ const repositoryRoot = path.resolve(
 const scenarioDocuments = [
   ".tasks/closed-beta-access/scenarios/closed-beta-access.feature.md",
   ".tasks/privy-auth/scenarios/privy-auth.feature.md",
+  ".tasks/messaging/scenarios/messaging.feature.md",
 ];
-const citationOnlyDocuments = ["docs/closed-beta-operations.md"];
+const citationOnlyDocuments = [
+  "docs/closed-beta-operations.md",
+  "docs/messaging-operations.md",
+];
 
 const coverageMarker =
   /^Coverage: (Automated|Manual gap|Partial automation|Not applicable)\b/u;

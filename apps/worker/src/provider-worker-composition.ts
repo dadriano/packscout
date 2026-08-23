@@ -1,5 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
+  PrismaEmailLinkTokenRepository,
   PrismaEmailMessageOutboxRepository,
   PrismaImportRunRepository,
   PrismaProviderConfigurationRepository,
@@ -13,6 +14,7 @@ import {
 import {
   AesGcmProviderCredentialCipher,
   CatalogProjectionService,
+  createEmailLinkTokenPruner,
   createPostmarkEmailDeliveryAdapter,
   EmailMessageOutboxService,
   createProviderMappingAdapterRegistryFromManifest,
@@ -179,6 +181,12 @@ export function createProviderWorkerRuntime(
             24 * 60 * 60 * 1_000,
           prune: (request) => outboxRepository.pruneHistory(request),
         },
+        // Spent and expired one-time links age out on the mechanism's own
+        // default retention; the pruner never touches a token that is still
+        // live, so an outstanding invitation survives its own pruning cycle.
+        createEmailLinkTokenPruner({
+          repository: new PrismaEmailLinkTokenRepository(input.database),
+        }),
       ],
     },
   });
