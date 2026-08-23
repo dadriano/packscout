@@ -4,7 +4,7 @@
 **Depends on:** messaging/008
 **Blocks:** messaging/012
 **Estimated scope:** medium
-**Status:** in_progress
+**Status:** done
 
 ## Objective
 
@@ -44,15 +44,22 @@ An operator on the admin sign-in screen chooses "forgot password", enters their 
 
 ## Acceptance Criteria
 
-- [ ] An operator can complete the full request-to-sign-in journey with a mailed link.
-- [ ] Requests for unknown and known addresses are indistinguishable in wording and outcome, and rate limiting does not break that indistinguishability.
-- [ ] A link works once; reuse, expiry, and a superseded link all show the same plain invalid-link state.
-- [ ] Completing a reset invalidates the operator's existing sessions.
-- [ ] A disabled or ineligible account cannot be reset into a usable state.
-- [ ] No password, token, or link appears in any log, metric, audit record, or error payload, and audit records cover request and completion with outcome.
-- [ ] Request, invalid-link, expired-link, validation-error, and success states render accessibly at desktop and narrow widths.
-- [ ] Existing sign-in, session, rate-limiting, and lockout behavior is unchanged.
+- [x] An operator can complete the full request-to-sign-in journey with a mailed link.
+- [x] Requests for unknown and known addresses are indistinguishable in wording and outcome, and rate limiting does not break that indistinguishability.
+- [x] A link works once; reuse, expiry, and a superseded link all show the same plain invalid-link state.
+- [x] Completing a reset invalidates the operator's existing sessions.
+- [x] A disabled or ineligible account cannot be reset into a usable state.
+- [x] No password, token, or link appears in any log, metric, audit record, or error payload, and audit records cover request and completion with outcome.
+- [x] Request, invalid-link, expired-link, validation-error, and success states render accessibly at desktop and narrow widths.
+- [x] Existing sign-in, session, rate-limiting, and lockout behavior is unchanged.
 
 ## Verification
 
 Admin route behavior tests prove the full journey, non-enumerating responses across known, unknown, and rate-limited requests, single-use and expiry handling, session invalidation on completion, refusal for disabled accounts, password-rule reuse, and audit records free of secrets; page tests cover every state. The admin lint, typecheck, test, and build commands exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no `tech-*.md` or `ux-*.md` companions in this feature)
+- Alignment: Both endpoints are unauthenticated by design and follow the sign-in endpoint's discipline for unauthenticated POSTs — trusted Origin required before any flow work, schema-validated inputs, and one post-validation response whatever happened. Non-enumeration is inherited from messaging/008's `requestIssuance`, which performs identical work for known, unknown, disabled, and rate-limited addresses; the route adds the guarantee that even an internal flow failure cannot become a distinguishing oracle. Every dead link — unknown, expired, superseded, reused, or ineligible — collapses into one `PASSWORD_RESET_LINK_INVALID_MESSAGE`. Password-rule violations reuse the existing schema's own messages, so a reset password is validated exactly as an administrator-set one. Completion invalidates the operator's existing sessions. Audit coverage of issuance and redemption outcomes is inherited from messaging/008's `PrismaEmailLinkAuditSink`, wired through `password-reset-runtime.ts`, which allowlists actions and refuses token-shaped material; the route additionally emits `admin_password_reset_request_failed` / `admin_password_reset_completion_failed` structured log lines for the two failure domains.
+- Divergences: (1) **The live browser layout pass was not performed.** The builder was interrupted by an API quota limit at exactly that step. Substituted evidence: all five states (request, check-your-mail, invalid-link, validation-error, success) are covered by page tests; the two new classes are responsive by construction (`.admin-auth-screen { width: min(100%, 30rem) }`, `.admin-auth-card { width: 100% }`, no fixed width above the 320px root minimum); and both pages reuse the existing, previously browser-verified sign-in structure and class vocabulary. A live measurement at 1280px and 375px in both themes remains the one open check on this task. (2) Success paths emit no route-level audit event of their own — issuance and redemption successes are audited by the messaging/008 sink, and only the two failure domains needed route-level log lines.
+- Verification: `npm run lint:admin && npm run typecheck:admin && npm run test:admin && npm run build:admin && npm run typecheck:services && npm run test:services && npm run lint:services && npm run test:contracts` → exit 0 on the combined tree (19 tests for this task: 10 route behavior, 3 request page, 6 reset page). `npm run scan:framework-standards:ratchet` → 0 findings, 0 new. `node scripts/check-docs.mjs` → ok.

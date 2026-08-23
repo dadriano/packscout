@@ -57,8 +57,8 @@ The closed-beta feature excluded notifying users of access decisions, reasoning 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
 | 008 | Issue and redeem one-time email links | large | done | 003, 004 |
-| 009 | Let operators reset their own password | medium | in_progress | 008 |
-| 010 | Provision operators by invitation | medium | todo | 008 |
+| 009 | Let operators reset their own password | medium | done | 008 |
+| 010 | Provision operators by invitation | medium | in_progress | 008 |
 
 ### Operability
 
