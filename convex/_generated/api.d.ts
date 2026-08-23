@@ -44,6 +44,7 @@ import type * as productUserCapabilityGate from "../productUserCapabilityGate.js
 import type * as productUserDirectory from "../productUserDirectory.js";
 import type * as productUserRecords from "../productUserRecords.js";
 import type * as productUserSavedItems from "../productUserSavedItems.js";
+import type * as productUserWelcome from "../productUserWelcome.js";
 import type * as productUsers from "../productUsers.js";
 import type * as productionDataReleaseAuth from "../productionDataReleaseAuth.js";
 import type * as productionDataReleaseErrors from "../productionDataReleaseErrors.js";
@@ -123,6 +124,7 @@ declare const fullApi: ApiFromModules<{
   productUserDirectory: typeof productUserDirectory;
   productUserRecords: typeof productUserRecords;
   productUserSavedItems: typeof productUserSavedItems;
+  productUserWelcome: typeof productUserWelcome;
   productUsers: typeof productUsers;
   productionDataReleaseAuth: typeof productionDataReleaseAuth;
   productionDataReleaseErrors: typeof productionDataReleaseErrors;

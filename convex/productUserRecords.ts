@@ -48,7 +48,8 @@ export type ProductUserErrorCode =
   | "PRODUCT_USER_PAGE_SIZE_INVALID"
   | "PRODUCT_USER_PAGE_CURSOR_INVALID"
   | "PRODUCT_USER_SUBJECT_INVALID"
-  | "PRODUCT_USER_OPERATOR_INVALID";
+  | "PRODUCT_USER_OPERATOR_INVALID"
+  | "PRODUCT_USER_WELCOME_REQUEST_INVALID";
 
 /**
  * `ACCOUNT_SUSPENDED` is the stable, distinguishable outcome every
@@ -72,6 +73,8 @@ const PRODUCT_USER_MESSAGES: Readonly<Record<ProductUserErrorCode, string>> =
       "The requested product-user subject is invalid.",
     PRODUCT_USER_OPERATOR_INVALID:
       "The product-user operator reference is invalid.",
+    PRODUCT_USER_WELCOME_REQUEST_INVALID:
+      "The product-user welcome request is out of bounds.",
   });
 
 export function refuseProductUser(code: ProductUserErrorCode): never {
@@ -150,6 +153,162 @@ export const productUserEffectiveAccessValidator = v.union(
   }),
 );
 
+/**
+ * The durable once-ever welcome marker (messaging/007).
+ *
+ * Absence means "not yet due": the identity has not had its first admitted
+ * session since this machinery began observing, so there is nothing to send
+ * yet. Every present state is permanent forward progress:
+ *
+ * - `due`: the first admitted session happened; a welcome should be sent.
+ * - `claimed`: a dispatcher pass claimed this identity. The claim expires at
+ *   `claimExpiresAt`, so a dispatcher that crashes between claiming and
+ *   durably enqueueing surrenders the identity back to discovery instead of
+ *   stranding it claimed-but-never-sent.
+ * - `sent`: the welcome was durably enqueued with the delivery layer. Never
+ *   revisited — this is what makes "once, ever" survive restarts, retries,
+ *   duplicate discovery, and re-admission after revocation.
+ * - `not_applicable`: recorded as a normal skip, never retried. Either the
+ *   identity had no verified email address at its first admitted session, or
+ *   it was grandfathered: already admitted before this machinery existed, so
+ *   welcoming it now would be retroactive.
+ *
+ * The marker is written only by the establishment path (arming) and the
+ * dispatcher operations in `productUserWelcome.ts` (claim and settle).
+ * Access decisions — operator approve/decline/revoke, allowlist admission —
+ * never touch it, which is exactly why an admitted-revoked-readmitted
+ * identity is never welcomed twice: its marker survives every decision flip.
+ */
+export const productUserWelcomeMarkerValidator = v.union(
+  v.object({
+    state: v.literal("due"),
+    /** When the first admitted session armed the marker; ISO-8601. */
+    dueAt: v.string(),
+  }),
+  v.object({
+    state: v.literal("claimed"),
+    dueAt: v.string(),
+    claimedAt: v.string(),
+    /** After this instant the claim lapses and discovery may reclaim. */
+    claimExpiresAt: v.string(),
+  }),
+  v.object({
+    state: v.literal("sent"),
+    dueAt: v.string(),
+    /** When the dispatcher confirmed the durable enqueue, not delivery. */
+    sentAt: v.string(),
+  }),
+  v.object({
+    state: v.literal("not_applicable"),
+    reason: v.union(
+      v.literal("no_verified_email"),
+      v.literal("grandfathered"),
+    ),
+    recordedAt: v.string(),
+  }),
+);
+
+export type ProductUserWelcomeMarker = Infer<
+  typeof productUserWelcomeMarkerValidator
+>;
+
+function timestampIsStrictlyAfter(left: string, right: string): boolean {
+  const leftMilliseconds = productUserTimestampMilliseconds(left);
+  const rightMilliseconds = productUserTimestampMilliseconds(right);
+  if (leftMilliseconds === null || rightMilliseconds === null) return false;
+  return leftMilliseconds > rightMilliseconds;
+}
+
+/**
+ * The welcome arming rule, evaluated inside the establishment write path and
+ * nowhere else (messaging/007). Stated precisely:
+ *
+ * A record with no welcome marker gains one only at an establishment contact
+ * whose composed decision-plus-standing answer is admitted (approved and not
+ * suspended, independent of the `PACKSCOUT_CLOSED_BETA` switch, matching how
+ * the allowlist and operator decisions are switch-independent), and only in
+ * one of these ways:
+ *
+ * 1. The identity became admitted during THIS establishment — a new record
+ *    inserted with an allowlist approval, or an existing awaiting identity
+ *    the allowlist approved on this very contact. This session is its first
+ *    admitted session: arm.
+ * 2. The identity arrived already approved and the approval's `decidedAt` is
+ *    strictly after the record's previous `lastSeenAt` — the decision landed
+ *    between contacts (operator approval, retroactive allowlist admission),
+ *    so no session has happened while admitted. This session is its first
+ *    admitted session: arm.
+ * 3. The identity arrived already approved with `decidedAt` at or before the
+ *    previous `lastSeenAt` — it has already had a contact while approved, so
+ *    its first admitted session predates this machinery's observation.
+ *    Welcoming it now would be retroactive: the marker is set to
+ *    `not_applicable` with reason `grandfathered`, decided once and never
+ *    revisited.
+ *
+ * "Arm" resolves against the verified email known at this establishment:
+ * `due` when an address exists, `not_applicable`/`no_verified_email` when
+ * none does — recorded as a normal skip and never retried, even if a later
+ * sign-in exposes an address.
+ *
+ * Deliberate consequences, chosen to fail toward silence rather than toward
+ * a duplicate or retroactive welcome:
+ *
+ * - An identity approved before this shipped that never returned after its
+ *   approval (`decidedAt` after its last pre-rollout contact) is armed on
+ *   its next contact: it is newly reaching its first admitted session.
+ * - An identity whose only contacts after approval happened while suspended
+ *   reads as grandfathered once reinstated, because contact recency is the
+ *   only durable trace of past sessions and standing history is not stored.
+ *   It is never welcomed; it is also never welcomed twice or retroactively.
+ * - A decision flip never arms, un-arms, or rewrites a marker; only the sent
+ *   and not_applicable states are terminal, and both are permanent.
+ *
+ * Returns the marker to write, or undefined when nothing must change. The
+ * caller must include a returned marker in its patch even when no other
+ * field changed.
+ */
+export function welcomeMarkerAtEstablishment(input: {
+  /** The stored marker; any present marker is final for this rule. */
+  existingMarker: ProductUserWelcomeMarker | undefined;
+  /** The decision as it stands after this establishment's own resolution. */
+  decision: ProductUserAccessDecision;
+  standing: ProductUserStanding;
+  /** True when this establishment itself moved the identity to approved. */
+  admittedByThisEstablishment: boolean;
+  /** The record's lastSeenAt before this contact; null for a new record. */
+  previousLastSeenAt: string | null;
+  /** The verified email known at this establishment, post-merge. */
+  email: string | null;
+  observedAt: string;
+}): ProductUserWelcomeMarker | undefined {
+  if (input.existingMarker !== undefined) return undefined;
+  if (input.decision.state !== "approved" || input.standing === "suspended") {
+    return undefined;
+  }
+  const firstAdmittedSession =
+    input.admittedByThisEstablishment ||
+    input.previousLastSeenAt === null ||
+    timestampIsStrictlyAfter(
+      input.decision.decidedAt,
+      input.previousLastSeenAt,
+    );
+  if (!firstAdmittedSession) {
+    return {
+      state: "not_applicable",
+      reason: "grandfathered",
+      recordedAt: input.observedAt,
+    };
+  }
+  if (input.email === null) {
+    return {
+      state: "not_applicable",
+      reason: "no_verified_email",
+      recordedAt: input.observedAt,
+    };
+  }
+  return { state: "due", dueAt: input.observedAt };
+}
+
 export const productUserDocumentValidator = v.object({
   subject: v.string(),
   authMethod: v.string(),
@@ -166,11 +325,19 @@ export const productUserDocumentValidator = v.object({
    * authenticated contact materializes exactly that decision.
    */
   access: v.optional(productUserAccessDecisionValidator),
+  /**
+   * The once-ever welcome marker (messaging/007). Optional because absence
+   * is the meaningful default: not yet due. Deliberately absent from
+   * `productUserRecordValidator` — it is dispatcher bookkeeping, not a
+   * directory fact any existing consumer displays.
+   */
+  welcome: v.optional(productUserWelcomeMarkerValidator),
 });
 
 export const productUserRecordValidator = productUserDocumentValidator
   .omit("walletAddressKey")
   .omit("access")
+  .omit("welcome")
   .extend({
     /**
      * The authoritative admission decision, always present on a returned

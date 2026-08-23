@@ -7,6 +7,7 @@ import {
 import * as React from "react";
 import { AdminLayout } from "./layouts/AdminLayout";
 import { BackgroundWorkPage } from "./pages/BackgroundWorkPage";
+import { BetaAllowlistPage } from "./pages/BetaAllowlistPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OperatorsPage } from "./pages/OperatorsPage";
@@ -88,6 +89,7 @@ export const appRoutes = (
         {/* An opaque handle, never the person's subject key: this path is
             written into history, access logs, and the sign-in returnTo. */}
         <Route path="users/:handle" element={<ProductUserDetailPage />} />
+        <Route path="allowlist" element={<BetaAllowlistPage />} />
         <Route path="providers" element={<ProvidersPage />} />
         <Route path="providers/new" element={<ProviderFormPage />} />
         <Route path="providers/:providerId" element={<ProviderDetailPage />} />

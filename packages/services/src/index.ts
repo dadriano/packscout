@@ -95,3 +95,6 @@ export * from "./alert-email/publisher.ts";
 export * from "./email-links/token-format.ts";
 export * from "./email-links/configuration.ts";
 export * from "./email-links/token-service.ts";
+export * from "./welcome-dispatch/settings.ts";
+export * from "./welcome-dispatch/directory-client.ts";
+export * from "./welcome-dispatch/dispatch-service.ts";

@@ -37,6 +37,9 @@ export type ProviderWorkerConfigurationErrorCode =
   | "RETENTION_MAX_BATCHES_INVALID"
   | "RUN_HEARTBEAT_STALE_INVALID"
   | "SCHEDULE_CLAIM_LEASE_INVALID"
+  | "WELCOME_DISPATCH_BATCH_SIZE_INVALID"
+  | "WELCOME_DISPATCH_LEASE_INVALID"
+  | "WELCOME_DISPATCH_POLL_INVALID"
   | "WORKER_HOST_INVALID"
   | "WORKER_ID_INVALID"
   | "WORKER_VERSION_INVALID";
@@ -76,6 +79,9 @@ export interface ProviderWorkerConfiguration {
   readonly retentionOrganizationDiscoveryLimit: number;
   readonly runHeartbeatStaleAfterMilliseconds: number;
   readonly scheduleClaimLeaseMilliseconds: number;
+  readonly welcomeDispatchBatchSize: number;
+  readonly welcomeDispatchLeaseMilliseconds: number;
+  readonly welcomeDispatchPollMilliseconds: number;
   readonly workerHost: string;
   readonly workerId: string;
   readonly workerVersion: string;
@@ -390,6 +396,30 @@ export function readProviderWorkerConfiguration(
       1_000,
       300_000,
       "SCHEDULE_CLAIM_LEASE_INVALID",
+    ),
+    // Welcome dispatch (messaging/007): batch bound mirrors the directory's
+    // claim bound, and the lease its claim-expiry bounds, so a configured
+    // value the worker accepts is never refused upstream.
+    welcomeDispatchBatchSize: boundedInteger(
+      environment.PACKSCOUT_WORKER_WELCOME_DISPATCH_BATCH_SIZE,
+      10,
+      1,
+      20,
+      "WELCOME_DISPATCH_BATCH_SIZE_INVALID",
+    ),
+    welcomeDispatchLeaseMilliseconds: boundedInteger(
+      environment.PACKSCOUT_WORKER_WELCOME_DISPATCH_LEASE_MS,
+      300_000,
+      1_000,
+      900_000,
+      "WELCOME_DISPATCH_LEASE_INVALID",
+    ),
+    welcomeDispatchPollMilliseconds: boundedInteger(
+      environment.PACKSCOUT_WORKER_WELCOME_DISPATCH_POLL_MS,
+      60_000,
+      100,
+      300_000,
+      "WELCOME_DISPATCH_POLL_INVALID",
     ),
     workerHost: workerHostFor(environment.PACKSCOUT_WORKER_HOST),
     workerId: workerIdFor(environment.PACKSCOUT_WORKER_ID, fallbackWorkerId),

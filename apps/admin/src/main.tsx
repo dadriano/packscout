@@ -18,6 +18,7 @@ import "./data-providers.css";
 import "./operations.css";
 import "./alerts.css";
 import "./product-users.css";
+import "./beta-allowlist.css";
 
 function RootProviders() {
   return (

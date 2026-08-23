@@ -16,6 +16,8 @@ export const operatorPermissions = [
   "resources:archive",
   "product_users:view",
   "product_users:manage",
+  "beta_allowlist:view",
+  "beta_allowlist:manage",
 ] as const;
 
 export type OperatorPermission = (typeof operatorPermissions)[number];
@@ -23,7 +25,9 @@ export type OperatorPermission = (typeof operatorPermissions)[number];
 /**
  * The authoritative role grant. Product-user permissions expose personal data
  * (email addresses and wallet-linked identities) that the rest of the pipeline
- * deliberately pseudonymizes, so they are granted to `admin` only.
+ * deliberately pseudonymizes, so they are granted to `admin` only. The beta
+ * allowlist carries the same kind of personal identifiers and decides who may
+ * enter the closed beta, so its permissions are likewise administrator-only.
  */
 export const operatorRolePermissions: Readonly<
   Record<OperatorRole, readonly OperatorPermission[]>
@@ -38,6 +42,8 @@ export const operatorRolePermissions: Readonly<
     "resources:archive",
     "product_users:view",
     "product_users:manage",
+    "beta_allowlist:view",
+    "beta_allowlist:manage",
   ] as const),
   data_operator: Object.freeze([
     "providers:view",

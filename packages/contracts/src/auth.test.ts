@@ -79,3 +79,22 @@ test("role grants stay inside the shared permission vocabulary", () => {
   permissionsForOperatorRole("admin").length = 0;
   assert.ok(permissionsForOperatorRole("admin").includes("product_users:view"));
 });
+
+test("beta-allowlist administration is granted to administrators only", () => {
+  assert.ok(operatorPermissions.includes("beta_allowlist:view"));
+  assert.ok(operatorPermissions.includes("beta_allowlist:manage"));
+
+  const administrator = permissionsForOperatorRole("admin");
+  assert.ok(administrator.includes("beta_allowlist:view"));
+  assert.ok(administrator.includes("beta_allowlist:manage"));
+
+  const dataOperator = permissionsForOperatorRole("data_operator");
+  assert.equal(dataOperator.includes("beta_allowlist:view"), false);
+  assert.equal(dataOperator.includes("beta_allowlist:manage"), false);
+  // The data operator's existing capability set is unchanged by this feature.
+  assert.deepEqual(dataOperator, [
+    "providers:view",
+    "imports:start",
+    "imports:retry",
+  ]);
+});

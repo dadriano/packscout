@@ -22,6 +22,7 @@ import {
   productUserWalletAddressKey,
   refuseProductUser,
   requireProductUserSubject,
+  welcomeMarkerAtEstablishment,
   type ProductUserIdentityAttributes,
 } from "./productUserRecords";
 
@@ -134,15 +135,30 @@ export async function establishProductUserRecord(
 
   if (existing === null) {
     const invitation = await findBetaAllowlistMatch(ctx, attributes);
+    const access =
+      invitation === null
+        ? defaultProductUserAccessDecision(observedAt)
+        : betaAllowlistApprovedDecision(invitation._id, observedAt);
+    // A new record admitted at its very first contact (allowlist match) is
+    // having its first admitted session right now, so the welcome marker is
+    // armed here (messaging/007). An awaiting record stays markerless: not
+    // yet due.
+    const welcome = welcomeMarkerAtEstablishment({
+      existingMarker: undefined,
+      decision: access,
+      standing: "active",
+      admittedByThisEstablishment: invitation !== null,
+      previousLastSeenAt: null,
+      email: attributes.email,
+      observedAt,
+    });
     await ctx.db.insert("productUsers", {
       ...attributes,
       firstSeenAt: observedAt,
       lastSeenAt: observedAt,
       standing: "active",
-      access:
-        invitation === null
-          ? defaultProductUserAccessDecision(observedAt)
-          : betaAllowlistApprovedDecision(invitation._id, observedAt),
+      access,
+      ...(welcome === undefined ? {} : { welcome }),
     });
     return { created: true, standing: "active" };
   }
@@ -158,11 +174,32 @@ export async function establishProductUserRecord(
     productUserAccessDecisionOf(existing).state === "awaiting_review"
       ? await findBetaAllowlistMatch(ctx, merged)
       : null;
+  const resultingAccess =
+    invitation !== null
+      ? betaAllowlistApprovedDecision(invitation._id, observedAt)
+      : productUserAccessDecisionOf(existing);
+  // The welcome marker arms only here, at an admitted establishment contact
+  // (messaging/007): approved during this contact or between contacts means
+  // this is the identity's first admitted session; approved with a contact
+  // already behind it means it predates the marker machinery and is
+  // grandfathered. The rule and its consequences are documented on
+  // `welcomeMarkerAtEstablishment`. A returned marker forces the patch even
+  // inside the last-seen refresh window; an existing marker never changes.
+  const welcome = welcomeMarkerAtEstablishment({
+    existingMarker: existing.welcome,
+    decision: resultingAccess,
+    standing: existing.standing,
+    admittedByThisEstablishment: invitation !== null,
+    previousLastSeenAt: existing.lastSeenAt,
+    email: merged.email,
+    observedAt,
+  });
   if (
     attributesChanged(existing, merged) ||
     lastSeenIsStale(existing, nowMilliseconds) ||
     decisionMissing ||
-    invitation !== null
+    invitation !== null ||
+    welcome !== undefined
   ) {
     await ctx.db.patch("productUsers", existing._id, {
       authMethod: merged.authMethod,
@@ -173,10 +210,11 @@ export async function establishProductUserRecord(
       // An allowlist match decides the waiting identity now; otherwise a
       // legacy record materializes exactly the decision it already reads as.
       ...(invitation !== null
-        ? { access: betaAllowlistApprovedDecision(invitation._id, observedAt) }
+        ? { access: resultingAccess }
         : decisionMissing
-          ? { access: productUserAccessDecisionOf(existing) }
+          ? { access: resultingAccess }
           : {}),
+      ...(welcome === undefined ? {} : { welcome }),
     });
   }
   return { created: false, standing: existing.standing };

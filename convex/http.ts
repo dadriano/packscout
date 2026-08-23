@@ -14,6 +14,11 @@ import {
   handleAuthenticatedHeatPublicationRequest,
   handleAuthenticatedProviderReleaseRequest,
 } from "./productionDataReleaseAuth";
+import {
+  PRODUCT_USER_WELCOME_CLAIM_MAX_BATCH,
+  PRODUCT_USER_WELCOME_CLAIM_MAX_LEASE_MILLISECONDS,
+  PRODUCT_USER_WELCOME_CLAIM_MIN_LEASE_MILLISECONDS,
+} from "./productUserWelcome";
 
 
 /**
@@ -38,6 +43,7 @@ const REQUEST_ERROR_CODES = new Set([
   "PRODUCT_USER_PAGE_CURSOR_INVALID",
   "PRODUCT_USER_SUBJECT_INVALID",
   "PRODUCT_USER_OPERATOR_INVALID",
+  "PRODUCT_USER_WELCOME_REQUEST_INVALID",
 ]);
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -611,6 +617,86 @@ const countProductUserAccessQueue = httpAction(async (ctx, request) => {
   }
 });
 
+/**
+ * The welcome-dispatch surface (messaging/007), reached through the same
+ * admin integration and deployment secret as the directory reads. The
+ * dispatcher discovers and claims identities whose first admitted session
+ * armed a welcome, and settles each once the message is durably enqueued.
+ * Subjects and addresses are personal data, so both operations are POST
+ * with JSON bodies — neither ever appears in a URL — and every refusal is
+ * a fixed string.
+ */
+
+function readWelcomeClaimLimit(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= PRODUCT_USER_WELCOME_CLAIM_MAX_BATCH
+    ? value
+    : null;
+}
+
+/** Absent means the backend default; anything present must be in bounds. */
+function readWelcomeClaimLease(value: unknown): number | null | undefined {
+  if (value === undefined) return null;
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= PRODUCT_USER_WELCOME_CLAIM_MIN_LEASE_MILLISECONDS &&
+    value <= PRODUCT_USER_WELCOME_CLAIM_MAX_LEASE_MILLISECONDS
+    ? value
+    : undefined;
+}
+
+function readWelcomeSettleOutcome(
+  value: unknown,
+): "sent" | "no_verified_email" | null {
+  return value === "sent" || value === "no_verified_email" ? value : null;
+}
+
+const claimProductUserWelcomes = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  const limit = readWelcomeClaimLimit(body.limit);
+  const leaseMilliseconds = readWelcomeClaimLease(body.leaseMilliseconds);
+  if (limit === null || leaseMilliseconds === undefined) {
+    return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runMutation(internal.productUserWelcome.claimDueWelcomes, {
+        limit,
+        ...(leaseMilliseconds === null ? {} : { leaseMilliseconds }),
+      }),
+    );
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
+const settleProductUserWelcome = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  const subject = readSubject(body.subject);
+  const outcome = readWelcomeSettleOutcome(body.outcome);
+  if (subject === null || outcome === null) {
+    return badRequest("ADMIN_DIRECTORY_REQUEST_INVALID");
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runMutation(internal.productUserWelcome.settleWelcome, {
+        subject,
+        outcome,
+      }),
+    );
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
 const http = httpRouter();
 
 
@@ -953,6 +1039,19 @@ http.route({
   path: "/admin/product-users/access/queue-count",
   method: "POST",
   handler: countProductUserAccessQueue,
+});
+
+// The welcome-dispatch surface: POST for the same reason — subjects and
+// verified addresses travel only in JSON bodies, never in a URL.
+http.route({
+  path: "/admin/product-users/welcome/claim",
+  method: "POST",
+  handler: claimProductUserWelcomes,
+});
+http.route({
+  path: "/admin/product-users/welcome/settle",
+  method: "POST",
+  handler: settleProductUserWelcome,
 });
 
 // POST rather than GET, like the directory routes: allowlist identifiers are

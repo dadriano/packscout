@@ -14,6 +14,7 @@ import {
   AesGcmProviderCredentialCipher,
   CatalogProjectionService,
   createPostmarkEmailDeliveryAdapter,
+  EmailMessageOutboxService,
   createProviderMappingAdapterRegistryFromManifest,
   DefaultProviderImportPagePlanner,
   EmailDeliveryAdapterRegistry,
@@ -34,6 +35,7 @@ import {
 import { createProviderWorkerOperationalRuntime } from "./provider-worker-operational-runtime.ts";
 import { createProviderWorkerEstimatedEvProcessor } from "./provider-worker-estimated-ev.ts";
 import { createProviderWorkerMessageOutboxProcessor } from "./provider-worker-message-outbox.ts";
+import { createProviderWorkerWelcomeDispatchProcessor } from "./provider-worker-welcome-dispatch.ts";
 import {
   createProviderWorkerPresenceObserver,
   describeWorkerInstance,
@@ -81,6 +83,9 @@ type RuntimeConfiguration = Pick<
   | "retentionOrganizationDiscoveryLimit"
   | "runHeartbeatStaleAfterMilliseconds"
   | "scheduleClaimLeaseMilliseconds"
+  | "welcomeDispatchBatchSize"
+  | "welcomeDispatchLeaseMilliseconds"
+  | "welcomeDispatchPollMilliseconds"
   | "workerHost"
   | "workerId"
   | "workerVersion"
@@ -265,6 +270,23 @@ export function createProviderWorkerRuntime(
           input.configuration.messageOutboxBackoffCapMilliseconds,
         pollIntervalMilliseconds:
           input.configuration.messageOutboxPollMilliseconds,
+      },
+    }),
+    // The welcome dispatcher (messaging/007) runs beside the outbox drain.
+    // Its off switch and operator-integration configuration resolve from
+    // this same environment per pass; disabled or unconfigured, it idles
+    // without touching any other job or message kind. It enqueues through
+    // the same durable outbox the drain above delivers.
+    welcomeDispatch: createProviderWorkerWelcomeDispatchProcessor({
+      env: environment,
+      outbox: new EmailMessageOutboxService({ queue: outboxRepository, clock }),
+      clock,
+      settings: {
+        batchSize: input.configuration.welcomeDispatchBatchSize,
+        leaseMilliseconds:
+          input.configuration.welcomeDispatchLeaseMilliseconds,
+        pollIntervalMilliseconds:
+          input.configuration.welcomeDispatchPollMilliseconds,
       },
     }),
     presence: new ProviderWorkerPresence({

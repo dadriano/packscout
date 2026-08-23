@@ -22,6 +22,10 @@ import type {
   ProviderWorkerMessageOutboxCycleResult,
   ProviderWorkerMessageOutboxPort,
 } from "./provider-worker-message-outbox.ts";
+import type {
+  ProviderWorkerWelcomeDispatchCycleResult,
+  ProviderWorkerWelcomeDispatchPort,
+} from "./provider-worker-welcome-dispatch.ts";
 
 const safeLogValuePattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const safeFailureCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
@@ -72,6 +76,8 @@ export type ProviderWorkerLogEventName =
   | "provider_import_queue_failed"
   | "provider_message_outbox_cycle_failed"
   | "provider_message_outbox_cycle_finished"
+  | "provider_welcome_dispatch_cycle_failed"
+  | "provider_welcome_dispatch_cycle_finished"
   | "provider_estimated_ev_cycle_failed"
   | "provider_estimated_ev_cycle_finished"
   | "provider_retention_cycle_failed"
@@ -115,6 +121,12 @@ export interface ProviderWorkerLogEvent {
   readonly outboxFailed?: number;
   readonly outboxLost?: number;
   readonly outboxErrors?: number;
+  readonly welcomeClaimed?: number;
+  readonly welcomeEnqueued?: number;
+  readonly welcomeDeduplicated?: number;
+  readonly welcomeSkipped?: number;
+  readonly welcomeErrors?: number;
+  readonly welcomeCapReached?: boolean;
   readonly activityKind?: WorkerActivityKind;
   readonly presenceFailures?: number;
 }
@@ -147,6 +159,7 @@ export interface ProviderWorkerRuntimeDependencies {
   readonly catalogRetention?: CatalogRetentionWorkerRuntimePort;
   readonly retention: ProviderWorkerRetentionPort;
   readonly messageOutbox?: ProviderWorkerMessageOutboxPort;
+  readonly welcomeDispatch?: ProviderWorkerWelcomeDispatchPort;
   readonly presence?: ProviderWorkerPresencePort;
   readonly logger: ProviderWorkerLogger;
   readonly workerId: string;
@@ -415,6 +428,7 @@ export class ProviderWorkerRuntime {
         await this.processEstimatedEv();
         await this.processRetention();
         await this.processMessageOutbox();
+        await this.processWelcomeDispatch();
       }
       return result;
     } finally {
@@ -505,6 +519,57 @@ export class ProviderWorkerRuntime {
             outboxErrors: safeCount(result.errors),
           }),
       ...(failures > 0 ? { failureCode: "MESSAGE_OUTBOX_DELIVERY_FAILED" } : {}),
+    });
+  }
+
+  private async processWelcomeDispatch(): Promise<void> {
+    if (!this.dependencies.welcomeDispatch) return;
+    // The dispatcher enqueues messages, so it reports under the same
+    // activity kind as the outbox work it feeds.
+    this.reportActivity({
+      kind: "message_outbox",
+      organizationId: null,
+      providerId: null,
+      runId: null,
+    });
+    let result: ProviderWorkerWelcomeDispatchCycleResult;
+    try {
+      result = await this.dependencies.welcomeDispatch.runCycle();
+    } catch {
+      this.log({
+        level: "error",
+        event: "provider_welcome_dispatch_cycle_failed",
+        failureCode: "WELCOME_DISPATCH_CYCLE_ERROR",
+      });
+      return;
+    }
+    // A gated pass is not an observable cycle, and a deliberately disabled
+    // or unconfigured dispatcher idles silently rather than filling the log
+    // with a chosen state.
+    if (
+      result.outcome === "waiting" ||
+      result.outcome === "disabled" ||
+      result.outcome === "unconfigured"
+    ) {
+      return;
+    }
+    const failures = safeCount(result.errors);
+    this.log({
+      level: failures > 0 ? "error" : "info",
+      event: "provider_welcome_dispatch_cycle_finished",
+      outcome:
+        failures > 0
+          ? "degraded"
+          : result.capReached
+            ? "bounded"
+            : "succeeded",
+      welcomeClaimed: safeCount(result.claimed),
+      welcomeEnqueued: safeCount(result.enqueued),
+      welcomeDeduplicated: safeCount(result.deduplicated),
+      welcomeSkipped: safeCount(result.skipped),
+      welcomeErrors: failures,
+      welcomeCapReached: result.capReached === true,
+      ...(failures > 0 ? { failureCode: "WELCOME_DISPATCH_FAILED" } : {}),
     });
   }
 

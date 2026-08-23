@@ -44,6 +44,8 @@ export function AdminLayout() {
         ? "Operators"
         : location.pathname.startsWith("/users")
           ? "Users"
+        : location.pathname.startsWith("/allowlist")
+          ? "Allowlist"
         : location.pathname.startsWith("/providers")
           ? "Data Providers"
         : location.pathname.startsWith("/operations")
@@ -75,10 +77,14 @@ export function AdminLayout() {
   const canManageOperators = session.permissions.includes("operators:manage");
   const canViewProviders = session.permissions.includes("providers:view");
   const canViewProductUsers = session.permissions.includes("product_users:view");
+  const canViewBetaAllowlist = session.permissions.includes(
+    "beta_allowlist:view",
+  );
   const workspaceNavigation = [
     ...baseNavigation,
     ...(canManageOperators ? [{ to: "/operators", label: "Operators" }] : []),
     ...(canViewProductUsers ? [{ to: "/users", label: "Users" }] : []),
+    ...(canViewBetaAllowlist ? [{ to: "/allowlist", label: "Allowlist" }] : []),
   ];
   const pipelineNavigation = canViewProviders
     ? [

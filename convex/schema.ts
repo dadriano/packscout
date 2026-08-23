@@ -1367,6 +1367,15 @@ export default defineSchema({
     .index("by_access_state_and_access_decided_at", [
       "access.state",
       "access.decidedAt",
+    ])
+    // Welcome-dispatch discovery (messaging/007): the `due` segment lists
+    // identities awaiting their one welcome, and the `claimed` segment is
+    // range-scanned by claim expiry so a crashed dispatcher's claims lapse
+    // back into discovery. Records with no marker sit in the undefined
+    // segment and are never scanned.
+    .index("by_welcome_state_and_welcome_claim_expires_at", [
+      "welcome.state",
+      "welcome.claimExpiresAt",
     ]),
 
   // The closed-beta allowlist. The identifier indexes serve exact-match

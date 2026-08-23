@@ -30,6 +30,10 @@ import {
   type ProductUsersRouterDependencies,
 } from "./routes/product-users.ts";
 import {
+  createBetaAllowlistRouter,
+  type BetaAllowlistRouterDependencies,
+} from "./routes/beta-allowlist.ts";
+import {
   createWorkerFleetRouter,
   type WorkerFleetRouterDependencies,
 } from "./routes/worker-fleet.ts";
@@ -65,6 +69,10 @@ export interface AdminAppDependencies {
   >;
   productUsers?: Omit<
     ProductUsersRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  betaAllowlist?: Omit<
+    BetaAllowlistRouterDependencies,
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
@@ -195,6 +203,17 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         "/api/product-users",
         createProductUsersRouter({
           ...dependencies.productUsers,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.betaAllowlist) {
+      app.use(
+        "/api/beta-allowlist",
+        createBetaAllowlistRouter({
+          ...dependencies.betaAllowlist,
           auth: service,
           cookiePolicy,
           sameOrigin,

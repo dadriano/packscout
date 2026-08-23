@@ -50,7 +50,7 @@ The closed-beta feature excluded notifying users of access decisions, reasoning 
 |---|---|---|---|---|
 | 005 | Route operational alerts to operators by email | medium | done | 003, 004 |
 | 006 | Notify product users of beta access decisions | medium | todo | 003, 004, closed-beta-access/003, closed-beta-access/010 |
-| 007 | Welcome an admitted user on first sign-in | medium | todo | 003, 004, closed-beta-access/001 |
+| 007 | Welcome an admitted user on first sign-in | medium | done | 003, 004, closed-beta-access/001 |
 
 ### Operator account lifecycle
 

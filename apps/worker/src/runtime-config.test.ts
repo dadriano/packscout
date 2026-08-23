@@ -349,6 +349,47 @@ test("message outbox settings refuse out-of-bounds values with their own codes",
   }
 });
 
+test("welcome dispatch settings default sanely, honor bounded overrides, and refuse out-of-bounds values", () => {
+  const defaults = readProviderWorkerConfiguration(validEnvironment(), "worker:1");
+  assert.equal(defaults.welcomeDispatchBatchSize, 10);
+  assert.equal(defaults.welcomeDispatchLeaseMilliseconds, 300_000);
+  assert.equal(defaults.welcomeDispatchPollMilliseconds, 60_000);
+
+  const configured = readProviderWorkerConfiguration(
+    validEnvironment({
+      PACKSCOUT_WORKER_WELCOME_DISPATCH_BATCH_SIZE: "5",
+      PACKSCOUT_WORKER_WELCOME_DISPATCH_LEASE_MS: "120000",
+      PACKSCOUT_WORKER_WELCOME_DISPATCH_POLL_MS: "30000",
+    }),
+    "worker:1",
+  );
+  assert.equal(configured.welcomeDispatchBatchSize, 5);
+  assert.equal(configured.welcomeDispatchLeaseMilliseconds, 120_000);
+  assert.equal(configured.welcomeDispatchPollMilliseconds, 30_000);
+
+  const invalidSettings = [
+    // The batch bound mirrors the directory's claim bound (20), so a value
+    // the worker accepts is never refused upstream.
+    ["PACKSCOUT_WORKER_WELCOME_DISPATCH_BATCH_SIZE", "0", "WELCOME_DISPATCH_BATCH_SIZE_INVALID"],
+    ["PACKSCOUT_WORKER_WELCOME_DISPATCH_BATCH_SIZE", "21", "WELCOME_DISPATCH_BATCH_SIZE_INVALID"],
+    ["PACKSCOUT_WORKER_WELCOME_DISPATCH_LEASE_MS", "999", "WELCOME_DISPATCH_LEASE_INVALID"],
+    ["PACKSCOUT_WORKER_WELCOME_DISPATCH_LEASE_MS", "900001", "WELCOME_DISPATCH_LEASE_INVALID"],
+    ["PACKSCOUT_WORKER_WELCOME_DISPATCH_POLL_MS", "99", "WELCOME_DISPATCH_POLL_INVALID"],
+    ["PACKSCOUT_WORKER_WELCOME_DISPATCH_POLL_MS", "300001", "WELCOME_DISPATCH_POLL_INVALID"],
+  ] as const;
+  for (const [variable, value, code] of invalidSettings) {
+    assert.throws(
+      () =>
+        readProviderWorkerConfiguration(
+          validEnvironment({ [variable]: value }),
+          "worker:1",
+        ),
+      hasConfigurationCode(code),
+      `${variable}=${value} refuses with ${code}`,
+    );
+  }
+});
+
 test("a backoff cap below the base is refused so retries can never shrink", () => {
   assert.throws(
     () =>

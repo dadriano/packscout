@@ -26,3 +26,4 @@ export * from "./worker-presence.ts";
 export * from "./email-delivery.ts";
 export * from "./email-outbox.ts";
 export * from "./email-links.ts";
+export * from "./beta-allowlist.ts";

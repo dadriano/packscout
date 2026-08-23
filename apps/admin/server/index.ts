@@ -25,6 +25,8 @@ import {
   type MachineryAlertLoop,
 } from "./machinery-alert-runtime.ts";
 import { createAdminOperationalRuntime } from "./operational-runtime.ts";
+import { createBetaAllowlistAuditSink } from "./beta-allowlist-audit.ts";
+import { createBetaAllowlistDirectoryClient } from "./beta-allowlist-directory.ts";
 import { createProductUserAuditSink } from "./product-user-audit.ts";
 import { createProductUserDirectoryReader } from "./product-user-directory.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
@@ -210,6 +212,17 @@ try {
         config: productUserDirectoryConfig,
       }),
       audit: createProductUserAuditSink({
+        database,
+        actorPseudonymKey: providerActorKey,
+      }),
+    },
+    // The allowlist lives with the product backend and is reached through the
+    // same integration and credential as the directory reads above.
+    betaAllowlist: {
+      directory: createBetaAllowlistDirectoryClient({
+        config: productUserDirectoryConfig,
+      }),
+      audit: createBetaAllowlistAuditSink({
         database,
         actorPseudonymKey: providerActorKey,
       }),
