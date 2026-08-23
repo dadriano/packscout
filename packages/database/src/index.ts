@@ -40,3 +40,5 @@ export * from "./security.ts";
 export * from "./setup-repository.ts";
 export * from "./worker-fleet-read-repository.ts";
 export * from "./worker-presence-repository.ts";
+export * from "./alert-email-read-repository.ts";
+export * from "./email-link-token-repository.ts";

@@ -55,7 +55,7 @@ Adapted rather than copied, because PackScout's stack differs: identity arrives 
 |---|---|---|---|---|
 | 006 | Add the public landing page | medium | done | none |
 | 007 | Gate the product behind approved access | large | done | 001, 006 |
-| 008 | Awaiting-approval and declined experience | medium | in_progress | 007 |
+| 008 | Awaiting-approval and declined experience | medium | done | 007 |
 
 ### Operator surfaces (admin)
 

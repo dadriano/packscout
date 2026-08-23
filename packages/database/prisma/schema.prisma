@@ -1762,3 +1762,27 @@ enum worker_instance_state {
   running
   stopped
 }
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model email_link_tokens {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  purpose            email_link_purpose
+  selector           String             @unique(map: "email_link_tokens_selector_unique")
+  verifier_hash      String
+  subject_id         String             @db.Uuid
+  address_normalized String
+  issued_at          DateTime           @db.Timestamptz(6)
+  expires_at         DateTime           @db.Timestamptz(6)
+  redeemed_at        DateTime?          @db.Timestamptz(6)
+  superseded_at      DateTime?          @db.Timestamptz(6)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime           @default(now()) @db.Timestamptz(6)
+
+  @@index([purpose, subject_id], map: "email_link_tokens_outstanding_idx")
+  @@index([expires_at], map: "email_link_tokens_expiry_idx")
+}
+
+enum email_link_purpose {
+  operator_password_reset
+  operator_invitation
+}

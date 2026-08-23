@@ -165,6 +165,7 @@ try {
   const operational = createAdminOperationalRuntime({
     database,
     actorPseudonymKey: providerActorKey,
+    alertEmail: { env: process.env },
   });
   const auth = await createAdminAuthRuntime({
     repository: new PrismaAuthRepository(database),

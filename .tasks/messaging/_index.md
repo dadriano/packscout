@@ -48,7 +48,7 @@ The closed-beta feature excluded notifying users of access decisions, reasoning 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 005 | Route operational alerts to operators by email | medium | in_progress | 003, 004 |
+| 005 | Route operational alerts to operators by email | medium | done | 003, 004 |
 | 006 | Notify product users of beta access decisions | medium | todo | 003, 004, closed-beta-access/003, closed-beta-access/010 |
 | 007 | Welcome an admitted user on first sign-in | medium | todo | 003, 004, closed-beta-access/001 |
 
@@ -56,7 +56,7 @@ The closed-beta feature excluded notifying users of access decisions, reasoning 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 008 | Issue and redeem one-time email links | large | in_progress | 003, 004 |
+| 008 | Issue and redeem one-time email links | large | done | 003, 004 |
 | 009 | Let operators reset their own password | medium | todo | 008 |
 | 010 | Provision operators by invitation | medium | todo | 008 |
 

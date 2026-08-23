@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { AccessHoldingNotice } from "@/components/access/AccessHoldingNotice";
+import { AccessHoldingNotice } from "@/components/access/AccessHoldingNotice.client";
 import { ShellSurfaceReporter } from "@/components/shell/ShellSurface.client";
 import {
   resolveAccessRoute,
@@ -16,8 +16,11 @@ import { ACCESS_HOLDING_COPY } from "@/lib/access-holding-content";
  * trusting anything from the URL, renders the holding notice for held and
  * unresolved sessions, and sends everyone else back to the root — which
  * renders for them instead of redirecting here, so no decision can bounce
- * between the two. It is never indexed: it is a personal status surface,
- * not a product page, in either switch position.
+ * between the two. The notice itself then keeps the decision current
+ * client-side through the authenticated self-read, so an approval arriving
+ * while the page is open moves the visitor into the product. It is never
+ * indexed: it is a personal status surface, not a product page, in either
+ * switch position.
  */
 export const dynamic = "force-dynamic";
 

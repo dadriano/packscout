@@ -140,6 +140,10 @@ export function createProviderWorkerRuntime(
     ids,
     clock,
     observability: input.observability,
+    // Alerts raised by pipeline work also reach operator email, enqueued on
+    // the same outbox the drain below delivers; routing and its off switch
+    // are server-side settings resolved from this environment.
+    alertEmail: { env: environment, queue: outboxRepository },
   });
   const retention = createProviderWorkerRetentionCoordinator({
     database: input.database,

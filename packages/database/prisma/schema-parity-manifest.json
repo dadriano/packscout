@@ -1,17 +1,17 @@
 {
-  "source": "email message outbox durable delivery",
+  "source": "one-time email link tokens",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260822000000_email_message_outbox/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260823010000_email_link_tokens/migration.sql"
   },
   "expectedCounts": {
-    "tables": 59,
-    "enums": 26,
-    "columns": 842,
-    "indexes": 76,
-    "uniqueConstraints": 52,
+    "tables": 60,
+    "enums": 27,
+    "columns": 854,
+    "indexes": 78,
+    "uniqueConstraints": 53,
     "foreignKeys": 176,
-    "checkConstraints": 207
+    "checkConstraints": 214
   },
   "enums": {
     "admin_alert_state": [
@@ -32,6 +32,10 @@
       "pull",
       "sale",
       "estimated_ev"
+    ],
+    "email_link_purpose": [
+      "operator_password_reset",
+      "operator_invitation"
     ],
     "email_message_attempt_outcome": [
       "sent",
@@ -2237,6 +2241,143 @@
         },
         "catalog_promotion_retention_operations_state_check": {
           "value": "((state = ANY (ARRAY['pending'::text, 'sent'::text, 'acknowledged'::text])) AND (send_count >= 0) AND (((state = 'pending'::text) AND (send_count = 0) AND (last_sent_at IS NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL) AND (terminal_state IS NULL) AND (has_more IS NULL) AND (selected_platform_key IS NULL) AND (selected_public_provider_release_id IS NULL) AND (selected_provider_release_fingerprint IS NULL) AND (postgres_cleanup_complete = false)) OR ((state = 'sent'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NULL) AND (canonical_receipt_body IS NULL) AND (receipt_sha256 IS NULL) AND (exact_response_body IS NULL) AND (response_sha256 IS NULL) AND (terminal_state IS NULL) AND (has_more IS NULL) AND (selected_platform_key IS NULL) AND (selected_public_provider_release_id IS NULL) AND (selected_provider_release_fingerprint IS NULL) AND (postgres_cleanup_complete = false)) OR ((state = 'acknowledged'::text) AND (send_count > 0) AND (last_sent_at IS NOT NULL) AND (acknowledged_at IS NOT NULL) AND ((octet_length(canonical_receipt_body) >= 2) AND (octet_length(canonical_receipt_body) <= 393216)) AND promotion_v2_sha256_valid(receipt_sha256) AND ((octet_length(exact_response_body) >= 2) AND (octet_length(exact_response_body) <= 524288)) AND promotion_v2_sha256_valid(response_sha256) AND (terminal_state = ANY (ARRAY['complete'::text, 'continuation_required'::text])) AND (has_more = (terminal_state = 'continuation_required'::text)))))"
+        }
+      }
+    },
+    "email_link_tokens": {
+      "columns": {
+        "address_normalized": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "now()"
+        },
+        "expires_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "issued_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "purpose": {
+          "type": "email_link_purpose",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "redeemed_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "selector": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "subject_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "superseded_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "now()"
+        },
+        "verifier_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "email_link_tokens_expiry_idx": {
+          "columns": [
+            "expires_at"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_link_tokens_outstanding_idx": {
+          "columns": [
+            "purpose",
+            "subject_id"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "email_link_tokens_selector_unique": {
+          "columns": [
+            "selector"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {},
+      "checkConstraints": {
+        "email_link_tokens_address_bounded": {
+          "value": "((length(address_normalized) >= 3) AND (length(address_normalized) <= 320) AND (strpos(address_normalized, '@'::text) > 1))"
+        },
+        "email_link_tokens_expires_after_issue": {
+          "value": "(expires_at > issued_at)"
+        },
+        "email_link_tokens_redeemed_after_issue": {
+          "value": "((redeemed_at IS NULL) OR (redeemed_at >= issued_at))"
+        },
+        "email_link_tokens_selector_bounded": {
+          "value": "(selector ~ '^[A-Za-z0-9_-]{22}$'::text)"
+        },
+        "email_link_tokens_settled_exclusive": {
+          "value": "((redeemed_at IS NULL) OR (superseded_at IS NULL))"
+        },
+        "email_link_tokens_superseded_after_issue": {
+          "value": "((superseded_at IS NULL) OR (superseded_at >= issued_at))"
+        },
+        "email_link_tokens_verifier_hash_bounded": {
+          "value": "(verifier_hash ~ '^[A-Za-z0-9_-]{43}$'::text)"
         }
       }
     },

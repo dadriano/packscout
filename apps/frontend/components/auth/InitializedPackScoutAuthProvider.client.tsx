@@ -36,6 +36,11 @@ import {
   convexAuthSessionKey,
   fetchPrivyAccessTokenForConvex,
 } from "./convex-auth-adapter";
+import { verifiedIdentityFromProviderUser } from "./verified-identity";
+
+// The provider is initialized here, so a session boot request has nothing
+// left to do.
+const sessionBootAlreadyDone = () => undefined;
 
 function usePrivyAuthForConvex() {
   const { authenticated, getAccessToken, ready, user } = usePrivy();
@@ -157,9 +162,23 @@ function PackScoutAuthBridge({
           : convex.isAuthenticated
             ? "signed_in"
             : "error";
+  // Only what the provider verified for this session, and only while the
+  // session stands. Display data for surfaces like the holding page
+  // (closed-beta-access/008); no routing or capability reads it.
+  const identity = useMemo(
+    () =>
+      ready && authenticated ? verifiedIdentityFromProviderUser(user) : null,
+    [authenticated, ready, user],
+  );
   const value = useMemo<PackScoutAuthValue>(
-    () => ({ status, login: requestLogin, logout }),
-    [logout, requestLogin, status],
+    () => ({
+      status,
+      identity,
+      login: requestLogin,
+      logout,
+      requestSessionBoot: sessionBootAlreadyDone,
+    }),
+    [identity, logout, requestLogin, status],
   );
 
   return (

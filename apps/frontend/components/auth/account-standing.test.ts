@@ -185,10 +185,12 @@ test("a blocked save reads as a suspended account, not a retryable fault", () =>
 
 test("the product learns standing from the authenticated self-standing read", () => {
   // Session establishment reads the account's own standing, skipped entirely
-  // while signed out so public browsing makes no authenticated call.
+  // while signed out so public browsing makes no authenticated call. The
+  // read is tolerant (closed-beta-access/008): a refusal is a value, never a
+  // render crash above the provider tree.
   assert.match(
     providerSource,
-    /useQuery\(\s*api\.productUsers\.getMyStanding,\s*signedIn \? \{\} : "skip",\s*\)/,
+    /useTolerantQuery\(\s*api\.productUsers\.getMyStanding,\s*signedIn \? \{\} : "skip",\s*\)\.data/,
   );
   // A blocked write is the second arrival of the same fact, and a completed
   // write clears it, so reinstatement needs no reload.

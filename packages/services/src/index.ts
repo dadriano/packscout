@@ -90,3 +90,8 @@ export * from "./message-catalogue/catalogue.ts";
 export * from "./message-outbox/outbox-service.ts";
 export * from "./message-outbox/drain-service.ts";
 export * from "./message-outbox/renderers.ts";
+export * from "./alert-email/settings.ts";
+export * from "./alert-email/publisher.ts";
+export * from "./email-links/token-format.ts";
+export * from "./email-links/configuration.ts";
+export * from "./email-links/token-service.ts";
