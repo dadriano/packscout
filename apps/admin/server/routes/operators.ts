@@ -92,15 +92,24 @@ function sendValidationError(
   });
 }
 
-/** The one wording every refused invitation issuance receives. */
+/** The wording a refused invitation issuance receives. */
 const INVITATION_UNAVAILABLE =
   "The invitation could not be sent. Try again shortly.";
 
+/**
+ * Creation is the one case where the account outlives the refusal: it rests
+ * pending with no live link, so the answer says where to pick it up rather
+ * than implying nothing happened.
+ */
+const INVITATION_UNAVAILABLE_ACCOUNT_WAITING =
+  "The invitation could not be sent. The account is waiting in the operators list — resend its invitation from there.";
+
 function sendInvitationUnavailable(
   response: import("express").Response,
+  error: string = INVITATION_UNAVAILABLE,
 ): void {
   response.status(503).json({
-    error: INVITATION_UNAVAILABLE,
+    error,
     code: "SERVICE_UNAVAILABLE",
   });
 }
@@ -203,11 +212,17 @@ export function createOperatorsRouter({
         },
       });
     } catch {
-      // An account nobody can be told about is not a provisioned account.
-      // Withdraw it and its links so the tree is left in one of two honest
-      // states — pending with an outstanding invitation, or cancelled.
+      // Compensation is not cancellation. Cancelling here would spend the
+      // administrator's deliberate terminal action on a delivery hiccup, and
+      // because the address stays unique across every state, that row would
+      // reserve the address with no route back — the 503 below would be
+      // telling them to retry something the API cannot do.
+      //
+      // Instead the account rests pending with no live link: the state the
+      // ledger already shows as an invitation needing to be resent, and the
+      // one the existing permission-guarded Resend control recovers from.
+      // It still cannot authenticate, so nothing is usable in the meantime.
       try {
-        await service.cancelInvitedOperator(actor, created.operator.id);
         await invitations.flow.revokeInvitations(created.operator.id);
       } catch {
         // Content-free by design: never the address or anything held.
@@ -218,7 +233,7 @@ export function createOperatorsRouter({
           }),
         );
       }
-      sendInvitationUnavailable(response);
+      sendInvitationUnavailable(response, INVITATION_UNAVAILABLE_ACCOUNT_WAITING);
     }
   });
 
@@ -265,7 +280,21 @@ export function createOperatorsRouter({
           sendInvitationUnavailable(response);
           return;
         }
-        await service.recordInvitationReissue(actor, target.operatorId, "success");
+        // The invitation and its message are committed. An audit sink that
+        // fails now must not report the issuance as failed: an administrator
+        // who retries on that answer issues a second invitation, which
+        // supersedes the link already in the recipient's inbox and hands them
+        // one that is dead on arrival. Audit failure is its own domain.
+        try {
+          await service.recordInvitationReissue(actor, target.operatorId, "success");
+        } catch {
+          console.error(
+            JSON.stringify({
+              level: "error",
+              event: "admin_operator_invitation_reissue_audit_failed",
+            }),
+          );
+        }
         response.status(200).json({
           invitation: {
             sentAt: issued.sentAt,

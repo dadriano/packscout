@@ -1008,3 +1008,57 @@ test("requeueing refuses every non-terminal-failed state and concurrent requeues
     await harness.close();
   }
 });
+
+test("a concurrent duplicate converges instead of being refused for backlog", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const repository = new PrismaEmailMessageOutboxRepository(harness.database);
+    const limited = { source: "operational_alerts", sourceActiveLimit: 2 };
+    await repository.enqueue(
+      enqueueInput({ idempotencyKey: "race:seed", ...limited, dueAt: enqueuedAt }),
+    );
+    // One slot left, and two callers enqueue the SAME triggering event at once.
+    // Both miss the pre-transaction fast path; the advisory lock serializes
+    // them, and the first fills the last slot. The second must still recognise
+    // its own event rather than be told the backlog is full — its intent
+    // demonstrably exists.
+    const [a, b] = await Promise.all([
+      repository.enqueue(
+        enqueueInput({ idempotencyKey: "race:same", ...limited, dueAt: enqueuedAt }),
+      ),
+      repository.enqueue(
+        enqueueInput({ idempotencyKey: "race:same", ...limited, dueAt: enqueuedAt }),
+      ),
+    ]);
+    const outcomes = [a, b];
+    assert.equal(
+      outcomes.filter((outcome) => outcome.status === "enqueued").length,
+      2,
+      "both callers must be told their event is queued",
+    );
+    assert.equal(
+      outcomes.filter(
+        (outcome) => outcome.status === "enqueued" && outcome.deduplicated,
+      ).length,
+      1,
+      "exactly one of them converged on the other's intent",
+    );
+    const ids = new Set(
+      outcomes.map((outcome) =>
+        outcome.status === "enqueued" ? outcome.intentId : null,
+      ),
+    );
+    assert.equal(ids.size, 1, "both must name the same intent");
+    // Capacity is genuinely spent now, so a different event is still refused.
+    assert.equal(
+      (
+        await repository.enqueue(
+          enqueueInput({ idempotencyKey: "race:other", ...limited }),
+        )
+      ).status,
+      "rejected",
+    );
+  } finally {
+    await harness.close();
+  }
+});

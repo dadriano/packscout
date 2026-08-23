@@ -310,9 +310,70 @@ test("an invitation that cannot be mailed leaves no usable half-provisioned acco
     assert.equal(response.status, 503);
     assert.equal((await response.json()).code, "SERVICE_UNAVAILABLE");
   });
-  // The account is withdrawn and any link it might hold superseded.
-  assert.equal(calls.cancel, 1);
+  // Compensation leaves the account recoverable rather than terminal: any
+  // partial link is superseded, but the row is NOT cancelled. Cancelling would
+  // reserve the address forever behind the state-blind unique constraint, so
+  // the retry the 503 advises would come back as an email conflict with no
+  // route out. The account rests pending, and Resend invitation recovers it.
+  assert.equal(calls.cancel, 0);
   assert.equal(calls.revoke, 1);
+});
+
+test("a failed invitation leaves the address recoverable, and says where to resume", async () => {
+  const { app, calls, cookiePolicy } = createHarness(
+    {},
+    {
+      flow: {
+        async issueInvitation() {
+          throw new Error("delivery unavailable");
+        },
+      },
+    },
+  );
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/operators`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy, "admin-session"),
+      body: JSON.stringify({
+        email: "new@packscout.test",
+        displayName: "New Operator",
+        role: "data_operator",
+      }),
+    });
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    // The answer must not imply nothing happened: the account exists, and the
+    // administrator is told the one place it can be picked up from.
+    assert.match(body.error, /operators list/u);
+    assert.doesNotMatch(body.error, /Try again shortly/u);
+  });
+  assert.equal(calls.cancel, 0);
+});
+
+test("a reissue that committed is reported as committed even when its audit write fails", async () => {
+  // The token and its outbox intent commit atomically inside issueInvitation.
+  // Reporting 503 because the audit sink then failed would send the
+  // administrator to retry, superseding the link already in the recipient's
+  // inbox and handing them one that is dead on arrival.
+  const { app, cookiePolicy } = createHarness({
+    async recordInvitationReissue(_actor, _operatorId, outcome) {
+      if (outcome === "success") throw new Error("audit sink unavailable");
+      return undefined;
+    },
+  });
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/operators/${invited.id}/invitation`,
+      {
+        method: "POST",
+        headers: mutationHeaders(cookiePolicy, "admin-session"),
+      },
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.ok(body.invitation.sentAt);
+    assert.equal(body.invitation.expired, false);
+  });
 });
 
 test("reissuing an invitation is permission-guarded, supersedes, and is audited", async () => {

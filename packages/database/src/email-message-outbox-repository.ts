@@ -294,6 +294,27 @@ export async function enqueueEmailMessageIntent(
       hashtextextended('email_message_outbox:' || ${input.source}, 0)
     )
   `);
+  // Convergence outranks capacity. Two callers enqueueing the same triggering
+  // event can both miss the pre-transaction fast path; the lock then serializes
+  // them, and if the first insert fills the last slot the second would be told
+  // its backlog is full even though its own intent exists. Re-checking the key
+  // under the lock keeps a duplicate reported as the deduplicated intent it is,
+  // and only genuinely new work is measured against the limit.
+  const [alreadyEnqueued] = await transaction.$queryRaw<Array<{ id: string }>>(
+    Prisma.sql`
+      select id
+      from email_message_intents
+      where idempotency_key = ${input.idempotencyKey}
+      limit 1
+    `,
+  );
+  if (alreadyEnqueued) {
+    return {
+      status: "enqueued",
+      intentId: alreadyEnqueued.id,
+      deduplicated: true,
+    };
+  }
   const [active] = await transaction.$queryRaw<Array<{ active: bigint }>>(
     Prisma.sql`
       select count(*)::bigint as active
