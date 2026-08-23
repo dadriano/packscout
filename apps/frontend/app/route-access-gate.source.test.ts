@@ -23,6 +23,7 @@ const accessSource = source("./access/page.tsx");
 const layoutSource = source("./layout.tsx");
 const robotsSource = source("./robots.ts");
 const searchRouteSource = source("./api/collectibles/search/route.ts");
+const rootLoadingSource = source("./loading.tsx");
 const healthRouteSource = source("./api/health/route.ts");
 
 function defaultExportBody(pageSource: string): string {
@@ -128,4 +129,18 @@ test("telemetry intake stays a write-only surface with fixed responses", () => {
     assert.equal(routeSource.includes("searchPublicCollectibles"), false);
     assert.match(routeSource, /createTelemetryIngressHandler/);
   }
+});
+
+test("the root loading fallback commits to neither surface before the decision resolves", () => {
+  // The root serves the landing page to unadmitted visitors and the dashboard
+  // to admitted ones, and this fallback streams before that is known. Dashboard
+  // chrome here flashes catalog framing at signed-out visitors and leaves the
+  // streamed document carrying two page headings.
+  assert.doesNotMatch(rootLoadingSource, /DashboardPageHeader/u);
+  assert.doesNotMatch(rootLoadingSource, /CatalogLoading/u);
+  assert.doesNotMatch(rootLoadingSource, /DataReleaseStatusReporter/u);
+  assert.doesNotMatch(rootLoadingSource, /<h1/u);
+  // It still announces the wait to assistive technology.
+  assert.match(rootLoadingSource, /aria-busy="true"/u);
+  assert.match(rootLoadingSource, /role="status"/u);
 });
