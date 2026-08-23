@@ -4,7 +4,7 @@
 **Depends on:** messaging/003, messaging/004
 **Blocks:** messaging/009, messaging/010
 **Estimated scope:** large
-**Status:** todo
+**Status:** in_progress
 
 ## Objective
 

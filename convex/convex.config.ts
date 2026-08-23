@@ -27,6 +27,12 @@ export default defineApp({
     // callers; unset keeps the product fully public. Server-side deployment
     // configuration only: no client input, header, or query can influence it.
     PACKSCOUT_CLOSED_BETA: v.optional(v.literal("1")),
+    // Server-held credential authorizing PackScout's own server rendering
+    // path to read the catalog while the closed beta is on. Mirrored by the
+    // frontend server environment variable of the same name; never browser
+    // visible. Absent by default: while the beta is on, catalog reads fail
+    // closed to admitted identities only until it is configured.
+    PACKSCOUT_CATALOG_READ_TOKEN: v.optional(v.string()),
     PRIVY_APP_ID: v.optional(v.string()),
   },
 });

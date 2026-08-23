@@ -288,6 +288,42 @@ page shows a bounded "not connected" state instead of failing. Only operators
 holding the `product_users:view` permission (administrators) see the page at
 all.
 
+### Closed-beta catalog read credential
+
+While the closed beta is on (`PACKSCOUT_CLOSED_BETA=1` on the Convex
+deployment), catalog reads accept exactly two callers: an admitted product
+identity, and PackScout's own server rendering path presenting a server-held
+credential. One server-only value configures that second caller, on both ends
+under the same name:
+
+```dotenv
+PACKSCOUT_CATALOG_READ_TOKEN=<shared-secret-32-to-512-chars>
+```
+
+Set the same secret on the Convex deployment
+(`npx convex env set PACKSCOUT_CATALOG_READ_TOKEN <value>` against the
+confirmed deployment) and in the frontend server's environment. Both sides
+fail closed: an absent, too-short, or too-long secret authorizes nothing, and
+the site then renders its existing bounded "data temporarily unavailable"
+states instead of catalog data — never a crash and never a fallback to
+serving data.
+
+The value never belongs in a `NEXT_PUBLIC_` or otherwise browser-visible
+variable. The frontend presents it only from server-only code as a query
+argument on its existing catalog reads, so it is not embedded in bundles,
+page markup, logs, or error payloads.
+
+With the beta switch off, catalog reads are public again and the credential
+is not required; a configured value is simply ignored.
+
+For a local demo against the anonymous local deployment with the beta on, add
+`PACKSCOUT_CATALOG_READ_TOKEN` to the root `.env.local`: the local seed lane
+(`scripts/local/seed-convex-mock-data-release.mjs`) mirrors it onto the local
+deployment and the frontend dev session inherits the same value, so both ends
+match without further steps. Leaving it unset keeps the preview honest — the
+product surfaces show their unavailable states, exactly as an unconfigured
+deployment would.
+
 ### Machinery alerting in the admin
 
 The admin server evaluates the pipeline's machinery conditions — a silent
