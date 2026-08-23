@@ -470,6 +470,13 @@ export interface ProductUserDirectoryReader {
    */
   getProductUserDetail(input: { subject: string }): Promise<ProductUserDetail>;
   /**
+   * One user's directory record alone — the single-record integration read,
+   * without the saved-item join. The access-decision notice reads the
+   * verified address this way after a decision commits; an unrecorded
+   * subject is the same not-found outcome the detail read reports.
+   */
+  getProductUserRecord(input: { subject: string }): Promise<ProductUserRecord>;
+  /**
    * Sets one user's standing to exactly the requested value and reports the
    * authoritative result. The product backend owns the flip, so a repeated or
    * concurrent action converges there rather than being guessed at here. This
@@ -614,6 +621,15 @@ export function createProductUserDirectoryReader(
           readSavedCollectible,
         ),
       };
+    },
+
+    async getProductUserRecord(request) {
+      const payload = asObject(await post(RECORD_PATH, { subject: request.subject }));
+      // A subject the directory has never recorded is not an error state.
+      if (payload.record === null || payload.record === undefined) {
+        throw notFound();
+      }
+      return readRecord(payload.record);
     },
 
     async setProductUserStanding(request) {

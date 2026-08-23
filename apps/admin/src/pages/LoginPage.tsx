@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { login } from "../api/auth";
 import { AdminApiError } from "../api/client";
 import { AuthErrorSummary } from "../components/auth/AuthErrorSummary";
@@ -129,6 +129,10 @@ export function LoginPage() {
               <span className="admin-visually-hidden" aria-live="polite">
                 {submitting ? "Signing in…" : ""}
               </span>
+
+              <p className="admin-auth-links">
+                <Link to="/forgot-password">Forgot your password?</Link>
+              </p>
             </form>
           </div>
         </div>

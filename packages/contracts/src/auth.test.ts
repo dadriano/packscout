@@ -3,6 +3,8 @@ import { test } from "node:test";
 import {
   createOperatorRequestSchema,
   loginRequestSchema,
+  passwordResetCompletionRequestSchema,
+  passwordResetRequestSchema,
   operatorPermissions,
   operatorRolePermissions,
   permissionsForOperatorRole,
@@ -116,4 +118,68 @@ test("message-delivery inspection is granted to administrators only", () => {
     "imports:start",
     "imports:retry",
   ]);
+});
+
+test("password reset request normalizes email exactly like sign-in", () => {
+  const parsed = passwordResetRequestSchema.parse({
+    email: "  Operator@PackScout.Test ",
+  });
+  assert.deepEqual(parsed, { email: "operator@packscout.test" });
+  assert.equal(
+    passwordResetRequestSchema.safeParse({ email: "not-an-address" }).success,
+    false,
+  );
+  assert.equal(
+    passwordResetRequestSchema.safeParse({ email: "a@b.test", extra: true })
+      .success,
+    false,
+  );
+});
+
+test("password reset completion reuses the managed password rules verbatim", () => {
+  const token = `${"a".repeat(22)}.${"b".repeat(43)}`;
+  assert.equal(
+    passwordResetCompletionRequestSchema.safeParse({
+      token,
+      password: "a strong enough password",
+    }).success,
+    true,
+  );
+
+  // The same bounds and messages an administrator-set password must satisfy.
+  const short = passwordResetCompletionRequestSchema.safeParse({
+    token,
+    password: "short",
+  });
+  assert.equal(short.success, false);
+  const shortMessage = short.success
+    ? []
+    : short.error.flatten().fieldErrors.password;
+  assert.deepEqual(shortMessage, ["Password must be at least 12 characters."]);
+  const adminSide = createOperatorRequestSchema.safeParse({
+    email: "operator@packscout.test",
+    displayName: "Operator",
+    password: "short",
+    role: "data_operator",
+  });
+  const adminMessage = adminSide.success
+    ? []
+    : adminSide.error.flatten().fieldErrors.password;
+  assert.deepEqual(shortMessage, adminMessage);
+
+  assert.equal(
+    passwordResetCompletionRequestSchema.safeParse({
+      token: "",
+      password: "a strong enough password",
+    }).success,
+    false,
+  );
+  assert.equal(
+    passwordResetCompletionRequestSchema.safeParse({
+      token,
+      password: "a strong enough password",
+      extra: true,
+    }).success,
+    false,
+  );
 });

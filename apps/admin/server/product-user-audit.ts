@@ -58,6 +58,24 @@ export interface ProductUserAuditAccessChange {
   readonly changed: boolean;
 }
 
+/**
+ * What happened to the decision notice after a genuine approve or decline
+ * transition (messaging/006). Recorded on the same event as the decision so
+ * an operator reading the trail sees, in one place, that the person was
+ * told, could not be reached, or that the enqueue failed. A revoke and a
+ * converged repeat attempt no notice and record none.
+ */
+export type ProductUserAuditNoticeOutcome =
+  | "enqueued"
+  | "skipped_no_verified_email"
+  | "failed";
+
+export interface ProductUserAuditNotice {
+  readonly outcome: ProductUserAuditNoticeOutcome;
+  /** A short, non-personal code describing why the notice failed. */
+  readonly reason?: string;
+}
+
 export interface ProductUserAuditEvent {
   readonly organizationId: string | null;
   readonly actorId: string | null;
@@ -70,6 +88,8 @@ export interface ProductUserAuditEvent {
   readonly standing?: ProductUserStanding;
   /** The access decision movement, when the action was an access decision. */
   readonly accessChange?: ProductUserAuditAccessChange;
+  /** The decision notice's fate, when a genuine transition attempted one. */
+  readonly notice?: ProductUserAuditNotice;
   /** A short, non-personal code describing why an attempt did not succeed. */
   readonly reason?: string;
 }
@@ -141,6 +161,14 @@ export function createProductUserAuditSink(input: {
                   resultingAccess: event.accessChange.resulting.state,
                   resultingDecidedBy: event.accessChange.resulting.decidedBy,
                   changed: event.accessChange.changed,
+                }),
+            ...(event.notice === undefined
+              ? {}
+              : {
+                  notice: event.notice.outcome,
+                  ...(event.notice.reason === undefined
+                    ? {}
+                    : { noticeReason: event.notice.reason }),
                 }),
             ...(event.reason === undefined ? {} : { reason: event.reason }),
           },

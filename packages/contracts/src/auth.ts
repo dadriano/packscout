@@ -195,3 +195,39 @@ export const authErrorCodes = [
 ] as const;
 
 export type AuthErrorCode = (typeof authErrorCodes)[number];
+
+/**
+ * Operator password reset (messaging/009). The request side carries only an
+ * email address; whether that address belongs to an operator is never
+ * reflected in any response, so the schema's own failures are purely
+ * syntactic. The completion side carries the presented one-time token as an
+ * opaque bounded string — its real validation is redemption, which refuses
+ * every invalid shape with the same outcome — plus the new password, held to
+ * exactly the same rules an administrator-set password must satisfy.
+ */
+export const passwordResetRequestSchema = z
+  .object({
+    email: emailSchema,
+  })
+  .strict();
+
+export const passwordResetCompletionRequestSchema = z
+  .object({
+    token: z
+      .string()
+      .min(1, "The reset link is incomplete. Open it from your email again.")
+      .max(512, "The reset link is incomplete. Open it from your email again."),
+    password: managedPasswordSchema,
+  })
+  .strict();
+
+export type PasswordResetRequest = z.input<typeof passwordResetRequestSchema>;
+export type NormalizedPasswordResetRequest = z.output<
+  typeof passwordResetRequestSchema
+>;
+export type PasswordResetCompletionRequest = z.input<
+  typeof passwordResetCompletionRequestSchema
+>;
+export type NormalizedPasswordResetCompletionRequest = z.output<
+  typeof passwordResetCompletionRequestSchema
+>;

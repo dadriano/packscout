@@ -444,3 +444,140 @@ test("atomic repository last-admin protection maps to a stable conflict", async 
   assert.equal(error.code, "LAST_ACTIVE_ADMIN");
   assert.equal(state.operatorUpdates.length, 1);
 });
+
+test("password reset issuance resolves only active operators, silently", async () => {
+  const { service, state } = createHarness();
+
+  assert.equal(
+    await service.resolveActiveOperatorIdByEmail(admin.emailNormalized),
+    admin.id,
+  );
+
+  state.loginOperator = { ...admin, state: "disabled" };
+  assert.equal(
+    await service.resolveActiveOperatorIdByEmail(admin.emailNormalized),
+    null,
+  );
+
+  state.loginOperator = null;
+  assert.equal(
+    await service.resolveActiveOperatorIdByEmail("nobody@packscout.test"),
+    null,
+  );
+});
+
+test("password reset eligibility requires the same active operator behind the mailed address", async () => {
+  const { service, state } = createHarness();
+
+  assert.equal(
+    await service.isOperatorEligibleForPasswordReset(
+      admin.id,
+      admin.emailNormalized,
+    ),
+    true,
+  );
+  // The address resolves to a different operator than the token was bound to.
+  assert.equal(
+    await service.isOperatorEligibleForPasswordReset(
+      "00000000-0000-4000-8000-000000000099",
+      admin.emailNormalized,
+    ),
+    false,
+  );
+  state.loginOperator = { ...admin, state: "disabled" };
+  assert.equal(
+    await service.isOperatorEligibleForPasswordReset(
+      admin.id,
+      admin.emailNormalized,
+    ),
+    false,
+  );
+  state.loginOperator = null;
+  assert.equal(
+    await service.isOperatorEligibleForPasswordReset(
+      admin.id,
+      admin.emailNormalized,
+    ),
+    false,
+  );
+});
+
+test("completing a password reset rehashes through the session-revoking update and audits without secrets", async () => {
+  const { service, state, audits } = createHarness();
+
+  await service.completePasswordReset({
+    operatorId: admin.id,
+    addressNormalized: admin.emailNormalized,
+    newPassword: "a fresh strong password",
+  });
+
+  // The one repository call that both writes the hash and revokes every
+  // active session for the operator — the admin's existing machinery.
+  assert.equal(state.operatorUpdates.length, 1);
+  assert.deepEqual(state.operatorUpdates[0], {
+    organizationId: admin.organizationId,
+    operatorId: admin.id,
+    passwordHash: "hash:a fresh strong password",
+    now,
+  });
+
+  const audit = audits.at(-1);
+  assert.equal(audit?.action, "operator.password_reset");
+  assert.equal(audit?.outcome, "success");
+  assert.equal(audit?.subjectId, admin.id);
+  assert.equal(audit?.actorId, admin.id);
+  const serializedAudit = JSON.stringify(audits);
+  assert.doesNotMatch(serializedAudit, /fresh strong password|hash:/);
+});
+
+test("a reset completion for an ineligible or mismatched operator is refused before any write", async () => {
+  const { service, state, audits } = createHarness();
+
+  state.loginOperator = { ...admin, state: "disabled" };
+  const disabled = await captureServiceError(() =>
+    service.completePasswordReset({
+      operatorId: admin.id,
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a fresh strong password",
+    }),
+  );
+  assert.equal(disabled.code, "FORBIDDEN");
+
+  state.loginOperator = admin;
+  const mismatched = await captureServiceError(() =>
+    service.completePasswordReset({
+      operatorId: "00000000-0000-4000-8000-000000000099",
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a fresh strong password",
+    }),
+  );
+  assert.equal(mismatched.code, "FORBIDDEN");
+
+  assert.equal(state.operatorUpdates.length, 0);
+  assert.equal(
+    audits.filter(
+      (event) =>
+        event.action === "operator.password_reset" &&
+        event.outcome === "blocked",
+    ).length,
+    2,
+  );
+  assert.doesNotMatch(JSON.stringify(audits), /fresh strong password/);
+});
+
+test("a reset completion that cannot update the operator reports unavailability honestly", async () => {
+  const { service, state, audits } = createHarness();
+  state.updateResult = { kind: "not_found" };
+
+  const error = await captureServiceError(() =>
+    service.completePasswordReset({
+      operatorId: admin.id,
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a fresh strong password",
+    }),
+  );
+  assert.equal(error.code, "SERVICE_UNAVAILABLE");
+  assert.equal(error.status, 503);
+  assert.equal(audits.at(-1)?.outcome, "failure");
+  assert.doesNotMatch(JSON.stringify(audits), /fresh strong password/);
+});

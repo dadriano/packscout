@@ -1277,3 +1277,41 @@ form.admin-ledger .admin-section-heading {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* ---------------------------------------------- account recovery */
+
+/*
+ * The password-reset screens share the sign-in shell: one 30rem column that
+ * stays put while the flow moves between its form, confirmation, invalid-
+ * link, and success states.
+ */
+.admin-auth-screen {
+  width: min(100%, 30rem);
+  min-height: 100vh;
+  justify-items: stretch;
+  margin: 0 auto;
+}
+
+.admin-auth-card {
+  gap: 1rem;
+  width: 100%;
+  margin-top: 1.6rem;
+  padding: 1.45rem;
+  box-shadow: var(--admin-shadow-md);
+}
+
+.admin-auth-card .admin-button {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.admin-auth-card .admin-field small {
+  color: var(--admin-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.admin-auth-links {
+  margin: 0.9rem 0 0;
+  font-size: 0.92rem;
+}

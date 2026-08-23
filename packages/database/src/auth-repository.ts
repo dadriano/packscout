@@ -495,7 +495,12 @@ export class PrismaAuthRepository {
 export interface AuthAuditEventInput {
   organizationId: string | null;
   actorId: string | null;
-  action: "auth.login" | "auth.logout" | "operator.provision" | "operator.update";
+  action:
+    | "auth.login"
+    | "auth.logout"
+    | "operator.provision"
+    | "operator.update"
+    | "operator.password_reset";
   subjectId: string | null;
   outcome: "success" | "failure" | "blocked";
   occurredAt: Date;

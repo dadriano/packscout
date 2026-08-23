@@ -55,7 +55,8 @@ export interface AuthAuditEvent {
     | "auth.login"
     | "auth.logout"
     | "operator.provision"
-    | "operator.update";
+    | "operator.update"
+    | "operator.password_reset";
   subjectId: string | null;
   outcome: "success" | "failure" | "blocked";
   occurredAt: Date;
@@ -624,6 +625,120 @@ export class AuthService {
       metadata: { fields: changedFields },
     });
     return { operator: result.operator };
+  }
+
+  /**
+   * Resolves the operator a self-service password reset may be issued for:
+   * the account holding this normalized address, only while it is active. A
+   * disabled or unknown address resolves to nothing, and the caller's
+   * request path (messaging/008's `requestIssuance`) makes that outcome
+   * indistinguishable from a successful one.
+   */
+  async resolveActiveOperatorIdByEmail(
+    normalizedEmail: string,
+  ): Promise<string | null> {
+    const operator = await this.dependencies.repository.findOperatorForLogin(
+      normalizedEmail,
+    );
+    return operator !== null && operator.state === "active"
+      ? operator.id
+      : null;
+  }
+
+  /**
+   * The redemption-time eligibility recheck for a password reset link: the
+   * operator the token was bound to still exists, still holds the address
+   * the link was mailed to, and is still active. Consulted before the token
+   * is consumed, so a subject disabled after issuance is refused without
+   * spending the link.
+   */
+  async isOperatorEligibleForPasswordReset(
+    operatorId: string,
+    addressNormalized: string,
+  ): Promise<boolean> {
+    const operator = await this.dependencies.repository.findOperatorForLogin(
+      addressNormalized,
+    );
+    return (
+      operator !== null &&
+      operator.id === operatorId &&
+      operator.state === "active"
+    );
+  }
+
+  /**
+   * Completes a mailbox-proven password reset: hashes the new password with
+   * the same hasher administrator-set passwords use, and applies it through
+   * the same repository update that atomically revokes every one of the
+   * operator's active sessions — so a reset performed because of a suspected
+   * compromise actually ends the intruder's access. The new password is
+   * expected to have passed the managed password rules at the boundary; this
+   * method defines no policy of its own. Audit carries identifiers and a
+   * closed outcome, never the password or any token material.
+   */
+  async completePasswordReset(input: {
+    operatorId: string;
+    addressNormalized: string;
+    newPassword: string;
+  }): Promise<void> {
+    const now = this.dependencies.clock.now();
+    const operator = await this.dependencies.repository.findOperatorForLogin(
+      input.addressNormalized,
+    );
+    if (
+      !operator ||
+      operator.id !== input.operatorId ||
+      operator.state !== "active"
+    ) {
+      await this.dependencies.audit.append({
+        organizationId: operator?.organizationId ?? null,
+        actorId: null,
+        action: "operator.password_reset",
+        subjectId: input.operatorId,
+        outcome: "blocked",
+        occurredAt: now,
+        metadata: { reason: "subject_ineligible" },
+      });
+      throw new AuthServiceError(
+        "FORBIDDEN",
+        "The request could not be verified.",
+        403,
+      );
+    }
+    const passwordHash = await this.dependencies.passwordHasher.hash(
+      input.newPassword,
+    );
+    const result = await this.dependencies.repository.updateOperator({
+      organizationId: operator.organizationId,
+      operatorId: operator.id,
+      passwordHash,
+      now,
+    });
+    if (result.kind !== "updated") {
+      await this.dependencies.audit.append({
+        organizationId: operator.organizationId,
+        actorId: null,
+        action: "operator.password_reset",
+        subjectId: operator.id,
+        outcome: "failure",
+        occurredAt: now,
+        metadata: { reason: "update_unavailable" },
+      });
+      throw new AuthServiceError(
+        "SERVICE_UNAVAILABLE",
+        "The authentication service is temporarily unavailable.",
+        503,
+      );
+    }
+    await this.dependencies.audit.append({
+      organizationId: operator.organizationId,
+      actorId: operator.id,
+      action: "operator.password_reset",
+      subjectId: operator.id,
+      outcome: "success",
+      occurredAt: now,
+      metadata: { fields: ["credential"] },
+    });
   }
 }
 

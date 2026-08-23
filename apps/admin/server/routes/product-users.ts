@@ -29,9 +29,14 @@ import {
   productUserAccessAuditAction,
   productUserAuditAction,
   type ProductUserAuditAction,
+  type ProductUserAuditNotice,
   type ProductUserAuditOutcome,
   type ProductUserAuditSink,
 } from "../product-user-audit.ts";
+import type {
+  AccessDecisionNoticeResult,
+  AccessDecisionNotifier,
+} from "../access-decision-notice.ts";
 import {
   ProductUserDirectoryError,
   type ProductUserDirectoryReader,
@@ -69,14 +74,33 @@ export interface ProductUserAuditFailure {
   readonly afterCommit: boolean;
 }
 
+/**
+ * A decision notice that did not get enqueued. The decision itself has
+ * already committed, so this can never alter what the browser is told; it
+ * names the failed messaging attempt with non-personal values — the audit
+ * trail carries the same fact durably on the decision's own event.
+ */
+export interface ProductUserNoticeFailure {
+  readonly action: ProductUserAuditAction;
+  /** The notice's stable failure code; never an address or upstream text. */
+  readonly reason: string;
+}
+
 export interface ProductUsersRouterDependencies {
   readonly auth: Pick<AuthService, "resolveSession" | "requirePermission">;
   readonly directory: ProductUserDirectoryReader;
   readonly audit: ProductUserAuditSink;
   readonly cookiePolicy: SessionCookiePolicy;
   readonly sameOrigin: RequestHandler;
+  /**
+   * Enqueues the message a committed access decision earns (messaging/006).
+   * Its results are recorded and reported; they never fail the decision.
+   */
+  readonly decisionNotice: AccessDecisionNotifier;
   /** Where an unwritable audit record is reported. Defaults to the error log. */
   readonly onAuditFailure?: (failure: ProductUserAuditFailure) => void;
+  /** Where a failed decision-notice enqueue is reported. Defaults to the error log. */
+  readonly onNoticeFailure?: (failure: ProductUserNoticeFailure) => void;
 }
 
 function bounded(value: string, maximum: number): string {
@@ -230,11 +254,48 @@ function logAuditFailure(failure: ProductUserAuditFailure): void {
   );
 }
 
+/**
+ * The default report for a decision notice that failed to enqueue: one
+ * bounded line naming the decision and the stable failure code, and nothing
+ * about the person it concerned. The committed decision already stands.
+ */
+function logNoticeFailure(failure: ProductUserNoticeFailure): void {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      event: "product_user_decision_notice_failed",
+      action: failure.action,
+      reason: failure.reason,
+    }),
+  );
+}
+
+/**
+ * The notice result as the audit trail records it, on the decision's own
+ * success event. A revoke or a converged repeat attempts no notice and
+ * records none, so the trail never claims silence was tried.
+ */
+function auditNotice(
+  notice: AccessDecisionNoticeResult,
+): ProductUserAuditNotice | undefined {
+  switch (notice.outcome) {
+    case "not_applicable":
+      return undefined;
+    case "enqueued":
+      return { outcome: "enqueued" };
+    case "skipped_no_verified_email":
+      return { outcome: "skipped_no_verified_email" };
+    case "failed":
+      return { outcome: "failed", reason: notice.reason };
+  }
+}
+
 export function createProductUsersRouter(
   dependencies: ProductUsersRouterDependencies,
 ) {
   const router = Router();
   const reportAuditFailure = dependencies.onAuditFailure ?? logAuditFailure;
+  const reportNoticeFailure = dependencies.onNoticeFailure ?? logNoticeFailure;
   const read = createRequireSession(dependencies.auth, dependencies.cookiePolicy, {
     permission: "product_users:view",
   });
@@ -477,6 +538,7 @@ export function createProductUsersRouter(
               resulting: ProductUserAccessDecision;
               changed: boolean;
             };
+            notice?: ProductUserAuditNotice;
             reason?: string;
           },
           afterCommit: boolean,
@@ -501,6 +563,7 @@ export function createProductUsersRouter(
                       changed: detail.accessChange.changed,
                     },
                   }),
+              ...(detail.notice === undefined ? {} : { notice: detail.notice }),
             });
           } catch {
             try {
@@ -540,8 +603,38 @@ export function createProductUsersRouter(
           return;
         }
 
-        // Past this point the decision is whatever the backend now holds, so
-        // the response says so whatever the trail manages to record.
+        // Past this point the decision is committed and authoritative; the
+        // notice can no longer change it. A genuine approve or decline
+        // transition enqueues the person's message through the durable
+        // outbox, a revoke or a converged repeat attempts nothing, and
+        // whatever happens is recorded on the decision's own audit event
+        // and reported — never turned into a failure of the decision.
+        let notice: AccessDecisionNoticeResult;
+        try {
+          notice = await dependencies.decisionNotice.notifyAccessDecision({
+            subject,
+            changed: decided.changed,
+            resulting: decided.resulting,
+          });
+        } catch {
+          // The notifier's contract is to resolve; a throw anyway must not
+          // unseat the committed decision.
+          notice = {
+            outcome: "failed",
+            reason: "ACCESS_DECISION_NOTICE_FAILED",
+          };
+        }
+        if (notice.outcome === "failed") {
+          try {
+            reportNoticeFailure({ action, reason: notice.reason });
+          } catch {
+            // Reporting the gap must not become another failure domain.
+          }
+        }
+        const recordedNotice = auditNotice(notice);
+
+        // The response says what the backend now holds, whatever the trail
+        // manages to record.
         await record(
           "success",
           {
@@ -550,6 +643,7 @@ export function createProductUsersRouter(
               resulting: decided.resulting,
               changed: decided.changed,
             },
+            ...(recordedNotice === undefined ? {} : { notice: recordedNotice }),
           },
           true,
         );

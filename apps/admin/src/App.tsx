@@ -28,6 +28,8 @@ import { WorkerFleetPage } from "./pages/WorkerFleetPage";
 import { useSession } from "./providers/session";
 import { MessageDetailPage } from "./pages/MessageDetailPage";
 import { MessagesPage } from "./pages/MessagesPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 
 function SessionLoading() {
   return (
@@ -112,5 +114,10 @@ export const appRoutes = (
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>
+    {/* Mailbox-proven account recovery: reachable without a session, like
+        /login. The reset link's token rides in the query string and is only
+        ever posted to the completion endpoint — never logged or echoed. */}
+    <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+    <Route path="/reset-password" element={<ResetPasswordPage />} />
   </React.Fragment>
 );

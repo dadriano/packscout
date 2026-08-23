@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import express, { type Express } from "express";
@@ -9,9 +10,16 @@ import type {
   ProductUserAccessState,
   ProductUserDetail,
   ProductUserDirectoryPage,
+  ProductUserRecord,
   ProductUserStandingChange,
 } from "@packscout/contracts";
-import { AuthServiceError, type AuthenticatedActor } from "@packscout/services";
+import {
+  AuthServiceError,
+  type AuthenticatedActor,
+  type EnqueueEmailMessageCommand,
+  type EnqueueEmailMessageResult,
+} from "@packscout/services";
+import { createAccessDecisionNotifier } from "../access-decision-notice.ts";
 import { createSessionCookiePolicy } from "../auth/cookies.ts";
 import { createSameOriginGuard } from "../auth/request-protection.ts";
 import type { ProductUserAuditEvent } from "../product-user-audit.ts";
@@ -22,6 +30,7 @@ import {
 import {
   createProductUsersRouter,
   type ProductUserAuditFailure,
+  type ProductUserNoticeFailure,
   type ProductUsersRouterDependencies,
 } from "./product-users.ts";
 
@@ -281,6 +290,12 @@ function createHarness(
     listQueue?: ProductUsersRouterDependencies["directory"]["listProductUserAccessQueue"];
     count?: ProductUsersRouterDependencies["directory"]["countAwaitingReview"];
     decide?: ProductUsersRouterDependencies["directory"]["decideProductUserAccess"];
+    /** The single-record read the decision notice takes after a commit. */
+    record?: ProductUsersRouterDependencies["directory"]["getProductUserRecord"];
+    /** The outbox enqueue behind the decision notice. */
+    enqueue?: (
+      command: EnqueueEmailMessageCommand,
+    ) => Promise<EnqueueEmailMessageResult>;
   },
 ) {
   const requests: DirectoryRequest[] = [];
@@ -289,8 +304,33 @@ function createHarness(
   const queueRequests: QueueRequest[] = [];
   const countRequests: number[] = [];
   const decisionRequests: DecisionRequest[] = [];
+  const recordRequests: { subject: string }[] = [];
+  const noticeCommands: EnqueueEmailMessageCommand[] = [];
   const auditEvents: ProductUserAuditEvent[] = [];
   const auditFailures: ProductUserAuditFailure[] = [];
+  const noticeFailures: ProductUserNoticeFailure[] = [];
+  const fixtureRecords: Record<string, ProductUserRecord> = {
+    [emailUser.subject]: emailUser as unknown as ProductUserRecord,
+    [walletOnly.subject]: walletOnly as unknown as ProductUserRecord,
+    [subjectOnly.subject]: subjectOnly as unknown as ProductUserRecord,
+  };
+  /** The single-record integration read, shared by the route's directory
+   * dependency and the decision notice exactly as production wires it. */
+  async function getProductUserRecordStub(request: {
+    subject: string;
+  }): Promise<ProductUserRecord> {
+    recordRequests.push(request);
+    if (access?.record) return access.record(request);
+    const record = fixtureRecords[request.subject];
+    if (record === undefined) {
+      throw new ProductUserDirectoryError(
+        "PRODUCT_USER_NOT_FOUND",
+        "That product user is not in the directory.",
+        404,
+      );
+    }
+    return record;
+  }
   const fallbackStanding = createStandingDirectory({
     [emailUser.subject]: "active",
   });
@@ -360,6 +400,7 @@ function createHarness(
             ? await getProductUserDetail(request)
             : detail;
         },
+        getProductUserRecord: getProductUserRecordStub,
         async setProductUserStanding(request) {
           standingRequests.push(request);
           return setProductUserStanding
@@ -394,7 +435,22 @@ function createHarness(
           auditEvents.push(event);
         },
       },
+      decisionNotice: createAccessDecisionNotifier({
+        directory: { getProductUserRecord: getProductUserRecordStub },
+        outbox: {
+          async enqueueEmailMessage(command) {
+            noticeCommands.push(command);
+            if (access?.enqueue) return access.enqueue(command);
+            return {
+              status: "enqueued",
+              intentId: `intent-${noticeCommands.length}`,
+              deduplicated: false,
+            };
+          },
+        },
+      }),
       onAuditFailure: (auditFailure) => auditFailures.push(auditFailure),
+      onNoticeFailure: (noticeFailure) => noticeFailures.push(noticeFailure),
       cookiePolicy,
       sameOrigin: createSameOriginGuard([origin]),
     }),
@@ -408,8 +464,11 @@ function createHarness(
     queueRequests,
     countRequests,
     decisionRequests,
+    recordRequests,
+    noticeCommands,
     auditEvents,
     auditFailures,
+    noticeFailures,
   };
 }
 
@@ -1799,4 +1858,456 @@ test("decision requests are validated and can never name the acting operator", a
     }
   });
   assert.deepEqual(decisionRequests, []);
+});
+
+/** The decision instant the harness's convergent decision store stamps. */
+const FALLBACK_DECIDED_AT = "2026-08-20T10:00:00.000Z";
+
+function subjectDigest(subject: string): string {
+  return createHash("sha256").update(subject, "utf8").digest("hex");
+}
+
+async function decideAs(
+  baseUrl: string,
+  cookieName: string,
+  action: string,
+  subject: string,
+) {
+  const response = await fetch(`${baseUrl}/api/product-users/access/${action}`, {
+    method: "POST",
+    headers: mutationHeaders(cookieName, "admin-session"),
+    body: JSON.stringify({ subject }),
+  });
+  const serialized = await response.text();
+  assertBrowserSafe(serialized);
+  return {
+    status: response.status,
+    serialized,
+    payload: JSON.parse(serialized) as Record<string, unknown>,
+  };
+}
+
+test("a genuine approval enqueues the approval message after the decision commits", async () => {
+  const {
+    app,
+    cookiePolicy,
+    recordRequests,
+    noticeCommands,
+    auditEvents,
+    noticeFailures,
+  } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    const approved = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "approve",
+      emailUser.subject,
+    );
+    assert.equal(approved.status, 200);
+    assert.equal(approved.payload.changed, true);
+    // The browser payload stays exactly the decision; no notice detail and
+    // no address ride back to the page.
+    assert.deepEqual(Object.keys(approved.payload).sort(), [
+      "access",
+      "action",
+      "changed",
+      "effectiveAccess",
+    ]);
+    assert.doesNotMatch(approved.serialized, /ada@example\.test/);
+  });
+
+  // The verified address was read back through the single-record
+  // integration read, for this decision alone, after it committed.
+  assert.deepEqual(recordRequests, [{ subject: emailUser.subject }]);
+  assert.equal(noticeCommands.length, 1);
+  const command = noticeCommands[0]!;
+  assert.equal(command.kind, "access_approved");
+  assert.equal(command.recipient, "ada@example.test");
+  assert.deepEqual(command.input, { toEmail: "ada@example.test" });
+  assert.equal(command.source, "beta_access_decision");
+  // The key is the decision transition: subject digest, resulting state,
+  // and this transition's decision instant — never the raw subject or the
+  // address, because the key travels into delivery records and logs.
+  assert.equal(
+    command.idempotencyKey,
+    `accessdecision:${subjectDigest(emailUser.subject)}:approved:${Date.parse(
+      FALLBACK_DECIDED_AT,
+    )}`,
+  );
+  assert.doesNotMatch(command.idempotencyKey, /did:example|@|example\.test/);
+
+  // The trail records, on the decision's own success event, that the
+  // person was told.
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]!.outcome, "success");
+  assert.deepEqual(auditEvents[0]!.notice, { outcome: "enqueued" });
+  assert.deepEqual(noticeFailures, []);
+});
+
+test("a genuine decline enqueues the decline message", async () => {
+  const { app, cookiePolicy, noticeCommands, auditEvents } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    const declined = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "decline",
+      emailUser.subject,
+    );
+    assert.equal(declined.status, 200);
+    assert.equal(declined.payload.changed, true);
+  });
+
+  assert.equal(noticeCommands.length, 1);
+  assert.equal(noticeCommands[0]!.kind, "access_declined");
+  assert.deepEqual(noticeCommands[0]!.input, { toEmail: "ada@example.test" });
+  assert.equal(
+    noticeCommands[0]!.idempotencyKey,
+    `accessdecision:${subjectDigest(emailUser.subject)}:declined:${Date.parse(
+      FALLBACK_DECIDED_AT,
+    )}`,
+  );
+  assert.deepEqual(auditEvents[0]!.notice, { outcome: "enqueued" });
+});
+
+test("revoke and allowlist admission announce nothing", async () => {
+  const {
+    app,
+    cookiePolicy,
+    recordRequests,
+    noticeCommands,
+    auditEvents,
+    noticeFailures,
+  } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    // Revoking the approved wallet-only user is an enforcement action, not
+    // an announcement: the decision commits and nothing is enqueued.
+    const revoked = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "revoke",
+      walletOnly.subject,
+    );
+    assert.equal(revoked.status, 200);
+    assert.equal(revoked.payload.changed, true);
+
+    // A subject with no record has nothing to decide and nothing to announce.
+    const unknown = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "approve",
+      "https://auth.example.test/|did:example:never-signed-in",
+    );
+    assert.equal(unknown.status, 404);
+
+    // The standing control is account enforcement, never an access decision.
+    const suspended = await fetch(`${baseUrl}/api/product-users/standing`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy.name, "admin-session"),
+      body: JSON.stringify({ subject: emailUser.subject, standing: "suspended" }),
+    });
+    assert.equal(suspended.status, 200);
+  });
+
+  // Nothing was announced, so nothing about anyone was even read back.
+  assert.deepEqual(noticeCommands, []);
+  assert.deepEqual(recordRequests, []);
+  assert.deepEqual(noticeFailures, []);
+  // The revoke's trail records the decision movement and claims no notice.
+  const revokeEvent = auditEvents.find(
+    (event) => event.action === "product_user.revoke_access",
+  );
+  assert.equal(revokeEvent?.outcome, "success");
+  assert.equal(revokeEvent?.notice, undefined);
+
+  // Allowlist admissions never pass through this surface at all: they are
+  // decided at sign-in inside the product backend (closed-beta-access/001
+  // and 002), no admin decision route runs, and the greeting an admitted
+  // first sign-in earns is the welcome (messaging/007), not an access
+  // notice — so there is deliberately nothing here to enqueue for them.
+});
+
+test("a repeat decision converges without a second message", async () => {
+  const {
+    app,
+    cookiePolicy,
+    recordRequests,
+    noticeCommands,
+    auditEvents,
+  } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    const first = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "approve",
+      emailUser.subject,
+    );
+    assert.equal(first.payload.changed, true);
+
+    // The repeat — the same operator acting twice, or a second operator
+    // converging on the stored decision — moves nothing and sends nothing.
+    const repeat = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "approve",
+      emailUser.subject,
+    );
+    assert.equal(repeat.status, 200);
+    assert.equal(repeat.payload.changed, false);
+  });
+
+  assert.equal(noticeCommands.length, 1);
+  assert.equal(recordRequests.length, 1);
+  assert.deepEqual(auditEvents[0]!.notice, { outcome: "enqueued" });
+  // The converged repeat's trail records the convergence and claims no
+  // notice was attempted.
+  assert.equal(auditEvents[1]!.accessChange?.changed, false);
+  assert.equal(auditEvents[1]!.notice, undefined);
+});
+
+test("a genuine re-transition earns a fresh message with a fresh key", async () => {
+  const instants = [
+    "2026-08-20T10:00:00.000Z",
+    "2026-08-21T09:00:00.000Z",
+    "2026-08-22T15:45:00.000Z",
+  ];
+  let state: ProductUserAccessState = "awaiting_review";
+  let transition = 0;
+  const { app, cookiePolicy, noticeCommands } = createHarness(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      // The product backend stamps each genuine flip with its own decision
+      // instant; the harness's fixed-clock fallback cannot express that.
+      decide: async (request) => {
+        const target = DECISION_TARGET_STATE[request.action];
+        const changed = state !== target;
+        const decidedAt = instants[transition]!;
+        transition += 1;
+        state = target;
+        return {
+          outcome: "decided",
+          changed,
+          previous: {
+            state: "awaiting_review",
+            decidedBy: "default",
+            decidedAt: "2026-08-01T09:00:00.000Z",
+          },
+          resulting: { state: target, decidedBy: "operator", decidedAt },
+          effectiveAccess:
+            target === "approved"
+              ? { admitted: true, reason: "approved" }
+              : { admitted: false, reason: "awaiting_review" },
+        };
+      },
+    },
+  );
+  await withServer(app, async (baseUrl) => {
+    // Approved, revoked, approved again: each genuine approval is its own
+    // transition and earns its own message; the revoke stays silent.
+    for (const action of ["approve", "revoke", "approve"]) {
+      const decided = await decideAs(
+        baseUrl,
+        cookiePolicy.name,
+        action,
+        emailUser.subject,
+      );
+      assert.equal(decided.status, 200);
+      assert.equal(decided.payload.changed, true);
+    }
+  });
+
+  assert.equal(noticeCommands.length, 2);
+  assert.deepEqual(
+    noticeCommands.map(({ kind }) => kind),
+    ["access_approved", "access_approved"],
+  );
+  const [firstKey, secondKey] = noticeCommands.map(
+    ({ idempotencyKey }) => idempotencyKey,
+  );
+  assert.notEqual(firstKey, secondKey);
+  assert.equal(
+    firstKey,
+    `accessdecision:${subjectDigest(emailUser.subject)}:approved:${Date.parse(
+      instants[0]!,
+    )}`,
+  );
+  assert.equal(
+    secondKey,
+    `accessdecision:${subjectDigest(emailUser.subject)}:approved:${Date.parse(
+      instants[2]!,
+    )}`,
+  );
+});
+
+test("an identity with no verified address is skipped as a recorded outcome", async () => {
+  const {
+    app,
+    cookiePolicy,
+    recordRequests,
+    noticeCommands,
+    auditEvents,
+    noticeFailures,
+  } = createHarness();
+  await withServer(app, async (baseUrl) => {
+    // The wallet-only identity signed in without exposing an address. The
+    // administrator's approval still succeeds in full.
+    const approved = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "approve",
+      subjectOnly.subject,
+    );
+    assert.equal(approved.status, 200);
+    assert.equal(approved.payload.changed, true);
+  });
+
+  // The record was consulted, nothing was enqueued, and the skip is
+  // recorded on the decision's own audit event — a normal outcome an
+  // operator can see, never a failure.
+  assert.deepEqual(recordRequests, [{ subject: subjectOnly.subject }]);
+  assert.deepEqual(noticeCommands, []);
+  assert.deepEqual(noticeFailures, []);
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0]!.outcome, "success");
+  assert.deepEqual(auditEvents[0]!.notice, {
+    outcome: "skipped_no_verified_email",
+  });
+});
+
+test("a committed decision survives a failed enqueue, and the failure is named", async () => {
+  let enqueueMode: "throw" | "reject" | "ok" = "throw";
+  let recordMode: "ok" | "unavailable" = "ok";
+  const {
+    app,
+    cookiePolicy,
+    noticeCommands,
+    auditEvents,
+    auditFailures,
+    noticeFailures,
+  } = createHarness(undefined, undefined, undefined, undefined, {
+    enqueue: async () => {
+      if (enqueueMode === "throw") {
+        throw new Error("outbox database exploded holding ada@example.test");
+      }
+      if (enqueueMode === "reject") {
+        return {
+          status: "rejected",
+          errorCode: "EMAIL_OUTBOX_SOURCE_BACKLOG_EXCEEDED",
+          activeCount: 10_000,
+        };
+      }
+      return { status: "enqueued", intentId: "intent-ok", deduplicated: false };
+    },
+    record: async () => {
+      if (recordMode === "unavailable") {
+        throw new ProductUserDirectoryError(
+          "PRODUCT_USER_DIRECTORY_UNAVAILABLE",
+          "The product-user directory is temporarily unavailable.",
+          503,
+        );
+      }
+      return emailUser as unknown as ProductUserRecord;
+    },
+  });
+  await withServer(app, async (baseUrl) => {
+    // A thrown enqueue: the approval is still reported committed, with the
+    // authoritative decision, and the browser learns nothing of the outbox.
+    const approved = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "approve",
+      emailUser.subject,
+    );
+    assert.equal(approved.status, 200);
+    assert.equal(approved.payload.changed, true);
+    assert.equal(
+      (approved.payload.access as { state: string }).state,
+      "approved",
+    );
+    assert.doesNotMatch(approved.serialized, /EMAIL_OUTBOX|notice/i);
+
+    // A backlog rejection surfaces the same way.
+    enqueueMode = "reject";
+    const declined = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "decline",
+      emailUser.subject,
+    );
+    assert.equal(declined.status, 200);
+    assert.equal(declined.payload.changed, true);
+
+    // So does an unreadable record between the commit and the enqueue.
+    enqueueMode = "ok";
+    recordMode = "unavailable";
+    const reApproved = await decideAs(
+      baseUrl,
+      cookiePolicy.name,
+      "approve",
+      emailUser.subject,
+    );
+    assert.equal(reApproved.status, 200);
+    assert.equal(reApproved.payload.changed, true);
+  });
+
+  // Every decision's trail records success with the named notice failure —
+  // the same two-failure-domain shape as an unwritable audit record.
+  assert.deepEqual(
+    auditEvents.map(({ action, outcome, notice }) => ({
+      action,
+      outcome,
+      notice,
+    })),
+    [
+      {
+        action: "product_user.approve_access",
+        outcome: "success",
+        notice: { outcome: "failed", reason: "EMAIL_OUTBOX_UNAVAILABLE" },
+      },
+      {
+        action: "product_user.decline_access",
+        outcome: "success",
+        notice: {
+          outcome: "failed",
+          reason: "EMAIL_OUTBOX_SOURCE_BACKLOG_EXCEEDED",
+        },
+      },
+      {
+        action: "product_user.approve_access",
+        outcome: "success",
+        notice: {
+          outcome: "failed",
+          reason: "PRODUCT_USER_DIRECTORY_UNAVAILABLE",
+        },
+      },
+    ],
+  );
+  // The failures are additionally reported where audit-write failures are,
+  // as bounded non-personal codes.
+  assert.deepEqual(noticeFailures, [
+    {
+      action: "product_user.approve_access",
+      reason: "EMAIL_OUTBOX_UNAVAILABLE",
+    },
+    {
+      action: "product_user.decline_access",
+      reason: "EMAIL_OUTBOX_SOURCE_BACKLOG_EXCEEDED",
+    },
+    {
+      action: "product_user.approve_access",
+      reason: "PRODUCT_USER_DIRECTORY_UNAVAILABLE",
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(noticeFailures), /@|did:example/);
+  assert.doesNotMatch(
+    JSON.stringify(auditEvents.map(({ notice }) => notice)),
+    /@|did:example/,
+  );
+  // The audit trail itself was writable throughout; the notice failures
+  // never masqueraded as audit failures.
+  assert.deepEqual(auditFailures, []);
+  // The first two attempts reached the outbox; the third failed before it.
+  assert.equal(noticeCommands.length, 2);
 });

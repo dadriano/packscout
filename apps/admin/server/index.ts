@@ -5,7 +5,10 @@ import dotenv from "dotenv";
 import express from "express";
 import type { ViteDevServer } from "vite";
 import { RECOMPUTATION_BACKLOG_DEPTH_DEFAULT } from "@packscout/contracts";
-import { MachineryAlertService } from "@packscout/services";
+import {
+  MachineryAlertService,
+  resolveEmailLinkTokenSecret,
+} from "@packscout/services";
 import {
   createPrismaClientLifecycle,
   DatabaseLoginAttemptLimiter,
@@ -32,6 +35,8 @@ import { createProductUserDirectoryReader } from "./product-user-directory.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
 import { createAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
 import { createAdminMessageDeliveryRuntime } from "./message-delivery-runtime.ts";
+import { createAdminPasswordResetRuntime } from "./password-reset-runtime.ts";
+import { createAdminAccessDecisionNoticeRuntime } from "./access-decision-notice-runtime.ts";
 import {
   adminDevelopmentAllowedOrigins,
   adminDevelopmentServerNetwork,
@@ -131,6 +136,13 @@ const productUserDirectoryConfig = readProductUserDirectoryConfig({
   baseUrl: process.env.PACKSCOUT_ADMIN_DIRECTORY_URL,
   token: process.env.PACKSCOUT_ADMIN_DIRECTORY_TOKEN,
 });
+/**
+ * Keys the one-time email-link verifier HMAC (messaging/008) behind the
+ * operator password-reset flow. Absent configuration leaves that flow
+ * unmounted rather than stopping the admin; a present-but-weak value fails
+ * startup closed when the runtime derives its keys.
+ */
+const emailLinkTokenSecret = resolveEmailLinkTokenSecret(process.env);
 
 function waitForListening(server: Server): Promise<void> {
   if (server.listening) return Promise.resolve();
@@ -216,6 +228,15 @@ try {
         database,
         actorPseudonymKey: providerActorKey,
       }),
+      // A committed approve or decline enqueues the person's notice into the
+      // same durable outbox the worker drains; the verified address is read
+      // back through the same directory integration.
+      decisionNotice: createAdminAccessDecisionNoticeRuntime({
+        database,
+        directory: createProductUserDirectoryReader({
+          config: productUserDirectoryConfig,
+        }),
+      }),
     },
     // The allowlist lives with the product backend and is reached through the
     // same integration and credential as the directory reads above.
@@ -235,6 +256,15 @@ try {
       database,
       actorPseudonymKey: providerActorKey,
     }),
+    // Self-service operator password reset over the one-time link mechanism.
+    passwordReset:
+      emailLinkTokenSecret === null
+        ? undefined
+        : createAdminPasswordResetRuntime({
+            database,
+            authService: auth.service,
+            secret: emailLinkTokenSecret,
+          }),
   });
 
   if (isDevelopment) {
@@ -297,6 +327,12 @@ try {
     // Names the missing capability, never any configuration value.
     console.log(
       "Packscout Admin: the product-user directory integration is not configured.",
+    );
+  }
+  if (emailLinkTokenSecret === null) {
+    // Names the missing capability, never any configuration value.
+    console.log(
+      "Packscout Admin: the operator password reset flow is not configured.",
     );
   }
 } catch (error) {

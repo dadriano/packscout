@@ -41,6 +41,10 @@ import {
   createMessagesRouter,
   type MessagesRouterDependencies,
 } from "./routes/messages.ts";
+import {
+  createPasswordResetRouter,
+  type PasswordResetRouterDependencies,
+} from "./routes/password-reset.ts";
 
 export interface AdminAuthHttpDependencies {
   service: AuthService;
@@ -84,6 +88,7 @@ export interface AdminAppDependencies {
     MessagesRouterDependencies,
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
+  passwordReset?: Omit<PasswordResetRouterDependencies, "sameOrigin">;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
@@ -245,6 +250,17 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
           ...dependencies.messages,
           auth: service,
           cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.passwordReset) {
+      // Mounted after the session routes: an unauthenticated route INTO
+      // authentication, guarded by the same trusted-origin discipline.
+      app.use(
+        "/api/auth/password-reset",
+        createPasswordResetRouter({
+          ...dependencies.passwordReset,
           sameOrigin,
         }),
       );

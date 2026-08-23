@@ -68,7 +68,7 @@ Adapted rather than copied, because PackScout's stack differs: identity arrives 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 011 | Verify and operate the closed beta | medium | todo | 004, 005, 007, 008, 009, 010 |
+| 011 | Verify and operate the closed beta | medium | done | 004, 005, 007, 008, 009, 010 |
 
 ## Build Order
 

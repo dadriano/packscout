@@ -830,3 +830,89 @@ test("an unconfigured integration refuses queue reads and decisions without cont
   }
   assert.equal(calls.length, 0);
 });
+
+test("the record read is the single-record lookup without the saved-item join", async () => {
+  const { calls, implementation } = recordingFetch(() =>
+    jsonResponse({
+      record: row({
+        access: {
+          state: "approved",
+          decidedBy: "operator",
+          decidedAt: "2026-08-20T10:00:00.000Z",
+          operatorRef: "operator-reference-never-serialize",
+          allowlistEntryId: "allowlist-entry-never-serialize",
+        },
+      }),
+    }),
+  );
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: implementation,
+  });
+
+  const record = await reader.getProductUserRecord({ subject });
+  assert.equal(record.subject, subject);
+  assert.equal(record.email, "ada@example.test");
+  // The record projection carries identity, not saved-item counts.
+  assert.deepEqual(Object.keys(record).sort(), [
+    "access",
+    "authMethod",
+    "email",
+    "firstSeenAt",
+    "lastSeenAt",
+    "standing",
+    "subject",
+    "walletAddress",
+  ]);
+  // The stored decision's operator and allowlist references are dropped at
+  // this boundary, exactly as they are on every other read.
+  assert.deepEqual(record.access, {
+    state: "approved",
+    decidedBy: "operator",
+    decidedAt: "2026-08-20T10:00:00.000Z",
+  });
+
+  // One privileged POST to the record endpoint alone — no saved-item join —
+  // with the subject in the body rather than the URL.
+  assert.deepEqual(
+    calls.map(({ url }) => url),
+    ["https://backend.example.test/admin/product-users/record"],
+  );
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(
+    (calls[0]?.init?.headers as Record<string, string>).authorization,
+    `Bearer ${token}`,
+  );
+  assert.doesNotMatch(calls[0]!.url, /did:example|\?/);
+  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), { subject });
+});
+
+test("a record read on an unrecorded subject is not found, and a broken one is unavailable", async () => {
+  const missing = recordingFetch(() => jsonResponse({ record: null }));
+  const missingReader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: missing.implementation,
+  });
+  const notFound = await refusal(missingReader.getProductUserRecord({ subject }));
+  assert.equal(notFound.code, "PRODUCT_USER_NOT_FOUND");
+  assert.equal(notFound.status, 404);
+
+  const broken = recordingFetch(() =>
+    jsonResponse({ record: row({ standing: "weird" }) }),
+  );
+  const brokenReader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: broken.implementation,
+  });
+  const unavailable = await refusal(brokenReader.getProductUserRecord({ subject }));
+  assert.equal(unavailable.code, "PRODUCT_USER_DIRECTORY_UNAVAILABLE");
+
+  const unconfigured = recordingFetch(() => jsonResponse({ record: row() }));
+  const unconfiguredReader = createProductUserDirectoryReader({
+    config: null,
+    fetchImplementation: unconfigured.implementation,
+  });
+  const refused = await refusal(unconfiguredReader.getProductUserRecord({ subject }));
+  assert.equal(refused.code, "PRODUCT_USER_DIRECTORY_UNCONFIGURED");
+  assert.equal(unconfigured.calls.length, 0);
+});

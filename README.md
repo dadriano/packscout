@@ -202,9 +202,12 @@ deployments and deploy keys.
 
 ### Optional Privy authentication
 
-Dashboard, Repacks, Learn, and catalog search remain public. Authentication is
-an optional enhancement for saving a repack or an exact desired collectible;
-an unconfigured build keeps the anonymous application and its existing CSP.
+With the closed beta off, Dashboard, Repacks, Learn, and catalog search are
+public, and authentication is an optional enhancement for saving a repack or
+an exact desired collectible. While the beta is on, those surfaces require an
+admitted signed-in account instead — see
+[docs/closed-beta-operations.md](docs/closed-beta-operations.md). An
+unconfigured build keeps the anonymous application and its existing CSP.
 Even when configured, the browser defers loading and initializing Privy until
 the visitor chooses Sign in or a save action. A successful session stores only
 a fixed, non-identifying returning-session hint so that a later visit can
@@ -323,6 +326,11 @@ deployment and the frontend dev session inherits the same value, so both ends
 match without further steps. Leaving it unset keeps the preview honest — the
 product surfaces show their unavailable states, exactly as an unconfigured
 deployment would.
+
+Day-to-day beta operations — telling whether the beta is on, admitting and
+deciding people, revoking access, what an unadmitted party can still observe,
+and opening the product to the public with one switch — are documented in
+[docs/closed-beta-operations.md](docs/closed-beta-operations.md).
 
 ### Machinery alerting in the admin
 
