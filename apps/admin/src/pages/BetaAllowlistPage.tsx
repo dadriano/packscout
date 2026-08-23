@@ -247,7 +247,7 @@ export function BetaAllowlistPage() {
           canManage ? (
             <button
               type="button"
-              className="admin-button admin-button--primary"
+              className="admin-button admin-button-primary"
               onClick={openAdd}
             >
               Add entry
@@ -257,11 +257,11 @@ export function BetaAllowlistPage() {
       />
 
       <form
-        className="admin-ledger"
+        className="admin-surface admin-panel"
         aria-label="Search the beta allowlist"
         onSubmit={applySearch}
       >
-        <div className="admin-section-heading">
+        <div className="admin-section-header">
           <div className="admin-field beta-allowlist__search">
             <label htmlFor="beta-allowlist-search">
               Search email or wallet address
@@ -274,13 +274,13 @@ export function BetaAllowlistPage() {
               onChange={(event) => setSearchDraft(event.target.value)}
             />
           </div>
-          <button className="admin-button admin-button--secondary" type="submit">
+          <button className="admin-button admin-button-secondary" type="submit">
             Search
           </button>
           {searching ? (
             <button
               type="button"
-              className="admin-button admin-button--secondary"
+              className="admin-button admin-button-secondary"
               onClick={() => {
                 setSearchDraft("");
                 restart("");
@@ -293,8 +293,8 @@ export function BetaAllowlistPage() {
       </form>
 
       {loading ? (
-        <section className="admin-ledger" aria-busy="true" aria-live="polite">
-          <span className="admin-eyebrow">Loading the allowlist…</span>
+        <section className="admin-surface admin-panel" aria-busy="true" aria-live="polite">
+          <span className="admin-kicker">Loading the allowlist…</span>
         </section>
       ) : failure ? (
         <div role="alert">
@@ -305,7 +305,7 @@ export function BetaAllowlistPage() {
             action={
               <button
                 type="button"
-                className="admin-button admin-button--secondary"
+                className="admin-button admin-button-secondary"
                 onClick={() => {
                   setLoading(true);
                   if (failure.retryable) {
@@ -337,7 +337,7 @@ export function BetaAllowlistPage() {
             searching ? (
               <button
                 type="button"
-                className="admin-button admin-button--secondary"
+                className="admin-button admin-button-secondary"
                 onClick={() => {
                   setSearchDraft("");
                   restart("");
@@ -348,7 +348,7 @@ export function BetaAllowlistPage() {
             ) : canManage ? (
               <button
                 type="button"
-                className="admin-button admin-button--primary"
+                className="admin-button admin-button-primary"
                 onClick={openAdd}
               >
                 Add entry

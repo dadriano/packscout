@@ -67,17 +67,17 @@ export function OperatorLedger({
   onCancelInvitation,
 }: OperatorLedgerProps) {
   return (
-    <section className="admin-ledger" aria-labelledby="operators-ledger-title">
-      <header className="admin-section-heading">
+    <section className="admin-surface admin-panel" aria-labelledby="operators-ledger-title">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Access ledger</span>
+          <span className="admin-kicker">Access ledger</span>
           <h2 id="operators-ledger-title">Provisioned operators</h2>
         </div>
         <span className="admin-section-count">
           {String(operators.length).padStart(2, "0")} accounts
         </span>
       </header>
-      <div className="admin-ledger__rows">
+      <div className="admin-row-list">
         {operators.map((operator, index) => {
           const status = operatorStatus(operator);
           const awaitingActivation = operator.state === "pending";
@@ -98,14 +98,14 @@ export function OperatorLedger({
                   <p>
                     <button
                       type="button"
-                      className="admin-button admin-button--secondary"
+                      className="admin-button admin-button-secondary"
                       onClick={() => onReissueInvitation(operator)}
                     >
                       Resend invitation
                     </button>{" "}
                     <button
                       type="button"
-                      className="admin-button admin-button--danger"
+                      className="admin-button admin-button-danger"
                       onClick={() => onCancelInvitation(operator)}
                     >
                       Cancel invitation
@@ -115,14 +115,14 @@ export function OperatorLedger({
                   <p>
                     <button
                       type="button"
-                      className="admin-button admin-button--secondary"
+                      className="admin-button admin-button-secondary"
                       onClick={() => onChangeRole(operator)}
                     >
                       Change role
                     </button>{" "}
                     <button
                       type="button"
-                      className="admin-button admin-button--secondary"
+                      className="admin-button admin-button-secondary"
                       onClick={() => onRotateCredential(operator)}
                     >
                       Rotate credential
@@ -131,8 +131,8 @@ export function OperatorLedger({
                       type="button"
                       className={
                         operator.state === "active"
-                          ? "admin-button admin-button--danger"
-                          : "admin-button admin-button--secondary"
+                          ? "admin-button admin-button-danger"
+                          : "admin-button admin-button-secondary"
                       }
                       onClick={() => onToggleState(operator)}
                     >

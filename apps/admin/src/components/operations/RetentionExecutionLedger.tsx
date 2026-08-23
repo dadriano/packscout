@@ -9,9 +9,9 @@ export function RetentionExecutionLedger({
 }) {
   return (
     <section className="ops-ledger" aria-labelledby="retention-ledger-title">
-      <header className="admin-section-heading">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Protected payload cleanup</span>
+          <span className="admin-kicker">Protected payload cleanup</span>
           <h2 id="retention-ledger-title">Retention executions</h2>
         </div>
         <span className="admin-section-count">

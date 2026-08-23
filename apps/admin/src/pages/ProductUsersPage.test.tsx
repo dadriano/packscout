@@ -253,7 +253,7 @@ test("the directory lists sign-ups newest first, including records with no email
   assert.match(text, /No email or wallet address recorded for this sign-up/);
   assert.match(text, /did:example:opaque/);
   assert.equal(
-    renderer.container.querySelectorAll(".admin-ledger__rows article").length,
+    renderer.container.querySelectorAll(".admin-row-list article").length,
     2,
   );
 
@@ -270,11 +270,11 @@ test("access state and standing are separate badges that can never read as one",
   cleanupPage(context, renderer);
   await settlePage();
 
-  const rows = [...renderer.container.querySelectorAll(".admin-ledger__rows article")];
+  const rows = [...renderer.container.querySelectorAll(".admin-row-list article")];
   assert.equal(rows.length, 2);
 
   // The admitted, active account: Approved (ready) beside Active (ready).
-  const admittedBadges = [...(rows[0]?.querySelectorAll(".admin-status") ?? [])];
+  const admittedBadges = [...(rows[0]?.querySelectorAll(".admin-pill") ?? [])];
   assert.deepEqual(
     admittedBadges.map((badge) => badge.textContent?.trim()),
     ["Approved", "Active"],
@@ -282,14 +282,14 @@ test("access state and standing are separate badges that can never read as one",
 
   // The waiting, suspended account: the waiting badge is the pending tone,
   // never the danger tone the suspension badge uses beside it.
-  const waitingBadges = [...(rows[1]?.querySelectorAll(".admin-status") ?? [])];
+  const waitingBadges = [...(rows[1]?.querySelectorAll(".admin-pill") ?? [])];
   assert.deepEqual(
     waitingBadges.map((badge) => badge.textContent?.trim()),
     ["Awaiting review", "Suspended"],
   );
-  assert.ok(waitingBadges[0]?.classList.contains("admin-status--pending"));
-  assert.ok(!waitingBadges[0]?.classList.contains("admin-status--danger"));
-  assert.ok(waitingBadges[1]?.classList.contains("admin-status--danger"));
+  assert.ok(waitingBadges[0]?.classList.contains("admin-pill-warning"));
+  assert.ok(!waitingBadges[0]?.classList.contains("admin-pill-danger"));
+  assert.ok(waitingBadges[1]?.classList.contains("admin-pill-danger"));
 
   // Provenance says how each decision came to be, with its date.
   const text = pageText(renderer);
@@ -431,7 +431,7 @@ test("an unavailable integration degrades to a bounded, non-destructive error", 
   // The header shows no waiting count rather than a number it cannot know.
   assert.doesNotMatch(text, /awaiting review/);
   assert.equal(
-    renderer.container.querySelectorAll(".admin-ledger__rows article").length,
+    renderer.container.querySelectorAll(".admin-row-list article").length,
     0,
   );
   assert.ok(renderer.container.querySelector('[role="alert"]'));
@@ -613,7 +613,7 @@ test("approving from the queue confirms the consequence, then updates the row in
   // control — and the rest of the queue stays exactly where it was.
   const text = pageText(renderer);
   assert.match(text, /Access approved\. They are in the beta now\./);
-  const rows = [...renderer.container.querySelectorAll(".admin-ledger__rows article")];
+  const rows = [...renderer.container.querySelectorAll(".admin-row-list article")];
   assert.equal(rows.length, 2);
   assert.match(rows[0]?.textContent ?? "", /Approved/);
   assert.match(rows[0]?.textContent ?? "", /Approved by an operator/);
@@ -702,7 +702,7 @@ test("declining and revoking each state their own consequence before acting", as
   // The declined row now offers Approve and Return to review — reversible in
   // both directions, with no deletion anywhere.
   const declinedRow = renderer.container.querySelector(
-    ".admin-ledger__rows article",
+    ".admin-row-list article",
   );
   assert.match(declinedRow?.textContent ?? "", /Declined by an operator/);
   await act(async () => findButton(renderer, "Return to review").click());

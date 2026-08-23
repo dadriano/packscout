@@ -82,17 +82,17 @@ export function ProviderFormPage() {
         eyebrow={editing ? "Data providers / New revision" : "Data providers / New draft"}
         title={editing ? `Revise ${provider?.displayName ?? "provider"}` : "Add a data provider"}
         description={editing ? "Saving creates a new immutable revision. Active imports keep using the enabled revision until the new one is tested and enabled." : "Create a draft first. Test the saved revision before enabling imports."}
-        actions={<Link className="admin-button admin-button--secondary" to={providerId ? `/providers/${providerId}` : "/providers"}>Cancel</Link>}
+        actions={<Link className="admin-button admin-button-secondary" to={providerId ? `/providers/${providerId}` : "/providers"}>Cancel</Link>}
       />
       {loading ? <div className="provider-loading" aria-busy="true">Loading masked configuration…</div> : null}
       {!loading && editing && !provider && error ? (
         <div className="ops-error" role="alert">
           <p>{error}</p>
-          <Link className="admin-button admin-button--secondary" to="/providers">Return to providers</Link>
+          <Link className="admin-button admin-button-secondary" to="/providers">Return to providers</Link>
         </div>
       ) : null}
       {!loading && (!editing || provider) ? <ProviderForm provider={provider ?? undefined} pending={pending} error={error} onDirtyChange={setDirty} onSubmit={save} /> : null}
-      {conflict ? <button type="button" className="admin-button admin-button--secondary provider-conflict-reload" onClick={() => window.location.reload()}>Reload current configuration</button> : null}
+      {conflict ? <button type="button" className="admin-button admin-button-secondary provider-conflict-reload" onClick={() => window.location.reload()}>Reload current configuration</button> : null}
     </div>
   );
 }

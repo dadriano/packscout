@@ -65,17 +65,17 @@ export function ProductUserLedger({
   title = "Product users",
 }: ProductUserLedgerProps) {
   return (
-    <section className="admin-ledger" aria-labelledby="product-users-ledger-title">
-      <header className="admin-section-heading">
+    <section className="admin-surface admin-panel" aria-labelledby="product-users-ledger-title">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">{eyebrow}</span>
+          <span className="admin-kicker">{eyebrow}</span>
           <h2 id="product-users-ledger-title">{title}</h2>
         </div>
         <span className="admin-section-count">
           {String(users.length).padStart(2, "0")} on page
         </span>
       </header>
-      <div className="admin-ledger__rows">
+      <div className="admin-row-list">
         {users.map((user, index) => {
           const identity = describeProductUserIdentity(user);
           const secondaryLine =

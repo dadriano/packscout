@@ -109,7 +109,7 @@ export function MessageDetailPage() {
   }
 
   const backLink = (
-    <Link className="admin-button admin-button--secondary" to="/messages">
+    <Link className="admin-button admin-button-secondary" to="/messages">
       Back to messages
     </Link>
   );
@@ -117,8 +117,8 @@ export function MessageDetailPage() {
   if (loading) {
     return (
       <div className="admin-page">
-        <section className="admin-ledger" aria-busy="true" aria-live="polite">
-          <span className="admin-eyebrow">Loading the delivery record…</span>
+        <section className="admin-surface admin-panel" aria-busy="true" aria-live="polite">
+          <span className="admin-kicker">Loading the delivery record…</span>
         </section>
       </div>
     );
@@ -156,7 +156,7 @@ export function MessageDetailPage() {
             loadError === "unavailable" ? (
               <button
                 type="button"
-                className="admin-button admin-button--secondary"
+                className="admin-button admin-button-secondary"
                 onClick={reload}
               >
                 Try again
@@ -183,7 +183,7 @@ export function MessageDetailPage() {
             {canManage && intent.state === "failed" ? (
               <button
                 type="button"
-                className="admin-button admin-button--primary"
+                className="admin-button admin-button-primary"
                 onClick={requestRetry}
               >
                 Retry delivery
@@ -194,10 +194,10 @@ export function MessageDetailPage() {
         }
       />
 
-      <section className="admin-ledger" aria-label="Delivery summary">
-        <header className="admin-section-heading">
+      <section className="admin-surface admin-panel" aria-label="Delivery summary">
+        <header className="admin-section-header">
           <div className="messages__summary-lead">
-            <span className="admin-eyebrow">Recipient</span>
+            <span className="admin-kicker">Recipient</span>
             <h2 className="messages__recipient" title={intent.recipient}>
               {intent.recipient}
             </h2>

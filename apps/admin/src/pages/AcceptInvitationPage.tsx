@@ -104,85 +104,81 @@ export function AcceptInvitationPage() {
   }
 
   return (
-    <div className="admin-layout">
-      <main className="admin-main">
-        <div className="admin-main__inner">
-          <div className="admin-not-found admin-auth-screen">
-            <span className="admin-eyebrow">PackScout operations</span>
-            {phase === "invalid_link" ? (
-              <InvalidLinkState />
-            ) : phase === "success" ? (
-              <>
-                <h1>Your operator account is ready.</h1>
-                <p role="status">
-                  Sign in with your email address and the password you just
-                  chose.
-                </p>
-                <Link to="/login" className="admin-button admin-button--primary">
-                  Go to sign in
-                </Link>
-              </>
-            ) : (
-              <>
-                <h1>Choose your password.</h1>
-                <p>
-                  This one-time link proves you control the mailbox it was sent
-                  to. Choose a password and your PackScout operator account
-                  becomes active.
-                </p>
+    <main className="admin-route-state">
+      <div className="admin-route-card admin-auth-screen">
+        <span className="admin-kicker">PackScout operations</span>
+        {phase === "invalid_link" ? (
+          <InvalidLinkState />
+        ) : phase === "success" ? (
+          <>
+            <h1>Your operator account is ready.</h1>
+            <p role="status">
+              Sign in with your email address and the password you just
+              chose.
+            </p>
+            <Link to="/login" className="admin-button admin-button-primary">
+              Go to sign in
+            </Link>
+          </>
+        ) : (
+          <>
+            <h1>Choose your password.</h1>
+            <p>
+              This one-time link proves you control the mailbox it was sent
+              to. Choose a password and your PackScout operator account
+              becomes active.
+            </p>
 
-                <form
-                  className="admin-ledger admin-page admin-auth-card"
-                  aria-label="Choose your password"
-                  noValidate
-                  onSubmit={(event) => void submit(event)}
-                >
-                  {error ? (
-                    <AuthErrorSummary ref={errorRef} message={error} />
-                  ) : null}
+            <form
+              className="admin-stack admin-auth-card"
+              aria-label="Choose your password"
+              noValidate
+              onSubmit={(event) => void submit(event)}
+            >
+              {error ? (
+                <AuthErrorSummary ref={errorRef} message={error} />
+              ) : null}
 
-                  <div className="admin-field">
-                    <label htmlFor="invitation-new-password">Password</label>
-                    <input
-                      id="invitation-new-password"
-                      name="password"
-                      type="password"
-                      autoComplete="new-password"
-                      autoFocus
-                      required
-                      minLength={12}
-                      maxLength={128}
-                      value={password}
-                      disabled={submitting}
-                      aria-describedby="invitation-new-password-note"
-                      onChange={(event) => setPassword(event.target.value)}
-                    />
-                    <small id="invitation-new-password-note">
-                      Use at least 12 characters. PackScout will never show
-                      this value again.
-                    </small>
-                  </div>
+              <div className="admin-field">
+                <label htmlFor="invitation-new-password">Password</label>
+                <input
+                  id="invitation-new-password"
+                  name="password"
+                  type="password"
+                  autoComplete="new-password"
+                  autoFocus
+                  required
+                  minLength={12}
+                  maxLength={128}
+                  value={password}
+                  disabled={submitting}
+                  aria-describedby="invitation-new-password-note"
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <small id="invitation-new-password-note">
+                  Use at least 12 characters. PackScout will never show
+                  this value again.
+                </small>
+              </div>
 
-                  <button
-                    type="submit"
-                    className="admin-button admin-button--primary"
-                    disabled={submitting || !password}
-                  >
-                    {submitting ? "Activating account…" : "Activate my account"}
-                  </button>
-                  <span className="admin-visually-hidden" aria-live="polite">
-                    {submitting ? "Activating account…" : ""}
-                  </span>
-                </form>
+              <button
+                type="submit"
+                className="admin-button admin-button-primary"
+                disabled={submitting || !password}
+              >
+                {submitting ? "Activating account…" : "Activate my account"}
+              </button>
+              <span className="admin-visually-hidden" aria-live="polite">
+                {submitting ? "Activating account…" : ""}
+              </span>
+            </form>
 
-                <p className="admin-auth-links">
-                  <Link to="/login">Back to sign in</Link>
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-      </main>
-    </div>
+            <p className="admin-auth-links">
+              <Link to="/login">Back to sign in</Link>
+            </p>
+          </>
+        )}
+      </div>
+    </main>
   );
 }

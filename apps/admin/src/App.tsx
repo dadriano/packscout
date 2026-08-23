@@ -34,10 +34,12 @@ import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 
 function SessionLoading() {
   return (
-    <main className="admin-session-gate" aria-busy="true" aria-live="polite">
-      <span className="admin-eyebrow">PackScout operations</span>
-      <h1>Checking your access…</h1>
-      <p>Opening the secure operations workspace.</p>
+    <main className="admin-route-state" aria-busy="true" aria-live="polite">
+      <div className="admin-route-card">
+        <span className="admin-kicker">PackScout operations</span>
+        <h1>Checking your access…</h1>
+        <p>Opening the secure operations workspace.</p>
+      </div>
     </main>
   );
 }
@@ -56,17 +58,21 @@ function ProtectedRoute() {
   if (status.phase === "loading") return <SessionLoading />;
   if (status.phase === "unavailable") {
     return (
-      <main className="admin-session-gate" role="alert">
-        <span className="admin-eyebrow">PackScout operations</span>
-        <h1>The admin service is unavailable.</h1>
-        <p>Your account has not been changed. Try the secure connection again.</p>
-        <button
-          type="button"
-          className="admin-button admin-button--secondary"
-          onClick={retry}
-        >
-          Try again
-        </button>
+      <main className="admin-route-state" role="alert">
+        <div className="admin-route-card">
+          <span className="admin-kicker">PackScout operations</span>
+          <h1>The admin service is unavailable.</h1>
+          <p>
+            Your account has not been changed. Try the secure connection again.
+          </p>
+          <button
+            type="button"
+            className="admin-button admin-button-secondary"
+            onClick={retry}
+          >
+            Try again
+          </button>
+        </div>
       </main>
     );
   }

@@ -88,7 +88,7 @@ export function OverviewPage() {
         actions={
           <button
             type="button"
-            className="admin-button admin-button--secondary"
+            className="admin-button admin-button-secondary"
             onClick={() => void recheckService()}
             disabled={serviceState === "checking"}
           >
@@ -97,25 +97,25 @@ export function OverviewPage() {
         }
       />
 
-      <section className="admin-metrics" aria-label="Foundation status">
-        <article>
-          <span className="admin-metric__index">A</span>
+      <section className="admin-overview-grid" aria-label="Foundation status">
+        <article className="admin-metric-card admin-metric-card--inline">
+          <span className="admin-metric-card__index">A</span>
           <div>
             <small>Admin service</small>
             <strong>{serviceState === "online" ? "Reachable" : serviceState === "offline" ? "Needs attention" : "Connecting"}</strong>
           </div>
           {serviceBadge(serviceState)}
         </article>
-        <article>
-          <span className="admin-metric__index">B</span>
+        <article className="admin-metric-card admin-metric-card--inline">
+          <span className="admin-metric-card__index">B</span>
           <div>
             <small>Framework baseline</small>
             <strong>Zero accepted drift</strong>
           </div>
           <StatusBadge label="Ratchet on" tone="ready" />
         </article>
-        <article>
-          <span className="admin-metric__index">C</span>
+        <article className="admin-metric-card admin-metric-card--inline">
+          <span className="admin-metric-card__index">C</span>
           <div>
             <small>Operator access</small>
             <strong>
@@ -129,16 +129,16 @@ export function OverviewPage() {
         </article>
       </section>
 
-      <div className="admin-overview-grid">
-        <section className="admin-ledger" aria-labelledby="guardrail-title">
-          <header className="admin-section-heading">
+      <div className="admin-split-grid">
+        <section className="admin-surface admin-panel" aria-labelledby="guardrail-title">
+          <header className="admin-section-header">
             <div>
-              <span className="admin-eyebrow">System ledger</span>
+              <span className="admin-kicker">System ledger</span>
               <h2 id="guardrail-title">Guardrails carried forward</h2>
             </div>
             <span className="admin-section-count">04 controls</span>
           </header>
-          <div className="admin-ledger__rows">
+          <div className="admin-row-list">
             {guardrails.map((item) => (
               <article key={item.index}>
                 <span>{item.index}</span>
@@ -152,8 +152,8 @@ export function OverviewPage() {
           </div>
         </section>
 
-        <aside className="admin-contract" aria-labelledby="contract-title">
-          <span className="admin-eyebrow">Boundary contract</span>
+        <aside className="admin-surface admin-panel admin-contract" aria-labelledby="contract-title">
+          <span className="admin-kicker">Boundary contract</span>
           <h2 id="contract-title">What the base does not pretend</h2>
           <dl>
             <div>

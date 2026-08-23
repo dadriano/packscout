@@ -151,9 +151,9 @@ export function MessagesPage() {
       />
 
       {counts !== null && !loading ? (
-        <section className="admin-metrics" aria-label="Delivery queue state">
-          <article>
-            <span className="admin-metric__index" aria-hidden="true">
+        <section className="admin-overview-grid" aria-label="Delivery queue state">
+          <article className="admin-metric-card admin-metric-card--inline">
+            <span className="admin-metric-card__index" aria-hidden="true">
               P
             </span>
             <div>
@@ -161,8 +161,8 @@ export function MessagesPage() {
               <strong>{counts.pending}</strong>
             </div>
           </article>
-          <article>
-            <span className="admin-metric__index" aria-hidden="true">
+          <article className="admin-metric-card admin-metric-card--inline">
+            <span className="admin-metric-card__index" aria-hidden="true">
               R
             </span>
             <div>
@@ -170,9 +170,9 @@ export function MessagesPage() {
               <strong>{counts.retrying}</strong>
             </div>
           </article>
-          <article>
+          <article className="admin-metric-card admin-metric-card--inline">
             <span
-              className={`admin-metric__index${counts.failed > 0 ? " messages__metric-danger" : ""}`}
+              className={`admin-metric-card__index${counts.failed > 0 ? " messages__metric-danger" : ""}`}
               aria-hidden="true"
             >
               F
@@ -182,8 +182,8 @@ export function MessagesPage() {
               <strong>{counts.failed}</strong>
             </div>
           </article>
-          <article>
-            <span className="admin-metric__index" aria-hidden="true">
+          <article className="admin-metric-card admin-metric-card--inline">
+            <span className="admin-metric-card__index" aria-hidden="true">
               S
             </span>
             <div>
@@ -243,18 +243,18 @@ export function MessagesPage() {
             onChange={(event) => setRecipientDraft(event.target.value)}
           />
           {recipientError ? (
-            <p className="admin-inline-error" id="messages-recipient-error">
+            <p className="admin-form-error" id="messages-recipient-error">
               {recipientError}
             </p>
           ) : null}
         </div>
-        <button className="admin-button admin-button--secondary" type="submit">
+        <button className="admin-button admin-button-secondary" type="submit">
           Apply filters
         </button>
         {filtering ? (
           <button
             type="button"
-            className="admin-button admin-button--secondary"
+            className="admin-button admin-button-secondary"
             onClick={clearFilters}
           >
             Clear filters
@@ -263,8 +263,8 @@ export function MessagesPage() {
       </form>
 
       {loading ? (
-        <section className="admin-ledger" aria-busy="true" aria-live="polite">
-          <span className="admin-eyebrow">Loading the delivery history…</span>
+        <section className="admin-surface admin-panel" aria-busy="true" aria-live="polite">
+          <span className="admin-kicker">Loading the delivery history…</span>
         </section>
       ) : failure ? (
         <div role="alert">
@@ -275,7 +275,7 @@ export function MessagesPage() {
             action={
               <button
                 type="button"
-                className="admin-button admin-button--secondary"
+                className="admin-button admin-button-secondary"
                 onClick={() => {
                   setLoading(true);
                   if (failure.retryable) {
@@ -307,7 +307,7 @@ export function MessagesPage() {
             filtering ? (
               <button
                 type="button"
-                className="admin-button admin-button--secondary"
+                className="admin-button admin-button-secondary"
                 onClick={clearFilters}
               >
                 Clear filters

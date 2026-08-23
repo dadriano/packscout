@@ -69,74 +69,70 @@ export function LoginPage() {
   }
 
   return (
-    <div className="admin-layout">
-      <main className="admin-main">
-        <div className="admin-main__inner">
-          <div className="admin-not-found">
-            <span className="admin-eyebrow">PackScout operations</span>
-            <h1>Sign in to continue.</h1>
-            <p>Use the operator account provided by your PackScout admin.</p>
+    <main className="admin-route-state">
+      <div className="admin-route-card">
+        <span className="admin-kicker">PackScout operations</span>
+        <h1>Sign in to continue.</h1>
+        <p>Use the operator account provided by your PackScout admin.</p>
 
-            <form
-              className="admin-ledger admin-page"
-              aria-label="Operator sign in"
-              noValidate
-              onSubmit={(event) => void submit(event)}
-            >
-              {sessionExpired && !error ? (
-                <p className="admin-inline-error" role="status">
-                  Your session ended. Sign in again to continue.
-                </p>
-              ) : null}
-              {error ? <AuthErrorSummary ref={errorRef} message={error} /> : null}
+        <form
+          className="admin-stack admin-login-form"
+          aria-label="Operator sign in"
+          noValidate
+          onSubmit={(event) => void submit(event)}
+        >
+          {sessionExpired && !error ? (
+            <p className="admin-form-error" role="status">
+              Your session ended. Sign in again to continue.
+            </p>
+          ) : null}
+          {error ? <AuthErrorSummary ref={errorRef} message={error} /> : null}
 
-              <div className="admin-field">
-                <label htmlFor="login-email">Email</label>
-                <input
-                  id="login-email"
-                  name="email"
-                  type="email"
-                  autoComplete="username"
-                  autoFocus
-                  required
-                  value={email}
-                  disabled={submitting}
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-              </div>
-
-              <div className="admin-field">
-                <label htmlFor="login-password">Password</label>
-                <input
-                  id="login-password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  disabled={submitting}
-                  onChange={(event) => setPassword(event.target.value)}
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="admin-button admin-button--primary"
-                disabled={submitting || !email || !password}
-              >
-                {submitting ? "Signing in…" : "Sign in"}
-              </button>
-              <span className="admin-visually-hidden" aria-live="polite">
-                {submitting ? "Signing in…" : ""}
-              </span>
-
-              <p className="admin-auth-links">
-                <Link to="/forgot-password">Forgot your password?</Link>
-              </p>
-            </form>
+          <div className="admin-field">
+            <label htmlFor="login-email">Email</label>
+            <input
+              id="login-email"
+              name="email"
+              type="email"
+              autoComplete="username"
+              autoFocus
+              required
+              value={email}
+              disabled={submitting}
+              onChange={(event) => setEmail(event.target.value)}
+            />
           </div>
-        </div>
-      </main>
-    </div>
+
+          <div className="admin-field">
+            <label htmlFor="login-password">Password</label>
+            <input
+              id="login-password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              disabled={submitting}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </div>
+
+          <button
+            type="submit"
+            className="admin-button admin-button-primary"
+            disabled={submitting || !email || !password}
+          >
+            {submitting ? "Signing in…" : "Sign in"}
+          </button>
+          <span className="admin-visually-hidden" aria-live="polite">
+            {submitting ? "Signing in…" : ""}
+          </span>
+
+          <p className="admin-auth-links">
+            <Link to="/forgot-password">Forgot your password?</Link>
+          </p>
+        </form>
+      </div>
+    </main>
   );
 }

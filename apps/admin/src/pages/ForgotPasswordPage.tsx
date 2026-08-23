@@ -52,88 +52,84 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <div className="admin-layout">
-      <main className="admin-main">
-        <div className="admin-main__inner">
-          <div className="admin-not-found admin-auth-screen">
-            <span className="admin-eyebrow">PackScout operations</span>
-            {sent ? (
-              <>
-                <h1>Check your mail.</h1>
-                <p role="status">
-                  If that address belongs to an operator account, a reset link
-                  is on its way. The link works once and expires soon, and
-                  requesting another replaces it.
-                </p>
-                <p>
-                  Nothing arrived? Check the address and your spam folder, or
-                  request another link.
-                </p>
-                <button
-                  type="button"
-                  className="admin-button admin-button--secondary"
-                  onClick={() => setSent(false)}
-                >
-                  Request another link
-                </button>
-                <p className="admin-auth-links">
-                  <Link to="/login">Back to sign in</Link>
-                </p>
-              </>
-            ) : (
-              <>
-                <h1>Reset your password.</h1>
-                <p>
-                  Enter your operator email address. If it is registered, a
-                  one-time reset link will be mailed to it.
-                </p>
+    <main className="admin-route-state">
+      <div className="admin-route-card admin-auth-screen">
+        <span className="admin-kicker">PackScout operations</span>
+        {sent ? (
+          <>
+            <h1>Check your mail.</h1>
+            <p role="status">
+              If that address belongs to an operator account, a reset link
+              is on its way. The link works once and expires soon, and
+              requesting another replaces it.
+            </p>
+            <p>
+              Nothing arrived? Check the address and your spam folder, or
+              request another link.
+            </p>
+            <button
+              type="button"
+              className="admin-button admin-button-secondary"
+              onClick={() => setSent(false)}
+            >
+              Request another link
+            </button>
+            <p className="admin-auth-links">
+              <Link to="/login">Back to sign in</Link>
+            </p>
+          </>
+        ) : (
+          <>
+            <h1>Reset your password.</h1>
+            <p>
+              Enter your operator email address. If it is registered, a
+              one-time reset link will be mailed to it.
+            </p>
 
-                <form
-                  className="admin-ledger admin-page admin-auth-card"
-                  aria-label="Request a password reset"
-                  noValidate
-                  onSubmit={(event) => void submit(event)}
-                >
-                  {error ? (
-                    <AuthErrorSummary ref={errorRef} message={error} />
-                  ) : null}
+            <form
+              className="admin-stack admin-auth-card"
+              aria-label="Request a password reset"
+              noValidate
+              onSubmit={(event) => void submit(event)}
+            >
+              {error ? (
+                <AuthErrorSummary ref={errorRef} message={error} />
+              ) : null}
 
-                  <div className="admin-field">
-                    <label htmlFor="reset-request-email">Email</label>
-                    <input
-                      id="reset-request-email"
-                      name="email"
-                      type="email"
-                      autoComplete="username"
-                      autoFocus
-                      required
-                      maxLength={254}
-                      value={email}
-                      disabled={submitting}
-                      onChange={(event) => setEmail(event.target.value)}
-                    />
-                  </div>
+              <div className="admin-field">
+                <label htmlFor="reset-request-email">Email</label>
+                <input
+                  id="reset-request-email"
+                  name="email"
+                  type="email"
+                  autoComplete="username"
+                  autoFocus
+                  required
+                  maxLength={254}
+                  value={email}
+                  disabled={submitting}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </div>
 
-                  <button
-                    type="submit"
-                    className="admin-button admin-button--primary"
-                    disabled={submitting || !email}
-                  >
-                    {submitting ? "Sending…" : "Send reset link"}
-                  </button>
-                  <span className="admin-visually-hidden" aria-live="polite">
-                    {submitting ? "Sending…" : ""}
-                  </span>
-                </form>
+              <button
+                type="submit"
+                className="admin-button admin-button-primary"
+                disabled={submitting || !email}
+              >
+                {submitting ? "Sending…" : "Send reset link"}
+              </button>
+              <span className="admin-visually-hidden" aria-live="polite">
+                {submitting ? "Sending…" : ""}
+              </span>
+            </form>
 
-                <p className="admin-auth-links">
-                  <Link to="/login">Back to sign in</Link>
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-      </main>
-    </div>
+            <p className="admin-auth-links">
+              <Link to="/login">Back to sign in</Link>
+            </p>
+          </>
+        )}
+      </div>
+    </main>
   );
 }

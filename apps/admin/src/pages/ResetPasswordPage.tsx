@@ -37,7 +37,7 @@ function InvalidLinkState() {
         requesting a new link replaces any older one. Request a new one to
         continue.
       </p>
-      <Link to="/forgot-password" className="admin-button admin-button--primary">
+      <Link to="/forgot-password" className="admin-button admin-button-primary">
         Request a new link
       </Link>
       <p className="admin-auth-links">
@@ -104,84 +104,80 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <div className="admin-layout">
-      <main className="admin-main">
-        <div className="admin-main__inner">
-          <div className="admin-not-found admin-auth-screen">
-            <span className="admin-eyebrow">PackScout operations</span>
-            {phase === "invalid_link" ? (
-              <InvalidLinkState />
-            ) : phase === "success" ? (
-              <>
-                <h1>Your password is updated.</h1>
-                <p role="status">
-                  You have been signed out everywhere. Sign in with your new
-                  password to continue.
-                </p>
-                <Link to="/login" className="admin-button admin-button--primary">
-                  Go to sign in
-                </Link>
-              </>
-            ) : (
-              <>
-                <h1>Choose a new password.</h1>
-                <p>
-                  This one-time link proves you control the operator mailbox.
-                  Setting a new password signs you out everywhere else.
-                </p>
+    <main className="admin-route-state">
+      <div className="admin-route-card admin-auth-screen">
+        <span className="admin-kicker">PackScout operations</span>
+        {phase === "invalid_link" ? (
+          <InvalidLinkState />
+        ) : phase === "success" ? (
+          <>
+            <h1>Your password is updated.</h1>
+            <p role="status">
+              You have been signed out everywhere. Sign in with your new
+              password to continue.
+            </p>
+            <Link to="/login" className="admin-button admin-button-primary">
+              Go to sign in
+            </Link>
+          </>
+        ) : (
+          <>
+            <h1>Choose a new password.</h1>
+            <p>
+              This one-time link proves you control the operator mailbox.
+              Setting a new password signs you out everywhere else.
+            </p>
 
-                <form
-                  className="admin-ledger admin-page admin-auth-card"
-                  aria-label="Choose a new password"
-                  noValidate
-                  onSubmit={(event) => void submit(event)}
-                >
-                  {error ? (
-                    <AuthErrorSummary ref={errorRef} message={error} />
-                  ) : null}
+            <form
+              className="admin-stack admin-auth-card"
+              aria-label="Choose a new password"
+              noValidate
+              onSubmit={(event) => void submit(event)}
+            >
+              {error ? (
+                <AuthErrorSummary ref={errorRef} message={error} />
+              ) : null}
 
-                  <div className="admin-field">
-                    <label htmlFor="reset-new-password">New password</label>
-                    <input
-                      id="reset-new-password"
-                      name="password"
-                      type="password"
-                      autoComplete="new-password"
-                      autoFocus
-                      required
-                      minLength={12}
-                      maxLength={128}
-                      value={password}
-                      disabled={submitting}
-                      aria-describedby="reset-new-password-note"
-                      onChange={(event) => setPassword(event.target.value)}
-                    />
-                    <small id="reset-new-password-note">
-                      Use at least 12 characters. PackScout will never show
-                      this value again.
-                    </small>
-                  </div>
+              <div className="admin-field">
+                <label htmlFor="reset-new-password">New password</label>
+                <input
+                  id="reset-new-password"
+                  name="password"
+                  type="password"
+                  autoComplete="new-password"
+                  autoFocus
+                  required
+                  minLength={12}
+                  maxLength={128}
+                  value={password}
+                  disabled={submitting}
+                  aria-describedby="reset-new-password-note"
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <small id="reset-new-password-note">
+                  Use at least 12 characters. PackScout will never show
+                  this value again.
+                </small>
+              </div>
 
-                  <button
-                    type="submit"
-                    className="admin-button admin-button--primary"
-                    disabled={submitting || !password}
-                  >
-                    {submitting ? "Updating password…" : "Set new password"}
-                  </button>
-                  <span className="admin-visually-hidden" aria-live="polite">
-                    {submitting ? "Updating password…" : ""}
-                  </span>
-                </form>
+              <button
+                type="submit"
+                className="admin-button admin-button-primary"
+                disabled={submitting || !password}
+              >
+                {submitting ? "Updating password…" : "Set new password"}
+              </button>
+              <span className="admin-visually-hidden" aria-live="polite">
+                {submitting ? "Updating password…" : ""}
+              </span>
+            </form>
 
-                <p className="admin-auth-links">
-                  <Link to="/login">Back to sign in</Link>
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-      </main>
-    </div>
+            <p className="admin-auth-links">
+              <Link to="/login">Back to sign in</Link>
+            </p>
+          </>
+        )}
+      </div>
+    </main>
   );
 }

@@ -20,9 +20,9 @@ export function WorkerInstanceLedger({
 }) {
   return (
     <section className="ops-ledger" aria-labelledby="worker-instance-title">
-      <header className="admin-section-heading">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Worker presence</span>
+          <span className="admin-kicker">Worker presence</span>
           <h2 id="worker-instance-title">Instances</h2>
         </div>
         <span className="admin-section-count">

@@ -224,7 +224,7 @@ export function ProductUsersPage() {
       >
         <button
           type="button"
-          className={`admin-button admin-button--secondary${inQueue ? "" : " is-active"}`}
+          className={`admin-button admin-button-secondary${inQueue ? "" : " is-active"}`}
           aria-pressed={!inQueue}
           onClick={() => switchView("directory")}
         >
@@ -232,7 +232,7 @@ export function ProductUsersPage() {
         </button>
         <button
           type="button"
-          className={`admin-button admin-button--secondary${inQueue ? " is-active" : ""}`}
+          className={`admin-button admin-button-secondary${inQueue ? " is-active" : ""}`}
           aria-pressed={inQueue}
           onClick={() => switchView("queue")}
         >
@@ -244,11 +244,11 @@ export function ProductUsersPage() {
 
       {inQueue ? null : (
         <form
-          className="admin-ledger"
+          className="admin-surface admin-panel"
           aria-label="Search product users"
           onSubmit={applySearch}
         >
-          <div className="admin-section-heading">
+          <div className="admin-section-header">
             <div className="admin-field product-users__search">
               <label htmlFor="product-user-search">
                 Search email, wallet address, or subject key
@@ -261,13 +261,13 @@ export function ProductUsersPage() {
                 onChange={(event) => setSearchDraft(event.target.value)}
               />
             </div>
-            <button className="admin-button admin-button--secondary" type="submit">
+            <button className="admin-button admin-button-secondary" type="submit">
               Search
             </button>
             {searching ? (
               <button
                 type="button"
-                className="admin-button admin-button--secondary"
+                className="admin-button admin-button-secondary"
                 onClick={() => {
                   setSearchDraft("");
                   restart("");
@@ -281,8 +281,8 @@ export function ProductUsersPage() {
       )}
 
       {loading ? (
-        <section className="admin-ledger" aria-busy="true" aria-live="polite">
-          <span className="admin-eyebrow">
+        <section className="admin-surface admin-panel" aria-busy="true" aria-live="polite">
+          <span className="admin-kicker">
             {inQueue ? "Loading the review queue…" : "Loading the user directory…"}
           </span>
         </section>
@@ -295,7 +295,7 @@ export function ProductUsersPage() {
             action={
               <button
                 type="button"
-                className="admin-button admin-button--secondary"
+                className="admin-button admin-button-secondary"
                 onClick={() => {
                   setLoading(true);
                   if (failure.retryable) {
@@ -334,7 +334,7 @@ export function ProductUsersPage() {
               searching ? (
                 <button
                   type="button"
-                  className="admin-button admin-button--secondary"
+                  className="admin-button admin-button-secondary"
                   onClick={() => {
                     setSearchDraft("");
                     restart("");

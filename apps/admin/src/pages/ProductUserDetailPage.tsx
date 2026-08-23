@@ -179,7 +179,7 @@ export function ProductUserDetailPage() {
   );
 
   const backToUsers = (
-    <Link className="admin-button admin-button--secondary" to="/users">
+    <Link className="admin-button admin-button-secondary" to="/users">
       Back to users
     </Link>
   );
@@ -206,8 +206,8 @@ export function ProductUserDetailPage() {
           description="What this account holds in PackScout today."
           actions={backToUsers}
         />
-        <section className="admin-ledger" aria-busy="true" aria-live="polite">
-          <span className="admin-eyebrow">Loading this user…</span>
+        <section className="admin-surface admin-panel" aria-busy="true" aria-live="polite">
+          <span className="admin-kicker">Loading this user…</span>
         </section>
       </div>
     );
@@ -234,7 +234,7 @@ export function ProductUserDetailPage() {
               described.retryable ? (
                 <button
                   type="button"
-                  className="admin-button admin-button--secondary"
+                  className="admin-button admin-button-secondary"
                   onClick={() => {
                     setLoading(true);
                     setRefreshIndex((value) => value + 1);
@@ -265,10 +265,10 @@ export function ProductUserDetailPage() {
         actions={backToUsers}
       />
 
-      <section className="admin-ledger" aria-labelledby="product-user-identity">
-        <header className="admin-section-heading">
+      <section className="admin-surface admin-panel" aria-labelledby="product-user-identity">
+        <header className="admin-section-header">
           <div>
-            <span className="admin-eyebrow">Sign-up record</span>
+            <span className="admin-kicker">Sign-up record</span>
             <h2 id="product-user-identity">Identity, standing, and access</h2>
           </div>
           <div className="product-users__row-actions">

@@ -14,9 +14,9 @@ function attribution(run: StalledRunView): string {
 export function StalledRunLedger({ runs }: { runs: StalledRunView[] }) {
   return (
     <section className="ops-ledger" aria-labelledby="stalled-run-title">
-      <header className="admin-section-heading">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Runs past their heartbeat window</span>
+          <span className="admin-kicker">Runs past their heartbeat window</span>
           <h2 id="stalled-run-title">Stalled import runs</h2>
         </div>
         <span className="admin-section-count">

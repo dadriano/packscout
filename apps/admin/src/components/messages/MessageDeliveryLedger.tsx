@@ -24,17 +24,17 @@ export function MessageDeliveryLedger({
   startIndex,
 }: MessageDeliveryLedgerProps) {
   return (
-    <section className="admin-ledger" aria-labelledby="message-delivery-ledger-title">
-      <header className="admin-section-heading">
+    <section className="admin-surface admin-panel" aria-labelledby="message-delivery-ledger-title">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Delivery history</span>
+          <span className="admin-kicker">Delivery history</span>
           <h2 id="message-delivery-ledger-title">Messages</h2>
         </div>
         <span className="admin-section-count">
           {String(entries.length).padStart(2, "0")} on page
         </span>
       </header>
-      <div className="admin-ledger__rows">
+      <div className="admin-row-list">
         {entries.map((entry, index) => {
           const state = messageStateDisplay(entry.state);
           return (
@@ -79,7 +79,7 @@ export function MessageDeliveryLedger({
               <div className="messages__row-status">
                 <StatusBadge label={state.label} tone={state.tone} />
                 <Link
-                  className="admin-button admin-button--secondary"
+                  className="admin-button admin-button-secondary"
                   to={`/messages/${entry.intentId}`}
                 >
                   View attempts

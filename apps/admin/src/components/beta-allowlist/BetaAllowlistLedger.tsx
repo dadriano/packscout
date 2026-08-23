@@ -29,17 +29,17 @@ export function BetaAllowlistLedger({
   onRemove,
 }: BetaAllowlistLedgerProps) {
   return (
-    <section className="admin-ledger" aria-labelledby="beta-allowlist-ledger-title">
-      <header className="admin-section-heading">
+    <section className="admin-surface admin-panel" aria-labelledby="beta-allowlist-ledger-title">
+      <header className="admin-section-header">
         <div>
-          <span className="admin-eyebrow">Invitation ledger</span>
+          <span className="admin-kicker">Invitation ledger</span>
           <h2 id="beta-allowlist-ledger-title">Allowlist entries</h2>
         </div>
         <span className="admin-section-count">
           {String(entries.length).padStart(2, "0")} on page
         </span>
       </header>
-      <div className="admin-ledger__rows">
+      <div className="admin-row-list">
         {entries.map((entry, index) => {
           // An entry names an email address, a wallet address, or both; the
           // first present identifier leads the row and the other follows.
@@ -91,14 +91,14 @@ export function BetaAllowlistLedger({
                 <div className="beta-allowlist__row-actions">
                   <button
                     type="button"
-                    className="admin-button admin-button--secondary"
+                    className="admin-button admin-button-secondary"
                     onClick={() => onEdit(entry)}
                   >
                     Edit
                   </button>
                   <button
                     type="button"
-                    className="admin-button admin-button--danger"
+                    className="admin-button admin-button-danger"
                     onClick={() => onRemove(entry)}
                   >
                     Remove

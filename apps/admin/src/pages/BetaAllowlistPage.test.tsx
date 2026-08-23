@@ -153,7 +153,7 @@ test("the allowlist lists entries newest first with identifiers, labels, and cre
   assert.match(text, /Primary Admin/);
   assert.match(text, /00000000-0000-4000-8000-000000000099/);
   assert.equal(
-    renderer.container.querySelectorAll(".admin-ledger__rows article").length,
+    renderer.container.querySelectorAll(".admin-row-list article").length,
     2,
   );
 
@@ -243,7 +243,7 @@ test("an unavailable integration degrades to a bounded, non-destructive error", 
   assert.match(text, /Nothing has been changed/);
   assert.doesNotMatch(text, /Bearer|token|convex/i);
   assert.equal(
-    renderer.container.querySelectorAll(".admin-ledger__rows article").length,
+    renderer.container.querySelectorAll(".admin-row-list article").length,
     0,
   );
   assert.ok(renderer.container.querySelector('[role="alert"]'));
@@ -436,7 +436,7 @@ test("editing states the entry in full and updates the row in place", async (con
   // operator.
   assert.equal(requests.length, 2);
   assert.equal(
-    renderer.container.querySelectorAll(".admin-ledger__rows article").length,
+    renderer.container.querySelectorAll(".admin-row-list article").length,
     2,
   );
 });
@@ -482,7 +482,7 @@ test("removal states both consequences before anything happens, then converges",
   // The removed row is gone without reloading the listing under the operator.
   assert.equal(requests.length, 2);
   assert.equal(
-    renderer.container.querySelectorAll(".admin-ledger__rows article").length,
+    renderer.container.querySelectorAll(".admin-row-list article").length,
     1,
   );
   assert.doesNotMatch(pageText(renderer), /ada@example\.test/);

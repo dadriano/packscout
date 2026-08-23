@@ -578,11 +578,11 @@ test("the detail view shows beta access with provenance and decides in place", a
   assert.match(text, /Beta access/);
   assert.match(text, /Awaiting a first decision/);
   const badges = [
-    ...renderer.container.querySelectorAll(".admin-status"),
+    ...renderer.container.querySelectorAll(".admin-pill"),
   ].map((badge) => ({
     label: badge.textContent?.trim(),
-    pending: badge.classList.contains("admin-status--pending"),
-    danger: badge.classList.contains("admin-status--danger"),
+    pending: badge.classList.contains("admin-pill-warning"),
+    danger: badge.classList.contains("admin-pill-danger"),
   }));
   assert.deepEqual(badges[0], {
     label: "Awaiting review",

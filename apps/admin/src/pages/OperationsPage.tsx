@@ -42,7 +42,7 @@ export function OperationsPage() {
     <div className="admin-page">
       <PageHeader eyebrow="Data pipeline / Status" title="Pipeline status" description="Freshness shows whether each feed reached provider head on time. Quality separately shows quarantines and mapping problems." />
       {loading ? <div className="ops-loading" aria-live="polite" aria-busy="true">Loading provider operations…</div> : null}
-      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => { setLoading(true); setRetryIndex((value) => value + 1); }}>Try again</button></div> : null}
+      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => { setLoading(true); setRetryIndex((value) => value + 1); }}>Try again</button></div> : null}
       {!loading && !error && providers.length === 0 ? <EmptyState title="No provider operations yet" description="Enable a tested provider to begin scheduled or manual imports." /> : null}
       {providers.length > 0 ? <ProviderOperationsLedger providers={providers} /> : null}
       <KeysetPagination
