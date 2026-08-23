@@ -58,14 +58,14 @@ The closed-beta feature excluded notifying users of access decisions, reasoning 
 |---|---|---|---|---|
 | 008 | Issue and redeem one-time email links | large | done | 003, 004 |
 | 009 | Let operators reset their own password | medium | done | 008 |
-| 010 | Provision operators by invitation | medium | in_progress | 008 |
+| 010 | Provision operators by invitation | medium | done | 008 |
 
 ### Operability
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
 | 011 | Inspect message delivery in the admin | medium | done | 004, admin-tools/001 |
-| 012 | Verify and operate the messaging layer | medium | todo | 002, 005, 006, 007, 009, 010, 011 |
+| 012 | Verify and operate the messaging layer | medium | in_progress | 002, 005, 006, 007, 009, 010, 011 |
 
 ## Build Order
 

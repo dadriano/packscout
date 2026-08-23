@@ -1,10 +1,33 @@
 import { z } from "zod";
 
 export const operatorRoles = ["admin", "data_operator"] as const;
-export const operatorStates = ["active", "disabled"] as const;
+
+/**
+ * Every state an operator account can hold. `pending` is an invited account
+ * that has not yet proven control of its mailbox: it exists so it can carry a
+ * role and appear in the access ledger, and it authenticates nowhere.
+ * `cancelled` is an invitation an administrator withdrew — terminal, never
+ * usable, and deliberately distinct from `disabled`, which is an account that
+ * once worked and was switched off.
+ */
+export const operatorStates = [
+  "pending",
+  "active",
+  "disabled",
+  "cancelled",
+] as const;
+
+/**
+ * The states an administrator may assign directly through the operator
+ * update endpoint. `pending` is reached only by inviting, and `cancelled`
+ * only by cancelling an invitation, so no ordinary update can manufacture or
+ * escape an invited account's state.
+ */
+export const operatorAssignableStates = ["active", "disabled"] as const;
 
 export type OperatorRole = (typeof operatorRoles)[number];
 export type OperatorState = (typeof operatorStates)[number];
+export type OperatorAssignableState = (typeof operatorAssignableStates)[number];
 
 export const operatorPermissions = [
   "operators:manage",
@@ -89,30 +112,32 @@ export const loginRequestSchema = z
   })
   .strict();
 
-export const createOperatorRequestSchema = z
+const displayNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter a display name.")
+  .max(120, "Display name must be 120 characters or fewer.");
+
+/**
+ * Creating an operator by invitation: an address, a name, and a role, and
+ * deliberately no password. The invited person chooses their own credential
+ * by redeeming the mailed link, so a working password is never chosen by one
+ * person and communicated to another.
+ */
+export const inviteOperatorRequestSchema = z
   .object({
     email: emailSchema,
-    displayName: z
-      .string()
-      .trim()
-      .min(1, "Enter a display name.")
-      .max(120, "Display name must be 120 characters or fewer."),
-    password: managedPasswordSchema,
+    displayName: displayNameSchema,
     role: z.enum(operatorRoles),
   })
   .strict();
 
 export const updateOperatorRequestSchema = z
   .object({
-    displayName: z
-      .string()
-      .trim()
-      .min(1, "Enter a display name.")
-      .max(120, "Display name must be 120 characters or fewer.")
-      .optional(),
+    displayName: displayNameSchema.optional(),
     password: managedPasswordSchema.optional(),
     role: z.enum(operatorRoles).optional(),
-    state: z.enum(operatorStates).optional(),
+    state: z.enum(operatorAssignableStates).optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0, {
@@ -155,10 +180,28 @@ export interface AuthSessionResponse {
   csrfToken: string;
 }
 
+/**
+ * What an administrator may see about an account's outstanding invitation:
+ * that one exists, when it was sent, when it stops working, and whether it
+ * already has. Deliberately no token, no link, and no selector — the usable
+ * material exists only inside the message that was mailed.
+ */
+export interface OperatorInvitationStatus {
+  sentAt: string;
+  expiresAt: string;
+  expired: boolean;
+}
+
 export interface OperatorSummary extends SessionUser {
   createdAt: string;
   updatedAt: string;
   lastAccessAt: string | null;
+  /**
+   * Present only while an invitation is outstanding for a pending account.
+   * `null` covers every other case: an activated account, a cancelled one,
+   * and a pending one whose invitation was withdrawn or already redeemed.
+   */
+  invitation?: OperatorInvitationStatus | null;
 }
 
 export interface OperatorListResponse {
@@ -172,9 +215,9 @@ export interface OperatorMutationResponse {
 
 export type LoginRequest = z.input<typeof loginRequestSchema>;
 export type NormalizedLoginRequest = z.output<typeof loginRequestSchema>;
-export type CreateOperatorRequest = z.input<typeof createOperatorRequestSchema>;
-export type NormalizedCreateOperatorRequest = z.output<
-  typeof createOperatorRequestSchema
+export type InviteOperatorRequest = z.input<typeof inviteOperatorRequestSchema>;
+export type NormalizedInviteOperatorRequest = z.output<
+  typeof inviteOperatorRequestSchema
 >;
 export type UpdateOperatorRequest = z.input<typeof updateOperatorRequestSchema>;
 export type NormalizedUpdateOperatorRequest = z.output<
@@ -191,6 +234,7 @@ export const authErrorCodes = [
   "OPERATOR_EMAIL_CONFLICT",
   "LAST_ACTIVE_ADMIN",
   "OPERATOR_NOT_FOUND",
+  "OPERATOR_NOT_ACTIVATED",
   "SERVICE_UNAVAILABLE",
 ] as const;
 
@@ -230,4 +274,36 @@ export type PasswordResetCompletionRequest = z.input<
 >;
 export type NormalizedPasswordResetCompletionRequest = z.output<
   typeof passwordResetCompletionRequestSchema
+>;
+
+/**
+ * Operator invitation redemption (messaging/010). The mailed link's token
+ * rides in the query string and is posted here once; like the reset flow it
+ * is carried as an opaque bounded string, because its real validation is
+ * redemption — which refuses every invalid, expired, superseded, cancelled,
+ * and already-used presentation with one indistinguishable outcome. The
+ * chosen password is held to exactly the same rules an administrator-set
+ * password must satisfy, so invitation introduces no password policy.
+ */
+export const operatorInvitationAcceptanceRequestSchema = z
+  .object({
+    token: z
+      .string()
+      .min(
+        1,
+        "The invitation link is incomplete. Open it from your email again.",
+      )
+      .max(
+        512,
+        "The invitation link is incomplete. Open it from your email again.",
+      ),
+    password: managedPasswordSchema,
+  })
+  .strict();
+
+export type OperatorInvitationAcceptanceRequest = z.input<
+  typeof operatorInvitationAcceptanceRequestSchema
+>;
+export type NormalizedOperatorInvitationAcceptanceRequest = z.output<
+  typeof operatorInvitationAcceptanceRequestSchema
 >;

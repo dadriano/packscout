@@ -1,8 +1,8 @@
 {
-  "source": "one-time email link tokens",
+  "source": "operator invitations",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260823010000_email_link_tokens/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260824000000_operator_invitations/migration.sql"
   },
   "expectedCounts": {
     "tables": 60,
@@ -11,7 +11,7 @@
     "indexes": 78,
     "uniqueConstraints": 53,
     "foreignKeys": 176,
-    "checkConstraints": 214
+    "checkConstraints": 215
   },
   "enums": {
     "admin_alert_state": [
@@ -101,8 +101,10 @@
       "data_operator"
     ],
     "operator_state": [
+      "pending",
       "active",
-      "disabled"
+      "disabled",
+      "cancelled"
     ],
     "provider_auth_mode": [
       "none",
@@ -5592,7 +5594,7 @@
         "password_hash": {
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "identity": null,
           "default": null
         },
@@ -5623,6 +5625,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {},
       "checkConstraints": {
+        "operators_active_requires_credential": {
+          "value": "((password_hash IS NOT NULL) OR (state <> 'active'::operator_state))"
+        },
         "operators_display_name_not_blank": {
           "value": "(length(TRIM(BOTH FROM display_name)) > 0)"
         },

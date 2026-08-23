@@ -7,7 +7,11 @@ import type { AuthService } from "@packscout/services";
 import type { SessionCookiePolicy } from "./auth/cookies.ts";
 import { createHealthRouter } from "./routes/health.ts";
 import { createAuthRouter } from "./routes/auth.ts";
-import { createOperatorsRouter } from "./routes/operators.ts";
+import {
+  createOperatorsRouter,
+  type OperatorInvitationRuntime,
+} from "./routes/operators.ts";
+import { createOperatorInvitationsRouter } from "./routes/operator-invitations.ts";
 import { createProvidersRouter, type ProvidersRouterDependencies } from "./routes/providers.ts";
 import {
   createImportOperationsRouter,
@@ -89,6 +93,7 @@ export interface AdminAppDependencies {
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
   passwordReset?: Omit<PasswordResetRouterDependencies, "sameOrigin">;
+  operatorInvitations?: OperatorInvitationRuntime;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
@@ -155,7 +160,12 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
     );
     app.use(
       "/api/operators",
-      createOperatorsRouter({ service, cookiePolicy, sameOrigin }),
+      createOperatorsRouter({
+        service,
+        cookiePolicy,
+        sameOrigin,
+        invitations: dependencies.operatorInvitations,
+      }),
     );
     if (dependencies.providers) {
       app.use(
@@ -250,6 +260,18 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
           ...dependencies.messages,
           auth: service,
           cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.operatorInvitations) {
+      // Mounted beside the reset routes and for the same reason: an
+      // unauthenticated route INTO authentication, guarded by the same
+      // trusted-origin discipline.
+      app.use(
+        "/api/auth/invitations",
+        createOperatorInvitationsRouter({
+          flow: dependencies.operatorInvitations.flow,
           sameOrigin,
         }),
       );

@@ -4,7 +4,7 @@
 **Depends on:** messaging/008
 **Blocks:** messaging/012
 **Estimated scope:** medium
-**Status:** in_progress
+**Status:** done
 
 ## Objective
 
@@ -45,15 +45,22 @@ An administrator opens the operators area, invites a colleague by address and ro
 
 ## Acceptance Criteria
 
-- [ ] An administrator can create an operator with only an address and a role, and an invitation is enqueued.
-- [ ] A pending account appears with its role and pending status and cannot authenticate by any route until activation.
-- [ ] Redeeming a valid invitation sets a password against the existing rules and activates the account for sign-in.
-- [ ] Invitations are single-use and expiring; reissue supersedes outstanding invitations; cancel invalidates them.
-- [ ] Redemption for a cancelled, superseded, or expired invitation shows the same plain invalid outcome without revealing account state.
-- [ ] Reissue and cancel are permission-guarded and audited; anonymous and unauthorized requests receive the standard outcomes.
-- [ ] Pending, expired-invitation, active, and cancelled states are distinguishable in the operators list from the existing enabled and disabled states.
-- [ ] No token, link, or password appears in any log, metric, audit record, or admin surface.
+- [x] An administrator can create an operator with only an address and a role, and an invitation is enqueued.
+- [x] A pending account appears with its role and pending status and cannot authenticate by any route until activation.
+- [x] Redeeming a valid invitation sets a password against the existing rules and activates the account for sign-in.
+- [x] Invitations are single-use and expiring; reissue supersedes outstanding invitations; cancel invalidates them.
+- [x] Redemption for a cancelled, superseded, or expired invitation shows the same plain invalid outcome without revealing account state.
+- [x] Reissue and cancel are permission-guarded and audited; anonymous and unauthorized requests receive the standard outcomes.
+- [x] Pending, expired-invitation, active, and cancelled states are distinguishable in the operators list from the existing enabled and disabled states.
+- [x] No token, link, or password appears in any log, metric, audit record, or admin surface.
 
 ## Verification
 
 Admin route behavior tests prove invitation-based creation, that pending accounts are refused by every authentication path, activation through redemption, single-use and expiry, reissue supersession, cancellation invalidating outstanding invitations, the permission matrix for reissue and cancel, uniform invalid-link outcomes, and audit records free of secrets; page tests cover the operators list states and the set-password screen. The admin lint, typecheck, test, and build commands exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none (no `tech-*.md` or `ux-*.md` companions in this feature)
+- Alignment: An invited-but-not-yet-activated account is modelled as a real operator row in a new `pending` state holding **no credential at all** — `operators.password_hash` becomes nullable, and a database check constraint (`operators_active_requires_credential`) makes an active account without a credential impossible rather than merely unlikely. Cancellation is a second new terminal state, `cancelled`, kept distinct from `disabled` so the ledger tells a withdrawn invitation apart from an account that once worked. Both are in the shared state vocabulary but neither is assignable through the update endpoint: `operatorAssignableStates` still holds only `active` and `disabled`, so `pending` comes only from inviting and `cancelled` only from cancelling. Rejection of pending accounts is enforced at two independent layers — every service authentication path already keys on `state === "active"` (login, session resolution, session bootstrap, reset issuance, reset eligibility, reset completion), and the repository's `updateOperator` refuses any target in `pending` or `cancelled` at the data edge, which is what closes the reset-and-administrator-edit routes into usability. A dedicated `activateInvitedOperator` transition, guarded on `pending` inside its own UPDATE, is the only way out of the pending state, so two concurrent redemptions resolve to one activation at the database. Issuance, supersession, single use, expiry, hashing, rate limiting, and the one uniform rejection all belong to messaging/008; reissue supersedes inside the same write that records the new token, and cancellation moves the account out of `pending` before superseding its links, so both ends of the refusal agree. Every dead link — cancelled, superseded, expired, reused, malformed, unknown, or bound to another subject — collapses into one `OPERATOR_INVITATION_LINK_INVALID_MESSAGE` with an identical body. Reissue and cancel sit behind the same `operators:manage` permission, trusted-Origin, and CSRF discipline as every other operator mutation, and both emit auth-audit entries (`operator.invitation_reissue`, `operator.invitation_cancel`) carrying acting operator, target, action, and outcome. Administrator-set passwords remain available for existing accounts through `updateOperatorRequestSchema.password`; creation with a password is not merely unused but refused by the strict invite schema.
+- Divergences: (1) The spec names `pending` as the one added state; **`cancelled` was added alongside it** because acceptance criterion 7 requires cancelled accounts to be distinguishable in the list from enabled and disabled, which a delete or a reuse of `disabled` cannot provide. (2) **Creation is not one atomic transaction.** The account row is written first, then the token and its outbox intent land together; if that second step fails the route compensates by cancelling the account and superseding its links, and answers 503. The tree is therefore always in one of two honest states — pending with an outstanding invitation, or cancelled — but the compensation is a rollback rather than a single commit. (3) Reissue is exposed as `POST /api/operators/:id/invitation` and cancel as `DELETE` on the same path, rather than as states of the existing PATCH, so that an ordinary update can never be the vehicle for either.
+- Verification: `npm run lint:admin && npm run typecheck:admin && npm run test:admin && npm run build:admin && npm run typecheck:services && npm run test:services && npm run lint:services && npm run typecheck:contracts && npm run test:contracts && npm run check:prisma && npm run test:database` → exit 0 (admin 320, services 589, contracts 176, database 159; 24 tests for this task: 7 admin route behavior, 5 invitation-journey behavior, 6 accept-invitation page, 2 ledger page, 2 contracts, plus 6 auth-service and 4 database integration). `npm run scan:framework-standards:ratchet` → 0 findings, 0 new. `node scripts/check-docs.mjs` → ok. A live browser pass was performed against a migrated database and a seeded administrator: the accept-invitation form and invalid-link states at 1280px and 375px in both themes with no horizontal overflow, and the operators ledger showing four simultaneously distinguishable badges — `admin-status--ready` Active, `admin-status--neutral` Cancelled, `admin-status--danger` Invitation expired, `admin-status--pending` Invitation sent — produced by real invite, cancel, and expiry operations through the running API, with three `operator_invitation` intents in the outbox and every pending row carrying a null credential.

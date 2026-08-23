@@ -328,6 +328,15 @@ function createJourneyHarness(configurationEnv: Record<string, string> = {}) {
       const session = sessions.get(tokenHash);
       if (session && !session.revokedAt) session.revokedAt = revokedAt;
     },
+    async findOperatorById() {
+      throw new Error("The password-reset journey never reads one operator.");
+    },
+    async activateInvitedOperator() {
+      throw new Error("The password-reset journey never activates invitations.");
+    },
+    async cancelInvitedOperator() {
+      throw new Error("The password-reset journey never cancels invitations.");
+    },
     async listOperators() {
       return { items: [], nextCursor: null };
     },

@@ -48,6 +48,10 @@ const EXPECTED_MIGRATIONS = Object.freeze([
     name: "20260823010000_email_link_tokens",
     checksum: "a139abfdbc65b8c689658b278c7e5c4eb7fb9bb8bc6d48d043ebf1f2d8d91507",
   }),
+  Object.freeze({
+    name: "20260824000000_operator_invitations",
+    checksum: "2ab4f734eb7f1c16532a32b1cd6ae1c098d914b581aa2d9913b719ea9bf4eeaa",
+  }),
 ]);
 const EXPECTED_TABLE_COUNT = 60;
 

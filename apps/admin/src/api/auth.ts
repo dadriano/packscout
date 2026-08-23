@@ -1,6 +1,7 @@
 import type {
   AuthSessionResponse,
   LoginRequest,
+  OperatorInvitationAcceptanceRequest,
   PasswordResetCompletionRequest,
   PasswordResetRequest,
 } from "@packscout/contracts";
@@ -101,6 +102,23 @@ export function completePasswordReset(
 ): Promise<void> {
   return requestJson<void>(
     "/auth/password-reset/complete",
+    { method: "POST", json: input },
+    fetcher,
+  );
+}
+
+/**
+ * Redeems a mailed invitation link with the password the invited person
+ * chose. Success activates the account; every dead link — cancelled,
+ * superseded, expired, or already used — fails with the one uniform
+ * invalid-link outcome.
+ */
+export function acceptOperatorInvitation(
+  input: OperatorInvitationAcceptanceRequest,
+  fetcher?: Fetcher,
+): Promise<void> {
+  return requestJson<void>(
+    "/auth/invitations/accept",
     { method: "POST", json: input },
     fetcher,
   );

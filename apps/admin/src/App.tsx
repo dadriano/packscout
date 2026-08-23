@@ -30,6 +30,7 @@ import { MessageDetailPage } from "./pages/MessageDetailPage";
 import { MessagesPage } from "./pages/MessagesPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 
 function SessionLoading() {
   return (
@@ -119,5 +120,10 @@ export const appRoutes = (
         ever posted to the completion endpoint — never logged or echoed. */}
     <Route path="/forgot-password" element={<ForgotPasswordPage />} />
     <Route path="/reset-password" element={<ResetPasswordPage />} />
+    {/* Mailbox-proven provisioning: an invited operator has no session and no
+        password yet, so this lands beside the recovery screens. The token
+        rides in the query string and is only ever posted to the acceptance
+        endpoint — never logged or echoed. */}
+    <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
   </React.Fragment>
 );

@@ -9,6 +9,8 @@ import {
   type AuthRepository,
   type AuthoritativeSessionRecord,
   type LoginOperatorRecord,
+  type ActivateInvitedOperatorResult,
+  type CancelInvitedOperatorResult,
   type ProvisionOperatorResult,
   type UpdateOperatorResult,
 } from "./auth-service.ts";
@@ -50,6 +52,12 @@ interface RepositoryState {
   refreshed: Array<Parameters<AuthRepository["refreshSession"]>[0]>;
   provisionResult: ProvisionOperatorResult;
   updateResult: UpdateOperatorResult;
+  activateResult: ActivateInvitedOperatorResult;
+  cancelResult: CancelInvitedOperatorResult;
+  operatorById: OperatorSummary | null;
+  provisionInputs: Array<Parameters<AuthRepository["provisionOperator"]>[0]>;
+  activations: Array<Parameters<AuthRepository["activateInvitedOperator"]>[0]>;
+  cancellations: Array<Parameters<AuthRepository["cancelInvitedOperator"]>[0]>;
 }
 
 function createRepository(): { repository: AuthRepository; state: RepositoryState } {
@@ -60,8 +68,14 @@ function createRepository(): { repository: AuthRepository; state: RepositoryStat
     revokedTokens: [],
     operatorUpdates: [],
     refreshed: [],
-    provisionResult: { kind: "created", operator: summary() },
+    provisionResult: { kind: "created", operator: summary({ state: "pending" }) },
     updateResult: { kind: "updated", operator: summary() },
+    activateResult: { kind: "activated", operator: summary() },
+    cancelResult: { kind: "cancelled", operator: summary({ state: "cancelled" }) },
+    operatorById: summary({ state: "pending" }),
+    provisionInputs: [],
+    activations: [],
+    cancellations: [],
   };
   const repository: AuthRepository = {
     async findOperatorForLogin() {
@@ -82,8 +96,20 @@ function createRepository(): { repository: AuthRepository; state: RepositoryStat
     async listOperators() {
       return { items: [summary()], nextCursor: null };
     },
-    async provisionOperator() {
+    async findOperatorById() {
+      return state.operatorById;
+    },
+    async provisionOperator(input) {
+      state.provisionInputs.push(input);
       return state.provisionResult;
+    },
+    async activateInvitedOperator(input) {
+      state.activations.push(input);
+      return state.activateResult;
+    },
+    async cancelInvitedOperator(input) {
+      state.cancellations.push(input);
+      return state.cancelResult;
     },
     async updateOperator(input) {
       state.operatorUpdates.push(input);
@@ -412,10 +438,9 @@ test("operator mutations are admin-only, revoke stale sessions, and keep audits 
 
   const dataOperator = { ...actor, role: "data_operator" as const };
   const forbidden = await captureServiceError(() =>
-    service.provisionOperator(dataOperator, {
+    service.inviteOperator(dataOperator, {
       email: "new@packscout.test",
       displayName: "New Operator",
-      password: "initial secure password",
       role: "data_operator",
     }),
   );
@@ -580,4 +605,313 @@ test("a reset completion that cannot update the operator reports unavailability 
   assert.equal(error.status, 503);
   assert.equal(audits.at(-1)?.outcome, "failure");
   assert.doesNotMatch(JSON.stringify(audits), /fresh strong password/);
+});
+
+test("inviting an operator creates a credential-less pending account and audits without secrets", async () => {
+  const { service, state, audits } = createHarness();
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: [],
+    csrfToken: "csrf",
+  };
+
+  const result = await service.inviteOperator(actor, {
+    email: "invited@packscout.test",
+    displayName: "Invited Operator",
+    role: "data_operator",
+  });
+
+  assert.equal(result.operator.state, "pending");
+  assert.equal(state.provisionInputs.length, 1);
+  assert.equal(state.provisionInputs[0]?.passwordHash, null);
+  assert.equal(state.provisionInputs[0]?.state, "pending");
+  const audit = audits.at(-1);
+  assert.equal(audit?.action, "operator.invite");
+  assert.equal(audit?.outcome, "success");
+  assert.doesNotMatch(JSON.stringify(audits), /hash:|password|token|link/i);
+
+  const dataOperator = { ...actor, role: "data_operator" as const };
+  const forbidden = await captureServiceError(() =>
+    service.inviteOperator(dataOperator, {
+      email: "other@packscout.test",
+      displayName: "Other",
+      role: "data_operator",
+    }),
+  );
+  assert.equal(forbidden.code, "FORBIDDEN");
+});
+
+test("a pending account is refused by every authentication path", async () => {
+  // One enumeration over every route into an authenticated identity, so a
+  // new path cannot quietly start accepting invited-but-not-activated
+  // accounts. Each entry names the site in auth-service.ts it exercises.
+  const pending = { ...admin, state: "pending" as const, passwordHash: null };
+
+  // login(): the credential check.
+  const loginHarness = createHarness();
+  loginHarness.state.loginOperator = pending;
+  const login = await captureServiceError(() =>
+    loginHarness.service.login({
+      normalizedEmail: pending.emailNormalized,
+      password: "correct horse battery staple",
+      networkIdentifier: "network-a",
+      previousSessionToken: undefined,
+    }),
+  );
+  assert.equal(login.code, "INVALID_CREDENTIALS");
+  // Verified against the dummy hash, exactly like an unknown address: a
+  // credential-less account is refused for its state, not for its shape.
+  assert.deepEqual(loginHarness.passwordVerifications, ["hash:dummy value"]);
+
+  // resolveSession(): the authoritative session recheck.
+  const sessionHarness = createHarness();
+  sessionHarness.state.authoritativeSession = {
+    sessionId: "session-id",
+    operatorId: pending.id,
+    organizationId: pending.organizationId,
+    organizationName: pending.organizationName,
+    emailNormalized: pending.emailNormalized,
+    displayName: pending.displayName,
+    state: "pending",
+    role: "admin",
+    csrfHash: "csrf:valid-csrf",
+    idleExpiresAt: new Date(now.getTime() + 10_000),
+    absoluteExpiresAt: new Date(now.getTime() + 20_000),
+  };
+  const resolved = await captureServiceError(() =>
+    sessionHarness.service.resolveSession({ sessionToken: "session-token" }),
+  );
+  assert.equal(resolved.code, "AUTH_REQUIRED");
+
+  // bootstrapSession(): the read-only variant of the same recheck.
+  const bootstrapHarness = createHarness();
+  bootstrapHarness.state.authoritativeSession =
+    sessionHarness.state.authoritativeSession;
+  const bootstrapped = await captureServiceError(() =>
+    bootstrapHarness.service.bootstrapSession("session-token"),
+  );
+  assert.equal(bootstrapped.code, "AUTH_REQUIRED");
+
+  // resolveActiveOperatorIdByEmail(): password-reset issuance.
+  const issuanceHarness = createHarness();
+  issuanceHarness.state.loginOperator = pending;
+  assert.equal(
+    await issuanceHarness.service.resolveActiveOperatorIdByEmail(
+      pending.emailNormalized,
+    ),
+    null,
+  );
+
+  // isOperatorEligibleForPasswordReset(): password-reset redemption.
+  assert.equal(
+    await issuanceHarness.service.isOperatorEligibleForPasswordReset(
+      pending.id,
+      pending.emailNormalized,
+    ),
+    false,
+  );
+
+  // completePasswordReset(): a reset can never activate a pending account.
+  const resetHarness = createHarness();
+  resetHarness.state.loginOperator = pending;
+  const reset = await captureServiceError(() =>
+    resetHarness.service.completePasswordReset({
+      operatorId: pending.id,
+      addressNormalized: pending.emailNormalized,
+      newPassword: "a fresh strong password",
+    }),
+  );
+  assert.equal(reset.code, "FORBIDDEN");
+  assert.equal(resetHarness.state.operatorUpdates.length, 0);
+
+  // updateOperator(): an administrator cannot edit one into usability.
+  const updateHarness = createHarness();
+  updateHarness.state.updateResult = { kind: "not_activated" };
+  const updated = await captureServiceError(() =>
+    updateHarness.service.updateOperator(
+      {
+        sessionId: "session-id",
+        operatorId: admin.id,
+        organizationId: admin.organizationId,
+        organizationName: admin.organizationName,
+        email: admin.emailNormalized,
+        displayName: admin.displayName,
+        state: "active",
+        role: "admin",
+        permissions: [],
+        csrfToken: "csrf",
+      },
+      pending.id,
+      { state: "active", password: "an administrator chosen password" },
+    ),
+  );
+  assert.equal(updated.code, "OPERATOR_NOT_ACTIVATED");
+  assert.equal(updated.status, 409);
+  assert.equal(updateHarness.audits.at(-1)?.outcome, "blocked");
+});
+
+test("invitation redemption activates only the pending account the link was bound to", async () => {
+  const { service, state, audits } = createHarness();
+  const pending = { ...admin, state: "pending" as const, passwordHash: null };
+  state.loginOperator = pending;
+
+  assert.equal(
+    await service.isOperatorEligibleForInvitation(
+      pending.id,
+      pending.emailNormalized,
+    ),
+    true,
+  );
+  // A different subject behind the same address, and an account that is no
+  // longer pending, are both ineligible.
+  assert.equal(
+    await service.isOperatorEligibleForInvitation(
+      "00000000-0000-4000-8000-0000000000ff",
+      pending.emailNormalized,
+    ),
+    false,
+  );
+  state.loginOperator = { ...pending, state: "active" };
+  assert.equal(
+    await service.isOperatorEligibleForInvitation(
+      pending.id,
+      pending.emailNormalized,
+    ),
+    false,
+  );
+
+  state.loginOperator = pending;
+  const activated = await service.activateInvitedOperator({
+    operatorId: pending.id,
+    addressNormalized: pending.emailNormalized,
+    newPassword: "a chosen strong password",
+  });
+  assert.equal(activated.operator.state, "active");
+  assert.equal(state.activations.length, 1);
+  assert.equal(state.activations[0]?.passwordHash, "hash:a chosen strong password");
+  const audit = audits.at(-1);
+  assert.equal(audit?.action, "operator.invitation_accept");
+  assert.equal(audit?.outcome, "success");
+  assert.doesNotMatch(JSON.stringify(audits), /a chosen strong password|hash:/);
+});
+
+test("redeeming for a cancelled or already-activated account is refused before any write", async () => {
+  const cancelled = createHarness();
+  cancelled.state.loginOperator = {
+    ...admin,
+    state: "cancelled",
+    passwordHash: null,
+  };
+  const refused = await captureServiceError(() =>
+    cancelled.service.activateInvitedOperator({
+      operatorId: admin.id,
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a chosen strong password",
+    }),
+  );
+  assert.equal(refused.code, "FORBIDDEN");
+  assert.equal(cancelled.state.activations.length, 0);
+
+  // A cancellation that lands between the eligibility check and the write:
+  // the guarded update refuses, and the outcome is the same refusal.
+  const raced = createHarness();
+  raced.state.loginOperator = { ...admin, state: "pending", passwordHash: null };
+  raced.state.activateResult = { kind: "not_pending" };
+  const lost = await captureServiceError(() =>
+    raced.service.activateInvitedOperator({
+      operatorId: admin.id,
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a chosen strong password",
+    }),
+  );
+  assert.equal(lost.code, "FORBIDDEN");
+  assert.equal(raced.audits.at(-1)?.outcome, "blocked");
+  assert.doesNotMatch(JSON.stringify(raced.audits), /a chosen strong password/);
+});
+
+test("cancelling an invitation is admin-only, terminal, and audited", async () => {
+  const { service, state, audits } = createHarness();
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: [],
+    csrfToken: "csrf",
+  };
+
+  const cancelled = await service.cancelInvitedOperator(actor, summary().id);
+  assert.equal(cancelled.operator.state, "cancelled");
+  assert.equal(state.cancellations.length, 1);
+  assert.equal(audits.at(-1)?.action, "operator.invitation_cancel");
+  assert.equal(audits.at(-1)?.outcome, "success");
+
+  const forbidden = await captureServiceError(() =>
+    service.cancelInvitedOperator(
+      { ...actor, role: "data_operator" },
+      summary().id,
+    ),
+  );
+  assert.equal(forbidden.code, "FORBIDDEN");
+
+  // An account that already works is not a pending invitation to withdraw.
+  state.cancelResult = { kind: "not_pending" };
+  const missing = await captureServiceError(() =>
+    service.cancelInvitedOperator(actor, summary().id),
+  );
+  assert.equal(missing.code, "OPERATOR_NOT_FOUND");
+  assert.equal(missing.status, 404);
+});
+
+test("reissue resolves the account's own address and refuses non-pending targets", async () => {
+  const { service, state } = createHarness();
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: [],
+    csrfToken: "csrf",
+  };
+
+  const resolved = await service.resolvePendingOperatorForReissue(
+    actor,
+    summary().id,
+  );
+  assert.equal(resolved.email, "operator@packscout.test");
+
+  state.operatorById = summary({ state: "active" });
+  const active = await captureServiceError(() =>
+    service.resolvePendingOperatorForReissue(actor, summary().id),
+  );
+  assert.equal(active.code, "OPERATOR_NOT_FOUND");
+
+  state.operatorById = null;
+  const unknown = await captureServiceError(() =>
+    service.resolvePendingOperatorForReissue(actor, summary().id),
+  );
+  assert.equal(unknown.code, "OPERATOR_NOT_FOUND");
+
+  const forbidden = await captureServiceError(() =>
+    service.resolvePendingOperatorForReissue(
+      { ...actor, role: "data_operator" },
+      summary().id,
+    ),
+  );
+  assert.equal(forbidden.code, "FORBIDDEN");
 });

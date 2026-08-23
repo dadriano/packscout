@@ -2,7 +2,7 @@ import { permissionsForOperatorRole } from "@packscout/contracts";
 import type {
   AuthSessionResponse,
   ListOperatorsQuery,
-  NormalizedCreateOperatorRequest,
+  NormalizedInviteOperatorRequest,
   NormalizedUpdateOperatorRequest,
   OperatorListResponse,
   OperatorMutationResponse,
@@ -55,6 +55,10 @@ export interface AuthAuditEvent {
     | "auth.login"
     | "auth.logout"
     | "operator.provision"
+    | "operator.invite"
+    | "operator.invitation_accept"
+    | "operator.invitation_cancel"
+    | "operator.invitation_reissue"
     | "operator.update"
     | "operator.password_reset";
   subjectId: string | null;
@@ -73,7 +77,13 @@ export interface LoginOperatorRecord {
   organizationName: string;
   emailNormalized: string;
   displayName: string;
-  passwordHash: string;
+  /**
+   * Absent for an invited account that has never been activated. Every path
+   * that verifies a password already falls back to the configured dummy
+   * hash, so a credential-less account costs exactly what a real one does
+   * and is refused for its state, never for its shape.
+   */
+  passwordHash: string | null;
   state: OperatorState;
   role: OperatorRole;
 }
@@ -123,7 +133,17 @@ export type ProvisionOperatorResult =
 export type UpdateOperatorResult =
   | { kind: "updated"; operator: OperatorSummary }
   | { kind: "not_found" }
-  | { kind: "last_active_admin" };
+  | { kind: "last_active_admin" }
+  /** The target is an invited or cancelled account, not one to administer. */
+  | { kind: "not_activated" };
+
+export type ActivateInvitedOperatorResult =
+  | { kind: "activated"; operator: OperatorSummary }
+  | { kind: "not_pending" };
+
+export type CancelInvitedOperatorResult =
+  | { kind: "cancelled"; operator: OperatorSummary }
+  | { kind: "not_pending" };
 
 export interface AuthRepository {
   findOperatorForLogin(normalizedEmail: string): Promise<LoginOperatorRecord | null>;
@@ -145,14 +165,20 @@ export interface AuthRepository {
     organizationId: string,
     query: ListOperatorsQuery,
   ): Promise<OperatorListResponse>;
+  /** One operator in the acting organization, or null. */
+  findOperatorById(
+    organizationId: string,
+    operatorId: string,
+  ): Promise<OperatorSummary | null>;
   provisionOperator(input: {
     id: string;
     organizationId: string;
     emailNormalized: string;
     displayName: string;
-    passwordHash: string;
+    /** Null for an invitation: the invited person chooses their own. */
+    passwordHash: string | null;
     role: OperatorRole;
-    state: "active";
+    state: "active" | "pending";
     now: Date;
   }): Promise<ProvisionOperatorResult>;
   /**
@@ -168,6 +194,21 @@ export interface AuthRepository {
     state?: OperatorState;
     now: Date;
   }): Promise<UpdateOperatorResult>;
+  /**
+   * The only transition from `pending` to `active`, guarded on the pending
+   * state inside the write itself.
+   */
+  activateInvitedOperator(input: {
+    organizationId: string;
+    operatorId: string;
+    passwordHash: string;
+    now: Date;
+  }): Promise<ActivateInvitedOperatorResult>;
+  cancelInvitedOperator(input: {
+    organizationId: string;
+    operatorId: string;
+    now: Date;
+  }): Promise<CancelInvitedOperatorResult>;
 }
 
 export interface AuthServiceConfig {
@@ -184,6 +225,7 @@ export type AuthServiceErrorCode =
   | "OPERATOR_EMAIL_CONFLICT"
   | "LAST_ACTIVE_ADMIN"
   | "OPERATOR_NOT_FOUND"
+  | "OPERATOR_NOT_ACTIVATED"
   | "SERVICE_UNAVAILABLE";
 
 export class AuthServiceError extends Error {
@@ -523,28 +565,35 @@ export class AuthService {
     return this.dependencies.repository.listOperators(actor.organizationId, query);
   }
 
-  async provisionOperator(
+  /**
+   * Creates an operator by invitation: an address, a name, and a role, and no
+   * credential at all. The account exists so it can carry its role and appear
+   * in the access ledger, and it holds `pending` until the invited person
+   * proves control of the mailbox — until then every authentication path
+   * refuses it for its state. Issuing and mailing the one-time link is the
+   * caller's separate, atomic step; this method never sees token material.
+   */
+  async inviteOperator(
     actor: AuthenticatedActor,
-    input: NormalizedCreateOperatorRequest,
+    input: NormalizedInviteOperatorRequest,
   ): Promise<OperatorMutationResponse> {
     assertAdmin(actor);
     const now = this.dependencies.clock.now();
-    const passwordHash = await this.dependencies.passwordHasher.hash(input.password);
     const result = await this.dependencies.repository.provisionOperator({
       id: this.dependencies.random.id(),
       organizationId: actor.organizationId,
       emailNormalized: input.email,
       displayName: input.displayName,
-      passwordHash,
+      passwordHash: null,
       role: input.role,
-      state: "active",
+      state: "pending",
       now,
     });
     if (result.kind === "email_conflict") {
       await this.dependencies.audit.append({
         organizationId: actor.organizationId,
         actorId: actor.operatorId,
-        action: "operator.provision",
+        action: "operator.invite",
         subjectId: null,
         outcome: "failure",
         occurredAt: now,
@@ -559,13 +608,210 @@ export class AuthService {
     await this.dependencies.audit.append({
       organizationId: actor.organizationId,
       actorId: actor.operatorId,
-      action: "operator.provision",
+      action: "operator.invite",
       subjectId: result.operator.id,
       outcome: "success",
       occurredAt: now,
       metadata: { role: result.operator.role },
     });
     return { operator: result.operator };
+  }
+
+  /**
+   * The redemption-time eligibility recheck for an invitation link: the
+   * account the token was bound to still exists, still holds the address the
+   * link was mailed to, and is still waiting to be activated. Consulted
+   * before the token is consumed, so an invitation cancelled after issuance
+   * is refused without spending the link — and so a link can never activate
+   * an account that already works.
+   */
+  async isOperatorEligibleForInvitation(
+    operatorId: string,
+    addressNormalized: string,
+  ): Promise<boolean> {
+    const operator = await this.dependencies.repository.findOperatorForLogin(
+      addressNormalized,
+    );
+    return (
+      operator !== null &&
+      operator.id === operatorId &&
+      operator.state === "pending"
+    );
+  }
+
+  /**
+   * Completes a mailbox-proven invitation: hashes the chosen password with
+   * the same hasher administrator-set passwords use and applies it through
+   * the one repository transition that leaves `pending`, guarded on that
+   * state inside the write. The password is expected to have passed the
+   * managed password rules at the boundary; this method defines no policy of
+   * its own. Audit carries identifiers and a closed outcome, never the
+   * password or any token material.
+   */
+  async activateInvitedOperator(input: {
+    operatorId: string;
+    addressNormalized: string;
+    newPassword: string;
+  }): Promise<OperatorMutationResponse> {
+    const now = this.dependencies.clock.now();
+    const operator = await this.dependencies.repository.findOperatorForLogin(
+      input.addressNormalized,
+    );
+    if (
+      !operator ||
+      operator.id !== input.operatorId ||
+      operator.state !== "pending"
+    ) {
+      await this.dependencies.audit.append({
+        organizationId: operator?.organizationId ?? null,
+        actorId: null,
+        action: "operator.invitation_accept",
+        subjectId: input.operatorId,
+        outcome: "blocked",
+        occurredAt: now,
+        metadata: { reason: "subject_ineligible" },
+      });
+      throw new AuthServiceError(
+        "FORBIDDEN",
+        "The request could not be verified.",
+        403,
+      );
+    }
+    const passwordHash = await this.dependencies.passwordHasher.hash(
+      input.newPassword,
+    );
+    const result = await this.dependencies.repository.activateInvitedOperator({
+      organizationId: operator.organizationId,
+      operatorId: operator.id,
+      passwordHash,
+      now,
+    });
+    if (result.kind !== "activated") {
+      // Lost the race with a cancellation or a concurrent redemption. The
+      // caller maps this to the one uniform invalid-link outcome.
+      await this.dependencies.audit.append({
+        organizationId: operator.organizationId,
+        actorId: null,
+        action: "operator.invitation_accept",
+        subjectId: operator.id,
+        outcome: "blocked",
+        occurredAt: now,
+        metadata: { reason: "subject_ineligible" },
+      });
+      throw new AuthServiceError(
+        "FORBIDDEN",
+        "The request could not be verified.",
+        403,
+      );
+    }
+    await this.dependencies.audit.append({
+      organizationId: operator.organizationId,
+      actorId: operator.id,
+      action: "operator.invitation_accept",
+      subjectId: operator.id,
+      outcome: "success",
+      occurredAt: now,
+      metadata: { fields: ["credential", "state"] },
+    });
+    return { operator: result.operator };
+  }
+
+  /**
+   * Withdraws an invitation. The account moves to the terminal `cancelled`
+   * state — refused by every authentication path and by every ordinary
+   * update — and the caller invalidates its outstanding link separately.
+   * Only a `pending` account can be cancelled, so this can never be a
+   * shortcut around the last-active-administrator protection.
+   */
+  async cancelInvitedOperator(
+    actor: AuthenticatedActor,
+    operatorId: string,
+  ): Promise<OperatorMutationResponse> {
+    assertAdmin(actor);
+    const now = this.dependencies.clock.now();
+    const result = await this.dependencies.repository.cancelInvitedOperator({
+      organizationId: actor.organizationId,
+      operatorId,
+      now,
+    });
+    if (result.kind !== "cancelled") {
+      await this.dependencies.audit.append({
+        organizationId: actor.organizationId,
+        actorId: actor.operatorId,
+        action: "operator.invitation_cancel",
+        subjectId: operatorId,
+        outcome: "failure",
+        occurredAt: now,
+        metadata: { reason: "not_pending" },
+      });
+      throw new AuthServiceError(
+        "OPERATOR_NOT_FOUND",
+        "Operator not found.",
+        404,
+      );
+    }
+    await this.dependencies.audit.append({
+      organizationId: actor.organizationId,
+      actorId: actor.operatorId,
+      action: "operator.invitation_cancel",
+      subjectId: operatorId,
+      outcome: "success",
+      occurredAt: now,
+      metadata: {},
+    });
+    return { operator: result.operator };
+  }
+
+  /**
+   * Confirms an account is still awaiting activation before an administrator
+   * reissues its invitation, and hands back the address the new link must be
+   * mailed to — the account's own, never a caller-supplied one.
+   */
+  async resolvePendingOperatorForReissue(
+    actor: AuthenticatedActor,
+    operatorId: string,
+  ): Promise<{ operatorId: string; email: string; displayName: string }> {
+    assertAdmin(actor);
+    const summary = await this.dependencies.repository.findOperatorById(
+      actor.organizationId,
+      operatorId,
+    );
+    if (!summary || summary.state !== "pending") {
+      throw new AuthServiceError(
+        "OPERATOR_NOT_FOUND",
+        "Operator not found.",
+        404,
+      );
+    }
+    return {
+      operatorId: summary.id,
+      email: summary.email,
+      displayName: summary.displayName,
+    };
+  }
+
+  /**
+   * The administrator-facing audit record for a reissue: who acted, which
+   * account, and how it ended. The link's own issuance is audited separately
+   * by the token mechanism; this is the operator-management trail, and like
+   * every other entry here it carries identifiers and a closed outcome, never
+   * an address, a link, or token material.
+   */
+  async recordInvitationReissue(
+    actor: AuthenticatedActor,
+    operatorId: string,
+    outcome: "success" | "failure" | "blocked",
+  ): Promise<void> {
+    assertAdmin(actor);
+    await this.dependencies.audit.append({
+      organizationId: actor.organizationId,
+      actorId: actor.operatorId,
+      action: "operator.invitation_reissue",
+      subjectId: operatorId,
+      outcome,
+      occurredAt: this.dependencies.clock.now(),
+      metadata: {},
+    });
   }
 
   async updateOperator(
@@ -592,6 +838,26 @@ export class AuthService {
         "OPERATOR_NOT_FOUND",
         "Operator not found.",
         404,
+      );
+    }
+    if (result.kind === "not_activated") {
+      // An unredeemed invitation is not an account to administer. Refusing
+      // here is what keeps an administrator — or a password reset, which
+      // takes the same repository path — from turning a pending account into
+      // a usable one without its invitation being redeemed.
+      await this.dependencies.audit.append({
+        organizationId: actor.organizationId,
+        actorId: actor.operatorId,
+        action: "operator.update",
+        subjectId: operatorId,
+        outcome: "blocked",
+        occurredAt: now,
+        metadata: { reason: "not_activated" },
+      });
+      throw new AuthServiceError(
+        "OPERATOR_NOT_ACTIVATED",
+        "This operator has not accepted their invitation yet. Reissue or cancel the invitation instead.",
+        409,
       );
     }
     if (result.kind === "last_active_admin") {

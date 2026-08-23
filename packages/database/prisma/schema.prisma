@@ -493,7 +493,10 @@ model operators {
   id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email_normalized     String                 @unique(map: "operators_email_normalized_unique")
   display_name         String
-  password_hash        String
+  /// Absent only for an invited account that has not yet been activated; the
+  /// `operators_active_requires_credential` check keeps an active account
+  /// from ever lacking one.
+  password_hash        String?
   state                operator_state         @default(active)
   created_at           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
@@ -1661,8 +1664,10 @@ enum operator_role {
 }
 
 enum operator_state {
+  pending
   active
   disabled
+  cancelled
 }
 
 enum provider_auth_mode {

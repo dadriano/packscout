@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  createOperatorRequestSchema,
+  inviteOperatorRequestSchema,
   loginRequestSchema,
+  operatorAssignableStates,
+  operatorInvitationAcceptanceRequestSchema,
+  operatorStates,
   passwordResetCompletionRequestSchema,
   passwordResetRequestSchema,
   operatorPermissions,
@@ -23,11 +26,22 @@ test("login normalizes email without changing credential bytes", () => {
 });
 
 test("operator mutations reject weak credentials and unknown executable fields", () => {
+  // Creating an operator is an invitation: an address, a name, and a role.
+  // A password is not optional here, it is refused, so new accounts cannot
+  // quietly go back to an administrator-chosen credential.
   assert.equal(
-    createOperatorRequestSchema.safeParse({
+    inviteOperatorRequestSchema.safeParse({
       email: "operator@packscout.test",
       displayName: "Operator",
-      password: "short",
+      role: "data_operator",
+    }).success,
+    true,
+  );
+  assert.equal(
+    inviteOperatorRequestSchema.safeParse({
+      email: "operator@packscout.test",
+      displayName: "Operator",
+      password: "an administrator chosen password",
       role: "data_operator",
     }).success,
     false,
@@ -156,11 +170,8 @@ test("password reset completion reuses the managed password rules verbatim", () 
     ? []
     : short.error.flatten().fieldErrors.password;
   assert.deepEqual(shortMessage, ["Password must be at least 12 characters."]);
-  const adminSide = createOperatorRequestSchema.safeParse({
-    email: "operator@packscout.test",
-    displayName: "Operator",
+  const adminSide = updateOperatorRequestSchema.safeParse({
     password: "short",
-    role: "data_operator",
   });
   const adminMessage = adminSide.success
     ? []
@@ -179,6 +190,70 @@ test("password reset completion reuses the managed password rules verbatim", () 
       token,
       password: "a strong enough password",
       extra: true,
+    }).success,
+    false,
+  );
+});
+
+test("the operator state vocabulary carries invitation lifecycle without widening what an update may assign", () => {
+  // Pending and cancelled exist so the ledger can tell an invited account
+  // and a withdrawn one apart from the enabled and disabled states that
+  // already existed.
+  assert.deepEqual(
+    [...operatorStates],
+    ["pending", "active", "disabled", "cancelled"],
+  );
+  // But neither is reachable through an ordinary update: `pending` comes only
+  // from inviting and `cancelled` only from cancelling.
+  assert.deepEqual([...operatorAssignableStates], ["active", "disabled"]);
+  for (const state of ["pending", "cancelled"]) {
+    assert.equal(
+      updateOperatorRequestSchema.safeParse({ state }).success,
+      false,
+      `${state} must not be directly assignable`,
+    );
+  }
+  assert.equal(
+    updateOperatorRequestSchema.safeParse({ state: "disabled" }).success,
+    true,
+  );
+});
+
+test("invitation acceptance reuses the admin's password rules and refuses extra fields", () => {
+  const token = `${"a".repeat(22)}.${"b".repeat(43)}`;
+  assert.equal(
+    operatorInvitationAcceptanceRequestSchema.safeParse({
+      token,
+      password: "a strong enough password",
+    }).success,
+    true,
+  );
+  const short = operatorInvitationAcceptanceRequestSchema.safeParse({
+    token,
+    password: "short",
+  });
+  assert.equal(short.success, false);
+  assert.deepEqual(
+    short.success ? [] : short.error.flatten().fieldErrors.password,
+    // The same message an administrator-set password would receive.
+    updateOperatorRequestSchema.safeParse({ password: "short" }).success
+      ? []
+      : updateOperatorRequestSchema
+          .safeParse({ password: "short" })
+          .error?.flatten().fieldErrors.password,
+  );
+  assert.equal(
+    operatorInvitationAcceptanceRequestSchema.safeParse({
+      token: "",
+      password: "a strong enough password",
+    }).success,
+    false,
+  );
+  assert.equal(
+    operatorInvitationAcceptanceRequestSchema.safeParse({
+      token,
+      password: "a strong enough password",
+      role: "admin",
     }).success,
     false,
   );

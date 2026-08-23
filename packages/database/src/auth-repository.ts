@@ -31,7 +31,12 @@ export interface LoginOperatorRecord {
   organizationName: string;
   emailNormalized: string;
   displayName: string;
-  passwordHash: string;
+  /**
+   * Absent for an invited account that has not been activated. Callers
+   * verify against their dummy hash in that case, so a credential-less
+   * account costs exactly what a real one does.
+   */
+  passwordHash: string | null;
   state: OperatorState;
   role: OperatorRole;
 }
@@ -51,7 +56,24 @@ export type ProvisionOperatorResult =
 export type UpdateOperatorResult =
   | { kind: "updated"; operator: OperatorSummary }
   | { kind: "not_found" }
-  | { kind: "last_active_admin" };
+  | { kind: "last_active_admin" }
+  /**
+   * The target is an invited account that has never been activated, or a
+   * cancelled one. Ordinary updates — credential rotation, role, state —
+   * are refused here at the data edge rather than in any one caller, so no
+   * route, and no password-reset completion, can turn an unredeemed
+   * invitation into a usable account.
+   */
+  | { kind: "not_activated" };
+
+export type ActivateInvitedOperatorResult =
+  | { kind: "activated"; operator: OperatorSummary }
+  /** No pending account with that identifier: unknown, already activated, or cancelled. */
+  | { kind: "not_pending" };
+
+export type CancelInvitedOperatorResult =
+  | { kind: "cancelled"; operator: OperatorSummary }
+  | { kind: "not_pending" };
 
 interface OperatorRow {
   id: string;
@@ -297,14 +319,57 @@ export class PrismaAuthRepository {
     };
   }
 
+  /** One operator in the organization, in the same shape the ledger lists. */
+  async findOperatorById(
+    organizationId: string,
+    operatorId: string,
+  ): Promise<OperatorSummary | null> {
+    const membership = await this.database.operator_memberships.findUnique({
+      where: {
+        organization_id_operator_id: {
+          organization_id: organizationId,
+          operator_id: operatorId,
+        },
+      },
+      select: {
+        role: true,
+        operators: {
+          select: {
+            id: true,
+            email_normalized: true,
+            display_name: true,
+            state: true,
+            created_at: true,
+            updated_at: true,
+          },
+        },
+      },
+    });
+    if (!membership) return null;
+    const lastAccess = await this.lastAccessByOperator([operatorId]);
+    return toOperatorSummary(
+      {
+        id: membership.operators.id,
+        email: membership.operators.email_normalized,
+        displayName: membership.operators.display_name,
+        state: membership.operators.state,
+        role: membership.role,
+        createdAt: membership.operators.created_at,
+        updatedAt: membership.operators.updated_at,
+      },
+      lastAccess.get(operatorId) ?? null,
+    );
+  }
+
   async provisionOperator(input: {
     id: string;
     organizationId: string;
     emailNormalized: string;
     displayName: string;
-    passwordHash: string;
+    /** Null for an invitation: the invited person chooses their own. */
+    passwordHash: string | null;
     role: OperatorRole;
-    state: "active";
+    state: "active" | "pending";
     now: Date;
   }): Promise<ProvisionOperatorResult> {
     try {
@@ -393,6 +458,14 @@ export class PrismaAuthRepository {
         },
       });
       if (!membership) return { kind: "not_found" };
+      if (
+        membership.operators.state === "pending" ||
+        membership.operators.state === "cancelled"
+      ) {
+        // An unredeemed invitation is not an account to administer: it is
+        // reissued or cancelled, never edited into usability.
+        return { kind: "not_activated" };
+      }
       const target = {
         id: membership.operators.id,
         email: membership.operators.email_normalized,
@@ -468,6 +541,129 @@ export class PrismaAuthRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
+  /**
+   * The only route from `pending` to `active`. The state predicate lives in
+   * the UPDATE's own WHERE clause, so two concurrent redemptions of the same
+   * invitation resolve to exactly one activation at the database, and an
+   * account that was cancelled between redemption and this write is refused
+   * rather than revived. The credential is written in the same statement, so
+   * an active account never exists without one.
+   */
+  async activateInvitedOperator(input: {
+    organizationId: string;
+    operatorId: string;
+    passwordHash: string;
+    now: Date;
+  }): Promise<ActivateInvitedOperatorResult> {
+    return this.database.$transaction(async (transaction) => {
+      const activated = await transaction.operators.updateMany({
+        where: { id: input.operatorId, state: "pending" },
+        data: {
+          password_hash: input.passwordHash,
+          state: "active",
+          updated_at: input.now,
+        },
+      });
+      if (activated.count === 0) return { kind: "not_pending" };
+      const membership = await transaction.operator_memberships.findUnique({
+        where: {
+          organization_id_operator_id: {
+            organization_id: input.organizationId,
+            operator_id: input.operatorId,
+          },
+        },
+        select: {
+          role: true,
+          operators: {
+            select: {
+              id: true,
+              email_normalized: true,
+              display_name: true,
+              state: true,
+              created_at: true,
+              updated_at: true,
+            },
+          },
+        },
+      });
+      if (!membership) return { kind: "not_pending" };
+      return {
+        kind: "activated",
+        operator: toOperatorSummary(
+          {
+            id: membership.operators.id,
+            email: membership.operators.email_normalized,
+            displayName: membership.operators.display_name,
+            state: membership.operators.state,
+            role: membership.role,
+            createdAt: membership.operators.created_at,
+            updatedAt: membership.operators.updated_at,
+          },
+          await this.lastAccessForOperator(transaction, input.operatorId),
+        ),
+      };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
+  /**
+   * Withdraws an invitation: the account moves to the terminal `cancelled`
+   * state, which no authentication path accepts and no update can leave.
+   * Scoped to the acting organization and guarded on `pending`, so cancelling
+   * can never touch an account that already works.
+   */
+  async cancelInvitedOperator(input: {
+    organizationId: string;
+    operatorId: string;
+    now: Date;
+  }): Promise<CancelInvitedOperatorResult> {
+    return this.database.$transaction(async (transaction) => {
+      const membership = await transaction.operator_memberships.findUnique({
+        where: {
+          organization_id_operator_id: {
+            organization_id: input.organizationId,
+            operator_id: input.operatorId,
+          },
+        },
+        select: {
+          role: true,
+          operators: {
+            select: {
+              id: true,
+              email_normalized: true,
+              display_name: true,
+              state: true,
+              created_at: true,
+              updated_at: true,
+            },
+          },
+        },
+      });
+      if (!membership || membership.operators.state !== "pending") {
+        return { kind: "not_pending" };
+      }
+      const cancelled = await transaction.operators.updateMany({
+        where: { id: input.operatorId, state: "pending" },
+        data: { state: "cancelled", updated_at: input.now },
+      });
+      if (cancelled.count === 0) return { kind: "not_pending" };
+      return {
+        kind: "cancelled",
+        operator: toOperatorSummary(
+          {
+            id: membership.operators.id,
+            email: membership.operators.email_normalized,
+            displayName: membership.operators.display_name,
+            state: "cancelled",
+            role: membership.role,
+            createdAt: membership.operators.created_at,
+            updatedAt: input.now,
+          },
+          null,
+        ),
+      };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
   private async lastAccessByOperator(
     operatorIds: readonly string[],
   ): Promise<Map<string, Date>> {
@@ -499,6 +695,10 @@ export interface AuthAuditEventInput {
     | "auth.login"
     | "auth.logout"
     | "operator.provision"
+    | "operator.invite"
+    | "operator.invitation_accept"
+    | "operator.invitation_cancel"
+    | "operator.invitation_reissue"
     | "operator.update"
     | "operator.password_reset";
   subjectId: string | null;

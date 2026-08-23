@@ -319,6 +319,51 @@ export class PrismaEmailLinkTokenRepository {
   }
 
   /**
+   * The same outstanding read for many subjects at once, so an admin list can
+   * show invitation status without one query per row. Returns at most one
+   * entry per subject — the latest unsettled token — and, like its
+   * single-subject sibling, never exposes token material.
+   */
+  async findOutstandingForSubjects(input: {
+    readonly purpose: EmailLinkPurpose;
+    readonly subjectIds: readonly string[];
+  }): Promise<Map<string, OutstandingEmailLinkToken>> {
+    assertPurpose(input.purpose);
+    const subjectIds = [...new Set(input.subjectIds)];
+    if (subjectIds.length === 0) return new Map();
+    for (const subjectId of subjectIds) assertSubjectId(subjectId);
+    const rows = await this.database.email_link_tokens.findMany({
+      where: {
+        purpose: input.purpose,
+        subject_id: { in: subjectIds },
+        redeemed_at: null,
+        superseded_at: null,
+      },
+      orderBy: [{ issued_at: "desc" }, { id: "desc" }],
+      select: {
+        id: true,
+        subject_id: true,
+        address_normalized: true,
+        issued_at: true,
+        expires_at: true,
+      },
+    });
+    const outstanding = new Map<string, OutstandingEmailLinkToken>();
+    for (const row of rows) {
+      // Rows arrive newest-first, so the first sighting of a subject is its
+      // latest unsettled token.
+      if (outstanding.has(row.subject_id)) continue;
+      outstanding.set(row.subject_id, {
+        tokenId: row.id,
+        addressNormalized: row.address_normalized,
+        issuedAt: row.issued_at,
+        expiresAt: row.expires_at,
+      });
+    }
+    return outstanding;
+  }
+
+  /**
    * Ages out expired tokens: rows whose expiry lies at or before the cutoff,
    * at most `limit` per call. A live token — unexpired, unredeemed,
    * unsuperseded — is never eligible, because expiry is the only criterion

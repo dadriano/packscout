@@ -36,6 +36,7 @@ import { createProviderAdminRuntime } from "./provider-runtime.ts";
 import { createAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
 import { createAdminMessageDeliveryRuntime } from "./message-delivery-runtime.ts";
 import { createAdminPasswordResetRuntime } from "./password-reset-runtime.ts";
+import { createAdminOperatorInvitationRuntime } from "./operator-invitation-runtime.ts";
 import { createAdminAccessDecisionNoticeRuntime } from "./access-decision-notice-runtime.ts";
 import {
   adminDevelopmentAllowedOrigins,
@@ -261,6 +262,15 @@ try {
       emailLinkTokenSecret === null
         ? undefined
         : createAdminPasswordResetRuntime({
+            database,
+            authService: auth.service,
+            secret: emailLinkTokenSecret,
+          }),
+    // Operator provisioning by invitation over the same link mechanism.
+    operatorInvitations:
+      emailLinkTokenSecret === null
+        ? undefined
+        : createAdminOperatorInvitationRuntime({
             database,
             authService: auth.service,
             secret: emailLinkTokenSecret,

@@ -80,6 +80,15 @@ async function createHarness() {
     },
     async refreshSession() {},
     async revokeSessionByTokenHash() {},
+    async findOperatorById() {
+      return unusedRepositoryCall();
+    },
+    async activateInvitedOperator() {
+      return unusedRepositoryCall();
+    },
+    async cancelInvitedOperator() {
+      return unusedRepositoryCall();
+    },
     async listOperators() {
       return { items: [], nextCursor: null };
     },
