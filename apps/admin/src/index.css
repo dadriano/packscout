@@ -1898,3 +1898,36 @@ form.admin-surface .admin-section-header {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* ---------------------------------------------- account recovery */
+
+/*
+ * The password-reset and invitation screens share the sign-in shell:
+ * `admin-route-state` centres them and `admin-route-card` draws the card.
+ * This modifier only narrows that card to one column, so the flow's form,
+ * confirmation, invalid-link, and success states all stay the same width.
+ */
+.admin-auth-screen {
+  width: min(100%, 30rem);
+}
+
+/* The recovery forms stack like the sign-in form does. */
+.admin-auth-card {
+  margin-top: 1.6rem;
+}
+
+.admin-auth-card .admin-button {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.admin-auth-card .admin-field small {
+  color: var(--admin-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.admin-auth-links {
+  margin: 0.9rem 0 0;
+  font-size: 0.92rem;
+}

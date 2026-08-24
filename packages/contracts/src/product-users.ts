@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  publicPackAvailabilities,
+  type PublicPackAvailability,
+} from "./public-pack-availability-v1.ts";
 
 /**
  * Shared product-user directory vocabulary.
@@ -14,6 +18,58 @@ import { z } from "zod";
 export const productUserStandings = ["active", "suspended"] as const;
 
 export type ProductUserStanding = (typeof productUserStandings)[number];
+
+/**
+ * The closed-beta admission dimension, deliberately separate from standing.
+ * Standing asks whether a known account was disciplined; access asks whether
+ * an account was let in. A waiting account is a person at the door, not a
+ * suspended one, and the two must never be collapsed into one badge.
+ */
+export const productUserAccessStates = [
+  "awaiting_review",
+  "approved",
+  "declined",
+] as const;
+
+export type ProductUserAccessState = (typeof productUserAccessStates)[number];
+
+/**
+ * Who established the current decision: nobody yet (the default a record holds
+ * from first sign-in), the beta allowlist automatically, or an operator by
+ * hand. Provenance is display and audit data, never free text.
+ */
+export const productUserAccessDeciders = [
+  "default",
+  "allowlist",
+  "operator",
+] as const;
+
+export type ProductUserAccessDecider = (typeof productUserAccessDeciders)[number];
+
+/**
+ * One access decision as the admin browser is allowed to see it: the state,
+ * what produced it, and when. The product backend's stored decision also
+ * carries the matched allowlist entry or the acting operator's identifier;
+ * neither is needed to render provenance, so neither crosses to the browser.
+ */
+export interface ProductUserAccessDecision {
+  readonly state: ProductUserAccessState;
+  readonly decidedBy: ProductUserAccessDecider;
+  readonly decidedAt: string;
+}
+
+/**
+ * The composed decision-plus-standing answer the product backend reports with
+ * every operator decision, so the admin can tell the whole truth: approving a
+ * suspended account is a real approval that still leaves the person locked
+ * out, and the toast must say so rather than claiming they are in.
+ */
+export type ProductUserEffectiveAccess =
+  | { readonly admitted: true; readonly reason: "approved" }
+  | {
+      readonly admitted: false;
+      readonly reason: "awaiting_review" | "declined" | "suspended" | "undetermined";
+    };
 
 /**
  * The product backend's stable refusal when a suspended account attempts an
@@ -52,6 +108,8 @@ export interface ProductUserRecord {
   readonly firstSeenAt: string;
   readonly lastSeenAt: string;
   readonly standing: ProductUserStanding;
+  /** The admission decision and its provenance, alongside — never inside — standing. */
+  readonly access: ProductUserAccessDecision;
 }
 
 /** A directory record plus the size of what that user owns. */
@@ -81,7 +139,12 @@ export const listProductUsersRequestSchema = z
       .min(1, "Enter something to search for.")
       .max(PRODUCT_USER_MAX_SEARCH_LENGTH)
       .optional(),
-    cursor: z.string().trim().min(1).max(PRODUCT_USER_MAX_CURSOR_LENGTH).optional(),
+    cursor: z
+      .string()
+      .trim()
+      .min(1)
+      .max(PRODUCT_USER_MAX_CURSOR_LENGTH)
+      .optional(),
     limit: z.coerce
       .number()
       .int()
@@ -91,7 +154,9 @@ export const listProductUsersRequestSchema = z
   })
   .strict();
 
-export type ListProductUsersRequest = z.input<typeof listProductUsersRequestSchema>;
+export type ListProductUsersRequest = z.input<
+  typeof listProductUsersRequestSchema
+>;
 export type NormalizedListProductUsersRequest = z.output<
   typeof listProductUsersRequestSchema
 >;
@@ -182,7 +247,8 @@ const REINSTATE_ACTION: ProductUserStandingAction = Object.freeze({
   description:
     "Reinstating restores this person's signed-in capabilities on their very next request, with everything they had saved still in place. Nothing was removed while they were suspended.",
   confirmLabel: "Reinstate account",
-  successMessage: "Account reinstated, with everything they saved still in place.",
+  successMessage:
+    "Account reinstated, with everything they saved still in place.",
   unchangedMessage: "That account was already active.",
   destructive: false,
 });
@@ -231,10 +297,9 @@ export type ProductUserDirectoryErrorCode =
  */
 export type ProductUserSavedItemResolution = "resolved" | "unresolved";
 
-export const productUserRepackAvailabilities = ["active", "sold_out"] as const;
+export const productUserRepackAvailabilities = publicPackAvailabilities;
 
-export type ProductUserRepackAvailability =
-  (typeof productUserRepackAvailabilities)[number];
+export type ProductUserRepackAvailability = PublicPackAvailability;
 
 export const productUserCollectibleTypes = [
   "card",
@@ -282,7 +347,10 @@ export type ProductUserSavedCollectible = SavedItemBase &
         readonly name: string;
         readonly collectibleType: ProductUserCollectibleType;
       }
-    | { readonly resolution: "unresolved"; readonly publicCollectibleId: string }
+    | {
+        readonly resolution: "unresolved";
+        readonly publicCollectibleId: string;
+      }
   );
 
 /**
@@ -322,6 +390,22 @@ export function describeProductUserEstimatedEv(
   return `${usdFromMinorUnits(estimate.evDollarsMinorUnits)} EV · ${Math.round(
     estimate.grossReturnBasisPoints / 100,
   )}% of price · ${estimate.confidenceBand} confidence`;
+}
+
+/** Exact source-neutral public availability, phrased for an administrator. */
+export function describeProductUserRepackAvailability(
+  availability: ProductUserRepackAvailability,
+): string {
+  switch (availability) {
+    case "available":
+      return "Available now";
+    case "unavailable":
+      return "Unavailable";
+    case "unknown":
+      return "Availability unknown";
+    case "sold_out":
+      return "Sold out";
+  }
 }
 
 export type ProductUserIdentityKind = "email" | "wallet" | "subject";
@@ -378,4 +462,240 @@ export function describeProductUserIdentity(
     label: boundedProductUserSubjectLabel(row.subject),
     secondary: null,
   };
+}
+
+/**
+ * The three operator decisions about admission. Approve admits, decline
+ * refuses, revoke returns the identity to awaiting review. All three are
+ * reversible flips on the record; none can express a deletion.
+ */
+export const productUserAccessActions = ["approve", "decline", "revoke"] as const;
+
+export type ProductUserAccessAction = (typeof productUserAccessActions)[number];
+
+/**
+ * The review-queue listing request. The queue is the directory filtered by
+ * access state, so it shares the directory's bounded cursor/limit pagination
+ * contract; state defaults to the queue that matters, awaiting review.
+ */
+export const listProductUserAccessQueueRequestSchema = z
+  .object({
+    accessState: z.enum(productUserAccessStates).default("awaiting_review"),
+    cursor: z.string().trim().min(1).max(PRODUCT_USER_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(PRODUCT_USER_DIRECTORY_MAX_PAGE_SIZE)
+      .default(PRODUCT_USER_DIRECTORY_MAX_PAGE_SIZE),
+  })
+  .strict();
+
+export type ListProductUserAccessQueueRequest = z.input<
+  typeof listProductUserAccessQueueRequestSchema
+>;
+
+/**
+ * One page of the review queue: full directory rows, oldest request first so
+ * nobody is buried by newer arrivals. `queueTruncated` means the backend's
+ * bounded queue scan cut off the newest arrivals — the front of the queue,
+ * which is what operators work, is always complete.
+ */
+export interface ProductUserAccessQueuePage {
+  readonly items: readonly ProductUserDirectoryRow[];
+  /** Opaque continuation handle; null when the listing is exhausted. */
+  readonly nextCursor: string | null;
+  readonly queueTruncated: boolean;
+}
+
+/**
+ * How many identities are awaiting review, bounded. `truncated` means the
+ * backend's counting bound was hit and the real number is at least `count`,
+ * which displays as "500+" rather than a false exact figure.
+ */
+export interface ProductUserAccessQueueCount {
+  readonly count: number;
+  readonly truncated: boolean;
+}
+
+/** The bounded count as operators read it: exact, or "at least this many". */
+export function formatProductUserAwaitingCount(
+  count: ProductUserAccessQueueCount,
+): string {
+  return count.truncated ? `${count.count}+` : `${count.count}`;
+}
+
+/**
+ * A decision request names only the person. The action is the endpoint, and
+ * the acting operator is always the authenticated session — no request shape
+ * can act as someone else.
+ */
+export const decideProductUserAccessRequestSchema = z
+  .object({
+    subject: z
+      .string()
+      .trim()
+      .min(1, "Choose a user to act on.")
+      .max(PRODUCT_USER_MAX_SUBJECT_LENGTH),
+  })
+  .strict();
+
+export type DecideProductUserAccessRequest = z.input<
+  typeof decideProductUserAccessRequestSchema
+>;
+
+/**
+ * The outcome of a decision: which action ran, whether this call is what
+ * moved the record, the decision the product backend now holds, and the
+ * composed effective access. A repeat or concurrent action reports
+ * `changed: false` with the authoritative decision rather than failing.
+ */
+export interface ProductUserAccessDecisionChange {
+  readonly action: ProductUserAccessAction;
+  readonly changed: boolean;
+  /** The resulting decision — what the record authoritatively holds now. */
+  readonly access: ProductUserAccessDecision;
+  readonly effectiveAccess: ProductUserEffectiveAccess;
+}
+
+/** The badge label for an access state, spelled the same everywhere. */
+export function describeProductUserAccessState(
+  state: ProductUserAccessState,
+): string {
+  switch (state) {
+    case "awaiting_review":
+      return "Awaiting review";
+    case "approved":
+      return "Approved";
+    case "declined":
+      return "Declined";
+  }
+}
+
+/**
+ * How the current decision came to be, for the ledger's provenance line. The
+ * caller appends the decision date; this names the mechanism, so an operator
+ * can tell an allowlist admission from a hand approval at a glance.
+ */
+export function describeProductUserAccessProvenance(
+  decision: ProductUserAccessDecision,
+): string {
+  if (decision.decidedBy === "default") return "Awaiting a first decision";
+  if (decision.decidedBy === "allowlist") {
+    return decision.state === "approved"
+      ? "Admitted automatically by the allowlist"
+      : `${describeProductUserAccessState(decision.state)} by the allowlist`;
+  }
+  return decision.state === "awaiting_review"
+    ? "Returned to review by an operator"
+    : `${describeProductUserAccessState(decision.state)} by an operator`;
+}
+
+/**
+ * What one decision control does next, and exactly what the administrator is
+ * agreeing to. The ledger row and the detail view both read this, so a
+ * consequence is stated identically wherever the control appears.
+ */
+export interface ProductUserAccessActionDescription {
+  readonly action: ProductUserAccessAction;
+  readonly actionLabel: string;
+  readonly title: string;
+  readonly description: string;
+  readonly confirmLabel: string;
+  readonly destructive: boolean;
+}
+
+const APPROVE_ACCESS_ACTION: ProductUserAccessActionDescription = Object.freeze({
+  action: "approve",
+  actionLabel: "Approve",
+  title: "Approve access for this person?",
+  description:
+    "Approving admits this person to the PackScout closed beta immediately. If they are signed in on the waiting screen, they are let straight into the product. You can revoke or decline their access at any time, and nothing about their account is ever deleted.",
+  confirmLabel: "Approve access",
+  destructive: false,
+});
+
+const DECLINE_ACCESS_ACTION: ProductUserAccessActionDescription = Object.freeze({
+  action: "decline",
+  actionLabel: "Decline",
+  title: "Decline access for this person?",
+  description:
+    "Declining refuses this person's beta access. When they sign in they see the declined notice instead of the product. Their sign-up record and everything they saved are kept, and adding them to the allowlist later will not overturn this decision — only an operator can reverse it.",
+  confirmLabel: "Decline access",
+  destructive: true,
+});
+
+const REVOKE_ACCESS_ACTION: ProductUserAccessActionDescription = Object.freeze({
+  action: "revoke",
+  actionLabel: "Revoke",
+  title: "Revoke this person's access?",
+  description:
+    "Revoking returns this person to awaiting review and closes the product to them on their very next request. Nothing they saved is deleted. If their email or wallet address is still on the allowlist, their next sign-in will admit them again automatically — decline them instead if they must stay out.",
+  confirmLabel: "Revoke access",
+  destructive: true,
+});
+
+const REOPEN_ACCESS_ACTION: ProductUserAccessActionDescription = Object.freeze({
+  action: "revoke",
+  actionLabel: "Return to review",
+  title: "Return this person to review?",
+  description:
+    "This clears the decline and returns this person to awaiting review. They stay out of the product until someone approves them — but if their email or wallet address is on the allowlist, their next sign-in will admit them automatically.",
+  confirmLabel: "Return to review",
+  destructive: false,
+});
+
+/**
+ * The decision controls that make sense for a record in the given state.
+ * Waiting people get the two verdicts; admitted people can be revoked (and
+ * declined from review afterwards); declined people can be approved outright
+ * or handed back to the queue. Every state stays reversible and no state
+ * offers a deletion.
+ */
+export function describeProductUserAccessActions(
+  current: ProductUserAccessState,
+): readonly ProductUserAccessActionDescription[] {
+  switch (current) {
+    case "awaiting_review":
+      return [APPROVE_ACCESS_ACTION, DECLINE_ACCESS_ACTION];
+    case "approved":
+      return [REVOKE_ACCESS_ACTION];
+    case "declined":
+      return [APPROVE_ACCESS_ACTION, REOPEN_ACCESS_ACTION];
+  }
+}
+
+/**
+ * What to tell the administrator once the product backend has spoken. The
+ * message is derived from the decision the backend reports, not the one the
+ * browser asked for: a repeat states the authoritative decision plainly, and
+ * an approval that leaves the person suspended says so instead of claiming
+ * they are in.
+ */
+export function describeProductUserAccessOutcome(
+  change: ProductUserAccessDecisionChange,
+): string {
+  const { state } = change.access;
+  if (!change.changed) {
+    switch (state) {
+      case "approved":
+        return "That person's access was already approved.";
+      case "declined":
+        return "That person's access was already declined.";
+      case "awaiting_review":
+        return "That person was already awaiting review.";
+    }
+  }
+  switch (state) {
+    case "approved":
+      return change.effectiveAccess.admitted
+        ? "Access approved. They are in the beta now."
+        : change.effectiveAccess.reason === "suspended"
+          ? "Access approved — but this account is suspended, so they stay locked out until reinstated."
+          : "Access approved.";
+    case "declined":
+      return "Access declined. Their sign-up record and saved items are kept.";
+    case "awaiting_review":
+      return "Access revoked. They are back in the review queue and out of the product on their next request.";
+  }
 }

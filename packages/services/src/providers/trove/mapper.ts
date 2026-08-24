@@ -158,10 +158,10 @@ function mapCatalog(envelope: CatalogEnvelopeV1, recordIndex: number) {
     category: text(data.collectible_type) ?? identity(categoryIds[0]),
     availability:
       availability === "in_stock" && status === "active"
-        ? "active"
+        ? "available"
         : availability === "sold_out"
           ? "sold_out"
-          : "disabled",
+          : "unavailable",
     sourceStatus: availability ?? status,
     price: { amount: price, currency: "USD" },
     imageUrls: images([data.image_uri]),
@@ -239,17 +239,17 @@ export class TroveMappingAdapter implements ProviderMappingAdapter {
   mapPage(input: {
     configuration: { platform: string };
     page: ProviderFeedPageV1;
-    recordIndexes: Readonly<{ catalog: readonly number[]; pulls: readonly number[]; sales: readonly number[] }>;
+    recordIndexes: Readonly<{ catalog: readonly number[]; pulls: readonly number[]; trades: readonly number[] }>;
   }) {
     if (input.configuration.platform !== this.platformKey) throw new Error("Trove mapper platform mismatch.");
     return {
       outcomes: Object.freeze([
         ...input.recordIndexes.catalog.map((index) => mapCatalog(input.page.catalog[index]!, index)),
         ...input.recordIndexes.pulls.map((index) => mapPull(input.page.pulls[index]!, index)),
-        ...input.recordIndexes.sales.map((index) => {
-          const envelope = input.page.sales[index]!;
-          const source = sourceIdentityForEnvelope({ recordKind: "sale", recordIndex: index, envelope });
-          return invalid(source, "TROVE_SALE_UNSUPPORTED", "sales");
+        ...input.recordIndexes.trades.map((index) => {
+          const envelope = input.page.trades[index]!;
+          const source = sourceIdentityForEnvelope({ recordKind: "trade", recordIndex: index, envelope });
+          return invalid(source, "TROVE_TRADE_UNSUPPORTED", "trades");
         }),
       ]),
     };

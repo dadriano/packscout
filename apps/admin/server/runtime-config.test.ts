@@ -9,8 +9,10 @@ import {
   readPort,
   readPositiveCount,
   readPositiveDuration,
+  readPositiveInteger,
   readProductUserDirectoryConfig,
   readRequiredSecret,
+  readSourceAdministrationSettings,
   readTrustedProxies,
   serviceHttpOrigin,
 } from "./runtime-config.ts";
@@ -78,6 +80,10 @@ test("admin security configuration fails closed and normalizes trusted origins",
   assert.throws(() => readRequiredSecret("short", "SECRET", 32), /SECRET/);
   assert.equal(readPositiveDuration(undefined, 60_000, "IDLE_MS"), 60_000);
   assert.throws(() => readPositiveDuration("0", 60_000, "IDLE_MS"), /IDLE_MS/);
+  assert.equal(readPositiveInteger("7", "KEY_VERSION"), 7);
+  for (const invalid of [undefined, "", "0", " 1", "1 ", "1.5", "2147483648"]) {
+    assert.throws(() => readPositiveInteger(invalid, "KEY_VERSION"), /KEY_VERSION/u);
+  }
   // Alert thresholds fail closed the same way: a mistyped ceiling must stop
   // the service rather than quietly disable the condition it bounds.
   assert.equal(readPositiveCount(undefined, 100, "BACKLOG_LIMIT"), 100);
@@ -105,6 +111,38 @@ test("provider credential keys require canonical base64 with exactly 32 bytes", 
   for (const invalid of [undefined, "not base64", Buffer.alloc(31).toString("base64")]) {
     assert.throws(() => readBase64Key(invalid, "PROVIDER_KEY"), /PROVIDER_KEY/);
   }
+});
+
+test("source administration keys are optional as a pair and fail closed when partial", () => {
+  const key = Buffer.alloc(32, 5).toString("base64");
+
+  for (const absent of [
+    { key: undefined, keyVersion: undefined },
+    { key: "", keyVersion: " " },
+  ]) {
+    assert.equal(readSourceAdministrationSettings(absent), null);
+  }
+
+  const settings = readSourceAdministrationSettings({ key, keyVersion: "3" });
+  assert.ok(settings);
+  assert.deepEqual(
+    settings.connectionConfigurationKey,
+    Buffer.alloc(32, 5),
+  );
+  assert.equal(settings.connectionConfigurationKeyVersion, 3);
+
+  assert.throws(
+    () => readSourceAdministrationSettings({ key, keyVersion: undefined }),
+    /PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION/,
+  );
+  assert.throws(
+    () => readSourceAdministrationSettings({ key: undefined, keyVersion: "3" }),
+    /PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64/,
+  );
+  assert.throws(
+    () => readSourceAdministrationSettings({ key: "not base64", keyVersion: "3" }),
+    /PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64/,
+  );
 });
 
 /**

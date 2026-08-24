@@ -24,13 +24,19 @@ const MISSING_REPACK_ID = "40000000-0000-5000-8000-000000000999";
 const MISSING_COLLECTIBLE_ID = "30000000-0000-5000-8000-000000000999";
 
 const fixture = buildMockDataReleaseV2();
-const activeRepack = fixture.repacks.find(
+const availableRepack = fixture.repacks.find(
   (repack) =>
-    repack.availability === "active" &&
+    repack.availability === "available" &&
     repack.evEstimates.packScout.status === "available",
 )!;
 const soldOutRepack = fixture.repacks.find(
   (repack) => repack.availability === "sold_out",
+)!;
+const unavailableRepack = fixture.repacks.find(
+  (repack) => repack.availability === "unavailable",
+)!;
+const unknownRepack = fixture.repacks.find(
+  (repack) => repack.availability === "unknown",
 )!;
 const withoutEvRepack = fixture.repacks.find(
   (repack) => repack.evEstimates.packScout.status === "unavailable",
@@ -139,35 +145,37 @@ describe("privileged per-subject saved-item reads", () => {
     await seedCatalog(t);
     const saver = createSaver(t);
     await saver.repacks(ALICE, [
-      activeRepack.publicRepackId,
+      availableRepack.publicRepackId,
       withoutEvRepack.publicRepackId,
       MISSING_REPACK_ID,
       soldOutRepack.publicRepackId,
     ]);
     // Another owner's saves never appear in this owner's collection.
-    await saver.repacks(BOB, [activeRepack.publicRepackId]);
+    await saver.repacks(BOB, [availableRepack.publicRepackId]);
 
     const collection = await listRepacks(t, ALICE);
     expect(collection.catalogAvailable).toBe(true);
-    expect(collection.items.map(({ publicRepackId }) => publicRepackId)).toEqual([
+    expect(
+      collection.items.map(({ publicRepackId }) => publicRepackId),
+    ).toEqual([
       soldOutRepack.publicRepackId,
       MISSING_REPACK_ID,
       withoutEvRepack.publicRepackId,
-      activeRepack.publicRepackId,
+      availableRepack.publicRepackId,
     ]);
 
-    const packScout = activeRepack.evEstimates.packScout;
+    const packScout = availableRepack.evEstimates.packScout;
     if (packScout.status !== "available") {
       throw new Error("Expected a fixture repack with a PackScout estimate.");
     }
     expect(collection.items.at(-1)).toEqual({
-      publicRepackId: activeRepack.publicRepackId,
+      publicRepackId: availableRepack.publicRepackId,
       savedAt: savedAt(1),
       resolution: "resolved",
       repack: {
-        name: activeRepack.name,
-        vendorDisplayName: activeRepack.vendorDisplayName,
-        availability: "active",
+        name: availableRepack.name,
+        vendorDisplayName: availableRepack.vendorDisplayName,
+        availability: "available",
         estimatedEv: {
           evDollarsMinorUnits: packScout.metrics.evDollars.minorUnits,
           grossReturnBasisPoints: packScout.metrics.grossReturnBasisPoints,
@@ -185,6 +193,22 @@ describe("privileged per-subject saved-item reads", () => {
       resolution: "resolved",
       repack: { name: withoutEvRepack.name, estimatedEv: null },
     });
+  });
+
+  test("preserves all four public availability states", async () => {
+    const t = createTest();
+    await seedCatalog(t);
+    await createSaver(t).repacks(ALICE, [
+      availableRepack.publicRepackId,
+      unavailableRepack.publicRepackId,
+      unknownRepack.publicRepackId,
+      soldOutRepack.publicRepackId,
+    ]);
+
+    const collection = await listRepacks(t, ALICE);
+    expect(
+      collection.items.map((item) => item.repack?.availability ?? null),
+    ).toEqual(["sold_out", "unknown", "unavailable", "available"]);
   });
 
   test("keeps a reference the active catalog no longer carries, labelled and identified", async () => {
@@ -259,7 +283,7 @@ describe("privileged per-subject saved-item reads", () => {
   test("distinguishes an unreadable catalog from references that have left it", async () => {
     const t = createTest();
     const saver = createSaver(t);
-    await saver.repacks(ALICE, [activeRepack.publicRepackId]);
+    await saver.repacks(ALICE, [availableRepack.publicRepackId]);
     await saver.collectibles(ALICE, [firstCollectible.publicCollectibleId]);
 
     // No active catalog release exists, so nothing can be resolved and the
@@ -293,9 +317,9 @@ describe("privileged per-subject saved-item reads", () => {
     const collection = await listRepacks(t, ALICE);
     expect(collection.items).toHaveLength(MAX_SAVED_ITEMS_PER_KIND);
     // Saves made in one instant still order deterministically, newest first.
-    expect(collection.items.map(({ publicRepackId }) => publicRepackId)).toEqual(
-      [...publicRepackIds].reverse(),
-    );
+    expect(
+      collection.items.map(({ publicRepackId }) => publicRepackId),
+    ).toEqual([...publicRepackIds].reverse());
     expect(
       collection.items.every(({ resolution }) => resolution === "unresolved"),
     ).toBe(true);
@@ -306,10 +330,7 @@ describe("privileged per-subject saved-item reads", () => {
         publicRepackId: boundedPublicId(MAX_SAVED_ITEMS_PER_KIND + 1),
       });
     });
-    await expectErrorCode(
-      listRepacks(t, ALICE),
-      "PRODUCT_USER_STATE_CONFLICT",
-    );
+    await expectErrorCode(listRepacks(t, ALICE), "PRODUCT_USER_STATE_CONFLICT");
   });
 
   test("bounds the addressing subject", async () => {
@@ -402,7 +423,10 @@ describe("admin saved-items integration transport", () => {
     const t = createTest();
     await seedCatalog(t);
     const saver = createSaver(t);
-    await saver.repacks(ALICE, [activeRepack.publicRepackId, MISSING_REPACK_ID]);
+    await saver.repacks(ALICE, [
+      availableRepack.publicRepackId,
+      MISSING_REPACK_ID,
+    ]);
     await saver.collectibles(ALICE, [firstCollectible.publicCollectibleId]);
     vi.stubEnv("PACKSCOUT_ADMIN_DIRECTORY_TOKEN", ADMIN_TOKEN);
 
@@ -423,13 +447,13 @@ describe("admin saved-items integration transport", () => {
           repack: null,
         },
         {
-          publicRepackId: activeRepack.publicRepackId,
+          publicRepackId: availableRepack.publicRepackId,
           savedAt: savedAt(1),
           resolution: "resolved",
           repack: {
-            name: activeRepack.name,
-            vendorDisplayName: activeRepack.vendorDisplayName,
-            availability: "active",
+            name: availableRepack.name,
+            vendorDisplayName: availableRepack.vendorDisplayName,
+            availability: "available",
             estimatedEv: expect.objectContaining({
               confidenceBand: expect.any(String),
             }),

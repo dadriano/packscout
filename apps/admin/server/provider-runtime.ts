@@ -2,7 +2,6 @@ import { createHmac, randomUUID } from "node:crypto";
 import type { ProviderConfigurationSummary } from "@packscout/contracts";
 import {
   AesGcmProviderCredentialCipher,
-  HttpCursorAdapter,
   ProviderConfigurationService,
   ProviderHealthService,
   ProviderTransportAdapterRegistry,
@@ -60,7 +59,10 @@ export function createProviderAdminRuntime(
   );
   const configuration = new ProviderConfigurationService({
     repository: input.repository,
-    adapters: new ProviderTransportAdapterRegistry([new HttpCursorAdapter()]),
+    // Provider-source routes are the only production transport boundary. The
+    // historical configuration UI stays readable, but cannot launch its old
+    // cursor transport after the clean source cutover.
+    adapters: new ProviderTransportAdapterRegistry(),
     credentialCipher: new AesGcmProviderCredentialCipher({
       primaryVersion: 1,
       keys: new Map([[1, input.credentialKey]]),

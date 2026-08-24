@@ -3,10 +3,12 @@ import {
   Outlet,
   Route,
   useLocation,
+  useParams,
 } from "react-router-dom";
 import * as React from "react";
 import { AdminLayout } from "./layouts/AdminLayout";
 import { BackgroundWorkPage } from "./pages/BackgroundWorkPage";
+import { BetaAllowlistPage } from "./pages/BetaAllowlistPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OperatorsPage } from "./pages/OperatorsPage";
@@ -23,8 +25,14 @@ import { RunDetailPage } from "./pages/RunDetailPage";
 import { RunsPage } from "./pages/RunsPage";
 import { AlertDetailPage } from "./pages/AlertDetailPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { SourceConfigurationPage } from "./pages/SourceConfigurationPage";
 import { WorkerFleetPage } from "./pages/WorkerFleetPage";
 import { useSession } from "./providers/session";
+import { MessageDetailPage } from "./pages/MessageDetailPage";
+import { MessagesPage } from "./pages/MessagesPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 
 function SessionLoading() {
   return (
@@ -83,6 +91,11 @@ function ProtectedRoute() {
   return <Outlet />;
 }
 
+function ProviderDetailRoute() {
+  const { providerId = "" } = useParams();
+  return <ProviderDetailPage key={providerId} />;
+}
+
 export const appRoutes = (
   <React.Fragment>
     <Route path="/login" element={<LoginRoute />} />
@@ -94,10 +107,12 @@ export const appRoutes = (
         {/* An opaque handle, never the person's subject key: this path is
             written into history, access logs, and the sign-in returnTo. */}
         <Route path="users/:handle" element={<ProductUserDetailPage />} />
+        <Route path="allowlist" element={<BetaAllowlistPage />} />
         <Route path="providers" element={<ProvidersPage />} />
         <Route path="providers/new" element={<ProviderFormPage />} />
-        <Route path="providers/:providerId" element={<ProviderDetailPage />} />
+        <Route path="providers/:providerId" element={<ProviderDetailRoute />} />
         <Route path="providers/:providerId/edit" element={<ProviderFormPage />} />
+        <Route path="source-configuration" element={<SourceConfigurationPage />} />
         <Route path="operations" element={<OperationsPage />} />
         <Route path="runs" element={<RunsPage />} />
         <Route path="runs/:runId" element={<RunDetailPage />} />
@@ -107,8 +122,22 @@ export const appRoutes = (
         <Route path="quarantine/:quarantineId" element={<QuarantineDetailPage />} />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="alerts/:alertId" element={<AlertDetailPage />} />
+        <Route path="messages" element={<MessagesPage />} />
+        {/* An opaque queue UUID, never a recipient address: this path is
+            written into history, access logs, and the sign-in returnTo. */}
+        <Route path="messages/:intentId" element={<MessageDetailPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>
+    {/* Mailbox-proven account recovery: reachable without a session, like
+        /login. The reset link's token rides in the query string and is only
+        ever posted to the completion endpoint — never logged or echoed. */}
+    <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+    <Route path="/reset-password" element={<ResetPasswordPage />} />
+    {/* Mailbox-proven provisioning: an invited operator has no session and no
+        password yet, so this lands beside the recovery screens. The token
+        rides in the query string and is only ever posted to the acceptance
+        endpoint — never logged or echoed. */}
+    <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
   </React.Fragment>
 );

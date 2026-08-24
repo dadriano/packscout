@@ -7,7 +7,7 @@ import {
 
 type QuarantineState = "open" | "retrying" | "resolved" | "expired";
 type StoredQuarantineState = "open" | "resolved" | "expired";
-type RecordKind = "catalog" | "pull" | "sale";
+type RecordKind = "catalog" | "pull" | "trade";
 
 export interface PersistedQuarantineEntry {
   readonly id: string;
@@ -743,7 +743,7 @@ export class PrismaQuarantineRepository {
 
   private recordFromPage(payload: unknown, kind: RecordKind, index: number): unknown {
     if (typeof payload !== "object" || payload === null) return undefined;
-    const key = kind === "catalog" ? "catalog" : kind === "pull" ? "pulls" : "sales";
+    const key = kind === "catalog" ? "catalog" : kind === "pull" ? "pulls" : "trades";
     const group = key in payload ? payload[key as keyof typeof payload] : undefined;
     return Array.isArray(group) ? group[index] : undefined;
   }

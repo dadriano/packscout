@@ -1,9 +1,21 @@
 import { hostname } from "node:os";
-import type { ProviderRuntimeEnvironment } from "@packscout/services";
+import {
+  hasProviderSourceSupervisorSettings,
+  ProviderSourceSupervisorConfigurationError,
+  readProviderSourceSupervisorConfiguration,
+  readProviderSourceSupervisorSharedConfiguration,
+  type ProviderSourceSupervisorConfiguration,
+  type ProviderSourceSupervisorSharedConfiguration,
+} from "./source-supervisor-runtime-config.ts";
+
+export {
+  ProviderSourceSupervisorConfigurationError,
+  readProviderSourceSupervisorConfiguration,
+  type ProviderSourceSupervisorConfiguration,
+} from "./source-supervisor-runtime-config.ts";
 
 const organizationIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
 const workerHostPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const workerVersionPattern = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/;
 const canonicalBase64Pattern =
@@ -19,6 +31,14 @@ export type ProviderWorkerConfigurationErrorCode =
   | "HEARTBEAT_INTERVAL_INVALID"
   | "IMPORT_RUN_LEASE_INVALID"
   | "MAXIMUM_CLAIMS_INVALID"
+  | "MESSAGE_OUTBOX_ATTEMPTS_INVALID"
+  | "MESSAGE_OUTBOX_BACKOFF_BASE_INVALID"
+  | "MESSAGE_OUTBOX_BACKOFF_CAP_INVALID"
+  | "MESSAGE_OUTBOX_BATCH_SIZE_INVALID"
+  | "MESSAGE_OUTBOX_LEASE_INVALID"
+  | "MESSAGE_OUTBOX_PER_RECIPIENT_INVALID"
+  | "MESSAGE_OUTBOX_POLL_INVALID"
+  | "MESSAGE_OUTBOX_RETENTION_DAYS_INVALID"
   | "NODE_ENV_INVALID"
   | "POLL_INTERVAL_INVALID"
   | "PUBLIC_ORGANIZATION_ID_INVALID"
@@ -29,6 +49,12 @@ export type ProviderWorkerConfigurationErrorCode =
   | "RETENTION_MAX_BATCHES_INVALID"
   | "RUN_HEARTBEAT_STALE_INVALID"
   | "SCHEDULE_CLAIM_LEASE_INVALID"
+  | "SOURCE_CONNECTION_KEY_INVALID"
+  | "SOURCE_CONNECTION_KEY_VERSION_INVALID"
+  | "SOURCE_DATABASE_VOLUME_PATH_INVALID"
+  | "WELCOME_DISPATCH_BATCH_SIZE_INVALID"
+  | "WELCOME_DISPATCH_LEASE_INVALID"
+  | "WELCOME_DISPATCH_POLL_INVALID"
   | "WORKER_HOST_INVALID"
   | "WORKER_ID_INVALID"
   | "WORKER_VERSION_INVALID";
@@ -40,17 +66,23 @@ export class ProviderWorkerConfigurationError extends Error {
   }
 }
 
-export interface ProviderWorkerConfiguration {
-  readonly actorPseudonymKey: Uint8Array;
+export interface ProviderWorkerConfiguration
+  extends ProviderSourceSupervisorSharedConfiguration {
   readonly credentialKey: Uint8Array;
   readonly credentialKeyVersion: number;
   readonly databasePoolMaximum: number;
-  readonly databaseUrl: string;
-  readonly environment: ProviderRuntimeEnvironment;
   readonly estimatedEvVerifiedUsdStablecoins: readonly string[];
   readonly heartbeatIntervalMilliseconds: number;
   readonly importRunLeaseMilliseconds: number;
   readonly maximumClaimsPerCycle: number;
+  readonly messageOutboxBackoffBaseMilliseconds: number;
+  readonly messageOutboxBackoffCapMilliseconds: number;
+  readonly messageOutboxBatchSize: number;
+  readonly messageOutboxLeaseMilliseconds: number;
+  readonly messageOutboxMaximumAttempts: number;
+  readonly messageOutboxPerRecipientLimit: number;
+  readonly messageOutboxPollMilliseconds: number;
+  readonly messageOutboxRetentionDays: number;
   readonly pollIntervalMilliseconds: number;
   readonly publicOrganizationId: string;
   readonly presenceRetentionDays: number;
@@ -60,17 +92,17 @@ export interface ProviderWorkerConfiguration {
   readonly retentionOrganizationDiscoveryLimit: number;
   readonly runHeartbeatStaleAfterMilliseconds: number;
   readonly scheduleClaimLeaseMilliseconds: number;
+  /**
+   * Undefined when none of the supervisor-only settings are set, which is the
+   * supported way to run the combined worker without the source-supervisor
+   * lane. A partially set group still fails configuration.
+   */
+  readonly sourceSupervisor?: ProviderSourceSupervisorConfiguration;
+  readonly welcomeDispatchBatchSize: number;
+  readonly welcomeDispatchLeaseMilliseconds: number;
+  readonly welcomeDispatchPollMilliseconds: number;
   readonly workerHost: string;
-  readonly workerId: string;
   readonly workerVersion: string;
-}
-
-function environmentFor(value: string | undefined): ProviderRuntimeEnvironment {
-  if (value === undefined || value === "development" || value === "local") {
-    return "local";
-  }
-  if (value === "production" || value === "test") return value;
-  throw new ProviderWorkerConfigurationError("NODE_ENV_INVALID");
 }
 
 function boundedInteger(
@@ -91,24 +123,6 @@ function boundedInteger(
   return parsed;
 }
 
-function databaseUrlFor(value: string | undefined): string {
-  if (!value || value.length > 2_048 || /[\r\n]/.test(value)) {
-    throw new ProviderWorkerConfigurationError("DATABASE_URL_INVALID");
-  }
-  try {
-    const parsed = new URL(value);
-    if (
-      (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") ||
-      parsed.hostname.length === 0
-    ) {
-      throw new Error("invalid");
-    }
-  } catch {
-    throw new ProviderWorkerConfigurationError("DATABASE_URL_INVALID");
-  }
-  return value;
-}
-
 function keyFor(
   value: string | undefined,
   code: "ACTOR_KEY_INVALID" | "CREDENTIAL_KEY_INVALID",
@@ -121,14 +135,6 @@ function keyFor(
     throw new ProviderWorkerConfigurationError(code);
   }
   return new Uint8Array(decoded);
-}
-
-function workerIdFor(value: string | undefined, fallback: string): string {
-  const resolved = value ?? fallback;
-  if (!workerIdPattern.test(resolved)) {
-    throw new ProviderWorkerConfigurationError("WORKER_ID_INVALID");
-  }
-  return resolved;
 }
 
 function publicOrganizationIdFor(value: string | undefined): string {
@@ -196,6 +202,22 @@ export function readProviderWorkerConfiguration(
   environment: NodeJS.ProcessEnv,
   fallbackWorkerId: string,
 ): ProviderWorkerConfiguration {
+  let shared: ProviderSourceSupervisorSharedConfiguration;
+  let sourceSupervisor: ProviderSourceSupervisorConfiguration | undefined;
+  try {
+    shared = readProviderSourceSupervisorSharedConfiguration(
+      environment,
+      fallbackWorkerId,
+    );
+    sourceSupervisor = hasProviderSourceSupervisorSettings(environment)
+      ? readProviderSourceSupervisorConfiguration(environment, fallbackWorkerId)
+      : undefined;
+  } catch (error) {
+    if (error instanceof ProviderSourceSupervisorConfigurationError) {
+      throw new ProviderWorkerConfigurationError(error.code);
+    }
+    throw error;
+  }
   const heartbeatIntervalMilliseconds = boundedInteger(
     environment.PACKSCOUT_WORKER_HEARTBEAT_MS,
     15_000,
@@ -215,11 +237,28 @@ export function readProviderWorkerConfiguration(
   if (presenceStaleAfterMilliseconds <= heartbeatIntervalMilliseconds) {
     throw new ProviderWorkerConfigurationError("PRESENCE_STALE_INVALID");
   }
+  const messageOutboxBackoffBaseMilliseconds = boundedInteger(
+    environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_BASE_MS,
+    30_000,
+    100,
+    3_600_000,
+    "MESSAGE_OUTBOX_BACKOFF_BASE_INVALID",
+  );
+  const messageOutboxBackoffCapMilliseconds = boundedInteger(
+    environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_BACKOFF_CAP_MS,
+    3_600_000,
+    100,
+    86_400_000,
+    "MESSAGE_OUTBOX_BACKOFF_CAP_INVALID",
+  );
+  // A cap below the base would make the "exponential" schedule shrink.
+  if (messageOutboxBackoffCapMilliseconds < messageOutboxBackoffBaseMilliseconds) {
+    throw new ProviderWorkerConfigurationError(
+      "MESSAGE_OUTBOX_BACKOFF_CAP_INVALID",
+    );
+  }
   return Object.freeze({
-    actorPseudonymKey: keyFor(
-      environment.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
-      "ACTOR_KEY_INVALID",
-    ),
+    ...shared,
     credentialKey: keyFor(
       environment.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64,
       "CREDENTIAL_KEY_INVALID",
@@ -238,8 +277,6 @@ export function readProviderWorkerConfiguration(
       50,
       "DATABASE_POOL_MAX_INVALID",
     ),
-    databaseUrl: databaseUrlFor(environment.PACKSCOUT_DATABASE_URL),
-    environment: environmentFor(environment.NODE_ENV),
     estimatedEvVerifiedUsdStablecoins: verifiedUsdStablecoinsFor(
       environment.PACKSCOUT_ESTIMATED_EV_VERIFIED_USD_STABLECOINS,
     ),
@@ -257,6 +294,50 @@ export function readProviderWorkerConfiguration(
       1,
       100,
       "MAXIMUM_CLAIMS_INVALID",
+    ),
+    messageOutboxBackoffBaseMilliseconds,
+    messageOutboxBackoffCapMilliseconds,
+    messageOutboxBatchSize: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_BATCH_SIZE,
+      25,
+      1,
+      100,
+      "MESSAGE_OUTBOX_BATCH_SIZE_INVALID",
+    ),
+    messageOutboxLeaseMilliseconds: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_LEASE_MS,
+      60_000,
+      1_000,
+      900_000,
+      "MESSAGE_OUTBOX_LEASE_INVALID",
+    ),
+    messageOutboxMaximumAttempts: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_MAX_ATTEMPTS,
+      6,
+      1,
+      20,
+      "MESSAGE_OUTBOX_ATTEMPTS_INVALID",
+    ),
+    messageOutboxPerRecipientLimit: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_PER_RECIPIENT_LIMIT,
+      5,
+      1,
+      100,
+      "MESSAGE_OUTBOX_PER_RECIPIENT_INVALID",
+    ),
+    messageOutboxPollMilliseconds: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_POLL_MS,
+      5_000,
+      100,
+      300_000,
+      "MESSAGE_OUTBOX_POLL_INVALID",
+    ),
+    messageOutboxRetentionDays: boundedInteger(
+      environment.PACKSCOUT_WORKER_MESSAGE_OUTBOX_RETENTION_DAYS,
+      90,
+      1,
+      3_650,
+      "MESSAGE_OUTBOX_RETENTION_DAYS_INVALID",
     ),
     pollIntervalMilliseconds: boundedInteger(
       environment.PACKSCOUT_WORKER_POLL_MS,
@@ -311,8 +392,32 @@ export function readProviderWorkerConfiguration(
       300_000,
       "SCHEDULE_CLAIM_LEASE_INVALID",
     ),
+    sourceSupervisor,
+    // Welcome dispatch (messaging/007): batch bound mirrors the directory's
+    // claim bound, and the lease its claim-expiry bounds, so a configured
+    // value the worker accepts is never refused upstream.
+    welcomeDispatchBatchSize: boundedInteger(
+      environment.PACKSCOUT_WORKER_WELCOME_DISPATCH_BATCH_SIZE,
+      10,
+      1,
+      20,
+      "WELCOME_DISPATCH_BATCH_SIZE_INVALID",
+    ),
+    welcomeDispatchLeaseMilliseconds: boundedInteger(
+      environment.PACKSCOUT_WORKER_WELCOME_DISPATCH_LEASE_MS,
+      300_000,
+      1_000,
+      900_000,
+      "WELCOME_DISPATCH_LEASE_INVALID",
+    ),
+    welcomeDispatchPollMilliseconds: boundedInteger(
+      environment.PACKSCOUT_WORKER_WELCOME_DISPATCH_POLL_MS,
+      60_000,
+      100,
+      300_000,
+      "WELCOME_DISPATCH_POLL_INVALID",
+    ),
     workerHost: workerHostFor(environment.PACKSCOUT_WORKER_HOST),
-    workerId: workerIdFor(environment.PACKSCOUT_WORKER_ID, fallbackWorkerId),
     workerVersion: workerVersionFor(environment.PACKSCOUT_WORKER_VERSION),
   });
 }

@@ -25,6 +25,7 @@ import {
   type PublicRepackViewDetail,
 } from "./public-repacks.ts";
 import { unavailableRepackHeat } from "./repack-heat.ts";
+import { publicRepackDetailSchema } from "./data-release-v2.ts";
 
 function withUnavailableHeat<T extends object>(value: T): T & {
   readonly heat: ReturnType<typeof unavailableRepackHeat>;
@@ -49,7 +50,7 @@ test("repack query normalization is deterministic across all aggregate facets", 
   assert.deepEqual(query.filters.vendors, ["collector_example"]);
   assert.deepEqual(query.filters.categories, [SYNTHETIC_POKEMON_CATEGORY_ID]);
   assert.deepEqual(query.filters.collectibleTypes, ["card", "watch"]);
-  assert.equal(query.filters.availability, "active");
+  assert.equal(query.filters.availability, "available");
   assert.equal(query.sort, "packscout_ev_dollars");
   assert.equal(query.desiredPublicCollectibleId, null);
 
@@ -279,4 +280,49 @@ test("category facets require parent and depth so the dashboard can nest subcate
     }).success,
     false,
   );
+});
+
+test("public pack details retain four states and reject protected or non-available actions", () => {
+  const base = buildSyntheticDataReleaseV2().repacks[0]!;
+  for (const availability of [
+    "available",
+    "unavailable",
+    "unknown",
+    "sold_out",
+  ] as const) {
+    const actionAvailability = availability === "available"
+      ? base.actionAvailability
+      : { promo: false, repackLink: false };
+    const actions = availability === "available" ? base.actions : {};
+    const detail = { ...base, availability, actionAvailability, actions };
+    assert.equal(publicRepackDetailSchema.safeParse(detail).success, true);
+    assert.equal(detail.publicVendorId, base.publicVendorId);
+    assert.equal(detail.vendorKey, base.vendorKey);
+    assert.equal(detail.sourceUpdatedAt, base.sourceUpdatedAt);
+  }
+
+  for (const availability of ["unavailable", "unknown", "sold_out"] as const) {
+    assert.equal(
+      publicRepackDetailSchema.safeParse({
+        ...base,
+        availability,
+      }).success,
+      false,
+    );
+  }
+
+  for (const forbidden of [
+    { sourceInstanceId: "source-1" },
+    { connectionId: "connection-1" },
+    { checkpoint: "opaque" },
+    { processorDiagnostics: [] },
+    { quarantine: null },
+    { paymentMethod: "card" },
+    { protectedProviderData: {} },
+  ]) {
+    assert.equal(
+      publicRepackDetailSchema.safeParse({ ...base, ...forbidden }).success,
+      false,
+    );
+  }
 });

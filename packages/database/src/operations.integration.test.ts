@@ -128,7 +128,7 @@ async function createHarness() {
     payload: {
       catalog: [accepted, mappedFailure],
       pulls: [],
-      sales: [],
+      trades: [],
       next_cursor: "cursor-1",
       has_more: true,
     },
@@ -179,7 +179,7 @@ async function createHarness() {
     payload: {
       catalog: [invalidEnvelope],
       pulls: [],
-      sales: [],
+      trades: [],
       next_cursor: "cursor-2",
       has_more: false,
     },

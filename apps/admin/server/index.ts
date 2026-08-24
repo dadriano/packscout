@@ -5,7 +5,10 @@ import dotenv from "dotenv";
 import express from "express";
 import type { ViteDevServer } from "vite";
 import { RECOMPUTATION_BACKLOG_DEPTH_DEFAULT } from "@packscout/contracts";
-import { MachineryAlertService } from "@packscout/services";
+import {
+  MachineryAlertService,
+  resolveEmailLinkTokenSecret,
+} from "@packscout/services";
 import {
   createPrismaClientLifecycle,
   DatabaseLoginAttemptLimiter,
@@ -25,10 +28,17 @@ import {
   type MachineryAlertLoop,
 } from "./machinery-alert-runtime.ts";
 import { createAdminOperationalRuntime } from "./operational-runtime.ts";
+import { createBetaAllowlistAuditSink } from "./beta-allowlist-audit.ts";
+import { createBetaAllowlistDirectoryClient } from "./beta-allowlist-directory.ts";
 import { createProductUserAuditSink } from "./product-user-audit.ts";
 import { createProductUserDirectoryReader } from "./product-user-directory.ts";
 import { createProviderAdminRuntime } from "./provider-runtime.ts";
+import { createAdminProviderSourceRuntime } from "./provider-source-runtime.ts";
 import { createAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
+import { createAdminMessageDeliveryRuntime } from "./message-delivery-runtime.ts";
+import { createAdminPasswordResetRuntime } from "./password-reset-runtime.ts";
+import { createAdminOperatorInvitationRuntime } from "./operator-invitation-runtime.ts";
+import { createAdminAccessDecisionNoticeRuntime } from "./access-decision-notice-runtime.ts";
 import {
   adminDevelopmentAllowedOrigins,
   adminDevelopmentServerNetwork,
@@ -40,6 +50,7 @@ import {
   readPositiveCount,
   readPositiveDuration,
   readRequiredSecret,
+  readSourceAdministrationSettings,
   readTrustedProxies,
   serviceHttpOrigin,
 } from "./runtime-config.ts";
@@ -94,6 +105,16 @@ const providerActorKey = readBase64Key(
   process.env.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
   "PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64",
 );
+/**
+ * Absent as a pair, the source-connection keys leave source administration
+ * unconfigured rather than stopping the admin: every other workflow stays
+ * available and the source routes answer with a stable error. A partially set
+ * or invalid pair still fails startup.
+ */
+const sourceAdministration = readSourceAdministrationSettings({
+  key: process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64,
+  keyVersion: process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION,
+});
 const allowedOrigins = readAllowedOrigins(
   process.env.PACKSCOUT_ADMIN_ALLOWED_ORIGINS,
   isDevelopment ? adminDevelopmentAllowedOrigins(host, port) : [],
@@ -128,6 +149,13 @@ const productUserDirectoryConfig = readProductUserDirectoryConfig({
   baseUrl: process.env.PACKSCOUT_ADMIN_DIRECTORY_URL,
   token: process.env.PACKSCOUT_ADMIN_DIRECTORY_TOKEN,
 });
+/**
+ * Keys the one-time email-link verifier HMAC (messaging/008) behind the
+ * operator password-reset flow. Absent configuration leaves that flow
+ * unmounted rather than stopping the admin; a present-but-weak value fails
+ * startup closed when the runtime derives its keys.
+ */
+const emailLinkTokenSecret = resolveEmailLinkTokenSecret(process.env);
 
 function waitForListening(server: Server): Promise<void> {
   if (server.listening) return Promise.resolve();
@@ -165,6 +193,7 @@ try {
   const operational = createAdminOperationalRuntime({
     database,
     actorPseudonymKey: providerActorKey,
+    alertEmail: { env: process.env },
   });
   const auth = await createAdminAuthRuntime({
     repository: new PrismaAuthRepository(database),
@@ -180,6 +209,17 @@ try {
     production: !isDevelopment,
     allowedOrigins,
   });
+  const providerSourceRuntime = sourceAdministration
+    ? createAdminProviderSourceRuntime({
+      database,
+      connectionConfigurationKey:
+        sourceAdministration.connectionConfigurationKey,
+      connectionConfigurationKeyVersion:
+        sourceAdministration.connectionConfigurationKeyVersion,
+      actorPseudonymKey: providerActorKey,
+      environment: isDevelopment ? "local" : "production",
+    })
+    : undefined;
   const app = createAdminApp({
     trustedProxies,
     auth,
@@ -194,9 +234,6 @@ try {
     importOperations: createAdminImportOperationsRuntime({
       database,
       actorPseudonymKey: providerActorKey,
-      credentialKey: providerCredentialKey,
-      environment: isDevelopment ? "local" : "production",
-      operational,
     }),
     backgroundWork: createAdminBackgroundWorkRuntime({
       database,
@@ -212,9 +249,55 @@ try {
         database,
         actorPseudonymKey: providerActorKey,
       }),
+      // A committed approve or decline enqueues the person's notice into the
+      // same durable outbox the worker drains; the verified address is read
+      // back through the same directory integration.
+      decisionNotice: createAdminAccessDecisionNoticeRuntime({
+        database,
+        directory: createProductUserDirectoryReader({
+          config: productUserDirectoryConfig,
+        }),
+      }),
+    },
+    // The allowlist lives with the product backend and is reached through the
+    // same integration and credential as the directory reads above.
+    betaAllowlist: {
+      directory: createBetaAllowlistDirectoryClient({
+        config: productUserDirectoryConfig,
+      }),
+      audit: createBetaAllowlistAuditSink({
+        database,
+        actorPseudonymKey: providerActorKey,
+      }),
     },
     operationalAlerts: { alerts: operational.alerts },
     operationalHealth: { health: operational.health },
+    providerSources: providerSourceRuntime,
+    providerSourceOperations: providerSourceRuntime,
+    sourceAdministrationUnconfigured: providerSourceRuntime === undefined,
+    // The delivery history reads the same durable outbox the worker drains.
+    messages: createAdminMessageDeliveryRuntime({
+      database,
+      actorPseudonymKey: providerActorKey,
+    }),
+    // Self-service operator password reset over the one-time link mechanism.
+    passwordReset:
+      emailLinkTokenSecret === null
+        ? undefined
+        : createAdminPasswordResetRuntime({
+            database,
+            authService: auth.service,
+            secret: emailLinkTokenSecret,
+          }),
+    // Operator provisioning by invitation over the same link mechanism.
+    operatorInvitations:
+      emailLinkTokenSecret === null
+        ? undefined
+        : createAdminOperatorInvitationRuntime({
+            database,
+            authService: auth.service,
+            secret: emailLinkTokenSecret,
+          }),
   });
 
   if (isDevelopment) {
@@ -277,6 +360,21 @@ try {
     // Names the missing capability, never any configuration value.
     console.log(
       "Packscout Admin: the product-user directory integration is not configured.",
+    );
+  }
+  if (sourceAdministration === null) {
+    // Names the missing capability, never any configuration value.
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        event: "admin_source_administration_unconfigured",
+      }),
+    );
+  }
+  if (emailLinkTokenSecret === null) {
+    // Names the missing capability, never any configuration value.
+    console.log(
+      "Packscout Admin: the operator password reset flow is not configured.",
     );
   }
 } catch (error) {

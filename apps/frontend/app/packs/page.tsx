@@ -1,8 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { DashboardDisclaimer } from "@/components/shell/DashboardDisclaimer";
 import { DashboardPageHeader } from "@/components/shell/DashboardPageHeader";
 import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
+import { ShellSurfaceReporter } from "@/components/shell/ShellSurface.client";
+import {
+  gatedSurfaceRobots,
+  resolveGatedRoute,
+  resolveVisitorAccess,
+} from "@/lib/access-gate.server";
 import { CatalogRouteRecovery, EmptyCatalog } from "@/components/catalog-state";
 import { parseAllRepacksRouteQuery, type NextSearchParams } from "@/lib/catalog-route-state.server";
 import { parseCatalogViewLayout } from "@/lib/catalog-query-state.client";
@@ -11,18 +18,27 @@ import { readPublicRepacks } from "@/lib/public-repacks.server";
 import { dataReleaseStatusFromMetadata } from "@/lib/public-release-status";
 import { AllRepacksClient } from "./AllRepacksClient.client";
 
-export const metadata: Metadata = {
-  title: "All Repacks",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    title: "All Repacks",
+    robots: gatedSurfaceRobots(await resolveVisitorAccess()),
+  };
+}
 
 export default async function AllRepacksPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<NextSearchParams> }>) {
+  // The access decision comes first (closed-beta-access/007): no parsing and
+  // no catalog read happens for a visitor the beta does not admit.
+  const route = resolveGatedRoute(await resolveVisitorAccess());
+  if (route.kind === "redirect") redirect(route.destination);
+
   const resolvedSearchParams = await searchParams;
   const parsed = parseAllRepacksRouteQuery(resolvedSearchParams);
   if (!parsed.ok) {
     return (
       <>
+        <ShellSurfaceReporter mode="product" />
         <DataReleaseStatusReporter status={{ state: "unavailable" }} />
         <DashboardPageHeader activeView="all-repacks" />
         <section className="route-placeholder" aria-labelledby="invalid-catalog-title">
@@ -41,6 +57,7 @@ export default async function AllRepacksPage({
   if (!result.ok) {
     return (
       <>
+        <ShellSurfaceReporter mode="product" />
         <DataReleaseStatusReporter status={{ state: "unavailable" }} />
         <DashboardPageHeader activeView="all-repacks" />
         <CatalogRouteRecovery />
@@ -58,6 +75,7 @@ export default async function AllRepacksPage({
 
   return (
     <>
+      <ShellSurfaceReporter mode="product" />
       <DataReleaseStatusReporter status={status} />
       <DashboardPageHeader
         activeView="all-repacks"

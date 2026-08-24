@@ -6,7 +6,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import {
   isSuspendedAccountRefusal,
@@ -18,6 +18,7 @@ import {
   SavedItemsContext,
   type SavedItemsValue,
 } from "./SavedItemsContext.client";
+import { useTolerantQuery } from "./tolerant-query.client";
 import {
   presentSavedItemMutationMessage,
   type SavedItemKind,
@@ -33,19 +34,28 @@ export function AuthenticatedSavedItemsProvider({
 }: Readonly<{ children: ReactNode }>) {
   const auth = usePackScoutAuth();
   const signedIn = auth.status === "signed_in";
-  const savedItemIds = useQuery(
+  /**
+   * Tolerant on purpose: while the closed beta holds this account, the
+   * saved-items read is refused by the capability gate
+   * (closed-beta-access/004), and a held visitor's whole session — including
+   * the holding surface itself (closed-beta-access/008) — lives under this
+   * provider. A refusal reads as "no saved items available", never as a
+   * crash, and the live subscription starts answering by itself the moment
+   * the account is admitted.
+   */
+  const savedItemIds = useTolerantQuery(
     api.savedItems.getSavedItemIds,
     signedIn ? {} : "skip",
-  );
+  ).data;
   /**
    * The account's own standing, read once the session is established and kept
    * live afterwards. This is presentation only — the backend re-reads the
    * authoritative record on every write regardless of what is held here.
    */
-  const accountStanding = useQuery(
+  const accountStanding = useTolerantQuery(
     api.productUsers.getMyStanding,
     signedIn ? {} : "skip",
-  );
+  ).data;
   /**
    * Set when a write comes back refused as suspended, which covers the moment
    * between a suspension landing and the standing read answering. A later

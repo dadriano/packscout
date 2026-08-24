@@ -149,7 +149,7 @@ test("two-vendor fixture satisfies strict ordering, origins, batching, and prote
   assert.equal(soldOut.actions.repackLink, undefined);
 });
 
-test("disabled listings are absent and unavailable values use bounded reasons", async () => {
+test("unavailable listings remain discoverable and unavailable values use bounded reasons", async () => {
   const unavailable = changePack(fixtureSnapshot(), "alpha", {
     priceValueMinor: null,
     priceCurrency: null,
@@ -174,18 +174,62 @@ test("disabled listings are absent and unavailable values use bounded reasons", 
     assert.equal(alpha.evEstimates.packScout.metrics, null);
   }
 
-  const disabled = changePack(fixtureSnapshot(), "alpha", { availability: "disabled" });
-  const disabledPlan = await assembler(fixtureCheckpoint(), disabled).assemble({
+  const unavailablePack = changePack(fixtureSnapshot(), "alpha", {
+    availability: "unavailable",
+  });
+  const unavailablePlan = await assembler(
+    fixtureCheckpoint(),
+    unavailablePack,
+  ).assemble({
     requestedWatermark: 20n,
     baseline: null,
     trigger: "settled_change",
   });
-  assert.equal(disabledPlan.classification, "publish");
-  if (disabledPlan.classification === "publish") {
-    assert.deepEqual(
-      disabledPlan.manifest.repacks.map(({ publicRepackId }) => publicRepackId),
-      [fixtureIds.betaRepack],
+  assert.equal(unavailablePlan.classification, "publish");
+  if (unavailablePlan.classification === "publish") {
+    const projected = unavailablePlan.manifest.repacks.find(
+      ({ publicRepackId }) => publicRepackId === fixtureIds.alphaRepack,
     );
+    assert.equal(projected?.availability, "unavailable");
+    assert.deepEqual(projected?.actions, {});
+    assert.deepEqual(projected?.actionAvailability, {
+      promo: false,
+      repackLink: false,
+    });
+  }
+});
+
+test("release assembly translates legacy pack availability and still blocks unknown values", async () => {
+  for (const [availability, translated] of [
+    ["active", "available"],
+    ["disabled", "unavailable"],
+  ] as const) {
+    const legacy = changePack(fixtureSnapshot(), "alpha", { availability });
+    const plan = await assembler(fixtureCheckpoint(), legacy).assemble({
+      requestedWatermark: 20n,
+      baseline: null,
+      trigger: "settled_change",
+    });
+    assert.equal(plan.classification, "publish");
+    if (plan.classification === "publish") {
+      const projected = plan.manifest.repacks.find(({ publicRepackId }) =>
+        publicRepackId === fixtureIds.alphaRepack,
+      );
+      assert.equal(projected?.availability, translated);
+    }
+  }
+
+  const invalid = changePack(fixtureSnapshot(), "alpha", {
+    availability: "retired",
+  });
+  const plan = await assembler(fixtureCheckpoint(), invalid).assemble({
+    requestedWatermark: 20n,
+    baseline: null,
+    trigger: "settled_change",
+  });
+  assert.equal(plan.classification, "blocked");
+  if (plan.classification === "blocked") {
+    assert.equal(plan.reason, "CANONICAL_PROJECTION_INVALID");
   }
 });
 

@@ -4,7 +4,7 @@ import {
   quarantineIdSchema,
   quarantineListQuerySchema,
   quarantineRetryBulkRequestSchema,
-  saleEnvelopeV1Schema,
+  tradeEnvelopeV1Schema,
   type CatalogEnvelopeV1,
   type NormalizedQuarantineListQuery,
   type ProviderFeedEnvelopeV1,
@@ -18,7 +18,7 @@ import {
   type QuarantineRetryBulkRequest,
   type QuarantineRetryOutcome,
   type QuarantineServiceErrorCode,
-  type SaleEnvelopeV1,
+  type TradeEnvelopeV1,
 } from "@packscout/contracts";
 import {
   ProviderAdapterRegistryError,
@@ -328,7 +328,7 @@ function retryPage(
     catalog:
       recordKind === "catalog" ? [rawRecord as CatalogEnvelopeV1] : [],
     pulls: recordKind === "pull" ? [rawRecord as PullEnvelopeV1] : [],
-    sales: recordKind === "sale" ? [rawRecord as SaleEnvelopeV1] : [],
+    trades: recordKind === "trade" ? [rawRecord as TradeEnvelopeV1] : [],
     next_cursor: "quarantine-retry",
     has_more: false,
   };
@@ -506,8 +506,8 @@ export class QuarantineService {
           ? catalogEnvelopeV1Schema
           : evidence.recordKind === "pull"
             ? pullEnvelopeV1Schema
-            : evidence.recordKind === "sale"
-              ? saleEnvelopeV1Schema
+            : evidence.recordKind === "trade"
+              ? tradeEnvelopeV1Schema
               : null;
     if (!schema) {
       return {
@@ -589,7 +589,7 @@ export class QuarantineService {
         recordIndexes: {
           catalog: source.recordKind === "catalog" ? [source.recordIndex] : [],
           pulls: source.recordKind === "pull" ? [source.recordIndex] : [],
-          sales: source.recordKind === "sale" ? [source.recordIndex] : [],
+          trades: source.recordKind === "trade" ? [source.recordIndex] : [],
         },
       });
     } catch {

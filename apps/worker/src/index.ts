@@ -53,6 +53,18 @@ async function runProviderWorker(): Promise<void> {
     process.env,
     fallbackWorkerId(),
   );
+  if (configuration.sourceSupervisor === undefined) {
+    // None of the PACKSCOUT_SOURCE_* settings are set, so the supervisor lane
+    // stays off; a partially set group fails configuration above instead.
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        event: "provider_source_supervisor_disabled",
+        workerId: configuration.workerId,
+        reason: "source_supervisor_environment_unset",
+      }),
+    );
+  }
   const promotionConfiguration = readPromotionV2WorkerConfiguration(process.env);
   const heatConfiguration = readHeatPromotionWorkerConfiguration(
     process.env,

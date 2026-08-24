@@ -13,6 +13,14 @@ const configuration = Object.freeze({
   heartbeatIntervalMilliseconds: 15_000,
   importRunLeaseMilliseconds: 120_000,
   maximumClaimsPerCycle: 5,
+  messageOutboxBackoffBaseMilliseconds: 1_000,
+  messageOutboxBackoffCapMilliseconds: 60_000,
+  messageOutboxBatchSize: 10,
+  messageOutboxLeaseMilliseconds: 30_000,
+  messageOutboxMaximumAttempts: 4,
+  messageOutboxPerRecipientLimit: 3,
+  messageOutboxPollMilliseconds: 1_000,
+  messageOutboxRetentionDays: 30,
   pollIntervalMilliseconds: 100,
   presenceRetentionDays: 14,
   presenceStaleAfterMilliseconds: 60_000,
@@ -21,6 +29,9 @@ const configuration = Object.freeze({
   retentionOrganizationDiscoveryLimit: 10,
   runHeartbeatStaleAfterMilliseconds: 300_000,
   scheduleClaimLeaseMilliseconds: 30_000,
+  welcomeDispatchBatchSize: 10,
+  welcomeDispatchLeaseMilliseconds: 300_000,
+  welcomeDispatchPollMilliseconds: 60_000,
   workerHost: "composition-host",
   workerId: "prisma-composition-worker",
   workerVersion: "0.0.0-test",
@@ -33,9 +44,45 @@ test("worker composition runs an idle cycle against one Prisma client", async ()
     const runtime = createProviderWorkerRuntime({
       configuration,
       database: harness.client,
+      // A hermetic environment: no delivery mode, credentials, or origins
+      // leak in from the developer machine running this test.
+      env: {},
       logger: { write: (event) => void events.push(event) },
       observability: { metric() {}, log() {} },
     });
+
+    assert.deepEqual(runtime.sourceImports.sourceAdapters.keys(), [
+      "dataforrest-events-v1",
+    ]);
+    assert.deepEqual(
+      runtime.sourceImports.mappers.descriptors().map((descriptor) => ({
+        provider: descriptor.provider,
+        mapperKey: descriptor.mapperKey,
+        mapperVersion: descriptor.mapperVersion,
+      })),
+      [
+        {
+          provider: "courtyard",
+          mapperKey: "courtyard-provider-observation",
+          mapperVersion: "1",
+        },
+        {
+          provider: "collector_crypt",
+          mapperKey: "collector-crypt-provider-observation",
+          mapperVersion: "1",
+        },
+        {
+          provider: "phygitals",
+          mapperKey: "phygitals-provider-observation",
+          mapperVersion: "1",
+        },
+        {
+          provider: "clutchpacks",
+          mapperKey: "clutchpacks-provider-observation",
+          mapperVersion: "1",
+        },
+      ],
+    );
 
     const result = await runtime.runCycle();
 
@@ -51,6 +98,7 @@ test("worker composition runs an idle cycle against one Prisma client", async ()
       [
         "provider_estimated_ev_cycle_finished",
         "provider_retention_cycle_finished",
+        "provider_message_outbox_cycle_finished",
       ],
     );
   } finally {

@@ -54,17 +54,17 @@ Coverage: Automated — independent Prisma clients on real PostgreSQL cover sche
 Given an import run starts at a durable cursor and `<ownership>`
 When `<commit attempt>`
 Then `<persistence outcome>`
-And the run counters and cursor `<checkpoint outcome>`
+And the run counters and cursor `<cursor outcome>`
 
 Examples:
 
-| ownership | commit attempt | persistence outcome | checkpoint outcome |
+| ownership | commit attempt | persistence outcome | cursor outcome |
 |---|---|---|---|
 | belongs to the caller | a valid mixed page is committed | evidence, observations, outcomes, canonical history, quarantines, relationships, and EV work become visible together | advance exactly once |
 | belongs to the caller | any persistence step fails | none of the page writes remain visible | remain unchanged |
 | is missing, expired, or foreign | the page is submitted | no page write becomes visible and ownership loss is reported | remain unchanged |
 
-Coverage: Automated — real PostgreSQL integration tests cover valid atomic commits, rollback, and missing, stale, or foreign ownership with unchanged checkpoints.
+Coverage: Automated — real PostgreSQL integration tests cover valid atomic commits, rollback, and missing, stale, or foreign ownership with unchanged cursors.
 
 ## Scenario Outline: Replays preserve one truthful history
 

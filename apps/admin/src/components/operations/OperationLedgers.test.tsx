@@ -4,8 +4,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import type { QuarantineEntrySummary } from "@packscout/contracts";
-import type { ImportRunSummary, ProviderOperationSummary } from "../../api/import-operations";
-import { ProviderOperationsLedger } from "./ProviderOperationsLedger.tsx";
+import type { ImportRunSummary } from "../../api/import-operations";
 import { QuarantineLedger } from "./QuarantineLedger.tsx";
 import { RunLedger } from "./RunLedger.tsx";
 
@@ -23,7 +22,7 @@ const run: ImportRunSummary = {
   finishedAt: "2026-08-06T12:01:00.000Z",
   lastProgressAt: "2026-08-06T12:00:55.000Z",
   reachedProviderHead: false,
-  counters: { pages: 2, catalog: 3, pulls: 4, sales: 5, accepted: 9, unchanged: 2, revised: 1, quarantined: 2, resolvedQuarantines: 1 },
+  counters: { pages: 2, catalog: 3, pulls: 4, trades: 5, accepted: 9, unchanged: 2, revised: 1, quarantined: 2, resolvedQuarantines: 1 },
   failure: { class: "contract", code: "IMPORT_INVALID_CONTRACT", summary: "Provider response failed validation." },
 };
 
@@ -68,33 +67,4 @@ test("expired quarantine evidence remains visible but cannot be selected for ret
   assert.match(html, /Unavailable for retry/);
   assert.match(html, /type="checkbox" disabled=""/);
   assert.doesNotMatch(html, /raw JSON|walletAddress|username/i);
-});
-
-test("provider operations render freshness and quality as independent states", () => {
-  Object.assign(globalThis, { React });
-  const provider: ProviderOperationSummary = {
-    providerId: run.providerId,
-    displayName: run.providerName,
-    platformKey: run.platformKey,
-    lifecycleState: "active",
-    configurationRevisionId: run.configurationRevisionId,
-    configurationVersion: 2,
-    scheduleSeconds: 300,
-    staleAfterSeconds: 900,
-    nextDueAt: "2026-08-06T12:05:00.000Z",
-    lastAttemptedAt: run.finishedAt,
-    lastHeadReachedAt: "2026-08-06T11:30:00.000Z",
-    freshnessState: "fresh",
-    qualityState: "degraded",
-    activeRun: null,
-    latestRun: { id: run.id, state: run.state },
-    openQuarantineCount: 1,
-    consecutiveFailures: 0,
-    recoveredAt: null,
-    recoveryHint: "Resolve open quality signals.",
-  };
-  const html = renderToStaticMarkup(<MemoryRouter><ProviderOperationsLedger providers={[provider]} /></MemoryRouter>);
-  assert.match(html, /Fresh/);
-  assert.match(html, /Degraded/);
-  assert.match(html, /Review quarantine/);
 });

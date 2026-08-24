@@ -20,6 +20,10 @@ import {
 } from "@packscout/contracts";
 import { v } from "convex/values";
 import { query, type QueryCtx } from "./_generated/server";
+import {
+  catalogReadAuthorized,
+  catalogReadTokenArg,
+} from "./publicCatalogReadAccess";
 import { resolvePublicCatalogPagination } from "./publicCatalogPagination";
 import {
   loadActivePublicCatalogManifest,
@@ -27,8 +31,10 @@ import {
 } from "./publicCatalogManifestReadModel";
 import { attachHeatToCatalogManifestDetails } from "./publicCatalogHeatReadModel";
 import {
+  availableRepackRows,
   contextualFacets,
   dashboardKpis,
+  deterministicVisibleSelection,
   matchingRepackRows,
   repackSummaries,
   selectionsAreKnown,
@@ -71,8 +77,11 @@ function compareText(left: string, right: string): number {
 }
 
 export const getPublicShellStatus = query({
-  args: {},
-  handler: async (ctx): Promise<GetPublicShellStatusResult> => {
+  args: { ...catalogReadTokenArg },
+  handler: async (ctx, args): Promise<GetPublicShellStatusResult> => {
+    if (!(await catalogReadAuthorized(ctx, args.catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     const active = await loadActivePublicCatalogManifest(ctx);
     return active === null
       ? publicReadError("RELEASE_UNAVAILABLE")
@@ -85,9 +94,13 @@ export const getDashboardBundle = query({
     filters: v.optional(v.any()),
     selectedPublicRepackId: v.optional(v.any()),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<GetDashboardBundleResult> => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = parseDashboardRequest(directArgs(queryArgs));
     if (!request.ok) return publicReadError("INVALID_QUERY");
@@ -108,13 +121,11 @@ export const getDashboardBundle = query({
       "",
       active.catalog.categoryByPublicId,
     );
-    // Opportunities are actionable buys, so they stay active-only even when the
-    // caller opted into seeing sold-out repacks in the counts and summaries.
-    const opportunityRows = [...matchingRows]
+    // Opportunities are actionable buys, so every non-available state stays
+    // visible only in the complete catalog and out of current rankings.
+    const opportunityRows = availableRepackRows(matchingRows)
       .filter(
-        (row) =>
-          row.availability === "active" &&
-          row.packScoutEvDollarsMinor !== null,
+        (row) => row.packScoutEvDollarsMinor !== null,
       )
       .sort((left, right) =>
         compareRepackRows(left, right, {
@@ -136,11 +147,10 @@ export const getDashboardBundle = query({
       baseDetails,
       currentTime,
     );
-    const selectedRepack =
-      details.find(
-        (detail) =>
-          detail.publicRepackId === request.value.selectedPublicRepackId,
-      ) ?? details[0] ?? null;
+    const selectedRepack = deterministicVisibleSelection(
+      details,
+      request.value.selectedPublicRepackId,
+    );
 
     const data: DashboardBundle = {
       metadata: active.metadata,
@@ -176,9 +186,13 @@ export const listPublicRepacks = query({
     desiredPublicCollectibleId: v.optional(v.any()),
     selectedPublicRepackId: v.optional(v.any()),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<ListPublicRepacksResult> => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = parseRepackListRequest(directArgs(queryArgs));
     if (!request.ok) return publicReadError("INVALID_QUERY");
@@ -259,11 +273,10 @@ export const listPublicRepacks = query({
       baseDetails,
       currentTime,
     );
-    const selectedRepack =
-      details.find(
-        (detail) =>
-          detail.publicRepackId === request.value.selectedPublicRepackId,
-      ) ?? details[0] ?? null;
+    const selectedRepack = deterministicVisibleSelection(
+      details,
+      request.value.selectedPublicRepackId,
+    );
     const pageEnd = pagination.offset + pageRows.length;
     const nextCursor =
       pageEnd < matchingRows.length
@@ -327,9 +340,13 @@ export const getPublicRepack = query({
     publicRepackId: v.any(),
     publicReleaseId: v.any(),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<GetPublicRepackResult> => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = getPublicRepackInputSchema.safeParse(queryArgs);
     if (!request.success) return publicReadError("INVALID_QUERY");
@@ -366,10 +383,15 @@ export const searchPublicCollectibles = query({
     search: v.any(),
     collectibleTypes: v.optional(v.any()),
     limit: v.optional(v.any()),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<SearchPublicCollectiblesResult> => {
+    const { catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     const request = searchPublicCollectiblesInputSchema.safeParse(
-      directArgs(args),
+      directArgs(queryArgs),
     );
     if (!request.success) return publicReadError("INVALID_QUERY");
     const active = await loadActivePublicCatalogManifest(ctx);
@@ -454,7 +476,7 @@ async function desiredCollectibleMatches(
     collectible,
   );
   if (desiredChases === null) return null;
-  const matchingRows = rows.filter(
+  const matchingRows = availableRepackRows(rows).filter(
     (row) =>
       desiredChases.has(row.publicRepackId) &&
       rowMatchesFilters(row, input.filters, {
@@ -493,9 +515,13 @@ export const findRepacksByDesiredCollectible = query({
     direction: v.optional(v.any()),
     limit: v.optional(v.any()),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<FindRepacksByDesiredCollectibleResult> => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = findRepacksByDesiredCollectibleInputSchema.safeParse(
       directArgs(queryArgs),

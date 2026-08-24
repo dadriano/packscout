@@ -1,0 +1,65 @@
+# Task: Route Operational Alerts to Operators by Email
+
+**ID:** messaging/005
+**Depends on:** messaging/003, messaging/004
+**Blocks:** messaging/012
+**Estimated scope:** medium
+**Status:** done
+
+## Objective
+
+Operational alerts reach the people who can act on them: a run failure, a stale provider, or a dead worker produces email to the configured operators, throttled and severity-scoped so the signal survives.
+
+## Context
+
+PackScout's pipeline already detects the problems worth knowing about and publishes them through an abstract notification boundary, where they are persisted for the admin's alerts area. Nothing leaves the building — an operator learns that the pipeline died by opening the admin and looking. External delivery was deliberately deferred with the note that the abstract boundary stands, waiting for a delivery layer. This is that delivery.
+
+The boundary is already a composite of publishers, so email arrives as one more publisher rather than as a change to any producer. That matters: every existing alert source keeps working unchanged, and email can be switched off without touching pipeline code.
+
+The failure mode to design against is not missing an alert — it is drowning in them. A provider that flaps every ninety seconds must not produce a hundred emails, and a critical incident must not be buried under informational noise. The alert layer already deduplicates and tracks occurrence counts and recovery, so the routing decision has real state to work with rather than a raw event stream.
+
+## Requirements
+
+- Email delivery attaches as an additional publisher on the existing notification boundary. No alert producer changes, and the durable admin persistence keeps working exactly as it does now.
+- A publisher failure never breaks alert persistence or the producing operation: if email cannot be enqueued, the alert is still recorded and the pipeline work still completes.
+- Severity routing is configurable: which severities produce email is a server-side setting with a sensible default that sends critical and warning alerts and leaves informational ones to the admin.
+- Recipients are administrator-configurable rather than hard-coded, resolved at send time so a departed operator stops receiving mail. When no recipient is configured, alerts are persisted as they are today and the absence is visible to operators rather than silent.
+- Flood control is explicit: repeat occurrences of an already-notified alert do not produce a new message within a configured window, and a summarized count is used instead of one message per occurrence. The existing deduplication and occurrence tracking is the input to this decision, not a parallel mechanism.
+- Recovery is communicated: when an alert resolves, the operators who were told about it learn that it recovered, so nobody chases a fixed problem.
+- Each message states what happened, which provider or run it concerns, how many times it has occurred, when it started, and where to look in the admin — using only the alert's already-safe title, summary, and evidence codes. No credential, no raw provider error, no payload content.
+- Messages are enqueued through messaging/004, never delivered inline, so an alert storm cannot slow or block pipeline work and a provider outage does not lose alerts.
+- Enqueue volume per alert is bounded, so a pathological alert source cannot fill the queue.
+- Email routing is independently switchable off, leaving all existing alert behavior intact.
+
+## User-Facing Behavior
+
+An operator gets an email when something breaks that they can do something about: what failed, how long it has been failing, how many times, and a link into the admin's alert detail. A flapping provider produces one message and then a periodic summary, not a stream. When it recovers, they get a short recovery note. Informational events stay in the admin where they belong.
+
+## Interface Contract
+
+- An email notification publisher implementing the existing notification publisher interface, composed alongside the durable admin publisher; its result never changes the composite's overall outcome for producers.
+- It renders through the operational-alert message kind in messaging/003 and enqueues through messaging/004, using an idempotency key derived from the alert's deduplication identity and notification window so repeat occurrences converge.
+- Severity thresholds, recipients, and the flood-control window are server-side configuration.
+- Recovery notices are keyed to the alert's existing recovery identity so they reach exactly the recipients who were notified.
+
+## Acceptance Criteria
+
+- [x] Alerts at the configured severities produce enqueued messages; alerts below them do not, and all alerts persist to the admin exactly as before.
+- [x] A failure to enqueue leaves alert persistence and the producing pipeline operation unaffected.
+- [x] Repeat occurrences within the flood-control window produce no new message, and a summarized occurrence count is delivered instead of per-occurrence messages.
+- [x] Recovery of a notified alert delivers a recovery notice to the operators who were notified.
+- [x] With no recipient configured, alerts persist as today and the missing configuration is visible to operators rather than silent.
+- [x] Message content carries only the alert's safe title, summary, and evidence codes — no credential, raw provider error, or payload content.
+- [x] Turning email routing off restores exactly the current behavior.
+
+## Verification
+
+Tests prove severity filtering, unchanged persistence when email publishing fails, flood-control suppression and summarized counts across repeat occurrences, recovery notice delivery to the notified recipient set, the unconfigured-recipient path, safe message content, and the off switch. Enqueue is asserted rather than delivery, with messaging/004 covering delivery itself. The workspace typecheck and the services test command exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: `.tasks/messaging/_index.md`; messaging/001 (delivery boundary — untouched), messaging/003 (the `operational_alert` / `operational_alert_recovery` renderers and their exact inputs — untouched), messaging/004 (the durable outbox and its idempotent enqueue — untouched); the boundary files `packages/services/src/operational-events.ts`, `packages/contracts/src/operations.ts`, and `packages/database/src/operational-alert-repository.ts` — all three untouched.
+- Alignment: `AlertEmailNotificationPublisher` (`packages/services/src/alert-email/publisher.ts`) implements the existing `NotificationPublisher` interface and composes as an `additionalPublishers` member behind the durable admin publisher in both runtimes that publish alerts — the worker (`apps/worker/src/provider-worker-operational-runtime.ts`, wired in `provider-worker-composition.ts` onto the same outbox repository the drain serves) and the admin server (`apps/admin/server/operational-runtime.ts`, wired in `index.ts`), which must carry it because the machinery cycle — including the dead-fleet condition no worker can report — publishes from there. Its `publish` never rejects and always resolves an inert non-failed result, so the composite's aggregation keeps the durable publisher's outcome authoritative for every producer; enqueue rejections, reader outages, and thrown enqueues become bounded observability codes, never failures. Severity routing, recipients, and the flood window are server-side settings (`settings.ts`) resolved from the environment at publish time — a removed operator stops receiving mail on the next alert — defaulting to critical+warning with informational events left to the admin. Flood control reads the durable alert state itself: the publisher runs after the durable publisher, reads the alert row for the event's dedupe key through the new read-only `PrismaAlertEmailReadRepository` (`packages/database/src/alert-email-read-repository.ts`), and derives the outbox idempotency key from the alert identity, the configured window bucket, and the recipient digest, so every repeat occurrence inside a window converges on the already-recorded intent (messaging/004's unique idempotency key) and the first occurrence past the boundary sends one message carrying the durable row's accumulated occurrence count, first-seen time, and admin alert link. Recovery events route by the alert's recovery identity: only alerts the resolving event actually closed (matched by `latest_event_id` and resolved state), and only those last raised at a notified severity, produce recovery notices keyed `opsrecovery:{alertId}:{eventId}:{recipient digest}`, to the recipients resolved at send time. Message inputs carry exactly the event's already-safe title, summary, and stable evidence codes (`failureCode`/`reasonCode`/`outcome` only — no measures, watermarks, or payload content) plus the durable row's count, first-seen instant, and alert id for the catalogue's admin link; rendering itself stays in messaging/003 at drain time. Everything is enqueue-only through `EmailMessageOutboxService` under source `operational_alerts` (the per-source volume bound), with per-alert volume bounded to one intent per recipient per window (recipients capped at 16) and recovery fan-out capped per resolving event. `PACKSCOUT_ALERT_EMAIL_ENABLED=0` restores exactly current behavior: no reads, no enqueues, no logs. With no recipient configured, alerts persist unchanged and each qualifying event logs the stable warning `ALERT_EMAIL_RECIPIENTS_UNCONFIGURED` through the existing `OperationalObservability` notification channel both runtimes already ship to operator-visible sinks.
+- Configuration introduced (all optional): `PACKSCOUT_ALERT_EMAIL_ENABLED` (default enabled; `0`/`false`/`off`/`no` disables; unrecognized values stay enabled and report a problem code so a typo cannot silence alerting), `PACKSCOUT_ALERT_EMAIL_RECIPIENTS` (comma-separated, validated, de-duplicated, capped at 16; default unset — no email, visibly), `PACKSCOUT_ALERT_EMAIL_SEVERITIES` (comma-separated subset of `info,warning,critical`; default `warning,critical`; an unreadable value falls back whole to the default with a problem code), `PACKSCOUT_ALERT_EMAIL_WINDOW_MS` (default 21600000 — six hours; bounded 60000..604800000).
+- Divergences: (1) The recovery-kind classification is duplicated from the durable repository, which keeps its set private and whose interface may not change; it is derived from the contract's kind vocabulary and a pinned test fails when a new kind lands in neither bucket deliberately. (2) "The operators who were notified" resolves to the currently configured recipient list at send time — the spec's own departed-operator requirement makes the current list, not a persisted per-alert roster, the recipient authority; the raised-severity gate keeps never-notified alerts from producing recovery notices. (3) Occurrence windows are epoch-aligned buckets of the event time carried entirely by the outbox idempotency key — no last-notified-at state exists anywhere; at a bucket boundary two messages can arrive closer than one window once, and at most one message per alert per window holds always. (4) The recovery notice reports the durable occurrence count minus the resolving event's own increment, clamped to one, so "occurrences while active" is what operators read. (5) The missing-recipient signal reuses the operational log channel (`event: "notification"`, level warning, stable code) rather than a new surface, because the observability unions in the untouchable boundary are closed. (6) One new read-only repository file was added in `packages/database` (plus a barrel append) because flood control must read the durable alert state and no existing read exposes a dedupe- or recovery-key lookup; `operational-alert-repository.ts` itself is untouched.
+- Verification: `npm run typecheck:services && npm run test:services && npm run lint:services && npm run test:worker` → exit 0 (554 unit + 1 volume services tests, 95 worker tests; 19 new under `src/alert-email/` — 5 settings, 13 publisher including "repeat occurrences inside the window converge on one idempotency key", "the first occurrence past the window summarizes the accumulated count", "recovery notices reach recipients for alerts this event resolved at notified severities", "no recipient configured: nothing enqueues and the absence is visible", "the off switch restores exactly the durable-only behavior", and "email trouble never changes the composite outcome for producers", plus the end-to-end `alert-email.integration.test.ts` against a migrated database, and the appended worker composition test "worker composition routes alerts to operator email beside durable persistence"). Also exit 0: `npm run typecheck:database`, `typecheck:worker`, `typecheck:admin`, `lint:database`, `lint:worker`, `lint:admin`, `npm run test:database` (143), `npm run test:admin` (172), `npm run scan:framework-standards:ratchet` (0 findings, 0 new, 0 grown modules), `node scripts/check-docs.mjs` (156 markdown files), `npm run check:boundaries` (748 files).

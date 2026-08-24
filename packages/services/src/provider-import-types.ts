@@ -9,7 +9,7 @@ import type {
 } from "./provider-adapter.ts";
 import type { EncryptedProviderCredential } from "./provider-credential-cipher.ts";
 
-export type ProviderImportTrigger = "scheduled" | "manual";
+export type ProviderImportTrigger = "scheduled" | "manual" | "continuation";
 export type ProviderImportRunState =
   | "queued"
   | "running"
@@ -155,7 +155,7 @@ export type ProviderCanonicalRecordKind =
   | "catalog_asset"
   | "ev_input"
   | "pull"
-  | "sale"
+  | "market_event"
   | "estimated_ev";
 
 export interface ProviderCanonicalRelationshipCommand {

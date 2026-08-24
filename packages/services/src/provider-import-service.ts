@@ -82,7 +82,7 @@ export type ProviderImportRequest =
       readonly expectedConfigurationRevisionId: string;
     }
   | {
-      readonly trigger: "scheduled";
+      readonly trigger: "scheduled" | "continuation";
       readonly providerId: string;
       readonly organizationId: string;
     };

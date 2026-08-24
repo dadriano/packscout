@@ -20,6 +20,14 @@ test("production composition wires provider and manifest lanes without legacy ca
         heartbeatIntervalMilliseconds: 15_000,
         importRunLeaseMilliseconds: 120_000,
         maximumClaimsPerCycle: 5,
+        messageOutboxBackoffBaseMilliseconds: 1_000,
+        messageOutboxBackoffCapMilliseconds: 60_000,
+        messageOutboxBatchSize: 10,
+        messageOutboxLeaseMilliseconds: 30_000,
+        messageOutboxMaximumAttempts: 4,
+        messageOutboxPerRecipientLimit: 3,
+        messageOutboxPollMilliseconds: 1_000,
+        messageOutboxRetentionDays: 30,
         pollIntervalMilliseconds: 100,
         publicOrganizationId: "54000000-0000-4000-8000-000000000001",
         presenceRetentionDays: 14,
@@ -28,8 +36,20 @@ test("production composition wires provider and manifest lanes without legacy ca
         retentionBatchSize: 10,
         retentionMaximumBatchesPerCycle: 2,
         retentionOrganizationDiscoveryLimit: 10,
+        sourceSupervisor: {
+          actorPseudonymKey: new Uint8Array(32).fill(1),
+          databaseUrl: "postgresql://unused.invalid/packscout",
+          environment: "test",
+          sourceConnectionConfigurationKey: new Uint8Array(32).fill(8),
+          sourceConnectionConfigurationKeyVersion: 1,
+          sourceDatabaseVolumePath: "/tmp",
+          workerId: "production-composition-worker",
+        },
         runHeartbeatStaleAfterMilliseconds: 300_000,
         scheduleClaimLeaseMilliseconds: 30_000,
+        welcomeDispatchBatchSize: 10,
+        welcomeDispatchLeaseMilliseconds: 300_000,
+        welcomeDispatchPollMilliseconds: 60_000,
         workerHost: "composition-host",
         workerId: "production-composition-worker",
         workerVersion: "0.0.0-test",
@@ -84,6 +104,13 @@ test("production composition wires provider and manifest lanes without legacy ca
     };
     const runtime = createProductionWorkerRuntime(input);
     assert.ok(runtime instanceof ProviderWorkerRuntime);
+    // Without the supervisor settings the lane is skipped, not fatal.
+    assert.ok(
+      createProductionWorkerRuntime({
+        ...input,
+        provider: { ...input.provider, sourceSupervisor: undefined },
+      }) instanceof ProviderWorkerRuntime,
+    );
     assert.throws(
       () => createProductionWorkerRuntime({
         ...input,

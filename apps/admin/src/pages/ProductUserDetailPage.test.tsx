@@ -35,6 +35,11 @@ const user = {
   firstSeenAt: "2026-08-01T09:00:00.000Z",
   lastSeenAt: "2026-08-19T12:00:00.000Z",
   standing: "active",
+  access: {
+    state: "awaiting_review",
+    decidedBy: "default",
+    decidedAt: "2026-08-01T09:00:00.000Z",
+  },
 } as const;
 
 const resolvedRepack: ProductUserSavedRepack = {
@@ -43,12 +48,30 @@ const resolvedRepack: ProductUserSavedRepack = {
   savedAt: "2026-08-19T12:00:03.000Z",
   name: "Mythic Pokemon Gacha",
   vendorDisplayName: "Collector Crypt",
-  availability: "active",
+  availability: "available",
   estimatedEv: {
     evDollarsMinorUnits: 12_500,
     grossReturnBasisPoints: 10_500,
     confidenceBand: "high",
   },
+};
+const unavailableRepack: ProductUserSavedRepack = {
+  resolution: "resolved",
+  publicRepackId: "40000000-0000-5000-8000-000000000002",
+  savedAt: "2026-08-19T12:00:02.800Z",
+  name: "Temporarily Unavailable Pack",
+  vendorDisplayName: "Phygitals",
+  availability: "unavailable",
+  estimatedEv: null,
+};
+const unknownRepack: ProductUserSavedRepack = {
+  resolution: "resolved",
+  publicRepackId: "40000000-0000-5000-8000-000000000003",
+  savedAt: "2026-08-19T12:00:02.600Z",
+  name: "Unconfirmed Availability Pack",
+  vendorDisplayName: "ClutchPacks",
+  availability: "unknown",
+  estimatedEv: null,
 };
 const soldOutRepack: ProductUserSavedRepack = {
   resolution: "resolved",
@@ -68,7 +91,13 @@ const unresolvedRepack: ProductUserSavedRepack = {
 const detail = {
   user,
   catalogAvailable: true,
-  savedRepacks: [resolvedRepack, soldOutRepack, unresolvedRepack],
+  savedRepacks: [
+    resolvedRepack,
+    unavailableRepack,
+    unknownRepack,
+    soldOutRepack,
+    unresolvedRepack,
+  ],
   savedCollectibles: [
     {
       resolution: "resolved",
@@ -123,7 +152,10 @@ function route(
         <SessionProvider initialSession={session(permissions)}>
           <MemoryRouter initialEntries={[entry]}>
             <Routes>
-              <Route path="/users/:handle" element={<ProductUserDetailPage />} />
+              <Route
+                path="/users/:handle"
+                element={<ProductUserDetailPage />}
+              />
             </Routes>
           </MemoryRouter>
         </SessionProvider>
@@ -159,6 +191,9 @@ test("a user's identity and both saved collections render, newest save first", a
   assert.match(text, /Saved collectibles/);
   assert.match(text, /Mythic Pokemon Gacha/);
   assert.match(text, /Collector Crypt/);
+  assert.match(text, /Available now/);
+  assert.match(text, /Unavailable/);
+  assert.match(text, /Availability unknown/);
   assert.match(text, /Sold out/);
   assert.match(text, /\+\$125\.00 EV · 105% of price · high confidence/);
   assert.match(text, /No current estimate/);
@@ -171,6 +206,8 @@ test("a user's identity and both saved collections render, newest save first", a
   ].map((node) => node.textContent);
   assert.deepEqual(repackNames, [
     "Mythic Pokemon Gacha",
+    "Temporarily Unavailable Pack",
+    "Unconfirmed Availability Pack",
     "Sold Out Basketball Grails",
     "No longer in the current catalog",
   ]);
@@ -240,7 +277,10 @@ test("an item the catalog no longer carries stays listed and identified", async 
   // Its stable identifier stays on the row so it remains investigable.
   assert.match(text, /40000000-0000-5000-8000-000000000999/);
   // Such a row can vanish through the user's own saving, which is stated.
-  assert.match(text, /saving another item drops their oldest item of that kind/);
+  assert.match(
+    text,
+    /saving another item drops their oldest item of that kind/,
+  );
   assert.doesNotMatch(text, /Mythic Pokemon Gacha/);
   // The collection with nothing in it reads as empty, not as an error.
   assert.match(text, /This user has not saved any collectibles/);
@@ -376,7 +416,10 @@ test("an unknown user and an unavailable service degrade without inventing data"
   assert.match(missing, /This user is not in the directory/);
   assert.match(missing, /Nothing has been changed/);
   assert.ok(renderer.container.querySelector('[role="alert"]'));
-  assert.equal(renderer.container.querySelectorAll(".saved-items__rows").length, 0);
+  assert.equal(
+    renderer.container.querySelectorAll(".saved-items__rows").length,
+    0,
+  );
   // An unrecoverable state offers the way back rather than a pointless retry.
   assert.equal(
     [...renderer.container.querySelectorAll("a")].some(
@@ -485,7 +528,10 @@ test("a repeat action reports the authoritative standing without claiming a chan
 
   const text = pageText(renderer);
   assert.match(text, /That account was already suspended\./);
-  assert.doesNotMatch(text, /Account suspended\. Everything they saved is kept\./);
+  assert.doesNotMatch(
+    text,
+    /Account suspended\. Everything they saved is kept\./,
+  );
   // The view converges on the authoritative standing rather than an error.
   assert.match(text, /Suspended/);
   assert.doesNotMatch(text, /failed/i);
@@ -535,10 +581,74 @@ test("an operator who cannot manage accounts sees the standing and no control", 
   );
   assert.deepEqual(
     labels.filter((label) =>
-      /suspend|reinstate|delete|remove|purge/i.test(label),
+      /suspend|reinstate|approve|decline|revoke|return to review|delete|remove|purge/i.test(
+        label,
+      ),
     ),
     [],
   );
+  // Standing and access are still readable; only the controls are absent.
   assert.match(pageText(renderer), /Suspended/);
+  assert.match(pageText(renderer), /Awaiting review/);
   assert.equal(requests.length, 1);
+});
+
+test("the detail view shows beta access with provenance and decides in place", async (context) => {
+  const requests = stubFetch(context, (request) =>
+    String(request.input).endsWith("/product-users/access/approve")
+      ? jsonResponse({
+          action: "approve",
+          changed: true,
+          access: {
+            state: "approved",
+            decidedBy: "operator",
+            decidedAt: "2026-08-20T10:00:00.000Z",
+          },
+          effectiveAccess: { admitted: true, reason: "approved" },
+        })
+      : jsonResponse(detail),
+  );
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  // The waiting account reads as waiting — the pending tone, never the
+  // danger tone — with its provenance and date alongside the standing.
+  let text = pageText(renderer);
+  assert.match(text, /Awaiting review/);
+  assert.match(text, /Beta access/);
+  assert.match(text, /Awaiting a first decision/);
+  const badges = [
+    ...renderer.container.querySelectorAll(".admin-pill"),
+  ].map((badge) => ({
+    label: badge.textContent?.trim(),
+    pending: badge.classList.contains("admin-pill-warning"),
+    danger: badge.classList.contains("admin-pill-danger"),
+  }));
+  assert.deepEqual(badges[0], {
+    label: "Awaiting review",
+    pending: true,
+    danger: false,
+  });
+
+  await act(async () => findButton(renderer, "Approve").click());
+  await settlePage();
+  // The consequence is stated before anything happens.
+  assert.equal(requests.length, 1, "the page has only read until confirmation");
+  assert.match(pageText(renderer), /Approve access for this person\?/);
+
+  await act(async () => findButton(renderer, "Approve access").click());
+  await settlePage();
+
+  const decision = requests.at(-1);
+  assert.equal(String(decision?.input), "/api/product-users/access/approve");
+  assert.deepEqual(body(decision as RecordedRequest), { subject });
+
+  // The view reflects the decision the backend reported, in place, with the
+  // reverse control now offered and every saved item untouched.
+  text = pageText(renderer);
+  assert.match(text, /Access approved\. They are in the beta now\./);
+  assert.match(text, /Approved by an operator/);
+  findButton(renderer, "Revoke");
+  assert.match(text, /Mythic Pokemon Gacha/);
 });

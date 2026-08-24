@@ -34,7 +34,7 @@ function opportunity(
       },
     ],
     collectibleTypes: ["card"],
-    availability: "active",
+    availability: "available",
     price: {
       displayMoney: { minorUnits: priceMinorUnits, currency: "USD" },
       usdComparison: {

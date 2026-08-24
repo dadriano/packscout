@@ -25,7 +25,10 @@ import type { DataModel } from "./dataModel.js";
  * Typesafe environment variables declared in `convex.config.ts`.
  */
 type Env = {
+  readonly PACKSCOUT_ADMIN_DIRECTORY_TOKEN: string | undefined;
   readonly PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES: string | undefined;
+  readonly PACKSCOUT_CATALOG_READ_TOKEN: string | undefined;
+  readonly PACKSCOUT_CLOSED_BETA: "1" | undefined;
   readonly PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS: string | undefined;
   readonly PACKSCOUT_HEAT_PUBLICATION_KEY_IDS: string | undefined;
   readonly PACKSCOUT_MOCK_DATA_RELEASE_SEED_ENABLED: "1" | undefined;

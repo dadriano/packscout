@@ -151,16 +151,31 @@ export function providerFixtureSnapshot(
           ? `${revision.platformKey}-ev-input-revision`
           : `${revision.platformKey}-${revision.recordKind}-revision`,
     }));
-  revisions = revisions.map((revision) =>
-    revision.platformKey === checkpoint.platformKey && revision.recordKind === "pack"
-      ? {
-          ...revision,
-          content: {
-            ...(revision.content as Record<string, unknown>),
-            imageUrls: [`https://${checkpoint.platformKey}.example/pack.png`],
-          },
-        }
-      : revision);
+  revisions = revisions.map((revision) => {
+    if (
+      revision.platformKey !== checkpoint.platformKey ||
+      revision.recordKind !== "pack"
+    ) return revision;
+    const content = revision.content as Record<string, unknown>;
+    const availability = content.availability;
+    return {
+      ...revision,
+      content: {
+        ...content,
+        availabilityProvenance:
+          availability === "sold_out"
+            ? {
+                kind: "explicit_authoritative_sold_out",
+                authority: "provider_explicit_sold_out",
+              }
+            : {
+                kind: "canonical_provider_observation",
+                observedAvailability: availability,
+              },
+        imageUrls: [`https://${checkpoint.platformKey}.example/pack.png`],
+      },
+    };
+  });
   let repackIdentities = source.repackIdentities.filter(({ platformKey }) =>
     platformKey === checkpoint.platformKey || options.includeForeignRows === true);
   if (options.reverseRows === true) {

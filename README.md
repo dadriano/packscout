@@ -25,6 +25,19 @@ Database setup uses an empty PostgreSQL 16+ target and the checked-in Prisma
 migrations. Follow the [database provisioning workflow](docs/database-provisioning.md)
 before starting a database-backed runtime.
 
+## Ingestion pipeline operations
+
+Operators should start with the
+[ingestion pipeline operator guide](docs/ingestion-pipelines/README.md). It
+covers the single-supervisor process model, source and connection setup, daily
+Run/Pause/Resume workflows, diagnostics, capacity guards, credential recovery,
+quarantine, cursor safety, and graceful restart behavior.
+
+A first full-history DataForrest import has additional fail-closed target,
+storage, bootstrap, and reconciliation gates. Follow the
+[guarded Task010 runbook](docs/dataforest-source-integration-task010-local-runbook.md)
+instead of starting it with the general development commands.
+
 ## Development
 
 ```bash
@@ -202,9 +215,12 @@ deployments and deploy keys.
 
 ### Optional Privy authentication
 
-Dashboard, Repacks, Learn, and catalog search remain public. Authentication is
-an optional enhancement for saving a repack or an exact desired collectible;
-an unconfigured build keeps the anonymous application and its existing CSP.
+With the closed beta off, Dashboard, Repacks, Learn, and catalog search are
+public, and authentication is an optional enhancement for saving a repack or
+an exact desired collectible. While the beta is on, those surfaces require an
+admitted signed-in account instead — see
+[docs/closed-beta-operations.md](docs/closed-beta-operations.md). An
+unconfigured build keeps the anonymous application and its existing CSP.
 Even when configured, the browser defers loading and initializing Privy until
 the visitor chooses Sign in or a save action. A successful session stores only
 a fixed, non-identifying returning-session hint so that a later visit can
@@ -287,6 +303,84 @@ Leaving these unset is safe and supported: the admin still boots and the Users
 page shows a bounded "not connected" state instead of failing. Only operators
 holding the `product_users:view` permission (administrators) see the page at
 all.
+
+### Optional provider-source supervision
+
+Three server-only values enable the provider-source supervisor lane in the
+worker and source administration in the admin:
+
+```dotenv
+PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64=<canonical-base64-32-byte-key>
+PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION=<positive-integer>
+PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH=<absolute-non-root-path>
+```
+
+- `PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64` — key encrypting stored
+  source-connection configuration; shared by the worker and the admin.
+- `PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION` — the active encryption revision
+  of that key; shared by the worker and the admin.
+- `PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH` — the PostgreSQL data volume whose
+  capacity the supervisor's admission gate measures; worker only.
+
+Leaving all of them unset is safe and supported: the combined worker boots
+with the supervisor lane disabled (it logs
+`provider_source_supervisor_disabled` once at startup), and the admin boots
+with the provider-source routes answering `503 SOURCE_ADMIN_UNCONFIGURED`.
+Setting only part of the group is a misconfiguration and fails startup. The
+dedicated source-supervisor entrypoint always requires all of them.
+
+### Closed-beta catalog read credential
+
+While the closed beta is on (`PACKSCOUT_CLOSED_BETA=1` on the Convex
+deployment), catalog reads accept exactly two callers: an admitted product
+identity, and PackScout's own server rendering path presenting a server-held
+credential. One server-only value configures that second caller, on both ends
+under the same name:
+
+```dotenv
+PACKSCOUT_CATALOG_READ_TOKEN=<shared-secret-32-to-512-chars>
+```
+
+Set the same secret on the Convex deployment
+(`npx convex env set PACKSCOUT_CATALOG_READ_TOKEN <value>` against the
+confirmed deployment) and in the frontend server's environment. Both sides
+fail closed: an absent, too-short, or too-long secret authorizes nothing, and
+the site then renders its existing bounded "data temporarily unavailable"
+states instead of catalog data — never a crash and never a fallback to
+serving data.
+
+The value never belongs in a `NEXT_PUBLIC_` or otherwise browser-visible
+variable. The frontend presents it only from server-only code as a query
+argument on its existing catalog reads, so it is not embedded in bundles,
+page markup, logs, or error payloads.
+
+With the beta switch off, catalog reads are public again and the credential
+is not required; a configured value is simply ignored.
+
+For a local demo against the anonymous local deployment with the beta on, add
+`PACKSCOUT_CATALOG_READ_TOKEN` to the root `.env.local`: the local seed lane
+(`scripts/local/seed-convex-mock-data-release.mjs`) mirrors it onto the local
+deployment and the frontend dev session inherits the same value, so both ends
+match without further steps. Leaving it unset keeps the preview honest — the
+product surfaces show their unavailable states, exactly as an unconfigured
+deployment would.
+
+Day-to-day beta operations — telling whether the beta is on, admitting and
+deciding people, revoking access, what an unadmitted party can still observe,
+and opening the product to the public with one switch — are documented in
+[docs/closed-beta-operations.md](docs/closed-beta-operations.md).
+
+### Transactional email
+
+Operational alerts, beta access decisions, the welcome message, and the
+operator account links are delivered by one abstracted messaging layer:
+messages are enqueued as durable intents and drained by the worker, so a
+provider outage delays delivery rather than losing it. The provider is
+swappable by configuration — set `PACKSCOUT_EMAIL_DELIVERY_MODE=console` to
+render every message locally without a provider account or a real send.
+Configuration, the delivery-state runbook, adapter requirements, and the
+deliberately deferred bounce handling are documented in
+[docs/messaging-operations.md](docs/messaging-operations.md).
 
 ### Machinery alerting in the admin
 

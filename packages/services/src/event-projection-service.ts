@@ -10,7 +10,7 @@ import type {
   ProviderRelationshipKey,
   PseudonymousActorInput,
   PullCandidate,
-  SaleCandidate,
+  MarketEventCandidate,
 } from "./provider-adapter.ts";
 import type {
   ProviderCanonicalProjectionCommand,
@@ -23,7 +23,7 @@ import {
   type CanonicalTradeLifecycleCategory,
 } from "./provider-stream-normalization.ts";
 
-export type CanonicalSaleCategory = CanonicalTradeLifecycleCategory;
+export type CanonicalTradeCategory = CanonicalTradeLifecycleCategory;
 
 export interface ProviderActorPseudonymizer {
   pseudonymize(input: {
@@ -95,7 +95,7 @@ function invalid(
 }
 
 function actorKeys(
-  candidate: PullCandidate | SaleCandidate,
+  candidate: PullCandidate | MarketEventCandidate,
   providerId: string,
   pseudonymizer: ProviderActorPseudonymizer,
 ): Readonly<Record<PseudonymousActorInput["role"], string>> {
@@ -143,7 +143,7 @@ function relationshipCommand(
 }
 
 function relationshipsForEvent(
-  candidate: PullCandidate | SaleCandidate,
+  candidate: PullCandidate | MarketEventCandidate,
 ): readonly ProviderCanonicalRelationshipCommand[] {
   const relationships = candidate.relationships
     .map(relationshipCommand)
@@ -187,7 +187,7 @@ function relationshipsForEvent(
   return Object.freeze([...unique.values()]);
 }
 
-function qualityEvidence(candidate: PullCandidate | SaleCandidate) {
+function qualityEvidence(candidate: PullCandidate | MarketEventCandidate) {
   return candidate.dataQualityEvidence.map((evidence) => ({
     code: normalizeCanonicalIdentity(evidence.code, "quality.code", 128),
     severity: evidence.severity,
@@ -196,7 +196,7 @@ function qualityEvidence(candidate: PullCandidate | SaleCandidate) {
 }
 
 function commonProjection(
-  candidate: PullCandidate | SaleCandidate,
+  candidate: PullCandidate | MarketEventCandidate,
   providerId: string,
   adapterKey: string,
   pseudonymizer: ProviderActorPseudonymizer,
@@ -240,7 +240,7 @@ export class EventProjectionService implements ProviderProjectionPort {
       return invalid("EVENT_CANDIDATE_SET_INVALID", "candidates");
     }
     const [candidate] = input.candidates;
-    if (!candidate || (candidate.candidateKind !== "pull" && candidate.candidateKind !== "sale")) {
+    if (!candidate || (candidate.candidateKind !== "pull" && candidate.candidateKind !== "market_event")) {
       return invalid("EVENT_CANDIDATE_KIND_INVALID", "candidates[0].candidateKind");
     }
     if (
@@ -248,7 +248,9 @@ export class EventProjectionService implements ProviderProjectionPort {
       candidate.source.externalId !== input.source.externalId ||
       candidate.source.recordKind !== input.source.recordKind ||
       candidate.source.recordIndex !== input.source.recordIndex ||
-      candidate.source.recordKind !== candidate.candidateKind
+      (candidate.candidateKind === "pull"
+        ? candidate.source.recordKind !== "pull"
+        : candidate.source.recordKind !== "trade")
     ) {
       return invalid("EVENT_SOURCE_MISMATCH", "candidates[0].source");
     }
@@ -286,14 +288,14 @@ export class EventProjectionService implements ProviderProjectionPort {
             }
           : {
               platformKey: input.source.platform,
-              recordKind: "sale",
+              recordKind: "market_event",
               externalId: common.externalId,
               sourceUpdatedAt: common.occurredAt,
               sourceCollectedAt: common.collectedAt,
               relationships: common.relationships,
               provenance: common.provenance,
               content: {
-                eventKind: "sale",
+                eventKind: "market_event",
                 providerEventType: normalizeCanonicalIdentity(
                   candidate.eventType,
                   "eventType",

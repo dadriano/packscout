@@ -60,13 +60,22 @@ test("sort headers toggle deterministically and disappear during relevance order
   );
 });
 
-test("sold-out rows never expose an outbound repack action", () => {
-  const repack = {
-    availability: "sold_out",
-    actionAvailability: { promo: true, repackLink: true },
-  } as PublicRepackSummary;
-  assert.deepEqual(publicRowActions(repack), {
-    promo: true,
-    repackLink: false,
-  });
+test("only available rows expose purchase-oriented actions", () => {
+  for (const availability of ["unavailable", "unknown", "sold_out"] as const) {
+    const repack = {
+      availability,
+      actionAvailability: { promo: true, repackLink: true },
+    } as PublicRepackSummary;
+    assert.deepEqual(publicRowActions(repack), {
+      promo: false,
+      repackLink: false,
+    });
+  }
+  assert.deepEqual(
+    publicRowActions({
+      availability: "available",
+      actionAvailability: { promo: true, repackLink: true },
+    } as PublicRepackSummary),
+    { promo: true, repackLink: true },
+  );
 });

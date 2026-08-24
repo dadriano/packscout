@@ -12,14 +12,21 @@ import {
 } from "./sign-in-recording";
 
 /**
- * Establishes the signed-in visitor's product-user directory record.
+ * Establishes the signed-in visitor's product-user directory record and,
+ * with it, their closed-beta admission decision.
  *
  * Product sign-in has no registration step, so the directory learns about a
  * user the first time an authenticated session reaches the backend. The
- * mutation derives everything it stores from the verified identity and is
- * idempotent, so this sends it once per established session and absorbs
- * failures: recording is invisible, and nothing here can block sign-in or
- * disturb saved items.
+ * establishment mutation (closed-beta-access/001) funnels through the same
+ * directory write path sign-in recording always used, stamps the
+ * awaiting-review default on first contact, and refreshes identity
+ * attributes on later ones — which keeps the record the server-side gate
+ * routes on fresh. It derives everything it stores from the verified
+ * identity and is idempotent, so this sends it once per established session
+ * and absorbs failures: recording is invisible, and nothing here can block
+ * sign-in or disturb saved items. The gate never depends on this write
+ * landing — it re-reads effective access per request, and a missing record
+ * simply reads as awaiting review.
  *
  * "Once" counts writes that completed, not writes that were sent. A write that
  * fails gets a few further attempts within the session, each on a timer the
@@ -35,7 +42,7 @@ export function AuthenticatedSignInRecorder({
 }: Readonly<{ children: ReactNode; sessionKey: string }>) {
   const auth = usePackScoutAuth();
   const signedIn = auth.status === "signed_in";
-  const recordSignIn = useMutation(api.productUsers.recordSignIn);
+  const establishAccess = useMutation(api.productUserAccess.establishAccess);
   const recording = useRef(initialSignInRecordingState);
 
   useEffect(() => {
@@ -51,7 +58,7 @@ export function AuthenticatedSignInRecorder({
       if (!decision.record) return;
       // recordSignInBestEffort settles both ways and never rejects, so this
       // chain cannot raise into the provider tree.
-      void recordSignInBestEffort(() => recordSignIn({})).then((outcome) => {
+      void recordSignInBestEffort(() => establishAccess({})).then((outcome) => {
         const settled = settleSignInRecording(
           recording.current,
           sessionKey,
@@ -70,7 +77,7 @@ export function AuthenticatedSignInRecorder({
       active = false;
       clearTimeout(retryTimer);
     };
-  }, [recordSignIn, sessionKey, signedIn]);
+  }, [establishAccess, sessionKey, signedIn]);
 
   return <>{children}</>;
 }

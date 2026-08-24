@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArticleLayout } from "@/components/learn/ArticleLayout";
 import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
+import { ShellSurfaceReporter } from "@/components/shell/ShellSurface.client";
+import {
+  gatedSurfaceRobots,
+  resolveGatedRoute,
+  resolveVisitorAccess,
+} from "@/lib/access-gate.server";
 import { findLearnGuide, LEARN_GUIDES } from "@/lib/learn-content";
 import { readPublicShellStatus } from "@/lib/public-repacks.server";
 import { dataReleaseStatusFromPublicResult } from "@/lib/public-release-status";
@@ -19,16 +25,25 @@ export const dynamicParams = false;
 
 export async function generateMetadata({ params }: LearnArticleProps): Promise<Metadata> {
   const guide = findLearnGuide((await params).slug);
-  return guide ? { title: guide.title, description: guide.summary } : {};
+  const robots = gatedSurfaceRobots(await resolveVisitorAccess());
+  return guide
+    ? { title: guide.title, description: guide.summary, robots }
+    : { robots };
 }
 
 export default async function LearnArticlePage({ params }: LearnArticleProps) {
+  // The access decision comes first (closed-beta-access/007): an unadmitted
+  // visitor is redirected before the guide lookup or the shell status read.
+  const route = resolveGatedRoute(await resolveVisitorAccess());
+  if (route.kind === "redirect") redirect(route.destination);
+
   const guide = findLearnGuide((await params).slug);
   if (!guide) notFound();
   const status = dataReleaseStatusFromPublicResult(await readPublicShellStatus());
 
   return (
     <>
+      <ShellSurfaceReporter mode="product" />
       <DataReleaseStatusReporter status={status} />
       <ArticleLayout guide={guide} />
     </>

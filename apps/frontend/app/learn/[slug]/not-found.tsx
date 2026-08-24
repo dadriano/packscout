@@ -1,10 +1,23 @@
 import Link from "next/link";
+import { publicReadError } from "@packscout/contracts";
 import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
+import { resolveGatedRoute, resolveVisitorAccess } from "@/lib/access-gate.server";
 import { readPublicShellStatus } from "@/lib/public-repacks.server";
 import { dataReleaseStatusFromPublicResult } from "@/lib/public-release-status";
 
 export default async function LearnArticleNotFound() {
-  const status = dataReleaseStatusFromPublicResult(await readPublicShellStatus());
+  // Not-found answers unknown paths for everyone, including signed-out
+  // visitors, so it is ungated by construction. The shell status read carries
+  // the server catalog credential (closed-beta-access/005), so it runs only
+  // once the same gate the product pages use has admitted this visitor;
+  // everyone else gets the bounded unavailable state, and no authorized
+  // catalog read — and no release source or timestamp — happens for them.
+  const route = resolveGatedRoute(await resolveVisitorAccess());
+  const status = dataReleaseStatusFromPublicResult(
+    route.kind === "render"
+      ? await readPublicShellStatus()
+      : publicReadError("RELEASE_UNAVAILABLE"),
+  );
   return (
     <>
       <DataReleaseStatusReporter status={status} />

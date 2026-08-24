@@ -118,7 +118,7 @@ function publicRepack(input: Readonly<{
     contentMode: "unknown",
     categories: [],
     collectibleTypes: [],
-    availability: "active",
+    availability: "available",
     price: {
       displayMoney: null,
       usdComparison: {

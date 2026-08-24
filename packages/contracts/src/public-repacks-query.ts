@@ -88,7 +88,7 @@ const defaultPriceFilter = Object.freeze({
   maxMinor: PUBLIC_REPACK_PRICE_MAX_MINOR,
 });
 
-export const publicRepackAvailabilityFilterSchema = z.enum(["active", "all"]);
+export const publicRepackAvailabilityFilterSchema = z.enum(["available", "all"]);
 
 const defaultRepackFilters = Object.freeze({
   vendors: Object.freeze([] as string[]),
@@ -98,7 +98,7 @@ const defaultRepackFilters = Object.freeze({
       "card" | "watch" | "coin" | "sealed_product" | "memorabilia" | "other"
     >,
   ),
-  availability: "active" as const,
+  availability: "available" as const,
   price: defaultPriceFilter,
 });
 
@@ -109,7 +109,7 @@ export const publicRepackFiltersSchema = z
     collectibleTypes: canonicalSelectionSchema(publicCollectibleTypeSchema, 8).default(
       [],
     ),
-    availability: publicRepackAvailabilityFilterSchema.default("active"),
+    availability: publicRepackAvailabilityFilterSchema.default("available"),
     price: publicPriceFilterSchema.default(defaultPriceFilter),
   })
   .strict();

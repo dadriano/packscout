@@ -23,9 +23,13 @@ import type {
 const sevenDaysInMilliseconds = 7 * 24 * 60 * 60 * 1_000;
 const maximumAvailableChaseCount = 10_000;
 const maximumWriteCandidates = 1_000;
+// Canonical revisions persisted before the availability rename still hold
+// active/disabled; both vocabularies stay readable.
 const canonicalAvailabilities = new Set([
   "active",
   "disabled",
+  "available",
+  "unavailable",
   "sold_out",
   "unknown",
 ]);
@@ -715,13 +719,13 @@ function classifyHeatCandidate(
 function catalogContentIsActive(content: unknown): boolean {
   return isObject(content)
     && content.entityType === "catalog_asset"
-    && content.availability === "active";
+    && (content.availability === "active" || content.availability === "available");
 }
 
 function packContentIsActive(content: unknown): boolean {
   return isObject(content)
     && content.entityType === "pack"
-    && content.availability === "active";
+    && (content.availability === "active" || content.availability === "available");
 }
 
 function pullValues(
@@ -921,7 +925,7 @@ async function loadCatalogAssetsAsOfCauses(
         where asset_revision.content_json ->> 'relatedPackExternalId'
           = requested.pack_external_id
           and asset_revision.content_json ->> 'entityType' = 'catalog_asset'
-          and asset_revision.content_json ->> 'availability' = 'active'
+          and asset_revision.content_json ->> 'availability' in ('active', 'available')
       )
       select candidate_key as "candidateKey",
              platform_key as "platformKey",

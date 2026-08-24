@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./test-fixtures/dataforrest-events-v1": "./src/__fixtures__/dataforest-events-v1.fixture.ts"
   },
   "scripts": {
     "lint": "eslint src",

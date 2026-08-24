@@ -29,7 +29,7 @@ export const DEFAULT_CATALOG_QUERY: ListPublicRepacksInput = Object.freeze({
     vendors: Object.freeze([]),
     categories: Object.freeze([]),
     collectibleTypes: Object.freeze([]),
-    availability: "active",
+    availability: "available",
     price: Object.freeze({
       mode: "full",
       minMinor: PUBLIC_REPACK_PRICE_MIN_MINOR,
@@ -96,6 +96,7 @@ function onlyKnownKeys(parameters: URLSearchParams): boolean {
     "cursorStack",
     "queryFingerprint",
     "pageSize",
+    "selected",
     "view",
   ]);
   return [...parameters.keys()].every((key) => knownKeys.has(key));
@@ -114,6 +115,7 @@ function hasDuplicateSingleton(parameters: URLSearchParams): boolean {
     "cursorStack",
     "queryFingerprint",
     "pageSize",
+    "selected",
     "view",
   ].some((key) => parameters.getAll(key).length > 1);
 }
@@ -183,7 +185,7 @@ export function parseCatalogQueryState(
       vendors: canonicalValues(parameters.getAll("vendor")),
       categories: canonicalValues(parameters.getAll("category")),
       collectibleTypes: canonicalValues(parameters.getAll("collectibleType")),
-      availability: availabilityRaw === "all" ? "all" : "active",
+      availability: availabilityRaw === "all" ? "all" : "available",
       price:
         minRaw === null && maxRaw === null
           ? DEFAULT_CATALOG_QUERY.filters.price
@@ -196,7 +198,7 @@ export function parseCatalogQueryState(
     queryFingerprint,
     pageSize,
     desiredPublicCollectibleId: parameters.get("chase"),
-    selectedPublicRepackId: null,
+    selectedPublicRepackId: parameters.get("selected"),
   });
 
   return parsed.success
@@ -210,6 +212,9 @@ export function serializeCatalogQueryState(query: ListPublicRepacksInput): strin
   if (parsed.search) parameters.set("q", parsed.search);
   if (parsed.desiredPublicCollectibleId) {
     parameters.set("chase", parsed.desiredPublicCollectibleId);
+  }
+  if (parsed.selectedPublicRepackId) {
+    parameters.set("selected", parsed.selectedPublicRepackId);
   }
   for (const vendor of parsed.filters.vendors) parameters.append("vendor", vendor);
   for (const category of parsed.filters.categories) parameters.append("category", category);
@@ -263,6 +268,25 @@ export function catalogSheetInspectorInitiallyOpen(
   selectedPublicRepackId: ListPublicRepacksInput["selectedPublicRepackId"],
 ): boolean {
   return selectedPublicRepackId !== null;
+}
+
+export function selectCatalogRepack(
+  query: ListPublicRepacksInput,
+  publicRepackId: string,
+): ListPublicRepacksInput {
+  return listPublicRepacksInputSchema.parse({
+    ...query,
+    selectedPublicRepackId: publicRepackId,
+  });
+}
+
+export function clearCatalogRepackSelection(
+  query: ListPublicRepacksInput,
+): ListPublicRepacksInput {
+  return listPublicRepacksInputSchema.parse({
+    ...query,
+    selectedPublicRepackId: null,
+  });
 }
 
 export function serializeDashboardFilters(

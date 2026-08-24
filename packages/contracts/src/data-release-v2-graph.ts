@@ -367,7 +367,10 @@ export function validateDataReleaseV2EntityGraph(
     }
     if (
       vendor !== undefined &&
-      !sameNullableValue(repack.actions.promo ?? null, vendor.publicPromo)
+      !sameNullableValue(
+        repack.actions.promo ?? null,
+        repack.availability === "available" ? vendor.publicPromo : null,
+      )
     ) {
       context.addIssue({
         code: "custom",

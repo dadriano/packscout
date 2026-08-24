@@ -3,14 +3,36 @@
 Status: active build handoff — live Privy verification pending
 Owner: product build
 
-## Scenario: An anonymous buyer keeps full public access
+## Scenario: An anonymous visitor is beta-gated to the landing page
 
-Given Privy is unconfigured or the buyer is signed out
-When the buyer opens Dashboard, Repacks, Learn, or catalog search
-Then the public experience remains available without an account
+Given the closed beta switch is on
+And the visitor is signed out or presents no identity the backend recognizes
+When they request Dashboard, Repacks, Learn, catalog search, or any other product route
+Then the server resolves their access before anything renders and serves the landing page at the root, redirecting every other gated route there
+And no gated markup or catalog data leaves in any response to them, including the streamed render payload
+And the frontend catalog search route refuses them with a stable non-leaking outcome while the health probe stays open
+
+Coverage: Automated — `apps/frontend/lib/access-gate.server.test.ts` (total routing outcomes, fail-closed resolution, guarded data route: "an unadmitted request never reaches the catalog search read"), `apps/frontend/app/route-access-gate.source.test.ts` ("every gated page resolves access before any catalog read"), `apps/frontend/app/api/collectibles/search/route.behavior.test.ts`, and `apps/frontend/app/api/health/route.behavior.test.ts`; live signed-out browser coverage remains pending.
+
+## Scenario: The full public experience returns exactly when the beta switch is off
+
+Given the closed beta switch is off
+When an anonymous buyer opens Dashboard, Repacks, Learn, or catalog search
+Then the public experience is available without an account exactly as it was before the beta, with the root rendering the dashboard
 And no authentication token, cookie, or user profile is required for a public read
+And the beta's indexing exclusions lift
 
-Coverage: Automated — `apps/frontend/lib/security-policy.server.test.ts`, existing public route tests, and `npm run build:frontend`; live signed-out browser coverage remains pending.
+Coverage: Automated — `apps/frontend/lib/access-gate.server.test.ts` ("with the switch off every visitor resolves to public and no identity is read", "with the switch off the root serves the product to anonymous visitors and all indexing exclusions lift", "a switch flip is visible within one TTL") and `npm run build:frontend`.
+
+## Scenario: A signed-in session gives the server a verifiable identity signal
+
+Given a buyer establishes a session through the hosted provider
+When the session is created, refreshed, or ended
+Then the provider-issued identity token is mirrored into a same-site, path-wide cookie whose lifetime never exceeds the token's own expiry
+And the server treats that cookie as an unverified claim, re-verifying it against the product backend on every gated request rather than trusting it
+And signing out clears the cookie together with the returning-session hint
+
+Coverage: Automated — `apps/frontend/lib/identity-cookie.test.ts`, the identity-cookie boundary test in `apps/frontend/components/auth/auth-boot-boundary.source.test.ts`, and server verification and refusal mapping in `apps/frontend/lib/access-gate.server.test.ts`; live token round-trip verification remains pending with a real Privy app.
 
 ## Scenario: Authentication initializes only after intent
 
