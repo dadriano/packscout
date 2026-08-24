@@ -200,6 +200,13 @@ export function OperationsPage({
         }
       />
 
+      {providerCatalog && !canConfigure ? (
+        <aside className="provider-read-only-note">
+          <strong>Read-only access to provider configuration</strong>
+          <p>You can inspect canonical source health and use any separately authorized run controls. Changing connection or source configuration requires administrator access.</p>
+        </aside>
+      ) : null}
+
       <p className="admin-visually-hidden" aria-live="polite" aria-atomic="true">
         {announcement}
       </p>
