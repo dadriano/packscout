@@ -250,6 +250,26 @@ test("production executor begins and terminalizes once before publishing a test 
   assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
 });
 
+test("a captured connection interpretation failure publishes its test result", async () => {
+  const subject = fixture();
+  subject.adapter.interpretConnectionTest = async () => ({
+    ok: false,
+    failure: {
+      disposition: "connection_action_required",
+      code: "profile_configuration_invalid",
+    },
+    recordCount: 0,
+    diagnostics: [],
+  });
+
+  const result = await subject.executor.execute(connectionWork(), subject.context);
+
+  assert.deepEqual(result, { kind: "test_terminal" });
+  assert.ok(subject.events.includes("terminalize"));
+  assert.ok(subject.events.includes("connection-test-result"));
+  subject.releaseRetained();
+});
+
 test("JSONB roundtrip preserves the canonical record-scope sequence", async () => {
   const subject = fixture();
   const result = await subject.executor.execute(sourceWork(), subject.context);
