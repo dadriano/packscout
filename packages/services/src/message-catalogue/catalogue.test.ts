@@ -453,13 +453,13 @@ test("a one-time link path passes through opaque and uninspected", () => {
   const result = renderOperatorPasswordResetMessage(
     {
       toEmail: "operator@example.com",
-      resetLinkPath: `/reset-password?token=${"A1b2C3d4".repeat(8)}`,
+      resetLinkPath: `/reset-password#token=${"A1b2C3d4".repeat(8)}`,
       linkExpiresAt: "2026-08-20T16:03:00.000Z",
     },
     origins,
   );
   const message = renderedOrThrow(result);
-  const expected = `https://admin.packscout.io/reset-password?token=${"A1b2C3d4".repeat(8)}`;
+  const expected = `https://admin.packscout.io/reset-password#token=${"A1b2C3d4".repeat(8)}`;
   assert.ok(message.textBody.includes(expected));
   assert.ok(hrefsInHtml(message.htmlBody).has(expected));
 });

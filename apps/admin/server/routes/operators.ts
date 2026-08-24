@@ -332,21 +332,39 @@ export function createOperatorsRouter({
         return;
       }
       const actor = getAuthenticatedActor(response);
+      let cancelled: Awaited<ReturnType<typeof service.cancelInvitedOperator>>;
       try {
         // The account moves out of `pending` first, so redemption's own
         // eligibility recheck already refuses; superseding the outstanding
         // links then removes the row's liveness too.
-        const cancelled = await service.cancelInvitedOperator(
-          actor,
-          operatorId.data,
-        );
-        if (invitations) {
-          await invitations.flow.revokeInvitations(operatorId.data);
-        }
-        response.status(200).json(cancelled);
+        cancelled = await service.cancelInvitedOperator(actor, operatorId.data);
       } catch (error) {
+        // Nothing committed: the account is untouched and the refusal stands.
         sendAuthServiceError(response, error, cookiePolicy);
+        return;
       }
+      // The terminal `cancelled` state has committed and cannot be taken back
+      // from here. Supersession is its own failure domain: answering with an
+      // error because it failed sends the administrator to retry a
+      // cancellation that already took effect, and the retry answers "not
+      // pending" — the operator and the account then describe different
+      // outcomes. The outstanding token is already inert, because redemption
+      // rechecks account eligibility and a cancelled account is refused, so
+      // the gap is operational and is reported on its own.
+      if (invitations) {
+        try {
+          await invitations.flow.revokeInvitations(operatorId.data);
+        } catch {
+          // Content-free by design: never the address or anything held.
+          console.error(
+            JSON.stringify({
+              level: "error",
+              event: "admin_operator_invitation_supersession_failed",
+            }),
+          );
+        }
+      }
+      response.status(200).json(cancelled);
     },
   );
 

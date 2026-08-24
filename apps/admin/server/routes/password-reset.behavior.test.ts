@@ -583,7 +583,11 @@ function mailedTokenFrom(intent: EnqueueEmailMessageCommand): string {
   const input = intent.input as { resetLinkPath: string };
   const url = new URL(input.resetLinkPath, "https://admin.packscout.test");
   assert.equal(url.pathname, "/reset-password");
-  const token = url.searchParams.get("token");
+  // The credential rides in the fragment, which browsers never send: not in
+  // the query string, where access logs and `Referer` headers would hold it.
+  assert.equal(url.search, "");
+  assert.equal(url.searchParams.get("token"), null);
+  const token = new URLSearchParams(url.hash.slice(1)).get("token");
   assert.ok(token, "expected the mailed link to carry a token");
   return token;
 }

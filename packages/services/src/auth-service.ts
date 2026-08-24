@@ -71,6 +71,19 @@ export interface AuthAuditSink {
   append(event: AuthAuditEvent): Promise<void>;
 }
 
+/**
+ * One bounded record of an audit write that could not be persisted. It names
+ * the action, the outcome the record would have carried, and whether the work
+ * it describes had already committed — never an address, a credential, or any
+ * token material.
+ */
+export interface AuthAuditWriteFailure {
+  readonly action: AuthAuditEvent["action"];
+  readonly outcome: AuthAuditEvent["outcome"];
+  /** True when the change the record describes is already durable. */
+  readonly afterCommit: boolean;
+}
+
 export interface LoginOperatorRecord {
   id: string;
   organizationId: string;
@@ -250,7 +263,26 @@ export interface AuthServiceDependencies {
   bucketKeyer: LoginBucketKeyer;
   loginLimiter: LoginAttemptLimiter;
   audit: AuthAuditSink;
+  /**
+   * Where an audit record that could not be written is reported. Defaults to
+   * one content-free error line. It never decides an outcome: a committed
+   * change stays committed whether or not its record landed.
+   */
+  reportAuditFailure?: (failure: AuthAuditWriteFailure) => void;
   config: AuthServiceConfig;
+}
+
+/** The default report for an audit write that failed: one bounded line. */
+function logAuthAuditFailure(failure: AuthAuditWriteFailure): void {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      event: "auth_audit_write_failed",
+      action: failure.action,
+      outcome: failure.outcome,
+      afterCommit: failure.afterCommit,
+    }),
+  );
 }
 
 function permissionsForRole(role: OperatorRole): OperatorPermission[] {
@@ -996,15 +1028,38 @@ export class AuthService {
         503,
       );
     }
-    await this.dependencies.audit.append({
-      organizationId: operator.organizationId,
-      actorId: operator.id,
-      action: "operator.password_reset",
-      subjectId: operator.id,
-      outcome: "success",
-      occurredAt: now,
-      metadata: { fields: ["credential"] },
-    });
+    // The credential is now changed and every session the operator held is
+    // revoked, and the one-time link that authorized it is spent. An audit
+    // sink that fails here must not turn that into a failure: the reset page
+    // would tell the operator their password is unchanged when it is changed
+    // and the link can never be presented again, locking them out of their
+    // own account. The missing record is its own reported failure.
+    try {
+      await this.dependencies.audit.append({
+        organizationId: operator.organizationId,
+        actorId: operator.id,
+        action: "operator.password_reset",
+        subjectId: operator.id,
+        outcome: "success",
+        occurredAt: now,
+        metadata: { fields: ["credential"] },
+      });
+    } catch {
+      this.#reportAuditFailure({
+        action: "operator.password_reset",
+        outcome: "success",
+        afterCommit: true,
+      });
+    }
+  }
+
+  /** Reports an unwritable audit record without becoming a failure itself. */
+  #reportAuditFailure(failure: AuthAuditWriteFailure): void {
+    try {
+      (this.dependencies.reportAuditFailure ?? logAuthAuditFailure)(failure);
+    } catch {
+      // Reporting the gap must not become a third failure domain.
+    }
   }
 }
 

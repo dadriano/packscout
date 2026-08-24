@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import {
   changeControl,
   cleanupPage,
@@ -18,12 +18,27 @@ import { ResetPasswordPage } from "./ResetPasswordPage.tsx";
 const mailedToken = `${"a".repeat(22)}.${"b".repeat(43)}`;
 const strongPassword = "a brand new strong password";
 
-function page(entry = `/reset-password?token=${mailedToken}`) {
+/** Renders the address the screen currently occupies, fragment included. */
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <span data-location>
+      {`${location.pathname}${location.search}${location.hash}`}
+    </span>
+  );
+}
+
+function page(entry = `/reset-password#token=${mailedToken}`) {
   return (
     <MemoryRouter initialEntries={[entry]}>
       <ResetPasswordPage />
+      <LocationProbe />
     </MemoryRouter>
   );
+}
+
+function locationOf(renderer: { container: HTMLElement }): string {
+  return renderer.container.querySelector("[data-location]")?.textContent ?? "";
 }
 
 test("a link with no token is the plain invalid-link state, without any request", async (context) => {
@@ -40,7 +55,11 @@ test("a link with no token is the plain invalid-link state, without any request"
 });
 
 test("a presented token renders a labelled set-password form with the shared password guidance", () => {
-  const html = renderToStaticMarkup(page());
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={[`/reset-password#token=${mailedToken}`]}>
+      <ResetPasswordPage />
+    </MemoryRouter>,
+  );
   assert.match(html, /Choose a new password/);
   assert.match(html, /label for="reset-new-password">New password/);
   assert.match(html, /type="password"/);
@@ -145,4 +164,45 @@ test("server-side validation and unavailability keep the form with a specific me
     /PackScout Admin is temporarily unavailable\. Your password is unchanged\./,
   );
   assert.ok(renderer.container.querySelector("#reset-new-password"));
+});
+
+test("the mailed token is read from the fragment and stripped from history", async (context) => {
+  // A one-time operator credential in the query string reaches server access
+  // logs and, under the admin's `Referrer-Policy: same-origin`, the `Referer`
+  // of every asset and API request this screen makes. It rides in the
+  // fragment instead, and the screen drops it from the entry once read, so
+  // the spent link cannot be recovered from the address bar or session
+  // history — while still completing the reset from component state.
+  const requests = stubFetch(context, () => new Response(null, { status: 204 }));
+  const renderer = await renderPage(page());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.equal(locationOf(renderer), "/reset-password");
+  assert.doesNotMatch(
+    renderer.container.innerHTML,
+    new RegExp(mailedToken.slice(0, 22)),
+  );
+
+  await act(async () => changeControl(renderer, "reset-new-password", strongPassword));
+  await act(async () => findButton(renderer, "Set new password").click());
+  await settlePage();
+
+  assert.match(pageText(renderer), /Your password is updated\./);
+  assert.deepEqual(JSON.parse(String(requests[0]?.init?.body)), {
+    token: mailedToken,
+    password: strongPassword,
+  });
+});
+
+test("a token presented in the query string is not a usable link", async (context) => {
+  // Nothing mails that shape any more, and honouring it would keep the
+  // logged-and-referred credential path alive.
+  const requests = stubFetch(context, () => jsonResponse({}, 500));
+  const renderer = await renderPage(page(`/reset-password?token=${mailedToken}`));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.match(pageText(renderer), /This link is no longer valid\./);
+  assert.equal(requests.length, 0);
 });

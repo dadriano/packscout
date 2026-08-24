@@ -59,7 +59,7 @@ test("a requested link redeems exactly once end to end, and reuse is uniformly r
     assert.equal(requested.status, "accepted");
     assert.ok(requested.issued);
     const issued = requested.issued;
-    assert.equal(issued.linkPath, `/reset-password?token=${issued.token}`);
+    assert.equal(issued.linkPath, `/reset-password#token=${issued.token}`);
 
     const redeemed = await service.redeem({
       purpose: "operator_password_reset",

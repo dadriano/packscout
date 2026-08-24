@@ -136,7 +136,7 @@ export function createOperatorPasswordResetFlow(
             },
           },
         });
-        const result = await issuance.requestIssuance({
+        await issuance.requestIssuance({
           purpose: RESET_PURPOSE,
           address: email,
           source,
@@ -144,22 +144,30 @@ export function createOperatorPasswordResetFlow(
             dependencies.authService.resolveActiveOperatorIdByEmail(
               addressNormalized,
             ),
-        });
-        if (!result.issued || captured === null) return;
-        const issued: CapturedIssuance = captured;
-        const messageInput: OperatorPasswordResetMessageInput = {
-          toEmail: issued.addressNormalized,
-          resetLinkPath: result.issued.linkPath,
-          linkExpiresAt: result.issued.expiresAt.toISOString(),
-        };
-        await dependencies.commitIssuance({
-          token: issued,
-          message: {
-            kind: RESET_PURPOSE,
-            input: messageInput,
-            recipient: issued.addressNormalized,
-            idempotencyKey: `${RESET_PURPOSE}:${issued.id}`,
-            source: RESET_OUTBOX_SOURCE,
+          // Inside the issuance sequence, so the security trail records the
+          // issuance only once the token row and its message intent have
+          // landed. A commit that refuses is audited as uncommitted and
+          // raised here, where the uniform response below absorbs it.
+          commit: async (link) => {
+            if (captured === null) {
+              throw new Error("The issuance path captured no token to commit.");
+            }
+            const issued: CapturedIssuance = captured;
+            const messageInput: OperatorPasswordResetMessageInput = {
+              toEmail: issued.addressNormalized,
+              resetLinkPath: link.linkPath,
+              linkExpiresAt: link.expiresAt.toISOString(),
+            };
+            await dependencies.commitIssuance({
+              token: issued,
+              message: {
+                kind: RESET_PURPOSE,
+                input: messageInput,
+                recipient: issued.addressNormalized,
+                idempotencyKey: `${RESET_PURPOSE}:${issued.id}`,
+                source: RESET_OUTBOX_SOURCE,
+              },
+            });
           },
         });
       } catch {

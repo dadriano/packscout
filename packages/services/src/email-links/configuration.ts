@@ -47,9 +47,14 @@ const MAX_PER_WINDOW_BOUNDS = { minimum: 1, maximum: 10_000 };
 
 /**
  * The rooted admin path each purpose redeems on. The presented token rides
- * in the `token` query parameter; messaging/009 and /010 mount their
- * redemption screens on these paths, and the message catalogue re-anchors
- * the path to the configured admin origin without ever inspecting it.
+ * in the URL *fragment*, not the query string: a fragment is the one part of
+ * a URL browsers never put on the wire, so a one-time operator credential
+ * stays out of server access logs and out of the `Referer` header the
+ * redemption screen would otherwise send on every same-origin asset and API
+ * request. messaging/009 and /010 mount their redemption screens on these
+ * paths, read the token from the fragment, and strip it from history; the
+ * message catalogue re-anchors the path to the configured admin origin
+ * without ever inspecting it.
  */
 export const EMAIL_LINK_REDEMPTION_PATHS: Readonly<
   Record<EmailLinkPurpose, string>
@@ -58,8 +63,8 @@ export const EMAIL_LINK_REDEMPTION_PATHS: Readonly<
   operator_invitation: "/accept-invitation",
 });
 
-/** The query parameter carrying the presented token on a redemption path. */
-export const EMAIL_LINK_TOKEN_QUERY_PARAMETER = "token";
+/** The fragment key carrying the presented token on a redemption path. */
+export const EMAIL_LINK_TOKEN_FRAGMENT_KEY = "token";
 
 export interface EmailLinkIssuanceRateLimitConfiguration {
   readonly windowMs: number;
@@ -183,13 +188,17 @@ export function resolveEmailLinkTokenSecret(
   return value;
 }
 
-/** Builds the opaque rooted link path a purpose's message carries. */
+/**
+ * Builds the opaque rooted link path a purpose's message carries. The token
+ * goes in the fragment, so it never reaches an access log and is never sent
+ * as a referrer; the path stays a single opaque string to every consumer.
+ */
 export function emailLinkPathFor(
   purpose: EmailLinkPurpose,
   presentedToken: string,
 ): string {
   const path = EMAIL_LINK_REDEMPTION_PATHS[purpose];
-  return `${path}?${EMAIL_LINK_TOKEN_QUERY_PARAMETER}=${presentedToken}`;
+  return `${path}#${EMAIL_LINK_TOKEN_FRAGMENT_KEY}=${presentedToken}`;
 }
 
 /** Every purpose has a redemption path; verified at module load in tests. */

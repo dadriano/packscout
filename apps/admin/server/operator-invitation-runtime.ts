@@ -148,27 +148,37 @@ export function createOperatorInvitationFlow(
         address: email,
         source,
         actorKey,
+        // Inside the issuance sequence, so the security trail records the
+        // issuance only once the token row and its message intent have
+        // landed together. A commit that refuses is audited as uncommitted
+        // and raised to the caller, which never claims the link was sent.
+        commit: async (link) => {
+          if (captured === null) {
+            throw new Error("The issuance path captured no token to commit.");
+          }
+          const issued: CapturedIssuance = captured;
+          const messageInput: OperatorInvitationMessageInput = {
+            toEmail: issued.addressNormalized,
+            invitedByDisplayName,
+            invitationLinkPath: link.linkPath,
+            linkExpiresAt: link.expiresAt.toISOString(),
+          };
+          await dependencies.commitIssuance({
+            token: issued,
+            message: {
+              kind: INVITATION_PURPOSE,
+              input: messageInput,
+              recipient: issued.addressNormalized,
+              idempotencyKey: `${INVITATION_PURPOSE}:${issued.id}`,
+              source: INVITATION_OUTBOX_SOURCE,
+            },
+          });
+        },
       });
       if (result.status !== "issued" || captured === null) {
         return { status: "rate_limited" };
       }
       const issued: CapturedIssuance = captured;
-      const messageInput: OperatorInvitationMessageInput = {
-        toEmail: issued.addressNormalized,
-        invitedByDisplayName,
-        invitationLinkPath: result.issued.linkPath,
-        linkExpiresAt: result.issued.expiresAt.toISOString(),
-      };
-      await dependencies.commitIssuance({
-        token: issued,
-        message: {
-          kind: INVITATION_PURPOSE,
-          input: messageInput,
-          recipient: issued.addressNormalized,
-          idempotencyKey: `${INVITATION_PURPOSE}:${issued.id}`,
-          source: INVITATION_OUTBOX_SOURCE,
-        },
-      });
       return {
         status: "issued",
         sentAt: issued.issuedAt.toISOString(),

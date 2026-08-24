@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { operatorInvitationAcceptanceRequestSchema } from "@packscout/contracts";
 import { acceptOperatorInvitation } from "../api/auth";
 import { AdminApiError } from "../api/client";
 import { AuthErrorSummary } from "../components/auth/AuthErrorSummary";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { useOneTimeLinkToken } from "../hooks/useOneTimeLinkToken";
 
 /**
  * The set-password screen a mailed invitation link lands on. The token rides
- * in the `token` query parameter and is only ever posted to the acceptance
- * endpoint — never echoed, stored, or logged. Every dead link — missing,
+ * in the URL fragment, is stripped from history the moment it is read, and is
+ * only ever posted to the acceptance endpoint — never echoed, stored, or
+ * logged, and never in a place a server log or a `Referer` header can see
+ * it. Every dead link — missing,
  * malformed, expired, superseded, cancelled, or already used — collapses into
  * the one plain invalid-link state, which says nothing about whether an
  * account exists or what state it is in. The password is validated against
@@ -47,8 +50,7 @@ function InvalidLinkState() {
 
 export function AcceptInvitationPage() {
   useDocumentTitle("Accept your invitation");
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get("token") ?? "";
+  const token = useOneTimeLinkToken();
   const errorRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<Phase>(token ? "form" : "invalid_link");
   const [password, setPassword] = useState("");

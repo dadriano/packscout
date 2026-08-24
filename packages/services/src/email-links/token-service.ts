@@ -83,7 +83,9 @@ export type EmailLinkIssuanceAuditReason =
   | "issued"
   | "rate_limited"
   | "subject_unknown"
-  | "address_invalid";
+  | "address_invalid"
+  /** Generated, then the caller's durable commit refused: no link exists. */
+  | "issue_uncommitted";
 
 export type EmailLinkRedemptionAuditReason =
   | "redeemed"
@@ -111,6 +113,32 @@ export interface EmailLinkAuditRecorder {
   append(event: EmailLinkAuditEventRecord): Promise<void>;
 }
 
+/**
+ * One bounded record of an audit write that could not be persisted: the
+ * action, its closed reason word, and whether the work it describes is
+ * already durable. Never a token, a selector, an address, or a link.
+ */
+export interface EmailLinkAuditWriteFailure {
+  readonly action: EmailLinkAuditEventRecord["action"];
+  readonly purpose: EmailLinkPurpose;
+  readonly reason: EmailLinkAuditEventRecord["reason"];
+  readonly afterCommit: boolean;
+}
+
+/** The default report for an audit write that failed: one bounded line. */
+function logEmailLinkAuditFailure(failure: EmailLinkAuditWriteFailure): void {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      event: "email_link_audit_write_failed",
+      action: failure.action,
+      purpose: failure.purpose,
+      reason: failure.reason,
+      afterCommit: failure.afterCommit,
+    }),
+  );
+}
+
 export interface IssueEmailLinkCommand {
   readonly purpose: EmailLinkPurpose;
   /** The bound subject; redemption resolves back to exactly this identity. */
@@ -121,6 +149,14 @@ export interface IssueEmailLinkCommand {
   readonly source: string;
   /** Audit attribution for administrator-triggered issuance. */
   readonly actorKey?: string;
+  /**
+   * The caller's durable commit for the generated token — typically the one
+   * transaction that lands the token row with the message intent carrying its
+   * link. It runs before the issuance is audited, so the security trail
+   * records a success only for a link that exists. A refusal must throw; the
+   * attempt is then audited as `issue_uncommitted` and the error rethrown.
+   */
+  commit?(issued: IssuedEmailLink): Promise<void>;
 }
 
 export interface IssuedEmailLink {
@@ -150,6 +186,14 @@ export interface RequestEmailLinkIssuanceCommand {
    * and rate-limited alike — so lookup cost never distinguishes them.
    */
   resolveSubjectId(addressNormalized: string): Promise<string | null>;
+  /**
+   * The caller's durable commit for the generated token, run before the
+   * issuance is audited so the trail never records a success for a link that
+   * was never persisted or mailed. A refusal must throw; the attempt is
+   * audited as `issue_uncommitted` and the error rethrown to the caller,
+   * whose own uniform response to the requester is unaffected.
+   */
+  commit?(issued: IssuedEmailLink): Promise<void>;
 }
 
 /**
@@ -203,6 +247,12 @@ export interface EmailLinkTokenServiceOptions {
   readonly configuration: EmailLinkTokenConfiguration;
   readonly clock?: Clock;
   readonly randomness?: EmailLinkRandomness;
+  /**
+   * Where an audit record that could not be written is reported. Defaults to
+   * one content-free error line. It never decides an outcome: a consumed
+   * token stays consumed whether or not its record landed.
+   */
+  readonly reportAuditFailure?: (failure: EmailLinkAuditWriteFailure) => void;
 }
 
 const addressPattern = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
@@ -229,6 +279,9 @@ export class EmailLinkTokenService {
   readonly #clock: Clock;
   readonly #randomness: EmailLinkRandomness;
   readonly #bucketKeyer: EmailLinkBucketKeyer;
+  readonly #reportAuditWriteFailure: (
+    failure: EmailLinkAuditWriteFailure,
+  ) => void;
   /**
    * The digest an unknown or malformed presentation is compared against — a
    * real digest of a random verifier drawn at construction, so the failing
@@ -245,6 +298,8 @@ export class EmailLinkTokenService {
     this.#clock = options.clock ?? { now: () => new Date() };
     this.#randomness = options.randomness ?? nodeEmailLinkRandomness;
     this.#bucketKeyer = options.bucketKeyer;
+    this.#reportAuditWriteFailure =
+      options.reportAuditFailure ?? logEmailLinkAuditFailure;
     this.#dummyVerifierHash = this.#digest.digest(
       "operator_password_reset",
       generateEmailLinkToken(this.#randomness).verifier,
@@ -279,7 +334,14 @@ export class EmailLinkTokenService {
       address,
       now,
     );
-    await this.#auditIssuance(command.purpose, command.subjectId, "issued", now, command.actorKey);
+    await this.#commitAndAuditIssuance(
+      command.purpose,
+      command.subjectId,
+      issued,
+      now,
+      command.commit,
+      command.actorKey,
+    );
     return { status: "issued", issued };
   }
 
@@ -324,7 +386,13 @@ export class EmailLinkTokenService {
       return { status: "accepted" };
     }
     const issued = await this.#persistIssuance(command.purpose, subjectId, address, now);
-    await this.#auditIssuance(command.purpose, subjectId, "issued", now);
+    await this.#commitAndAuditIssuance(
+      command.purpose,
+      subjectId,
+      issued,
+      now,
+      command.commit,
+    );
     return { status: "accepted", issued };
   }
 
@@ -382,14 +450,29 @@ export class EmailLinkTokenService {
       // A concurrent redemption or supersession won between read and update.
       return this.#reject(command.purpose, stored.subjectId, "already_used", now);
     }
-    await this.#audit.append({
-      action: "email_link.redeem",
-      purpose: command.purpose,
-      subjectId: stored.subjectId,
-      outcome: "success",
-      reason: "redeemed",
-      occurredAt: now,
-    });
+    // The guarded UPDATE has committed: this token is spent and can never be
+    // presented again. Rejecting here because the record could not be written
+    // would leave the person holding the link with no way forward — the
+    // password set or activation behind this redemption never runs, and the
+    // link now answers with the uniform rejection. The missing record is its
+    // own reported failure, never the redemption's outcome.
+    try {
+      await this.#audit.append({
+        action: "email_link.redeem",
+        purpose: command.purpose,
+        subjectId: stored.subjectId,
+        outcome: "success",
+        reason: "redeemed",
+        occurredAt: now,
+      });
+    } catch {
+      this.#reportAuditFailure({
+        action: "email_link.redeem",
+        purpose: command.purpose,
+        reason: "redeemed",
+        afterCommit: true,
+      });
+    }
     return {
       status: "redeemed",
       subjectId: stored.subjectId,
@@ -461,6 +544,50 @@ export class EmailLinkTokenService {
     if (!addressBlock) return sourceBlock;
     if (!sourceBlock) return addressBlock;
     return addressBlock > sourceBlock ? addressBlock : sourceBlock;
+  }
+
+  /**
+   * Lands the caller's durable commit for a generated token, then records the
+   * issuance. Auditing success first would write a successful issuance into
+   * the security trail for a link that does not exist and was never mailed.
+   */
+  async #commitAndAuditIssuance(
+    purpose: EmailLinkPurpose,
+    subjectId: string,
+    issued: IssuedEmailLink,
+    now: Date,
+    commit: ((issued: IssuedEmailLink) => Promise<void>) | undefined,
+    actorKey?: string,
+  ): Promise<void> {
+    if (commit) {
+      try {
+        await commit(issued);
+      } catch (error) {
+        try {
+          await this.#auditIssuance(
+            purpose,
+            subjectId,
+            "issue_uncommitted",
+            now,
+            actorKey,
+          );
+        } catch {
+          // The commit refusal is the outcome the caller must act on; a trail
+          // that could not record it must not replace that error.
+        }
+        throw error;
+      }
+    }
+    await this.#auditIssuance(purpose, subjectId, "issued", now, actorKey);
+  }
+
+  /** Reports an unwritable audit record without becoming a failure itself. */
+  #reportAuditFailure(failure: EmailLinkAuditWriteFailure): void {
+    try {
+      this.#reportAuditWriteFailure(failure);
+    } catch {
+      // Reporting the gap must not become a third failure domain.
+    }
   }
 
   async #auditIssuance(

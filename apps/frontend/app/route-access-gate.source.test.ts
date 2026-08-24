@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
 /**
@@ -143,4 +143,129 @@ test("the root loading fallback commits to neither surface before the decision r
   // It still announces the wait to assistive technology.
   assert.match(rootLoadingSource, /aria-busy="true"/u);
   assert.match(rootLoadingSource, /role="status"/u);
+});
+
+// --- Credentialed reads: enumerated by caller, not by path ----------------
+
+/**
+ * The catalog reads that present the server-held credential
+ * (closed-beta-access/005), derived from the module rather than listed here,
+ * so a read added later is covered without anyone remembering to add it.
+ */
+function credentialedReadNames(): readonly string[] {
+  const moduleSource = source("../lib/public-repacks.server.ts");
+  const names: string[] = [];
+  const declaration = /export async function (\w+)/gu;
+  const starts: Array<{ name: string; index: number }> = [];
+  for (const match of moduleSource.matchAll(declaration)) {
+    starts.push({ name: match[1]!, index: match.index! });
+  }
+  for (const [position, start] of starts.entries()) {
+    const end = starts[position + 1]?.index ?? moduleSource.length;
+    if (moduleSource.slice(start.index, end).includes("catalogReadArguments(")) {
+      names.push(start.name);
+    }
+  }
+  return names;
+}
+
+/** Every routable source file under `app/`, tests excluded. */
+function routeSourceFiles(): readonly string[] {
+  const root = new URL("./", import.meta.url);
+  return readdirSync(root, { recursive: true, encoding: "utf8" })
+    .filter(
+      (entry) =>
+        (entry.endsWith(".ts") || entry.endsWith(".tsx")) &&
+        !entry.includes(".test."),
+    )
+    .sort();
+}
+
+/** Whatever the file resolves the visitor's access through, if anything. */
+const GATE_MARKERS = [
+  "resolveVisitorAccess()",
+  "resolveVisitorAccessForRequest",
+  "createAccessGuardedHandler",
+] as const;
+
+/** The source with its import statements removed: only the module body. */
+function moduleBody(fileSource: string): string {
+  return fileSource.replace(/^import [\s\S]*?;$/gmu, "");
+}
+
+test("the credentialed catalog reads are the ones this enumeration covers", () => {
+  // Derivation guard: a broken derivation must fail loudly, not silently
+  // exempt every caller below.
+  assert.deepEqual(credentialedReadNames(), [
+    "readPublicShellStatus",
+    "readDashboardBundle",
+    "readPublicRepacks",
+    "readPublicRepack",
+    "searchPublicCollectibles",
+    "readRepacksByDesiredCollectible",
+  ]);
+});
+
+test("every caller of a credentialed catalog read resolves access first", () => {
+  // The earlier enumeration covered read *paths*: the four gated pages. It
+  // could not see a new, ungated caller of the same credentialed helper —
+  // which is exactly how the not-found surfaces came to make an authorized
+  // catalog read, and serialize release source and timestamps into the
+  // client, for signed-out visitors on any unknown URL. This enumerates
+  // callers, so an ungated one fails the build.
+  const reads = credentialedReadNames();
+  assert.ok(reads.length > 0, "the credentialed reads were derived");
+  const callers: string[] = [];
+  for (const file of routeSourceFiles()) {
+    const fileSource = source(`./${file}`);
+    if (!reads.some((read) => fileSource.includes(read))) continue;
+    callers.push(file);
+    const body = moduleBody(fileSource);
+    const firstRead = Math.min(
+      ...reads
+        .map((read) => body.indexOf(read))
+        .filter((index) => index !== -1),
+    );
+    if (!Number.isFinite(firstRead)) continue;
+    const firstGate = Math.min(
+      ...GATE_MARKERS.map((marker) => body.indexOf(marker)).filter(
+        (index) => index !== -1,
+      ),
+    );
+    assert.ok(
+      Number.isFinite(firstGate),
+      `${file} reads the closed catalog without resolving visitor access`,
+    );
+    assert.ok(
+      firstGate < firstRead,
+      `${file} must resolve visitor access before its first credentialed read`,
+    );
+  }
+  // The walk really did reach the surfaces we know read the catalog.
+  for (const expected of [
+    "page.tsx",
+    "packs/page.tsx",
+    "learn/page.tsx",
+    "learn/[slug]/page.tsx",
+    "not-found.tsx",
+    "learn/[slug]/not-found.tsx",
+    "api/collectibles/search/route.ts",
+  ]) {
+    assert.ok(callers.includes(expected), `${expected} was enumerated`);
+  }
+});
+
+test("the ungated not-found surfaces read the catalog only for admitted visitors", () => {
+  // These answer unknown URLs for signed-out visitors, so they cannot
+  // redirect the way a gated page does. They withhold the credentialed read
+  // instead: an unadmitted visitor gets the same bounded unavailable state a
+  // missing backend produces, and no release source or timestamp at all.
+  for (const path of ["./not-found.tsx", "./learn/[slug]/not-found.tsx"]) {
+    const body = defaultExportBody(source(path));
+    assert.match(body, /resolveGatedRoute\(await resolveVisitorAccess\(\)\)/u);
+    assert.match(
+      body,
+      /route\.kind === "render"\s*\?\s*await readPublicShellStatus\(\)\s*:\s*publicReadError\("RELEASE_UNAVAILABLE"\)/u,
+    );
+  }
 });

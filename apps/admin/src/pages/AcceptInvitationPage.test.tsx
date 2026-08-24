@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import {
   changeControl,
   cleanupPage,
@@ -18,12 +18,27 @@ import { AcceptInvitationPage } from "./AcceptInvitationPage.tsx";
 const mailedToken = `${"a".repeat(22)}.${"b".repeat(43)}`;
 const chosenPassword = "a password only I know";
 
-function page(entry = `/accept-invitation?token=${mailedToken}`) {
+/** Renders the address the screen currently occupies, fragment included. */
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <span data-location>
+      {`${location.pathname}${location.search}${location.hash}`}
+    </span>
+  );
+}
+
+function page(entry = `/accept-invitation#token=${mailedToken}`) {
   return (
     <MemoryRouter initialEntries={[entry]}>
       <AcceptInvitationPage />
+      <LocationProbe />
     </MemoryRouter>
   );
+}
+
+function locationOf(renderer: { container: HTMLElement }): string {
+  return renderer.container.querySelector("[data-location]")?.textContent ?? "";
 }
 
 test("an invitation link with no token is the plain invalid-link state, without any request", async (context) => {
@@ -39,7 +54,11 @@ test("an invitation link with no token is the plain invalid-link state, without 
 });
 
 test("a presented invitation renders a labelled set-password form with the shared guidance", () => {
-  const html = renderToStaticMarkup(page());
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={[`/accept-invitation#token=${mailedToken}`]}>
+      <AcceptInvitationPage />
+    </MemoryRouter>,
+  );
   assert.match(html, /Choose your password/);
   assert.match(html, /label for="invitation-new-password">Password/);
   assert.match(html, /type="password"/);
@@ -138,4 +157,49 @@ test("an unavailable service says so plainly and leaves the form usable", async 
   assert.match(text, /temporarily unavailable/);
   assert.match(text, /Your account is unchanged\./);
   assert.ok(findButton(renderer, "Activate my account"));
+});
+
+test("the mailed token is read from the fragment and stripped from history", async (context) => {
+  // A one-time operator credential in the query string reaches server access
+  // logs and, under the admin's `Referrer-Policy: same-origin`, the `Referer`
+  // of every asset and API request this screen makes. It rides in the
+  // fragment instead, and the screen drops it from the entry once read, so
+  // the spent link cannot be recovered from the address bar or session
+  // history — while still activating the account from component state.
+  const requests = stubFetch(context, () => new Response(null, { status: 204 }));
+  const renderer = await renderPage(page());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.equal(locationOf(renderer), "/accept-invitation");
+  assert.doesNotMatch(
+    renderer.container.innerHTML,
+    new RegExp(mailedToken.slice(0, 22)),
+  );
+
+  await act(async () =>
+    changeControl(renderer, "invitation-new-password", chosenPassword),
+  );
+  await act(async () => findButton(renderer, "Activate my account").click());
+  await settlePage();
+
+  assert.match(pageText(renderer), /Your operator account is ready\./);
+  assert.deepEqual(JSON.parse(String(requests[0]?.init?.body)), {
+    token: mailedToken,
+    password: chosenPassword,
+  });
+});
+
+test("a token presented in the query string is not a usable invitation link", async (context) => {
+  // Nothing mails that shape any more, and honouring it would keep the
+  // logged-and-referred credential path alive.
+  const requests = stubFetch(context, () => jsonResponse({}, 500));
+  const renderer = await renderPage(
+    page(`/accept-invitation?token=${mailedToken}`),
+  );
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.match(pageText(renderer), /This invitation link is no longer valid\./);
+  assert.equal(requests.length, 0);
 });

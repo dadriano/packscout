@@ -230,8 +230,11 @@ async function issueFor(flow: OperatorInvitationFlow, enqueued: EnqueueEmailMess
   const message = enqueued.at(-1);
   const linkPath = (message?.input as { invitationLinkPath: string })
     .invitationLinkPath;
+  // The credential rides in the fragment, which browsers never send.
+  const url = new URL(linkPath, "https://admin.test");
+  assert.equal(url.search, "");
   return {
-    token: new URL(linkPath, "https://admin.test").searchParams.get("token")!,
+    token: new URLSearchParams(url.hash.slice(1)).get("token")!,
     message,
   };
 }
@@ -257,7 +260,9 @@ test("an invited operator activates through the mailed link and the message name
     linkExpiresAt: string;
   };
   assert.equal(input.invitedByDisplayName, "Primary Admin");
-  assert.ok(input.invitationLinkPath.startsWith("/accept-invitation?token="));
+  assert.ok(input.invitationLinkPath.startsWith("/accept-invitation#token="));
+  // The credential never rides in the query string of a mailed link.
+  assert.equal(input.invitationLinkPath.includes("?"), false);
   assert.ok(Date.parse(input.linkExpiresAt) > harness.clock.now().getTime());
 
   await withServer(harness.app, async (baseUrl) => {

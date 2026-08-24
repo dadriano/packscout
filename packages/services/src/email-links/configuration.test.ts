@@ -104,10 +104,33 @@ test("every purpose has a rooted redemption path and an opaque token parameter",
   const presented = `${"a".repeat(22)}.${"B".repeat(43)}`;
   assert.equal(
     emailLinkPathFor("operator_password_reset", presented),
-    `/reset-password?token=${presented}`,
+    `/reset-password#token=${presented}`,
   );
   assert.equal(
     emailLinkPathFor("operator_invitation", presented),
-    `/accept-invitation?token=${presented}`,
+    `/accept-invitation#token=${presented}`,
   );
+});
+
+test("a one-time credential never rides in the query string of a mailed link", () => {
+  // A token in the query string reaches every server access log the request
+  // touches, and — the admin serves `Referrer-Policy: same-origin` — travels
+  // in the `Referer` of every same-origin asset and API request the
+  // redemption screen makes. The fragment never leaves the browser.
+  const presented = `${"a".repeat(22)}.${"B".repeat(43)}`;
+  for (const purpose of EMAIL_LINK_PURPOSES) {
+    const url = new URL(
+      emailLinkPathFor(purpose, presented),
+      "https://admin.packscout.test",
+    );
+    assert.equal(url.pathname, EMAIL_LINK_REDEMPTION_PATHS[purpose]);
+    assert.equal(url.search, "", `${purpose} carries no query string`);
+    assert.equal(url.searchParams.get("token"), null);
+    assert.equal(url.hash, `#token=${presented}`);
+    // Nothing but the fragment holds the token.
+    assert.equal(
+      `${url.origin}${url.pathname}${url.search}`.includes(presented),
+      false,
+    );
+  }
 });

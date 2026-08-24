@@ -6,6 +6,7 @@ import {
   AuthServiceError,
   BoundedLoginAttemptLimiter,
   type AuthAuditEvent,
+  type AuthAuditWriteFailure,
   type AuthRepository,
   type AuthoritativeSessionRecord,
   type LoginOperatorRecord,
@@ -119,9 +120,13 @@ function createRepository(): { repository: AuthRepository; state: RepositoryStat
   return { repository, state };
 }
 
-function createHarness() {
+function createHarness(overrides?: {
+  /** Which records the ledger refuses, standing in for an unavailable sink. */
+  auditFailsOn?: (event: AuthAuditEvent) => boolean;
+}) {
   const { repository, state } = createRepository();
   const audits: AuthAuditEvent[] = [];
+  const auditFailures: AuthAuditWriteFailure[] = [];
   const passwordVerifications: string[] = [];
   const limiter = new BoundedLoginAttemptLimiter({
     windowMs: 60_000,
@@ -162,16 +167,20 @@ function createHarness() {
     loginLimiter: limiter,
     audit: {
       async append(event) {
+        if (overrides?.auditFailsOn?.(event)) {
+          throw new Error("the audit ledger is unavailable");
+        }
         audits.push(event);
       },
     },
+    reportAuditFailure: (failure) => auditFailures.push(failure),
     config: {
       sessionIdleMs: 60 * 60 * 1_000,
       sessionAbsoluteMs: 12 * 60 * 60 * 1_000,
       dummyPasswordHash: "hash:dummy value",
     },
   });
-  return { service, state, audits, passwordVerifications };
+  return { service, state, audits, auditFailures, passwordVerifications };
 }
 
 function captureServiceError(run: () => Promise<unknown>): Promise<AuthServiceError> {
@@ -914,4 +923,44 @@ test("reissue resolves the account's own address and refuses non-pending targets
     ),
   );
   assert.equal(forbidden.code, "FORBIDDEN");
+});
+
+test("a completed reset stays completed when its audit write fails", async () => {
+  // The password is changed, every session the operator held is revoked, and
+  // the one-time link that authorized it is spent. Reporting unavailability
+  // because the ledger refused would tell the operator their password is
+  // unchanged when it is changed, and the link can never be presented again:
+  // they would be locked out of an account whose new password they were told
+  // did not take.
+  const { service, state, audits, auditFailures } = createHarness({
+    auditFailsOn: (event) =>
+      event.action === "operator.password_reset" && event.outcome === "success",
+  });
+
+  await service.completePasswordReset({
+    operatorId: admin.id,
+    addressNormalized: admin.emailNormalized,
+    newPassword: "a fresh strong password",
+  });
+
+  // The credential update — and its session revocation — still happened once.
+  assert.equal(state.operatorUpdates.length, 1);
+  assert.equal(state.operatorUpdates[0]?.passwordHash, "hash:a fresh strong password");
+  assert.equal(
+    audits.some((event) => event.action === "operator.password_reset"),
+    false,
+  );
+
+  // The gap is reported on its own, naming nothing the reset was holding.
+  assert.deepEqual(auditFailures, [
+    {
+      action: "operator.password_reset",
+      outcome: "success",
+      afterCommit: true,
+    },
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(auditFailures),
+    /fresh strong password|hash:|@/,
+  );
 });

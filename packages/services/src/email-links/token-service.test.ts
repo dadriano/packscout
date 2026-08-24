@@ -21,6 +21,7 @@ import {
   EmailLinkTokenService,
   createEmailLinkTokenPruner,
   type EmailLinkAuditEventRecord,
+  type EmailLinkAuditWriteFailure,
   type EmailLinkStoredToken,
   type EmailLinkThrottleOptions,
 } from "./token-service.ts";
@@ -123,7 +124,10 @@ class CountingThrottle {
 
 class RecordingAudit {
   readonly events: EmailLinkAuditEventRecord[] = [];
+  /** Which records this sink refuses, standing in for an unavailable ledger. */
+  failsOn: ((event: EmailLinkAuditEventRecord) => boolean) | null = null;
   async append(event: EmailLinkAuditEventRecord): Promise<void> {
+    if (this.failsOn?.(event)) throw new Error("the audit ledger is unavailable");
     this.events.push(event);
   }
 }
@@ -178,11 +182,16 @@ const bucketKeyer: EmailLinkBucketKeyer = {
   sourceKey: (purpose, source) => `email_link:${purpose}:source:${Buffer.from(source).toString("base64url")}`,
 };
 
-function createHarness(overrides?: { blockAt?: Date | null }) {
+function createHarness(overrides?: {
+  blockAt?: Date | null;
+  auditFailsOn?: (event: EmailLinkAuditEventRecord) => boolean;
+}) {
   const store = new FakeStore();
   const throttle = new CountingThrottle();
   throttle.blockAt = overrides?.blockAt ?? null;
   const audit = new RecordingAudit();
+  audit.failsOn = overrides?.auditFailsOn ?? null;
+  const auditFailures: EmailLinkAuditWriteFailure[] = [];
   const digest = new CountingDigest(createEmailLinkVerifierDigest(secret));
   const randomness = deterministicRandomness();
   const clock = { current: new Date(startedAt), now: () => clock.current };
@@ -195,11 +204,21 @@ function createHarness(overrides?: { blockAt?: Date | null }) {
     configuration: resolveEmailLinkTokenConfiguration({}),
     clock,
     randomness,
+    reportAuditFailure: (failure) => auditFailures.push(failure),
   });
   // Construction draws the dummy digest; measurements start clean.
   digest.reset();
   randomness.reset();
-  return { store, throttle, audit, digest, randomness, clock, service };
+  return {
+    store,
+    throttle,
+    audit,
+    auditFailures,
+    digest,
+    randomness,
+    clock,
+    service,
+  };
 }
 
 function issueCommand(overrides?: Partial<{ purpose: EmailLinkPurpose; address: string; source: string; subjectId: string }>) {
@@ -223,7 +242,7 @@ test("issuing returns the only usable token inside a link path the catalogue acc
   const issued = await issuedToken(harness);
 
   assert.match(issued.token, /^[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/);
-  assert.equal(issued.linkPath, `/reset-password?token=${issued.token}`);
+  assert.equal(issued.linkPath, `/reset-password#token=${issued.token}`);
   assert.equal(
     issued.expiresAt.getTime(),
     startedAt.getTime() + DEFAULT_RESET_LIFETIME_MS,
@@ -666,5 +685,150 @@ test("the retention pruner registers token pruning without touching live rows it
   assert.throws(
     () => createEmailLinkTokenPruner({ repository: { prune: async () => 0 }, retentionMs: 0 }),
     RangeError,
+  );
+});
+
+test("a consumed token is still redeemed when the success audit write fails", async () => {
+  // The guarded UPDATE has committed and cannot be undone: this token can
+  // never be presented again. Rejecting because the record could not be
+  // written would spend the link and leave the person holding it with
+  // nothing — no password set, no activation — and a second click on the
+  // same link is the frozen rejection.
+  const harness = createHarness({
+    auditFailsOn: (event) =>
+      event.action === "email_link.redeem" && event.outcome === "success",
+  });
+  const issued = await issuedToken(harness);
+
+  const redeemed = await harness.service.redeem({
+    purpose: "operator_password_reset",
+    presentedToken: issued.token,
+    isSubjectEligible: async () => true,
+  });
+
+  assert.equal(redeemed.status, "redeemed");
+  if (redeemed.status !== "redeemed") throw new Error("unreachable");
+  assert.equal(redeemed.subjectId, subjectId);
+  assert.equal(harness.store.consumeCalls, 1);
+
+  // The gap is its own reported failure, and carries no token material.
+  assert.deepEqual(harness.auditFailures, [
+    {
+      action: "email_link.redeem",
+      purpose: "operator_password_reset",
+      reason: "redeemed",
+      afterCommit: true,
+    },
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(harness.auditFailures),
+    new RegExp(issued.token.slice(0, 22)),
+  );
+
+  // Single use still holds: the token really was consumed.
+  assert.deepEqual(
+    await harness.service.redeem({
+      purpose: "operator_password_reset",
+      presentedToken: issued.token,
+      isSubjectEligible: async () => true,
+    }),
+    EMAIL_LINK_REJECTION,
+  );
+});
+
+test("an administrator-triggered issuance is audited only after its commit lands", async () => {
+  const harness = createHarness();
+  const auditedWhenCommitting: EmailLinkAuditEventRecord[] = [];
+
+  const result = await harness.service.issue({
+    ...issueCommand(),
+    commit: async (issued) => {
+      auditedWhenCommitting.push(...harness.audit.events);
+      assert.equal(issued.linkPath.startsWith("/reset-password#token="), true);
+    },
+  });
+
+  assert.equal(result.status, "issued");
+  // Nothing was in the trail while the transaction was still open.
+  assert.deepEqual(auditedWhenCommitting, []);
+  assert.deepEqual(
+    harness.audit.events.map((event) => [event.outcome, event.reason]),
+    [["success", "issued"]],
+  );
+});
+
+test("an issuance whose transaction refuses is never recorded as a successful issue", async () => {
+  // Auditing success before the commit puts a successful issuance in the
+  // security trail for a link that does not exist and was never mailed.
+  const harness = createHarness();
+  const refusal = new Error("the issuance transaction refused");
+
+  await assert.rejects(
+    harness.service.issue({
+      ...issueCommand(),
+      commit: async () => {
+        throw refusal;
+      },
+    }),
+    (error: unknown) => error === refusal,
+  );
+
+  assert.deepEqual(
+    harness.audit.events.map((event) => [
+      event.action,
+      event.outcome,
+      event.reason,
+    ]),
+    [["email_link.issue", "failure", "issue_uncommitted"]],
+  );
+});
+
+test("a request whose issuance transaction refuses records no successful issuance", async () => {
+  const harness = createHarness();
+  const refusal = new Error("the issuance transaction refused");
+
+  await assert.rejects(
+    harness.service.requestIssuance({
+      purpose: "operator_password_reset",
+      address: "Operator@Example.Test",
+      source: "203.0.113.7",
+      resolveSubjectId: async () => subjectId,
+      commit: async () => {
+        throw refusal;
+      },
+    }),
+    (error: unknown) => error === refusal,
+  );
+
+  assert.deepEqual(
+    harness.audit.events.map((event) => [
+      event.action,
+      event.outcome,
+      event.reason,
+    ]),
+    [["email_link.issue", "failure", "issue_uncommitted"]],
+  );
+});
+
+test("the request path audits a successful issuance only once its commit has landed", async () => {
+  const harness = createHarness();
+  const auditedWhenCommitting: EmailLinkAuditEventRecord[] = [];
+
+  const result = await harness.service.requestIssuance({
+    purpose: "operator_password_reset",
+    address: "Operator@Example.Test",
+    source: "203.0.113.7",
+    resolveSubjectId: async () => subjectId,
+    commit: async () => {
+      auditedWhenCommitting.push(...harness.audit.events);
+    },
+  });
+
+  assert.equal(result.status, "accepted");
+  assert.ok(result.issued);
+  assert.deepEqual(auditedWhenCommitting, []);
+  assert.deepEqual(
+    harness.audit.events.map((event) => [event.outcome, event.reason]),
+    [["success", "issued"]],
   );
 });

@@ -462,6 +462,39 @@ test("cancelling an invitation is permission-guarded and invalidates outstanding
   assert.equal(calls.revoke, 1);
 });
 
+test("a cancellation that committed is reported as committed even when supersession fails", async () => {
+  // `cancelInvitedOperator` has already written the terminal state and it
+  // cannot be taken back from here. Answering with an error because the
+  // outstanding links could not be superseded sends the administrator to
+  // retry, and the retry answers "not pending" — the operator and the account
+  // then describe different outcomes. The stale token is already inert:
+  // redemption rechecks account eligibility and a cancelled account fails it.
+  const { app, calls, cookiePolicy } = createHarness(
+    {},
+    {
+      flow: {
+        async revokeInvitations() {
+          calls.revoke += 1;
+          throw new Error("the supersession update is unavailable");
+        },
+      },
+    },
+  );
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/operators/${invitedId}/invitation`,
+      { method: "DELETE", headers: mutationHeaders(cookiePolicy, "admin-session") },
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.operator.state, "cancelled");
+    // Nothing about a token or a link leaks into the answer.
+    assert.doesNotMatch(JSON.stringify(body), /token|accept-invitation|password/i);
+  });
+  assert.equal(calls.cancel, 1);
+  assert.equal(calls.revoke, 1);
+});
+
 test("the ledger reports invitation status for pending accounts only", async () => {
   const { app, cookiePolicy } = createHarness({
     async listOperators() {

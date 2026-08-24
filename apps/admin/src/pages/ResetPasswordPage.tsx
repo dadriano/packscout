@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { passwordResetCompletionRequestSchema } from "@packscout/contracts";
 import { completePasswordReset } from "../api/auth";
 import { AdminApiError } from "../api/client";
 import { AuthErrorSummary } from "../components/auth/AuthErrorSummary";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { useOneTimeLinkToken } from "../hooks/useOneTimeLinkToken";
 
 /**
  * The set-password screen a mailed reset link lands on. The token rides in
- * the `token` query parameter and is only ever posted to the completion
- * endpoint — never echoed, stored, or logged. Every dead link — missing,
+ * the URL fragment, is stripped from history the moment it is read, and is
+ * only ever posted to the completion endpoint — never echoed, stored, or
+ * logged, and never in a place a server log or a `Referer` header can see
+ * it. Every dead link — missing,
  * malformed, expired, superseded, or already used — collapses into the one
  * plain invalid-link state; the password itself is validated against the
  * exact schema an administrator-set password must satisfy, so the messages
@@ -49,8 +52,7 @@ function InvalidLinkState() {
 
 export function ResetPasswordPage() {
   useDocumentTitle("Choose a new password");
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get("token") ?? "";
+  const token = useOneTimeLinkToken();
   const errorRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<Phase>(token ? "form" : "invalid_link");
   const [password, setPassword] = useState("");
