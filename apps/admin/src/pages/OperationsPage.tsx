@@ -8,6 +8,7 @@ import { AdminApiError } from "../api/client";
 import { requestManualImport } from "../api/import-operations";
 import { getProviderSourceOperationsOverview } from "../api/provider-source-operations";
 import { commandProviderSource } from "../api/provider-sources";
+import { EmptyState } from "../components/EmptyState";
 import {
   ConnectionOperationsSummary,
   ProviderSourceOperationsLedger,
@@ -52,8 +53,13 @@ function commandError(error: unknown): string {
   return error.message || "The processor command could not be completed.";
 }
 
-export function OperationsPage() {
-  useDocumentTitle("Pipeline Status");
+export function OperationsPage({
+  presentation = "status",
+}: {
+  readonly presentation?: "status" | "providers";
+} = {}) {
+  const providerCatalog = presentation === "providers";
+  useDocumentTitle(providerCatalog ? "Data Providers" : "Pipeline Status");
   const { status } = useSession();
   const { showToast } = useToast();
   const canOperate = status.phase === "authenticated" &&
@@ -161,9 +167,11 @@ export function OperationsPage() {
   return (
     <div className="admin-page source-operations-page">
       <PageHeader
-        eyebrow="Data pipeline / Status"
-        title="Platform processors"
-        description="One shared source connection feeds four isolated processor lanes. Local cursors, lifecycle, freshness, and quality remain distinct when the connection is affected."
+        eyebrow={providerCatalog ? "Data pipeline / Providers" : "Data pipeline / Status"}
+        title={providerCatalog ? "Data providers" : "Platform processors"}
+        description={providerCatalog
+          ? "Canonical provider roots and their isolated source lanes. Platforms may share one connection while retaining independent cursors, runs, freshness, and quality."
+          : "One shared source connection feeds four isolated processor lanes. Local cursors, lifecycle, freshness, and quality remain distinct when the connection is affected."}
         actions={
           <>
             {canConfigure ? (
@@ -238,12 +246,19 @@ export function OperationsPage() {
       {overview ? (
         <>
           <ConnectionOperationsSummary connection={overview.connection} />
-          <ProviderSourceOperationsLedger
-            sources={overview.sources}
-            canOperate={canOperate}
-            pendingKey={pendingKey}
-            onCommand={(source, command) => { void operate(source, command); }}
-          />
+          {providerCatalog && overview.sources.length === 0 ? (
+            <EmptyState
+              title="No stable providers are available"
+              description="Seed the canonical provider roots before binding source lanes. No legacy provider revision is required."
+            />
+          ) : (
+            <ProviderSourceOperationsLedger
+              sources={overview.sources}
+              canOperate={canOperate}
+              pendingKey={pendingKey}
+              onCommand={(source, command) => { void operate(source, command); }}
+            />
+          )}
         </>
       ) : null}
     </div>
