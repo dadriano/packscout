@@ -64,7 +64,7 @@
       "runtimeExecutable": "sh",
       "runtimeArgs": [
         "-c",
-        "cd .worktrees/provider-data-inspection && PACKSCOUT_ADMIN_PORT=5141 PACKSCOUT_ADMIN_HMR_PORT=5142 PACKSCOUT_SESSION_HASHING_SECRET=local-only-throwaway-session-secret-for-embedded-preview PACKSCOUT_BOOTSTRAP_ADMIN_EMAIL=admin@local.test PACKSCOUT_BOOTSTRAP_ADMIN_PASSWORD=local-preview-password npm run start:admin:embedded:local"
+        "cd .worktrees/provider-data-inspection && PACKSCOUT_DATABASE_URL='postgresql://lains@127.0.0.1:5432/packscout_dev?schema=public' PACKSCOUT_ADMIN_PORT=5141 PACKSCOUT_ADMIN_HMR_PORT=5142 npm run dev:admin"
       ],
       "port": 5141,
       "autoPort": false
