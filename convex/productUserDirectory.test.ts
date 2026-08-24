@@ -41,6 +41,12 @@ async function seedDirectory(t: DirectoryTest): Promise<void> {
       firstSeenAt: "2026-08-01T09:00:00.000Z",
       lastSeenAt: "2026-08-19T12:00:00.000Z",
       standing: "active",
+      access: {
+        state: "approved",
+        decidedBy: "operator",
+        decidedAt: "2026-08-15T09:00:00.000Z",
+        operatorId: "operator-1",
+      },
     });
     await ctx.db.insert("productUsers", {
       subject: BOB,
@@ -130,6 +136,12 @@ describe("privileged product-user directory reads", () => {
         firstSeenAt: "2026-08-01T09:00:00.000Z",
         lastSeenAt: "2026-08-19T12:00:00.000Z",
         standing: "active",
+        access: {
+          state: "approved",
+          decidedBy: "operator",
+          decidedAt: "2026-08-15T09:00:00.000Z",
+          operatorId: "operator-1",
+        },
         savedRepackCount: 3,
         savedCollectibleCount: 2,
       },
@@ -141,6 +153,13 @@ describe("privileged product-user directory reads", () => {
         firstSeenAt: "2026-08-02T09:00:00.000Z",
         lastSeenAt: "2026-08-19T11:00:00.000Z",
         standing: "suspended",
+        // A record from before the closed beta carries the derived default
+        // decision, dated at the moment it was first seen.
+        access: {
+          state: "awaiting_review",
+          decidedBy: "default",
+          decidedAt: "2026-08-02T09:00:00.000Z",
+        },
         savedRepackCount: 1,
         savedCollectibleCount: 0,
       },
@@ -271,6 +290,11 @@ describe("privileged product-user directory reads", () => {
       firstSeenAt: "2026-08-02T09:00:00.000Z",
       lastSeenAt: "2026-08-19T11:00:00.000Z",
       standing: "suspended",
+      access: {
+        state: "awaiting_review",
+        decidedBy: "default",
+        decidedAt: "2026-08-02T09:00:00.000Z",
+      },
     });
     await expect(
       t.query(internal.productUserDirectory.getDirectoryRecord, {
@@ -388,6 +412,12 @@ describe("admin directory integration transport", () => {
           firstSeenAt: "2026-08-01T09:00:00.000Z",
           lastSeenAt: "2026-08-19T12:00:00.000Z",
           standing: "active",
+          access: {
+            state: "approved",
+            decidedBy: "operator",
+            decidedAt: "2026-08-15T09:00:00.000Z",
+            operatorId: "operator-1",
+          },
           savedRepackCount: 3,
           savedCollectibleCount: 2,
         },

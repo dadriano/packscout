@@ -38,10 +38,16 @@ const ids = {
   secondPublicRepack: "33333333-3333-5333-8333-333333333333",
 } as const;
 
-const configuredAt = new Date("2026-08-15T10:00:00.000Z");
-const sourceAt = new Date("2026-08-15T10:01:00.000Z");
-const collectedAt = new Date("2026-08-15T10:01:01.000Z");
-const committedAt = new Date("2026-08-15T10:01:02.000Z");
+// The append-only guard trigger compares retained_until against the real
+// clock, so the fixture era anchors on the run's own clock: observations
+// written by the tests stay inside their 7-day retention for every run, while
+// the deliberately expired history below stays outside it. Fixed instants
+// here would make the suite fail the day the wall clock crossed them.
+const fixtureAnchorAt = new Date(Math.floor(Date.now() / 1_000) * 1_000);
+const configuredAt = new Date(fixtureAnchorAt.getTime());
+const sourceAt = new Date(fixtureAnchorAt.getTime() + 60_000);
+const collectedAt = new Date(fixtureAnchorAt.getTime() + 61_000);
+const committedAt = new Date(fixtureAnchorAt.getTime() + 62_000);
 
 function packContent() {
   return {
@@ -565,8 +571,14 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       sequenceBeforeReplay.next_catalog_sequence,
     );
 
-    const retainedHistoryAt = new Date("2026-08-01T00:00:00.000Z");
-    const retainedHistoryUntil = new Date("2026-08-08T00:00:00.000Z");
+    // Deliberately expired history: its retention horizon is already behind
+    // both the cleanup cutoff and the real clock the guard trigger reads.
+    const retainedHistoryAt = new Date(
+      fixtureAnchorAt.getTime() - 14 * 24 * 60 * 60 * 1_000,
+    );
+    const retainedHistoryUntil = new Date(
+      fixtureAnchorAt.getTime() - 7 * 24 * 60 * 60 * 1_000,
+    );
     const retainedObservationId = "55000000-0000-4000-8000-000000000040";
     await harness.client.normalized_heat_observations.create({
       data: {

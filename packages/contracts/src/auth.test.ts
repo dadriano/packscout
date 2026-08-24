@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  createOperatorRequestSchema,
+  inviteOperatorRequestSchema,
   loginRequestSchema,
+  operatorAssignableStates,
+  operatorInvitationAcceptanceRequestSchema,
+  operatorStates,
+  passwordResetCompletionRequestSchema,
+  passwordResetRequestSchema,
   operatorPermissions,
   operatorRolePermissions,
   permissionsForOperatorRole,
@@ -21,11 +26,22 @@ test("login normalizes email without changing credential bytes", () => {
 });
 
 test("operator mutations reject weak credentials and unknown executable fields", () => {
+  // Creating an operator is an invitation: an address, a name, and a role.
+  // A password is not optional here, it is refused, so new accounts cannot
+  // quietly go back to an administrator-chosen credential.
   assert.equal(
-    createOperatorRequestSchema.safeParse({
+    inviteOperatorRequestSchema.safeParse({
       email: "operator@packscout.test",
       displayName: "Operator",
-      password: "short",
+      role: "data_operator",
+    }).success,
+    true,
+  );
+  assert.equal(
+    inviteOperatorRequestSchema.safeParse({
+      email: "operator@packscout.test",
+      displayName: "Operator",
+      password: "an administrator chosen password",
       role: "data_operator",
     }).success,
     false,
@@ -78,4 +94,167 @@ test("role grants stay inside the shared permission vocabulary", () => {
   // A returned grant is a copy, so callers cannot mutate the shared vocabulary.
   permissionsForOperatorRole("admin").length = 0;
   assert.ok(permissionsForOperatorRole("admin").includes("product_users:view"));
+});
+
+test("beta-allowlist administration is granted to administrators only", () => {
+  assert.ok(operatorPermissions.includes("beta_allowlist:view"));
+  assert.ok(operatorPermissions.includes("beta_allowlist:manage"));
+
+  const administrator = permissionsForOperatorRole("admin");
+  assert.ok(administrator.includes("beta_allowlist:view"));
+  assert.ok(administrator.includes("beta_allowlist:manage"));
+
+  const dataOperator = permissionsForOperatorRole("data_operator");
+  assert.equal(dataOperator.includes("beta_allowlist:view"), false);
+  assert.equal(dataOperator.includes("beta_allowlist:manage"), false);
+  // The data operator's existing capability set is unchanged by this feature.
+  assert.deepEqual(dataOperator, [
+    "providers:view",
+    "imports:start",
+    "imports:retry",
+  ]);
+});
+
+test("message-delivery inspection is granted to administrators only", () => {
+  assert.ok(operatorPermissions.includes("message_delivery:view"));
+  assert.ok(operatorPermissions.includes("message_delivery:manage"));
+
+  const administrator = permissionsForOperatorRole("admin");
+  assert.ok(administrator.includes("message_delivery:view"));
+  assert.ok(administrator.includes("message_delivery:manage"));
+
+  const dataOperator = permissionsForOperatorRole("data_operator");
+  assert.equal(dataOperator.includes("message_delivery:view"), false);
+  assert.equal(dataOperator.includes("message_delivery:manage"), false);
+  // The data operator's existing capability set is unchanged by this feature.
+  assert.deepEqual(dataOperator, [
+    "providers:view",
+    "imports:start",
+    "imports:retry",
+  ]);
+});
+
+test("password reset request normalizes email exactly like sign-in", () => {
+  const parsed = passwordResetRequestSchema.parse({
+    email: "  Operator@PackScout.Test ",
+  });
+  assert.deepEqual(parsed, { email: "operator@packscout.test" });
+  assert.equal(
+    passwordResetRequestSchema.safeParse({ email: "not-an-address" }).success,
+    false,
+  );
+  assert.equal(
+    passwordResetRequestSchema.safeParse({ email: "a@b.test", extra: true })
+      .success,
+    false,
+  );
+});
+
+test("password reset completion reuses the managed password rules verbatim", () => {
+  const token = `${"a".repeat(22)}.${"b".repeat(43)}`;
+  assert.equal(
+    passwordResetCompletionRequestSchema.safeParse({
+      token,
+      password: "a strong enough password",
+    }).success,
+    true,
+  );
+
+  // The same bounds and messages an administrator-set password must satisfy.
+  const short = passwordResetCompletionRequestSchema.safeParse({
+    token,
+    password: "short",
+  });
+  assert.equal(short.success, false);
+  const shortMessage = short.success
+    ? []
+    : short.error.flatten().fieldErrors.password;
+  assert.deepEqual(shortMessage, ["Password must be at least 12 characters."]);
+  const adminSide = updateOperatorRequestSchema.safeParse({
+    password: "short",
+  });
+  const adminMessage = adminSide.success
+    ? []
+    : adminSide.error.flatten().fieldErrors.password;
+  assert.deepEqual(shortMessage, adminMessage);
+
+  assert.equal(
+    passwordResetCompletionRequestSchema.safeParse({
+      token: "",
+      password: "a strong enough password",
+    }).success,
+    false,
+  );
+  assert.equal(
+    passwordResetCompletionRequestSchema.safeParse({
+      token,
+      password: "a strong enough password",
+      extra: true,
+    }).success,
+    false,
+  );
+});
+
+test("the operator state vocabulary carries invitation lifecycle without widening what an update may assign", () => {
+  // Pending and cancelled exist so the ledger can tell an invited account
+  // and a withdrawn one apart from the enabled and disabled states that
+  // already existed.
+  assert.deepEqual(
+    [...operatorStates],
+    ["pending", "active", "disabled", "cancelled"],
+  );
+  // But neither is reachable through an ordinary update: `pending` comes only
+  // from inviting and `cancelled` only from cancelling.
+  assert.deepEqual([...operatorAssignableStates], ["active", "disabled"]);
+  for (const state of ["pending", "cancelled"]) {
+    assert.equal(
+      updateOperatorRequestSchema.safeParse({ state }).success,
+      false,
+      `${state} must not be directly assignable`,
+    );
+  }
+  assert.equal(
+    updateOperatorRequestSchema.safeParse({ state: "disabled" }).success,
+    true,
+  );
+});
+
+test("invitation acceptance reuses the admin's password rules and refuses extra fields", () => {
+  const token = `${"a".repeat(22)}.${"b".repeat(43)}`;
+  assert.equal(
+    operatorInvitationAcceptanceRequestSchema.safeParse({
+      token,
+      password: "a strong enough password",
+    }).success,
+    true,
+  );
+  const short = operatorInvitationAcceptanceRequestSchema.safeParse({
+    token,
+    password: "short",
+  });
+  assert.equal(short.success, false);
+  assert.deepEqual(
+    short.success ? [] : short.error.flatten().fieldErrors.password,
+    // The same message an administrator-set password would receive.
+    updateOperatorRequestSchema.safeParse({ password: "short" }).success
+      ? []
+      : updateOperatorRequestSchema
+          .safeParse({ password: "short" })
+          .error?.flatten().fieldErrors.password,
+  );
+  assert.equal(
+    operatorInvitationAcceptanceRequestSchema.safeParse({
+      token: "",
+      password: "a strong enough password",
+    }).success,
+    false,
+  );
+  assert.equal(
+    operatorInvitationAcceptanceRequestSchema.safeParse({
+      token,
+      password: "a strong enough password",
+      role: "admin",
+    }).success,
+    false,
+  );
 });

@@ -8,6 +8,7 @@ import {
 } from "@packscout/contracts";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { betaAllowlistEntryDocumentValidator } from "./betaAllowlistRecords";
 import { productUserDocumentValidator } from "./productUserRecords";
 import { repackSearchRowValidator } from "./publicRepackValidation";
 
@@ -1352,9 +1353,38 @@ export default defineSchema({
     "publicCollectibleId",
   ]),
 
+  // The decision-state index serves the operator review queue (identities in
+  // one decision state, oldest decision first) and the bounded
+  // awaiting-review count. Records that predate the closed beta store no
+  // `access` at all: they sit in that index's undefined segment, ordered by
+  // creation time (their first sign-in), and the queue reads merge them into
+  // awaiting review — which is what absence already means.
   productUsers: defineTable(productUserDocumentValidator)
     .index("by_subject", ["subject"])
     .index("by_last_seen_at", ["lastSeenAt"])
     .index("by_email", ["email"])
-    .index("by_wallet_address_key", ["walletAddressKey"]),
+    .index("by_wallet_address_key", ["walletAddressKey"])
+    .index("by_access_state_and_access_decided_at", [
+      "access.state",
+      "access.decidedAt",
+    ])
+    // Welcome-dispatch discovery (messaging/007): the `due` segment lists
+    // identities awaiting their one welcome, and the `claimed` segment is
+    // range-scanned by claim expiry so a crashed dispatcher's claims lapse
+    // back into discovery. Records with no marker sit in the undefined
+    // segment and are never scanned.
+    .index("by_welcome_state_and_welcome_claim_expires_at", [
+      "welcome.state",
+      "welcome.claimExpiresAt",
+    ]),
+
+  // The closed-beta allowlist. The identifier indexes serve exact-match
+  // admission (establishment-time and retroactive), uniqueness checks, and
+  // bounded prefix search; the update-time index serves recency-ordered
+  // listing. Uniqueness of a normalized identifier across entries is an
+  // application invariant enforced by the allowlist mutations.
+  betaAllowlistEntries: defineTable(betaAllowlistEntryDocumentValidator)
+    .index("by_email", ["email"])
+    .index("by_wallet_address_key", ["walletAddressKey"])
+    .index("by_updated_at", ["updatedAt"]),
 });

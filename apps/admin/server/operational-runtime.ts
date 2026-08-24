@@ -1,9 +1,13 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
   PrismaAdminNotificationPublisher,
+  PrismaAlertEmailReadRepository,
+  PrismaEmailMessageOutboxRepository,
   PrismaOperationalHealthRepository,
 } from "@packscout/database";
 import {
+  AlertEmailNotificationPublisher,
+  EmailMessageOutboxService,
   OperationalAlertService,
   OperationalHealthService,
   createOperationalRuntime,
@@ -18,6 +22,16 @@ type OperationalDatabase = ConstructorParameters<
 export interface AdminOperationalRuntimeInput {
   readonly database: OperationalDatabase;
   readonly actorPseudonymKey: Uint8Array;
+  /**
+   * When present, alerts published by this runtime — the machinery cycle
+   * above all, whose loudest condition is a dead worker fleet no worker can
+   * report — are additionally routed to operator email through the durable
+   * message outbox. Absent, behavior is exactly the durable-only path.
+   */
+  readonly alertEmail?: {
+    /** Routing settings are resolved from here at publish time. */
+    readonly env: NodeJS.ProcessEnv;
+  };
 }
 
 const observability: OperationalObservability = {
@@ -71,6 +85,19 @@ export function createAdminOperationalRuntime(
   const publisher = new PrismaAdminNotificationPublisher(input.database);
   const pipeline = createOperationalRuntime({
     durableAdminPublisher: publisher,
+    additionalPublishers: input.alertEmail
+      ? [
+          new AlertEmailNotificationPublisher({
+            reader: new PrismaAlertEmailReadRepository(input.database),
+            outbox: new EmailMessageOutboxService({
+              queue: new PrismaEmailMessageOutboxRepository(input.database),
+              clock,
+            }),
+            env: input.alertEmail.env,
+            observability,
+          }),
+        ]
+      : [],
     ids: { id: randomUUID },
     clock,
     observability,

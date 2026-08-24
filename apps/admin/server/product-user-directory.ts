@@ -1,4 +1,6 @@
 import {
+  productUserAccessDeciders,
+  productUserAccessStates,
   productUserCollectibleTypes,
   productUserRepackAvailabilities,
   productUserStandings,
@@ -10,11 +12,18 @@ import {
   PRODUCT_USER_MAX_SUBJECT_LENGTH,
   PRODUCT_USER_MAX_TEXT_LENGTH,
   PRODUCT_USER_MAX_WALLET_ADDRESS_LENGTH,
+  type ProductUserAccessAction,
+  type ProductUserAccessDecider,
+  type ProductUserAccessDecision,
+  type ProductUserAccessQueueCount,
+  type ProductUserAccessQueuePage,
+  type ProductUserAccessState,
   type ProductUserCollectibleType,
   type ProductUserDetail,
   type ProductUserDirectoryErrorCode,
   type ProductUserDirectoryPage,
   type ProductUserDirectoryRow,
+  type ProductUserEffectiveAccess,
   type ProductUserEstimatedEv,
   type ProductUserRecord,
   type ProductUserRepackAvailability,
@@ -41,6 +50,14 @@ const LIST_PATH = "/admin/product-users/list";
 const RECORD_PATH = "/admin/product-users/record";
 const SAVED_ITEMS_PATH = "/admin/product-users/saved-items";
 const STANDING_PATH = "/admin/product-users/standing";
+const ACCESS_QUEUE_PATH = "/admin/product-users/access/queue";
+const ACCESS_QUEUE_COUNT_PATH = "/admin/product-users/access/queue-count";
+/** One decision path per action: the operation is the endpoint, never a field. */
+const ACCESS_DECISION_PATHS: Readonly<Record<ProductUserAccessAction, string>> = {
+  approve: "/admin/product-users/access/approve",
+  decline: "/admin/product-users/access/decline",
+  revoke: "/admin/product-users/access/revoke",
+};
 const UNKNOWN_AUTH_METHOD = "unknown";
 
 /** Upstream refusals the admin can restate as an operator-facing request problem. */
@@ -57,6 +74,14 @@ const UPSTREAM_REQUEST_CODES = new Set([
 const standings = new Set<string>(productUserStandings);
 const availabilities = new Set<string>(productUserRepackAvailabilities);
 const collectibleTypes = new Set<string>(productUserCollectibleTypes);
+const accessStates = new Set<string>(productUserAccessStates);
+const accessDeciders = new Set<string>(productUserAccessDeciders);
+const inadmissionReasons = new Set<string>([
+  "awaiting_review",
+  "declined",
+  "suspended",
+  "undetermined",
+]);
 
 export class ProductUserDirectoryError extends Error {
   readonly code: ProductUserDirectoryErrorCode;
@@ -133,10 +158,61 @@ function asObject(value: unknown): Record<string, unknown> {
 }
 
 /**
- * One upstream record, accepted only when its identity, timestamps, and
- * standing are present and well formed. A malformed record means the
- * integration contract is broken, which the caller surfaces as an unavailable
- * directory rather than rendering a half-identified person.
+ * One access decision, reduced to the three fields the admin displays. The
+ * stored decision also references the matched allowlist entry or the acting
+ * operator; those identifiers are dropped here, at the integration boundary,
+ * so nothing downstream has to remember not to forward them.
+ */
+function readAccessDecision(value: unknown): ProductUserAccessDecision {
+  const candidate = asObject(value);
+  const state = boundedText(candidate.state, 32);
+  const decidedBy = boundedText(candidate.decidedBy, 32);
+  const decidedAt = timestamp(candidate.decidedAt);
+  if (
+    state === null ||
+    decidedBy === null ||
+    decidedAt === null ||
+    !accessStates.has(state) ||
+    !accessDeciders.has(decidedBy)
+  ) {
+    throw unavailable();
+  }
+  return {
+    state: state as ProductUserAccessState,
+    decidedBy: decidedBy as ProductUserAccessDecider,
+    decidedAt,
+  };
+}
+
+/**
+ * The composed admission answer, accepted only when the verdict and reason
+ * agree: `admitted` must be exactly the approved reason, so a broken upstream
+ * can never make the admin claim someone is in when they are not.
+ */
+function readEffectiveAccess(value: unknown): ProductUserEffectiveAccess {
+  const candidate = asObject(value);
+  const reason = boundedText(candidate.reason, 32);
+  if (candidate.admitted === true && reason === "approved") {
+    return { admitted: true, reason: "approved" };
+  }
+  if (
+    candidate.admitted === false &&
+    reason !== null &&
+    inadmissionReasons.has(reason)
+  ) {
+    return {
+      admitted: false,
+      reason: reason as Exclude<ProductUserEffectiveAccess["reason"], "approved">,
+    };
+  }
+  throw unavailable();
+}
+
+/**
+ * One upstream record, accepted only when its identity, timestamps, standing,
+ * and access decision are present and well formed. A malformed record means
+ * the integration contract is broken, which the caller surfaces as an
+ * unavailable directory rather than rendering a half-identified person.
  */
 function readRecord(value: unknown): ProductUserRecord {
   const candidate = asObject(value);
@@ -166,6 +242,7 @@ function readRecord(value: unknown): ProductUserRecord {
     firstSeenAt,
     lastSeenAt,
     standing: standing as ProductUserStanding,
+    access: readAccessDecision(candidate.access),
   };
 }
 
@@ -306,6 +383,66 @@ function readPage(payload: unknown): ProductUserDirectoryPage {
   };
 }
 
+function readQueuePage(payload: unknown): ProductUserAccessQueuePage {
+  const candidate = asObject(payload);
+  if (!Array.isArray(candidate.page) || typeof candidate.isDone !== "boolean") {
+    throw unavailable();
+  }
+  const continueCursor = boundedText(
+    candidate.continueCursor,
+    PRODUCT_USER_MAX_CURSOR_LENGTH,
+  );
+  return {
+    items: candidate.page.map(readRow),
+    nextCursor: candidate.isDone ? null : continueCursor,
+    queueTruncated: candidate.queueTruncated === true,
+  };
+}
+
+function readQueueCount(payload: unknown): ProductUserAccessQueueCount {
+  const candidate = asObject(payload);
+  if (typeof candidate.count !== "number" || !Number.isFinite(candidate.count)) {
+    throw unavailable();
+  }
+  return {
+    count: Math.max(0, Math.trunc(candidate.count)),
+    truncated: candidate.truncated === true,
+  };
+}
+
+/**
+ * What one decision operation reported: the authoritative previous and
+ * resulting decisions, or that the subject has no record to decide about.
+ * The upstream echo of the subject and operator is deliberately not relayed —
+ * the caller already knows both, and nothing personal should ride back.
+ */
+export type ProductUserAccessDecisionOutcome =
+  | {
+      readonly outcome: "decided";
+      readonly changed: boolean;
+      readonly previous: ProductUserAccessDecision;
+      readonly resulting: ProductUserAccessDecision;
+      readonly effectiveAccess: ProductUserEffectiveAccess;
+    }
+  | { readonly outcome: "nothing_to_decide" };
+
+function readDecisionOutcome(payload: unknown): ProductUserAccessDecisionOutcome {
+  const candidate = asObject(payload);
+  if (candidate.outcome === "nothing_to_decide") {
+    return { outcome: "nothing_to_decide" };
+  }
+  if (candidate.outcome !== "decided" || typeof candidate.changed !== "boolean") {
+    throw unavailable();
+  }
+  return {
+    outcome: "decided",
+    changed: candidate.changed,
+    previous: readAccessDecision(candidate.previous),
+    resulting: readAccessDecision(candidate.resulting),
+    effectiveAccess: readEffectiveAccess(candidate.effectiveAccess),
+  };
+}
+
 /**
  * The upstream refusal code, when it is one the admin recognizes. The body is
  * read only for that field; nothing else from it is retained or reported.
@@ -333,6 +470,13 @@ export interface ProductUserDirectoryReader {
    */
   getProductUserDetail(input: { subject: string }): Promise<ProductUserDetail>;
   /**
+   * One user's directory record alone — the single-record integration read,
+   * without the saved-item join. The access-decision notice reads the
+   * verified address this way after a decision commits; an unrecorded
+   * subject is the same not-found outcome the detail read reports.
+   */
+  getProductUserRecord(input: { subject: string }): Promise<ProductUserRecord>;
+  /**
    * Sets one user's standing to exactly the requested value and reports the
    * authoritative result. The product backend owns the flip, so a repeated or
    * concurrent action converges there rather than being guessed at here. This
@@ -343,6 +487,31 @@ export interface ProductUserDirectoryReader {
     subject: string;
     standing: ProductUserStanding;
   }): Promise<ProductUserStandingChange>;
+  /**
+   * One bounded page of the review queue: identities in one decision state,
+   * oldest request first so nobody is buried, as full directory rows.
+   */
+  listProductUserAccessQueue(input: {
+    accessState: ProductUserAccessState;
+    cursor?: string;
+    limit: number;
+  }): Promise<ProductUserAccessQueuePage>;
+  /** The bounded count of identities awaiting review. */
+  countAwaitingReview(): Promise<ProductUserAccessQueueCount>;
+  /**
+   * One operator decision — approve, decline, or revoke — keyed by subject
+   * and stamped with the acting operator. The product backend owns the flip:
+   * repeats and concurrent operators converge on the authoritative decision
+   * there, and an unknown subject reports that there is nothing to decide
+   * rather than inventing a record. These are the only other writes on the
+   * integration, and every one is a reversible flip; nothing can delete a
+   * user or touch what they have saved.
+   */
+  decideProductUserAccess(input: {
+    action: ProductUserAccessAction;
+    subject: string;
+    operatorId: string;
+  }): Promise<ProductUserAccessDecisionOutcome>;
 }
 
 export interface ProductUserDirectoryReaderInput {
@@ -454,6 +623,15 @@ export function createProductUserDirectoryReader(
       };
     },
 
+    async getProductUserRecord(request) {
+      const payload = asObject(await post(RECORD_PATH, { subject: request.subject }));
+      // A subject the directory has never recorded is not an error state.
+      if (payload.record === null || payload.record === undefined) {
+        throw notFound();
+      }
+      return readRecord(payload.record);
+    },
+
     async setProductUserStanding(request) {
       const payload = asObject(
         await post(STANDING_PATH, {
@@ -472,6 +650,31 @@ export function createProductUserDirectoryReader(
         user: readRecord(payload.record),
         changed: payload.changed === true,
       };
+    },
+
+    async listProductUserAccessQueue(request) {
+      return readQueuePage(
+        await post(ACCESS_QUEUE_PATH, {
+          accessState: request.accessState,
+          paginationOpts: {
+            numItems: request.limit,
+            cursor: request.cursor ?? null,
+          },
+        }),
+      );
+    },
+
+    async countAwaitingReview() {
+      return readQueueCount(await post(ACCESS_QUEUE_COUNT_PATH, {}));
+    },
+
+    async decideProductUserAccess(request) {
+      return readDecisionOutcome(
+        await post(ACCESS_DECISION_PATHS[request.action], {
+          subject: request.subject,
+          operatorId: request.operatorId,
+        }),
+      );
     },
   };
 }

@@ -1,16 +1,16 @@
 import { useRef, useState, type FormEvent } from "react";
 import type {
-  CreateOperatorRequest,
+  InviteOperatorRequest,
   OperatorRole,
   OperatorSummary,
 } from "@packscout/contracts";
 import { AdminDialog } from "../AdminDialog";
 import { AuthErrorSummary } from "./AuthErrorSummary";
 
-export type OperatorDialogMode = "create" | "role" | "credential";
+export type OperatorDialogMode = "invite" | "role" | "credential";
 
 export type OperatorDialogSubmission =
-  | { mode: "create"; input: CreateOperatorRequest }
+  | { mode: "invite"; input: InviteOperatorRequest }
   | { mode: "role"; role: OperatorRole }
   | { mode: "credential"; password: string };
 
@@ -25,13 +25,13 @@ interface OperatorDialogProps {
 }
 
 function dialogContent(mode: OperatorDialogMode) {
-  if (mode === "create") {
+  if (mode === "invite") {
     return {
-      title: "Add an operator",
+      title: "Invite an operator",
       description:
-        "Enter an initial credential and deliver it to the operator outside PackScout.",
-      action: "Add operator",
-      pendingAction: "Adding operator…",
+        "PackScout mails a single-use link. The operator chooses their own password; nobody else ever knows it.",
+      action: "Send invitation",
+      pendingAction: "Sending invitation…",
     };
   }
   if (mode === "role") {
@@ -73,10 +73,10 @@ export function OperatorDialog({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending) return;
-    if (mode === "create") {
+    if (mode === "invite") {
       await onSubmit({
         mode,
-        input: { email, displayName, password, role },
+        input: { email, displayName, role },
       });
     } else if (mode === "role") {
       await onSubmit({ mode, role });
@@ -121,7 +121,7 @@ export function OperatorDialog({
         onSubmit={(event) => void submit(event)}
       >
         {error ? <AuthErrorSummary message={error} /> : null}
-        {mode === "create" ? (
+        {mode === "invite" ? (
           <>
             <div className="admin-field">
               <label htmlFor="operator-display-name">Display name</label>
@@ -166,14 +166,19 @@ export function OperatorDialog({
           </div>
         ) : null}
 
-        {mode !== "role" ? (
+        {mode === "invite" ? (
+          <p role="note">
+            No password is set here. The invitation link is single-use, expires
+            on its own, and can be reissued or cancelled from the access ledger.
+          </p>
+        ) : null}
+
+        {mode === "credential" ? (
           <div className="admin-field">
-            <label htmlFor="operator-password">
-              {mode === "create" ? "Initial password" : "New password"}
-            </label>
+            <label htmlFor="operator-password">New password</label>
             <input
               id="operator-password"
-              ref={mode === "credential" ? firstInputRef : undefined}
+              ref={firstInputRef}
               type="password"
               autoComplete="new-password"
               value={password}

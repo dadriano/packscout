@@ -48,7 +48,7 @@ test("both account and guest save controls send the same boot intent", () => {
   assert.match(savedButtonSource, /auth\.login\(\)/);
 });
 
-test("an authenticated session reaches the product-user directory", () => {
+test("an authenticated session establishes its directory record and admission decision", () => {
   assert.match(
     initializedSource,
     /const sessionKey = convexAuthSessionKey\(\{/,
@@ -57,7 +57,11 @@ test("an authenticated session reaches the product-user directory", () => {
     initializedSource,
     /<AuthenticatedSignInRecorder sessionKey=\{sessionKey\}>[\s\S]*<AuthenticatedSavedItemsProvider[\s\S]*<\/AuthenticatedSignInRecorder>/,
   );
-  assert.match(recorderSource, /api\.productUsers\.recordSignIn/);
+  // Establishment (closed-beta-access/001) is the directory write plus the
+  // awaiting-review default, so session recording keeps the record the
+  // server-side gate routes on fresh.
+  assert.match(recorderSource, /api\.productUserAccess\.establishAccess/);
+  assert.equal(recorderSource.includes("api.productUsers.recordSignIn"), false);
 });
 
 test("recording stays invisible and cannot break the provider tree", () => {
@@ -66,9 +70,9 @@ test("recording stays invisible and cannot break the provider tree", () => {
   assert.match(recorderSource, /if \(!decision\.record\) return;/);
   assert.match(
     recorderSource,
-    /void recordSignInBestEffort\(\(\) => recordSignIn\(\{\}\)\)/,
+    /void recordSignInBestEffort\(\(\) => establishAccess\(\{\}\)\)/,
   );
-  assert.equal(recorderSource.match(/recordSignIn\(\{\}\)/g)?.length, 1);
+  assert.equal(recorderSource.match(/establishAccess\(\{\}\)/g)?.length, 1);
   assert.equal(recorderSource.includes("catch"), false);
   // Children render unconditionally: the recorder contributes no markup.
   assert.match(recorderSource, /return <>\{children\}<\/>;/);
@@ -88,4 +92,26 @@ test("a failed sign-in record is retried on a timer the effect owns", () => {
   // An unmount or a changed session drops the pending retry.
   assert.match(recorderSource, /clearTimeout\(retryTimer\)/);
   assert.match(recorderSource, /return \(\) => \{/);
+});
+
+test("the identity cookie follows the session and only exists inside the initialized tree", () => {
+  const cookieSyncSource = readFileSync(
+    new URL("./IdentityCookieSync.client.tsx", import.meta.url),
+    "utf8",
+  );
+  // The sync component mounts inside the lazily-booted provider, so a
+  // signed-out visitor who never asks for authentication never runs it.
+  assert.match(initializedSource, /<IdentityAccessCookieSync \/>/);
+  assert.equal(boundarySource.includes("IdentityAccessCookieSync"), false);
+  // The cookie is written from the provider-issued token, refreshed while
+  // the tab lives, and cleared the moment the session ends or sign-out runs.
+  assert.match(cookieSyncSource, /getAccessToken/);
+  assert.match(cookieSyncSource, /buildIdentityCookieValue/);
+  assert.match(cookieSyncSource, /IDENTITY_COOKIE_REFRESH_INTERVAL_MS/);
+  assert.match(cookieSyncSource, /visibilitychange/);
+  assert.match(cookieSyncSource, /clearBrowserIdentityCookie/);
+  assert.match(initializedSource, /clearBrowserIdentityCookie\(\);/);
+  // Transport, not trust: nothing here decides admission client-side.
+  assert.equal(cookieSyncSource.includes("admitted"), false);
+  assert.equal(cookieSyncSource.includes("getMyAccess"), false);
 });

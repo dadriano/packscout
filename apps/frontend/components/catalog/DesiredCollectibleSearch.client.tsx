@@ -126,10 +126,13 @@ export function DesiredCollectibleSearch({
         return;
       }
       setStatus("loading");
+      // Same-origin credentials carry the identity cookie the gated search
+      // route verifies server-side (closed-beta-access/007); this control is
+      // only reachable by visitors the gate already admitted.
       void fetch(`/api/collectibles/search?q=${encodeURIComponent(normalized)}`, {
         method: "GET",
         cache: "no-store",
-        credentials: "omit",
+        credentials: "same-origin",
         redirect: "error",
         referrerPolicy: "no-referrer",
         signal: controller.signal,

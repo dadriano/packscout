@@ -23,3 +23,8 @@ export * from "./quarantine.ts";
 export * from "./operations.ts";
 export * from "./worker-fleet.ts";
 export * from "./worker-presence.ts";
+export * from "./email-delivery.ts";
+export * from "./email-outbox.ts";
+export * from "./email-links.ts";
+export * from "./beta-allowlist.ts";
+export * from "./message-delivery.ts";

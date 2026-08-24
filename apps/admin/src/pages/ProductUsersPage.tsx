@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type {
-  ProductUserDirectoryRow,
-  ProductUserStandingChange,
+import {
+  formatProductUserAwaitingCount,
+  type ProductUserAccessDecisionChange,
+  type ProductUserAccessQueueCount,
+  type ProductUserDirectoryRow,
+  type ProductUserStandingChange,
 } from "@packscout/contracts";
 import { AdminApiError } from "../api/client";
-import { listProductUsers } from "../api/product-users";
+import {
+  getProductUserAccessQueueCount,
+  listProductUserAccessQueue,
+  listProductUsers,
+} from "../api/product-users";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
+import { StatusBadge } from "../components/StatusBadge";
 import { AuthRestrictedState } from "../components/auth/AuthRestrictedState";
 import { KeysetPagination } from "../components/operations/KeysetPagination";
 import {
@@ -19,12 +27,22 @@ import { useSession } from "../providers/session";
 
 const PAGE_SIZE = 20;
 
+/**
+ * The users area has two parallel views over the same directory: the full
+ * sign-up ledger, most recent activity first, and the review queue — the
+ * identities awaiting a beta-access decision, oldest request first so nobody
+ * is buried. The waiting count sits in the page header, visible from either
+ * view without paging the queue.
+ */
+type UsersView = "directory" | "queue";
+
 export function ProductUsersPage() {
   useDocumentTitle("Users");
   const { status } = useSession();
   const canManage =
     status.phase === "authenticated" &&
     status.session.permissions.includes("product_users:manage");
+  const [view, setView] = useState<UsersView>("directory");
   const [users, setUsers] = useState<ProductUserDirectoryRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -32,25 +50,42 @@ export function ProductUsersPage() {
   const [searchDraft, setSearchDraft] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [searchTruncated, setSearchTruncated] = useState(false);
+  const [queueTruncated, setQueueTruncated] = useState(false);
+  const [awaiting, setAwaiting] = useState<ProductUserAccessQueueCount | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
   const [failure, setFailure] = useState<DirectoryFailure | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
+  const [countRefreshIndex, setCountRefreshIndex] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    void listProductUsers(
-      {
-        ...(appliedSearch ? { search: appliedSearch } : {}),
-        ...(cursor ? { cursor } : {}),
-        limit: PAGE_SIZE,
-      },
-      controller.signal,
-    )
-      .then((page) => {
-        setUsers([...page.items]);
-        setNextCursor(page.nextCursor);
-        setSearchTruncated(page.searchTruncated);
+    const load =
+      view === "queue"
+        ? listProductUserAccessQueue(
+            { ...(cursor ? { cursor } : {}), limit: PAGE_SIZE },
+            controller.signal,
+          ).then((page) => {
+            setUsers([...page.items]);
+            setNextCursor(page.nextCursor);
+            setQueueTruncated(page.queueTruncated);
+          })
+        : listProductUsers(
+            {
+              ...(appliedSearch ? { search: appliedSearch } : {}),
+              ...(cursor ? { cursor } : {}),
+              limit: PAGE_SIZE,
+            },
+            controller.signal,
+          ).then((page) => {
+            setUsers([...page.items]);
+            setNextCursor(page.nextCursor);
+            setSearchTruncated(page.searchTruncated);
+          });
+    void load
+      .then(() => {
         setFailure(null);
         setForbidden(false);
       })
@@ -68,7 +103,22 @@ export function ProductUsersPage() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [appliedSearch, cursor, refreshIndex]);
+  }, [view, appliedSearch, cursor, refreshIndex]);
+
+  /**
+   * The waiting count for the header. It is presence information, not the
+   * queue itself: when it cannot be read the header simply shows no count
+   * while the main view reports the failure, so the number never lies.
+   */
+  useEffect(() => {
+    const controller = new AbortController();
+    void getProductUserAccessQueueCount(controller.signal)
+      .then(setAwaiting)
+      .catch(() => {
+        if (!controller.signal.aborted) setAwaiting(null);
+      });
+    return () => controller.abort();
+  }, [countRefreshIndex]);
 
   /**
    * The ledger reflects the standing the backend reports, immediately and in
@@ -86,6 +136,25 @@ export function ProductUsersPage() {
     );
   }, []);
 
+  /**
+   * A decision updates its row in place with the decision the backend now
+   * holds — in the queue view too, where the decided row keeps its place with
+   * its new state and controls until the operator moves on, rather than rows
+   * shifting under the person working the queue. The header count is
+   * re-read, since the queue just changed size.
+   */
+  const applyAccessDecision = useCallback(
+    (subject: string, change: ProductUserAccessDecisionChange) => {
+      setUsers((rows) =>
+        rows.map((row) =>
+          row.subject === subject ? { ...row, access: change.access } : row,
+        ),
+      );
+      setCountRefreshIndex((value) => value + 1);
+    },
+    [],
+  );
+
   function restart(search: string) {
     setCursor(undefined);
     setCursorStack([]);
@@ -98,6 +167,27 @@ export function ProductUsersPage() {
     event.preventDefault();
     restart(searchDraft.trim());
   }
+
+  function switchView(next: UsersView) {
+    if (next === view) return;
+    setView(next);
+    setCursor(undefined);
+    setCursorStack([]);
+    setUsers([]);
+    setLoading(true);
+  }
+
+  const awaitingLabel =
+    awaiting === null ? null : formatProductUserAwaitingCount(awaiting);
+  const headerCount =
+    awaitingLabel === null ? undefined : (
+      <span role="status">
+        <StatusBadge
+          label={`${awaitingLabel} awaiting review`}
+          tone={awaiting !== null && awaiting.count > 0 ? "pending" : "neutral"}
+        />
+      </span>
+    );
 
   if (forbidden) {
     return (
@@ -113,58 +203,93 @@ export function ProductUsersPage() {
   }
 
   const searching = appliedSearch.length > 0;
+  const inQueue = view === "queue";
   return (
     <div className="admin-page">
       <PageHeader
         eyebrow="Workspace / Users"
         title="Product users"
-        description="Everyone who has signed up for PackScout, most recent activity first, with how they signed in, their standing, and how much they have saved."
+        description={
+          inQueue
+            ? "Identities waiting for a beta-access decision, oldest request first, with how they signed in and when they arrived."
+            : "Everyone who has signed up for PackScout, most recent activity first, with how they signed in, their standing, their beta access, and how much they have saved."
+        }
+        actions={headerCount}
       />
 
-      <form
-        className="admin-surface admin-panel"
-        aria-label="Search product users"
-        onSubmit={applySearch}
+      <div
+        className="product-users__views"
+        role="group"
+        aria-label="Product user views"
       >
-        <div className="admin-section-header">
-          <div className="admin-field product-users__search">
-            <label htmlFor="product-user-search">
-              Search email, wallet address, or subject key
-            </label>
-            <input
-              id="product-user-search"
-              type="search"
-              autoComplete="off"
-              value={searchDraft}
-              onChange={(event) => setSearchDraft(event.target.value)}
-            />
-          </div>
-          <button className="admin-button admin-button-secondary" type="submit">
-            Search
-          </button>
-          {searching ? (
-            <button
-              type="button"
-              className="admin-button admin-button-secondary"
-              onClick={() => {
-                setSearchDraft("");
-                restart("");
-              }}
-            >
-              Clear search
+        <button
+          type="button"
+          className={`admin-button admin-button-secondary${inQueue ? "" : " is-active"}`}
+          aria-pressed={!inQueue}
+          onClick={() => switchView("directory")}
+        >
+          All users
+        </button>
+        <button
+          type="button"
+          className={`admin-button admin-button-secondary${inQueue ? " is-active" : ""}`}
+          aria-pressed={inQueue}
+          onClick={() => switchView("queue")}
+        >
+          {awaitingLabel === null
+            ? "Review queue"
+            : `Review queue (${awaitingLabel})`}
+        </button>
+      </div>
+
+      {inQueue ? null : (
+        <form
+          className="admin-surface admin-panel"
+          aria-label="Search product users"
+          onSubmit={applySearch}
+        >
+          <div className="admin-section-header">
+            <div className="admin-field product-users__search">
+              <label htmlFor="product-user-search">
+                Search email, wallet address, or subject key
+              </label>
+              <input
+                id="product-user-search"
+                type="search"
+                autoComplete="off"
+                value={searchDraft}
+                onChange={(event) => setSearchDraft(event.target.value)}
+              />
+            </div>
+            <button className="admin-button admin-button-secondary" type="submit">
+              Search
             </button>
-          ) : null}
-        </div>
-      </form>
+            {searching ? (
+              <button
+                type="button"
+                className="admin-button admin-button-secondary"
+                onClick={() => {
+                  setSearchDraft("");
+                  restart("");
+                }}
+              >
+                Clear search
+              </button>
+            ) : null}
+          </div>
+        </form>
+      )}
 
       {loading ? (
         <section className="admin-surface admin-panel" aria-busy="true" aria-live="polite">
-          <span className="admin-kicker">Loading the user directory…</span>
+          <span className="admin-kicker">
+            {inQueue ? "Loading the review queue…" : "Loading the user directory…"}
+          </span>
         </section>
       ) : failure ? (
         <div role="alert">
           <EmptyState
-            eyebrow="Directory unavailable"
+            eyebrow={inQueue ? "Queue unavailable" : "Directory unavailable"}
             title={failure.title}
             description={failure.description}
             action={
@@ -186,46 +311,65 @@ export function ProductUsersPage() {
           />
         </div>
       ) : users.length === 0 ? (
-        <EmptyState
-          eyebrow={searching ? "No match" : "Sign-up ledger"}
-          title={
-            searching
-              ? "No users match this search."
-              : "No users have signed up yet."
-          }
-          description={
-            searching
-              ? "Search matches the start of an email address, a wallet address, or a subject key. Clear the search to see every sign-up."
-              : "A user appears here the first time they sign in to PackScout."
-          }
-          action={
-            searching ? (
-              <button
-                type="button"
-                className="admin-button admin-button-secondary"
-                onClick={() => {
-                  setSearchDraft("");
-                  restart("");
-                }}
-              >
-                Clear search
-              </button>
-            ) : undefined
-          }
-        />
+        inQueue ? (
+          <EmptyState
+            eyebrow="Review queue"
+            title="No one is waiting for a decision."
+            description="New sign-ups that are not admitted by the allowlist appear here, oldest first, until an operator approves or declines them."
+          />
+        ) : (
+          <EmptyState
+            eyebrow={searching ? "No match" : "Sign-up ledger"}
+            title={
+              searching
+                ? "No users match this search."
+                : "No users have signed up yet."
+            }
+            description={
+              searching
+                ? "Search matches the start of an email address, a wallet address, or a subject key. Clear the search to see every sign-up."
+                : "A user appears here the first time they sign in to PackScout."
+            }
+            action={
+              searching ? (
+                <button
+                  type="button"
+                  className="admin-button admin-button-secondary"
+                  onClick={() => {
+                    setSearchDraft("");
+                    restart("");
+                  }}
+                >
+                  Clear search
+                </button>
+              ) : undefined
+            }
+          />
+        )
       ) : (
         <ProductUserLedger
           users={users}
           startIndex={cursorStack.length * PAGE_SIZE + 1}
           canManage={canManage}
           onStandingChange={applyStandingChange}
+          onAccessDecision={applyAccessDecision}
+          eyebrow={inQueue ? "Review queue" : "Sign-up ledger"}
+          title={inQueue ? "Awaiting a decision" : "Product users"}
         />
       )}
 
-      {!loading && !failure && searchTruncated ? (
+      {!loading && !failure && !inQueue && searchTruncated ? (
         <p className="product-users__note" role="status">
           This search reached the directory's match limit. Narrow the search to
           be certain you are seeing every match.
+        </p>
+      ) : null}
+
+      {!loading && !failure && inQueue && queueTruncated ? (
+        <p className="product-users__note" role="status">
+          The queue is longer than this bounded view can show. It is complete
+          from the front — work it oldest-first and newer arrivals will appear
+          as earlier ones are decided.
         </p>
       ) : null}
 

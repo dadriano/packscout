@@ -34,9 +34,10 @@ import { MAX_SAVED_ITEMS_PER_KIND } from "./savedItems";
  * surface in `http.ts`, which authenticates its caller server-side with a
  * deployment secret before running them.
  *
- * The one write here flips a record's standing. It is deliberately the only
- * mutation an administrator can reach: there is no hard delete, and nothing on
- * this surface touches a user's saved items.
+ * The one write here flips a record's standing. The closed-beta decision
+ * writes live beside it in `productUserAccessReview.ts`; both surfaces are
+ * reversible flips with no hard delete, and nothing on either touches a
+ * user's saved items.
  */
 
 /**
@@ -84,7 +85,12 @@ async function countSavedItems(
   };
 }
 
-async function toDirectoryRows(
+/**
+ * Hydrates directory rows — the record plus its saved-item counts — for any
+ * privileged listing over `productUsers`, shared with the review queue in
+ * `productUserAccessReview.ts` so operators see one row shape everywhere.
+ */
+export async function toDirectoryRows(
   ctx: QueryCtx,
   documents: readonly Doc<"productUsers">[],
 ): Promise<ProductUserDirectoryRow[]> {

@@ -834,3 +834,14 @@ a {
     animation-iteration-count: 1 !important;
   }
 }
+
+/*
+ * Gateway shell (closed-beta-access/007): around the landing and holding
+ * surfaces the header renders no navigation, search, or release status, so
+ * the tracks reserved for them collapse to brand-left, controls-right at
+ * every width. Declared last so it wins over the width variants above.
+ */
+.app-header__inner:not(:has(.primary-navigation)) {
+  grid-template-areas: "brand . auth theme";
+  grid-template-columns: 168px minmax(0, 1fr) minmax(0, auto) auto;
+}

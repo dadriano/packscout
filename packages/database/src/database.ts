@@ -40,8 +40,20 @@ const EXPECTED_MIGRATIONS = Object.freeze([
     name: "20260820000000_machinery_alerts",
     checksum: "ef91ca0c3cc94a6d9e87215748e2efb35b687441a8d912f635ed4f1d88cdaddc",
   }),
+  Object.freeze({
+    name: "20260822000000_email_message_outbox",
+    checksum: "833e44b7725dd169cd7d5552a8f85c3c8b9126ff06608e467c33428fa3426d41",
+  }),
+  Object.freeze({
+    name: "20260823010000_email_link_tokens",
+    checksum: "a139abfdbc65b8c689658b278c7e5c4eb7fb9bb8bc6d48d043ebf1f2d8d91507",
+  }),
+  Object.freeze({
+    name: "20260824000000_operator_invitations",
+    checksum: "2ab4f734eb7f1c16532a32b1cd6ae1c098d914b581aa2d9913b719ea9bf4eeaa",
+  }),
 ]);
-const EXPECTED_TABLE_COUNT = 57;
+const EXPECTED_TABLE_COUNT = 60;
 
 interface MigrationReadinessRow {
   migrationName: string;

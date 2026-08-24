@@ -6,8 +6,10 @@ import type {
 } from "@packscout/contracts";
 import { AdminApiError } from "../api/client";
 import {
-  createOperator,
+  cancelOperatorInvitation,
+  inviteOperator,
   listOperators,
+  reissueOperatorInvitation,
   updateOperator,
 } from "../api/operators";
 import { EmptyState } from "../components/EmptyState";
@@ -97,10 +99,12 @@ export function OperatorsPage() {
     setDialogPending(true);
     setDialogError(null);
     try {
-      if (submission.mode === "create") {
-        const result = await createOperator(submission.input);
+      if (submission.mode === "invite") {
+        const result = await inviteOperator(submission.input);
         replaceOperator(result.operator);
-        showToast(`${result.operator.displayName} can now sign in.`);
+        showToast(
+          `Invitation sent to ${result.operator.email}. They choose their own password.`,
+        );
       } else if (submission.mode === "role" && activeDialog?.operator) {
         const result = await updateOperator(activeDialog.operator.id, {
           role: submission.role,
@@ -155,6 +159,36 @@ export function OperatorsPage() {
     }
   }
 
+  /**
+   * Sending a fresh invitation supersedes the account's outstanding one, so
+   * the older link stops working. Nothing about the link reaches the browser:
+   * the response carries only when it was sent and when it stops working.
+   */
+  async function reissueInvitation(operator: OperatorSummary) {
+    try {
+      const result = await reissueOperatorInvitation(operator.id);
+      replaceOperator({ ...operator, invitation: result.invitation });
+      showToast(`A new invitation is on its way to ${operator.email}.`);
+    } catch (error) {
+      showToast(errorMessage(error), "error");
+    }
+  }
+
+  async function cancelInvitation(operator: OperatorSummary) {
+    await confirm({
+      tier: "danger",
+      title: `Cancel the invitation for ${operator.displayName}?`,
+      description:
+        "Their invitation link stops working immediately and the account cannot be used.",
+      confirmLabel: "Cancel invitation",
+      successMessage: `Invitation cancelled for ${operator.displayName}.`,
+      action: async () => {
+        const result = await cancelOperatorInvitation(operator.id);
+        replaceOperator(result.operator);
+      },
+    });
+  }
+
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -179,17 +213,17 @@ export function OperatorsPage() {
       <PageHeader
         eyebrow="Workspace / Operators"
         title="Operator access"
-        description="Provision operator accounts, assign the least access needed, and end sessions when responsibilities change."
+        description="Invite operators by email, assign the least access needed, and end sessions when responsibilities change."
         actions={
           <button
             type="button"
             className="admin-button admin-button-primary"
             onClick={() => {
               setDialogError(null);
-              setActiveDialog({ mode: "create" });
+              setActiveDialog({ mode: "invite" });
             }}
           >
-            Add operator
+            Invite operator
           </button>
         }
       />
@@ -229,8 +263,10 @@ export function OperatorsPage() {
               }
             >
               <option value="">All states</option>
+              <option value="pending">Awaiting activation</option>
               <option value="active">Active</option>
               <option value="disabled">Disabled</option>
+              <option value="cancelled">Cancelled</option>
             </select>
           </div>
           <button className="admin-button admin-button-secondary" type="submit">
@@ -265,14 +301,14 @@ export function OperatorsPage() {
         <EmptyState
           eyebrow="Access ledger"
           title="No other operators yet"
-          description="Add an operator to grant invite-only access. Initial credentials are delivered outside PackScout."
+          description="Invite an operator by email address. PackScout mails a single-use link and they choose their own password."
           action={
             <button
               type="button"
               className="admin-button admin-button-primary"
-              onClick={() => setActiveDialog({ mode: "create" })}
+              onClick={() => setActiveDialog({ mode: "invite" })}
             >
-              Add operator
+              Invite operator
             </button>
           }
         />
@@ -289,6 +325,8 @@ export function OperatorsPage() {
             setActiveDialog({ mode: "credential", operator });
           }}
           onToggleState={(operator) => void toggleState(operator)}
+          onReissueInvitation={(operator) => void reissueInvitation(operator)}
+          onCancelInvitation={(operator) => void cancelInvitation(operator)}
         />
       )}
 
