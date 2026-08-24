@@ -288,24 +288,15 @@ textarea:focus-visible {
   text-decoration: none;
 }
 
+/* The brand artwork carries its own silhouette and transparent ground, so the
+   lockup frames it by size alone: a border or filled chip here would read as a
+   second rounded box drawn around the first. */
 .admin-brand-mark {
-  display: grid;
+  display: block;
   width: 2.4rem;
   height: 2.4rem;
   flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid var(--admin-border);
-  border-radius: 0.9rem;
-  background: linear-gradient(
-    180deg,
-    var(--admin-primary-bg-muted),
-    var(--admin-surface-veil)
-  );
-  color: var(--admin-primary);
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  box-shadow: var(--admin-shadow-sm);
+  object-fit: contain;
 }
 
 .admin-brand-eyebrow {
