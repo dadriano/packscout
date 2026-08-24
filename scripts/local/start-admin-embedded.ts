@@ -14,6 +14,8 @@ import {
   PipelineSetupRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
+import { CanonicalInspectionService } from "@packscout/services";
+import { PrismaCanonicalInspectionRepository } from "@packscout/database";
 import { createAdminApp } from "../../apps/admin/server/app.ts";
 import { createAdminBackgroundWorkRuntime } from "../../apps/admin/server/background-work-runtime.ts";
 import { createNodeAuthSecurity } from "../../apps/admin/server/auth/crypto.ts";
@@ -186,6 +188,14 @@ async function main(): Promise<void> {
         actorPseudonymKey: providerActorKey,
       }),
       workerFleet: createAdminWorkerFleetRuntime({ database: harness.database }),
+      // The Data section's canonical reads, over this harness's own migrated
+      // database. The published half needs the product backend's integration
+      // secret, which a local throwaway admin has no business holding, so
+      // parity stays unconfigured and the compare surface says so rather than
+      // guessing.
+      canonical: new CanonicalInspectionService(
+        new PrismaCanonicalInspectionRepository(harness.database),
+      ),
       // The Users navigation item this harness shows must reach a mounted
       // route. With no product-backend settings the reader is simply
       // unconfigured, so the page renders the bounded "not connected" state
