@@ -108,7 +108,7 @@ export function QuarantinePage() {
   const filterCount = useMemo(() => [searchParams.get("providerId"), searchParams.get("runId"), searchParams.get("state"), searchParams.get("recordKind"), searchParams.get("reasonCode")].filter(Boolean).length, [searchParams]);
   return (
     <div className="admin-page">
-      <PageHeader eyebrow="Data pipeline / Recovery" title="Quarantine" description="Review bounded record diagnostics and retry retained records independently from provider cursor progress." actions={selected.size > 0 ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retrySelected()}>Retry selected ({selected.size})</button> : undefined} />
+      <PageHeader eyebrow="Data pipeline / Recovery" title="Quarantine" description="Records that failed validation during an import. Review why, then retry the ones worth keeping." actions={selected.size > 0 ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retrySelected()}>Retry selected ({selected.size})</button> : undefined} />
       <aside className="ops-independence-note"><strong>Retries do not rewind imports.</strong><p>The original run keeps its immutable outcome. A resolved record updates current quality separately.</p></aside>
       <form className="ops-filters ops-filters--quarantine" aria-label="Filter quarantine" onSubmit={applyFilters}>
         <div className="admin-field"><label htmlFor="quarantine-provider">Provider</label><select id="quarantine-provider" value={providerId} onChange={(event) => setProviderId(event.target.value)}><option value="">All providers</option>{providers.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></div>

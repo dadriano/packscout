@@ -1,49 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { getAdminHealth } from "../api/health";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
-import { StatusBadge, type StatusTone } from "../components/StatusBadge";
-import { useSession } from "../providers/session";
+import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../providers/toast";
 
 type ServiceState = "checking" | "online" | "offline";
-
-const guardrails: Array<{
-  index: string;
-  guardrail: string;
-  proof: string;
-  label: string;
-  tone: StatusTone;
-}> = [
-  {
-    index: "01",
-    guardrail: "Runtime boundaries",
-    proof: "Browser and server imports are checked independently.",
-    label: "Enforced",
-    tone: "ready",
-  },
-  {
-    index: "02",
-    guardrail: "HTTP error contract",
-    proof: "Unknown routes and invalid JSON return stable error codes.",
-    label: "Enforced",
-    tone: "ready",
-  },
-  {
-    index: "03",
-    guardrail: "Behavior coverage",
-    proof: "Tests are discovered by convention and scenarios map to proof.",
-    label: "Active",
-    tone: "ready",
-  },
-  {
-    index: "04",
-    guardrail: "Architecture ratchet",
-    proof: "New drift fails the zero-debt framework baseline.",
-    label: "Zero debt",
-    tone: "ready",
-  },
-];
 
 function serviceBadge(state: ServiceState) {
   if (state === "online") return <StatusBadge label="Online" tone="ready" />;
@@ -53,7 +16,6 @@ function serviceBadge(state: ServiceState) {
 
 export function OverviewPage() {
   const { showToast } = useToast();
-  const { status } = useSession();
   const [serviceState, setServiceState] = useState<ServiceState>("checking");
 
   useEffect(() => {
@@ -82,9 +44,9 @@ export function OverviewPage() {
   return (
     <div className="admin-page">
       <PageHeader
-        eyebrow="Overview / 001"
-        title="Data operations, under control."
-        description="Protected operator access, stable service boundaries, and repository guardrails keep PackScout's provider work deliberate and auditable."
+        eyebrow="Workspace / Overview"
+        title="Overview"
+        description="Whether the admin service is reachable, and what to do next."
         actions={
           <button
             type="button"
@@ -97,89 +59,25 @@ export function OverviewPage() {
         }
       />
 
-      <section className="admin-overview-grid" aria-label="Foundation status">
+      <section className="admin-overview-grid" aria-label="Service status">
         <article className="admin-metric-card admin-metric-card--inline">
-          <span className="admin-metric-card__index">A</span>
           <div>
             <small>Admin service</small>
             <strong>{serviceState === "online" ? "Reachable" : serviceState === "offline" ? "Needs attention" : "Connecting"}</strong>
           </div>
           {serviceBadge(serviceState)}
         </article>
-        <article className="admin-metric-card admin-metric-card--inline">
-          <span className="admin-metric-card__index">B</span>
-          <div>
-            <small>Framework baseline</small>
-            <strong>Zero accepted drift</strong>
-          </div>
-          <StatusBadge label="Ratchet on" tone="ready" />
-        </article>
-        <article className="admin-metric-card admin-metric-card--inline">
-          <span className="admin-metric-card__index">C</span>
-          <div>
-            <small>Operator access</small>
-            <strong>
-              {status.phase === "authenticated" &&
-              status.session.membership.role === "admin"
-                ? "Administrator session"
-                : "Data operator session"}
-            </strong>
-          </div>
-          <StatusBadge label="Protected" tone="ready" />
-        </article>
       </section>
 
-      <div className="admin-split-grid">
-        <section className="admin-surface admin-panel" aria-labelledby="guardrail-title">
-          <header className="admin-section-header">
-            <div>
-              <span className="admin-kicker">System ledger</span>
-              <h2 id="guardrail-title">Guardrails carried forward</h2>
-            </div>
-            <span className="admin-section-count">04 controls</span>
-          </header>
-          <div className="admin-row-list">
-            {guardrails.map((item) => (
-              <article key={item.index}>
-                <span>{item.index}</span>
-                <div>
-                  <strong>{item.guardrail}</strong>
-                  <p>{item.proof}</p>
-                </div>
-                <StatusBadge label={item.label} tone={item.tone} />
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <aside className="admin-surface admin-panel admin-contract" aria-labelledby="contract-title">
-          <span className="admin-kicker">Boundary contract</span>
-          <h2 id="contract-title">What the base does not pretend</h2>
-          <dl>
-            <div>
-              <dt>Authentication</dt>
-              <dd>Session protected</dd>
-            </div>
-            <div>
-              <dt>Persistence</dt>
-              <dd>PostgreSQL owned</dd>
-            </div>
-            <div>
-              <dt>Shared services</dt>
-              <dd>Contracts enforced</dd>
-            </div>
-          </dl>
-          <p>
-            Each boundary arrives with its authorization, validation, and direct
-            regression tests—not as a placeholder dependency.
-          </p>
-        </aside>
-      </div>
-
       <EmptyState
-        eyebrow="Next waypoint / 002"
-        title="Provider operations are the next waypoint."
-        description="Configure and test a provider before activation, then follow each import through its durable evidence and current projection."
+        eyebrow="Next step"
+        title="Set up your first provider."
+        description="Configure a source and test it before enabling imports."
+        action={
+          <Link className="admin-button admin-button-primary" to="/providers">
+            Go to providers
+          </Link>
+        }
       />
     </div>
   );

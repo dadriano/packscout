@@ -194,7 +194,7 @@ export function BackgroundWorkPage() {
       <PageHeader
         eyebrow="Data pipeline / Background work"
         title="Background work"
-        description="Estimated-EV recomputation backlog and protected-payload cleanup runs, with recovery for claims a departed worker left behind."
+        description="Queued EV recalculations and scheduled data cleanup, plus work stranded by a worker that stopped."
       />
 
       <section className="ops-metrics" aria-label="Recomputation backlog">

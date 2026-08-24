@@ -70,9 +70,17 @@ export function AdminLayout() {
             className="admin-brand-lockup"
             aria-label="Packscout admin overview"
           >
-            <span className="admin-brand-mark" aria-hidden="true">
-              PS
-            </span>
+            {/* Served from the app's public directory rather than imported, so
+                the asset resolves the same way under the bundler and under the
+                test runner, which does not process binary imports. */}
+            <img
+              className="admin-brand-mark"
+              src="/brand/packscout-icon.png"
+              alt=""
+              aria-hidden="true"
+              width={128}
+              height={128}
+            />
             <span>
               <span className="admin-brand-eyebrow">Operations console</span>
               <span className="admin-brand-title">Packscout</span>

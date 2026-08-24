@@ -79,7 +79,7 @@ export function RunsPage() {
   const filtersActive = Boolean(searchParams.get("providerId") || searchParams.get("state") || searchParams.get("trigger"));
   return (
     <div className="admin-page">
-      <PageHeader eyebrow="Data pipeline / Runs" title="Import runs" description="Inspect immutable import outcomes, durable page progress, and the current resolution state of related quarantines." />
+      <PageHeader eyebrow="Data pipeline / Runs" title="Import runs" description="Every import that has run, what it committed, and what it quarantined." />
       <form className="ops-filters" aria-label="Filter import runs" onSubmit={applyFilters}>
         <div className="admin-field"><label htmlFor="runs-provider">Provider</label><select id="runs-provider" value={providerId} onChange={(event) => setProviderId(event.target.value)}><option value="">All providers</option>{providers.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></div>
         <div className="admin-field"><label htmlFor="runs-state">State</label><select id="runs-state" value={state} onChange={(event) => setState(event.target.value)}><option value="">All states</option><option value="queued">Queued</option><option value="running">Running</option><option value="succeeded">Succeeded</option><option value="incomplete">Incomplete</option><option value="failed">Failed</option></select></div>
