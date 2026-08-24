@@ -162,22 +162,27 @@ export class CanonicalInspectionService {
     return await throughStore(async () => {
       const kinds = await Promise.all(
         canonicalRecordKinds.map(async (recordKind) => {
-          const [counted, recency] = await Promise.all([
-            this.repository.countBounded({
-              ...input,
-              recordKind,
-              bound: CANONICAL_COUNT_BOUND,
-            }),
-            this.repository.kindRecency({ ...input, recordKind }),
-          ]);
+          // The count decides whether the collection-time aggregate is
+          // affordable, so it is read first rather than alongside.
+          const counted = await this.repository.countBounded({
+            ...input,
+            recordKind,
+            bound: CANONICAL_COUNT_BOUND,
+          });
+          const recency = await this.repository.kindRecency({
+            ...input,
+            recordKind,
+            collectedExtrema: !counted.bounded,
+          });
           return {
             recordKind,
             count: counted.count,
             precision: counted.bounded ? ("at_least" as const) : ("exact" as const),
-            oldestCollectedAt: isoOrNull(recency.oldest?.collectedAt ?? null),
-            newestCollectedAt: isoOrNull(recency.newest?.collectedAt ?? null),
-            oldestAcceptedAt: isoOrNull(recency.oldest?.acceptedAt ?? null),
-            newestAcceptedAt: isoOrNull(recency.newest?.acceptedAt ?? null),
+            oldestCollectedAt: isoOrNull(recency.oldestCollectedAt),
+            newestCollectedAt: isoOrNull(recency.newestCollectedAt),
+            oldestAcceptedAt: isoOrNull(recency.oldestAcceptedAt),
+            newestAcceptedAt: isoOrNull(recency.newestAcceptedAt),
+            collectedExtremaComplete: recency.collectedExtremaComplete,
           };
         }),
       );

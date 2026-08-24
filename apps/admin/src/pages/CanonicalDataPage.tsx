@@ -55,7 +55,22 @@ function CanonicalDataView() {
   const platformKey = params.get("provider");
   const recordKind = params.get("kind") ?? DEFAULT_KIND;
   const search = params.get("q") ?? "";
-  const cursor = params.get("cursor") ?? undefined;
+  /**
+   * The whole trail of page positions, not just the current one.
+   *
+   * Holding the predecessors in component state meant a shared or reloaded
+   * later-page URL came back claiming to be page one with no way back. The
+   * trail lives in the URL so a deep link restores the position *and* the
+   * ability to walk back from it. Cursors are base64url, so a comma cannot
+   * occur inside one and is safe as the separator.
+   */
+  const cursorTrail = (params.get("cursors") ?? "")
+    .split(",")
+    .filter((value) => value.length > 0);
+  const cursor = cursorTrail.at(-1);
+
+  const trailParam = (trail: readonly string[]): string | undefined =>
+    trail.length > 0 ? trail.join(",") : undefined;
 
   const [providers, setProviders] = useState<CanonicalProviderRow[]>([]);
   const [providerError, setProviderError] = useState<string | null>(null);
@@ -64,19 +79,29 @@ function CanonicalDataView() {
   const [summary, setSummary] = useState<CanonicalProviderSummary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
-  const [rows, setRows] = useState<CanonicalEntityRow[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([]);
-  const [listError, setListError] = useState<string | null>(null);
   /**
-   * Loading is derived from which request has settled rather than set on the
-   * way into the effect. A synchronous set there would schedule a second render
-   * before the first has painted, and the derived form says the same thing.
+   * The page and the scope it belongs to travel together.
+   *
+   * Tracking them separately let a settled page outlive its scope: switching
+   * provider or kind left the old rows rendered under the new heading, and if
+   * the new request failed they stayed there indefinitely, readable as records
+   * belonging to a provider they do not belong to. Binding the rows to the key
+   * that produced them makes that state unrepresentable.
    */
   const requestKey = `${platformKey ?? ""}|${recordKind}|${search}|${cursor ?? ""}`;
-  const [settledKey, setSettledKey] = useState<string | null>(null);
-  const listLoading = platformKey !== null && settledKey !== requestKey;
-  const listLoaded = settledKey !== null;
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    rows: CanonicalEntityRow[];
+    nextCursor: string | null;
+  } | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const current = loaded?.key === requestKey ? loaded : null;
+  const rows = current?.rows ?? [];
+  const nextCursor = current?.nextCursor ?? null;
+  // Loading is derived rather than set on the way into the effect: a
+  // synchronous set there schedules a second render before the first paints.
+  const listLoading = platformKey !== null && current === null && !listError;
+  const listLoaded = current !== null;
 
   const [searchDraft, setSearchDraft] = useState(search);
   const [detail, setDetail] = useState<CanonicalEntityDetail | null>(null);
@@ -139,20 +164,22 @@ function CanonicalDataView() {
       controller.signal,
     )
       .then((page) => {
-        setRows(page.items);
-        setNextCursor(page.nextCursor);
+        setLoaded({
+          key: requestKey,
+          rows: [...page.items],
+          nextCursor: page.nextCursor,
+        });
         setListError(null);
       })
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return;
+        // Drop whatever was loaded for the previous scope. Leaving it would
+        // present another provider's records under this provider's heading.
+        setLoaded(null);
         setListError(
           messageFor(reason, "These records could not be loaded."),
         );
       })
-      .finally(() => {
-        if (controller.signal.aborted) return;
-        setSettledKey(requestKey);
-      });
     return () => controller.abort();
   }, [platformKey, recordKind, search, cursor, requestKey]);
 
@@ -201,9 +228,8 @@ function CanonicalDataView() {
           providers={providers}
           selected={platformKey}
           onSelect={(next) => {
-            setCursorStack([]);
             setDetail(null);
-            updateParams({ provider: next, cursor: undefined });
+            updateParams({ provider: next, cursors: undefined });
           }}
         />
       ) : null}
@@ -222,14 +248,13 @@ function CanonicalDataView() {
         </p>
       ) : null}
 
-      {platformKey && summary ? (
+      {platformKey && Array.isArray(summary?.kinds) ? (
         <CanonicalSummary
           summary={summary}
           selectedKind={recordKind}
           onSelectKind={(kind) => {
-            setCursorStack([]);
             setDetail(null);
-            updateParams({ kind, cursor: undefined });
+            updateParams({ kind, cursors: undefined });
           }}
         />
       ) : null}
@@ -249,8 +274,7 @@ function CanonicalDataView() {
             className="inspect-records__search"
             onSubmit={(event) => {
               event.preventDefault();
-              setCursorStack([]);
-              updateParams({ q: searchDraft.trim(), cursor: undefined });
+              updateParams({ q: searchDraft.trim(), cursors: undefined });
             }}
           >
             <label>
@@ -271,8 +295,7 @@ function CanonicalDataView() {
                 className="admin-button admin-button-secondary"
                 onClick={() => {
                   setSearchDraft("");
-                  setCursorStack([]);
-                  updateParams({ q: undefined, cursor: undefined });
+                  updateParams({ q: undefined, cursors: undefined });
                 }}
               >
                 Clear
@@ -344,18 +367,17 @@ function CanonicalDataView() {
           ) : null}
 
           <KeysetPagination
-            page={cursorStack.length + 1}
-            hasPrevious={cursorStack.length > 0}
+            page={cursorTrail.length + 1}
+            hasPrevious={cursorTrail.length > 0}
             hasNext={Boolean(nextCursor)}
             onPrevious={() => {
-              const previous = cursorStack.at(-1);
-              setCursorStack((values) => values.slice(0, -1));
-              updateParams({ cursor: previous });
+              updateParams({
+                cursors: trailParam(cursorTrail.slice(0, -1)),
+              });
             }}
             onNext={() => {
               if (!nextCursor) return;
-              setCursorStack((values) => [...values, cursor]);
-              updateParams({ cursor: nextCursor });
+              updateParams({ cursors: trailParam([...cursorTrail, nextCursor]) });
             }}
           />
         </section>

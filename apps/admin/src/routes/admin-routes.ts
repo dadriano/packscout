@@ -88,13 +88,6 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     permission: "providers:view",
   },
   {
-    segment: "quarantine",
-    navLabel: "Quarantine",
-    title: "Quarantine",
-    section: "pipeline",
-    permission: "providers:view",
-  },
-  {
     segment: "background-work",
     navLabel: "Background Work",
     title: "Background Work",
@@ -112,6 +105,13 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     segment: "alerts",
     navLabel: "Alerts",
     title: "Operational Alerts",
+    section: "pipeline",
+    permission: "providers:view",
+  },
+  {
+    segment: "quarantine",
+    navLabel: "Quarantine",
+    title: "Quarantine",
     section: "pipeline",
     permission: "providers:view",
   },

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { OperatorSummary } from "@packscout/contracts";
+import {
+  permissionsForOperatorRole,
+  type OperatorSummary,
+} from "@packscout/contracts";
 import {
   AuthService,
   AuthServiceError,
@@ -343,11 +346,10 @@ test("session resolution rechecks authoritative role and rejects disabled accoun
     csrfToken: "valid-csrf",
   });
   assert.equal(actor.role, "data_operator");
-  assert.deepEqual(actor.permissions, [
-    "providers:view",
-    "imports:start",
-    "imports:retry",
-  ]);
+  // Compared against the authoritative grant rather than a restated literal, so
+  // this test proves the role was re-resolved and does not have to be edited
+  // every time the role's capabilities change.
+  assert.deepEqual(actor.permissions, permissionsForOperatorRole("data_operator"));
   assert.equal(state.refreshed[0]?.idleExpiresAt.toISOString(), state.authoritativeSession.absoluteExpiresAt.toISOString());
 
   state.authoritativeSession = { ...state.authoritativeSession, state: "disabled" };

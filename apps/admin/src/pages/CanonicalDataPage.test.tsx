@@ -11,6 +11,7 @@ import { ConfirmProvider } from "../providers/confirm.tsx";
 import { SessionProvider } from "../providers/session.tsx";
 import { ToastProvider } from "../providers/toast.tsx";
 import {
+  changeControl,
   cleanupPage,
   findButton,
   jsonResponse,
@@ -83,6 +84,7 @@ const SUMMARY: CanonicalProviderSummary = {
       newestCollectedAt: "2026-08-20T00:00:00.000Z",
       oldestAcceptedAt: "2026-01-02T00:05:00.000Z",
       newestAcceptedAt: "2026-08-20T00:05:00.000Z",
+      collectedExtremaComplete: false,
     },
     {
       recordKind: "catalog_asset",
@@ -92,6 +94,7 @@ const SUMMARY: CanonicalProviderSummary = {
       newestCollectedAt: "2026-08-19T00:00:00.000Z",
       oldestAcceptedAt: "2026-02-02T00:05:00.000Z",
       newestAcceptedAt: "2026-08-19T00:05:00.000Z",
+      collectedExtremaComplete: true,
     },
   ],
 };
@@ -120,12 +123,8 @@ function routeFetch(
     for (const [fragment, respond] of Object.entries(overrides)) {
       if (input.includes(fragment)) return respond();
     }
-    if (input.includes("/canonical/providers/courtyard/summary")) {
-      return jsonResponse(SUMMARY);
-    }
-    if (input.includes("/canonical/providers/courtyard/entities")) {
-      return jsonResponse(PAGE);
-    }
+    if (input.includes("/summary")) return jsonResponse(SUMMARY);
+    if (input.includes("/entities")) return jsonResponse(PAGE);
     if (input.includes("/canonical/providers")) return jsonResponse(PROVIDERS);
     return jsonResponse({});
   };
@@ -245,4 +244,65 @@ test("no providers configured reads as its own state", async (t) => {
   await settlePage();
 
   assert.match(pageText(page), /No providers are configured yet/i);
+});
+
+test("a deep-linked later page keeps a working Previous", async (t) => {
+  stubFetch(t, routeFetch());
+  // Opened cold at page three: the predecessor chain must come from the URL,
+  // not from state this render never had.
+  const page = await renderPage(
+    route(
+      inspector,
+      "/data/canonical?provider=courtyard&kind=pack&cursors=cursor-a,cursor-b",
+    ),
+  );
+  cleanupPage(t, page);
+  await settlePage();
+
+  const text = pageText(page);
+  assert.match(text, /Page 3/i);
+  const previous = findButton(page, "Previous");
+  assert.equal(previous.disabled, false);
+});
+
+test("switching provider never leaves the previous provider's records on screen", async (t) => {
+  const requests: string[] = [];
+  stubFetch(t, (request) => {
+    const input = String(request.input);
+    requests.push(input);
+    if (input.includes("/phygitals/entities")) {
+      // The new scope fails. The old rows must go anyway.
+      return jsonResponse(
+        { error: "boom", code: "CANONICAL_STORE_UNAVAILABLE" },
+        503,
+      );
+    }
+    return routeFetch()({ input: request.input });
+  });
+
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+  assert.match(pageText(page), /courtyard-pack-0001/);
+
+  changeControl(page, "inspect-provider", "phygitals");
+  await settlePage();
+
+  // Whether or not the new read succeeded, the old provider's record must not
+  // still be rendered under the new provider's heading.
+  assert.doesNotMatch(pageText(page), /courtyard-pack-0001/);
+});
+
+test("collection times that were not computed say so, rather than showing a dash", async (t) => {
+  stubFetch(t, routeFetch());
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+
+  const text = pageText(page);
+  // The bucket past the count bound skipped the collection-time aggregate.
+  // "Not computed" and "nothing collected" are different facts.
+  assert.match(text, /Not computed at this size/i);
+  // The kind inside the bound still reports its real range.
+  assert.match(text, /Oldest collected/);
 });

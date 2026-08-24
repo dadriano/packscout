@@ -82,13 +82,28 @@ export function CanonicalSummary({
                 <span className="inspect-summary__precision">Exact count</span>
               )}
               <dl className="inspect-summary__facts">
+                {kind.collectedExtremaComplete ? (
+                  <>
+                    <div>
+                      <dt>Oldest collected</dt>
+                      <dd>{dateText(kind.oldestCollectedAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Newest collected</dt>
+                      <dd>{dateText(kind.newestCollectedAt)}</dd>
+                    </div>
+                  </>
+                ) : (
+                  // Not computed is not the same fact as not present. A dash
+                  // here would read as "this provider collected nothing".
+                  <div>
+                    <dt>Collected range</dt>
+                    <dd>Not computed at this size</dd>
+                  </div>
+                )}
                 <div>
-                  <dt>Oldest collected</dt>
-                  <dd>{dateText(kind.oldestCollectedAt)}</dd>
-                </div>
-                <div>
-                  <dt>Newest collected</dt>
-                  <dd>{dateText(kind.newestCollectedAt)}</dd>
+                  <dt>Oldest accepted</dt>
+                  <dd>{dateText(kind.oldestAcceptedAt)}</dd>
                 </div>
                 <div>
                   <dt>Newest accepted</dt>

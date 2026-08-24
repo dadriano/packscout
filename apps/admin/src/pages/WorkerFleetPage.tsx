@@ -100,7 +100,7 @@ export function WorkerFleetPage() {
       <PageHeader
         eyebrow="Data pipeline / Workers"
         title="Worker fleet"
-        description={`Whether the machinery behind provider imports is running, what each instance is doing, and which runs or schedules have slipped. Status refreshes every ${age(WORKER_FLEET_REFRESH_MS)} while this tab is visible.`}
+        description={`Which workers are running, what they are doing, and which runs or schedules have slipped. Refreshes every ${age(WORKER_FLEET_REFRESH_MS)}.`}
       />
 
       <SectionState
@@ -186,7 +186,7 @@ export function WorkerFleetPage() {
           <EmptyState
             eyebrow="Fleet presence"
             title="No worker instance has reported"
-            description="Presence records are written by running workers and pruned after their retention window. Nothing here means either no worker has started since this deployment or every record has aged out."
+            description="Either no worker has started since this deployment, or every record has aged out of its retention window."
           />
         ) : (
           <WorkerInstanceLedger instances={fleet.instances} />

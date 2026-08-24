@@ -39,6 +39,13 @@ export const canonicalKindSummarySchema = z.object({
   newestCollectedAt: z.string().nullable(),
   oldestAcceptedAt: z.string().nullable(),
   newestAcceptedAt: z.string().nullable(),
+  /**
+   * False when the bucket was too large to aggregate collection times, so the
+   * two collected values are unavailable rather than absent. "We did not
+   * compute this" and "there is nothing here" are different facts, and a
+   * surface that shows them the same way misleads.
+   */
+  collectedExtremaComplete: z.boolean(),
 });
 
 export type CanonicalKindSummary = z.infer<typeof canonicalKindSummarySchema>;

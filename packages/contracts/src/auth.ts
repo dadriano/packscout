@@ -79,11 +79,13 @@ export const operatorRolePermissions: Readonly<
     "beta_allowlist:manage",
     "message_delivery:view",
     "message_delivery:manage",
+    "data_inspection:view",
   ] as const),
   data_operator: Object.freeze([
     "providers:view",
     "imports:start",
     "imports:retry",
+    "data_inspection:view",
   ] as const),
 });
 

@@ -28,9 +28,10 @@ export function ProviderPicker({
         </div>
       </header>
       <div className="inspect-providers__row">
-        <label className="inspect-providers__field">
+        <label className="inspect-providers__field" htmlFor="inspect-provider">
           <span>Provider</span>
           <select
+            id="inspect-provider"
             value={selected ?? ""}
             onChange={(event) => onSelect(event.target.value)}
           >

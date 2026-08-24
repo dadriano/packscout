@@ -135,34 +135,62 @@ export class PrismaCanonicalInspectionRepository {
   }
 
   /**
-   * The least- and most-recently-updated entity of a kind, with the source and
-   * acceptance timestamps of each one's current revision. Two index lookups
-   * against the inspection recency index rather than an aggregate over the
-   * bucket.
+   * The extrema of each timestamp for a kind.
+   *
+   * Collection order and acceptance order are not the same order: ingestion sets
+   * an entity's `updated_at` from acceptance, so a record collected long ago can
+   * be accepted late. Reading a collection time off the most-recently-accepted
+   * row would therefore report the wrong oldest and newest collection times, and
+   * the parity surface reuses these values. Each extremum is selected on its own
+   * column instead.
+   *
+   * Acceptance extrema come from the inspection recency index on
+   * `canonical_entities`; collection extrema are aggregated over the kind's
+   * revisions, which is the only place `source_collected_at` lives.
    */
   async kindRecency(input: {
     readonly organizationId: string;
     readonly platformKey: string;
     readonly recordKind: CanonicalRecordKindRow;
+    /**
+     * Whether the bucket is small enough to aggregate. Nothing indexes
+     * `source_collected_at` under a (tenant, platform, kind) filter, so the
+     * aggregate is a scan of the bucket. On a bucket past the count bound the
+     * caller passes false and the extrema come back unavailable — an honest
+     * "not computed at this scale" rather than a wrong value or a hung request.
+     */
+    readonly collectedExtrema: boolean;
   }): Promise<{
-    oldest: { collectedAt: Date; acceptedAt: Date } | null;
-    newest: { collectedAt: Date; acceptedAt: Date } | null;
+    oldestCollectedAt: Date | null;
+    newestCollectedAt: Date | null;
+    oldestAcceptedAt: Date | null;
+    newestAcceptedAt: Date | null;
+    collectedExtremaComplete: boolean;
   }> {
-    const [oldest, newest] = await Promise.all([
-      this.edgeRevision(input, "asc"),
-      this.edgeRevision(input, "desc"),
+    const [acceptedOldest, acceptedNewest, collected] = await Promise.all([
+      this.acceptedEdge(input, "asc"),
+      this.acceptedEdge(input, "desc"),
+      input.collectedExtrema
+        ? this.collectedExtremaFor(input)
+        : Promise.resolve({ oldest: null, newest: null }),
     ]);
-    return { oldest, newest };
+    return {
+      oldestCollectedAt: collected.oldest,
+      newestCollectedAt: collected.newest,
+      oldestAcceptedAt: acceptedOldest,
+      newestAcceptedAt: acceptedNewest,
+      collectedExtremaComplete: input.collectedExtrema,
+    };
   }
 
-  private async edgeRevision(
+  private async acceptedEdge(
     input: {
       readonly organizationId: string;
       readonly platformKey: string;
       readonly recordKind: CanonicalRecordKindRow;
     },
     direction: "asc" | "desc",
-  ): Promise<{ collectedAt: Date; acceptedAt: Date } | null> {
+  ): Promise<Date | null> {
     const entity = await this.database.canonical_entities.findFirst({
       where: {
         organization_id: input.organizationId,
@@ -178,12 +206,41 @@ export class PrismaCanonicalInspectionRepository {
         organization_id: input.organizationId,
         id: entity.current_revision_id,
       },
-      select: { source_collected_at: true, accepted_at: true },
+      select: { accepted_at: true },
     });
-    if (!revision) return null;
+    return revision?.accepted_at ?? null;
+  }
+
+  /**
+   * True oldest and newest collection times across a kind's current revisions.
+   *
+   * Only called for a bucket the caller has already established is inside the
+   * count bound, because this aggregate has no supporting index and therefore
+   * scans the bucket.
+   */
+  private async collectedExtremaFor(input: {
+    readonly organizationId: string;
+    readonly platformKey: string;
+    readonly recordKind: CanonicalRecordKindRow;
+  }): Promise<{ oldest: Date | null; newest: Date | null }> {
+    const rows = await this.database.$queryRaw<
+      { oldest: Date | null; newest: Date | null }[]
+    >(
+      Prisma.sql`
+        select min(revision.source_collected_at) as "oldest",
+               max(revision.source_collected_at) as "newest"
+          from canonical_entities entity
+          join canonical_revisions revision
+            on revision.id = entity.current_revision_id
+           and revision.organization_id = entity.organization_id
+         where entity.organization_id = ${input.organizationId}::uuid
+           and entity.platform_key = ${input.platformKey}
+           and entity.record_kind = ${input.recordKind}::canonical_record_kind
+      `,
+    );
     return {
-      collectedAt: revision.source_collected_at,
-      acceptedAt: revision.accepted_at,
+      oldest: rows[0]?.oldest ?? null,
+      newest: rows[0]?.newest ?? null,
     };
   }
 
