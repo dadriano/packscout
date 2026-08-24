@@ -21,6 +21,8 @@ import { ProviderSourceSupervisorRepository } from
   "./provider-source-supervisor-repository.ts";
 import { ProviderSourceTestResultRepository } from
   "./provider-source-test-result-repository.ts";
+import { SourceConnectionAdminRepository } from
+  "./source-connection-admin-repository.ts";
 import { ProviderSourceSupervisorWorkRepository } from
   "./provider-source-supervisor-work-repository.ts";
 
@@ -56,6 +58,69 @@ async function recoveryFixture(testKey: string) {
     });
   return { fixture, source, ownerKey, leaseToken, epoch };
 }
+
+test("an initial draft connection profile can claim its required test", async () => {
+  const fixture = await createProviderSourceAcceptanceFixture(
+    "initial-draft-connection-test",
+  );
+  try {
+    const now = await databaseNow(fixture.database);
+    const ownerKey = "initial-draft-connection-test-owner";
+    const leaseToken = randomUUID();
+    const epoch = await new ProviderSourceSupervisorRepository(
+      fixture.database,
+    ).acquire({
+      environmentKey: "initial-draft-connection-test-environment",
+      ownerKey,
+      leaseToken,
+      now,
+    });
+    const profile = await fixture.database.source_connection_profiles
+      .findUniqueOrThrow({
+        where: { id: fixture.connectionProfileId },
+        select: { state: true, active_revision_id: true },
+      });
+    const revision = await fixture.database.source_connection_revisions
+      .findUniqueOrThrow({
+        where: { id: fixture.connectionRevisionId },
+        select: { state: true },
+      });
+    assert.deepEqual(profile, { state: "draft", active_revision_id: null });
+    assert.equal(revision.state, "candidate");
+
+    const requested = await new SourceConnectionAdminRepository(
+      fixture.database,
+    ).requestConnectionTest({
+      organizationId: fixture.organizationId,
+      connectionProfileId: fixture.connectionProfileId,
+      connectionRevisionId: fixture.connectionRevisionId,
+      expectedHealthGeneration: 0n,
+      requestedByActorKey: "operator-admin",
+      requestedAt: now,
+    });
+    const claimed = await new ProviderSourceSupervisorWorkRepository(
+      fixture.database,
+    ).claimNext({
+      epochId: epoch.epochId,
+      ownerKey,
+      leaseToken,
+      claimOwner: ownerKey,
+      claimToken: randomUUID(),
+      claimLeaseId: randomUUID(),
+    });
+
+    assert.equal(claimed?.kind, "connection_test");
+    assert.equal(claimed?.id, requested.jobId);
+    assert.equal(
+      (await fixture.database.source_connection_test_jobs.findUniqueOrThrow({
+        where: { id: requested.jobId },
+      })).state,
+      "running",
+    );
+  } finally {
+    await fixture.close();
+  }
+});
 
 test("takeover fences a terminal source-test/result gap without another claim", async () => {
   const { fixture, source, ownerKey, leaseToken, epoch } =
