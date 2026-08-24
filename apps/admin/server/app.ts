@@ -45,6 +45,7 @@ import {
   createBetaAllowlistRouter,
   type BetaAllowlistRouterDependencies,
 } from "./routes/beta-allowlist.ts";
+import { createDataInspectionRouter } from "./routes/data-inspection.ts";
 import {
   createWorkerFleetRouter,
   type WorkerFleetRouterDependencies,
@@ -254,6 +255,13 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         }),
       );
     }
+    // Read-only and unconditional: the surface needs no injected dependency to
+    // report what is in comparison scope, and mounting it always means a caller
+    // without the permission is refused rather than routed to the API 404.
+    app.use(
+      "/api/data-inspection",
+      createDataInspectionRouter({ auth: service, cookiePolicy }),
+    );
     if (dependencies.productUsers) {
       app.use(
         "/api/product-users",
