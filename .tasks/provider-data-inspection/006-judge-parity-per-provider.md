@@ -4,6 +4,7 @@
 **Depends on:** provider-data-inspection/002, provider-data-inspection/004
 **Blocks:** provider-data-inspection/007, provider-data-inspection/009
 **Estimated scope:** medium
+**Status:** done
 
 ## Objective
 
@@ -51,14 +52,23 @@ None directly — task 009 renders this.
 
 ## Acceptance Criteria
 
-- [ ] Matching fingerprints with a caught-up completed checkpoint yield `in_sync`; matching fingerprints with canonical settled further yield `behind`.
-- [ ] Disagreeing fingerprints, disagreeing counts, and a manifest referencing an unrecognized release each yield `drifted` with their own reason code.
-- [ ] A provider with canonical data and no referenced release yields `unpublished`.
-- [ ] With the product backend unreachable, every provider reads `unknown` on the published side, the canonical figures still return, and no unread value is reported as zero.
-- [ ] The out-of-scope kind list is returned with the verdict and names the canonical kinds with no published counterpart.
-- [ ] A count difference within the stated uncertainty of an approximate count is not reported as drift.
-- [ ] The all-providers summary performs no per-record reads on either side.
+- [x] Matching fingerprints with a caught-up completed checkpoint yield `in_sync`; matching fingerprints with canonical settled further yield `behind`.
+- [x] Disagreeing fingerprints, disagreeing counts, and a manifest referencing an unrecognized release each yield `drifted` with their own reason code.
+- [x] A provider with canonical data and no referenced release yields `unpublished`.
+- [x] With the product backend unreachable, every provider reads `unknown` on the published side, the canonical figures still return, and no unread value is reported as zero.
+- [x] The out-of-scope kind list is returned with the verdict and names the canonical kinds with no published counterpart.
+- [x] A count difference within the stated uncertainty of an approximate count is not reported as drift.
+- [x] The all-providers summary performs no per-record reads on either side.
 
 ## Verification
 
 Pure-logic tests over the verdict rule cover every branch — the two matching-fingerprint cases, each drift cause, unpublished, and each unknown cause — including that an unread side yields `unknown` rather than zero and that an approximate-count difference within its uncertainty does not read as drift. An integration test proves the all-providers summary returns with the product backend unreachable. The services and admin test suites plus the workspace typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: implemented as specified. The five verdicts and their reason codes are a closed set reached from fingerprints, checkpoints, and counts only — no per-record read on either side. Side-by-side figures, both checkpoints, both fingerprints, and both `dataAsOf` values travel with every verdict, as does the out-of-scope kind list. An unread side is `unknown` with the failing side named, never zero.
+- Count comparison: a canonical count that stopped at its bound is a floor, and a floor establishes disagreement in one direction only. "At least 10" against 12 published is not drift; "at least 50,000" against 40 published is. Both directions are covered by tests.
+- Additional case: a manifest naming a release the backend no longer holds is its own reason code (`MANIFEST_SERVES_MISSING_RELEASE`) rather than being collapsed into "not referenced", and a release whose lifecycle is not `complete` is drift rather than being served silently.
+- Configuration: the parity surface needs the catalog deployment key, because promotion lanes are keyed by deployment and reading another deployment's lane would produce confident, wrong verdicts. Without it the routes report themselves unconfigured rather than guessing.
+- Verification: `npm run test --workspace=@packscout/services` (807 pass, including 14 new tests covering every verdict branch, both floor directions, each drift cause, both unknown causes, and that out-of-scope kinds never appear among the compared figures), `npm run test:admin` (376 pass), `npm run typecheck` (0 errors), `npm run lint` (clean), `npm run scan:framework-standards:ratchet` (0 new findings).

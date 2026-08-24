@@ -349,3 +349,85 @@ export class PrismaCanonicalInspectionRepository {
     };
   }
 }
+
+/**
+ * What PostgreSQL knows about a provider's promotion into the product backend.
+ *
+ * The lane tracks how far canonical state has settled and how far promotion has
+ * carried it; the active selection records which provider release the manifest
+ * was told to serve, with the fingerprint that release was published under.
+ * Together they let a parity verdict be reached from cheap reads: when the
+ * fingerprints on both sides agree, the payload is identical by construction.
+ */
+export interface ProviderPromotionFacts {
+  readonly platformKey: string;
+  readonly settledCheckpoint: string;
+  readonly sourceHeadCheckpoint: string;
+  readonly completedCheckpoint: string;
+  readonly completedPublicProviderReleaseId: string | null;
+  readonly completedProviderReleaseFingerprint: string | null;
+  readonly completedAt: Date | null;
+  readonly selectedPublicProviderReleaseId: string | null;
+  readonly selectedProviderReleaseFingerprint: string | null;
+  readonly selectedCheckpoint: string | null;
+  readonly activatedAt: Date | null;
+}
+
+export class PrismaProviderPromotionFactsRepository {
+  constructor(private readonly database: PackscoutPrismaClient) {}
+
+  async readFacts(input: {
+    readonly organizationId: string;
+    readonly deploymentKey: string;
+    readonly platformKeys: readonly string[];
+  }): Promise<readonly ProviderPromotionFacts[]> {
+    if (input.platformKeys.length === 0) return [];
+    const [lanes, selections] = await Promise.all([
+      this.database.provider_promotion_lanes.findMany({
+        where: {
+          organization_id: input.organizationId,
+          deployment_key: input.deploymentKey,
+          platform_key: { in: [...input.platformKeys] },
+        },
+      }),
+      this.database.manifest_active_provider_selections.findMany({
+        where: {
+          organization_id: input.organizationId,
+          deployment_key: input.deploymentKey,
+          platform_key: { in: [...input.platformKeys] },
+        },
+      }),
+    ]);
+
+    const laneByPlatform = new Map(lanes.map((row) => [row.platform_key, row]));
+    const selectionByPlatform = new Map(
+      selections.map((row) => [row.platform_key, row]),
+    );
+
+    return input.platformKeys.map((platformKey) => {
+      const lane = laneByPlatform.get(platformKey);
+      const selection = selectionByPlatform.get(platformKey);
+      return {
+        platformKey,
+        // Checkpoints are 64-bit sequences; they travel as strings so a large
+        // value cannot lose precision on its way to a browser.
+        settledCheckpoint: (lane?.settled_checkpoint ?? 0n).toString(),
+        sourceHeadCheckpoint: (lane?.source_head_checkpoint ?? 0n).toString(),
+        completedCheckpoint: (lane?.completed_checkpoint ?? 0n).toString(),
+        completedPublicProviderReleaseId:
+          lane?.completed_public_provider_release_id ?? null,
+        completedProviderReleaseFingerprint:
+          lane?.completed_provider_release_fingerprint ?? null,
+        completedAt: lane?.completed_at ?? null,
+        selectedPublicProviderReleaseId:
+          selection?.provider_public_release_id ?? null,
+        selectedProviderReleaseFingerprint:
+          selection?.provider_release_fingerprint ?? null,
+        selectedCheckpoint: selection
+          ? selection.selected_checkpoint.toString()
+          : null,
+        activatedAt: selection?.activated_at ?? null,
+      };
+    });
+  }
+}

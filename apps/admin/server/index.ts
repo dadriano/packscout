@@ -14,12 +14,15 @@ import {
   createPrismaClientLifecycle,
   DatabaseLoginAttemptLimiter,
   PrismaCanonicalInspectionRepository,
+  PrismaProviderPromotionFactsRepository,
   PrismaAuthAuditSink,
   PrismaAuthRepository,
   PrismaProviderConfigurationRepository,
   PrismaProviderHealthRepository,
 } from "@packscout/database";
 import { createAdminApp } from "./app.ts";
+import { createParityRuntime } from "./parity-runtime.ts";
+import { createPublishedCatalogReader } from "./published-catalog-reader.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
 import { createAdminBackgroundWorkRuntime } from "./background-work-runtime.ts";
 import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
@@ -46,6 +49,7 @@ import {
   adminDevelopmentServerNetwork,
   readAllowedOrigins,
   readBase64Key,
+  readCatalogDeploymentKey,
   readProductUserDirectoryConfig,
   readServiceHost,
   readPort,
@@ -147,6 +151,7 @@ const recomputationBacklogLimit = readPositiveCount(
  * the directory unconfigured rather than stopping the admin: every pipeline
  * workflow stays available and the users page explains the missing integration.
  */
+const catalogDeploymentKey = readCatalogDeploymentKey(process.env);
 const productUserDirectoryConfig = readProductUserDirectoryConfig({
   baseUrl: process.env.PACKSCOUT_ADMIN_DIRECTORY_URL,
   token: process.env.PACKSCOUT_ADMIN_DIRECTORY_TOKEN,
@@ -191,6 +196,9 @@ let shutdownPromise: Promise<void> | undefined;
 try {
   await databaseLifecycle.start();
   const database = databaseLifecycle.client;
+  const canonicalInspection = new CanonicalInspectionService(
+    new PrismaCanonicalInspectionRepository(database),
+  );
   const providerRepository = new PrismaProviderConfigurationRepository(database);
   const operational = createAdminOperationalRuntime({
     database,
@@ -243,9 +251,18 @@ try {
       backlogDepthLimit: recomputationBacklogLimit,
     }),
     workerFleet: createAdminWorkerFleetRuntime({ database }),
-    canonical: new CanonicalInspectionService(
-      new PrismaCanonicalInspectionRepository(database),
-    ),
+    canonical: canonicalInspection,
+    // Both halves must be configured: without the deployment key the admin
+    // cannot know which promotion lane is this deployment's, and reading the
+    // wrong one would produce confident, wrong verdicts.
+    parity: catalogDeploymentKey === null ? undefined : createParityRuntime({
+      canonical: canonicalInspection,
+      promotion: new PrismaProviderPromotionFactsRepository(database),
+      published: createPublishedCatalogReader({
+        config: productUserDirectoryConfig,
+      }),
+      deploymentKey: catalogDeploymentKey,
+    }),
     productUsers: {
       directory: createProductUserDirectoryReader({
         config: productUserDirectoryConfig,

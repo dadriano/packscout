@@ -6,6 +6,7 @@ import {
   type CanonicalInspectionService,
 } from "@packscout/services";
 import type { SessionCookiePolicy } from "../auth/cookies.ts";
+import type { ParityRuntime } from "../parity-runtime.ts";
 import {
   createRequireSession,
   getAuthenticatedActor,
@@ -30,6 +31,8 @@ export interface DataInspectionRouterDependencies {
     CanonicalInspectionService,
     "listProviders" | "summarizeProvider" | "listEntities" | "readEntity"
   >;
+  /** Absent until the published-catalog integration is configured. */
+  readonly parity?: ParityRuntime;
 }
 
 /**
@@ -167,6 +170,43 @@ export function createDataInspectionRouter(
             platformKey: request.params.platformKey,
             recordKind: request.params.recordKind,
             externalId: request.params.externalId,
+          }),
+        );
+      } catch (reason) {
+        sendFailure(response, reason);
+      }
+    },
+  );
+
+  /**
+   * Every provider's verdict in one read. Cheap by construction: fingerprints,
+   * checkpoints, and counts only — no record on either side is touched.
+   */
+  router.get("/compare/summary", read, async (_request, response) => {
+    const parity = dependencies.parity;
+    if (!parity) return sendFailure(response, new Error("unconfigured"));
+    try {
+      const actor = getAuthenticatedActor(response);
+      response.setHeader("Cache-Control", "no-store");
+      response.status(200).json(await parity.summarize(actor.organizationId));
+    } catch (reason) {
+      sendFailure(response, reason);
+    }
+  });
+
+  router.get(
+    "/compare/providers/:platformKey",
+    read,
+    async (request, response) => {
+      const parity = dependencies.parity;
+      if (!parity) return sendFailure(response, new Error("unconfigured"));
+      try {
+        const actor = getAuthenticatedActor(response);
+        response.setHeader("Cache-Control", "no-store");
+        response.status(200).json(
+          await parity.detail({
+            organizationId: actor.organizationId,
+            platformKey: request.params.platformKey,
           }),
         );
       } catch (reason) {

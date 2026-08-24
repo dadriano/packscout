@@ -4,7 +4,7 @@
 
 Open `provider-data-inspection/001` and add the read-only data-inspection permission plus the "Data" sidebar section with its three destination shells. It unblocks all three UI tasks and is a session's work.
 
-**Progress:** 4/10 tasks complete
+**Progress:** 5/10 tasks complete
 
 ## Context
 
@@ -55,7 +55,7 @@ This feature adds a third admin sidebar section, **Data**, with three read-only 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 006 | Judge published-versus-canonical parity per provider | medium | todo | 002, 004 |
+| 006 | Judge published-versus-canonical parity per provider | medium | done | 002, 004 |
 | 007 | Reconcile record identities across the boundary | large | todo | 006 |
 | 008 | Diff one record across the boundary | medium | todo | 002, 004 |
 | 009 | Compare providers in the admin | large | todo | 001, 006, 007, 008 |

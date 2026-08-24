@@ -109,6 +109,7 @@ export interface AdminAppDependencies {
   >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
   canonical?: DataInspectionRouterDependencies["canonical"];
+  parity?: DataInspectionRouterDependencies["parity"];
   /**
    * Deployments without the source-connection keys run with source
    * administration deliberately unconfigured. The provider-source routes are
@@ -268,6 +269,7 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         auth: service,
         cookiePolicy,
         canonical: dependencies.canonical,
+        parity: dependencies.parity,
       }),
     );
     if (dependencies.productUsers) {
