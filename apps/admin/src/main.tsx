@@ -20,6 +20,7 @@ import "./alerts.css";
 import "./source-configuration.css";
 import "./source-operations.css";
 import "./product-users.css";
+import "./data-inspection.css";
 import "./beta-allowlist.css";
 import "./messages.css";
 

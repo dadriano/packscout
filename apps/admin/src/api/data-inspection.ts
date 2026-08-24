@@ -1,4 +1,10 @@
-import type { ComparisonScope } from "@packscout/contracts";
+import type {
+  CanonicalEntityDetail,
+  CanonicalEntityPage,
+  CanonicalProviderRow,
+  CanonicalProviderSummary,
+  ComparisonScope,
+} from "@packscout/contracts";
 import { requestJson, type Fetcher } from "./client";
 
 /**
@@ -15,4 +21,64 @@ export function getComparisonScope(signal?: AbortSignal, fetcher?: Fetcher) {
     { signal },
     fetcher,
   );
+}
+
+export function listCanonicalProviders(
+  signal?: AbortSignal,
+  fetcher?: Fetcher,
+) {
+  return requestJson<{ providers: CanonicalProviderRow[] }>(
+    "/data-inspection/canonical/providers",
+    { signal },
+    fetcher,
+  );
+}
+
+export function getCanonicalSummary(
+  platformKey: string,
+  signal?: AbortSignal,
+  fetcher?: Fetcher,
+) {
+  return requestJson<CanonicalProviderSummary>(
+    `/data-inspection/canonical/providers/${encodeURIComponent(platformKey)}/summary`,
+    { signal },
+    fetcher,
+  );
+}
+
+export function listCanonicalEntities(
+  input: {
+    platformKey: string;
+    recordKind: string;
+    search?: string;
+    cursor?: string;
+    limit?: number;
+  },
+  signal?: AbortSignal,
+  fetcher?: Fetcher,
+) {
+  const query = new URLSearchParams({ recordKind: input.recordKind });
+  if (input.search) query.set("search", input.search);
+  if (input.cursor) query.set("cursor", input.cursor);
+  if (input.limit) query.set("limit", String(input.limit));
+  return requestJson<CanonicalEntityPage>(
+    `/data-inspection/canonical/providers/${encodeURIComponent(input.platformKey)}/entities?${query}`,
+    { signal },
+    fetcher,
+  );
+}
+
+export function readCanonicalEntity(
+  input: { platformKey: string; recordKind: string; externalId: string },
+  signal?: AbortSignal,
+  fetcher?: Fetcher,
+) {
+  const path = [
+    "/data-inspection/canonical/providers",
+    encodeURIComponent(input.platformKey),
+    "entities",
+    encodeURIComponent(input.recordKind),
+    encodeURIComponent(input.externalId),
+  ].join("/");
+  return requestJson<CanonicalEntityDetail>(path, { signal }, fetcher);
 }

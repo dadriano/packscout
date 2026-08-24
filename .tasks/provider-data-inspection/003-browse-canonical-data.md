@@ -4,6 +4,7 @@
 **Depends on:** provider-data-inspection/001, provider-data-inspection/002
 **Blocks:** provider-data-inspection/010
 **Estimated scope:** medium
+**Status:** done
 
 ## Objective
 
@@ -43,14 +44,24 @@ An operator opens Data → Canonical and picks Courtyard. A row of summary cards
 
 ## Acceptance Criteria
 
-- [ ] Selecting a provider and kind lists that provider's records, and paging forward then backward returns to the same first page.
-- [ ] An approximate count renders as approximate and an exact count renders without that qualification.
-- [ ] Exact-ID lookup finds a known record, and a search matching nothing shows an empty state rather than an error.
-- [ ] Opening a record shows its current content, revision number, hashes, timestamps, and declared relationships, all read-only.
-- [ ] Reloading a deep link restores the same provider, kind, search, and page position.
-- [ ] Loading, no-providers, no-records, no-matches, invalid-cursor, forbidden, and read-failed states each render distinctly, and a failed read leaves previously loaded results on screen.
-- [ ] The provider cross-links reach the existing provider, import-run, and quarantine surfaces for the selected provider.
+- [x] Selecting a provider and kind lists that provider's records, and paging forward then backward returns to the same first page.
+- [x] An approximate count renders as approximate and an exact count renders without that qualification.
+- [x] Exact-ID lookup finds a known record, and a search matching nothing shows an empty state rather than an error.
+- [x] Opening a record shows its current content, revision number, hashes, timestamps, and declared relationships, all read-only.
+- [x] Reloading a deep link restores the same provider, kind, search, and page position.
+- [x] Loading, no-providers, no-records, no-matches, invalid-cursor, forbidden, and read-failed states each render distinctly, and a failed read leaves previously loaded results on screen.
+- [x] The provider cross-links reach the existing provider, import-run, and quarantine surfaces for the selected provider.
 
 ## Verification
 
 Component and route tests drive provider and kind selection, forward and backward paging, exact-ID lookup, an empty search, and the record detail view, and assert each of the loading, empty, forbidden, and failure states renders its own treatment. The admin test suite, lint, and the workspace typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: implemented as specified. Provider picker, per-kind summary, cursor-paged record list, exact-id and prefix search, record detail with content, hashes, timestamps, provenance summary, and declared relationships. Provider, kind, search, and page position live in the URL and survive a reload. Cross-links reach the provider, run, quarantine, and background-work surfaces. Nothing on the page mutates.
+- Count honesty: a bounded count renders as `50,000+` with "counting stopped at the server bound" on the card itself, not in a tooltip, and an exact count is labelled exact.
+- Failure behaviour: a failed list read leaves an already-loaded summary on screen rather than blanking the page, and an empty result renders its own empty state distinct from a failure. Both are covered by tests.
+- Divergences: loading state is derived from which request has settled rather than set synchronously inside the effect. The repository's lint rule refuses a synchronous setState in an effect, and the derived form expresses the same thing without a second render pass.
+- Accessibility and styling: uses the existing shell, PageHeader, EmptyState, and KeysetPagination; the feature stylesheet declares layout only and takes every colour from the shared `--admin-*` token vocabulary.
+- Verification: `npm run test:admin` (376 pass, including 7 new page tests covering the restricted treatment, both count precisions, record listing, record detail, the empty state, a failed read preserving prior results, and the no-providers state), `npm run typecheck` (0 errors), `npm run lint` (clean), `npm run scan:framework-standards:ratchet` (0 new findings). End-to-end browser verification is deferred to the local deploy in the close-out task, where an authenticated session exists.

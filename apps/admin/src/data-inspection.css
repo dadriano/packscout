@@ -1,0 +1,217 @@
+/*
+ * The Data section's surfaces. Layout and spacing only — every colour comes
+ * from the shared token vocabulary in theme.css, so these surfaces follow the
+ * light and dark themes without declaring a palette of their own.
+ */
+
+.inspect-providers,
+.inspect-summary,
+.inspect-records,
+.inspect-detail {
+  background: var(--admin-card-bg);
+  border: 1px solid var(--admin-border);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  margin-block-end: 1.5rem;
+}
+
+.inspect-providers__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+}
+
+.inspect-providers__field {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 20rem;
+  flex: 1 1 20rem;
+}
+
+.inspect-providers__field > span {
+  font-size: 0.8125rem;
+  color: var(--admin-text-muted);
+}
+
+.inspect-providers__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.inspect-summary__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.inspect-summary__card {
+  display: grid;
+  gap: 0.5rem;
+  text-align: start;
+  padding: 1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+  background: var(--admin-card-bg-muted);
+  color: inherit;
+  cursor: pointer;
+}
+
+.inspect-summary__card.is-selected {
+  border-color: var(--admin-primary);
+  box-shadow: 0 0 0 1px var(--admin-primary);
+}
+
+.inspect-summary__label {
+  font-size: 0.8125rem;
+  color: var(--admin-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inspect-summary__count {
+  font-size: 1.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A bounded count is a floor. It says so here, not in a tooltip. */
+.inspect-summary__precision {
+  font-size: 0.75rem;
+  color: var(--admin-text-muted);
+}
+
+.inspect-summary__facts,
+.inspect-records__facts,
+.inspect-detail__facts {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.inspect-summary__facts div,
+.inspect-records__facts div,
+.inspect-detail__facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.inspect-summary__facts dt,
+.inspect-records__facts dt,
+.inspect-detail__facts dt {
+  color: var(--admin-text-muted);
+}
+
+.inspect-summary__facts dd,
+.inspect-records__facts dd,
+.inspect-detail__facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.inspect-records__search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  margin-block: 1rem;
+}
+
+.inspect-records__search label {
+  display: grid;
+  gap: 0.5rem;
+  flex: 1 1 24rem;
+}
+
+.inspect-records__search label > span {
+  font-size: 0.8125rem;
+  color: var(--admin-text-muted);
+}
+
+.inspect-records__rows {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.inspect-records__rows article {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(12rem, 1fr) minmax(16rem, 2fr);
+  align-items: start;
+  padding: 1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+}
+
+.inspect-records__identity {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.inspect-records__identity > span {
+  font-size: 0.8125rem;
+  color: var(--admin-text-muted);
+}
+
+.inspect-records__open {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: start;
+  font: inherit;
+  color: var(--admin-primary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.inspect-detail__content {
+  max-height: 28rem;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+  background: var(--admin-card-bg-muted);
+  font-size: 0.8125rem;
+}
+
+.inspect-detail__hash {
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+
+.inspect-detail__edges {
+  display: grid;
+  gap: 0.5rem;
+  padding-inline-start: 1.5rem;
+  font-size: 0.875rem;
+}
+
+.inspect-detail__provenance dl {
+  display: grid;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.inspect-detail__provenance dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.inspect-detail__provenance dt {
+  color: var(--admin-text-muted);
+}
+
+.inspect-detail__provenance dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 48rem) {
+  .inspect-records__rows article {
+    grid-template-columns: 1fr;
+  }
+}
