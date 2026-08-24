@@ -4,7 +4,7 @@
 
 Open `provider-data-inspection/001` and add the read-only data-inspection permission plus the "Data" sidebar section with its three destination shells. It unblocks all three UI tasks and is a session's work.
 
-**Progress:** 2/10 tasks complete
+**Progress:** 3/10 tasks complete
 
 ## Context
 
@@ -48,7 +48,7 @@ This feature adds a third admin sidebar section, **Data**, with three read-only 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 004 | Expose published provider catalog reads from the product backend | medium | todo | none |
+| 004 | Expose published provider catalog reads from the product backend | medium | done | none |
 | 005 | Browse published provider data in the admin | medium | todo | 001, 004 |
 
 ### Compare

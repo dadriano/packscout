@@ -4,6 +4,7 @@
 **Depends on:** none
 **Blocks:** provider-data-inspection/005, provider-data-inspection/006, provider-data-inspection/007, provider-data-inspection/008
 **Estimated scope:** medium
+**Status:** done
 
 ## Objective
 
@@ -46,14 +47,23 @@ None directly — this is the boundary behind tasks 005, 006, 007, and 008.
 
 ## Acceptance Criteria
 
-- [ ] An authenticated server-to-server call returns the active release for a platform that has one, and returns the distinct "not referenced by the active manifest" answer for one that does not.
-- [ ] An unauthenticated call, a call with a malformed or short token, and a browser-style cross-origin call are each refused, and none of them performs work.
-- [ ] Paging an entity listing with a cursor visits every entity in the release exactly once under a stable order, and the server enforces its own maximum page size regardless of what the caller asks for.
-- [ ] The identity-only ID page returns public IDs without document bodies and pages to completion over a release larger than one page.
-- [ ] A single-document read returns the document when present and the distinct not-present answer when absent.
-- [ ] Errors carry only stable codes; no upstream body, document content, or backend error text appears in any error response.
-- [ ] A release in `staging`, `failed`, or `retired` reads with its actual lifecycle rather than being reported as complete.
+- [x] An authenticated server-to-server call returns the active release for a platform that has one, and returns the distinct "not referenced by the active manifest" answer for one that does not.
+- [x] An unauthenticated call, a call with a malformed or short token, and a browser-style cross-origin call are each refused, and none of them performs work.
+- [x] Paging an entity listing with a cursor visits every entity in the release exactly once under a stable order, and the server enforces its own maximum page size regardless of what the caller asks for.
+- [x] The identity-only ID page returns public IDs without document bodies and pages to completion over a release larger than one page.
+- [x] A single-document read returns the document when present and the distinct not-present answer when absent.
+- [x] Errors carry only stable codes; no upstream body, document content, or backend error text appears in any error response.
+- [x] A release in `staging`, `failed`, or `retired` reads with its actual lifecycle rather than being reported as complete.
 
 ## Verification
 
 Backend tests prove the authentication gate refuses unauthenticated, malformed-token, and browser-origin callers without performing work; that pagination is stable, complete, and server-bounded across both the entity listing and the ID page; that an absent platform and an absent document are representable answers rather than errors; and that no error response carries an upstream body. The backend test suite and its typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: implemented as specified. The active-release read, the paged entity listing, the identity-only ID page, and the single-document read are all internal queries behind the existing deployment-secret guard in the product backend's server-to-server router. Every one is a query, so no path here can write. The three absences the contract requires stay distinguishable, and a release reports its own lifecycle rather than being presented as complete.
+- Additional case found: a manifest can reference a release the store no longer holds. That is reported as its own `release_missing` status rather than collapsed into "platform not referenced", because it is an inconsistency an operator needs to see, not an absence.
+- Divergences: `repack_chases` carries no standalone public identity — the table is keyed by release plus internal repack and collectible ids. Rather than synthesize a composite identity, chases are compared through the publication's own `providerCatalogRepackReconciliation` record (expected versus accepted chase counts per repack), exposed as a fifth read. Identity paging therefore covers the four kinds that do have public ids: vendors, categories, repacks, collectibles. Task 007 must reconcile chases through their parent repack.
+- Generated artifact: `convex/_generated/api.d.ts` was hand-edited to register the new module, because codegen requires a live deployment that is not available offline. The edit is exactly what codegen emits — one import and one module-map entry in alphabetical position — and the next codegen run reproduces it.
+- Verification: `npm run test:convex` (292 pass across 31 files, including 11 new tests proving the auth gate refuses unauthenticated, short-token, and wrong-token callers without doing work; that identity paging visits every id exactly once across a multi-page walk; that the server caps a caller's requested page size; and that an unknown release and an absent document are representable answers rather than errors), `npm run typecheck` (0 errors), `npm run lint` (clean), `npm run scan:framework-standards:ratchet` (0 new findings).
