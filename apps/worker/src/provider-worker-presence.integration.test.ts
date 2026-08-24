@@ -16,6 +16,14 @@ const configuration = Object.freeze({
   heartbeatIntervalMilliseconds: 9_000,
   importRunLeaseMilliseconds: 111_000,
   maximumClaimsPerCycle: 5,
+  messageOutboxBackoffBaseMilliseconds: 1_000,
+  messageOutboxBackoffCapMilliseconds: 60_000,
+  messageOutboxBatchSize: 10,
+  messageOutboxLeaseMilliseconds: 30_000,
+  messageOutboxMaximumAttempts: 4,
+  messageOutboxPerRecipientLimit: 3,
+  messageOutboxPollMilliseconds: 1_000,
+  messageOutboxRetentionDays: 30,
   pollIntervalMilliseconds: 100,
   presenceRetentionDays: 7,
   presenceStaleAfterMilliseconds: 45_000,
@@ -24,6 +32,9 @@ const configuration = Object.freeze({
   retentionOrganizationDiscoveryLimit: 10,
   runHeartbeatStaleAfterMilliseconds: 222_000,
   scheduleClaimLeaseMilliseconds: 33_000,
+  welcomeDispatchBatchSize: 10,
+  welcomeDispatchLeaseMilliseconds: 300_000,
+  welcomeDispatchPollMilliseconds: 60_000,
   workerHost: "worker-host-1",
   workerId: "worker:composed:1",
   workerVersion: "3.2.1",
@@ -58,6 +69,7 @@ test("a composed worker publishes the settings it is actually running with", asy
     const runtime = createProviderWorkerRuntime({
       configuration,
       database: harness.client,
+      env: {},
       logger: {
         write(event) {
           events.push(event);
@@ -135,6 +147,7 @@ test("the composed retention cycle prunes presence history", async () => {
     const runtime = createProviderWorkerRuntime({
       configuration,
       database: harness.client,
+      env: {},
       logger: { write: (event) => void events.push(event) },
       observability: { metric() {}, log() {} },
       heartbeatTimer: manualTimer().timer,

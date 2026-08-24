@@ -20,6 +20,10 @@ import {
 } from "@packscout/contracts";
 import { v } from "convex/values";
 import { query, type QueryCtx } from "./_generated/server";
+import {
+  catalogReadAuthorized,
+  catalogReadTokenArg,
+} from "./publicCatalogReadAccess";
 import { resolvePublicCatalogPagination } from "./publicCatalogPagination";
 import {
   loadActivePublicCatalogManifest,
@@ -73,8 +77,11 @@ function compareText(left: string, right: string): number {
 }
 
 export const getPublicShellStatus = query({
-  args: {},
-  handler: async (ctx): Promise<GetPublicShellStatusResult> => {
+  args: { ...catalogReadTokenArg },
+  handler: async (ctx, args): Promise<GetPublicShellStatusResult> => {
+    if (!(await catalogReadAuthorized(ctx, args.catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     const active = await loadActivePublicCatalogManifest(ctx);
     return active === null
       ? publicReadError("RELEASE_UNAVAILABLE")
@@ -87,9 +94,13 @@ export const getDashboardBundle = query({
     filters: v.optional(v.any()),
     selectedPublicRepackId: v.optional(v.any()),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<GetDashboardBundleResult> => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = parseDashboardRequest(directArgs(queryArgs));
     if (!request.ok) return publicReadError("INVALID_QUERY");
@@ -175,9 +186,13 @@ export const listPublicRepacks = query({
     desiredPublicCollectibleId: v.optional(v.any()),
     selectedPublicRepackId: v.optional(v.any()),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<ListPublicRepacksResult> => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = parseRepackListRequest(directArgs(queryArgs));
     if (!request.ok) return publicReadError("INVALID_QUERY");
@@ -325,9 +340,13 @@ export const getPublicRepack = query({
     publicRepackId: v.any(),
     publicReleaseId: v.any(),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<GetPublicRepackResult> => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = getPublicRepackInputSchema.safeParse(queryArgs);
     if (!request.success) return publicReadError("INVALID_QUERY");
@@ -364,10 +383,15 @@ export const searchPublicCollectibles = query({
     search: v.any(),
     collectibleTypes: v.optional(v.any()),
     limit: v.optional(v.any()),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<SearchPublicCollectiblesResult> => {
+    const { catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     const request = searchPublicCollectiblesInputSchema.safeParse(
-      directArgs(args),
+      directArgs(queryArgs),
     );
     if (!request.success) return publicReadError("INVALID_QUERY");
     const active = await loadActivePublicCatalogManifest(ctx);
@@ -491,9 +515,13 @@ export const findRepacksByDesiredCollectible = query({
     direction: v.optional(v.any()),
     limit: v.optional(v.any()),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args): Promise<FindRepacksByDesiredCollectibleResult> => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = findRepacksByDesiredCollectibleInputSchema.safeParse(
       directArgs(queryArgs),

@@ -1,5 +1,10 @@
 import type {
+  ListProductUserAccessQueueRequest,
   ListProductUsersRequest,
+  ProductUserAccessAction,
+  ProductUserAccessDecisionChange,
+  ProductUserAccessQueueCount,
+  ProductUserAccessQueuePage,
   ProductUserDetail,
   ProductUserDirectoryPage,
   ProductUserStanding,
@@ -57,5 +62,56 @@ export function setProductUserStanding(
   return requestJson("/product-users/standing", {
     method: "POST",
     json: { subject, standing },
+  });
+}
+
+/**
+ * One bounded page of the review queue: identities in one decision state —
+ * awaiting review unless another is named — oldest request first. The state
+ * filter and cursor travel in the body like every other product-user request.
+ */
+export function listProductUserAccessQueue(
+  request: ListProductUserAccessQueueRequest = {},
+  signal?: AbortSignal,
+): Promise<ProductUserAccessQueuePage> {
+  return requestJson("/product-users/access/queue", {
+    method: "POST",
+    json: request,
+    ...(signal ? { signal } : {}),
+  });
+}
+
+/**
+ * The bounded awaiting-review count for the page header. It carries no
+ * personal data — a number, and whether the counting bound was hit.
+ */
+export function getProductUserAccessQueueCount(
+  signal?: AbortSignal,
+): Promise<ProductUserAccessQueueCount> {
+  return requestJson("/product-users/access/queue-count", {
+    method: "POST",
+    json: {},
+    ...(signal ? { signal } : {}),
+  });
+}
+
+/**
+ * One access decision. The action names the endpoint — approve, decline, or
+ * revoke — from the closed contract vocabulary, and the body names only the
+ * person; the acting operator is always the session on the server. The
+ * response carries the decision the backend now holds, which is what the
+ * caller should render: a repeat or a concurrent decision converges there and
+ * reports `changed: false` with the authoritative state.
+ *
+ * These are reversible flips. No browser call deletes a user, touches what
+ * they saved, or changes their standing through this surface.
+ */
+export function decideProductUserAccess(
+  action: ProductUserAccessAction,
+  subject: string,
+): Promise<ProductUserAccessDecisionChange> {
+  return requestJson(`/product-users/access/${action}`, {
+    method: "POST",
+    json: { subject },
   });
 }

@@ -1,17 +1,17 @@
 {
-  "source": "provider-source integration plus current main database catalog",
+  "source": "provider-source integration plus operator invitations",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260821040000_provider_source_page_plan_digest/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260824000000_operator_invitations/migration.sql"
   },
   "expectedCounts": {
-    "tables": 81,
-    "enums": 37,
-    "columns": 1283,
-    "indexes": 142,
-    "uniqueConstraints": 51,
-    "foreignKeys": 277,
-    "checkConstraints": 254
+    "tables": 84,
+    "enums": 40,
+    "columns": 1325,
+    "indexes": 150,
+    "uniqueConstraints": 54,
+    "foreignKeys": 276,
+    "checkConstraints": 281
   },
   "enums": {
     "admin_alert_state": [
@@ -43,6 +43,22 @@
       "active",
       "retired",
       "revoked"
+    ],
+    "email_link_purpose": [
+      "operator_password_reset",
+      "operator_invitation"
+    ],
+    "email_message_attempt_outcome": [
+      "sent",
+      "skipped",
+      "failed"
+    ],
+    "email_message_intent_state": [
+      "pending",
+      "retrying",
+      "sent",
+      "skipped",
+      "failed"
     ],
     "estimated_ev_recomputation_result": [
       "estimated",
@@ -97,8 +113,10 @@
       "data_operator"
     ],
     "operator_state": [
+      "pending",
       "active",
-      "disabled"
+      "disabled",
+      "cancelled"
     ],
     "provider_auth_mode": [
       "none",
@@ -228,7 +246,8 @@
       "scheduling",
       "importing",
       "estimated_ev",
-      "retention"
+      "retention",
+      "message_outbox"
     ],
     "worker_instance_state": [
       "running",
@@ -920,21 +939,6 @@
           "referencedTable": "canonical_revisions",
           "referencedColumns": [
             "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "canonical_entities_current_revision_scope_fk": {
-          "columns": [
-            "current_revision_id",
-            "id",
-            "organization_id"
-          ],
-          "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id",
-            "entity_id",
-            "organization_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -2775,6 +2779,505 @@
         },
         "compact_source_request_attempts_terminal_check": {
           "value": "((terminal_state <> 'in_flight'::source_request_attempt_state) AND (btrim(outcome_class) <> ''::text) AND (btrim(claim_owner) <> ''::text) AND (safe_outcome_hash ~ '^[0-9a-f]{64}$'::text) AND (terminal_at >= started_at) AND (expected_health_generation >= 0) AND ((terminal_state <> 'connection_outcome_uncertain'::source_request_attempt_state) OR ((blocking_episode_id IS NOT NULL) AND (blocking_episode_connection_revision_id IS NOT NULL))) AND ((compacted_at IS NULL) OR (compacted_at >= terminal_at)))"
+        }
+      }
+    },
+    "email_link_tokens": {
+      "columns": {
+        "address_normalized": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "now()"
+        },
+        "expires_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "issued_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "purpose": {
+          "type": "email_link_purpose",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "redeemed_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "selector": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "subject_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "superseded_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "now()"
+        },
+        "verifier_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "email_link_tokens_expiry_idx": {
+          "columns": [
+            "expires_at"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_link_tokens_outstanding_idx": {
+          "columns": [
+            "purpose",
+            "subject_id"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "email_link_tokens_selector_unique": {
+          "columns": [
+            "selector"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {},
+      "checkConstraints": {
+        "email_link_tokens_address_bounded": {
+          "value": "((length(address_normalized) >= 3) AND (length(address_normalized) <= 320) AND (strpos(address_normalized, '@'::text) > 1))"
+        },
+        "email_link_tokens_expires_after_issue": {
+          "value": "(expires_at > issued_at)"
+        },
+        "email_link_tokens_redeemed_after_issue": {
+          "value": "((redeemed_at IS NULL) OR (redeemed_at >= issued_at))"
+        },
+        "email_link_tokens_selector_bounded": {
+          "value": "(selector ~ '^[A-Za-z0-9_-]{22}$'::text)"
+        },
+        "email_link_tokens_settled_exclusive": {
+          "value": "((redeemed_at IS NULL) OR (superseded_at IS NULL))"
+        },
+        "email_link_tokens_superseded_after_issue": {
+          "value": "((superseded_at IS NULL) OR (superseded_at >= issued_at))"
+        },
+        "email_link_tokens_verifier_hash_bounded": {
+          "value": "(verifier_hash ~ '^[A-Za-z0-9_-]{43}$'::text)"
+        }
+      }
+    },
+    "email_message_attempts": {
+      "columns": {
+        "attempt_number": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "attempted_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "error_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "error_message": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "error_retryable": {
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "intent_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "outcome": {
+          "type": "email_message_attempt_outcome",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_message_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "skip_reason": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "email_message_attempts_attempted_idx": {
+          "columns": [
+            "attempted_at"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "email_message_attempts_intent_attempt_unique": {
+          "columns": [
+            "intent_id",
+            "attempt_number"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "email_message_attempts_intent_id_email_message_intents_id_fk": {
+          "columns": [
+            "intent_id"
+          ],
+          "referencedTable": "email_message_intents",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "email_message_attempts_error_code_bounded": {
+          "value": "((error_code IS NULL) OR (error_code ~ '^[A-Z][A-Z0-9_]{0,127}$'::text))"
+        },
+        "email_message_attempts_error_message_bounded": {
+          "value": "((error_message IS NULL) OR (length(error_message) <= 200))"
+        },
+        "email_message_attempts_number_positive": {
+          "value": "(attempt_number >= 1)"
+        },
+        "email_message_attempts_outcome_consistent": {
+          "value": "(((outcome = 'sent'::email_message_attempt_outcome) AND (provider IS NOT NULL) AND (error_code IS NULL) AND (error_message IS NULL) AND (error_retryable IS NULL) AND (skip_reason IS NULL)) OR ((outcome = 'skipped'::email_message_attempt_outcome) AND (skip_reason IS NOT NULL) AND (provider_message_id IS NULL) AND (error_code IS NULL) AND (error_message IS NULL) AND (error_retryable IS NULL)) OR ((outcome = 'failed'::email_message_attempt_outcome) AND (error_code IS NOT NULL) AND (error_retryable IS NOT NULL) AND (provider_message_id IS NULL) AND (skip_reason IS NULL)))"
+        },
+        "email_message_attempts_provider_bounded": {
+          "value": "((provider IS NULL) OR ((length(provider) >= 1) AND (length(provider) <= 64)))"
+        },
+        "email_message_attempts_provider_message_id_bounded": {
+          "value": "((provider_message_id IS NULL) OR ((length(provider_message_id) >= 1) AND (length(provider_message_id) <= 256)))"
+        },
+        "email_message_attempts_skip_reason_valid": {
+          "value": "((skip_reason IS NULL) OR (skip_reason = ANY (ARRAY['delivery_disabled'::text, 'console_mode'::text, 'missing_configuration'::text])))"
+        }
+      }
+    },
+    "email_message_intents": {
+      "columns": {
+        "attempt_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "claim_expires_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_owner": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "claim_token": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "now()"
+        },
+        "due_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "finalized_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "idempotency_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "input_json": {
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "last_attempted_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "last_error_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "last_provider": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "last_skip_reason": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "recipient": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "state": {
+          "type": "email_message_intent_state",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'pending'::email_message_intent_state"
+        },
+        "updated_at": {
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "email_message_intents_created_idx": {
+          "columns": [
+            "created_at",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_message_intents_recipient_created_idx": {
+          "columns": [
+            "recipient",
+            "created_at"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_message_intents_source_state_idx": {
+          "columns": [
+            "source",
+            "state"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_message_intents_state_due_idx": {
+          "columns": [
+            "state",
+            "due_at",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "email_message_intents_state_finalized_idx": {
+          "columns": [
+            "state",
+            "finalized_at"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "email_message_intents_idempotency_key_unique": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {},
+      "checkConstraints": {
+        "email_message_intents_attempts_nonnegative": {
+          "value": "(attempt_count >= 0)"
+        },
+        "email_message_intents_claim_consistent": {
+          "value": "(((claim_owner IS NULL) AND (claim_token IS NULL) AND (claim_expires_at IS NULL)) OR ((claim_owner IS NOT NULL) AND (claim_token IS NOT NULL) AND (claim_expires_at IS NOT NULL)))"
+        },
+        "email_message_intents_claim_owner_bounded": {
+          "value": "((claim_owner IS NULL) OR ((length(claim_owner) >= 1) AND (length(claim_owner) <= 256)))"
+        },
+        "email_message_intents_error_code_bounded": {
+          "value": "((last_error_code IS NULL) OR (last_error_code ~ '^[A-Z][A-Z0-9_]{0,127}$'::text))"
+        },
+        "email_message_intents_idempotency_key_bounded": {
+          "value": "((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 256))"
+        },
+        "email_message_intents_input_bounded": {
+          "value": "(length((input_json)::text) <= 16384)"
+        },
+        "email_message_intents_kind_bounded": {
+          "value": "(kind ~ '^[a-z][a-z0-9_]{0,63}$'::text)"
+        },
+        "email_message_intents_provider_bounded": {
+          "value": "((last_provider IS NULL) OR ((length(last_provider) >= 1) AND (length(last_provider) <= 64)))"
+        },
+        "email_message_intents_recipient_bounded": {
+          "value": "((length(recipient) >= 3) AND (length(recipient) <= 320) AND (strpos(recipient, '@'::text) > 1))"
+        },
+        "email_message_intents_skip_reason_valid": {
+          "value": "((last_skip_reason IS NULL) OR (last_skip_reason = ANY (ARRAY['delivery_disabled'::text, 'console_mode'::text, 'missing_configuration'::text])))"
+        },
+        "email_message_intents_source_bounded": {
+          "value": "(source ~ '^[a-z][a-z0-9_]{0,63}$'::text)"
+        },
+        "email_message_intents_terminal_consistent": {
+          "value": "(((state = ANY (ARRAY['sent'::email_message_intent_state, 'skipped'::email_message_intent_state, 'failed'::email_message_intent_state])) AND (finalized_at IS NOT NULL) AND (claim_owner IS NULL)) OR ((state = ANY (ARRAY['pending'::email_message_intent_state, 'retrying'::email_message_intent_state])) AND (finalized_at IS NULL)))"
         }
       }
     },
@@ -6222,7 +6725,7 @@
         "password_hash": {
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "identity": null,
           "default": null
         },
@@ -6253,6 +6756,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {},
       "checkConstraints": {
+        "operators_active_requires_credential": {
+          "value": "((password_hash IS NOT NULL) OR (state <> 'active'::operator_state))"
+        },
         "operators_display_name_not_blank": {
           "value": "(length(TRIM(BOTH FROM display_name)) > 0)"
         },
@@ -11242,21 +11748,6 @@
           "referencedTable": "provider_config_revisions",
           "referencedColumns": [
             "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "provider_sources_active_revision_scope_fk": {
-          "columns": [
-            "active_revision_id",
-            "id",
-            "organization_id"
-          ],
-          "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -16554,6 +17045,42 @@
         "worker_instances_stopped_consistent": {
           "value": "(((state = 'stopped'::worker_instance_state) AND (stopped_at IS NOT NULL) AND (stopped_at >= started_at)) OR ((state = 'running'::worker_instance_state) AND (stopped_at IS NULL)))"
         }
+      }
+    }
+  },
+  "nativeExtensions": {
+    "foreignKeys": {
+      "canonical_entities_current_revision_scope_fk": {
+        "table": "canonical_entities",
+        "columns": [
+          "current_revision_id",
+          "id",
+          "organization_id"
+        ],
+        "referencedTable": "canonical_revisions",
+        "referencedColumns": [
+          "id",
+          "entity_id",
+          "organization_id"
+        ],
+        "onDelete": "restrict",
+        "onUpdate": "no action"
+      },
+      "provider_sources_active_revision_scope_fk": {
+        "table": "provider_sources",
+        "columns": [
+          "active_revision_id",
+          "id",
+          "organization_id"
+        ],
+        "referencedTable": "provider_config_revisions",
+        "referencedColumns": [
+          "id",
+          "provider_id",
+          "organization_id"
+        ],
+        "onDelete": "restrict",
+        "onUpdate": "no action"
       }
     }
   }

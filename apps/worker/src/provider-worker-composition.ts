@@ -1,11 +1,19 @@
 import { randomUUID } from "node:crypto";
 import {
+  PrismaEmailLinkTokenRepository,
+  PrismaEmailMessageOutboxRepository,
   PrismaWorkerPresenceRepository,
   IngestionPersistenceRepository,
   PROTECTED_PAYLOAD_RETENTION_DAYS,
   type PackscoutPrismaClient,
 } from "@packscout/database";
 import {
+  createEmailLinkTokenPruner,
+  createPostmarkEmailDeliveryAdapter,
+  EmailMessageOutboxService,
+  EmailDeliveryAdapterRegistry,
+  EmailDeliveryService,
+  resolveMessageCatalogueOrigins,
   WorkerPresenceService,
   type OperationalObservability,
 } from "@packscout/services";
@@ -20,6 +28,8 @@ export {
 } from "./provider-source-import-composition.ts";
 import { createProviderWorkerOperationalRuntime } from "./provider-worker-operational-runtime.ts";
 import { createProviderWorkerEstimatedEvProcessor } from "./provider-worker-estimated-ev.ts";
+import { createProviderWorkerMessageOutboxProcessor } from "./provider-worker-message-outbox.ts";
+import { createProviderWorkerWelcomeDispatchProcessor } from "./provider-worker-welcome-dispatch.ts";
 import {
   createProviderWorkerPresenceObserver,
   describeWorkerInstance,
@@ -51,6 +61,14 @@ type RuntimeConfiguration = Pick<
   | "heartbeatIntervalMilliseconds"
   | "importRunLeaseMilliseconds"
   | "maximumClaimsPerCycle"
+  | "messageOutboxBackoffBaseMilliseconds"
+  | "messageOutboxBackoffCapMilliseconds"
+  | "messageOutboxBatchSize"
+  | "messageOutboxLeaseMilliseconds"
+  | "messageOutboxMaximumAttempts"
+  | "messageOutboxPerRecipientLimit"
+  | "messageOutboxPollMilliseconds"
+  | "messageOutboxRetentionDays"
   | "pollIntervalMilliseconds"
   | "presenceRetentionDays"
   | "presenceStaleAfterMilliseconds"
@@ -59,6 +77,9 @@ type RuntimeConfiguration = Pick<
   | "retentionOrganizationDiscoveryLimit"
   | "runHeartbeatStaleAfterMilliseconds"
   | "scheduleClaimLeaseMilliseconds"
+  | "welcomeDispatchBatchSize"
+  | "welcomeDispatchLeaseMilliseconds"
+  | "welcomeDispatchPollMilliseconds"
   | "workerHost"
   | "workerId"
   | "workerVersion"
@@ -67,6 +88,8 @@ type RuntimeConfiguration = Pick<
 export interface ProviderWorkerCompositionInput {
   readonly configuration: RuntimeConfiguration;
   readonly database: PackscoutPrismaClient;
+  /** Delivery mode, provider credentials, and public origins read here. */
+  readonly env?: NodeJS.ProcessEnv;
   readonly logger: ProviderWorkerLogger;
   readonly observability: OperationalObservability;
   readonly promotion?: PromotionV2WorkerRuntimePort;
@@ -97,11 +120,19 @@ export function createProviderWorkerRuntime(
   const descriptor = describeWorkerInstance(input.configuration);
   const instanceId = descriptor.instanceId;
   const presenceRepository = new PrismaWorkerPresenceRepository(input.database);
+  const environment = input.env ?? process.env;
+  const outboxRepository = new PrismaEmailMessageOutboxRepository(
+    input.database,
+  );
   const operational = createProviderWorkerOperationalRuntime({
     database: input.database,
     ids,
     clock,
     observability: input.observability,
+    // Alerts raised by pipeline work also reach operator email, enqueued on
+    // the same outbox the drain below delivers; routing and its off switch
+    // are server-side settings resolved from this environment.
+    alertEmail: { env: environment, queue: outboxRepository },
   });
   const retention = createProviderWorkerRetentionCoordinator({
     database: input.database,
@@ -122,6 +153,22 @@ export function createProviderWorkerRuntime(
             effectiveSettings.presenceRetentionDays * 24 * 60 * 60 * 1_000,
           prune: (request) => presenceRepository.prune(request),
         },
+        {
+          // Delivered message history ages out with the platform's other
+          // fleet-scoped records; the repository itself refuses to touch an
+          // intent that is still pending or retrying.
+          kind: "email_message_history",
+          retentionMs:
+            input.configuration.messageOutboxRetentionDays *
+            24 * 60 * 60 * 1_000,
+          prune: (request) => outboxRepository.pruneHistory(request),
+        },
+        // Spent and expired one-time links age out on the mechanism's own
+        // default retention; the pruner never touches a token that is still
+        // live, so an outstanding invitation survives its own pruning cycle.
+        createEmailLinkTokenPruner({
+          repository: new PrismaEmailLinkTokenRepository(input.database),
+        }),
       ],
     },
   });
@@ -157,6 +204,47 @@ export function createProviderWorkerRuntime(
     catalogRetention: input.catalogRetention,
     sourceSupervisor: input.sourceSupervisor,
     retention,
+    messageOutbox: createProviderWorkerMessageOutboxProcessor({
+      queue: outboxRepository,
+      delivery: new EmailDeliveryService(
+        new EmailDeliveryAdapterRegistry([
+          createPostmarkEmailDeliveryAdapter(),
+        ]),
+        { env: environment, clock },
+      ),
+      origins: resolveMessageCatalogueOrigins(environment),
+      clock,
+      workerId: instanceId,
+      settings: {
+        batchSize: input.configuration.messageOutboxBatchSize,
+        perRecipientLimit: input.configuration.messageOutboxPerRecipientLimit,
+        leaseMilliseconds: input.configuration.messageOutboxLeaseMilliseconds,
+        maximumAttempts: input.configuration.messageOutboxMaximumAttempts,
+        backoffBaseMilliseconds:
+          input.configuration.messageOutboxBackoffBaseMilliseconds,
+        backoffCapMilliseconds:
+          input.configuration.messageOutboxBackoffCapMilliseconds,
+        pollIntervalMilliseconds:
+          input.configuration.messageOutboxPollMilliseconds,
+      },
+    }),
+    // The welcome dispatcher (messaging/007) runs beside the outbox drain.
+    // Its off switch and operator-integration configuration resolve from
+    // this same environment per pass; disabled or unconfigured, it idles
+    // without touching any other job or message kind. It enqueues through
+    // the same durable outbox the drain above delivers.
+    welcomeDispatch: createProviderWorkerWelcomeDispatchProcessor({
+      env: environment,
+      outbox: new EmailMessageOutboxService({ queue: outboxRepository, clock }),
+      clock,
+      settings: {
+        batchSize: input.configuration.welcomeDispatchBatchSize,
+        leaseMilliseconds:
+          input.configuration.welcomeDispatchLeaseMilliseconds,
+        pollIntervalMilliseconds:
+          input.configuration.welcomeDispatchPollMilliseconds,
+      },
+    }),
     presence: new ProviderWorkerPresence({
       service: new WorkerPresenceService({
         store: presenceRepository,

@@ -35,6 +35,11 @@ const user = {
   firstSeenAt: "2026-08-01T09:00:00.000Z",
   lastSeenAt: "2026-08-19T12:00:00.000Z",
   standing: "active",
+  access: {
+    state: "awaiting_review",
+    decidedBy: "default",
+    decidedAt: "2026-08-01T09:00:00.000Z",
+  },
 } as const;
 
 const resolvedRepack: ProductUserSavedRepack = {
@@ -576,10 +581,74 @@ test("an operator who cannot manage accounts sees the standing and no control", 
   );
   assert.deepEqual(
     labels.filter((label) =>
-      /suspend|reinstate|delete|remove|purge/i.test(label),
+      /suspend|reinstate|approve|decline|revoke|return to review|delete|remove|purge/i.test(
+        label,
+      ),
     ),
     [],
   );
+  // Standing and access are still readable; only the controls are absent.
   assert.match(pageText(renderer), /Suspended/);
+  assert.match(pageText(renderer), /Awaiting review/);
   assert.equal(requests.length, 1);
+});
+
+test("the detail view shows beta access with provenance and decides in place", async (context) => {
+  const requests = stubFetch(context, (request) =>
+    String(request.input).endsWith("/product-users/access/approve")
+      ? jsonResponse({
+          action: "approve",
+          changed: true,
+          access: {
+            state: "approved",
+            decidedBy: "operator",
+            decidedAt: "2026-08-20T10:00:00.000Z",
+          },
+          effectiveAccess: { admitted: true, reason: "approved" },
+        })
+      : jsonResponse(detail),
+  );
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  // The waiting account reads as waiting — the pending tone, never the
+  // danger tone — with its provenance and date alongside the standing.
+  let text = pageText(renderer);
+  assert.match(text, /Awaiting review/);
+  assert.match(text, /Beta access/);
+  assert.match(text, /Awaiting a first decision/);
+  const badges = [
+    ...renderer.container.querySelectorAll(".admin-pill"),
+  ].map((badge) => ({
+    label: badge.textContent?.trim(),
+    pending: badge.classList.contains("admin-pill-warning"),
+    danger: badge.classList.contains("admin-pill-danger"),
+  }));
+  assert.deepEqual(badges[0], {
+    label: "Awaiting review",
+    pending: true,
+    danger: false,
+  });
+
+  await act(async () => findButton(renderer, "Approve").click());
+  await settlePage();
+  // The consequence is stated before anything happens.
+  assert.equal(requests.length, 1, "the page has only read until confirmation");
+  assert.match(pageText(renderer), /Approve access for this person\?/);
+
+  await act(async () => findButton(renderer, "Approve access").click());
+  await settlePage();
+
+  const decision = requests.at(-1);
+  assert.equal(String(decision?.input), "/api/product-users/access/approve");
+  assert.deepEqual(body(decision as RecordedRequest), { subject });
+
+  // The view reflects the decision the backend reported, in place, with the
+  // reverse control now offered and every saved item untouched.
+  text = pageText(renderer);
+  assert.match(text, /Access approved\. They are in the beta now\./);
+  assert.match(text, /Approved by an operator/);
+  findButton(renderer, "Revoke");
+  assert.match(text, /Mythic Pokemon Gacha/);
 });

@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   PrismaAdminNotificationPublisher,
+  PrismaEmailMessageOutboxRepository,
   PipelineSetupRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import {
+  ALERT_EMAIL_RECIPIENTS_VARIABLE,
   ProviderImportWorkerService,
   type ProviderImportRunSummary,
 } from "@packscout/services";
@@ -154,6 +156,98 @@ test("worker operational composition durably alerts on a terminal failed run", a
       jsonLines.some((line) => line.includes('"kind":"notification"')),
       true,
     );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("worker composition routes alerts to operator email beside durable persistence", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const fixture = {
+      organization: "78000000-0000-4000-8000-000000000011",
+      provider: "78000000-0000-4000-8000-000000000012",
+      configuration: "78000000-0000-4000-8000-000000000013",
+      run: "78000000-0000-4000-8000-000000000014",
+    } as const;
+    const setup = new PipelineSetupRepository(harness.database);
+    await setup.createOrganization({
+      id: fixture.organization,
+      slug: "worker-alert-email-runtime",
+      name: "Worker Alert Email Runtime",
+      createdAt: startedAt,
+    });
+    await setup.createProviderSource({
+      id: fixture.provider,
+      organizationId: fixture.organization,
+      platformKey: "fixture-provider",
+      displayName: "Fixture Provider",
+      createdAt: startedAt,
+    });
+    await setup.createConfigRevision({
+      id: fixture.configuration,
+      organizationId: fixture.organization,
+      providerId: fixture.provider,
+      version: 1,
+      adapterKey: "fixture-mapper-v1",
+      endpointUrl: "https://provider.example/feed",
+      authMode: "none",
+      createdByActorKey: "actor:test",
+      createdAt: startedAt,
+    });
+    await setup.createImportRun({
+      id: fixture.run,
+      organizationId: fixture.organization,
+      providerId: fixture.provider,
+      configRevisionId: fixture.configuration,
+      trigger: "scheduled",
+      state: "failed",
+      createdAt: startedAt,
+    });
+
+    const sink: ProviderWorkerJsonSink = { write: () => {} };
+    let eventId = 0;
+    const operational = createProviderWorkerOperationalRuntime({
+      database: harness.database,
+      ids: {
+        id: () =>
+          `78000000-0000-4000-8002-${String(++eventId).padStart(12, "0")}`,
+      },
+      clock: { now: () => finishedAt },
+      observability: new JsonConsoleProviderWorkerObservability(
+        "worker-2",
+        sink,
+      ),
+      alertEmail: {
+        env: { [ALERT_EMAIL_RECIPIENTS_VARIABLE]: "ops@example.com" },
+        queue: new PrismaEmailMessageOutboxRepository(harness.database),
+      },
+    });
+
+    const result = await operational.events.runFailed({
+      organizationId: fixture.organization,
+      providerId: fixture.provider,
+      runId: fixture.run,
+      failureCode: "IMPORT_TIMEOUT",
+    });
+    // The durable admin outcome stays authoritative for the producer.
+    assert.equal(result.status, "accepted");
+    const alerts = new PrismaAdminNotificationPublisher(harness.database);
+    const summaries = await alerts.listAlerts({
+      organizationId: fixture.organization,
+      state: "active",
+      limit: 10,
+    });
+    assert.equal(summaries.length, 1);
+    const intents = await harness.database.email_message_intents.findMany({
+      orderBy: [{ created_at: "asc" }, { id: "asc" }],
+    });
+    assert.equal(intents.length, 1);
+    assert.equal(intents[0]?.kind, "operational_alert");
+    assert.equal(intents[0]?.recipient, "ops@example.com");
+    assert.equal(intents[0]?.state, "pending");
+    const input = intents[0]?.input_json as unknown as { alertId: string };
+    assert.equal(input.alertId, summaries[0]?.id);
   } finally {
     await harness.close();
   }

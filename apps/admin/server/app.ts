@@ -7,7 +7,11 @@ import type { AuthService } from "@packscout/services";
 import type { SessionCookiePolicy } from "./auth/cookies.ts";
 import { createHealthRouter } from "./routes/health.ts";
 import { createAuthRouter } from "./routes/auth.ts";
-import { createOperatorsRouter } from "./routes/operators.ts";
+import {
+  createOperatorsRouter,
+  type OperatorInvitationRuntime,
+} from "./routes/operators.ts";
+import { createOperatorInvitationsRouter } from "./routes/operator-invitations.ts";
 import { createProvidersRouter, type ProvidersRouterDependencies } from "./routes/providers.ts";
 import {
   createImportOperationsRouter,
@@ -38,9 +42,21 @@ import {
   type ProductUsersRouterDependencies,
 } from "./routes/product-users.ts";
 import {
+  createBetaAllowlistRouter,
+  type BetaAllowlistRouterDependencies,
+} from "./routes/beta-allowlist.ts";
+import {
   createWorkerFleetRouter,
   type WorkerFleetRouterDependencies,
 } from "./routes/worker-fleet.ts";
+import {
+  createMessagesRouter,
+  type MessagesRouterDependencies,
+} from "./routes/messages.ts";
+import {
+  createPasswordResetRouter,
+  type PasswordResetRouterDependencies,
+} from "./routes/password-reset.ts";
 
 export interface AdminAuthHttpDependencies {
   service: AuthService;
@@ -83,6 +99,10 @@ export interface AdminAppDependencies {
     ProductUsersRouterDependencies,
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
+  betaAllowlist?: Omit<
+    BetaAllowlistRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
   /**
    * Deployments without the source-connection keys run with source
@@ -91,6 +111,12 @@ export interface AdminAppDependencies {
    * explicit capability state instead of a generic 404.
    */
   sourceAdministrationUnconfigured?: boolean;
+  messages?: Omit<
+    MessagesRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  passwordReset?: Omit<PasswordResetRouterDependencies, "sameOrigin">;
+  operatorInvitations?: OperatorInvitationRuntime;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
@@ -167,7 +193,12 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
     );
     app.use(
       "/api/operators",
-      createOperatorsRouter({ service, cookiePolicy, sameOrigin }),
+      createOperatorsRouter({
+        service,
+        cookiePolicy,
+        sameOrigin,
+        invitations: dependencies.operatorInvitations,
+      }),
     );
     if (dependencies.providers) {
       app.use(
@@ -234,6 +265,17 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         }),
       );
     }
+    if (dependencies.betaAllowlist) {
+      app.use(
+        "/api/beta-allowlist",
+        createBetaAllowlistRouter({
+          ...dependencies.betaAllowlist,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
     if (dependencies.operationalHealth) {
       app.use(
         "/api/operational-health",
@@ -255,6 +297,17 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         }),
       );
     }
+    if (dependencies.messages) {
+      app.use(
+        "/api/messages",
+        createMessagesRouter({
+          ...dependencies.messages,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
     if (dependencies.providerSourceOperations) {
       app.use(
         "/api/provider-source-operations",
@@ -262,6 +315,29 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
           ...dependencies.providerSourceOperations,
           auth: service,
           cookiePolicy,
+        }),
+      );
+    }
+    if (dependencies.operatorInvitations) {
+      // Mounted beside the reset routes and for the same reason: an
+      // unauthenticated route INTO authentication, guarded by the same
+      // trusted-origin discipline.
+      app.use(
+        "/api/auth/invitations",
+        createOperatorInvitationsRouter({
+          flow: dependencies.operatorInvitations.flow,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.passwordReset) {
+      // Mounted after the session routes: an unauthenticated route INTO
+      // authentication, guarded by the same trusted-origin discipline.
+      app.use(
+        "/api/auth/password-reset",
+        createPasswordResetRouter({
+          ...dependencies.passwordReset,
+          sameOrigin,
         }),
       );
     }

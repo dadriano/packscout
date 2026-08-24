@@ -18,6 +18,14 @@ import type {
 } from "./heat-promotion-worker-runtime.ts";
 import type { CatalogRetentionWorkerRuntimePort } from
   "./catalog-retention-worker-runtime.ts";
+import type {
+  ProviderWorkerMessageOutboxCycleResult,
+  ProviderWorkerMessageOutboxPort,
+} from "./provider-worker-message-outbox.ts";
+import type {
+  ProviderWorkerWelcomeDispatchCycleResult,
+  ProviderWorkerWelcomeDispatchPort,
+} from "./provider-worker-welcome-dispatch.ts";
 
 const safeLogValuePattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const safeFailureCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
@@ -66,6 +74,10 @@ export type ProviderWorkerLogEventName =
   | "provider_import_failed"
   | "provider_import_finished"
   | "provider_import_queue_failed"
+  | "provider_message_outbox_cycle_failed"
+  | "provider_message_outbox_cycle_finished"
+  | "provider_welcome_dispatch_cycle_failed"
+  | "provider_welcome_dispatch_cycle_finished"
   | "provider_estimated_ev_cycle_failed"
   | "provider_estimated_ev_cycle_finished"
   | "provider_retention_cycle_failed"
@@ -103,6 +115,19 @@ export interface ProviderWorkerLogEvent {
   readonly evCapReached?: boolean;
   readonly retentionPruned?: number;
   readonly retentionPruneFailures?: number;
+  readonly outboxClaimed?: number;
+  readonly outboxSent?: number;
+  readonly outboxSkipped?: number;
+  readonly outboxRetrying?: number;
+  readonly outboxFailed?: number;
+  readonly outboxLost?: number;
+  readonly outboxErrors?: number;
+  readonly welcomeClaimed?: number;
+  readonly welcomeEnqueued?: number;
+  readonly welcomeDeduplicated?: number;
+  readonly welcomeSkipped?: number;
+  readonly welcomeErrors?: number;
+  readonly welcomeCapReached?: boolean;
   readonly activityKind?: WorkerActivityKind;
   readonly presenceFailures?: number;
 }
@@ -138,6 +163,8 @@ export interface ProviderWorkerRuntimeDependencies {
     stop(): Promise<void> | void;
   }>;
   readonly retention: ProviderWorkerRetentionPort;
+  readonly messageOutbox?: ProviderWorkerMessageOutboxPort;
+  readonly welcomeDispatch?: ProviderWorkerWelcomeDispatchPort;
   readonly presence?: ProviderWorkerPresencePort;
   readonly logger: ProviderWorkerLogger;
   readonly workerId: string;
@@ -446,6 +473,8 @@ export class ProviderWorkerRuntime {
       if (result.reason !== "stopped") {
         await this.processEstimatedEv();
         await this.processRetention();
+        await this.processMessageOutbox();
+        await this.processWelcomeDispatch();
       }
       return result;
     } finally {
@@ -486,6 +515,107 @@ export class ProviderWorkerRuntime {
       ...(failures > 0
         ? { failureCode: "ESTIMATED_EV_REQUEST_FAILED" }
         : {}),
+    });
+  }
+
+  private async processMessageOutbox(): Promise<void> {
+    if (!this.dependencies.messageOutbox) return;
+    this.reportActivity({
+      kind: "message_outbox",
+      organizationId: null,
+      providerId: null,
+      runId: null,
+    });
+    let result: ProviderWorkerMessageOutboxCycleResult;
+    try {
+      result = await this.dependencies.messageOutbox.runCycle();
+    } catch {
+      this.log({
+        level: "error",
+        event: "provider_message_outbox_cycle_failed",
+        failureCode: "MESSAGE_OUTBOX_CYCLE_ERROR",
+      });
+      return;
+    }
+    // A gated pass between drain intervals is not an observable cycle.
+    if (result.outcome === "waiting") return;
+    const failures = result.outcome === "deferred"
+      ? 0
+      : safeCount(result.failed) + safeCount(result.errors);
+    this.log({
+      level: failures > 0 ? "error" : "info",
+      event: "provider_message_outbox_cycle_finished",
+      outcome:
+        result.outcome === "deferred"
+          ? "deferred"
+          : failures > 0
+            ? "degraded"
+            : result.capReached
+              ? "bounded"
+              : "succeeded",
+      outboxClaimed: safeCount(result.claimed),
+      ...(result.outcome === "deferred"
+        ? {}
+        : {
+            outboxSent: safeCount(result.sent),
+            outboxSkipped: safeCount(result.skipped),
+            outboxRetrying: safeCount(result.retrying),
+            outboxFailed: safeCount(result.failed),
+            outboxLost: safeCount(result.lost),
+            outboxErrors: safeCount(result.errors),
+          }),
+      ...(failures > 0 ? { failureCode: "MESSAGE_OUTBOX_DELIVERY_FAILED" } : {}),
+    });
+  }
+
+  private async processWelcomeDispatch(): Promise<void> {
+    if (!this.dependencies.welcomeDispatch) return;
+    // The dispatcher enqueues messages, so it reports under the same
+    // activity kind as the outbox work it feeds.
+    this.reportActivity({
+      kind: "message_outbox",
+      organizationId: null,
+      providerId: null,
+      runId: null,
+    });
+    let result: ProviderWorkerWelcomeDispatchCycleResult;
+    try {
+      result = await this.dependencies.welcomeDispatch.runCycle();
+    } catch {
+      this.log({
+        level: "error",
+        event: "provider_welcome_dispatch_cycle_failed",
+        failureCode: "WELCOME_DISPATCH_CYCLE_ERROR",
+      });
+      return;
+    }
+    // A gated pass is not an observable cycle, and a deliberately disabled
+    // or unconfigured dispatcher idles silently rather than filling the log
+    // with a chosen state.
+    if (
+      result.outcome === "waiting" ||
+      result.outcome === "disabled" ||
+      result.outcome === "unconfigured"
+    ) {
+      return;
+    }
+    const failures = safeCount(result.errors);
+    this.log({
+      level: failures > 0 ? "error" : "info",
+      event: "provider_welcome_dispatch_cycle_finished",
+      outcome:
+        failures > 0
+          ? "degraded"
+          : result.capReached
+            ? "bounded"
+            : "succeeded",
+      welcomeClaimed: safeCount(result.claimed),
+      welcomeEnqueued: safeCount(result.enqueued),
+      welcomeDeduplicated: safeCount(result.deduplicated),
+      welcomeSkipped: safeCount(result.skipped),
+      welcomeErrors: failures,
+      welcomeCapReached: result.capReached === true,
+      ...(failures > 0 ? { failureCode: "WELCOME_DISPATCH_FAILED" } : {}),
     });
   }
 

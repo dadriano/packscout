@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   boundedProductUserSubjectLabel,
+  decideProductUserAccessRequestSchema,
+  describeProductUserAccessActions,
+  describeProductUserAccessOutcome,
+  describeProductUserAccessProvenance,
+  describeProductUserAccessState,
   describeProductUserEstimatedEv,
   describeProductUserIdentity,
   describeProductUserRepackAvailability,
+  formatProductUserAwaitingCount,
+  listProductUserAccessQueueRequestSchema,
   listProductUsersRequestSchema,
   productUserDetailRequestSchema,
   PRODUCT_USER_DIRECTORY_MAX_PAGE_SIZE,
@@ -148,4 +155,185 @@ test("short subject keys are shown in full and empty keys stay labelled", () => 
   );
   assert.equal(boundedProductUserSubjectLabel("opaque-key"), "opaque-key");
   assert.equal(boundedProductUserSubjectLabel(""), "Unrecorded identity");
+});
+
+test("queue requests default to the awaiting-review state and the bounded page", () => {
+  assert.deepEqual(listProductUserAccessQueueRequestSchema.parse({}), {
+    accessState: "awaiting_review",
+    limit: PRODUCT_USER_DIRECTORY_MAX_PAGE_SIZE,
+  });
+  assert.equal(
+    listProductUserAccessQueueRequestSchema.parse({ accessState: "declined" })
+      .accessState,
+    "declined",
+  );
+  for (const request of [
+    { accessState: "suspended" },
+    { accessState: "" },
+    { limit: 0 },
+    { limit: 21 },
+    { cursor: "" },
+    { search: "ada@example.test" },
+  ]) {
+    assert.equal(
+      listProductUserAccessQueueRequestSchema.safeParse(request).success,
+      false,
+    );
+  }
+});
+
+test("decision requests demand one bounded subject and can name nothing else", () => {
+  assert.deepEqual(
+    decideProductUserAccessRequestSchema.parse({ subject: `  ${subject}  ` }),
+    { subject },
+  );
+  for (const request of [
+    {},
+    { subject: "" },
+    { subject: "a".repeat(PRODUCT_USER_MAX_SUBJECT_LENGTH + 1) },
+    // The acting operator is always the session; a request cannot name one.
+    { subject, operatorId: "00000000-0000-4000-8000-000000000009" },
+    { subject, action: "approve" },
+  ]) {
+    assert.equal(
+      decideProductUserAccessRequestSchema.safeParse(request).success,
+      false,
+    );
+  }
+});
+
+test("access states, provenance, and awaiting counts read as operator copy", () => {
+  assert.equal(describeProductUserAccessState("awaiting_review"), "Awaiting review");
+  assert.equal(describeProductUserAccessState("approved"), "Approved");
+  assert.equal(describeProductUserAccessState("declined"), "Declined");
+
+  const decidedAt = "2026-08-19T12:00:00.000Z";
+  assert.equal(
+    describeProductUserAccessProvenance({
+      state: "awaiting_review",
+      decidedBy: "default",
+      decidedAt,
+    }),
+    "Awaiting a first decision",
+  );
+  assert.equal(
+    describeProductUserAccessProvenance({
+      state: "approved",
+      decidedBy: "allowlist",
+      decidedAt,
+    }),
+    "Admitted automatically by the allowlist",
+  );
+  assert.equal(
+    describeProductUserAccessProvenance({
+      state: "approved",
+      decidedBy: "operator",
+      decidedAt,
+    }),
+    "Approved by an operator",
+  );
+  assert.equal(
+    describeProductUserAccessProvenance({
+      state: "declined",
+      decidedBy: "operator",
+      decidedAt,
+    }),
+    "Declined by an operator",
+  );
+  assert.equal(
+    describeProductUserAccessProvenance({
+      state: "awaiting_review",
+      decidedBy: "operator",
+      decidedAt,
+    }),
+    "Returned to review by an operator",
+  );
+
+  assert.equal(formatProductUserAwaitingCount({ count: 3, truncated: false }), "3");
+  assert.equal(formatProductUserAwaitingCount({ count: 500, truncated: true }), "500+");
+});
+
+test("each access state offers reversible decisions and never a deletion", () => {
+  assert.deepEqual(
+    describeProductUserAccessActions("awaiting_review").map(
+      ({ action, actionLabel }) => ({ action, actionLabel }),
+    ),
+    [
+      { action: "approve", actionLabel: "Approve" },
+      { action: "decline", actionLabel: "Decline" },
+    ],
+  );
+  assert.deepEqual(
+    describeProductUserAccessActions("approved").map(({ action }) => action),
+    ["revoke"],
+  );
+  assert.deepEqual(
+    describeProductUserAccessActions("declined").map(
+      ({ action, actionLabel }) => ({ action, actionLabel }),
+    ),
+    [
+      { action: "approve", actionLabel: "Approve" },
+      { action: "revoke", actionLabel: "Return to review" },
+    ],
+  );
+  for (const state of ["awaiting_review", "approved", "declined"] as const) {
+    for (const described of describeProductUserAccessActions(state)) {
+      assert.ok(described.title.length > 0);
+      assert.ok(described.description.length > 0);
+      // No control ever offers a deletion; the copy only rules one out.
+      assert.doesNotMatch(described.actionLabel, /delete|purge|remove/i);
+      assert.doesNotMatch(described.confirmLabel, /delete|purge|remove/i);
+    }
+  }
+});
+
+test("decision outcomes restate the authoritative decision, honestly composed", () => {
+  const decidedAt = "2026-08-19T12:00:00.000Z";
+  const admittedNow = describeProductUserAccessOutcome({
+    action: "approve",
+    changed: true,
+    access: { state: "approved", decidedBy: "operator", decidedAt },
+    effectiveAccess: { admitted: true, reason: "approved" },
+  });
+  assert.match(admittedNow, /Access approved/);
+  assert.match(admittedNow, /in the beta now/);
+
+  // Approving a suspended account is a real approval that admits nobody yet.
+  const stillSuspended = describeProductUserAccessOutcome({
+    action: "approve",
+    changed: true,
+    access: { state: "approved", decidedBy: "operator", decidedAt },
+    effectiveAccess: { admitted: false, reason: "suspended" },
+  });
+  assert.match(stillSuspended, /suspended/);
+  assert.doesNotMatch(stillSuspended, /in the beta now/);
+
+  // A repeat states the stored decision rather than claiming a change.
+  assert.equal(
+    describeProductUserAccessOutcome({
+      action: "approve",
+      changed: false,
+      access: { state: "approved", decidedBy: "allowlist", decidedAt },
+      effectiveAccess: { admitted: true, reason: "approved" },
+    }),
+    "That person's access was already approved.",
+  );
+  assert.match(
+    describeProductUserAccessOutcome({
+      action: "decline",
+      changed: true,
+      access: { state: "declined", decidedBy: "operator", decidedAt },
+      effectiveAccess: { admitted: false, reason: "declined" },
+    }),
+    /saved items are kept/,
+  );
+  assert.match(
+    describeProductUserAccessOutcome({
+      action: "revoke",
+      changed: true,
+      access: { state: "awaiting_review", decidedBy: "operator", decidedAt },
+      effectiveAccess: { admitted: false, reason: "awaiting_review" },
+    }),
+    /back in the review queue/,
+  );
 });

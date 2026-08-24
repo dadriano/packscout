@@ -14,7 +14,8 @@ export type WorkerActivityKind =
   | "scheduling"
   | "importing"
   | "estimated_ev"
-  | "retention";
+  | "retention"
+  | "message_outbox";
 
 /** Coarse, bounded description of what an instance is doing right now. */
 export interface WorkerActivity {

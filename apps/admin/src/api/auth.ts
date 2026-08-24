@@ -1,6 +1,9 @@
 import type {
   AuthSessionResponse,
   LoginRequest,
+  OperatorInvitationAcceptanceRequest,
+  PasswordResetCompletionRequest,
+  PasswordResetRequest,
 } from "@packscout/contracts";
 import {
   requestJson,
@@ -70,4 +73,53 @@ export async function logout(fetcher?: Fetcher): Promise<void> {
   const sequence = ++authRequestSequence;
   await requestJson<void>("/auth/logout", { method: "POST" }, fetcher);
   if (sequence === authRequestSequence) clearSession();
+}
+
+/**
+ * Asks for a one-time reset link. The server's response is identical for
+ * every address — known, unknown, or rate limited — so resolving tells the
+ * caller only that the request was accepted, never whether mail is coming.
+ */
+export function requestPasswordReset(
+  input: PasswordResetRequest,
+  fetcher?: Fetcher,
+): Promise<void> {
+  return requestJson<unknown>(
+    "/auth/password-reset/request",
+    { method: "POST", json: input },
+    fetcher,
+  ).then(() => undefined);
+}
+
+/**
+ * Redeems a mailed reset link with the operator's new password. Success
+ * revokes every existing session for the operator, so the caller signs in
+ * fresh afterwards; a dead link rejects with code `EMAIL_LINK_INVALID`.
+ */
+export function completePasswordReset(
+  input: PasswordResetCompletionRequest,
+  fetcher?: Fetcher,
+): Promise<void> {
+  return requestJson<void>(
+    "/auth/password-reset/complete",
+    { method: "POST", json: input },
+    fetcher,
+  );
+}
+
+/**
+ * Redeems a mailed invitation link with the password the invited person
+ * chose. Success activates the account; every dead link — cancelled,
+ * superseded, expired, or already used — fails with the one uniform
+ * invalid-link outcome.
+ */
+export function acceptOperatorInvitation(
+  input: OperatorInvitationAcceptanceRequest,
+  fetcher?: Fetcher,
+): Promise<void> {
+  return requestJson<void>(
+    "/auth/invitations/accept",
+    { method: "POST", json: input },
+    fetcher,
+  );
 }
