@@ -13,7 +13,7 @@ The Canonical destination in the admin's Data section lets an operator pick a pr
 
 This is the first of the Data section's three surfaces. It answers "what did the pipeline actually land for this provider?" without an operator having to reach for a database client. It is strictly read-only: no field is editable, and no control mutates anything.
 
-The canonical model is per-provider and per-kind. A provider is identified by its `platform_key`; its canonical records are entities of a fixed set of kinds (`platform`, `pack`, `catalog_asset`, `ev_input`, `pull`, `sale`, `estimated_ev`), each with a current revision carrying content, hashes, and source timestamps. Task 002 supplies all of that through a read capability; this task must consume it rather than query the database directly.
+The canonical model is per-provider and per-kind. A provider is identified by its `platform_key`; its canonical records are entities of a fixed set of kinds (`platform`, `pack`, `catalog_asset`, `ev_input`, `pull`, `market_event`, `estimated_ev`), each with a current revision carrying content, hashes, and source timestamps. Task 002 supplies all of that through a read capability; this task must consume it rather than query the database directly.
 
 Scale matters to the design: a provider can hold millions of records, so the record list is cursor-paged and some summary counts arrive labelled as approximate. The page must present an approximate count as approximate — an operator using this surface to judge whether a feed is complete will be misled by a number that looks exact and is not.
 

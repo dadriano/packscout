@@ -45,7 +45,10 @@ import {
   createBetaAllowlistRouter,
   type BetaAllowlistRouterDependencies,
 } from "./routes/beta-allowlist.ts";
-import { createDataInspectionRouter } from "./routes/data-inspection.ts";
+import {
+  createDataInspectionRouter,
+  type DataInspectionRouterDependencies,
+} from "./routes/data-inspection.ts";
 import {
   createWorkerFleetRouter,
   type WorkerFleetRouterDependencies,
@@ -105,6 +108,7 @@ export interface AdminAppDependencies {
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
+  canonical?: DataInspectionRouterDependencies["canonical"];
   /**
    * Deployments without the source-connection keys run with source
    * administration deliberately unconfigured. The provider-source routes are
@@ -260,7 +264,11 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
     // without the permission is refused rather than routed to the API 404.
     app.use(
       "/api/data-inspection",
-      createDataInspectionRouter({ auth: service, cookiePolicy }),
+      createDataInspectionRouter({
+        auth: service,
+        cookiePolicy,
+        canonical: dependencies.canonical,
+      }),
     );
     if (dependencies.productUsers) {
       app.use(

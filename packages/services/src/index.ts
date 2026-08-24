@@ -1,4 +1,6 @@
 export * from "./auth-service.ts";
+export * from "./canonical-inspection-service.ts";
+export * from "./inspection-redaction.ts";
 export * from "./canonical-projection-validation.ts";
 export * from "./catalog-ev-input-projection.ts";
 export * from "./catalog-projection-contracts.ts";

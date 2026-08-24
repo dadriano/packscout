@@ -4,6 +4,7 @@
 **Depends on:** none
 **Blocks:** provider-data-inspection/003, provider-data-inspection/006, provider-data-inspection/008
 **Estimated scope:** medium
+**Status:** done
 
 ## Objective
 
@@ -17,7 +18,7 @@ PostgreSQL is authoritative for PackScout's canonical data. The relevant shape:
 - `canonical_entities` is one row per canonical business object, identified by organization, `platform_key`, `record_kind`, and `external_id`, pointing at its `current_revision_id`.
 - `canonical_revisions` is the append-only content history: `revision_number`, `content_json` with its `content_hash`, `provenance_json` with its `provenance_hash`, plus `source_updated_at`, `source_collected_at`, and `accepted_at`.
 - `canonical_relationships` records edges declared from one entity toward another provider record, resolved or still dangling.
-- `canonical_record_kind` enumerates the kinds: `platform`, `pack`, `catalog_asset`, `ev_input`, `pull`, `sale`, `estimated_ev`.
+- `canonical_record_kind` enumerates the kinds: `platform`, `pack`, `catalog_asset`, `ev_input`, `pull`, `market_event`, `estimated_ev`.
 
 The production baseline is roughly 14.5 million records across four providers, so anything that scans a whole table on every page load is not viable. Reads must stay responsive at that size, and any number that cannot be produced exactly at that size must be labelled as approximate rather than presented as a fact.
 
@@ -47,13 +48,22 @@ None directly — this is the read capability behind task 003's page.
 
 ## Acceptance Criteria
 
-- [ ] The roster, summary, listing, and single-entity reads all return correct results for a seeded provider and are scoped to the caller's organization.
-- [ ] Paging forward through a listing with a cursor visits every entity exactly once under a deterministic order, and a malformed cursor is rejected with a structured error rather than silently restarting from the beginning.
-- [ ] A count returned as approximate is labelled approximate in the response; an exact count is labelled exact.
-- [ ] Credential-shaped values anywhere in provenance are redacted before the response leaves the server, including when nested.
-- [ ] Unknown provider, unknown entity, invalid record kind, malformed cursor, and database-unreachable each produce their own structured error, and none carries a driver message or query text.
-- [ ] No endpoint accepts a SQL fragment, filter expression, sort expression, or column name from the caller.
+- [x] The roster, summary, listing, and single-entity reads all return correct results for a seeded provider and are scoped to the caller's organization.
+- [x] Paging forward through a listing with a cursor visits every entity exactly once under a deterministic order, and a malformed cursor is rejected with a structured error rather than silently restarting from the beginning.
+- [x] A count returned as approximate is labelled approximate in the response; an exact count is labelled exact.
+- [x] Credential-shaped values anywhere in provenance are redacted before the response leaves the server, including when nested.
+- [x] Unknown provider, unknown entity, invalid record kind, malformed cursor, and database-unreachable each produce their own structured error, and none carries a driver message or query text.
+- [x] No endpoint accepts a SQL fragment, filter expression, sort expression, or column name from the caller.
 
 ## Verification
 
 Targeted tests prove keyset pagination visits every row exactly once and rejects malformed cursors, that organization scoping holds when a foreign identifier is supplied, that the redaction rule strips credential-shaped values at depth, and that each failure maps to its own structured error. The services and admin test suites plus the workspace typecheck exit 0.
+
+## Spec Compliance
+
+- Related specs reviewed: none
+- Alignment: implemented as specified. Roster, per-kind summary, keyset listing, and single-entity read are org-scoped in the query itself; filters are enumerated; page size is bounded server-side; provenance is summarized and redacted; each failure maps to its own stable code carrying no driver text.
+- Count precision: counting runs over a bounded subquery capped at 50,000 index entries. A bucket inside the bound reports `exact`; one past it reports `at_least` with the bound as a floor. A floor is returned rather than a planner estimate because a floor is a true statement about the data and an estimate is not.
+- Divergences: added a migration and a supporting index (`canonical_entities_inspection_recency_idx`). Per-kind oldest/newest could not be answered from the existing indexes without a sequential scan over a provider's whole history; the new index turns it into two lookups. The index is built in-transaction like every other migration in this repository, with the production out-of-band `CREATE INDEX CONCURRENTLY` path documented in the migration itself — this repository has no precedent for concurrent index builds in Prisma migrations and Prisma wraps each migration in a transaction.
+- Vocabulary correction: the canonical record kind is `market_event`, not `sale`. The task text was written against an older branch and has been corrected here and in tasks 003, 006, 007, and the feature index.
+- Verification: `npm run test --workspace=@packscout/services` (793 pass), `npm run test:admin` (369 pass), `npm run check:prisma` (schema parity, lifecycle, and setup all pass, including the new index recorded in the parity manifest), `npm run typecheck` (0 errors), `npm run lint` (clean), `npm run scan:framework-standards:ratchet` (0 new findings).

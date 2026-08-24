@@ -20,7 +20,7 @@ Both sides already carry cryptographic identity for a provider's published state
 
 When the fingerprints on both sides agree, the published payload is identical by construction and no walk is needed. When they disagree, or when the canonical checkpoint has moved past what was published, something is genuinely off and the expensive path (task 007) is worth running. Encoding that distinction is the point of this task.
 
-One scope rule governs the whole comparison: the product backend holds only the publishable subset — vendors, categories, repacks, collectibles, repack chases, and search rows. The canonical kinds `pull`, `sale`, `ev_input`, and `estimated_ev`, along with quarantine records, have no published counterpart. Those are out of comparison scope and must be reported as such. Reporting them as missing downstream would be false.
+One scope rule governs the whole comparison: the product backend holds only the publishable subset — vendors, categories, repacks, collectibles, repack chases, and search rows. The canonical kinds `pull`, `market_event`, `ev_input`, and `estimated_ev`, along with quarantine records, have no published counterpart. Those are out of comparison scope and must be reported as such. Reporting them as missing downstream would be false.
 
 ## Requirements
 

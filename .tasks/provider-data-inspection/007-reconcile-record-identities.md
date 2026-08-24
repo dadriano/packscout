@@ -17,7 +17,7 @@ The comparison happens on **public identifiers**, not internal ones. Canonical e
 
 Two hazards drive the design. First, a walk that takes many requests can straddle a promotion: if the active release changes mid-walk, results that mix two releases are worse than no results. Second, a partial walk that renders as if it were complete will convince an operator that a provider is clean when only its first page was checked. Both must be structurally impossible, not merely discouraged.
 
-Only publishable kinds can be reconciled. Task 006 already returns the out-of-scope kind list; asking to reconcile `pull`, `sale`, `ev_input`, `estimated_ev`, or quarantine is a refusal with a stated reason, not an empty result.
+Only publishable kinds can be reconciled. Task 006 already returns the out-of-scope kind list; asking to reconcile `pull`, `market_event`, `ev_input`, `estimated_ev`, or quarantine is a refusal with a stated reason, not an empty result.
 
 ## Requirements
 

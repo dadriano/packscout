@@ -4,7 +4,7 @@
 
 Open `provider-data-inspection/001` and add the read-only data-inspection permission plus the "Data" sidebar section with its three destination shells. It unblocks all three UI tasks and is a session's work.
 
-**Progress:** 1/10 tasks complete
+**Progress:** 2/10 tasks complete
 
 ## Context
 
@@ -25,7 +25,7 @@ This feature adds a third admin sidebar section, **Data**, with three read-only 
 
 ### Two rules that govern the whole feature
 
-**Comparison scope.** The product backend holds only the publishable subset — vendors, categories, repacks, collectibles, chases, search rows. The canonical kinds `pull`, `sale`, `ev_input`, and `estimated_ev`, plus quarantine records, are pipeline-only and have no published counterpart. They are reported as out of scope, never as missing.
+**Comparison scope.** The product backend holds only the publishable subset — vendors, categories, repacks, collectibles, chases, search rows. The canonical kinds `pull`, `market_event`, `ev_input`, and `estimated_ev`, plus quarantine records, are pipeline-only and have no published counterpart. They are reported as out of scope, never as missing.
 
 **Never overstate.** Counts that cannot be exact at production scale are labelled approximate. A bounded reconciliation walk that has not finished is labelled partial in its own payload. A capped divergence list states how many were found beyond the cap. A walk straddling a promotion is invalidated rather than mixed. An unread side reads "unknown", never zero.
 
@@ -41,7 +41,7 @@ This feature adds a third admin sidebar section, **Data**, with three read-only 
 
 | ID | Task | Scope | Status | Depends on |
 |---|---|---|---|---|
-| 002 | Read canonical provider data from PostgreSQL | medium | todo | none |
+| 002 | Read canonical provider data from PostgreSQL | medium | done | none |
 | 003 | Browse canonical provider data in the admin | medium | todo | 001, 002 |
 
 ### Published side (product backend)
@@ -92,7 +92,7 @@ Two independent tracks run side by side after step 1: the canonical track (002 �
 - A SQL runner, a caller-supplied filter or sort expression, or a schema browser. Filters are a fixed enumerated set.
 - Raw provider payload envelopes and unredacted provenance. Provenance is summarized; credential-shaped values are stripped.
 - A scheduled or continuous full-content sweep across all providers. Reconciliation is operator-initiated, bounded, and resumable.
-- Comparing the pipeline-only kinds (`pull`, `sale`, `ev_input`, `estimated_ev`, quarantine) — they have no published counterpart.
+- Comparing the pipeline-only kinds (`pull`, `market_event`, `ev_input`, `estimated_ev`, quarantine) — they have no published counterpart.
 - Repack heat snapshots and signals, saved items, product users, and the beta allowlist. This feature covers provider catalog data only.
 - Exposing these reads in the local operations panel, or to any browser client other than the authenticated admin.
 - Historical revision browsing beyond a record's current revision.

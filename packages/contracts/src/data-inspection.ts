@@ -19,7 +19,7 @@ export const canonicalRecordKinds = [
   "catalog_asset",
   "ev_input",
   "pull",
-  "sale",
+  "market_event",
   "estimated_ev",
 ] as const;
 
@@ -59,7 +59,8 @@ export const outOfComparisonScopeKinds: Readonly<
   ev_input:
     "Estimated-EV inputs are proprietary calculation evidence and are never published.",
   pull: "Pull histories stay in the pipeline; the product serves aggregates, not raw pulls.",
-  sale: "Market-event histories stay in the pipeline; the product serves aggregates, not raw sales.",
+  market_event:
+    "Market-event histories stay in the pipeline; the product serves aggregates, not raw sales.",
   estimated_ev:
     "Estimated EV is published as a field on a repack, not as its own published record.",
 });

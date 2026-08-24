@@ -4,6 +4,7 @@ import { test } from "node:test";
 import express from "express";
 import { AuthServiceError, type AuthenticatedActor } from "@packscout/services";
 import { createSessionCookiePolicy } from "../auth/cookies.ts";
+import { CanonicalInspectionError } from "@packscout/services";
 import { createDataInspectionRouter } from "./data-inspection.ts";
 
 const organizationId = "00000000-0000-4000-8000-000000000010";
@@ -26,11 +27,13 @@ function actorWith(permissions: string[]): AuthenticatedActor {
 async function withServer(
   permissions: string[],
   run: (baseUrl: string) => Promise<void>,
+  canonical?: Parameters<typeof createDataInspectionRouter>[0]["canonical"],
 ) {
   const app = express();
   app.use(
     "/api/data-inspection",
     createDataInspectionRouter({
+      canonical,
       auth: {
         async resolveSession({ sessionToken }) {
           if (!sessionToken) {
@@ -110,10 +113,112 @@ test("comparison scope names publishable and pipeline-only kinds", async () => {
 
     // Pulls and sales stay in the pipeline. Their absence downstream is scope,
     // not loss, so they must carry a stated reason rather than a null one.
-    for (const kind of ["pull", "sale", "ev_input", "estimated_ev"]) {
+    for (const kind of ["pull", "market_event", "ev_input", "estimated_ev"]) {
       assert.equal(byKind.get(kind)?.comparable, false);
       assert.equal(byKind.get(kind)?.publishedKind, null);
       assert.ok((byKind.get(kind)?.reason ?? "").length > 0);
     }
   });
+});
+
+
+/** Records the organization each read was scoped to. */
+function canonicalStub(overrides: Record<string, unknown> = {}) {
+  const seenOrganizations: string[] = [];
+  return {
+    seenOrganizations,
+    async listProviders(organizationId: string) {
+      seenOrganizations.push(organizationId);
+      return [
+        { platformKey: "courtyard", displayName: "Courtyard", state: "active" },
+      ];
+    },
+    async summarizeProvider(input: { organizationId: string }) {
+      seenOrganizations.push(input.organizationId);
+      return { platformKey: "courtyard", kinds: [] };
+    },
+    async listEntities(input: { organizationId: string }) {
+      seenOrganizations.push(input.organizationId);
+      return { items: [], nextCursor: null };
+    },
+    async readEntity(input: { organizationId: string }) {
+      seenOrganizations.push(input.organizationId);
+      throw new CanonicalInspectionError(
+        "CANONICAL_ENTITY_UNKNOWN",
+        "That record does not exist for this provider.",
+        404,
+      );
+    },
+    ...overrides,
+  };
+}
+
+test("canonical reads are scoped to the caller's own organization", async () => {
+  const canonical = canonicalStub();
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      // A foreign organization id in the path must not become the read's scope.
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/canonical/providers/courtyard/summary`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 200);
+      assert.deepEqual(canonical.seenOrganizations, [organizationId]);
+    },
+    canonical as never,
+  );
+});
+
+test("a classified read failure keeps its code and status", async () => {
+  const canonical = canonicalStub();
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/canonical/providers/courtyard/entities/pack/missing`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 404);
+      const body = (await response.json()) as { code?: string };
+      assert.equal(body.code, "CANONICAL_ENTITY_UNKNOWN");
+    },
+    canonical as never,
+  );
+});
+
+test("an unclassified read failure surfaces no driver detail", async () => {
+  const canonical = canonicalStub({
+    async listProviders() {
+      throw new Error("connect ECONNREFUSED 10.0.0.4:5432");
+    },
+  });
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/canonical/providers`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 503);
+      const payload = await response.text();
+      assert.match(payload, /CANONICAL_STORE_UNAVAILABLE/);
+      assert.doesNotMatch(payload, /ECONNREFUSED|5432|10\.0\.0\.4/);
+    },
+    canonical as never,
+  );
+});
+
+test("canonical reads are refused without the permission", async () => {
+  await withServer(
+    ["providers:view"],
+    async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/canonical/providers`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 403);
+    },
+    canonicalStub() as never,
+  );
 });

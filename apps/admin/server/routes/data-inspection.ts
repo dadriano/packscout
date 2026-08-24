@@ -1,8 +1,15 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { comparisonScope } from "@packscout/contracts";
-import type { AuthService } from "@packscout/services";
+import {
+  CanonicalInspectionError,
+  type AuthService,
+  type CanonicalInspectionService,
+} from "@packscout/services";
 import type { SessionCookiePolicy } from "../auth/cookies.ts";
-import { createRequireSession } from "../auth/middleware.ts";
+import {
+  createRequireSession,
+  getAuthenticatedActor,
+} from "../auth/middleware.ts";
 
 /**
  * The admin's read-only data-inspection surface.
@@ -18,6 +25,41 @@ import { createRequireSession } from "../auth/middleware.ts";
 export interface DataInspectionRouterDependencies {
   readonly auth: Pick<AuthService, "resolveSession" | "requirePermission">;
   readonly cookiePolicy: SessionCookiePolicy;
+  /** Absent until canonical reads are configured; the routes then report so. */
+  readonly canonical?: Pick<
+    CanonicalInspectionService,
+    "listProviders" | "summarizeProvider" | "listEntities" | "readEntity"
+  >;
+}
+
+/**
+ * One place where a failure becomes a response. Anything that is not already a
+ * classified inspection failure collapses to the unavailable code, so a driver
+ * message, a query fragment, or a stack never reaches a caller.
+ */
+function sendFailure(response: Response, reason: unknown): void {
+  if (reason instanceof CanonicalInspectionError) {
+    response.status(reason.status).json({
+      error: reason.message,
+      code: reason.code,
+    });
+    return;
+  }
+  response.status(503).json({
+    error: "Canonical data is temporarily unavailable.",
+    code: "CANONICAL_STORE_UNAVAILABLE",
+  });
+}
+
+/** A single positive integer from a query string, or undefined. */
+function readLimit(raw: unknown): number | undefined {
+  if (typeof raw !== "string" || raw.trim().length === 0) return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function readText(raw: unknown): string | undefined {
+  return typeof raw === "string" && raw.length > 0 ? raw : undefined;
 }
 
 /** The permission every data-inspection route requires. */
@@ -43,6 +85,95 @@ export function createDataInspectionRouter(
     response.setHeader("Cache-Control", "no-store");
     response.status(200).json(comparisonScope());
   });
+
+  /**
+   * The provider roster. Every canonical and published surface names providers
+   * from this one list, so the Data section cannot disagree with itself about
+   * which providers exist.
+   */
+  router.get("/canonical/providers", read, async (_request, response) => {
+    const canonical = dependencies.canonical;
+    if (!canonical) return sendFailure(response, new Error("unconfigured"));
+    try {
+      const actor = getAuthenticatedActor(response);
+      response.setHeader("Cache-Control", "no-store");
+      response.status(200).json({
+        providers: await canonical.listProviders(actor.organizationId),
+      });
+    } catch (reason) {
+      sendFailure(response, reason);
+    }
+  });
+
+  router.get(
+    "/canonical/providers/:platformKey/summary",
+    read,
+    async (request, response) => {
+      const canonical = dependencies.canonical;
+      if (!canonical) return sendFailure(response, new Error("unconfigured"));
+      try {
+        const actor = getAuthenticatedActor(response);
+        response.setHeader("Cache-Control", "no-store");
+        response.status(200).json(
+          await canonical.summarizeProvider({
+            organizationId: actor.organizationId,
+            platformKey: request.params.platformKey,
+          }),
+        );
+      } catch (reason) {
+        sendFailure(response, reason);
+      }
+    },
+  );
+
+  router.get(
+    "/canonical/providers/:platformKey/entities",
+    read,
+    async (request, response) => {
+      const canonical = dependencies.canonical;
+      if (!canonical) return sendFailure(response, new Error("unconfigured"));
+      try {
+        const actor = getAuthenticatedActor(response);
+        response.setHeader("Cache-Control", "no-store");
+        response.status(200).json(
+          await canonical.listEntities({
+            organizationId: actor.organizationId,
+            platformKey: request.params.platformKey,
+            recordKind: String(request.query.recordKind ?? ""),
+            externalId: readText(request.query.externalId),
+            search: readText(request.query.search),
+            cursor: readText(request.query.cursor),
+            limit: readLimit(request.query.limit),
+          }),
+        );
+      } catch (reason) {
+        sendFailure(response, reason);
+      }
+    },
+  );
+
+  router.get(
+    "/canonical/providers/:platformKey/entities/:recordKind/:externalId",
+    read,
+    async (request, response) => {
+      const canonical = dependencies.canonical;
+      if (!canonical) return sendFailure(response, new Error("unconfigured"));
+      try {
+        const actor = getAuthenticatedActor(response);
+        response.setHeader("Cache-Control", "no-store");
+        response.status(200).json(
+          await canonical.readEntity({
+            organizationId: actor.organizationId,
+            platformKey: request.params.platformKey,
+            recordKind: request.params.recordKind,
+            externalId: request.params.externalId,
+          }),
+        );
+      } catch (reason) {
+        sendFailure(response, reason);
+      }
+    },
+  );
 
   return router;
 }

@@ -8,7 +8,7 @@
     "tables": 84,
     "enums": 40,
     "columns": 1325,
-    "indexes": 150,
+    "indexes": 151,
     "uniqueConstraints": 54,
     "foreignKeys": 276,
     "checkConstraints": 281
@@ -907,6 +907,16 @@
         "canonical_entities_current_revision_idx": {
           "columns": [
             "current_revision_id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "canonical_entities_inspection_recency_idx": {
+          "columns": [
+            "organization_id",
+            "platform_key",
+            "record_kind",
+            "updated_at"
           ],
           "unique": false,
           "where": null

@@ -6,12 +6,14 @@ import express from "express";
 import type { ViteDevServer } from "vite";
 import { RECOMPUTATION_BACKLOG_DEPTH_DEFAULT } from "@packscout/contracts";
 import {
+  CanonicalInspectionService,
   MachineryAlertService,
   resolveEmailLinkTokenSecret,
 } from "@packscout/services";
 import {
   createPrismaClientLifecycle,
   DatabaseLoginAttemptLimiter,
+  PrismaCanonicalInspectionRepository,
   PrismaAuthAuditSink,
   PrismaAuthRepository,
   PrismaProviderConfigurationRepository,
@@ -241,6 +243,9 @@ try {
       backlogDepthLimit: recomputationBacklogLimit,
     }),
     workerFleet: createAdminWorkerFleetRuntime({ database }),
+    canonical: new CanonicalInspectionService(
+      new PrismaCanonicalInspectionRepository(database),
+    ),
     productUsers: {
       directory: createProductUserDirectoryReader({
         config: productUserDirectoryConfig,
