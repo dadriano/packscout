@@ -69,6 +69,13 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     permission: "providers:view",
   },
   {
+    segment: "source-configuration",
+    navLabel: "Sources",
+    title: "Source Configuration",
+    section: "pipeline",
+    permission: "providers:view",
+  },
+  {
     segment: "runs",
     navLabel: "Import Runs",
     title: "Import Runs",
@@ -128,6 +135,7 @@ export const ROUTABLE_PATTERNS: readonly string[] = [
   "/providers/new",
   "/providers/:providerId",
   "/providers/:providerId/edit",
+  "/source-configuration",
   "/operations",
   "/runs",
   "/runs/:runId",

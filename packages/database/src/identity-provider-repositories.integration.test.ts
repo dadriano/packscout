@@ -437,9 +437,9 @@ test("protected raw evidence reads remain tenant-scoped and atomically audited",
         run_id: runId,
         page_number: 1,
         has_more: false,
-        payload_json: { catalog: [], pulls: [], sales: [] },
+        payload_json: { catalog: [], pulls: [], trades: [] },
         payload_hash: "payload-hash",
-        record_counts_json: { catalog: 0, pulls: 0, sales: 0 },
+        record_counts_json: { catalog: 0, pulls: 0, trades: 0 },
         committed_at: now,
         expires_at: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1_000),
       },
@@ -469,7 +469,7 @@ test("protected raw evidence reads remain tenant-scoped and atomically audited",
       now,
     );
     assert.equal(page?.pageId, pageId);
-    assert.deepEqual(page?.payload, { catalog: [], pulls: [], sales: [] });
+    assert.deepEqual(page?.payload, { catalog: [], pulls: [], trades: [] });
     assert.deepEqual(
       await harness.database.audit_events.findFirst({
         select: {

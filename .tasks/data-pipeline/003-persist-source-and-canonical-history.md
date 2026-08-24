@@ -21,7 +21,7 @@ Raw source data can contain public usernames and wallet addresses. Raw pages and
 
 ### Durable source and projection records
 
-- Persist versioned provider configurations, active configuration identity per platform, current cursor checkpoint, run state, request and response cursors, page state, record outcomes, actor audit, and timestamps.
+- Persist versioned provider configurations, active configuration identity per platform, current cursor, run state, request and response cursors, page state, record outcomes, actor audit, and timestamps.
 - Persist each accepted raw page and its catalog, pull, and sale records without changing nested source data; attach a source hash, provider configuration revision, platform, run, page, record kind, external identity, and expiration time.
 - Persist quarantine metadata and protected source references separately from canonical projections so a malformed record cannot corrupt the current product view.
 - Persist revision history plus current projections for platforms, purchasable packs, supporting catalog assets, pulls, sales, and PackScout EV estimates.
@@ -41,7 +41,7 @@ No direct user-facing behavior. Downstream admin pages can show current configur
 
 ## Interface Contract
 
-Persistence services expose transport-neutral operations for configuration revision lifecycle, run/page creation, raw-page acceptance, record outcome recording, cursor checkpoint advancement, canonical revision upsert, current projection lookup, unresolved-link reconciliation, EV revision upsert, and retention expiry.
+Persistence services expose transport-neutral operations for configuration revision lifecycle, run/page creation, raw-page acceptance, record outcome recording, cursor advancement, canonical revision upsert, current projection lookup, unresolved-link reconciliation, EV revision upsert, and retention expiry.
 
 Every canonical revision links to its source record and contains `platform_key`, `record_kind`, `external_id`, `source_updated_at`, `source_collected_at`, `accepted_at`, and a deterministic content identity. Current projections point to one accepted revision. Raw payload operations are server-only and return protected references to callers that do not hold raw-data access.
 
@@ -51,7 +51,7 @@ Every canonical revision links to its source record and contains `platform_key`,
 - [x] Pulls or sales with missing or not-yet-known pack relationships persist successfully and link when a matching pack projection arrives later.
 - [x] Raw pages and quarantine payloads can expire after ninety days without removing canonical history, current projections, run summaries, validation reasons, or audit evidence.
 - [x] Canonical actor data contains no source username or raw wallet address, and raw payloads cannot be reached through browser-facing persistence operations.
-- [x] Concurrent and failed writes preserve one active configuration per platform, one durable cursor checkpoint per configuration, consistent run counters, and tenant isolation.
+- [x] Concurrent and failed writes preserve one active configuration per platform, one durable cursor per configuration, consistent run counters, and tenant isolation.
 
 ## Spec Compliance
 

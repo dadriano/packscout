@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "NODE_ENV=development tsx watch src/index.ts",
     "start:local": "NODE_ENV=development tsx src/index.ts",
+    "start:source-supervisor:local": "NODE_ENV=development tsx src/source-supervisor-local.ts",
     "start:production": "NODE_ENV=production tsx src/index.ts",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",

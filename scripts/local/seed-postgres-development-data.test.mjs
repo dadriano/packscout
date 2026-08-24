@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { TASK010_PROVIDER_IDENTITIES } from "./provider-source-task010-safety.mjs";
 import { seedArguments } from "./seed-postgres-development-data.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -32,4 +33,15 @@ test("the seed is idempotent and never deletes", () => {
   assert.doesNotMatch(seedSql, /\bdelete\b/i);
   assert.doesNotMatch(seedSql, /\btruncate\b/i);
   assert.doesNotMatch(seedSql, /\bdrop\b/i);
+});
+
+test("the seed includes the four active provider-source roots with stable identities", () => {
+  assert.equal(TASK010_PROVIDER_IDENTITIES.length, 4);
+  for (const provider of TASK010_PROVIDER_IDENTITIES) {
+    const row = `('${provider.id}', '${provider.platformKey}', '${provider.displayName}', 'active')`;
+    assert.equal(seedSql.split(row).length - 1, 1);
+  }
+  assert.doesNotMatch(seedSql, /collector_crypt[^;]*'draft'/i);
+  assert.doesNotMatch(seedSql, /phygitals[^;]*'draft'/i);
+  assert.doesNotMatch(seedSql, /clutchpacks[^;]*'draft'/i);
 });

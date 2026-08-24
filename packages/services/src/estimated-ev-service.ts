@@ -15,6 +15,7 @@ import {
   type CanonicalEstimatedEvProjectionContent,
   type EstimatedEvInputManifest,
   type EstimatedEvInputManifestBucket,
+  type EstimatedEvRecomputationOrigin,
   type ExplainPackScoutEstimatedEvQuery,
   type PackScoutEstimatedEvExplanation,
   type PackScoutProviderReportedEvExplanation,
@@ -31,7 +32,8 @@ import type { PipelineOperationalReporter } from "./operational-events.ts";
 export type PackScoutEstimatedEvServiceErrorCode =
   | "CALCULATION_SOURCE_NOT_FOUND"
   | "INVALID_CURRENCY_POLICY"
-  | "INVALID_PERSISTED_CALCULATION";
+  | "INVALID_PERSISTED_CALCULATION"
+  | "INVALID_RUNTIME_ORIGIN";
 
 export class PackScoutEstimatedEvServiceError extends Error {
   constructor(readonly code: PackScoutEstimatedEvServiceErrorCode) {
@@ -98,6 +100,34 @@ function nullableFiniteNumber(value: unknown): number | null {
 
 function unitBasis(value: unknown): PackScoutEstimatedEvUnitBasis | null {
   return value === "per_draw" || value === "per_pack" ? value : null;
+}
+
+function normalizedRuntimeOrigin(
+  origin: EstimatedEvRecomputationOrigin,
+): EstimatedEvRecomputationOrigin {
+  if (origin.kind === "legacy_configuration") {
+    return {
+      kind: origin.kind,
+      configurationRevisionId: normalizeCanonicalIdentity(
+        origin.configurationRevisionId,
+        "configurationRevisionId",
+      ),
+    };
+  }
+  if (origin.kind === "provider_source_revision") {
+    return {
+      kind: origin.kind,
+      sourceInstanceId: normalizeCanonicalIdentity(
+        origin.sourceInstanceId,
+        "sourceInstanceId",
+      ),
+      sourceRevisionId: normalizeCanonicalIdentity(
+        origin.sourceRevisionId,
+        "sourceRevisionId",
+      ),
+    };
+  }
+  throw new PackScoutEstimatedEvServiceError("INVALID_RUNTIME_ORIGIN");
 }
 
 function latestInstant(
@@ -383,6 +413,7 @@ export class PackScoutEstimatedEvService {
       command.evInputExternalId,
       "evInputExternalId",
     );
+    const origin = normalizedRuntimeOrigin(command.origin);
     const inputs = await this.repository.loadCalculationInputs({
       organizationId,
       platformKey,
@@ -392,6 +423,12 @@ export class PackScoutEstimatedEvService {
     const source = inputs.evInput ?? inputs.pack;
     if (!source) {
       throw new PackScoutEstimatedEvServiceError("CALCULATION_SOURCE_NOT_FOUND");
+    }
+    if (
+      (origin.kind === "legacy_configuration" && source.sourceRecordId === null) ||
+      (origin.kind === "provider_source_revision" && !command.recomputation)
+    ) {
+      throw new PackScoutEstimatedEvServiceError("INVALID_RUNTIME_ORIGIN");
     }
     const manifest = inputManifest({
       pack: inputs.pack,
@@ -428,11 +465,9 @@ export class PackScoutEstimatedEvService {
     const persisted = await this.repository.persistCalculation({
       organizationId,
       providerId,
-      configurationRevisionId: normalizeCanonicalIdentity(
-        command.configurationRevisionId,
-        "configurationRevisionId",
-      ),
-      sourceRecordId: source.sourceRecordId,
+      origin,
+      sourceRecordId:
+        origin.kind === "legacy_configuration" ? source.sourceRecordId : null,
       projection: commandProjection({
         platformKey,
         packExternalId,

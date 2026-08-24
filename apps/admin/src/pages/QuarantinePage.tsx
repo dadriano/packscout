@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { QuarantineEntrySummary, QuarantineRetryOutcome } from "@packscout/contracts";
 import { useSearchParams } from "react-router-dom";
 import { AdminApiError } from "../api/client";
-import { listProviderOperations, listQuarantines, retryQuarantines, type ProviderOperationSummary } from "../api/import-operations";
+import { listQuarantines, retryQuarantines } from "../api/import-operations";
+import { getProviderSourceOperationsOverview } from "../api/provider-source-operations";
 import { EmptyState } from "../components/EmptyState";
 import { KeysetPagination } from "../components/operations/KeysetPagination";
 import { QuarantineLedger } from "../components/operations/QuarantineLedger";
@@ -10,15 +11,22 @@ import { humanize } from "../components/operations/OperationStatus";
 import { PageHeader } from "../components/PageHeader";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useConfirm } from "../providers/confirm";
+import { useSession } from "../providers/session";
 import { useToast } from "../providers/toast";
 
 export function QuarantinePage() {
   useDocumentTitle("Quarantine");
   const { confirm } = useConfirm();
+  const { status } = useSession();
   const { showToast } = useToast();
+  const canRetry = status.phase === "authenticated" &&
+    status.session.permissions.includes("imports:retry");
   const [searchParams, setSearchParams] = useSearchParams();
   const [entries, setEntries] = useState<QuarantineEntrySummary[]>([]);
-  const [providers, setProviders] = useState<ProviderOperationSummary[]>([]);
+  const [providers, setProviders] = useState<Array<{
+    providerId: string;
+    displayName: string;
+  }>>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -35,7 +43,12 @@ export function QuarantinePage() {
 
   useEffect(() => {
     let active = true;
-    void listProviderOperations({ limit: 50 }).then((result) => { if (active) setProviders(result.items); }).catch(() => undefined);
+    void getProviderSourceOperationsOverview().then((result) => {
+      if (active) setProviders(result.sources.map(({ providerId, displayName }) => ({
+        providerId,
+        displayName,
+      })));
+    }).catch(() => undefined);
     return () => { active = false; };
   }, []);
 
@@ -108,13 +121,14 @@ export function QuarantinePage() {
   const filterCount = useMemo(() => [searchParams.get("providerId"), searchParams.get("runId"), searchParams.get("state"), searchParams.get("recordKind"), searchParams.get("reasonCode")].filter(Boolean).length, [searchParams]);
   return (
     <div className="admin-page">
-      <PageHeader eyebrow="Data pipeline / Recovery" title="Quarantine" description="Review bounded record diagnostics and retry retained records independently from provider cursor progress." actions={selected.size > 0 ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retrySelected()}>Retry selected ({selected.size})</button> : undefined} />
+      <PageHeader eyebrow="Data pipeline / Recovery" title="Quarantine" description="Review bounded record diagnostics and retry retained records independently from provider cursor progress." actions={canRetry && selected.size > 0 ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retrySelected()}>Retry selected ({selected.size})</button> : undefined} />
       <aside className="ops-independence-note"><strong>Retries do not rewind imports.</strong><p>The original run keeps its immutable outcome. A resolved record updates current quality separately.</p></aside>
+      {!canRetry ? <aside className="source-operator-boundary"><strong>Read-only quarantine evidence</strong><p>Your role can inspect retained safe evidence but cannot retry records.</p></aside> : null}
       <form className="ops-filters ops-filters--quarantine" aria-label="Filter quarantine" onSubmit={applyFilters}>
         <div className="admin-field"><label htmlFor="quarantine-provider">Provider</label><select id="quarantine-provider" value={providerId} onChange={(event) => setProviderId(event.target.value)}><option value="">All providers</option>{providers.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></div>
         <div className="admin-field"><label htmlFor="quarantine-run">Run ID</label><input id="quarantine-run" value={runId} onChange={(event) => setRunId(event.target.value)} placeholder="UUID" /></div>
         <div className="admin-field"><label htmlFor="quarantine-state">State</label><select id="quarantine-state" value={state} onChange={(event) => setState(event.target.value)}><option value="">All states</option><option value="open">Open</option><option value="retrying">Retrying</option><option value="resolved">Resolved</option><option value="expired">Expired</option></select></div>
-        <div className="admin-field"><label htmlFor="quarantine-kind">Record kind</label><select id="quarantine-kind" value={recordKind} onChange={(event) => setRecordKind(event.target.value)}><option value="">All kinds</option><option value="catalog">Catalog</option><option value="pull">Pull</option><option value="sale">Sale</option></select></div>
+        <div className="admin-field"><label htmlFor="quarantine-kind">Record kind</label><select id="quarantine-kind" value={recordKind} onChange={(event) => setRecordKind(event.target.value)}><option value="">All kinds</option><option value="catalog">Catalog</option><option value="pull">Pull</option><option value="trade">Trade</option></select></div>
         <div className="admin-field"><label htmlFor="quarantine-reason">Reason code</label><input id="quarantine-reason" pattern="[A-Za-z][A-Za-z0-9_]*" maxLength={128} value={reasonCode} onChange={(event) => setReasonCode(event.target.value)} /></div>
         <button type="submit" className="admin-button admin-button-secondary">Apply filters</button>
         {filterCount > 0 ? <button type="button" className="admin-button admin-button-secondary" onClick={() => { setProviderId(""); setRunId(""); setState(""); setRecordKind(""); setReasonCode(""); setCursorStack([]); setLoading(true); setSearchParams({}); }}>Clear</button> : null}
@@ -123,7 +137,7 @@ export function QuarantinePage() {
       {loading ? <div className="ops-loading" aria-live="polite" aria-busy="true">Loading quarantine records…</div> : null}
       {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => { setLoading(true); setRetryIndex((value) => value + 1); }}>Try again</button></div> : null}
       {!loading && !error && entries.length === 0 ? <EmptyState title={filterCount ? "No quarantine records match" : "No records need review"} description={filterCount ? "Change or clear the filters to inspect other quarantine history." : "Current provider quality has no quarantined records."} /> : null}
-      {entries.length > 0 ? <QuarantineLedger entries={entries} selectable selected={selected} onSelectionChange={(entryId, checked) => setSelected((current) => { const next = new Set(current); if (checked) next.add(entryId); else next.delete(entryId); return next; })} /> : null}
+      {entries.length > 0 ? <QuarantineLedger entries={entries} selectable={canRetry} selected={selected} onSelectionChange={(entryId, checked) => setSelected((current) => { const next = new Set(current); if (checked) next.add(entryId); else next.delete(entryId); return next; })} /> : null}
       <KeysetPagination
         page={cursorStack.length + 1}
         hasPrevious={cursorStack.length > 0}

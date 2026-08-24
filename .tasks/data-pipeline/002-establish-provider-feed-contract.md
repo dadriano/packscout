@@ -15,7 +15,7 @@ Every provider adapter and ingestion workflow shares one validated, provider-neu
 
 All eight samples share stable outer record shapes but contain sharply different nested payloads. Catalog arrays may contain packs, parent groups, purchasable variants, inventory cards, price records, or other supporting assets. Pulls may omit `pack_external_id`, and sales may be empty or use platform-specific event types and currencies. Generic ingestion must never branch on a platform key or assume a provider's nested fields.
 
-The first adapter performs an HTTP GET. It sends `platform` on every request and sends an opaque `cursor` after a durable checkpoint exists. Authentication mode is either no authentication or a server-side bearer token. The provider response adds pagination metadata beside the three arrays represented by the samples.
+The first adapter performs an HTTP GET. It sends `platform` on every request and sends an opaque `cursor` after a durable cursor exists. Authentication mode is either no authentication or a server-side bearer token. The provider response adds pagination metadata beside the three arrays represented by the samples.
 
 ## Requirements
 
@@ -39,7 +39,7 @@ No direct user-facing behavior. Operators later see contract failures as stable 
 
 ## Interface Contract
 
-The request is `GET <configured endpoint>?platform=<platform>` for the first page and adds `cursor=<opaque checkpoint>` afterward. The response contract is:
+The request is `GET <configured endpoint>?platform=<platform>` for the first page and adds `cursor=<opaque cursor>` afterward. The response contract is:
 
 ```text
 ProviderPage {
@@ -58,7 +58,7 @@ The shared adapter boundary accepts a validated `ProviderPage` plus provider con
 - [x] Contract fixtures derived from all eight sample files validate their outer envelopes, including empty sales arrays, nullable pull relationships, nullable sale amounts or currencies, and opaque nested data.
 - [x] Missing arrays, malformed timestamps, platform mismatches, invalid amounts, non-object data, and non-advancing continuing cursors fail with stable field-level errors.
 - [x] Provider-specific keys do not appear in generic orchestration branches, and a test adapter can be registered without modifying the ingestion workflow.
-- [x] Request construction omits the cursor for an initial backfill, preserves opaque cursor bytes thereafter, and supports authentication modes `none` and `bearer` without exposing the secret.
+- [x] Request construction omits the cursor for an initial backfill, preserves the exact opaque cursor text thereafter, and supports authentication modes `none` and `bearer` without exposing the secret.
 - [x] The contract remains runtime-neutral and usable by persistence, scheduling, admin APIs, and tests through intentional public boundaries.
 
 ## Spec Compliance

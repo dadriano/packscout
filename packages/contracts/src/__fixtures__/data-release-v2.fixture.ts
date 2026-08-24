@@ -247,7 +247,7 @@ export function buildSyntheticDataReleaseV2(): DataReleaseManifestV2 {
           },
         ],
         collectibleTypes: ["card"],
-        availability: "active",
+        availability: "available",
         price: {
           displayMoney: usd(10_000),
           usdComparison: { status: "available", value: usd(10_000) },
@@ -309,7 +309,7 @@ export function buildSyntheticDataReleaseV2(): DataReleaseManifestV2 {
           },
         ],
         collectibleTypes: ["card", "watch"],
-        availability: "active",
+        availability: "available",
         price: {
           displayMoney: usd(50_000),
           usdComparison: { status: "available", value: usd(50_000) },

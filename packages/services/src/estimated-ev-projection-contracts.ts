@@ -102,10 +102,21 @@ export interface PackScoutEstimatedEvExplanation {
   readonly providerReportedEv: PackScoutProviderReportedEvExplanation | null;
 }
 
+export type EstimatedEvRecomputationOrigin =
+  | Readonly<{
+      kind: "legacy_configuration";
+      configurationRevisionId: string;
+    }>
+  | Readonly<{
+      kind: "provider_source_revision";
+      sourceInstanceId: string;
+      sourceRevisionId: string;
+    }>;
+
 export interface RecalculatePackScoutEstimatedEvCommand {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly origin: EstimatedEvRecomputationOrigin;
   readonly platformKey: string;
   readonly packExternalId: string;
   readonly evInputExternalId: string;

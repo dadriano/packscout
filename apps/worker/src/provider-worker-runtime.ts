@@ -82,6 +82,7 @@ export type ProviderWorkerLogEventName =
   | "provider_estimated_ev_cycle_finished"
   | "provider_retention_cycle_failed"
   | "provider_retention_cycle_finished"
+  | "provider_source_supervisor_runtime_failed"
   | "provider_schedule_invalid"
   | "provider_schedule_processed"
   | "provider_scheduler_failed"
@@ -157,6 +158,10 @@ export interface ProviderWorkerRuntimeDependencies {
   readonly promotion?: PromotionV2WorkerRuntimePort;
   readonly heatPromotion?: HeatPromotionWorkerRuntimePort;
   readonly catalogRetention?: CatalogRetentionWorkerRuntimePort;
+  readonly sourceSupervisor?: Readonly<{
+    start(): Promise<void>;
+    stop(): Promise<void> | void;
+  }>;
   readonly retention: ProviderWorkerRetentionPort;
   readonly messageOutbox?: ProviderWorkerMessageOutboxPort;
   readonly welcomeDispatch?: ProviderWorkerWelcomeDispatchPort;
@@ -320,6 +325,20 @@ export class ProviderWorkerRuntime {
             failureCode: "CATALOG_RETENTION_RUNTIME_ERROR",
           });
         });
+    let sourceSupervisorFailure: unknown;
+    const sourceSupervisorTask = this.dependencies.sourceSupervisor === undefined
+      ? null
+      : (async () => await this.dependencies.sourceSupervisor!.start())()
+        .catch((error: unknown) => {
+          sourceSupervisorFailure = error;
+          this.log({
+            level: "error",
+            event: "provider_source_supervisor_runtime_failed",
+            failureCode: "PROVIDER_SOURCE_SUPERVISOR_RUNTIME_ERROR",
+          });
+          this.stop();
+        });
+    let sourceSupervisorStopFailure: unknown;
     // Registration is durable but best-effort: an instance that cannot publish
     // its presence still performs pipeline work.
     try {
@@ -363,6 +382,19 @@ export class ProviderWorkerRuntime {
       this.dependencies.promotion?.stop();
       this.dependencies.heatPromotion?.stop();
       this.dependencies.catalogRetention?.stop();
+      try {
+        await this.dependencies.sourceSupervisor?.stop();
+      } catch (error) {
+        // A failed supervisor stop must not replace start()'s outcome or skip
+        // the cleanup below; it is logged here and rethrown after the stopped
+        // log alongside the other captured lane failures.
+        sourceSupervisorStopFailure = error;
+        this.log({
+          level: "error",
+          event: "provider_source_supervisor_runtime_failed",
+          failureCode: "PROVIDER_SOURCE_SUPERVISOR_STOP_ERROR",
+        });
+      }
       if (promotionFailed) {
         // A retained Heat adapter is expected to stop cooperatively, but it
         // cannot mask a fail-closed Task011 startup refusal. Keep a late
@@ -373,7 +405,12 @@ export class ProviderWorkerRuntime {
         }
         await promotionTask;
       } else {
-        await Promise.all([promotionTask, heatTask, catalogRetentionTask]);
+        await Promise.all([
+          promotionTask,
+          heatTask,
+          catalogRetentionTask,
+          sourceSupervisorTask,
+        ]);
       }
       this.#sleepController = null;
       this.#running = false;
@@ -389,6 +426,10 @@ export class ProviderWorkerRuntime {
       this.log({ level: "info", event: "provider_worker_stopped" });
     }
     if (promotionFailed) throw promotionFailure;
+    if (sourceSupervisorFailure !== undefined) throw sourceSupervisorFailure;
+    if (sourceSupervisorStopFailure !== undefined) {
+      throw sourceSupervisorStopFailure;
+    }
   }
 
   /**
@@ -413,6 +454,11 @@ export class ProviderWorkerRuntime {
     this.dependencies.promotion?.stop();
     this.dependencies.heatPromotion?.stop();
     this.dependencies.catalogRetention?.stop();
+    // start()'s finally awaits sourceSupervisor.stop() again and surfaces its
+    // failure after cleanup; this detached copy only needs a rejection sink
+    // so it can never become an unhandled rejection.
+    void Promise.resolve(this.dependencies.sourceSupervisor?.stop())
+      .catch(() => {});
     this.#sleepController?.abort();
   }
 

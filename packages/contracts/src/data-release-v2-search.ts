@@ -38,7 +38,12 @@ export const repackSearchRowSchema = z.object({
   normalizedName: z.string(),
   normalizedVendor: z.string(),
   normalizedCategories: z.string(),
-  availability: z.enum(["active", "sold_out"]),
+  availability: z.enum([
+    "available",
+    "unavailable",
+    "unknown",
+    "sold_out",
+  ]),
   priceMinor: z.number().int().safe().nonnegative().nullable(),
   priceNullRank: nullRankSchema,
   vendorReportedGrossEvMinor: z.number().int().safe().nonnegative().nullable(),

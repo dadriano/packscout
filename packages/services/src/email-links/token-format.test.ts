@@ -69,8 +69,11 @@ test("the verifier digest is purpose-separated, keyed, and never the verifier", 
 
   assert.equal(digest.matches("operator_password_reset", verifier, stored), true);
   assert.equal(digest.matches("operator_invitation", verifier, stored), false);
+  const differentVerifier = `${verifier.slice(0, 42)}${
+    verifier.endsWith("A") ? "B" : "A"
+  }`;
   assert.equal(
-    digest.matches("operator_password_reset", `${verifier.slice(0, 42)}A`, stored),
+    digest.matches("operator_password_reset", differentVerifier, stored),
     false,
   );
   // The stored digest itself is not a verifier: hashing it cannot match.

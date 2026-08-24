@@ -56,6 +56,7 @@ model audit_events {
   occurred_at     DateTime       @default(now()) @db.Timestamptz(6)
   organizations   organizations? @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "audit_events_organization_id_organizations_id_fk")
 
+  @@unique([id, organization_id], map: "audit_events_tenant_unique")
   @@index([organization_id, occurred_at], map: "audit_events_organization_occurred_idx")
 }
 
@@ -139,13 +140,16 @@ model canonical_relationships {
   @@index([organization_id, target_platform_key, target_record_kind, target_external_id, resolved_at], map: "canonical_relationships_unresolved_lookup_idx")
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This table contains check constraints and a semantic-origin identity trigger
+/// that requires additional setup in the provider-source migration.
 model canonical_revisions {
   id                                                                                                                                   String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organization_id                                                                                                                      String                                 @db.Uuid
   entity_id                                                                                                                            String                                 @db.Uuid
   revision_number                                                                                                                      Int
-  source_record_id                                                                                                                     String                                 @db.Uuid
+  source_record_id                                                                                                                     String?                                @db.Uuid
+  origin_semantic_observation_id                                                                                                       String?                                @db.Uuid
+  origin_ev_recomputation_request_id                                                                                                   String?                                @db.Uuid
   content_json                                                                                                                         Json
   content_hash                                                                                                                         String
   provenance_json                                                                                                                      Json
@@ -159,8 +163,10 @@ model canonical_revisions {
   canonical_entities_canonical_revisions_entity_idTocanonical_entities                                                                 canonical_entities                     @relation("canonical_revisions_entity_idTocanonical_entities", fields: [entity_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_entity_id_canonical_entities_id_fk")
   canonical_entities_canonical_revisions_entity_id_organization_idTocanonical_entities                                                 canonical_entities                     @relation("canonical_revisions_entity_id_organization_idTocanonical_entities", fields: [entity_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_entity_tenant_fk")
   organizations                                                                                                                        organizations                          @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_organization_id_organizations_id_fk")
-  source_records_canonical_revisions_source_record_idTosource_records                                                                  source_records                         @relation("canonical_revisions_source_record_idTosource_records", fields: [source_record_id], references: [id], onUpdate: NoAction, map: "canonical_revisions_source_record_id_source_records_id_fk")
-  source_records_canonical_revisions_source_record_id_organization_idTosource_records                                                  source_records                         @relation("canonical_revisions_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "canonical_revisions_source_tenant_fk")
+  source_records_canonical_revisions_source_record_idTosource_records                                                                  source_records?                        @relation("canonical_revisions_source_record_idTosource_records", fields: [source_record_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "canonical_revisions_source_record_id_source_records_id_fk")
+  source_records_canonical_revisions_source_record_id_organization_idTosource_records                                                  source_records?                        @relation("canonical_revisions_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "canonical_revisions_source_tenant_fk")
+  source_semantic_observations                                                                                                         source_semantic_observations?          @relation("canonical_revisions_origin_semantic_observation", fields: [origin_semantic_observation_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "canonical_revisions_origin_semantic_observation_fk")
+  estimated_ev_recomputation_requests_origin                                                                                           estimated_ev_recomputation_requests?   @relation("canonical_revisions_origin_ev_recomputation", fields: [origin_ev_recomputation_request_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "canonical_revisions_origin_ev_recomputation_fk")
   estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions")
   estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions    estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions")
   estimated_ev_recomputation_requests_estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions        estimated_ev_recomputation_requests[]  @relation("estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions")
@@ -180,6 +186,7 @@ model canonical_revisions {
   @@unique([id, organization_id, public_change_sequence], map: "canonical_revisions_heat_source_unique")
   @@index([organization_id, accepted_at], map: "canonical_revisions_organization_accepted_idx")
   @@index([organization_id, public_change_sequence], map: "canonical_revisions_public_change_idx")
+  @@index([organization_id, origin_semantic_observation_id], map: "canonical_revisions_origin_semantic_observation_idx")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -188,7 +195,9 @@ model estimated_ev_recomputation_requests {
   request_key                                                                                                                                    String                             @unique(map: "estimated_ev_recomputation_request_key_unique")
   organization_id                                                                                                                                String                             @db.Uuid
   provider_id                                                                                                                                    String                             @db.Uuid
-  configuration_revision_id                                                                                                                      String                             @db.Uuid
+  configuration_revision_id                                                                                                                      String?                            @db.Uuid
+  source_instance_id                                                                                                                             String?                            @db.Uuid
+  source_revision_id                                                                                                                             String?                            @db.Uuid
   platform_key                                                                                                                                   String
   pack_external_id                                                                                                                               String
   ev_input_external_id                                                                                                                           String
@@ -208,18 +217,21 @@ model estimated_ev_recomputation_requests {
   completed_at                                                                                                                                   DateTime?                          @db.Timestamptz(6)
   originating_public_change_sequence                                                                                                             BigInt
   canonical_revisions_estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions                           canonical_revisions?               @relation("estimated_ev_recomputation_requests_calculation_revision_id_organization_idTocanonical_revisions", fields: [calculation_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_calculation_revision_tenant_fk")
-  provider_config_revisions_estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions provider_config_revisions          @relation("estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions", fields: [configuration_revision_id, provider_id, organization_id], references: [id, provider_id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_config_tenant_fk")
+  provider_config_revisions_estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions provider_config_revisions?         @relation("estimated_ev_recomputation_requests_configuration_revision_id_provider_id_organization_idToprovider_config_revisions", fields: [configuration_revision_id, provider_id, organization_id], references: [id, provider_id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_config_tenant_fk")
+  provider_source_revisions                                                                                                                      provider_source_revisions?         @relation("estimated_ev_recomputation_source_revision", fields: [source_revision_id, organization_id, provider_id, source_instance_id], references: [id, organization_id, provider_id, source_instance_id], onDelete: Restrict, onUpdate: NoAction, map: "estimated_ev_recomputation_source_revision_fk")
   canonical_revisions_estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions                              canonical_revisions?               @relation("estimated_ev_recomputation_requests_ev_input_revision_id_organization_idTocanonical_revisions", fields: [ev_input_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_input_revision_tenant_fk")
   canonical_revisions_estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions                                  canonical_revisions?               @relation("estimated_ev_recomputation_requests_pack_revision_id_organization_idTocanonical_revisions", fields: [pack_revision_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_pack_revision_tenant_fk")
   provider_sources_estimated_ev_recomputation_requests_provider_id_organization_idToprovider_sources                                             provider_sources                   @relation("estimated_ev_recomputation_requests_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "estimated_ev_recomputation_provider_tenant_fk")
   canonical_revisions_estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions                                           canonical_revisions?               @relation("estimated_ev_recomputation_requests_calculation_revision_idTocanonical_revisions", fields: [calculation_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "estimated_ev_recomputation_requests_calculation_revision_id_can")
-  provider_config_revisions_estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions                             provider_config_revisions          @relation("estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions", fields: [configuration_revision_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_configuration_revision_id_p")
+  provider_config_revisions_estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions                             provider_config_revisions?         @relation("estimated_ev_recomputation_requests_configuration_revision_idToprovider_config_revisions", fields: [configuration_revision_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_configuration_revision_id_p")
   canonical_revisions_estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions                                              canonical_revisions?               @relation("estimated_ev_recomputation_requests_ev_input_revision_idTocanonical_revisions", fields: [ev_input_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "estimated_ev_recomputation_requests_ev_input_revision_id_canoni")
   organizations                                                                                                                                  organizations                      @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_organization_id_organizatio")
   canonical_revisions_estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions                                                  canonical_revisions?               @relation("estimated_ev_recomputation_requests_pack_revision_idTocanonical_revisions", fields: [pack_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "estimated_ev_recomputation_requests_pack_revision_id_canonical_")
   provider_sources_estimated_ev_recomputation_requests_provider_idToprovider_sources                                                             provider_sources                   @relation("estimated_ev_recomputation_requests_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "estimated_ev_recomputation_requests_provider_id_provider_source")
   public_change_causes                                                                                                                           public_change_causes               @relation(fields: [organization_id, originating_public_change_sequence], references: [organization_id, sequence], onUpdate: NoAction, map: "estimated_ev_recomputation_originating_change_fk")
+  canonical_revisions_origin                                                                                                                     canonical_revisions[]              @relation("canonical_revisions_origin_ev_recomputation")
 
+  @@unique([id, organization_id], map: "estimated_ev_recomputation_id_organization_unique")
   @@index([state, available_at, created_at, id], map: "estimated_ev_recomputation_claim_idx")
   @@index([organization_id, originating_public_change_sequence], map: "estimated_ev_recomputation_originating_change_idx")
   @@index([organization_id, platform_key, pack_external_id, created_at], map: "estimated_ev_recomputation_tenant_pack_idx")
@@ -351,13 +363,37 @@ model import_pages {
   page_number                                                                                        Int
   requested_cursor                                                                                   String?
   next_cursor                                                                                        String?
-  has_more                                                                                           Boolean
+  has_more                                                                                           Boolean?
   payload_json                                                                                       Json?
   payload_hash                                                                                       String
   record_counts_json                                                                                 Json
   committed_at                                                                                       DateTime                     @default(now()) @db.Timestamptz(6)
   expires_at                                                                                         DateTime                     @db.Timestamptz(6)
   payload_expired_at                                                                                 DateTime?                    @db.Timestamptz(6)
+  source_instance_id                                                                                 String?                      @db.Uuid
+  source_revision_id                                                                                 String?                      @db.Uuid
+  source_type_key                                                                                    String?
+  source_adapter_version                                                                             String?
+  normalized_contract_version                                                                        String?
+  mapper_key                                                                                         String?
+  mapper_version                                                                                     String?
+  identity_namespace_key                                                                             String?
+  connection_profile_id                                                                              String?                      @db.Uuid
+  connection_revision_id                                                                             String?                      @db.Uuid
+  connection_health_generation                                                                       BigInt?
+  request_attempt_id                                                                                 String?                      @db.Uuid
+  run_claim_lease_id                                                                                 String?                      @db.Uuid
+  supervisor_epoch_id                                                                                String?                      @db.Uuid
+  cursor_codec_version                                                                               String?
+  cursor_generation                                                                                  BigInt?
+  requested_cursor_fingerprint                                                                       String?
+  requested_cursor_key                                                                               String?
+  next_cursor_fingerprint                                                                            String?
+  continuation_kind                                                                                  source_continuation_kind?
+  minimum_delay_seconds                                                                              Int?
+  protected_raw_response                                                                             Bytes?
+  protected_raw_response_sha256                                                                      String?
+  normalized_commit_hash                                                                             String?
   organizations                                                                                      organizations                @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "import_pages_organization_id_organizations_id_fk")
   provider_sources                                                                                   provider_sources             @relation(fields: [provider_id], references: [id], onUpdate: NoAction, map: "import_pages_provider_id_provider_sources_id_fk")
   import_runs_import_pages_run_idToimport_runs                                                       import_runs                  @relation("import_pages_run_idToimport_runs", fields: [run_id], references: [id], onUpdate: NoAction, map: "import_pages_run_id_import_runs_id_fk")
@@ -373,17 +409,22 @@ model import_pages {
 
   @@unique([id, organization_id, provider_id, run_id], map: "import_pages_id_organization_provider_run_unique")
   @@unique([id, organization_id, run_id], map: "import_pages_id_organization_run_unique")
-  @@unique([run_id, requested_cursor], map: "import_pages_run_cursor_unique")
+  @@unique([id, organization_id, provider_id, run_id, source_instance_id, source_revision_id], map: "import_pages_source_scope_unique")
+  @@unique([id, organization_id, provider_id, run_id, source_instance_id, source_revision_id, request_attempt_id, supervisor_epoch_id, connection_profile_id, connection_revision_id, cursor_generation, connection_health_generation], map: "import_pages_source_attempt_unique")
+  @@unique([id, organization_id, provider_id, run_id, source_instance_id, source_revision_id, cursor_generation, next_cursor_fingerprint], map: "import_pages_source_cursor_unique")
+  @@unique([id, organization_id, provider_id, run_id, source_instance_id, source_revision_id, cursor_generation], map: "import_pages_source_cursor_position_unique")
+  @@unique([id, organization_id, provider_id, run_id, source_instance_id, source_revision_id, request_attempt_id], map: "import_pages_source_diagnostic_unique")
   @@unique([run_id, page_number], map: "import_pages_run_number_unique")
   @@index([organization_id, expires_at], map: "import_pages_expiry_idx")
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This table contains check constraints and an immutable source-pin trigger
+/// that requires additional setup in the provider-source migration.
 model import_runs {
   id                                                                                                                  String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organization_id                                                                                                     String                        @db.Uuid
   provider_id                                                                                                         String                        @db.Uuid
-  config_revision_id                                                                                                  String                        @db.Uuid
+  config_revision_id                                                                                                  String?                       @db.Uuid
   trigger                                                                                                             import_trigger
   state                                                                                                               import_run_state              @default(queued)
   requested_cursor                                                                                                    String?
@@ -397,15 +438,35 @@ model import_runs {
   created_at                                                                                                          DateTime                      @default(now()) @db.Timestamptz(6)
   requested_by_actor_key                                                                                              String?
   lease_owner                                                                                                         String?
+  lease_token                                                                                                         String?                       @db.Uuid
+  claim_lease_id                                                                                                      String?                       @db.Uuid
   lease_expires_at                                                                                                    DateTime?                     @db.Timestamptz(6)
   attempt                                                                                                             Int                           @default(0)
   reached_provider_head                                                                                               Boolean                       @default(false)
+  source_instance_id                                                                                                  String?                       @db.Uuid
+  source_revision_id                                                                                                  String?                       @db.Uuid
+  source_type_key                                                                                                     String?
+  source_adapter_version                                                                                              String?
+  normalized_contract_version                                                                                         String?
+  mapper_key                                                                                                          String?
+  mapper_version                                                                                                      String?
+  identity_namespace_key                                                                                              String?
+  connection_profile_id                                                                                               String?                       @db.Uuid
+  connection_revision_id                                                                                              String?                       @db.Uuid
+  cursor_codec_version                                                                                                String?
+  cursor_generation                                                                                                   BigInt?
+  requested_cursor_fingerprint                                                                                        String?
+  requested_cursor_key                                                                                                String?
+  current_cursor                                                                                                      String?
+  current_cursor_fingerprint                                                                                          String?
+  current_cursor_key                                                                                                  String?
+  next_page_number                                                                                                    Int?
   admin_alerts_admin_alerts_run_idToimport_runs                                                                       admin_alerts[]                @relation("admin_alerts_run_idToimport_runs")
   admin_alerts_admin_alerts_run_id_organization_id_provider_idToimport_runs                                           admin_alerts[]                @relation("admin_alerts_run_id_organization_id_provider_idToimport_runs")
   import_pages_import_pages_run_idToimport_runs                                                                       import_pages[]                @relation("import_pages_run_idToimport_runs")
   import_pages_import_pages_run_id_organization_id_provider_idToimport_runs                                           import_pages[]                @relation("import_pages_run_id_organization_id_provider_idToimport_runs")
-  provider_config_revisions_import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions     provider_config_revisions     @relation("import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions", fields: [config_revision_id, provider_id, organization_id], references: [id, provider_id, organization_id], onUpdate: NoAction, map: "import_runs_config_provider_tenant_fk")
-  provider_config_revisions_import_runs_config_revision_idToprovider_config_revisions                                 provider_config_revisions     @relation("import_runs_config_revision_idToprovider_config_revisions", fields: [config_revision_id], references: [id], onUpdate: NoAction, map: "import_runs_config_revision_id_provider_config_revisions_id_fk")
+  provider_config_revisions_import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions     provider_config_revisions?    @relation("import_runs_config_revision_id_provider_id_organization_idToprovider_config_revisions", fields: [config_revision_id, provider_id, organization_id], references: [id, provider_id, organization_id], onUpdate: NoAction, map: "import_runs_config_provider_tenant_fk")
+  provider_config_revisions_import_runs_config_revision_idToprovider_config_revisions                                 provider_config_revisions?    @relation("import_runs_config_revision_idToprovider_config_revisions", fields: [config_revision_id], references: [id], onUpdate: NoAction, map: "import_runs_config_revision_id_provider_config_revisions_id_fk")
   organizations                                                                                                       organizations                 @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "import_runs_organization_id_organizations_id_fk")
   provider_sources_import_runs_provider_idToprovider_sources                                                          provider_sources              @relation("import_runs_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "import_runs_provider_id_provider_sources_id_fk")
   provider_sources_import_runs_provider_id_organization_idToprovider_sources                                          provider_sources              @relation("import_runs_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "import_runs_provider_tenant_fk")
@@ -421,6 +482,12 @@ model import_runs {
 
   @@unique([id, organization_id, provider_id, config_revision_id], map: "import_runs_id_organization_provider_config_unique")
   @@unique([id, organization_id, provider_id], map: "import_runs_id_organization_provider_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id], map: "import_runs_source_owner_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_revision_id], map: "import_runs_source_scope_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id], map: "import_runs_runtime_scope_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id, cursor_generation, requested_cursor_key, lease_owner, lease_token], map: "import_runs_source_claim_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id, cursor_generation, lease_owner, lease_token], map: "import_runs_source_lease_claim_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_revision_id, trigger], map: "import_runs_source_diagnostic_unique")
   @@index([organization_id, provider_id, created_at], map: "import_runs_organization_provider_created_idx")
 }
 
@@ -1142,6 +1209,649 @@ model promotion_operations {
   @@unique([organization_id, deployment_key, lane_key, operation_id], map: "promotion_operations_lane_operation_unique")
 }
 
+/// Stable, organization-scoped connection capacity shared by every source using one credential.
+/// Conditional and tenant-preserving foreign keys are defined in the forward migration.
+model source_connection_profiles {
+  id                   String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id      String                   @db.Uuid
+  source_type_key      String
+  connection_type_key  String
+  display_name         String
+  state                connection_profile_state @default(draft)
+  request_limit        Int
+  active_revision_id   String?                  @db.Uuid
+  created_by_actor_key String
+  created_at           DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime                 @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, organization_id], map: "source_connection_profiles_tenant_unique")
+  @@unique([id, organization_id, source_type_key], map: "source_connection_profiles_type_unique")
+  @@unique([organization_id, source_type_key, display_name], map: "source_connection_profiles_name_unique")
+  @@index([organization_id, state, created_at], map: "source_connection_profiles_state_idx")
+}
+
+/// Immutable encrypted connection/adapter identity plus mutable lifecycle and
+/// health fields. The referent guard is defined in the provider-source migration.
+model source_connection_revisions {
+  id                        String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id           String                    @db.Uuid
+  connection_profile_id     String                    @db.Uuid
+  revision_number           Int
+  source_type_key           String
+  source_adapter_version    String
+  configuration_ciphertext  Bytes
+  configuration_nonce       Bytes
+  configuration_auth_tag    Bytes
+  encryption_key_version    Int
+  configuration_fingerprint String
+  state                     connection_revision_state @default(candidate)
+  health_generation         BigInt                    @default(0)
+  created_by_actor_key      String
+  created_at                DateTime                  @default(now()) @db.Timestamptz(6)
+  activated_at              DateTime?                 @db.Timestamptz(6)
+  retired_at                DateTime?                 @db.Timestamptz(6)
+  revoked_at                DateTime?                 @db.Timestamptz(6)
+  revoked_by_actor_key      String?
+
+  @@unique([id, organization_id, connection_profile_id], map: "source_connection_revisions_scope_unique")
+  @@unique([id, organization_id, connection_profile_id, source_type_key, source_adapter_version], map: "source_connection_revisions_adapter_scope_unique")
+  @@unique([connection_profile_id, revision_number], map: "source_connection_revisions_number_unique")
+  @@index([organization_id, connection_profile_id, state], map: "source_connection_revisions_state_idx")
+}
+
+/// Durable asynchronous connection-test claim. Recovery jobs are correlated to one blocking episode.
+model source_connection_test_jobs {
+  id                           String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id              String                @db.Uuid
+  connection_profile_id        String                @db.Uuid
+  connection_revision_id       String                @db.Uuid
+  blocking_episode_id          String?               @db.Uuid
+  recovery_blocked_revision_id String?               @db.Uuid
+  expected_health_generation   BigInt
+  state                        source_test_job_state @default(queued)
+  requested_by_actor_key       String
+  claim_owner                  String?
+  claim_token                  String?               @db.Uuid
+  claim_expires_at             DateTime?             @db.Timestamptz(6)
+  supervisor_epoch_id          String?               @db.Uuid
+  created_at                   DateTime              @default(now()) @db.Timestamptz(6)
+  queued_at                    DateTime              @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(6)
+  started_at                   DateTime?             @db.Timestamptz(6)
+  finished_at                  DateTime?             @db.Timestamptz(6)
+
+  @@unique([id, organization_id, connection_profile_id, connection_revision_id], map: "source_connection_test_jobs_scope_unique")
+  @@unique([id, organization_id, connection_profile_id, connection_revision_id, expected_health_generation, supervisor_epoch_id, claim_owner, claim_token], map: "source_connection_test_jobs_claim_unique")
+  @@unique([id, organization_id, connection_profile_id, connection_revision_id, expected_health_generation, supervisor_epoch_id], map: "source_connection_test_jobs_result_unique")
+  @@index([organization_id, state, queued_at], map: "source_connection_test_jobs_runtime_queue_idx")
+}
+
+/// Immutable validated result for exactly one claimed connection-test job.
+model source_connection_test_results {
+  id                          String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id             String                       @db.Uuid
+  job_id                      String                       @db.Uuid
+  connection_profile_id       String                       @db.Uuid
+  connection_revision_id      String                       @db.Uuid
+  request_attempt_id          String                       @db.Uuid
+  request_terminal_state      source_request_attempt_state
+  supervisor_epoch_id         String                       @db.Uuid
+  pre_test_health_generation  BigInt
+  resulting_health_generation BigInt
+  outcome                     String
+  safe_code                   String?
+  response_status             Int?
+  latency_ms                  Int?
+  measurements_json           Json                         @default("{}")
+  tested_by_actor_key         String
+  tested_at                   DateTime                     @db.Timestamptz(6)
+  created_at                  DateTime                     @default(now()) @db.Timestamptz(6)
+
+  @@unique([job_id], map: "source_connection_test_results_job_unique")
+  @@unique([request_attempt_id], map: "source_connection_test_results_attempt_unique")
+  @@unique([id, organization_id, connection_profile_id, connection_revision_id], map: "source_connection_test_results_scope_unique")
+  @@unique([id, organization_id, connection_profile_id], map: "source_connection_test_results_profile_unique")
+  @@index([organization_id, connection_revision_id, tested_at], map: "source_connection_test_results_revision_idx")
+}
+
+/// One action-required connection episode. Only one episode may remain open per profile revision.
+model source_connection_health_episodes {
+  id                           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id              String    @db.Uuid
+  connection_profile_id        String    @db.Uuid
+  connection_revision_id       String    @db.Uuid
+  opened_health_generation     BigInt
+  closed_health_generation     BigInt?
+  failure_class                String
+  safe_code                    String
+  opened_by_request_attempt_id String?   @db.Uuid
+  closed_by_test_result_id     String?   @db.Uuid
+  opened_at                    DateTime  @db.Timestamptz(6)
+  closed_at                    DateTime? @db.Timestamptz(6)
+
+  @@unique([id, organization_id, connection_profile_id, connection_revision_id], map: "source_connection_health_episodes_scope_unique")
+  @@unique([id, organization_id, connection_profile_id], map: "source_connection_health_episodes_profile_unique")
+  @@index([organization_id, connection_profile_id, opened_at], map: "source_connection_health_episodes_profile_idx")
+}
+
+/// Replaceable way of obtaining one stable provider's data.
+model provider_source_instances {
+  id                    String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id       String                         @db.Uuid
+  provider_id           String                         @db.Uuid
+  source_type_key       String
+  connection_profile_id String                         @db.Uuid
+  state                 provider_source_instance_state @default(draft)
+  active_revision_id    String?                        @db.Uuid
+  created_by_actor_key  String
+  created_at            DateTime                       @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                       @default(now()) @db.Timestamptz(6)
+  activated_at          DateTime?                      @db.Timestamptz(6)
+  paused_at             DateTime?                      @db.Timestamptz(6)
+  pause_requested_at    DateTime?                      @db.Timestamptz(6)
+  disabled_at           DateTime?                      @db.Timestamptz(6)
+  replaced_at           DateTime?                      @db.Timestamptz(6)
+
+  @@unique([id, organization_id, provider_id], map: "provider_source_instances_scope_unique")
+  @@unique([id, organization_id, provider_id, source_type_key, connection_profile_id], map: "provider_source_instances_owner_unique")
+  @@index([organization_id, provider_id, state], map: "provider_source_instances_provider_state_idx")
+  @@index([organization_id, connection_profile_id, created_at], map: "provider_source_instances_profile_idx")
+}
+
+/// Insert-only adapter, mapper, namespace, scope and source configuration pins.
+/// The update guard is defined in the provider-source migration.
+model provider_source_revisions {
+  id                                  String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                     String                                @db.Uuid
+  provider_id                         String                                @db.Uuid
+  source_instance_id                  String                                @db.Uuid
+  connection_profile_id               String                                @db.Uuid
+  revision_number                     Int
+  source_type_key                     String
+  source_adapter_version              String
+  normalized_contract_version         String
+  mapper_key                          String
+  mapper_version                      String
+  identity_namespace_key              String
+  cursor_codec_version                String
+  configuration_json                  Json
+  configuration_hash                  String
+  record_id_scopes_json               Json
+  created_by_actor_key                String
+  created_at                          DateTime                              @default(now()) @db.Timestamptz(6)
+  estimated_ev_recomputation_requests estimated_ev_recomputation_requests[] @relation("estimated_ev_recomputation_source_revision")
+
+  @@unique([id, organization_id, provider_id, source_instance_id], map: "provider_source_revisions_scope_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, connection_profile_id, source_type_key, source_adapter_version, normalized_contract_version, mapper_key, mapper_version, identity_namespace_key, cursor_codec_version], map: "provider_source_revisions_pins_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_adapter_version, cursor_codec_version], map: "provider_source_revisions_cursor_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, connection_profile_id, source_type_key, source_adapter_version, normalized_contract_version], map: "provider_source_revisions_diagnostic_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, connection_profile_id], map: "provider_source_revisions_test_profile_unique")
+  @@unique([source_instance_id, revision_number], map: "provider_source_revisions_number_unique")
+  @@unique([source_instance_id, configuration_hash], map: "provider_source_revisions_configuration_unique")
+}
+
+/// Immutable per-source timing revision. Timing changes never replace source configuration.
+model provider_source_schedule_revisions {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id         String   @db.Uuid
+  provider_id             String   @db.Uuid
+  source_instance_id      String   @db.Uuid
+  revision_number         Int
+  interval_seconds        Int      @default(60)
+  freshness_grace_seconds Int      @default(900)
+  created_by_actor_key    String
+  effective_at            DateTime @db.Timestamptz(6)
+  created_at              DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, organization_id, source_instance_id], map: "provider_source_schedule_revisions_scope_unique")
+  @@unique([source_instance_id, revision_number], map: "provider_source_schedule_revisions_number_unique")
+}
+
+/// Current due time and claim for one source. Future work remains here until due.
+model provider_source_schedules {
+  source_instance_id          String    @id @db.Uuid
+  organization_id             String    @db.Uuid
+  provider_id                 String    @db.Uuid
+  active_schedule_revision_id String    @db.Uuid
+  next_due_at                 DateTime  @db.Timestamptz(6)
+  last_due_at                 DateTime? @db.Timestamptz(6)
+  claim_owner                 String?
+  claim_token                 String?   @db.Uuid
+  claim_expires_at            DateTime? @db.Timestamptz(6)
+  last_claimed_at             DateTime? @db.Timestamptz(6)
+  last_outcome                String?
+  last_run_id                 String?   @db.Uuid
+  updated_at                  DateTime  @db.Timestamptz(6)
+
+  @@unique([source_instance_id, organization_id, provider_id], map: "provider_source_schedules_scope_unique")
+  @@index([organization_id, next_due_at], map: "provider_source_schedules_due_idx")
+}
+
+/// Current cursor and its last committed source position metadata.
+model provider_source_cursors {
+  source_instance_id     String   @id @db.Uuid
+  organization_id        String   @db.Uuid
+  provider_id            String   @db.Uuid
+  source_revision_id     String   @db.Uuid
+  source_adapter_version String
+  cursor_codec_version   String
+  cursor_generation      BigInt   @default(1)
+  cursor                 String?
+  cursor_fingerprint     String?
+  advanced_by_run_id     String?  @db.Uuid
+  advanced_by_page_id    String?  @db.Uuid
+  updated_at             DateTime @db.Timestamptz(6)
+
+  @@unique([source_instance_id, organization_id, provider_id], map: "provider_source_cursors_scope_unique")
+  @@index([organization_id, provider_id], map: "provider_source_cursors_provider_idx")
+}
+
+/// Durable cycle history; retries, restarts and run rollover cannot erase it.
+model provider_source_cursor_fingerprints {
+  id                      BigInt   @id @default(autoincrement())
+  organization_id         String   @db.Uuid
+  provider_id             String   @db.Uuid
+  source_instance_id      String   @db.Uuid
+  source_revision_id      String   @db.Uuid
+  cursor_generation       BigInt
+  source_adapter_version  String
+  cursor_codec_version    String
+  cursor_fingerprint      String
+  first_committed_run_id  String?  @db.Uuid
+  first_committed_page_id String?  @db.Uuid
+  committed_at            DateTime @db.Timestamptz(6)
+
+  @@unique([source_instance_id, cursor_generation, cursor_fingerprint], map: "provider_source_cursor_fingerprints_cycle_unique")
+  @@index([organization_id, source_instance_id, cursor_generation], map: "provider_source_cursor_fingerprints_generation_idx")
+}
+
+/// Source-local health is independent from shared connection health.
+model provider_source_health_states {
+  source_instance_id   String    @id @db.Uuid
+  organization_id      String    @db.Uuid
+  provider_id          String    @db.Uuid
+  health_generation    BigInt    @default(0)
+  last_attempted_at    DateTime? @db.Timestamptz(6)
+  last_head_reached_at DateTime? @db.Timestamptz(6)
+  consecutive_failures Int       @default(0)
+  latest_failure_code  String?
+  recovered_at         DateTime? @db.Timestamptz(6)
+  updated_at           DateTime  @db.Timestamptz(6)
+
+  @@unique([source_instance_id, organization_id, provider_id], map: "provider_source_health_states_scope_unique")
+}
+
+/// Durable asynchronous source-test claim, pinned to one immutable source revision.
+model provider_source_test_jobs {
+  id                         String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id            String                @db.Uuid
+  provider_id                String                @db.Uuid
+  source_instance_id         String                @db.Uuid
+  source_revision_id         String                @db.Uuid
+  connection_profile_id      String                @db.Uuid
+  connection_revision_id     String                @db.Uuid
+  expected_health_generation BigInt
+  state                      source_test_job_state @default(queued)
+  requested_by_actor_key     String
+  claim_owner                String?
+  claim_token                String?               @db.Uuid
+  claim_expires_at           DateTime?             @db.Timestamptz(6)
+  supervisor_epoch_id        String?               @db.Uuid
+  created_at                 DateTime              @default(now()) @db.Timestamptz(6)
+  queued_at                  DateTime              @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(6)
+  started_at                 DateTime?             @db.Timestamptz(6)
+  finished_at                DateTime?             @db.Timestamptz(6)
+
+  @@unique([id, organization_id, source_instance_id, source_revision_id], map: "provider_source_test_jobs_scope_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id], map: "provider_source_test_jobs_operation_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id, expected_health_generation, supervisor_epoch_id, claim_owner, claim_token], map: "provider_source_test_jobs_claim_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id, expected_health_generation, supervisor_epoch_id], map: "provider_source_test_jobs_result_unique")
+  @@index([organization_id, state, queued_at], map: "provider_source_test_jobs_runtime_queue_idx")
+}
+
+/// Immutable validated result for exactly one claimed source-test job.
+model provider_source_test_results {
+  id                          String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id             String                       @db.Uuid
+  provider_id                 String                       @db.Uuid
+  job_id                      String                       @db.Uuid
+  source_instance_id          String                       @db.Uuid
+  source_revision_id          String                       @db.Uuid
+  connection_profile_id       String                       @db.Uuid
+  connection_revision_id      String                       @db.Uuid
+  request_attempt_id          String                       @db.Uuid
+  request_terminal_state      source_request_attempt_state
+  supervisor_epoch_id         String                       @db.Uuid
+  pre_test_health_generation  BigInt
+  resulting_health_generation BigInt
+  outcome                     String
+  safe_code                   String?
+  measurements_json           Json                         @default("{}")
+  tested_by_actor_key         String
+  tested_at                   DateTime                     @db.Timestamptz(6)
+  created_at                  DateTime                     @default(now()) @db.Timestamptz(6)
+
+  @@unique([job_id], map: "provider_source_test_results_job_unique")
+  @@unique([request_attempt_id], map: "provider_source_test_results_attempt_unique")
+  @@unique([id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id], map: "provider_source_test_results_scope_unique")
+  @@index([organization_id, source_instance_id, tested_at], map: "provider_source_test_results_source_idx")
+}
+
+/// Immutable ownership epoch for the one supported local ingestion supervisor.
+model source_supervisor_epochs {
+  id                      String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  environment_key         String
+  epoch_number            BigInt
+  state                   supervisor_epoch_state @default(active)
+  owner_key               String
+  lease_token             String                 @db.Uuid
+  acquired_at             DateTime               @db.Timestamptz(6)
+  last_renewed_at         DateTime               @db.Timestamptz(6)
+  lease_expires_at        DateTime               @db.Timestamptz(6)
+  takeover_not_before     DateTime               @db.Timestamptz(6)
+  fenced_at               DateTime?              @db.Timestamptz(6)
+  released_at             DateTime?              @db.Timestamptz(6)
+  safe_reason_code        String?
+  maximum_execution_slots Int                    @default(4)
+  active_execution_slots  Int                    @default(0)
+  capacity_state          String                 @default("available")
+  capacity_safe_code      String?
+  capacity_checked_at     DateTime?              @db.Timestamptz(6)
+  snapshot_updated_at     DateTime?              @db.Timestamptz(6)
+
+  @@unique([environment_key, epoch_number], map: "source_supervisor_epochs_number_unique")
+  @@unique([lease_token], map: "source_supervisor_epochs_lease_token_unique")
+  @@index([environment_key, state, lease_expires_at], map: "source_supervisor_epochs_owner_idx")
+}
+
+/// Durable source-neutral request-capacity snapshot for the owning epoch.
+model source_supervisor_profile_states {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  supervisor_epoch_id    String   @db.Uuid
+  organization_id        String   @db.Uuid
+  connection_profile_id  String   @db.Uuid
+  approved_request_limit Int
+  active_request_permits Int      @default(0)
+  waiting_operations     Int      @default(0)
+  updated_at             DateTime @db.Timestamptz(6)
+
+  @@unique([supervisor_epoch_id, organization_id, connection_profile_id], map: "source_supervisor_profile_states_scope_unique")
+  @@index([organization_id, connection_profile_id, updated_at], map: "source_supervisor_profile_states_profile_idx")
+}
+
+/// Durable supervisor-owned lane state. Admin reads this snapshot instead of
+/// inferring runtime activity from unrelated schedule and run tables.
+model provider_source_runtime_states {
+  source_instance_id                 String                    @id @db.Uuid
+  organization_id                    String                    @db.Uuid
+  provider_id                        String                    @db.Uuid
+  source_revision_id                 String                    @db.Uuid
+  connection_profile_id              String                    @db.Uuid
+  connection_revision_id             String                    @db.Uuid
+  supervisor_epoch_id                String?                   @db.Uuid
+  phase                              String
+  activity                           String
+  wait_reason                        String?
+  action_required_code               String?
+  current_run_id                     String?                   @db.Uuid
+  run_lease_acquired_at              DateTime?                 @db.Timestamptz(6)
+  run_lease_expires_at               DateTime?                 @db.Timestamptz(6)
+  retry_attempt                      Int                       @default(0)
+  retry_not_before                   DateTime?                 @db.Timestamptz(6)
+  pages_committed                    Int                       @default(0)
+  records_committed                  Int                       @default(0)
+  run_started_at                     DateTime?                 @db.Timestamptz(6)
+  last_progress_at                   DateTime?                 @db.Timestamptz(6)
+  cursor_fingerprint                 String?
+  continuation_kind                  source_continuation_kind?
+  continuation_minimum_delay_seconds Int?
+  next_due_at                        DateTime?                 @db.Timestamptz(6)
+  blocking_episode_id                String?                   @db.Uuid
+  blocking_health_generation         BigInt?
+  queued_at                          DateTime?                 @db.Timestamptz(6)
+  updated_at                         DateTime                  @db.Timestamptz(6)
+
+  @@unique([source_instance_id, organization_id, provider_id, source_revision_id, connection_profile_id, connection_revision_id], map: "provider_source_runtime_states_scope_unique")
+  @@index([organization_id, activity, updated_at], map: "provider_source_runtime_states_activity_idx")
+  @@index([supervisor_epoch_id, updated_at], map: "provider_source_runtime_states_epoch_idx")
+}
+
+/// Sanitized pre-call record. It is terminalized before its profile permit wakes another waiter.
+model source_request_attempts {
+  id                                      String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                         String                        @db.Uuid
+  operation_kind                          source_request_operation_kind
+  state                                   source_request_attempt_state  @default(in_flight)
+  request_lease_id                        String                        @db.Uuid
+  claim_owner                             String
+  claim_token                             String                        @db.Uuid
+  supervisor_epoch_id                     String                        @db.Uuid
+  connection_profile_id                   String                        @db.Uuid
+  connection_revision_id                  String                        @db.Uuid
+  expected_health_generation              BigInt
+  provider_id                             String?                       @db.Uuid
+  source_instance_id                      String?                       @db.Uuid
+  source_revision_id                      String?                       @db.Uuid
+  connection_test_job_id                  String?                       @db.Uuid
+  source_test_job_id                      String?                       @db.Uuid
+  run_id                                  String?                       @db.Uuid
+  page_number                             Int?
+  cursor_generation                       BigInt?
+  requested_cursor_fingerprint            String?
+  requested_cursor_key                    String?
+  blocking_episode_id                     String?                       @db.Uuid
+  blocking_episode_connection_revision_id String?                       @db.Uuid
+  outcome_class                           String?
+  safe_code                               String?
+  safe_outcome_hash                       String?
+  response_status                         Int?
+  response_bytes                          Int?
+  duration_ms                             Int?
+  started_at                              DateTime                      @db.Timestamptz(6)
+  terminal_at                             DateTime?                     @db.Timestamptz(6)
+  expires_at                              DateTime?                     @db.Timestamptz(6)
+  compacted_at                            DateTime?                     @db.Timestamptz(6)
+
+  @@unique([request_lease_id], map: "source_request_attempts_lease_unique")
+  @@unique([id, organization_id, connection_profile_id, connection_revision_id], map: "source_request_attempts_scope_unique")
+  @@index([state, supervisor_epoch_id, started_at], map: "source_request_attempts_uncertain_idx")
+  @@index([organization_id, expires_at], map: "source_request_attempts_retention_idx")
+}
+
+/// Permanent compact proof retained after a terminal request-attempt row expires.
+model compact_source_request_attempts {
+  request_attempt_id                      String                        @id @db.Uuid
+  organization_id                         String                        @db.Uuid
+  operation_kind                          source_request_operation_kind
+  terminal_state                          source_request_attempt_state
+  outcome_class                           String
+  safe_outcome_hash                       String
+  request_lease_id                        String                        @unique(map: "compact_source_request_attempts_lease_unique") @db.Uuid
+  claim_owner                             String
+  claim_token                             String                        @db.Uuid
+  supervisor_epoch_id                     String                        @db.Uuid
+  connection_profile_id                   String                        @db.Uuid
+  connection_revision_id                  String                        @db.Uuid
+  expected_health_generation              BigInt
+  provider_id                             String?                       @db.Uuid
+  source_instance_id                      String?                       @db.Uuid
+  source_revision_id                      String?                       @db.Uuid
+  connection_test_job_id                  String?                       @db.Uuid
+  source_test_job_id                      String?                       @db.Uuid
+  run_id                                  String?                       @db.Uuid
+  page_number                             Int?
+  cursor_generation                       BigInt?
+  requested_cursor_fingerprint            String?
+  requested_cursor_key                    String?
+  response_bytes                          Int?
+  duration_ms                             Int?
+  blocking_episode_id                     String?                       @db.Uuid
+  blocking_episode_connection_revision_id String?                       @db.Uuid
+  started_at                              DateTime                      @db.Timestamptz(6)
+  terminal_at                             DateTime                      @db.Timestamptz(6)
+  compacted_at                            DateTime?                     @db.Timestamptz(6)
+
+  @@unique([request_attempt_id, organization_id, connection_profile_id, connection_revision_id], map: "compact_source_request_attempts_scope_unique")
+  @@unique([request_attempt_id, organization_id, connection_profile_id, connection_revision_id, connection_test_job_id, supervisor_epoch_id, expected_health_generation, terminal_state], map: "compact_source_request_attempts_connection_test_unique")
+  @@unique([request_attempt_id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id, source_test_job_id, supervisor_epoch_id, expected_health_generation, terminal_state], map: "compact_source_request_attempts_source_test_unique")
+  @@unique([request_attempt_id, organization_id, provider_id, source_instance_id, source_revision_id, run_id, page_number], map: "compact_source_request_attempts_page_unique")
+  @@unique([request_attempt_id, organization_id, provider_id, source_instance_id, source_revision_id, run_id, page_number, supervisor_epoch_id, connection_profile_id, connection_revision_id, expected_health_generation, cursor_generation, requested_cursor_key], map: "compact_source_request_attempts_page_fence_unique")
+  @@unique([request_attempt_id, organization_id, provider_id, source_instance_id, source_revision_id, run_id, supervisor_epoch_id, connection_profile_id, connection_revision_id, expected_health_generation, cursor_generation], map: "compact_source_request_attempts_occurrence_unique")
+  @@unique([request_attempt_id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id], map: "compact_source_request_attempts_diagnostic_source_unique")
+  @@unique([request_attempt_id, organization_id, provider_id, source_instance_id, source_revision_id, run_id, connection_profile_id, connection_revision_id], map: "compact_source_request_attempts_diagnostic_run_unique")
+  @@unique([request_attempt_id, organization_id, connection_profile_id, connection_revision_id, connection_test_job_id], map: "compact_attempts_diagnostic_connection_test_unique")
+  @@unique([request_attempt_id, organization_id, provider_id, source_instance_id, source_revision_id, connection_profile_id, connection_revision_id, source_test_job_id], map: "compact_attempts_diagnostic_source_test_unique")
+  @@unique([request_attempt_id, organization_id, connection_profile_id, connection_revision_id, blocking_episode_id, blocking_episode_connection_revision_id], map: "compact_attempts_diagnostic_episode_unique")
+  @@index([organization_id, compacted_at], map: "compact_source_request_attempts_tenant_idx")
+}
+
+/// Stable provider record identity inside one exact launch scope. The migration
+/// backstops the shared scope-to-kind/discriminator contract.
+model source_record_identities {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id      String             @db.Uuid
+  provider_id          String             @db.Uuid
+  source_instance_id   String             @db.Uuid
+  record_id_scope_key  String
+  provider_record_id   String
+  record_kind          source_record_kind
+  record_discriminator String
+  created_at           DateTime           @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, organization_id, source_instance_id], map: "source_record_identities_scope_unique")
+  @@unique([id, organization_id], map: "source_record_identities_tenant_unique")
+  @@unique([organization_id, source_instance_id, record_id_scope_key, provider_record_id], map: "source_record_identities_stable_unique")
+  @@index([organization_id, provider_id, record_kind], map: "source_record_identities_provider_idx")
+}
+
+/// One strict semantic normalized fact. Collection time and delivery lineage are
+/// excluded; the migration trigger binds content identity/time/kind/providerFacts.
+model source_semantic_observations {
+  id                          String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id             String                @db.Uuid
+  source_record_id            String                @db.Uuid
+  effective_source_time       DateTime              @db.Timestamptz(6)
+  normalized_contract_version String
+  hash_version                String
+  normalized_content_hash     String
+  normalized_content_json     Json
+  created_at                  DateTime              @default(now()) @db.Timestamptz(6)
+  canonical_revisions         canonical_revisions[] @relation("canonical_revisions_origin_semantic_observation")
+
+  @@unique([id, organization_id], map: "source_semantic_observations_tenant_unique")
+  @@unique([id, organization_id, source_record_id], map: "source_semantic_observations_scope_unique")
+  @@unique([id, organization_id, source_record_id, normalized_contract_version], map: "source_semantic_observations_contract_scope_unique")
+  @@unique([source_record_id, effective_source_time, normalized_contract_version, hash_version, normalized_content_hash], map: "source_semantic_observations_identity_unique")
+  @@index([organization_id, source_record_id, effective_source_time], map: "source_semantic_observations_record_idx")
+}
+
+/// One delivery position in one page, including complete adapter/connection/mapper lineage.
+model source_delivery_occurrences {
+  id                           BigInt                      @id @default(autoincrement())
+  organization_id              String                      @db.Uuid
+  provider_id                  String                      @db.Uuid
+  source_instance_id           String                      @db.Uuid
+  source_revision_id           String                      @db.Uuid
+  run_id                       String                      @db.Uuid
+  page_id                      String                      @db.Uuid
+  record_index                 Int
+  source_record_id             String?                     @db.Uuid
+  semantic_observation_id      String?                     @db.Uuid
+  request_attempt_id           String                      @db.Uuid
+  source_type_key              String
+  source_adapter_version       String
+  normalized_contract_version  String
+  mapper_key                   String
+  mapper_version               String
+  identity_namespace_key       String
+  cursor_codec_version         String
+  cursor_generation            BigInt
+  connection_health_generation BigInt
+  supervisor_epoch_id          String                      @db.Uuid
+  connection_profile_id        String                      @db.Uuid
+  connection_revision_id       String                      @db.Uuid
+  collected_at                 DateTime                    @db.Timestamptz(6)
+  native_evidence_reference    String
+  disposition                  source_delivery_disposition
+  reason_code                  String?
+  created_at                   DateTime                    @default(now()) @db.Timestamptz(6)
+  quarantine_record            quarantine_records?         @relation("quarantine_records_delivery_occurrence")
+
+  @@unique([page_id, record_index], map: "source_delivery_occurrences_page_index_unique")
+  @@unique([id, organization_id], map: "source_delivery_occurrences_tenant_unique")
+  @@index([organization_id, source_instance_id, run_id], map: "source_delivery_occurrences_run_idx")
+  @@index([semantic_observation_id], map: "source_delivery_occurrences_observation_idx")
+}
+
+/// Sanitized, page-level processor feed. Scope-specific correlation is enforced in the migration.
+model source_processor_diagnostic_events {
+  id                                      String                             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                         String                             @db.Uuid
+  scope                                   source_diagnostic_scope
+  correlation_kind                        source_diagnostic_correlation_kind
+  event_kind                              String
+  severity                                source_diagnostic_severity
+  phase                                   String
+  safe_code                               String
+  occurred_at                             DateTime                           @db.Timestamptz(6)
+  duration_ms                             Int?
+  response_bytes                          Int?
+  counters_json                           Json                               @default("{}")
+  evidence_json                           Json                               @default("{}")
+  continuation_kind                       source_continuation_kind?
+  minimum_delay_seconds                   Int?
+  retry_delay_ms                          Int?
+  cursor_fingerprint                      String?
+  source_type_key                         String
+  source_adapter_version                  String
+  normalized_contract_version             String?
+  provider_id                             String?                            @db.Uuid
+  source_instance_id                      String?                            @db.Uuid
+  source_revision_id                      String?                            @db.Uuid
+  connection_profile_id                   String                             @db.Uuid
+  connection_revision_id                  String                             @db.Uuid
+  blocking_episode_id                     String?                            @db.Uuid
+  blocking_episode_connection_revision_id String?                            @db.Uuid
+  connection_test_job_id                  String?                            @db.Uuid
+  source_test_job_id                      String?                            @db.Uuid
+  run_id                                  String?                            @db.Uuid
+  page_id                                 String?                            @db.Uuid
+  request_attempt_id                      String?                            @db.Uuid
+  run_trigger                             import_trigger?
+  command_correlation_key                 String?
+  audit_event_id                          String?                            @db.Uuid
+  expires_at                              DateTime                           @db.Timestamptz(6)
+
+  @@unique([id, organization_id], map: "source_processor_diagnostic_events_tenant_unique")
+  @@index([organization_id, source_instance_id, occurred_at, id], map: "source_processor_diagnostic_events_source_feed_idx")
+  @@index([organization_id, connection_profile_id, occurred_at, id], map: "source_processor_diagnostic_events_connection_feed_idx")
+  @@index([organization_id, expires_at], map: "source_processor_diagnostic_events_retention_idx")
+}
+
+/// Restart-safe audit row for bounded raw-page, quarantine, diagnostic and attempt retention.
+model source_retention_executions {
+  id                        String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id           String                 @db.Uuid
+  state                     source_retention_state @default(running)
+  batch_size                Int
+  raw_page_cutoff_at        DateTime               @db.Timestamptz(6)
+  quarantine_cutoff_at      DateTime               @db.Timestamptz(6)
+  diagnostic_cutoff_at      DateTime               @db.Timestamptz(6)
+  request_attempt_cutoff_at DateTime               @db.Timestamptz(6)
+  resume_after_key          String?
+  pages_expired_count       Int                    @default(0)
+  quarantines_expired_count Int                    @default(0)
+  diagnostics_deleted_count Int                    @default(0)
+  attempts_compacted_count  Int                    @default(0)
+  attempts_deleted_count    Int                    @default(0)
+  failure_code              String?
+  sanitized_summary         String?
+  started_at                DateTime               @db.Timestamptz(6)
+  finished_at               DateTime?              @db.Timestamptz(6)
+
+  @@unique([id, organization_id], map: "source_retention_executions_tenant_unique")
+  @@index([organization_id, started_at], map: "source_retention_executions_started_idx")
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model provider_config_revisions {
   id                                                                                                                                                       String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -1343,42 +2053,45 @@ model quarantine_attempts {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model quarantine_records {
-  id                                                                                        String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organization_id                                                                           String                @db.Uuid
-  provider_id                                                                               String                @db.Uuid
-  source_record_id                                                                          String?               @db.Uuid
-  record_kind                                                                               source_record_kind
+  id                                                                                        String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                                           String                       @db.Uuid
+  provider_id                                                                               String                       @db.Uuid
+  source_record_id                                                                          String?                      @db.Uuid
+  record_kind                                                                               source_record_kind?
   external_id                                                                               String?
-  state                                                                                     quarantine_state      @default(open)
+  state                                                                                     quarantine_state             @default(open)
   reason_code                                                                               String
   field_path                                                                                String?
   sanitized_summary                                                                         String
   payload_json                                                                              Json?
-  retry_count                                                                               Int                   @default(0)
-  last_retry_at                                                                             DateTime?             @db.Timestamptz(6)
-  resolved_at                                                                               DateTime?             @db.Timestamptz(6)
-  expires_at                                                                                DateTime              @db.Timestamptz(6)
-  payload_expired_at                                                                        DateTime?             @db.Timestamptz(6)
-  created_at                                                                                DateTime              @default(now()) @db.Timestamptz(6)
-  run_id                                                                                    String                @db.Uuid
-  page_id                                                                                   String                @db.Uuid
+  retry_count                                                                               Int                          @default(0)
+  last_retry_at                                                                             DateTime?                    @db.Timestamptz(6)
+  resolved_at                                                                               DateTime?                    @db.Timestamptz(6)
+  expires_at                                                                                DateTime                     @db.Timestamptz(6)
+  payload_expired_at                                                                        DateTime?                    @db.Timestamptz(6)
+  created_at                                                                                DateTime                     @default(now()) @db.Timestamptz(6)
+  run_id                                                                                    String                       @db.Uuid
+  page_id                                                                                   String                       @db.Uuid
   record_index                                                                              Int
-  admin_alerts_admin_alerts_quarantine_idToquarantine_records                               admin_alerts[]        @relation("admin_alerts_quarantine_idToquarantine_records")
-  admin_alerts_admin_alerts_quarantine_id_organization_idToquarantine_records               admin_alerts[]        @relation("admin_alerts_quarantine_id_organization_idToquarantine_records")
-  operational_events_operational_events_quarantine_idToquarantine_records                   operational_events[]  @relation("operational_events_quarantine_idToquarantine_records")
-  operational_events_operational_events_quarantine_id_organization_idToquarantine_records   operational_events[]  @relation("operational_events_quarantine_id_organization_idToquarantine_records")
-  quarantine_attempts_quarantine_attempts_quarantine_idToquarantine_records                 quarantine_attempts[] @relation("quarantine_attempts_quarantine_idToquarantine_records")
-  quarantine_attempts_quarantine_attempts_quarantine_id_organization_idToquarantine_records quarantine_attempts[] @relation("quarantine_attempts_quarantine_id_organization_idToquarantine_records")
-  organizations                                                                             organizations         @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "quarantine_records_organization_id_organizations_id_fk")
-  import_pages_quarantine_records_page_idToimport_pages                                     import_pages          @relation("quarantine_records_page_idToimport_pages", fields: [page_id], references: [id], onUpdate: NoAction, map: "quarantine_records_page_id_import_pages_id_fk")
-  import_pages_quarantine_records_page_id_organization_id_run_idToimport_pages              import_pages          @relation("quarantine_records_page_id_organization_id_run_idToimport_pages", fields: [page_id, organization_id, run_id], references: [id, organization_id, run_id], onUpdate: NoAction, map: "quarantine_records_page_run_tenant_fk")
-  provider_sources_quarantine_records_provider_idToprovider_sources                         provider_sources      @relation("quarantine_records_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "quarantine_records_provider_id_provider_sources_id_fk")
-  provider_sources_quarantine_records_provider_id_organization_idToprovider_sources         provider_sources      @relation("quarantine_records_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "quarantine_records_provider_tenant_fk")
-  import_runs                                                                               import_runs           @relation(fields: [run_id], references: [id], onUpdate: NoAction, map: "quarantine_records_run_id_import_runs_id_fk")
-  source_records_quarantine_records_source_record_idTosource_records                        source_records?       @relation("quarantine_records_source_record_idTosource_records", fields: [source_record_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "quarantine_records_source_record_id_source_records_id_fk")
-  source_records_quarantine_records_source_record_id_organization_idTosource_records        source_records?       @relation("quarantine_records_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "quarantine_records_source_tenant_fk")
+  delivery_occurrence_id                                                                    BigInt?                      @unique(map: "quarantine_records_delivery_occurrence_unique")
+  admin_alerts_admin_alerts_quarantine_idToquarantine_records                               admin_alerts[]               @relation("admin_alerts_quarantine_idToquarantine_records")
+  admin_alerts_admin_alerts_quarantine_id_organization_idToquarantine_records               admin_alerts[]               @relation("admin_alerts_quarantine_id_organization_idToquarantine_records")
+  operational_events_operational_events_quarantine_idToquarantine_records                   operational_events[]         @relation("operational_events_quarantine_idToquarantine_records")
+  operational_events_operational_events_quarantine_id_organization_idToquarantine_records   operational_events[]         @relation("operational_events_quarantine_id_organization_idToquarantine_records")
+  quarantine_attempts_quarantine_attempts_quarantine_idToquarantine_records                 quarantine_attempts[]        @relation("quarantine_attempts_quarantine_idToquarantine_records")
+  quarantine_attempts_quarantine_attempts_quarantine_id_organization_idToquarantine_records quarantine_attempts[]        @relation("quarantine_attempts_quarantine_id_organization_idToquarantine_records")
+  organizations                                                                             organizations                @relation(fields: [organization_id], references: [id], onUpdate: NoAction, map: "quarantine_records_organization_id_organizations_id_fk")
+  import_pages_quarantine_records_page_idToimport_pages                                     import_pages                 @relation("quarantine_records_page_idToimport_pages", fields: [page_id], references: [id], onUpdate: NoAction, map: "quarantine_records_page_id_import_pages_id_fk")
+  import_pages_quarantine_records_page_id_organization_id_run_idToimport_pages              import_pages                 @relation("quarantine_records_page_id_organization_id_run_idToimport_pages", fields: [page_id, organization_id, run_id], references: [id, organization_id, run_id], onUpdate: NoAction, map: "quarantine_records_page_run_tenant_fk")
+  provider_sources_quarantine_records_provider_idToprovider_sources                         provider_sources             @relation("quarantine_records_provider_idToprovider_sources", fields: [provider_id], references: [id], onUpdate: NoAction, map: "quarantine_records_provider_id_provider_sources_id_fk")
+  provider_sources_quarantine_records_provider_id_organization_idToprovider_sources         provider_sources             @relation("quarantine_records_provider_id_organization_idToprovider_sources", fields: [provider_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "quarantine_records_provider_tenant_fk")
+  import_runs                                                                               import_runs                  @relation(fields: [run_id], references: [id], onUpdate: NoAction, map: "quarantine_records_run_id_import_runs_id_fk")
+  source_records_quarantine_records_source_record_idTosource_records                        source_records?              @relation("quarantine_records_source_record_idTosource_records", fields: [source_record_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "quarantine_records_source_record_id_source_records_id_fk")
+  source_records_quarantine_records_source_record_id_organization_idTosource_records        source_records?              @relation("quarantine_records_source_record_id_organization_idTosource_records", fields: [source_record_id, organization_id], references: [id, organization_id], onUpdate: NoAction, map: "quarantine_records_source_tenant_fk")
+  source_delivery_occurrences                                                               source_delivery_occurrences? @relation("quarantine_records_delivery_occurrence", fields: [delivery_occurrence_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "quarantine_records_delivery_occurrence_fk")
 
   @@unique([id, organization_id], map: "quarantine_records_id_organization_unique")
+  @@unique([delivery_occurrence_id, organization_id], map: "quarantine_records_delivery_occurrence_tenant_unique")
   @@unique([page_id, record_kind, record_index], map: "quarantine_records_page_kind_index_unique")
   @@index([organization_id, expires_at], map: "quarantine_records_expiry_idx")
   @@index([organization_id, state, created_at], map: "quarantine_records_organization_state_idx")
@@ -1601,8 +2314,21 @@ enum canonical_record_kind {
   catalog_asset
   ev_input
   pull
-  sale
+  market_event
   estimated_ev
+}
+
+enum connection_profile_state {
+  draft
+  active
+  disabled
+}
+
+enum connection_revision_state {
+  candidate
+  active
+  retired
+  revoked
 }
 
 enum estimated_ev_recomputation_result {
@@ -1628,6 +2354,7 @@ enum import_run_state {
 enum import_trigger {
   scheduled
   manual
+  continuation
   recovery
 }
 
@@ -1658,6 +2385,21 @@ enum operational_severity {
   critical
 }
 
+enum source_diagnostic_severity {
+  info
+  warning
+  critical
+}
+
+enum source_diagnostic_correlation_kind {
+  lifecycle
+  connection_test
+  source_test
+  run
+  page
+  connection_episode
+}
+
 enum operator_role {
   admin
   data_operator
@@ -1680,6 +2422,66 @@ enum provider_state {
   active
   disabled
   archived
+}
+
+enum provider_source_instance_state {
+  draft
+  paused
+  active
+  disabled
+  replaced
+}
+
+enum source_continuation_kind {
+  continue
+  poll_after
+}
+
+enum source_diagnostic_scope {
+  source
+  connection
+}
+
+enum source_delivery_disposition {
+  inserted
+  revised
+  duplicate
+  quarantined
+}
+
+enum source_request_attempt_state {
+  in_flight
+  captured
+  failed
+  connection_outcome_uncertain
+}
+
+enum source_request_operation_kind {
+  connection_test
+  source_test
+  page_read
+}
+
+enum source_retention_state {
+  running
+  succeeded
+  failed
+}
+
+enum source_test_job_state {
+  queued
+  running
+  succeeded
+  failed
+  cancelled
+  fenced
+}
+
+enum supervisor_epoch_state {
+  active
+  fenced_draining
+  released
+  expired
 }
 
 enum public_change_kind {
@@ -1731,7 +2533,7 @@ enum retention_execution_state {
 enum source_record_kind {
   catalog
   pull
-  sale
+  trade
 }
 
 enum source_record_outcome {

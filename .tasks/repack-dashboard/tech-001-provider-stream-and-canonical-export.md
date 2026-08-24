@@ -19,7 +19,7 @@ Replace the unlaunched aggregate provider boundary with one evidence-backed stre
 
 - Current `main` contains only the `frontend` and `admin` workspaces in `package.json`; the paths below marked post-merge arrive from PR #1.
 - Post-merge `packages/contracts/src/provider-feed.ts` expects one aggregate `catalog`/`pulls`/`sales` page with `external_id`, non-null source times, one cursor, and no catalog `entity` or `first_seen_at`.
-- Post-merge `packages/database/src/schema/ingestion.ts` uses `catalog`/`pull`/`sale`, one checkpoint per configuration revision, and a non-null `sourceTime`.
+- Post-merge `packages/database/src/schema/ingestion.ts` uses `catalog`/`pull`/`sale`, one cursor per configuration revision, and a non-null `sourceTime`.
 - Post-merge canonical revisions, relationships, catalog projections, and PackScout Estimated EV remain the foundation in `packages/database/src/schema/canonical.ts` and `packages/services/src/estimated-ev-projection-contracts.ts`.
 - `docs/engineering-rules.md` prohibits an unapproved compatibility shim, dual read, dual write, or provider-name branch in generic orchestration.
 
@@ -47,7 +47,7 @@ The [provider response-model draft](https://docs.google.com/document/d/1KEVYxWBj
 
 1. Create `ProviderStreamContractV2` as a discriminated union for `catalog`, `pulls`, and `trades` records.
 2. Parse the observed provider page wrapper inside its registered transport adapter and emit one normalized page for the requested stream.
-3. Run one import run and durable checkpoint per `(configurationRevisionId, stream)`; pack and card catalog records use the same `catalog` checkpoint.
+3. Run one import run and durable cursor per `(configurationRevisionId, stream)`; pack and card catalog records use the same `catalog` cursor.
 4. Remove `ProviderFeedPageV1`, its aggregate fixtures, and `sale` naming from the launch adapter in the same change.
 5. Reject any attempt to register the same source through both V1 and V2; do not add aliases from `external_id`, `updated_at`, or `sales`.
 
@@ -83,8 +83,8 @@ The [provider response-model draft](https://docs.google.com/document/d/1KEVYxWBj
 
 | Path | Change |
 |---|---|
-| `packages/database/src/schema/ingestion.ts` | Add per-stream run/checkpoint identity and V2 source fields; replace `sale` with `trade`. |
-| `packages/database/src/ingestion-page-batch-writer.ts` | Enforce event immutability, catalog revision behavior, page atomicity, and per-stream checkpoint advancement. |
+| `packages/database/src/schema/ingestion.ts` | Add per-stream run/cursor identity and V2 source fields; replace `sale` with `trade`. |
+| `packages/database/src/ingestion-page-batch-writer.ts` | Enforce event immutability, catalog revision behavior, page atomicity, and per-stream cursor advancement. |
 | `packages/services/src/catalog-projection-contracts.ts` | Rename provenance kinds and add V2 outer identity, first-seen, relationship, source-time, and canonical listing-URL candidate fields. |
 | `packages/services/src/event-projection-service.ts` | Project pull/trade identities and canonical lifecycle categories without provider-name branches. |
 | `apps/worker/src/provider-worker-composition.ts` | Schedule and resume one run per configured stream and remove aggregate-page assumptions. |
@@ -99,7 +99,7 @@ The [provider response-model draft](https://docs.google.com/document/d/1KEVYxWBj
 | Database quarantine repository/schema plus canonical/core schemas | Carry transport kind `trade`, outer identities, nullable source time, and stream-local evidence through persistence and quarantine. |
 | Admin read models, launch harnesses, fixtures, and all affected tests | Rename transport counters and filters, prove V1 removal, and retain canonical lifecycle category `sale` only where a trade event maps to that business meaning. |
 
-`trade` is the transport/source stream kind. `sale` remains a canonical lifecycle category produced from an accepted trade event; it must not remain as an inbound stream enum, checkpoint, run counter, or adapter selector.
+`trade` is the transport/source stream kind. `sale` remains a canonical lifecycle category produced from an accepted trade event; it must not remain as an inbound stream enum, cursor, run counter, or adapter selector.
 
 ### Export paths after PR #1 merges
 
@@ -127,7 +127,7 @@ The [provider response-model draft](https://docs.google.com/document/d/1KEVYxWBj
 
 1. Replace the `sale` enum value with `trade`; this is an unlaunched-boundary replacement, not a compatibility migration.
 2. Add `stream` to `import_runs`, `import_pages`, outcomes, and quarantine records; make the active-run uniqueness key `(organization_id, provider_id, stream)`.
-3. Change checkpoints to `(config_revision_id, stream)` and keep one `catalog` row for both catalog entity kinds.
+3. Change cursors to `(config_revision_id, stream)` and keep one `catalog` row for both catalog entity kinds.
 4. Store `record_id`, nullable `occurred_at`, `collected_at`, nullable `first_seen_at`, `entity`, `pack_id`, `card_id`, raw trade fields, and protected `data` explicitly.
 5. Generate one Prisma migration and update schema-validation snapshots; do not keep old columns populated by dual write or add fallback reads.
 
@@ -258,7 +258,7 @@ Chase selection first chooses the highest supported representative USD value, th
 ## Data Flow
 
 1. The worker fetches one observed page for one configured stream and validates its wrapper before any write.
-2. The page writer stores accepted protected evidence, quarantines invalid/conflicting records, and advances only that stream checkpoint in the same transaction.
+2. The page writer stores accepted protected evidence, quarantines invalid/conflicting records, and advances only that stream cursor in the same transaction.
 3. Projection services update catalog history or immutable event entities and enqueue affected Estimated EV recomputation.
 4. The export repository reads one stable canonical/config state and reserves a new monotonic observation ledger row.
 5. The worker hands `tech-002` either the immutable sanitized `CatalogSnapshotV1` or an unchanged-content freshness observation, then acknowledges the Convex outcome on the same ledger row.
@@ -269,7 +269,7 @@ Before publication against a new/replaced Convex deployment, the worker synchron
 
 ### Ingestion failures
 
-- Invalid page wrapper, cursor cycle, non-advancing cursor, or stream mismatch fails the page and leaves its checkpoint unchanged.
+- Invalid page wrapper, cursor cycle, non-advancing cursor, or stream mismatch fails the page and leaves its cursor unchanged.
 - Invalid individual records are quarantined with sanitized field paths while valid siblings follow the existing atomic page policy.
 - Repeating an immutable event with the same hash is idempotent; the same `record_id` with different content is `IMMUTABLE_EVENT_CONFLICT`.
 - Catalog changes create revisions; changed `first_seen_at`, entity kind, platform, or stable identity is `CATALOG_IDENTITY_CONFLICT`.
@@ -293,7 +293,7 @@ Before publication against a new/replaced Convex deployment, the worker synchron
 ### Automated coverage
 
 - Contract tests cover all three real wrappers, nullable timestamps/money, nested raw data, stream mismatch, and removed required identities.
-- Persistence integration tests cover per-stream checkpoints, catalog revisions, event duplicates/conflicts, quarantine, restart, and cursor non-advancement.
+- Persistence integration tests cover per-stream cursors, catalog revisions, event duplicates/conflicts, quarantine, restart, and cursor non-advancement.
 - Projection tests cover outer relationship precedence, lifecycle synonyms, unknown event types, and known/unknown currency references.
 - Export tests cover repeatable-read coherence, public-ID stability, USD-only values, EV derivation, deterministic chase/config selection, and public reason mapping.
 - Determinism tests compare clean rebuild and incremental canonical state byte-for-byte and assert identical manifest/content hashes.
@@ -308,9 +308,9 @@ Before publication against a new/replaced Convex deployment, the worker synchron
 
 - Scan every serialized snapshot fixture for raw `data`, organization/actor/run IDs, wallets, usernames, credentials, and quarantine detail.
 - Reconcile per-stream accepted, duplicate, quarantined, canonical, estimated/unavailable, and exported counts.
-- Exercise no-cursor history, durable incrementals, restart from every stream checkpoint, and one catalog correction.
+- Exercise no-cursor history, durable incrementals, restart from every stream cursor, and one catalog correction.
 - Verify no V1 aggregate parser, fixture, alias export, provider-name branch, or simultaneous V1/V2 registration remains.
-- Verify transport `trade` reaches all run/checkpoint/quarantine/admin counters while mapped canonical lifecycle `sale` remains a distinct business category.
+- Verify transport `trade` reaches all run/cursor/quarantine/admin counters while mapped canonical lifecycle `sale` remains a distinct business category.
 
 ### Provider evidence record
 
@@ -333,7 +333,7 @@ No product decisions remain for this slice.
 ### Evidence prerequisites
 
 - The real provider wrapper, paths, authentication, page-size behavior, termination signal, and rate-limit headers are not in the draft; fixtures must lock them before adapter implementation.
-- This spec implements one checkpoint per stream. If sanitized real pages prove a single cursor shared across all three streams, stop before migration and revise the technical contract; do not reinterpret it silently.
+- This spec implements one cursor per stream. If sanitized real pages prove a single cursor shared across all three streams, stop before migration and revise the technical contract; do not reinterpret it silently.
 - Provider ordering, cursor expiry, full-history start, and correction delivery require preproduction evidence before task `001` can complete.
 - The source draft contains real personal fields inside `data`; fixture sanitization must preserve structure while irreversibly replacing identities and secrets.
 

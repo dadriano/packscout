@@ -9,6 +9,7 @@ import {
   describeProductUserAccessState,
   describeProductUserEstimatedEv,
   describeProductUserIdentity,
+  describeProductUserRepackAvailability,
   formatProductUserAwaitingCount,
   listProductUserAccessQueueRequestSchema,
   listProductUsersRequestSchema,
@@ -16,6 +17,7 @@ import {
   PRODUCT_USER_DIRECTORY_MAX_PAGE_SIZE,
   PRODUCT_USER_MAX_SEARCH_LENGTH,
   PRODUCT_USER_MAX_SUBJECT_LENGTH,
+  productUserRepackAvailabilities,
 } from "./product-users.ts";
 
 const subject = "https://auth.example.test/|did:example:1234567890abcdefghij";
@@ -24,10 +26,7 @@ test("listing requests default to the bounded page size and reject over-large on
   const defaulted = listProductUsersRequestSchema.parse({});
   assert.deepEqual(defaulted, { limit: PRODUCT_USER_DIRECTORY_MAX_PAGE_SIZE });
 
-  assert.equal(
-    listProductUsersRequestSchema.parse({ limit: 5 }).limit,
-    5,
-  );
+  assert.equal(listProductUsersRequestSchema.parse({ limit: 5 }).limit, 5);
   for (const limit of [0, -1, 21, 500, 1.5]) {
     assert.equal(
       listProductUsersRequestSchema.safeParse({ limit }).success,
@@ -113,7 +112,10 @@ test("detail requests demand one bounded subject and nothing else", () => {
     { subject: "a".repeat(PRODUCT_USER_MAX_SUBJECT_LENGTH + 1) },
     { subject, savedRepackId: "40000000-0000-5000-8000-000000000001" },
   ]) {
-    assert.equal(productUserDetailRequestSchema.safeParse(request).success, false);
+    assert.equal(
+      productUserDetailRequestSchema.safeParse(request).success,
+      false,
+    );
   }
 });
 
@@ -137,8 +139,20 @@ test("estimated value reads as money, return, and confidence", () => {
   );
 });
 
+test("saved repacks preserve and label the four public availability states", () => {
+  assert.deepEqual(
+    productUserRepackAvailabilities.map((availability) =>
+      describeProductUserRepackAvailability(availability),
+    ),
+    ["Available now", "Unavailable", "Availability unknown", "Sold out"],
+  );
+});
+
 test("short subject keys are shown in full and empty keys stay labelled", () => {
-  assert.equal(boundedProductUserSubjectLabel("did:example:42"), "did:example:42");
+  assert.equal(
+    boundedProductUserSubjectLabel("did:example:42"),
+    "did:example:42",
+  );
   assert.equal(boundedProductUserSubjectLabel("opaque-key"), "opaque-key");
   assert.equal(boundedProductUserSubjectLabel(""), "Unrecorded identity");
 });

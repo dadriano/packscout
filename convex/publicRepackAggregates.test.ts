@@ -58,7 +58,7 @@ function searchRow(
     normalizedName: publicRepackId.replaceAll("-", " "),
     normalizedVendor: "vendor a",
     normalizedCategories: sorted.map(([, label]) => label.toLowerCase()).join(" "),
-    availability: "active",
+    availability: "available",
     priceMinor: 10_000,
     priceNullRank: 0,
     vendorReportedGrossEvMinor: null,

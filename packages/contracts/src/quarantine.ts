@@ -34,7 +34,7 @@ export interface QuarantineEntrySummary {
   readonly platformKey: string;
   readonly runId: string;
   readonly pageId: string;
-  readonly recordKind: "catalog" | "pull" | "sale";
+  readonly recordKind: "catalog" | "pull" | "trade" | "unknown";
   readonly recordIndex: number;
   readonly externalId: string | null;
   readonly reasonCode: string;

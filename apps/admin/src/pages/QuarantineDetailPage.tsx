@@ -7,6 +7,7 @@ import { QuarantineStatus, dateTime, humanize } from "../components/operations/O
 import { PageHeader } from "../components/PageHeader";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useConfirm } from "../providers/confirm";
+import { useSession } from "../providers/session";
 import { useToast } from "../providers/toast";
 
 function outcomeMessage(outcome: QuarantineRetryOutcome["outcome"]): string {
@@ -21,7 +22,10 @@ function outcomeMessage(outcome: QuarantineRetryOutcome["outcome"]): string {
 export function QuarantineDetailPage() {
   const { quarantineId = "" } = useParams();
   const { confirm } = useConfirm();
+  const { status } = useSession();
   const { showToast } = useToast();
+  const canRetry = status.phase === "authenticated" &&
+    status.session.permissions.includes("imports:retry");
   const [entry, setEntry] = useState<QuarantineEntryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,8 +81,9 @@ export function QuarantineDetailPage() {
         eyebrow={`Quarantine / ${entry.platformKey}`}
         title={entry.externalId ?? `${humanize(entry.recordKind)} record ${entry.recordIndex + 1}`}
         description={`${entry.reasonCode} · ${entry.fieldPath ?? "Record-level failure"}`}
-        actions={<><Link className="admin-button admin-button-secondary" to={`/runs/${entry.runId}`}>Origin run</Link>{retryable ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retry()}>Retry record</button> : null}</>}
+        actions={<><Link className="admin-button admin-button-secondary" to={`/runs/${entry.runId}`}>Origin run</Link>{retryable && canRetry ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retry()}>Retry record</button> : null}</>}
       />
+      {!canRetry ? <aside className="source-operator-boundary"><strong>Read-only quarantine evidence</strong><p>Your role cannot retry this selected record.</p></aside> : null}
       {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => { setLoading(true); setRefreshIndex((value) => value + 1); }}>Try again</button></div> : null}
       {outcome ? <section className={`ops-retry-result${outcome.outcome === "failed" || outcome.outcome === "expired" ? " is-failure" : ""}`} aria-live={outcome.outcome === "failed" ? "assertive" : "polite"}><strong>{humanize(outcome.outcome)}</strong><p>{outcomeMessage(outcome.outcome)}</p></section> : null}
 

@@ -26,6 +26,14 @@ import {
   type OperationalHealthRouterDependencies,
 } from "./routes/operational-health.ts";
 import {
+  createProviderSourcesRouter,
+  type ProviderSourcesRouterDependencies,
+} from "./routes/provider-sources.ts";
+import {
+  createProviderSourceOperationsRouter,
+  type ProviderSourceOperationsRouterDependencies,
+} from "./routes/provider-source-operations.ts";
+import {
   createBackgroundWorkRouter,
   type BackgroundWorkRouterDependencies,
 } from "./routes/background-work.ts";
@@ -75,6 +83,14 @@ export interface AdminAppDependencies {
     OperationalHealthRouterDependencies,
     "auth" | "cookiePolicy"
   >;
+  providerSources?: Omit<
+    ProviderSourcesRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  providerSourceOperations?: Omit<
+    ProviderSourceOperationsRouterDependencies,
+    "auth" | "cookiePolicy"
+  >;
   backgroundWork?: Omit<
     BackgroundWorkRouterDependencies,
     "auth" | "cookiePolicy" | "sameOrigin"
@@ -88,6 +104,13 @@ export interface AdminAppDependencies {
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
+  /**
+   * Deployments without the source-connection keys run with source
+   * administration deliberately unconfigured. The provider-source routes are
+   * then mounted with a stable "unconfigured" answer so clients parse an
+   * explicit capability state instead of a generic 404.
+   */
+  sourceAdministrationUnconfigured?: boolean;
   messages?: Omit<
     MessagesRouterDependencies,
     "auth" | "cookiePolicy" | "sameOrigin"
@@ -100,6 +123,16 @@ const apiNotFound: RequestHandler = (_request, response) => {
   response.status(404).json({
     error: "Admin API route not found.",
     code: "API_ROUTE_NOT_FOUND",
+  });
+};
+
+const sourceAdministrationUnconfigured: RequestHandler = (
+  _request,
+  response,
+) => {
+  response.status(503).json({
+    error: "Source administration is not configured on this deployment.",
+    code: "SOURCE_ADMIN_UNCONFIGURED",
   });
 };
 
@@ -253,6 +286,17 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         }),
       );
     }
+    if (dependencies.providerSources) {
+      app.use(
+        "/api/provider-sources",
+        createProviderSourcesRouter({
+          ...dependencies.providerSources,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
     if (dependencies.messages) {
       app.use(
         "/api/messages",
@@ -261,6 +305,16 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
           auth: service,
           cookiePolicy,
           sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.providerSourceOperations) {
+      app.use(
+        "/api/provider-source-operations",
+        createProviderSourceOperationsRouter({
+          ...dependencies.providerSourceOperations,
+          auth: service,
+          cookiePolicy,
         }),
       );
     }
@@ -287,6 +341,13 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         }),
       );
     }
+  }
+  if (dependencies.sourceAdministrationUnconfigured) {
+    app.use("/api/provider-sources", sourceAdministrationUnconfigured);
+    app.use(
+      "/api/provider-source-operations",
+      sourceAdministrationUnconfigured,
+    );
   }
   app.use("/api", apiNotFound);
   app.use(handleApiError);

@@ -47,7 +47,7 @@ function validPage(platform: string) {
       },
     ],
     pulls: [],
-    sales: [],
+    trades: [],
     next_cursor: "fixture-complete",
     has_more: false,
   };
@@ -257,7 +257,7 @@ test("provider lifecycle is versioned, masked, tenant-scoped, and non-importing"
       checkedAt: now.toISOString(),
       latencyMs: 1,
       responseStatus: 200,
-      recordCounts: { catalog: 1, pulls: 0, sales: 0 },
+      recordCounts: { catalog: 1, pulls: 0, trades: 0 },
       hasMore: false,
       nextCursorPresent: true,
       sanitizedCode: null,

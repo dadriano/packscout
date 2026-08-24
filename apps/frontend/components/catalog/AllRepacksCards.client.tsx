@@ -15,6 +15,7 @@ import {
   presentTopChaseValue,
 } from "@/lib/metric-presentation";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
+import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import styles from "./AllRepacksCards.module.css";
 
 type AllRepacksCardsProps = Readonly<{
@@ -51,6 +52,7 @@ function RepackCard({
     (repack.price.usdComparison.status === "available"
       ? repack.price.usdComparison.value
       : null);
+  const availability = presentPackAvailability(repack.availability);
 
   return (
     <article className={styles.card} data-selected={selected ? "true" : "false"}>
@@ -68,6 +70,13 @@ function RepackCard({
         <span className={styles.identity}>
           <span className={styles.vendor}>{repack.vendorDisplayName}</span>
           <span className={styles.name}>{repack.name}</span>
+          <span
+            className={styles.availability}
+            data-state={repack.availability}
+          >
+            {availability.label}
+            <span className="sr-only">. {availability.description}</span>
+          </span>
           <span className={styles.category}>
             {repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}
           </span>

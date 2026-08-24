@@ -13,7 +13,7 @@ PackScout can backfill and incrementally import provider cursor pages without lo
 
 ## Context
 
-The first adapter performs an HTTP GET with `platform` and an opaque cursor after the first accepted page. A new provider starts without a cursor and drains every available page until it reaches the provider head. Later runs resume from the durable checkpoint. Raw source pages must be durable before the cursor advances, and individual record failures must not trap the provider on a poison page.
+The first adapter performs an HTTP GET with `platform` and an opaque cursor after the first accepted page. A new provider starts without a cursor and drains every available page until it reaches the provider head. Later runs resume from the durable cursor. Raw source pages must be durable before the cursor advances, and individual record failures must not trap the provider on a poison page.
 
 Runs may start from the five-minute scheduler or from an authorized manual action. The same workflow, validation, idempotency, and audit behavior applies to both. Exactly one run may execute for a provider configuration at a time.
 
@@ -23,7 +23,7 @@ Runs may start from the five-minute scheduler or from an authorized manual actio
 
 - Create run states `queued`, `running`, `succeeded`, `incomplete`, and `failed`, with origin `scheduled` or `manual`, configuration revision, actor when present, start and finish times, counters, and bounded error summary.
 - Acquire exclusive execution ownership per provider configuration before the first request. Return a stable conflict for a manual request when a run is active and coalesce scheduled triggers without starting overlapping work.
-- Start a new configuration without a cursor; use the stored opaque checkpoint for every later run; never derive a cursor from timestamps, IDs, or source payload content.
+- Start a new configuration without a cursor; use the stored opaque cursor for every later run; never derive a cursor from timestamps, IDs, or source payload content.
 - Send platform and cursor through the registered adapter with the configured authentication mode, bounded request time, bounded retries for transient failures, and explicit classification of authentication, rate-limit, timeout, unreachable, status, JSON, and contract failures.
 
 ### Page durability and progress
@@ -47,7 +47,7 @@ No direct browser behavior in this task. Operator surfaces later receive stable 
 
 The run service accepts an enabled configuration ID and origin plus an authenticated actor for manual work. It returns a run identity or an active-run conflict. The adapter receives endpoint, platform, current cursor presence, and server-side authentication context and returns a validated provider page.
 
-For each page the workflow publishes durable facts in this order: raw page accepted, record outcomes recorded, canonical writes committed, cursor checkpoint advanced, page completed. Projection services receive protected source-record references plus classified adapter candidates. They do not make provider requests or own cursor state.
+For each page the workflow publishes durable facts in this order: raw page accepted, record outcomes recorded, canonical writes committed, cursor advanced, page completed. Projection services receive protected source-record references plus classified adapter candidates. They do not make provider requests or own cursor state.
 
 ## Acceptance Criteria
 
@@ -60,7 +60,7 @@ For each page the workflow publishes durable facts in this order: raw page accep
 ## Spec Compliance
 
 - `ProviderImportService` owns one workflow for manual and scheduled requests, database-enforced active-run exclusivity, lease claim/reclaim, immutable configuration resolution, bounded transient retry, cursor walking, safe terminal classification, and provider-head completion.
-- The Prisma-backed run repository persists actors, leases, attempts, request/retry counters, checkpoints, head state, and bounded failures. Its partial unique index serializes queued/running work and tenant-scoped compare-and-set operations reject foreign or stale workers.
+- The Prisma-backed run repository persists actors, leases, attempts, request/retry counters, cursors, head state, and bounded failures. Its partial unique index serializes queued/running work and tenant-scoped compare-and-set operations reject foreign or stale workers.
 - The page planner validates exact mapper/source correspondence and delegates provider-neutral candidates through a projection port. Valid-but-unmappable records store protected source evidence once and link quarantine/outcome rows; invalid envelopes use stable page/kind/record-index identity with nullable source IDs.
-- `commitPage` atomically writes raw evidence, valid outcomes, linked quarantines, canonical commands, run counters, and the opaque next cursor only under active worker ownership. Crash-after-commit recovery resumes from the durable checkpoint without replaying source history.
+- `commitPage` atomically writes raw evidence, valid outcomes, linked quarantines, canonical commands, run counters, and the opaque next cursor only under active worker ownership. Crash-after-commit recovery resumes from the durable cursor without replaying source history.
 - Integration tests cover two-page backfill/resume, overlap/coalescing, tenant denial, disable-after-start, mixed page outcomes, ownership loss, bounded retry, distinct sanitized transport/cursor/persistence failures, and no raw/audit leakage. Services 43/43 and database 8/8 tests plus lint, typecheck, migration, boundary, dependency, script, ratchet, and diff checks pass.

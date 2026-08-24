@@ -20,6 +20,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import {
   isValidRepackSearchRow,
+  normalizeLegacyPackAvailability,
   repackSearchRowMatchesDetail,
   type RepackSearchRow,
 } from "./publicRepackValidation";
@@ -134,7 +135,13 @@ async function loadProviderRows(
       byteCount: shard.byteCount,
       contentHash: shard.contentHash,
     });
-    for (const row of shard.rows) {
+    for (const storedRow of shard.rows) {
+      // Shard hashes above cover the stored bytes, so rows persisted before
+      // the availability rename are translated only after those checks.
+      const row = {
+        ...storedRow,
+        availability: normalizeLegacyPackAvailability(storedRow.availability),
+      };
       if (
         !isValidRepackSearchRow(row) ||
         (priorPublicRepackId !== null &&
@@ -375,9 +382,16 @@ export async function loadProviderRepackDetail(
     )
     .take(2);
   const document = documents[0];
+  // Stored details may predate the availability rename; translate before the
+  // strict public parse so legacy releases stay readable.
   const parsed = document === undefined
     ? null
-    : publicRepackDetailSchema.safeParse(document.detail);
+    : publicRepackDetailSchema.safeParse({
+        ...document.detail,
+        availability: normalizeLegacyPackAvailability(
+          document.detail.availability,
+        ),
+      });
   const vendor = catalog.vendorByReleaseId.get(release._id);
   const releaseCategoryIds = catalog.categoryIdsByReleaseId.get(release._id);
   return documents.length === 1 &&

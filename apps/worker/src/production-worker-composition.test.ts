@@ -36,6 +36,15 @@ test("production composition wires provider and manifest lanes without legacy ca
         retentionBatchSize: 10,
         retentionMaximumBatchesPerCycle: 2,
         retentionOrganizationDiscoveryLimit: 10,
+        sourceSupervisor: {
+          actorPseudonymKey: new Uint8Array(32).fill(1),
+          databaseUrl: "postgresql://unused.invalid/packscout",
+          environment: "test",
+          sourceConnectionConfigurationKey: new Uint8Array(32).fill(8),
+          sourceConnectionConfigurationKeyVersion: 1,
+          sourceDatabaseVolumePath: "/tmp",
+          workerId: "production-composition-worker",
+        },
         runHeartbeatStaleAfterMilliseconds: 300_000,
         scheduleClaimLeaseMilliseconds: 30_000,
         welcomeDispatchBatchSize: 10,
@@ -95,6 +104,13 @@ test("production composition wires provider and manifest lanes without legacy ca
     };
     const runtime = createProductionWorkerRuntime(input);
     assert.ok(runtime instanceof ProviderWorkerRuntime);
+    // Without the supervisor settings the lane is skipped, not fatal.
+    assert.ok(
+      createProductionWorkerRuntime({
+        ...input,
+        provider: { ...input.provider, sourceSupervisor: undefined },
+      }) instanceof ProviderWorkerRuntime,
+    );
     assert.throws(
       () => createProductionWorkerRuntime({
         ...input,

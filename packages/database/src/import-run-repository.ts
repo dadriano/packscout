@@ -7,7 +7,7 @@ import {
 } from "./database.ts";
 import type { RunCounters } from "./pipeline-types.ts";
 
-export type PersistedImportTrigger = "scheduled" | "manual";
+export type PersistedImportTrigger = "scheduled" | "manual" | "continuation";
 export type PersistedImportRunState =
   | "queued"
   | "running"
@@ -70,7 +70,7 @@ interface ImportRunRow {
   readonly id: string;
   readonly organization_id: string;
   readonly provider_id: string;
-  readonly config_revision_id: string;
+  readonly config_revision_id: string | null;
   readonly trigger: PersistedImportTrigger | "recovery";
   readonly state: PersistedImportRunState;
   readonly requested_cursor: string | null;
@@ -265,12 +265,13 @@ export class PrismaImportRunRepository {
       const [candidate] = await transaction.$queryRaw<{ id: string }[]>(Prisma.sql`
         select id
         from import_runs
-        where state = 'queued'::import_run_state
+        where source_instance_id is null
+          and (state = 'queued'::import_run_state
            or (
              state = 'running'::import_run_state
              and lease_expires_at is not null
              and lease_expires_at <= ${input.claimedAt}
-           )
+           ))
         order by created_at asc, id asc
         for update skip locked
         limit 1
@@ -466,6 +467,7 @@ export class PrismaImportRunRepository {
       where: {
         organization_id: organizationId,
         provider_id: providerId,
+        source_instance_id: null,
         state: { in: ["queued", "running"] },
       },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
@@ -482,6 +484,7 @@ export class PrismaImportRunRepository {
       where: {
         organization_id: organizationId,
         id: runId,
+        source_instance_id: null,
       },
     });
     return row ? this.toRun(row) : null;
@@ -497,6 +500,7 @@ export class PrismaImportRunRepository {
       from import_runs
       where organization_id = cast(${organizationId} as uuid)
         and id = cast(${runId} as uuid)
+        and source_instance_id is null
       for update
     `);
     if (!locked) return null;
@@ -511,6 +515,9 @@ export class PrismaImportRunRepository {
   }
 
   private toRun(row: ImportRunRow): PersistedImportRun {
+    if (row.config_revision_id === null) {
+      throw new TypeError("Legacy import repository cannot load a source-pinned run.");
+    }
     return {
       id: row.id,
       organizationId: row.organization_id,

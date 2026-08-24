@@ -119,7 +119,10 @@ const emailUser = {
   lastSeenAt: "2026-08-19T12:00:00.000Z",
 } as const;
 
-async function withServer(app: Express, run: (baseUrl: string) => Promise<void>) {
+async function withServer(
+  app: Express,
+  run: (baseUrl: string) => Promise<void>,
+) {
   const server = app.listen(0, "127.0.0.1");
   try {
     await new Promise<void>((resolve, reject) => {
@@ -146,7 +149,7 @@ const savedRepacks = [
     savedAt: "2026-08-19T12:00:02.000Z",
     name: "Mythic Pokemon Gacha",
     vendorDisplayName: "Collector Crypt",
-    availability: "active",
+    availability: "available",
     estimatedEv: {
       evDollarsMinorUnits: 12_500,
       grossReturnBasisPoints: 10_500,
@@ -258,7 +261,9 @@ function createDecisionDirectory(
  * subject, the flip is idempotent, and the authoritative result — not the
  * requested one — comes back.
  */
-function createStandingDirectory(initial: Record<string, "active" | "suspended">) {
+function createStandingDirectory(
+  initial: Record<string, "active" | "suspended">,
+) {
   const standings = { ...initial };
   return async function setProductUserStanding(
     request: StandingRequest,
@@ -357,7 +362,11 @@ function createHarness(
   const auth: ProductUsersRouterDependencies["auth"] = {
     async resolveSession({ sessionToken }) {
       if (!sessionToken) {
-        throw new AuthServiceError("AUTH_REQUIRED", "Sign in to continue.", 401);
+        throw new AuthServiceError(
+          "AUTH_REQUIRED",
+          "Sign in to continue.",
+          401,
+        );
       }
       return sessions[sessionToken] ?? admin;
     },
@@ -633,7 +642,10 @@ test("page requests stay bounded and validated", async () => {
         body: JSON.stringify(body),
       });
       assert.equal(response.status, 422);
-      assert.equal((await response.json()).code, "INVALID_PRODUCT_USER_REQUEST");
+      assert.equal(
+        (await response.json()).code,
+        "INVALID_PRODUCT_USER_REQUEST",
+      );
     }
 
     // An omitted limit uses the bounded default rather than an unbounded read.
@@ -796,7 +808,10 @@ test("detail requests are validated and the surface stays read-only", async () =
         body: JSON.stringify(body),
       });
       assert.equal(response.status, 422);
-      assert.equal((await response.json()).code, "INVALID_PRODUCT_USER_REQUEST");
+      assert.equal(
+        (await response.json()).code,
+        "INVALID_PRODUCT_USER_REQUEST",
+      );
     }
 
     // No method on this surface can change what a user has saved.
@@ -804,7 +819,9 @@ test("detail requests are validated and the surface stays read-only", async () =
       const response = await fetch(path, {
         method,
         headers: headers(cookiePolicy.name, "admin-session"),
-        ...(method === "GET" ? {} : { body: JSON.stringify({ subject: emailUser.subject }) }),
+        ...(method === "GET"
+          ? {}
+          : { body: JSON.stringify({ subject: emailUser.subject }) }),
       });
       assert.equal(response.status, 404);
     }
@@ -818,13 +835,15 @@ test("an over-long saved-item collection is truncated to the per-kind cap", asyn
     publicRepackId: `40000000-0000-5000-8000-${String(index).padStart(12, "0")}`,
     savedAt: "2026-08-19T12:00:00.000Z",
   }));
-  const { app, cookiePolicy } = createHarness(undefined, async () =>
-    ({
-      user: emailUser,
-      catalogAvailable: true,
-      savedRepacks: oversized,
-      savedCollectibles: [],
-    }) as unknown as ProductUserDetail,
+  const { app, cookiePolicy } = createHarness(
+    undefined,
+    async () =>
+      ({
+        user: emailUser,
+        catalogAvailable: true,
+        savedRepacks: oversized,
+        savedCollectibles: [],
+      }) as unknown as ProductUserDetail,
   );
   await withServer(app, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/product-users/detail`, {
@@ -892,7 +911,11 @@ test("integration failures map to stable codes without leaking the upstream", as
   ];
   for (const [code, status] of failures) {
     const { app, cookiePolicy } = createHarness(async () => {
-      throw new ProductUserDirectoryError(code, "The directory refused.", status);
+      throw new ProductUserDirectoryError(
+        code,
+        "The directory refused.",
+        status,
+      );
     });
     await withServer(app, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/product-users/list`, {
@@ -1011,7 +1034,10 @@ test("suspending and reinstating report the authoritative standing and converge 
 
     const suspended = await set("suspended");
     assert.equal(suspended.status, 200);
-    assert.deepEqual(Object.keys(suspended.payload).sort(), ["changed", "user"]);
+    assert.deepEqual(Object.keys(suspended.payload).sort(), [
+      "changed",
+      "user",
+    ]);
     assert.equal(suspended.payload.changed, true);
     assert.equal(suspended.payload.user.standing, "suspended");
     // The record is the same bounded projection every other route returns.
@@ -1194,7 +1220,10 @@ test("a committed standing change is reported as committed even when the audit w
     assert.equal(suspended.status, 200);
     assert.equal(suspended.payload.user.standing, "suspended");
     assert.equal(suspended.payload.changed, true);
-    assert.deepEqual(Object.keys(suspended.payload).sort(), ["changed", "user"]);
+    assert.deepEqual(Object.keys(suspended.payload).sort(), [
+      "changed",
+      "user",
+    ]);
 
     // The commit really stuck: the directory now holds the new standing, and a
     // repeat converges instead of claiming a second change.
@@ -1244,7 +1273,11 @@ test("a refused change with an unwritable trail is still refused, and the gap is
   });
   assert.equal(standingRequests.length, 1);
   assert.deepEqual(auditFailures, [
-    { action: "product_user.reinstate", outcome: "failure", afterCommit: false },
+    {
+      action: "product_user.reinstate",
+      outcome: "failure",
+      afterCommit: false,
+    },
   ]);
 });
 
@@ -1293,7 +1326,10 @@ test("standing requests are validated and no method here can delete a user", asy
         body: JSON.stringify(body),
       });
       assert.equal(response.status, 422);
-      assert.equal((await response.json()).code, "INVALID_PRODUCT_USER_REQUEST");
+      assert.equal(
+        (await response.json()).code,
+        "INVALID_PRODUCT_USER_REQUEST",
+      );
     }
 
     // The surface offers exactly one reversible control and no removal.

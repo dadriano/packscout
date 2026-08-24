@@ -31,8 +31,10 @@ import {
 } from "./publicCatalogManifestReadModel";
 import { attachHeatToCatalogManifestDetails } from "./publicCatalogHeatReadModel";
 import {
+  availableRepackRows,
   contextualFacets,
   dashboardKpis,
+  deterministicVisibleSelection,
   matchingRepackRows,
   repackSummaries,
   selectionsAreKnown,
@@ -119,13 +121,11 @@ export const getDashboardBundle = query({
       "",
       active.catalog.categoryByPublicId,
     );
-    // Opportunities are actionable buys, so they stay active-only even when the
-    // caller opted into seeing sold-out repacks in the counts and summaries.
-    const opportunityRows = [...matchingRows]
+    // Opportunities are actionable buys, so every non-available state stays
+    // visible only in the complete catalog and out of current rankings.
+    const opportunityRows = availableRepackRows(matchingRows)
       .filter(
-        (row) =>
-          row.availability === "active" &&
-          row.packScoutEvDollarsMinor !== null,
+        (row) => row.packScoutEvDollarsMinor !== null,
       )
       .sort((left, right) =>
         compareRepackRows(left, right, {
@@ -147,11 +147,10 @@ export const getDashboardBundle = query({
       baseDetails,
       currentTime,
     );
-    const selectedRepack =
-      details.find(
-        (detail) =>
-          detail.publicRepackId === request.value.selectedPublicRepackId,
-      ) ?? details[0] ?? null;
+    const selectedRepack = deterministicVisibleSelection(
+      details,
+      request.value.selectedPublicRepackId,
+    );
 
     const data: DashboardBundle = {
       metadata: active.metadata,
@@ -274,11 +273,10 @@ export const listPublicRepacks = query({
       baseDetails,
       currentTime,
     );
-    const selectedRepack =
-      details.find(
-        (detail) =>
-          detail.publicRepackId === request.value.selectedPublicRepackId,
-      ) ?? details[0] ?? null;
+    const selectedRepack = deterministicVisibleSelection(
+      details,
+      request.value.selectedPublicRepackId,
+    );
     const pageEnd = pagination.offset + pageRows.length;
     const nextCursor =
       pageEnd < matchingRows.length
@@ -478,7 +476,7 @@ async function desiredCollectibleMatches(
     collectible,
   );
   if (desiredChases === null) return null;
-  const matchingRows = rows.filter(
+  const matchingRows = availableRepackRows(rows).filter(
     (row) =>
       desiredChases.has(row.publicRepackId) &&
       rowMatchesFilters(row, input.filters, {

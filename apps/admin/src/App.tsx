@@ -3,6 +3,7 @@ import {
   Outlet,
   Route,
   useLocation,
+  useParams,
 } from "react-router-dom";
 import * as React from "react";
 import { AdminLayout } from "./layouts/AdminLayout";
@@ -24,6 +25,7 @@ import { RunDetailPage } from "./pages/RunDetailPage";
 import { RunsPage } from "./pages/RunsPage";
 import { AlertDetailPage } from "./pages/AlertDetailPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { SourceConfigurationPage } from "./pages/SourceConfigurationPage";
 import { WorkerFleetPage } from "./pages/WorkerFleetPage";
 import { useSession } from "./providers/session";
 import { MessageDetailPage } from "./pages/MessageDetailPage";
@@ -89,6 +91,11 @@ function ProtectedRoute() {
   return <Outlet />;
 }
 
+function ProviderDetailRoute() {
+  const { providerId = "" } = useParams();
+  return <ProviderDetailPage key={providerId} />;
+}
+
 export const appRoutes = (
   <React.Fragment>
     <Route path="/login" element={<LoginRoute />} />
@@ -103,8 +110,9 @@ export const appRoutes = (
         <Route path="allowlist" element={<BetaAllowlistPage />} />
         <Route path="providers" element={<ProvidersPage />} />
         <Route path="providers/new" element={<ProviderFormPage />} />
-        <Route path="providers/:providerId" element={<ProviderDetailPage />} />
+        <Route path="providers/:providerId" element={<ProviderDetailRoute />} />
         <Route path="providers/:providerId/edit" element={<ProviderFormPage />} />
+        <Route path="source-configuration" element={<SourceConfigurationPage />} />
         <Route path="operations" element={<OperationsPage />} />
         <Route path="runs" element={<RunsPage />} />
         <Route path="runs/:runId" element={<RunDetailPage />} />

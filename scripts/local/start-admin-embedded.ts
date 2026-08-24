@@ -180,9 +180,6 @@ async function main(): Promise<void> {
       importOperations: createAdminImportOperationsRuntime({
         database: harness.database,
         actorPseudonymKey: providerActorKey,
-        credentialKey: providerCredentialKey,
-        environment: "local",
-        operational,
       }),
       backgroundWork: createAdminBackgroundWorkRuntime({
         database: harness.database,

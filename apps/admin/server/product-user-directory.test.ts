@@ -46,7 +46,10 @@ function recordingFetch(
   handler: (call: RecordedCall) => Response | Promise<Response>,
 ) {
   const calls: RecordedCall[] = [];
-  const implementation = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const implementation = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
     const call = { url: String(input), init };
     calls.push(call);
     return handler(call);
@@ -105,7 +108,10 @@ test("the directory read is a server-to-server POST carrying the bearer secret",
 
   const [call] = calls;
   assert.ok(call);
-  assert.equal(call.url, "https://backend.example.test/admin/product-users/list");
+  assert.equal(
+    call.url,
+    "https://backend.example.test/admin/product-users/list",
+  );
   assert.equal(call.init?.method, "POST");
   const headers = call.init?.headers as Record<string, string>;
   assert.equal(headers.authorization, `Bearer ${token}`);
@@ -131,7 +137,11 @@ test("an exhausted listing reports no continuation", async () => {
     fetchImplementation: implementation,
   });
   const page = await reader.listProductUsers({ limit: 20 });
-  assert.deepEqual(page, { items: [], nextCursor: null, searchTruncated: false });
+  assert.deepEqual(page, {
+    items: [],
+    nextCursor: null,
+    searchTruncated: false,
+  });
   assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
     search: null,
     paginationOpts: { numItems: 20, cursor: null },
@@ -262,7 +272,9 @@ test("transport failures and unreadable bodies are one bounded outcome", async (
     config,
     fetchImplementation: throwingFetch,
   });
-  const transportError = await refusal(unreachable.listProductUsers({ limit: 20 }));
+  const transportError = await refusal(
+    unreachable.listProductUsers({ limit: 20 }),
+  );
   assert.equal(transportError.code, "PRODUCT_USER_DIRECTORY_UNAVAILABLE");
   assert.equal(transportError.status, 503);
   assert.doesNotMatch(transportError.message, new RegExp(token));
@@ -289,7 +301,7 @@ function savedItemsResponse(overrides: Record<string, unknown> = {}) {
         repack: {
           name: "Mythic Pokemon Gacha",
           vendorDisplayName: "Collector Crypt",
-          availability: "active",
+          availability: "available",
           estimatedEv: {
             evDollarsMinorUnits: 12_500,
             grossReturnBasisPoints: 10_500,
@@ -352,7 +364,7 @@ test("the detail read joins the record lookup to the resolved saved items", asyn
     savedAt: "2026-08-19T12:00:02.000Z",
     name: "Mythic Pokemon Gacha",
     vendorDisplayName: "Collector Crypt",
-    availability: "active",
+    availability: "available",
     estimatedEv: {
       evDollarsMinorUnits: 12_500,
       grossReturnBasisPoints: 10_500,
@@ -376,13 +388,10 @@ test("the detail read joins the record lookup to the resolved saved items", asyn
 
   // Both privileged reads are POSTs carrying the secret, with the subject in
   // the body rather than the URL.
-  assert.deepEqual(
-    calls.map(({ url }) => url).sort(),
-    [
-      "https://backend.example.test/admin/product-users/record",
-      "https://backend.example.test/admin/product-users/saved-items",
-    ],
-  );
+  assert.deepEqual(calls.map(({ url }) => url).sort(), [
+    "https://backend.example.test/admin/product-users/record",
+    "https://backend.example.test/admin/product-users/saved-items",
+  ]);
   for (const call of calls) {
     assert.equal(call.init?.method, "POST");
     assert.equal(
@@ -392,6 +401,41 @@ test("the detail read joins the record lookup to the resolved saved items", asyn
     assert.doesNotMatch(call.url, /did:example|\?/);
     assert.deepEqual(JSON.parse(String(call.init?.body)), { subject });
   }
+});
+
+test("saved repacks preserve every public availability state without a legacy alias", async () => {
+  const availabilities = [
+    "available",
+    "unavailable",
+    "unknown",
+    "sold_out",
+  ] as const;
+  const source = savedItemsResponse({
+    savedRepacks: availabilities.map((availability, index) => ({
+      publicRepackId: `40000000-0000-5000-8000-${String(index + 1).padStart(12, "0")}`,
+      savedAt: `2026-08-19T12:00:0${index}.000Z`,
+      resolution: "resolved",
+      repack: {
+        name: `Pack ${index + 1}`,
+        vendorDisplayName: "PackScout fixture",
+        availability,
+        estimatedEv: null,
+      },
+    })),
+  });
+  const request = detailFetch(row(), source);
+  const reader = createProductUserDirectoryReader({
+    config,
+    fetchImplementation: request.implementation,
+  });
+
+  const detail = await reader.getProductUserDetail({ subject });
+  assert.deepEqual(
+    detail.savedRepacks.map((repack) =>
+      repack.resolution === "resolved" ? repack.availability : null,
+    ),
+    availabilities,
+  );
 });
 
 test("a subject with no record is not found, and empty collections are honest", async () => {
@@ -462,11 +506,85 @@ test("a cap-sized collection survives the relay and a broken one does not", asyn
 
   const brokenCollections = [
     { savedRepacks: "not-an-array" },
-    { savedRepacks: [{ resolution: "resolved", publicRepackId: "40000000", savedAt: "2026-08-19T12:00:00.000Z" }] },
-    { savedRepacks: [{ resolution: "resolved", publicRepackId: "", savedAt: "2026-08-19T12:00:00.000Z", repack: { name: "n", vendorDisplayName: "v", availability: "active", estimatedEv: null } }] },
-    { savedRepacks: [{ resolution: "resolved", publicRepackId: "40000000", savedAt: "nope", repack: { name: "n", vendorDisplayName: "v", availability: "active", estimatedEv: null } }] },
-    { savedRepacks: [{ resolution: "resolved", publicRepackId: "40000000", savedAt: "2026-08-19T12:00:00.000Z", repack: { name: "n", vendorDisplayName: "v", availability: "withdrawn", estimatedEv: null } }] },
-    { savedCollectibles: [{ resolution: "resolved", publicCollectibleId: "30000000", savedAt: "2026-08-19T12:00:00.000Z", collectible: { name: "n", collectibleType: "spaceship" } }] },
+    {
+      savedRepacks: [
+        {
+          resolution: "resolved",
+          publicRepackId: "40000000",
+          savedAt: "2026-08-19T12:00:00.000Z",
+        },
+      ],
+    },
+    {
+      savedRepacks: [
+        {
+          resolution: "resolved",
+          publicRepackId: "",
+          savedAt: "2026-08-19T12:00:00.000Z",
+          repack: {
+            name: "n",
+            vendorDisplayName: "v",
+            availability: "available",
+            estimatedEv: null,
+          },
+        },
+      ],
+    },
+    {
+      savedRepacks: [
+        {
+          resolution: "resolved",
+          publicRepackId: "40000000",
+          savedAt: "nope",
+          repack: {
+            name: "n",
+            vendorDisplayName: "v",
+            availability: "available",
+            estimatedEv: null,
+          },
+        },
+      ],
+    },
+    {
+      savedRepacks: [
+        {
+          resolution: "resolved",
+          publicRepackId: "40000000",
+          savedAt: "2026-08-19T12:00:00.000Z",
+          repack: {
+            name: "n",
+            vendorDisplayName: "v",
+            availability: "active",
+            estimatedEv: null,
+          },
+        },
+      ],
+    },
+    {
+      savedRepacks: [
+        {
+          resolution: "resolved",
+          publicRepackId: "40000000",
+          savedAt: "2026-08-19T12:00:00.000Z",
+          repack: {
+            name: "n",
+            vendorDisplayName: "v",
+            availability: "withdrawn",
+            estimatedEv: null,
+          },
+        },
+      ],
+    },
+    {
+      savedCollectibles: [
+        {
+          resolution: "resolved",
+          publicCollectibleId: "30000000",
+          savedAt: "2026-08-19T12:00:00.000Z",
+          collectible: { name: "n", collectibleType: "spaceship" },
+        },
+      ],
+    },
   ];
   for (const overrides of brokenCollections) {
     const broken = detailFetch(row(), savedItemsResponse(overrides));

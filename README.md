@@ -25,6 +25,19 @@ Database setup uses an empty PostgreSQL 16+ target and the checked-in Prisma
 migrations. Follow the [database provisioning workflow](docs/database-provisioning.md)
 before starting a database-backed runtime.
 
+## Ingestion pipeline operations
+
+Operators should start with the
+[ingestion pipeline operator guide](docs/ingestion-pipelines/README.md). It
+covers the single-supervisor process model, source and connection setup, daily
+Run/Pause/Resume workflows, diagnostics, capacity guards, credential recovery,
+quarantine, cursor safety, and graceful restart behavior.
+
+A first full-history DataForrest import has additional fail-closed target,
+storage, bootstrap, and reconciliation gates. Follow the
+[guarded Task010 runbook](docs/dataforest-source-integration-task010-local-runbook.md)
+instead of starting it with the general development commands.
+
 ## Development
 
 ```bash
@@ -290,6 +303,31 @@ Leaving these unset is safe and supported: the admin still boots and the Users
 page shows a bounded "not connected" state instead of failing. Only operators
 holding the `product_users:view` permission (administrators) see the page at
 all.
+
+### Optional provider-source supervision
+
+Three server-only values enable the provider-source supervisor lane in the
+worker and source administration in the admin:
+
+```dotenv
+PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64=<canonical-base64-32-byte-key>
+PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION=<positive-integer>
+PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH=<absolute-non-root-path>
+```
+
+- `PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64` — key encrypting stored
+  source-connection configuration; shared by the worker and the admin.
+- `PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION` — the active encryption revision
+  of that key; shared by the worker and the admin.
+- `PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH` — the PostgreSQL data volume whose
+  capacity the supervisor's admission gate measures; worker only.
+
+Leaving all of them unset is safe and supported: the combined worker boots
+with the supervisor lane disabled (it logs
+`provider_source_supervisor_disabled` once at startup), and the admin boots
+with the provider-source routes answering `503 SOURCE_ADMIN_UNCONFIGURED`.
+Setting only part of the group is a misconfiguration and fails startup. The
+dedicated source-supervisor entrypoint always requires all of them.
 
 ### Closed-beta catalog read credential
 

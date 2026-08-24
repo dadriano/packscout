@@ -13,7 +13,7 @@ Scheduled imports, manual imports, provider work, and EV recomputation retain du
 
 ## Context
 
-PackScout coordinates queued and running imports, provider cursor checkpoints, schedules, provider health, and estimated-EV recomputation in PostgreSQL. Multiple workers may poll concurrently, so persistence must atomically select eligible work, prevent overlapping owners, reject stale workers, recover expired leases, coalesce duplicate demand, and preserve counters and terminal history.
+PackScout coordinates queued and running imports, provider cursors, schedules, provider health, and estimated-EV recomputation in PostgreSQL. Multiple workers may poll concurrently, so persistence must atomically select eligible work, prevent overlapping owners, reject stale workers, recover expired leases, coalesce duplicate demand, and preserve counters and terminal history.
 
 Generated ORM operations do not replace these observable guarantees. This task keeps the queue and scheduler state machines unchanged while moving their persistence to the shared Prisma transaction boundary.
 
@@ -24,7 +24,7 @@ Generated ORM operations do not replace these observable guarantees. This task k
 - Preserve exactly one queued or running import per organization and provider, including manual conflict and scheduled coalescing outcomes.
 - Preserve atomic claim, lease renewal, ownership checks, expiry recovery, attempt tracking, terminal completion, and stale-owner rejection.
 - Preserve immutable configuration revision ownership and actor evidence for manual work.
-- Keep cursor checkpoints, provider-head state, safe failure summaries, and run counters consistent across retries and restarts.
+- Keep cursors, provider-head state, safe failure summaries, and run counters consistent across retries and restarts.
 - Prevent a disabled or archived provider from starting new work while allowing its already-owned run to finish under the current contract.
 
 ### Scheduling and health
@@ -57,7 +57,7 @@ Task `007` composes the Prisma implementations into the worker and admin runtime
 - [x] Concurrent schedulers and EV workers claim disjoint eligible work without duplicate processing or indefinite blocking.
 - [x] Provider disablement, lease expiry, retry exhaustion, restart, and terminal completion preserve their current durable outcomes.
 - [x] EV requests coalesce and recompute without mixing provider-reported values with PackScout calculations or losing provenance.
-- [x] Cross-organization and foreign-owner operations fail without changing queue, schedule, health, checkpoint, or EV state.
+- [x] Cross-organization and foreign-owner operations fail without changing queue, schedule, health, cursor, or EV state.
 
 ## Verification
 

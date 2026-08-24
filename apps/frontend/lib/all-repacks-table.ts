@@ -3,6 +3,7 @@ import type {
   PublicRepackSummary,
 } from "@packscout/contracts";
 import type { GlossaryFieldKey } from "./metric-vocabulary";
+import { presentPackAvailability } from "./pack-availability-presentation";
 
 export type CatalogSortDirection = "asc" | "desc";
 
@@ -53,9 +54,12 @@ export function publicRowActions(repack: PublicRepackSummary): Readonly<{
   promo: boolean;
   repackLink: boolean;
 }> {
+  const purchaseActionsAvailable = presentPackAvailability(
+    repack.availability,
+  ).purchaseActionsAvailable;
   return Object.freeze({
-    promo: repack.actionAvailability.promo,
+    promo: purchaseActionsAvailable && repack.actionAvailability.promo,
     repackLink:
-      repack.availability === "active" && repack.actionAvailability.repackLink,
+      purchaseActionsAvailable && repack.actionAvailability.repackLink,
   });
 }
