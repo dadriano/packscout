@@ -1,17 +1,23 @@
 import {
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   normalizedObservationSemanticCanonicalJson,
+  normalizedObservationSemanticCanonicalJsonV2,
   normalizedObservationSemanticContent,
+  normalizedObservationSemanticContentV2,
   normalizedProviderObservationSchema,
+  normalizedProviderObservationV2Schema,
   quarantineIdSchema,
   quarantineRetryBulkRequestSchema,
   type LaunchProviderKey,
-  type NormalizedObservationSemanticContent,
   type ProviderSourceCanonicalProjectionPlan,
   type QuarantineAttemptSummary,
   type QuarantineEntryDetail,
   type QuarantineEntrySummary,
   type QuarantineRetryBulkRequest,
   type QuarantineRetryOutcome,
+  type VersionedNormalizedObservationSemanticContent,
+  type VersionedNormalizedProviderObservation,
 } from "@packscout/contracts";
 import type {
   ProviderActor,
@@ -67,7 +73,8 @@ export interface StoredProviderSourceQuarantineAttempt {
 interface ProtectedProviderSourceQuarantineEvidence {
   readonly normalizedObservation: unknown;
   readonly evidence: unknown;
-  readonly semanticContent: NormalizedObservationSemanticContent | null;
+  readonly semanticContent:
+    VersionedNormalizedObservationSemanticContent | null;
   readonly sourceRecordId: string | null;
   readonly semanticObservationId: string | null;
   readonly collectedAt: Date;
@@ -205,18 +212,38 @@ function requireActor(actor: ProviderActor, keyer: ProviderActorKeyer): string {
 
 function retainedEvidenceMatches(
   evidence: ProtectedProviderSourceQuarantineEvidence,
-): ReturnType<typeof normalizedProviderObservationSchema.safeParse> {
-  const parsed = normalizedProviderObservationSchema.safeParse(
-    evidence.normalizedObservation,
-  );
-  if (!parsed.success || evidence.semanticContent === null) return parsed;
-  if (
-    normalizedObservationSemanticCanonicalJson(
-      normalizedObservationSemanticContent(parsed.data),
-    ) !== normalizedObservationSemanticCanonicalJson(evidence.semanticContent)
-  ) {
-    return normalizedProviderObservationSchema.safeParse(null);
+): Readonly<
+  | { success: true; data: VersionedNormalizedProviderObservation }
+  | { success: false }
+> {
+  const contractVersion = evidence.mapper.normalizedContractVersion;
+  const parsed = contractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? normalizedProviderObservationSchema.safeParse(
+        evidence.normalizedObservation,
+      )
+    : contractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+      ? normalizedProviderObservationV2Schema.safeParse(
+          evidence.normalizedObservation,
+        )
+      : null;
+  if (parsed === null || !parsed.success || evidence.semanticContent === null) {
+    return { success: false };
   }
+  const semanticMatches = contractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? normalizedObservationSemanticCanonicalJson(
+        normalizedObservationSemanticContent(
+          normalizedProviderObservationSchema.parse(parsed.data),
+        ),
+      ) === normalizedObservationSemanticCanonicalJson(
+        evidence.semanticContent,
+      )
+    : normalizedObservationSemanticCanonicalJsonV2(
+        normalizedObservationSemanticContentV2(parsed.data),
+      ) === normalizedObservationSemanticCanonicalJsonV2(
+        evidence.semanticContent,
+      );
+  if (!semanticMatches) return { success: false };
   const protectedReferences = Array.isArray(evidence.evidence)
     ? new Set(evidence.evidence.flatMap((item) => {
         if (typeof item !== "object" || item === null || Array.isArray(item)) return [];
@@ -230,9 +257,9 @@ function retainedEvidenceMatches(
       parsed.data.protectedTransactionEvidenceRef !== null &&
       !protectedReferences.has(parsed.data.protectedTransactionEvidenceRef))
   ) {
-    return normalizedProviderObservationSchema.safeParse(null);
+    return { success: false };
   }
-  return parsed;
+  return { success: true, data: parsed.data };
 }
 
 /** Source-only retry path; it never reconstructs a legacy feed page or cursor. */
@@ -356,6 +383,8 @@ export class ProviderSourceQuarantineService {
           organizationId: actor.organizationId,
           providerId: claim.entry.providerId,
           provider: claim.entry.platformKey,
+          normalizedContractVersion:
+            claim.evidence.mapper.normalizedContractVersion,
           observation: parsed.data,
         },
       );

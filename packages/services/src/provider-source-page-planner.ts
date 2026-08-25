@@ -1,20 +1,30 @@
 import { createHash } from "node:crypto";
 import {
   PROVIDER_OBSERVATION_HASH_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+  PROVIDER_OBSERVATION_HASH_VERSION_V2,
   canonicalKindByLaunchScope,
   normalizedObservationSemanticContent,
+  normalizedObservationSemanticContentSchema,
   normalizedObservationSemanticCanonicalJson,
+  normalizedObservationSemanticCanonicalJsonV2,
+  normalizedObservationSemanticContentV2,
+  normalizedObservationSemanticContentV2Schema,
+  normalizedProviderObservationSchema,
   normalizedProviderObservationPageSchema,
+  normalizedProviderObservationPageV2Schema,
   providerSourceExpectedCanonicalRelationships,
+  providerSourceExpectedCanonicalRelationshipsV2,
   providerSourceCanonicalContentV1Schemas,
   type LaunchProviderKey,
-  type NormalizedObservationSemanticContent,
-  type NormalizedProviderObservation,
-  type NormalizedProviderObservationPage,
   type ProviderSourceCanonicalProjectionPlan,
   type ProviderSourceCanonicalRelationshipPlan,
-  type ProviderSourcePagePlan,
-  type ProviderSourcePlannedOutcome,
+  type VersionedNormalizedObservationSemanticContent,
+  type VersionedNormalizedProviderObservation,
+  type VersionedNormalizedProviderObservationPage,
+  type VersionedProviderSourcePagePlan,
+  type VersionedProviderSourcePlannedOutcome,
 } from "@packscout/contracts";
 import type {
   CanonicalEvInputCandidate,
@@ -186,7 +196,8 @@ export interface ProviderSourceMappingValidationContext {
   readonly organizationId: string;
   readonly providerId: string;
   readonly provider: LaunchProviderKey;
-  readonly observation: NormalizedProviderObservation;
+  readonly normalizedContractVersion: string;
+  readonly observation: VersionedNormalizedProviderObservation;
 }
 
 function assertExactCanonicalIdentity(
@@ -224,7 +235,7 @@ function assertExactCanonicalIdentity(
 function assertProjection(
   projection: ProviderSourceCanonicalProjectionPlan,
   input: ProviderSourceMappingValidationContext,
-  observation: NormalizedProviderObservation,
+  observation: VersionedNormalizedProviderObservation,
   projectionKind: "primary" | "derived_ev_input",
 ): void {
   if (!hasExactRuntimeKeys(projection as unknown as Record<string, unknown>, [
@@ -300,10 +311,27 @@ function assertProjection(
       throw new TypeError("provider_source.mapper_relationship_invalid");
     }
   }
-  const expectedRelationships = providerSourceExpectedCanonicalRelationships({
-    semanticContent: normalizedObservationSemanticContent(observation),
-    projectionKind,
-  });
+  const semanticContent = normalizedSemanticContentForVersion(
+    observation,
+    input.normalizedContractVersion,
+  );
+  const expectedRelationships = input.normalizedContractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? providerSourceExpectedCanonicalRelationships({
+        semanticContent:
+          normalizedObservationSemanticContentSchema.parse(semanticContent),
+        projectionKind,
+      })
+    : input.normalizedContractVersion ===
+        PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+      ? providerSourceExpectedCanonicalRelationshipsV2({
+          semanticContent:
+            normalizedObservationSemanticContentV2Schema.parse(semanticContent),
+          projectionKind,
+        })
+      : (() => {
+          throw new TypeError("provider_source.normalized_contract_invalid");
+        })();
   const relationshipKey = (
     relationship: ProviderSourceCanonicalRelationshipPlan,
   ) => JSON.stringify([
@@ -446,12 +474,40 @@ export interface ProviderSourcePagePlanningInput {
   readonly mapperVersion: string;
   readonly normalizedContractVersion: string;
   readonly identityNamespaceKey: string;
-  readonly page: NormalizedProviderObservationPage;
+  readonly page: VersionedNormalizedProviderObservationPage;
 }
 
-function semanticHash(content: NormalizedObservationSemanticContent): string {
+function normalizedSemanticContentForVersion(
+  observation: VersionedNormalizedProviderObservation,
+  normalizedContractVersion: string,
+): VersionedNormalizedObservationSemanticContent {
+  if (normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION) {
+    return normalizedObservationSemanticContent(
+      normalizedProviderObservationSchema.parse(observation),
+    );
+  }
+  if (
+    normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+  ) {
+    return normalizedObservationSemanticContentV2(observation);
+  }
+  throw new TypeError("provider_source.normalized_contract_invalid");
+}
+
+function semanticHash(
+  content: VersionedNormalizedObservationSemanticContent,
+  normalizedContractVersion: string,
+): string {
+  const canonicalJson = normalizedContractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? normalizedObservationSemanticCanonicalJson(content)
+    : normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+      ? normalizedObservationSemanticCanonicalJsonV2(content)
+      : (() => {
+          throw new TypeError("provider_source.normalized_contract_invalid");
+        })();
   return createHash("sha256")
-    .update(normalizedObservationSemanticCanonicalJson(content))
+    .update(canonicalJson)
     .digest("hex");
 }
 
@@ -531,7 +587,7 @@ export function providerSourceCanonicalProjectionsForValidatedMapping(
   return projectionsForValidatedMapping(mapped, input);
 }
 
-function sourceKindCounts(page: NormalizedProviderObservationPage) {
+function sourceKindCounts(page: VersionedNormalizedProviderObservationPage) {
   let catalog = 0;
   let pulls = 0;
   let trades = 0;
@@ -551,10 +607,22 @@ function sourceKindCounts(page: NormalizedProviderObservationPage) {
 export class ProviderSourcePagePlanner {
   constructor(private readonly mappers: ProviderObservationMapperResolver) {}
 
-  plan(input: ProviderSourcePagePlanningInput): ProviderSourcePagePlan {
-    let page: NormalizedProviderObservationPage;
+  plan(input: ProviderSourcePagePlanningInput): VersionedProviderSourcePagePlan {
+    let page: VersionedNormalizedProviderObservationPage;
     try {
-      page = deepFreeze(normalizedProviderObservationPageSchema.parse(input.page));
+      page = deepFreeze(
+        input.normalizedContractVersion ===
+            PROVIDER_OBSERVATION_CONTRACT_VERSION
+          ? normalizedProviderObservationPageSchema.parse(input.page)
+          : input.normalizedContractVersion ===
+              PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+            ? normalizedProviderObservationPageV2Schema.parse(input.page)
+            : (() => {
+                throw new TypeError(
+                  "provider_source.normalized_contract_invalid",
+                );
+              })(),
+      );
     } catch {
       throw new ProviderSourcePagePlanningError("normalized_page_invalid");
     }
@@ -581,8 +649,8 @@ export class ProviderSourcePagePlanner {
     let adapterInvalid = 0;
     let mapperQuarantined = 0;
     let warnings = 0;
-    const outcomes: ProviderSourcePlannedOutcome[] = page.outcomes.map(
-      (outcome): ProviderSourcePlannedOutcome => {
+    const outcomes: VersionedProviderSourcePlannedOutcome[] = page.outcomes.map(
+      (outcome): VersionedProviderSourcePlannedOutcome => {
         if (outcome.status === "invalid") {
           adapterInvalid += 1;
           return Object.freeze({
@@ -595,7 +663,10 @@ export class ProviderSourcePagePlanner {
         }
 
         const observation = outcome.observation;
-        const semanticContent = normalizedObservationSemanticContent(observation);
+        const semanticContent = normalizedSemanticContentForVersion(
+          observation,
+          input.normalizedContractVersion,
+        );
         try {
           const mapperOutput: unknown = mapper.map({
             organizationId: input.organizationId,
@@ -615,7 +686,10 @@ export class ProviderSourcePagePlanner {
             recordIndex: outcome.recordIndex,
             observation,
             semanticContent,
-            normalizedContentHash: semanticHash(semanticContent),
+            normalizedContentHash: semanticHash(
+              semanticContent,
+              input.normalizedContractVersion,
+            ),
             protectedNativeEvidenceRef:
               observation.protectedNativeEvidenceRef,
             protectedTransactionEvidenceRef:
@@ -662,7 +736,10 @@ export class ProviderSourcePagePlanner {
             recordIndex: outcome.recordIndex,
             observation,
             semanticContent,
-            normalizedContentHash: semanticHash(semanticContent),
+            normalizedContentHash: semanticHash(
+              semanticContent,
+              input.normalizedContractVersion,
+            ),
             protectedNativeEvidenceRef:
               observation.protectedNativeEvidenceRef,
             protectedTransactionEvidenceRef:
@@ -688,8 +765,11 @@ export class ProviderSourcePagePlanner {
         mapperQuarantined,
         warnings,
       }),
-    });
+    }) as VersionedProviderSourcePagePlan;
   }
 }
 
-export { PROVIDER_OBSERVATION_HASH_VERSION };
+export {
+  PROVIDER_OBSERVATION_HASH_VERSION,
+  PROVIDER_OBSERVATION_HASH_VERSION_V2,
+};

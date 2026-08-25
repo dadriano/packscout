@@ -1,8 +1,12 @@
 import {
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   decideProviderSourceCanonicalLifecycle,
+  normalizedObservationSemanticContentSchema,
+  normalizedObservationSemanticContentV2Schema,
   type LaunchProviderKey,
-  type NormalizedObservationSemanticContent,
   type ProviderSourceCanonicalProjectionPlan,
+  type VersionedNormalizedObservationSemanticContent,
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
 import {
@@ -79,7 +83,7 @@ export interface ProviderSourceQuarantinePageQuery {
 export interface ProviderSourceProtectedQuarantineEvidence {
   readonly normalizedObservation: unknown;
   readonly evidence: unknown;
-  readonly semanticContent: NormalizedObservationSemanticContent | null;
+  readonly semanticContent: VersionedNormalizedObservationSemanticContent | null;
   readonly sourceRecordId: string | null;
   readonly semanticObservationId: string | null;
   readonly collectedAt: Date;
@@ -133,6 +137,19 @@ function normalizedEvidence(value: unknown): Readonly<{
     normalizedObservation: object?.normalizedObservation ?? null,
     evidence: object?.evidence ?? null,
   };
+}
+
+function retainedSemanticContent(
+  normalizedContractVersion: string,
+  value: unknown,
+): VersionedNormalizedObservationSemanticContent | null {
+  const parsed = normalizedContractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? normalizedObservationSemanticContentSchema.safeParse(value)
+    : normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+      ? normalizedObservationSemanticContentV2Schema.safeParse(value)
+      : null;
+  return parsed?.success ? parsed.data : null;
 }
 
 export class ProviderSourceQuarantineRepository {
@@ -434,11 +451,17 @@ export class ProviderSourceQuarantineRepository {
               id: occurrence.semantic_observation_id,
               organization_id: input.organizationId,
               source_record_id: occurrence.source_record_id!,
+              normalized_contract_version:
+                occurrence.normalized_contract_version,
             },
           })
         : null;
-      const semanticContent = jsonObject(semantic?.normalized_content_json) as
-        NormalizedObservationSemanticContent | null;
+      const semanticContent = occurrence && semantic
+        ? retainedSemanticContent(
+            occurrence.normalized_contract_version,
+            semantic.normalized_content_json,
+          )
+        : null;
       if (!occurrence || !semantic || !semanticContent) {
         return this.failCompletion(transaction, input, {
           code: "SOURCE_REFERENCE_UNAVAILABLE",
@@ -447,6 +470,7 @@ export class ProviderSourceQuarantineRepository {
       }
       try {
         validateProviderSourceCanonicalProjections({
+          normalizedContractVersion: occurrence.normalized_contract_version,
           provider: input.provider,
           semanticContent,
           projections: input.projections,
@@ -798,14 +822,21 @@ export class ProviderSourceQuarantineRepository {
           where: {
             id: occurrence.semantic_observation_id,
             organization_id: organizationId,
+            source_record_id: occurrence.source_record_id!,
+            normalized_contract_version:
+              occurrence.normalized_contract_version,
           },
         })
       : null;
     const payload = normalizedEvidence(quarantine.payload_json);
     return {
       ...payload,
-      semanticContent: jsonObject(semantic?.normalized_content_json) as
-        NormalizedObservationSemanticContent | null,
+      semanticContent: semantic
+        ? retainedSemanticContent(
+            occurrence.normalized_contract_version,
+            semantic.normalized_content_json,
+          )
+        : null,
       sourceRecordId: occurrence.source_record_id,
       semanticObservationId: occurrence.semantic_observation_id,
       collectedAt: occurrence.collected_at,

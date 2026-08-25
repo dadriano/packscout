@@ -1,21 +1,25 @@
+import { createHash } from "node:crypto";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   PROVIDER_OBSERVATION_HASH_VERSION,
+  PROVIDER_OBSERVATION_HASH_VERSION_V2,
   launchRecordIdScopeDeclarations,
-  normalizedObservationSemanticContentSchema,
   normalizedObservationSemanticCanonicalJson,
-  type NormalizedObservationSemanticContent,
+  normalizedObservationSemanticCanonicalJsonV2,
+  normalizedObservationSemanticContentSchema,
+  normalizedObservationSemanticContentV2Schema,
+  type VersionedNormalizedObservationSemanticContent,
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
 import type { PackscoutTransactionClient } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
-import { createHash } from "node:crypto";
 
 const SHA_256_PATTERN = /^[0-9a-f]{64}$/;
 const SAFE_REASON_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9:._-]{0,254}[a-z0-9])?$/;
 
 function asJson(
-  value: NormalizedObservationSemanticContent,
+  value: VersionedNormalizedObservationSemanticContent,
 ): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
@@ -34,7 +38,7 @@ export type LaunchSourceRecordMeaning =
       recordDiscriminator: "trade";
     }>;
 
-export type UpsertSemanticObservationInput = Readonly<{
+type UpsertSemanticObservationCommon = Readonly<{
   organizationId: string;
   providerId: string;
   sourceInstanceId: string;
@@ -42,12 +46,45 @@ export type UpsertSemanticObservationInput = Readonly<{
   recordIdScopeKey: string;
   providerRecordId: string;
   effectiveSourceTime: Date;
-  normalizedContractVersion: typeof PROVIDER_OBSERVATION_CONTRACT_VERSION;
-  hashVersion: typeof PROVIDER_OBSERVATION_HASH_VERSION;
   normalizedContentHash: string;
-  normalizedContent: NormalizedObservationSemanticContent;
-}> &
-  LaunchSourceRecordMeaning;
+}> & LaunchSourceRecordMeaning;
+
+export type UpsertSemanticObservationInput = UpsertSemanticObservationCommon &
+  Readonly<{
+    normalizedContractVersion:
+      ProviderSourceObservationVersionPins["normalizedContractVersion"];
+    hashVersion: ProviderSourceObservationVersionPins["hashVersion"];
+    normalizedContent: VersionedNormalizedObservationSemanticContent;
+  }>;
+
+export type ProviderSourceObservationVersionPins =
+  | Readonly<{
+      normalizedContractVersion: typeof PROVIDER_OBSERVATION_CONTRACT_VERSION;
+      hashVersion: typeof PROVIDER_OBSERVATION_HASH_VERSION;
+    }>
+  | Readonly<{
+      normalizedContractVersion: typeof PROVIDER_OBSERVATION_CONTRACT_VERSION_V2;
+      hashVersion: typeof PROVIDER_OBSERVATION_HASH_VERSION_V2;
+    }>;
+
+/** Exact persistence-domain dispatch; unknown versions never fall back. */
+export function providerSourceObservationVersionPins(
+  normalizedContractVersion: string,
+): ProviderSourceObservationVersionPins {
+  if (normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION) {
+    return {
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
+    };
+  }
+  if (normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION_V2) {
+    return {
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION_V2,
+    };
+  }
+  throw new TypeError("Normalized observation contract version is unsupported.");
+}
 
 /** Resolves launch scope meaning only from the shared provider contract. */
 export function resolveLaunchSourceRecordMeaning(
@@ -81,13 +118,33 @@ export function hashNormalizedObservationSemanticContent(
     .digest("hex");
 }
 
+/** Canonical semantic hash for PROVIDER_OBSERVATION_HASH_VERSION_V2. */
+export function hashNormalizedObservationSemanticContentV2(
+  normalizedContent: unknown,
+): string {
+  return createHash("sha256")
+    .update(normalizedObservationSemanticCanonicalJsonV2(normalizedContent))
+    .digest("hex");
+}
+
+function hashVersionedNormalizedObservationSemanticContent(
+  normalizedContractVersion:
+    ProviderSourceObservationVersionPins["normalizedContractVersion"],
+  normalizedContent: unknown,
+): string {
+  return normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? hashNormalizedObservationSemanticContent(normalizedContent)
+    : hashNormalizedObservationSemanticContentV2(normalizedContent);
+}
+
 function parseBoundSemanticContent(
   input: UpsertSemanticObservationInput,
   expectedMeaning: LaunchSourceRecordMeaning,
-): NormalizedObservationSemanticContent {
-  const content = normalizedObservationSemanticContentSchema.parse(
-    input.normalizedContent,
-  );
+): VersionedNormalizedObservationSemanticContent {
+  const content = input.normalizedContractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? normalizedObservationSemanticContentSchema.parse(input.normalizedContent)
+    : normalizedObservationSemanticContentV2Schema.parse(input.normalizedContent);
   if (
     content.providerRecordIdentity.recordIdScopeKey !==
       input.recordIdScopeKey ||
@@ -219,14 +276,10 @@ export class ProviderSourceObservationRepository {
         `Record-ID scope ${input.recordIdScopeKey} requires ${expectedMeaning.recordKind}/${expectedMeaning.recordDiscriminator}.`,
       );
     }
-    if (
-      input.normalizedContractVersion !== PROVIDER_OBSERVATION_CONTRACT_VERSION
-    ) {
-      throw new TypeError(
-        "Normalized observation contract version is unsupported.",
-      );
-    }
-    if (input.hashVersion !== PROVIDER_OBSERVATION_HASH_VERSION) {
+    const versionPins = providerSourceObservationVersionPins(
+      input.normalizedContractVersion,
+    );
+    if (input.hashVersion !== versionPins.hashVersion) {
       throw new TypeError(
         "Normalized observation hash version is unsupported.",
       );
@@ -237,8 +290,10 @@ export class ProviderSourceObservationRepository {
       );
     }
     const normalizedContent = parseBoundSemanticContent(input, expectedMeaning);
-    const normalizedContentHash =
-      hashNormalizedObservationSemanticContent(normalizedContent);
+    const normalizedContentHash = hashVersionedNormalizedObservationSemanticContent(
+      versionPins.normalizedContractVersion,
+      normalizedContent,
+    );
     if (input.normalizedContentHash !== normalizedContentHash) {
       throw new TypeError(
         "Normalized content hash does not match canonical semantic content.",

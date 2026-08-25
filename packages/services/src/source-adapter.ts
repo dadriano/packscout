@@ -1,17 +1,20 @@
 import { createHash } from "node:crypto";
 import {
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   normalizedProviderObservationPageSchema,
+  normalizedProviderObservationPageV2Schema,
   providerSourceRequestBoundsSchema,
   sourceAdapterFailureSchema,
   sourceAdapterMeasurementsSchema,
   sourceAdapterSafeDiagnosticSchema,
   type ProviderSourceRequestBounds,
   type LaunchProviderKey,
-  type NormalizedProviderObservationPage,
   type OpaqueCursorEnvelope,
   type RecordIdScopeDeclaration,
   type SourceAdapterFailure,
-  type SourceAdapterManifestV1,
+  type VersionedNormalizedProviderObservationPage,
+  type VersionedSourceAdapterManifest,
   type SourceAdapterMeasurements,
   type SourceAdapterSafeDiagnostic,
 } from "@packscout/contracts";
@@ -1297,22 +1300,33 @@ function completeValidatedSourceAdapterPageInterpretation(
     ...request.measurements,
     recordCount,
   });
-  let parsedPage: NormalizedProviderObservationPage;
+  let parsedPage: VersionedNormalizedProviderObservationPage;
   try {
-    parsedPage = normalizedProviderObservationPageSchema.parse({
+    const candidate = {
       ...interpretation.value.normalizedPage,
       measurements: draftMeasurements,
       diagnostics,
-    });
+    };
+    parsedPage = operation.normalizedContractVersion ===
+        PROVIDER_OBSERVATION_CONTRACT_VERSION
+      ? normalizedProviderObservationPageSchema.parse(candidate)
+      : operation.normalizedContractVersion ===
+          PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+        ? normalizedProviderObservationPageV2Schema.parse(candidate)
+        : (() => {
+            throw new SourceAdapterContractError(
+              "invalid_interpretation_shape",
+            );
+          })();
   } catch {
     throw new SourceAdapterContractError("invalid_interpretation_shape");
   }
-  let normalizedPage: NormalizedProviderObservationPage;
+  let normalizedPage: VersionedNormalizedProviderObservationPage;
   try {
     normalizedPage = canonicalizeJsonValue(
       parsedPage,
       new Set(),
-    ) as NormalizedProviderObservationPage;
+    ) as VersionedNormalizedProviderObservationPage;
   } catch {
     throw new SourceAdapterContractError("invalid_interpretation_shape");
   }
@@ -1407,7 +1421,7 @@ export type SourceAdapterConfigurationValidation =
   | Readonly<{ ok: false; failure: SourceAdapterFailure }>;
 
 export interface SourceAdapter {
-  readonly manifest: SourceAdapterManifestV1;
+  readonly manifest: VersionedSourceAdapterManifest;
   validateConnectionConfiguration(
     configuration: unknown,
   ): SourceAdapterConfigurationValidation;

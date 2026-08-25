@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   opaqueCursorEnvelopeSchema,
   type ProviderSourcePageCommitPins,
-  type ProviderSourcePagePlan,
+  type VersionedProviderSourcePagePlan,
 } from "@packscout/contracts";
 import {
   CAPTURED_SOURCE_PAGE_VERSION,
@@ -29,7 +29,7 @@ export class ProviderSourcePageImportError extends Error {
 
 export interface ProviderSourceAtomicPagePersistenceInput {
   readonly pins: ProviderSourcePageCommitPins;
-  readonly plan: ProviderSourcePagePlan;
+  readonly plan: VersionedProviderSourcePagePlan;
   readonly protectedRawResponse: Uint8Array;
   readonly protectedRawResponseSha256: string;
   readonly protectedNativeEvidence: CapturedSourcePageV1["protectedNativeEvidence"];
@@ -41,7 +41,7 @@ export interface ProviderSourceAtomicPageCommitResult {
   readonly kind: "committed" | "already_committed";
   readonly pageId: string;
   readonly cursorFingerprint: string | null;
-  readonly continuation: ProviderSourcePagePlan["normalizedPage"]["continuation"];
+  readonly continuation: VersionedProviderSourcePagePlan["normalizedPage"]["continuation"];
   readonly counts: Readonly<{
     inserted: number;
     revised: number;

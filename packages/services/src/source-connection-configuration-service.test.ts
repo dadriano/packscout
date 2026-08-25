@@ -4,6 +4,7 @@ import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
 } from "@packscout/contracts";
 import {
   createProductionSourceAdminConfigurationCodecRegistry,
@@ -267,7 +268,7 @@ test("same-endpoint rotation creates a tested candidate and normal activation pr
   assert.equal(repository.activationInput?.connectionRevisionId, revisionTwoId);
 });
 
-test("adapter upgrade revalidates and re-encrypts a v1 credential as an untested v2 candidate", async () => {
+test("adapter upgrade revalidates and re-encrypts a v1 credential as an untested current v3 candidate", async () => {
   const { cipher, repository, service } = fixture([revisionTwoId]);
   const secret = "stored-v1-secret";
   repository.revisions.set(revisionOneId, {
@@ -295,14 +296,14 @@ test("adapter upgrade revalidates and re-encrypts a v1 credential as an untested
     {
       expectedRevisionId: revisionOneId,
       expectedSourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-      targetSourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+      targetSourceAdapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
       confirmation: "UPGRADE_ADAPTER",
     },
   );
   assert.equal(result.revisionId, revisionTwoId);
   assert.equal(
     result.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   );
   assert.equal(JSON.stringify(result).includes(secret), false);
   assert.equal(
@@ -311,7 +312,7 @@ test("adapter upgrade revalidates and re-encrypts a v1 credential as an untested
   );
   assert.equal(
     repository.adapterRevisionInput?.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   );
   const candidate = repository.revisions.get(revisionTwoId)!;
   assert.equal(

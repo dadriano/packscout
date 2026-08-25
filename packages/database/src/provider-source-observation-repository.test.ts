@@ -2,15 +2,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   PROVIDER_OBSERVATION_HASH_VERSION,
+  PROVIDER_OBSERVATION_HASH_VERSION_V2,
   emptyNormalizedProviderFacts,
   launchRecordIdScopeDeclarations,
   normalizedObservationSemanticContent,
+  normalizedObservationSemanticContentV2,
   normalizedProviderObservationSchema,
+  normalizedProviderObservationV2Schema,
 } from "@packscout/contracts";
 import type { PackscoutTransactionClient } from "./database.ts";
 import {
   hashNormalizedObservationSemanticContent,
+  hashNormalizedObservationSemanticContentV2,
   ProviderSourceObservationRepository,
   resolveLaunchSourceRecordMeaning,
   type RecordDeliveryOccurrenceInput,
@@ -56,6 +61,40 @@ const observationInput = Object.freeze({
   normalizedContentHash:
     hashNormalizedObservationSemanticContent(normalizedContent),
   normalizedContent,
+} satisfies UpsertSemanticObservationInput);
+
+const cardOnlyPullContent = normalizedObservationSemanticContentV2(
+  normalizedProviderObservationV2Schema.parse({
+    kind: "pull",
+    providerRecordIdentity: {
+      recordIdScopeKey: "pull-v1",
+      providerRecordId: "clutchpacks-pull-without-pack-42",
+    },
+    effectiveAt: "2026-08-20T12:00:00.000Z",
+    collectedAt: "2026-08-20T12:00:01.000Z",
+    relationships: [{
+      relationship: "card",
+      target: {
+        recordIdScopeKey: "catalog-card-v1",
+        providerRecordId: "clutchpacks-card-42",
+      },
+    }],
+    protectedNativeEvidenceRef: "protected:page:record:1",
+    providerFacts: emptyNormalizedProviderFacts("pull"),
+  }),
+);
+
+const cardOnlyPullInput = Object.freeze({
+  ...observationInput,
+  recordIdScopeKey: "pull-v1",
+  providerRecordId: "clutchpacks-pull-without-pack-42",
+  recordKind: "pull",
+  recordDiscriminator: "pull",
+  normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+  hashVersion: PROVIDER_OBSERVATION_HASH_VERSION_V2,
+  normalizedContentHash:
+    hashNormalizedObservationSemanticContentV2(cardOnlyPullContent),
+  normalizedContent: cardOnlyPullContent,
 } satisfies UpsertSemanticObservationInput);
 
 function unsafeObservationInput(
@@ -161,6 +200,77 @@ test("semantic identity rejects unsupported versions and an unverified caller ha
     );
   }
   assert.equal(sourceLookups, 0);
+});
+
+test("semantic identity stores a card-only pull only in the exact v2 hash domain", async () => {
+  const repository = new ProviderSourceObservationRepository();
+  const semanticWrites: Array<Record<string, unknown>> = [];
+  let sourceLookups = 0;
+  const transaction = {
+    provider_source_instances: {
+      findFirst: async () => {
+        sourceLookups += 1;
+        return { active_revision_id: sourceRevisionId };
+      },
+    },
+    source_record_identities: {
+      upsert: async () => ({
+        id: sourceRecordId,
+        record_kind: "pull",
+        record_discriminator: "pull",
+      }),
+    },
+    source_semantic_observations: {
+      createMany: async (query: { data: Record<string, unknown> }) => {
+        semanticWrites.push(query.data);
+        return { count: 1 };
+      },
+      findUniqueOrThrow: async () => ({ id: semanticObservationId }),
+    },
+  } as unknown as PackscoutTransactionClient;
+
+  const result = await repository.upsertSemanticObservationInTransaction(
+    transaction,
+    cardOnlyPullInput,
+  );
+  assert.equal(result.kind, "ready");
+  assert.equal(sourceLookups, 1);
+  assert.deepEqual(
+    semanticWrites.map((write) => ({
+      normalizedContractVersion: write.normalized_contract_version,
+      hashVersion: write.hash_version,
+      normalizedContent: write.normalized_content_json,
+    })),
+    [{
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION_V2,
+      normalizedContent: cardOnlyPullContent,
+    }],
+  );
+  assert.throws(
+    () => hashNormalizedObservationSemanticContent(cardOnlyPullContent),
+  );
+
+  for (const mismatched of [
+    {
+      ...cardOnlyPullInput,
+      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
+    },
+    {
+      ...observationInput,
+      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION_V2,
+    },
+  ]) {
+    await assert.rejects(
+      repository.upsertSemanticObservationInTransaction(
+        transaction,
+        unsafeObservationInput(mismatched),
+      ),
+      /hash version is unsupported/u,
+    );
+  }
+  assert.equal(sourceLookups, 1);
+  assert.equal(semanticWrites.length, 1);
 });
 
 test("semantic content rejects delivery keys and mismatched identity, time, or meaning", async () => {

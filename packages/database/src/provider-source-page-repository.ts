@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_HASH_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   decideProviderSourceCanonicalLifecycle,
   providerSourcePageCommitCanonicalJson,
+  providerSourcePageCommitCanonicalJsonV2,
   type ProviderSourceCanonicalProjectionPlan,
   type ProviderSourcePagePlan,
-  type ProviderSourcePlannedOutcome,
+  type ProviderSourcePagePlanV2,
+  type VersionedProviderSourcePagePlan,
+  type VersionedProviderSourcePlannedOutcome,
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
 import {
@@ -25,6 +28,7 @@ import { ProviderSourceCursorRepository } from "./provider-source-cursor-reposit
 import { ProviderSourceDiagnosticRepository } from "./provider-source-diagnostic-repository.ts";
 import {
   ProviderSourceObservationRepository,
+  providerSourceObservationVersionPins,
   resolveLaunchSourceRecordMeaning,
   type RecordDeliveryOccurrenceInput,
   type SourceDeliveryDisposition,
@@ -65,7 +69,8 @@ export interface ProviderSourceAtomicPageCommitResult {
   readonly kind: "committed" | "already_committed";
   readonly pageId: string;
   readonly cursorFingerprint: string | null;
-  readonly continuation: ProviderSourcePagePlan["normalizedPage"]["continuation"];
+  readonly continuation:
+    VersionedProviderSourcePagePlan["normalizedPage"]["continuation"];
   readonly counts: Readonly<{
     inserted: number;
     revised: number;
@@ -137,11 +142,21 @@ function asPrismaBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
 function normalizedCommitHash(
   input: ProviderSourceAtomicPagePersistenceInput,
 ): string {
+  const canonical = input.pins.normalizedContractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? providerSourcePageCommitCanonicalJson({
+        plan: input.plan as ProviderSourcePagePlan,
+        protectedNativeEvidence: input.protectedNativeEvidence,
+      })
+    : input.pins.normalizedContractVersion ===
+        PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+      ? providerSourcePageCommitCanonicalJsonV2({
+          plan: input.plan as ProviderSourcePagePlanV2,
+          protectedNativeEvidence: input.protectedNativeEvidence,
+        })
+      : invalidPlan();
   return createHash("sha256")
-    .update(providerSourcePageCommitCanonicalJson({
-      plan: input.plan,
-      protectedNativeEvidence: input.protectedNativeEvidence,
-    }))
+    .update(canonical)
     .digest("hex");
 }
 
@@ -164,7 +179,7 @@ function addRetentionDays(value: Date, days: number): Date {
 }
 
 function sourceRecordKind(
-  outcome: Extract<ProviderSourcePlannedOutcome, { kind: "semantic" }>,
+  outcome: Extract<VersionedProviderSourcePlannedOutcome, { kind: "semantic" }>,
 ): "catalog" | "pull" | "trade" {
   return outcome.observation.kind;
 }
@@ -350,6 +365,9 @@ export class ProviderSourcePageRepository {
       const evidence = new Map(
         input.protectedNativeEvidence.map((item) => [item.reference, item.value]),
       );
+      const observationVersionPins = providerSourceObservationVersionPins(
+        input.pins.normalizedContractVersion,
+      );
       const counts = emptyCounts(input.plan.counts.warnings);
       const evCauses = new Map<string, bigint[]>();
 
@@ -408,8 +426,7 @@ export class ProviderSourcePageRepository {
               recordIdScopeKey: identity.recordIdScopeKey,
               providerRecordId: identity.providerRecordId,
               effectiveSourceTime: new Date(outcome.semanticContent.effectiveAt),
-              normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
-              hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
+              ...observationVersionPins,
               normalizedContentHash: outcome.normalizedContentHash,
               normalizedContent: outcome.semanticContent,
               ...meaning,
@@ -771,7 +788,7 @@ export class ProviderSourcePageRepository {
   private async recordQuarantine(
     transaction: PackscoutTransactionClient,
     input: ProviderSourceAtomicPagePersistenceInput,
-    outcome: ProviderSourcePlannedOutcome,
+    outcome: VersionedProviderSourcePlannedOutcome,
     evidence: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
     committedAt: Date,
     decision: Readonly<{

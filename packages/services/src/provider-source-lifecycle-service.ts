@@ -160,13 +160,23 @@ export class ProviderSourceLifecycleService {
         !["paused", "disabled"].includes(previous.state) ||
         previous.hasActiveRun ||
         previous.identityNamespaceKey !== mapper.identityNamespaceKey ||
-        previous.normalizedContractVersion !==
-          providerAdapter.manifest.normalizedContractVersion ||
         previous.recordIdScopes.length !== recordIdScopes.length ||
         !previous.recordIdScopes.every(
           (scope, index) => scope === recordIdScopes[index],
         )
       ) this.#conflict();
+      try {
+        this.#mapperDescriptors.requireReplacementCompatible({
+          replacement: mapper,
+          predecessor: {
+            mapperKey: previous.mapperKey,
+            mapperVersion: previous.mapperVersion,
+            normalizedContractVersion: previous.normalizedContractVersion,
+          },
+        });
+      } catch {
+        this.#conflict();
+      }
     }
     const createdAt = this.#clock.now();
     const created = await this.#repository.createSource({

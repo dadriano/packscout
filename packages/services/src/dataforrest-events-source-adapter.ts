@@ -8,7 +8,7 @@ import {
   type LaunchProviderKey,
   type SourceAdapterFailure,
   type SourceAdapterSafeDiagnostic,
-  type SourceAdapterManifestV1,
+  type VersionedSourceAdapterManifest,
 } from "@packscout/contracts";
 import {
   HardenedProviderRequestError,
@@ -92,7 +92,7 @@ function operationLostOwnership(): UnboundSourceAdapterRequestResult {
 function recordsScopesMatch(operation: Exclude<
   SourceAdapterOperation,
   Readonly<{ operationKind: "connection_test" }>
->, manifest: SourceAdapterManifestV1): boolean {
+>, manifest: VersionedSourceAdapterManifest): boolean {
   const declaration = manifest
     .supportedProviders.find(({ provider }) => provider === operation.provider);
   if (declaration === undefined) return false;
@@ -114,7 +114,7 @@ function recordsScopesMatch(operation: Exclude<
 
 function validateCaptureOperation(
   operation: SourceAdapterOperation,
-  manifest: SourceAdapterManifestV1,
+  manifest: VersionedSourceAdapterManifest,
 ): OperationValidation {
   if (
     operation.sourceTypeKey !== manifest.sourceTypeKey ||
@@ -371,12 +371,12 @@ function mapTransportFailure(
 }
 
 export class DataforrestEventsSourceAdapter implements SourceAdapter {
-  readonly manifest: SourceAdapterManifestV1;
+  readonly manifest: VersionedSourceAdapterManifest;
   readonly #requestDependencies: HardenedProviderRequestDependencies;
 
   constructor(
     requestDependencies: HardenedProviderRequestDependencies = {},
-    manifest: SourceAdapterManifestV1 =
+    manifest: VersionedSourceAdapterManifest =
       dataforrestEventsV1SourceAdapterManifest,
   ) {
     this.#requestDependencies = requestDependencies;

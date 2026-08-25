@@ -10528,7 +10528,7 @@
       },
       "checkConstraints": {
         "provider_source_revisions_keys_check": {
-          "value": "((btrim(source_type_key) <> ''::text) AND (btrim(source_adapter_version) <> ''::text) AND (normalized_contract_version = 'packscout.provider-observation.v1'::text) AND (btrim(mapper_key) <> ''::text) AND (btrim(mapper_version) <> ''::text) AND (btrim(identity_namespace_key) <> ''::text) AND (btrim(cursor_codec_version) <> ''::text) AND (configuration_hash ~ '^[0-9a-f]{64}$'::text) AND (jsonb_typeof(configuration_json) = 'object'::text) AND (jsonb_typeof(record_id_scopes_json) = 'array'::text) AND (jsonb_array_length(record_id_scopes_json) > 0))"
+          "value": "((btrim(source_type_key) <> ''::text) AND (btrim(source_adapter_version) <> ''::text) AND (normalized_contract_version = ANY (ARRAY['packscout.provider-observation.v1'::text, 'packscout.provider-observation.v2'::text])) AND (btrim(mapper_key) <> ''::text) AND (btrim(mapper_version) <> ''::text) AND (btrim(identity_namespace_key) <> ''::text) AND (btrim(cursor_codec_version) <> ''::text) AND (configuration_hash ~ '^[0-9a-f]{64}$'::text) AND (jsonb_typeof(configuration_json) = 'object'::text) AND (jsonb_typeof(record_id_scopes_json) = 'array'::text) AND (jsonb_array_length(record_id_scopes_json) > 0))"
         },
         "provider_source_revisions_number_check": {
           "value": "(revision_number > 0)"
@@ -16556,7 +16556,7 @@
       },
       "checkConstraints": {
         "source_semantic_observations_content_check": {
-          "value": "((normalized_contract_version = 'packscout.provider-observation.v1'::text) AND (hash_version = 'packscout.provider-observation-hash.v1'::text) AND (normalized_content_hash ~ '^[0-9a-f]{64}$'::text) AND (jsonb_typeof(normalized_content_json) = 'object'::text))"
+          "value": "((((normalized_contract_version = 'packscout.provider-observation.v1'::text) AND (hash_version = 'packscout.provider-observation-hash.v1'::text)) OR ((normalized_contract_version = 'packscout.provider-observation.v2'::text) AND (hash_version = 'packscout.provider-observation-hash.v2'::text))) AND (normalized_content_hash ~ '^[0-9a-f]{64}$'::text) AND (jsonb_typeof(normalized_content_json) = 'object'::text))"
         }
       }
     },

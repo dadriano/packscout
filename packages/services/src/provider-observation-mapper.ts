@@ -1,14 +1,16 @@
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   canonicalKindByLaunchScope,
   normalizedProviderObservationSchema,
+  normalizedProviderObservationV2Schema,
   providerEventCodes,
   type LaunchProviderKey,
   type LaunchRecordIdScopeKey,
   type NormalizedProviderFacts,
-  type NormalizedProviderObservation,
   type NormalizedRelationshipIdentity,
   type ProviderCanonicalKind,
+  type VersionedNormalizedProviderObservation,
 } from "@packscout/contracts";
 import { fingerprintCanonicalProviderContent } from "./provider-observation-canonical-content.ts";
 import type { SourceMapperCompatibilityDescriptor } from "./source-mapper-descriptors.ts";
@@ -180,7 +182,7 @@ export interface ProviderObservationMapperInput {
   readonly mapperVersion: string;
   readonly normalizedContractVersion: string;
   readonly identityNamespaceKey: string;
-  readonly observation: NormalizedProviderObservation;
+  readonly observation: VersionedNormalizedProviderObservation;
 }
 
 export interface ProviderObservationMapper {
@@ -440,7 +442,15 @@ function mapNormalizedObservation(
 ): ProviderObservationMappingOutcome {
   const mismatch = incompatible(input, descriptor);
   if (mismatch) return mismatch;
-  const observation = normalizedProviderObservationSchema.parse(input.observation);
+  const observation = descriptor.normalizedContractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? normalizedProviderObservationSchema.parse(input.observation)
+    : descriptor.normalizedContractVersion ===
+        PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+      ? normalizedProviderObservationV2Schema.parse(input.observation)
+      : (() => {
+          throw new Error("provider_mapper.normalized_contract_mismatch");
+        })();
   const warnings: MapperWarning[] = [];
   const recordId = observation.providerRecordIdentity.providerRecordId;
   const scope = observation.providerRecordIdentity.recordIdScopeKey;
@@ -700,7 +710,12 @@ function mapNormalizedObservation(
 export function createLaunchProviderObservationMapper(
   descriptor: SourceMapperCompatibilityDescriptor,
 ): ProviderObservationMapper {
-  if (descriptor.normalizedContractVersion !== PROVIDER_OBSERVATION_CONTRACT_VERSION) {
+  if (
+    descriptor.normalizedContractVersion !==
+      PROVIDER_OBSERVATION_CONTRACT_VERSION &&
+    descriptor.normalizedContractVersion !==
+      PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+  ) {
     throw new Error("provider_mapper.normalized_contract_mismatch");
   }
   return Object.freeze({

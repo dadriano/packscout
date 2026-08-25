@@ -1,16 +1,35 @@
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   launchProviderKeys,
   providerIdentityNamespaceByLaunchProvider,
   type LaunchProviderKey,
 } from "@packscout/contracts";
 
+export type SourceMapperNormalizedContractVersion =
+  | typeof PROVIDER_OBSERVATION_CONTRACT_VERSION
+  | typeof PROVIDER_OBSERVATION_CONTRACT_VERSION_V2;
+
+export interface SourceMapperContractPin {
+  readonly mapperKey: string;
+  readonly mapperVersion: string;
+  readonly normalizedContractVersion: SourceMapperNormalizedContractVersion;
+}
+
+export interface SourceMapperContractPinInput {
+  readonly mapperKey: string;
+  readonly mapperVersion: string;
+  readonly normalizedContractVersion: string;
+}
+
 export interface SourceMapperCompatibilityDescriptor {
   readonly mapperKey: string;
   readonly mapperVersion: string;
   readonly provider: LaunchProviderKey;
-  readonly normalizedContractVersion: typeof PROVIDER_OBSERVATION_CONTRACT_VERSION;
+  readonly normalizedContractVersion: SourceMapperNormalizedContractVersion;
   readonly identityNamespaceKey: string;
+  /** Exact older mapper/contract pins this descriptor may replace. */
+  readonly compatiblePredecessors: readonly SourceMapperContractPin[];
 }
 
 const launchMapperKeys = Object.freeze({
@@ -21,15 +40,32 @@ const launchMapperKeys = Object.freeze({
 } as const satisfies Readonly<Record<LaunchProviderKey, string>>);
 
 export const launchSourceMapperDescriptors = Object.freeze(
-  launchProviderKeys.map((provider): SourceMapperCompatibilityDescriptor =>
-    Object.freeze({
-      mapperKey: launchMapperKeys[provider],
+  launchProviderKeys.flatMap((provider): SourceMapperCompatibilityDescriptor[] => {
+    const mapperKey = launchMapperKeys[provider];
+    const identityNamespaceKey =
+      providerIdentityNamespaceByLaunchProvider[provider];
+    const v1: SourceMapperCompatibilityDescriptor = Object.freeze({
+      mapperKey,
       mapperVersion: "1",
       provider,
       normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
-      identityNamespaceKey: providerIdentityNamespaceByLaunchProvider[provider],
-    }),
-  ),
+      identityNamespaceKey,
+      compatiblePredecessors: Object.freeze([]),
+    });
+    const v2: SourceMapperCompatibilityDescriptor = Object.freeze({
+      mapperKey,
+      mapperVersion: "2",
+      provider,
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+      identityNamespaceKey,
+      compatiblePredecessors: Object.freeze([Object.freeze({
+        mapperKey,
+        mapperVersion: "1",
+        normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+      })]),
+    });
+    return [v1, v2];
+  }),
 );
 
 export type SourceMapperCompatibilityErrorCode =
@@ -37,6 +73,7 @@ export type SourceMapperCompatibilityErrorCode =
   | "mapper_identity_conflicts_with_source_type"
   | "normalized_contract_mismatch"
   | "provider_mismatch"
+  | "replacement_contract_mismatch"
   | "replacement_namespace_mismatch"
   | "unknown_mapper_descriptor";
 
@@ -56,6 +93,26 @@ function descriptorIdentity(
   return `${descriptor.mapperKey}@${descriptor.mapperVersion}`;
 }
 
+function contractPinMatches(
+  left: SourceMapperContractPin,
+  right: SourceMapperContractPinInput,
+): boolean {
+  return left.mapperKey === right.mapperKey &&
+    left.mapperVersion === right.mapperVersion &&
+    left.normalizedContractVersion === right.normalizedContractVersion;
+}
+
+function freezeDescriptor(
+  descriptor: SourceMapperCompatibilityDescriptor,
+): SourceMapperCompatibilityDescriptor {
+  return Object.freeze({
+    ...descriptor,
+    compatiblePredecessors: Object.freeze(
+      descriptor.compatiblePredecessors.map((pin) => Object.freeze({ ...pin })),
+    ),
+  });
+}
+
 export class SourceMapperDescriptorRegistry {
   readonly #descriptors = new Map<string, SourceMapperCompatibilityDescriptor>();
 
@@ -71,7 +128,7 @@ export class SourceMapperDescriptorRegistry {
     if (this.#descriptors.has(identity)) {
       throw new SourceMapperCompatibilityError("duplicate_mapper_descriptor");
     }
-    this.#descriptors.set(identity, Object.freeze({ ...descriptor }));
+    this.#descriptors.set(identity, freezeDescriptor(descriptor));
     return this;
   }
 
@@ -100,6 +157,41 @@ export class SourceMapperDescriptorRegistry {
     }
     if (descriptor.identityNamespaceKey !== input.identityNamespaceKey) {
       throw new SourceMapperCompatibilityError("replacement_namespace_mismatch");
+    }
+    return descriptor;
+  }
+
+  requireReplacementCompatible(input: Readonly<{
+    replacement: SourceMapperCompatibilityDescriptor;
+    predecessor: SourceMapperContractPinInput;
+  }>): SourceMapperCompatibilityDescriptor {
+    const descriptor = this.#descriptors.get(
+      descriptorIdentity(input.replacement),
+    );
+    if (!descriptor) {
+      throw new SourceMapperCompatibilityError("unknown_mapper_descriptor");
+    }
+    if (
+      descriptor.provider !== input.replacement.provider ||
+      descriptor.normalizedContractVersion !==
+        input.replacement.normalizedContractVersion ||
+      descriptor.identityNamespaceKey !==
+        input.replacement.identityNamespaceKey
+    ) {
+      throw new SourceMapperCompatibilityError(
+        "replacement_contract_mismatch",
+      );
+    }
+    const currentPin: SourceMapperContractPin = descriptor;
+    if (
+      !contractPinMatches(currentPin, input.predecessor) &&
+      !descriptor.compatiblePredecessors.some((pin) =>
+        contractPinMatches(pin, input.predecessor)
+      )
+    ) {
+      throw new SourceMapperCompatibilityError(
+        "replacement_contract_mismatch",
+      );
     }
     return descriptor;
   }

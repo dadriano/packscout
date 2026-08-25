@@ -1,6 +1,8 @@
 import {
   sourceAdapterManifestV1Schema,
+  sourceAdapterManifestV2Schema,
   type LaunchProviderKey,
+  type VersionedSourceAdapterManifest,
 } from "@packscout/contracts";
 import type { SourceAdapter } from "./source-adapter.ts";
 
@@ -44,8 +46,14 @@ export class SourceAdapterRegistry {
   }
 
   register(adapter: SourceAdapter): this {
-    const manifest = sourceAdapterManifestV1Schema.safeParse(adapter.manifest);
-    if (!manifest.success) {
+    const v1 = sourceAdapterManifestV1Schema.safeParse(adapter.manifest);
+    const v2 = sourceAdapterManifestV2Schema.safeParse(adapter.manifest);
+    const manifest: VersionedSourceAdapterManifest | null = v1.success
+      ? v1.data
+      : v2.success
+        ? v2.data
+        : null;
+    if (!manifest) {
       throw new SourceAdapterRegistryError("invalid_adapter_manifest");
     }
     for (const capability of [
@@ -62,13 +70,13 @@ export class SourceAdapterRegistry {
       }
     }
     const registrationKey = SourceAdapterRegistry.#registrationKey(
-      manifest.data.sourceTypeKey,
-      manifest.data.adapterVersion,
+      manifest.sourceTypeKey,
+      manifest.adapterVersion,
     );
     if (this.#adapters.has(registrationKey)) {
       throw new SourceAdapterRegistryError("duplicate_adapter_registration");
     }
-    const frozenManifest = deepFreeze(manifest.data);
+    const frozenManifest = deepFreeze(manifest);
     this.#adapters.set(
       registrationKey,
       Object.freeze({

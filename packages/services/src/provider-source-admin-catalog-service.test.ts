@@ -4,8 +4,9 @@ import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
 } from "@packscout/contracts";
 import {
   ProviderSourceAdminCatalogService,
@@ -132,7 +133,7 @@ function repository(
   return { value, requestedScopes };
 }
 
-test("catalog advertises current v2 while retaining masked v1 connection and source history", async () => {
+test("catalog advertises current v3 while retaining masked v1 connection and source history", async () => {
   const records = repository();
   const resolutionInputs: unknown[] = [];
   const service = new ProviderSourceAdminCatalogService({
@@ -170,10 +171,10 @@ test("catalog advertises current v2 while retaining masked v1 connection and sou
   assert.equal(catalog.availableSourceTypes.length, 1);
   assert.deepEqual(catalog.providers[0]?.sourceRegistration, {
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    sourceAdapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
     mapperKey: "courtyard-provider-observation",
-    mapperVersion: "1",
+    mapperVersion: "2",
     identityNamespaceKey: "dataforrest-courtyard-records-v1",
     recordIdScopes: [
       "catalog-pack-v1",

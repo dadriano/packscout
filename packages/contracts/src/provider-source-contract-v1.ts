@@ -6,6 +6,10 @@ export const PROVIDER_OBSERVATION_CONTRACT_VERSION =
   "packscout.provider-observation.v1" as const;
 export const PROVIDER_OBSERVATION_HASH_VERSION =
   "packscout.provider-observation-hash.v1" as const;
+export const PROVIDER_OBSERVATION_CONTRACT_VERSION_V2 =
+  "packscout.provider-observation.v2" as const;
+export const PROVIDER_OBSERVATION_HASH_VERSION_V2 =
+  "packscout.provider-observation-hash.v2" as const;
 
 export const launchProviderKeys = [
   "courtyard",
@@ -472,6 +476,45 @@ export const sourceAdapterManifestV1Schema = z
     }
   });
 
+/**
+ * Additive manifest contract for adapters that emit normalized observation
+ * v2. The v1 manifest schema intentionally retains its exact v1 literal.
+ */
+export const sourceAdapterManifestV2Schema = z
+  .object({
+    providerSourceContractVersion: z.literal(PROVIDER_SOURCE_CONTRACT_VERSION),
+    sourceTypeKey: registrationKeySchema,
+    adapterVersion: registrationKeySchema,
+    normalizedContractVersion: z.literal(
+      PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+    ),
+    compatibleConnectionTypeKey: registrationKeySchema,
+    cursorCodecKey: registrationKeySchema,
+    operatorLabel: z.string().trim().min(1).max(80),
+    requestBounds: providerSourceRequestBoundsSchema,
+    maximumConnectionRequestCap: z.number().int().min(1).max(4),
+    capabilities: z
+      .object({
+        connectionTest: z.literal(true),
+        sourceTest: z.literal(true),
+        pageRead: z.literal(true),
+        cancellation: z.literal(true),
+      })
+      .strict(),
+    supportedProviders: z.array(sourceAdapterProviderDeclarationSchema).min(1),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const providers = value.supportedProviders.map(({ provider }) => provider);
+    if (new Set(providers).size !== providers.length) {
+      context.addIssue({
+        code: "custom",
+        message: "provider_source.duplicate_supported_provider",
+        path: ["supportedProviders"],
+      });
+    }
+  });
+
 export type ProviderSourceRequestBounds = z.infer<
   typeof providerSourceRequestBoundsSchema
 >;
@@ -492,6 +535,12 @@ export type SourceAdapterSafeDiagnostic = z.infer<
 export type SourceAdapterManifestV1 = z.infer<
   typeof sourceAdapterManifestV1Schema
 >;
+export type SourceAdapterManifestV2 = z.infer<
+  typeof sourceAdapterManifestV2Schema
+>;
+export type VersionedSourceAdapterManifest =
+  | SourceAdapterManifestV1
+  | SourceAdapterManifestV2;
 
 export function validateSourceIntervalSeconds(value: unknown): number {
   return positiveBoundedIntegerSchema

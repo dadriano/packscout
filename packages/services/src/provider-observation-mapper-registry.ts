@@ -40,7 +40,9 @@ function descriptorMatches(
     actual.mapperVersion === expected.mapperVersion &&
     actual.provider === expected.provider &&
     actual.normalizedContractVersion === expected.normalizedContractVersion &&
-    actual.identityNamespaceKey === expected.identityNamespaceKey
+    actual.identityNamespaceKey === expected.identityNamespaceKey &&
+    JSON.stringify(actual.compatiblePredecessors) ===
+      JSON.stringify(expected.compatiblePredecessors)
   );
 }
 

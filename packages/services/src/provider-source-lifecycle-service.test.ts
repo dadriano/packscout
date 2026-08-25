@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   providerIdentityNamespaceByLaunchProvider,
 } from "@packscout/contracts";
 import { ProviderSourceActivationService } from "./provider-source-activation-service.ts";
@@ -165,7 +166,7 @@ const sourceRequest = {
   connectionProfileId: profileId,
   sourceTypeKey: "dataforrest-events-v1" as const,
   mapperKey: "courtyard-provider-observation",
-  mapperVersion: "1",
+  mapperVersion: "2",
   intervalSeconds: 60,
 };
 
@@ -181,7 +182,7 @@ test("source creation derives the immutable platform filter and contract-only ma
   });
   assert.equal(
     repository.createInput?.normalizedContractVersion,
-    PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   );
   assert.equal(
     repository.createInput?.identityNamespaceKey,
@@ -189,7 +190,7 @@ test("source creation derives the immutable platform filter and contract-only ma
   );
   assert.equal(
     repository.createInput?.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   );
   assert.deepEqual(repository.createInput?.recordIdScopes, [
     "catalog-pack-v1",
@@ -234,9 +235,23 @@ test("a replacement requires an idle paused or disabled compatible predecessor a
   assert.equal(repository.createInput?.replacesSourceInstanceId, oldSourceId);
   assert.equal(
     repository.createInput?.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   );
   assert.notEqual(replacement.sourceInstanceId, oldSourceId);
+
+  repository.source = snapshot({
+    sourceInstanceId: oldSourceId,
+    state: "disabled",
+    hasActiveRun: false,
+    normalizedContractVersion: "packscout.provider-observation.future",
+  });
+  await assert.rejects(
+    service.createReplacement(
+      { organizationId, actorKey: "operator-admin" },
+      { ...sourceRequest, replacesSourceInstanceId: oldSourceId },
+    ),
+    /source_conflict/u,
+  );
 });
 
 test("activation delegates exact tested pins and cursor reset binds preview generation, fingerprint, and typed provider", async () => {

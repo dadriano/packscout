@@ -2,22 +2,29 @@ import type { ZodError } from "zod";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   dataforrestContinuation,
   dataforrestEventRecordV1Schema,
+  dataforrestEventRecordV2Schema,
   dataforrestEventsPageV1Schema,
+  dataforrestEventsPageV2Schema,
   dataforrestEventsSourceConfigurationV1Schema,
   dataforrestNextCursor,
   dataforrestEventsV1SourceAdapterManifest,
   dataforrestEventsV2SourceAdapterManifest,
+  dataforrestEventsV3SourceAdapterManifest,
   normalizeDataforrestEventRecord,
   normalizeDataforrestEventRecordV2,
+  normalizeDataforrestEventRecordV3,
   sourceAdapterFailureSchema,
   type DataforrestEventsPageV1,
+  type DataforrestEventsPageV2,
+  type DataforrestEventRecordV1,
+  type DataforrestEventRecordV2,
   type LaunchProviderKey,
-  type NormalizedObservationOutcome,
   type SourceAdapterFailure,
   type SourceAdapterSafeDiagnostic,
+  type VersionedNormalizedObservationOutcome,
 } from "@packscout/contracts";
 import type {
   ConnectionTestInterpretationContext,
@@ -31,12 +38,16 @@ import type {
 } from "./source-adapter.ts";
 
 type PageParseResult =
-  | Readonly<{ ok: true; page: DataforrestEventsPageV1 }>
+  | Readonly<{
+      ok: true;
+      page: DataforrestEventsPageV1 | DataforrestEventsPageV2;
+    }>
   | Readonly<{ ok: false }>;
 
 type DataforrestAdapterVersion =
   | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-  | typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION;
+  | typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION
+  | typeof DATAFORREST_EVENTS_V3_ADAPTER_VERSION;
 
 function dataforrestManifest(adapterVersion: string) {
   if (adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION) {
@@ -44,6 +55,9 @@ function dataforrestManifest(adapterVersion: string) {
   }
   if (adapterVersion === DATAFORREST_EVENTS_V2_ADAPTER_VERSION) {
     return dataforrestEventsV2SourceAdapterManifest;
+  }
+  if (adapterVersion === DATAFORREST_EVENTS_V3_ADAPTER_VERSION) {
+    return dataforrestEventsV3SourceAdapterManifest;
   }
   return null;
 }
@@ -140,6 +154,7 @@ function diagnostic(
 function parsePage(
   request: SuccessfulSourceAdapterRequest,
   pageLimit: number,
+  adapterVersion: string,
 ): PageParseResult {
   let decoded: string;
   try {
@@ -157,7 +172,13 @@ function parsePage(
   }
   if (!hasBoundedJsonShape(raw)) return { ok: false };
   try {
-    const parsed = dataforrestEventsPageV1Schema.safeParse(raw);
+    const parsed = adapterVersion === DATAFORREST_EVENTS_V3_ADAPTER_VERSION
+      ? dataforrestEventsPageV2Schema.safeParse(raw)
+      : adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION ||
+          adapterVersion === DATAFORREST_EVENTS_V2_ADAPTER_VERSION
+        ? dataforrestEventsPageV1Schema.safeParse(raw)
+        : null;
+    if (parsed === null) return { ok: false };
     if (!parsed.success || parsed.data.records.length > pageLimit) {
       return { ok: false };
     }
@@ -170,18 +191,18 @@ function parsePage(
 function sourceContextIsValid(
   context: SourceTestInterpretationContext | PageReadInterpretationContext,
 ): boolean {
-  const declaration = dataforrestManifest(context.adapterVersion)
-    ?.supportedProviders
+  const manifest = dataforrestManifest(context.adapterVersion);
+  const declaration = manifest?.supportedProviders
     .find(({ provider }) => provider === context.provider);
   const configuration = dataforrestEventsSourceConfigurationV1Schema.safeParse(
     context.sourceConfiguration,
   );
   if (
+    manifest === null ||
     declaration === undefined ||
     !configuration.success ||
     configuration.data.platform !== context.provider ||
-    context.normalizedContractVersion !==
-      PROVIDER_OBSERVATION_CONTRACT_VERSION ||
+    context.normalizedContractVersion !== manifest.normalizedContractVersion ||
     context.identityNamespaceKey !== declaration.identityNamespaceKey
   ) {
     return false;
@@ -231,7 +252,7 @@ function invalidOutcome(
   reasonCode: string,
   fieldPaths: readonly string[],
   protectedNativeEvidenceRef: string,
-): NormalizedObservationOutcome {
+): VersionedNormalizedObservationOutcome {
   return {
     status: "invalid",
     recordIndex,
@@ -269,7 +290,7 @@ function interpretRecord(
   provider: LaunchProviderKey,
   recordIndex: number,
   adapterVersion: DataforrestAdapterVersion,
-): NormalizedObservationOutcome {
+): VersionedNormalizedObservationOutcome {
   const evidenceReference = `page_record:${recordIndex}`;
   if (
     typeof record.record_id !== "string" ||
@@ -309,7 +330,9 @@ function interpretRecord(
       evidenceReference,
     );
   }
-  const parsed = dataforrestEventRecordV1Schema.safeParse(record);
+  const parsed = adapterVersion === DATAFORREST_EVENTS_V3_ADAPTER_VERSION
+    ? dataforrestEventRecordV2Schema.safeParse(record)
+    : dataforrestEventRecordV1Schema.safeParse(record);
   if (!parsed.success) {
     const invalidTimestamp = parsed.error.issues.some(({ path }) =>
       timestampFields.has(String(path[0] ?? ""))
@@ -325,13 +348,23 @@ function interpretRecord(
     return {
       status: "valid",
       recordIndex,
-      observation: (adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-        ? normalizeDataforrestEventRecord
-        : normalizeDataforrestEventRecordV2)(
-        parsed.data,
-        provider,
-        evidenceReference,
-      ),
+      observation: adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+        ? normalizeDataforrestEventRecord(
+            parsed.data as DataforrestEventRecordV1,
+            provider,
+            evidenceReference,
+          )
+        : adapterVersion === DATAFORREST_EVENTS_V2_ADAPTER_VERSION
+          ? normalizeDataforrestEventRecordV2(
+              parsed.data as DataforrestEventRecordV1,
+              provider,
+              evidenceReference,
+            )
+          : normalizeDataforrestEventRecordV3(
+              parsed.data as DataforrestEventRecordV2,
+              provider,
+              evidenceReference,
+            ),
     };
   } catch (error) {
     // Normalization defects are record-local: raw-valid values the normalized
@@ -351,10 +384,11 @@ function interpretRecords(
   page: DataforrestEventsPageV1,
   provider: LaunchProviderKey,
   adapterVersion: string,
-): readonly NormalizedObservationOutcome[] {
+): readonly VersionedNormalizedObservationOutcome[] {
   if (
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
-    adapterVersion !== DATAFORREST_EVENTS_V2_ADAPTER_VERSION
+    adapterVersion !== DATAFORREST_EVENTS_V2_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_EVENTS_V3_ADAPTER_VERSION
   ) {
     throw new RangeError("dataforrest_events.adapter_version_unsupported");
   }
@@ -367,7 +401,11 @@ async function interpretDataforrestConnectionTestUnsafe(
   context: ConnectionTestInterpretationContext,
   request: SuccessfulSourceAdapterRequest,
 ): Promise<SourceAdapterInterpretationResult<ConnectionTestValue>> {
-  const parsed = parsePage(request, context.bounds.pageLimit);
+  const parsed = parsePage(
+    request,
+    context.bounds.pageLimit,
+    context.adapterVersion,
+  );
   if (!parsed.ok) {
     return {
       ok: false,
@@ -399,7 +437,11 @@ async function interpretDataforrestSourceTestUnsafe(
       diagnostics: [diagnostic("source_context_invalid")],
     };
   }
-  const parsed = parsePage(request, context.bounds.pageLimit);
+  const parsed = parsePage(
+    request,
+    context.bounds.pageLimit,
+    context.adapterVersion,
+  );
   if (!parsed.ok) {
     return {
       ok: false,
@@ -447,7 +489,7 @@ async function interpretDataforrestPageUnsafe(
       diagnostics: [diagnostic("source_context_invalid")],
     };
   }
-  const parsed = parsePage(request, context.pageLimit);
+  const parsed = parsePage(request, context.pageLimit, context.adapterVersion);
   if (!parsed.ok) {
     return {
       ok: false,
@@ -498,7 +540,9 @@ async function interpretDataforrestPageUnsafe(
         },
       ),
       normalizedPage: {
-        normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+        normalizedContractVersion: dataforrestManifest(
+          context.adapterVersion,
+        )!.normalizedContractVersion,
         provider: context.provider,
         outcomes: [...outcomes],
         nextCursor: dataforrestNextCursor(

@@ -262,16 +262,30 @@ export class ProviderSourceAdminCatalogService {
       const pinnedDeclaration = pinnedAdapter.manifest.supportedProviders.find(
         ({ provider }) => provider === source.provider,
       );
+      if (!pinnedDeclaration) return false;
+      try {
+        this.#mapperDescriptors.requireCompatible({
+          mapperKey: source.mapperKey,
+          mapperVersion: source.mapperVersion,
+          provider: visibleProvider.provider,
+          normalizedContractVersion: source.normalizedContractVersion,
+          identityNamespaceKey: source.identityNamespaceKey,
+          sourceTypeKey: source.sourceTypeKey,
+        });
+      } catch {
+        return false;
+      }
       return productionSourceTypes.has(source.sourceTypeKey) &&
         visibleProviderIds.has(source.providerId) &&
-        pinnedDeclaration !== undefined &&
         registration?.sourceTypeKey === source.sourceTypeKey &&
         pinnedAdapter.manifest.normalizedContractVersion ===
           source.normalizedContractVersion &&
         pinnedDeclaration.identityNamespaceKey === source.identityNamespaceKey &&
-        registration.mapperKey === source.mapperKey &&
-        registration.mapperVersion === source.mapperVersion &&
         registration.identityNamespaceKey === source.identityNamespaceKey &&
+        pinnedDeclaration.recordIdScopes.length === source.recordIdScopes.length &&
+        pinnedDeclaration.recordIdScopes.every(
+          (scope, index) => scope.recordIdScopeKey === source.recordIdScopes[index],
+        ) &&
         registration.recordIdScopes.length === source.recordIdScopes.length &&
         registration.recordIdScopes.every(
           (scope, index) => scope === source.recordIdScopes[index],

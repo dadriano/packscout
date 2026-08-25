@@ -1,14 +1,23 @@
 import { createHash } from "node:crypto";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   canonicalKindByLaunchScope,
   launchProviderKeySchema,
   normalizedObservationSemanticCanonicalJson,
+  normalizedObservationSemanticCanonicalJsonV2,
   normalizedObservationSemanticContent,
+  normalizedObservationSemanticContentSchema,
+  normalizedObservationSemanticContentV2,
+  normalizedObservationSemanticContentV2Schema,
+  normalizedProviderObservationPageV2Schema,
   normalizedProviderObservationPageSchema,
+  normalizedProviderObservationSchema,
+  normalizedProviderObservationV2Schema,
   opaqueCursorEnvelopeSchema,
   providerSourceLaunchBounds,
   providerSourceExpectedCanonicalRelationships,
+  providerSourceExpectedCanonicalRelationshipsV2,
   providerSourceCanonicalCatalogAssetContentV1Schema,
   providerSourceCanonicalEvInputContentV1Schema,
   providerSourceCanonicalMarketEventContentV1Schema,
@@ -16,9 +25,10 @@ import {
   providerSourceCanonicalPullContentV1Schema,
   type ProviderSourceCanonicalProjectionPlan,
   type LaunchProviderKey,
-  type NormalizedObservationSemanticContent,
   type ProviderSourcePageCommitPins,
-  type ProviderSourcePagePlan,
+  type VersionedNormalizedObservationSemanticContent,
+  type VersionedNormalizedProviderObservationPage,
+  type VersionedProviderSourcePagePlan,
 } from "@packscout/contracts";
 import { hashJson } from "./security.ts";
 
@@ -48,7 +58,7 @@ export interface ProviderSourceProtectedNativeEvidence {
 
 export interface ProviderSourceAtomicPagePersistenceInput {
   readonly pins: ProviderSourcePageCommitPins;
-  readonly plan: ProviderSourcePagePlan;
+  readonly plan: VersionedProviderSourcePagePlan;
   readonly protectedRawResponse: Uint8Array;
   readonly protectedRawResponseSha256: string;
   readonly protectedNativeEvidence: readonly ProviderSourceProtectedNativeEvidence[];
@@ -162,12 +172,80 @@ function validatePins(pins: unknown): asserts pins is ProviderSourcePageCommitPi
   }
 }
 
+type SupportedObservationContractVersion =
+  | typeof PROVIDER_OBSERVATION_CONTRACT_VERSION
+  | typeof PROVIDER_OBSERVATION_CONTRACT_VERSION_V2;
+
+function supportedObservationContractVersion(
+  value: string,
+): SupportedObservationContractVersion {
+  if (
+    value === PROVIDER_OBSERVATION_CONTRACT_VERSION ||
+    value === PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+  ) {
+    return value;
+  }
+  return invalidPlan();
+}
+
+function parseNormalizedPage(
+  normalizedContractVersion: SupportedObservationContractVersion,
+  value: unknown,
+): VersionedNormalizedProviderObservationPage {
+  const parsed = normalizedContractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? normalizedProviderObservationPageSchema.safeParse(value)
+    : normalizedProviderObservationPageV2Schema.safeParse(value);
+  return parsed.success ? parsed.data : invalidPlan();
+}
+
+function parseSemanticContent(
+  normalizedContractVersion: SupportedObservationContractVersion,
+  value: unknown,
+): VersionedNormalizedObservationSemanticContent {
+  const parsed = normalizedContractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? normalizedObservationSemanticContentSchema.safeParse(value)
+    : normalizedObservationSemanticContentV2Schema.safeParse(value);
+  return parsed.success ? parsed.data : invalidPlan();
+}
+
+function semanticContentFromObservation(
+  normalizedContractVersion: SupportedObservationContractVersion,
+  value: unknown,
+): VersionedNormalizedObservationSemanticContent {
+  if (normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION) {
+    const observation = normalizedProviderObservationSchema.safeParse(value);
+    return observation.success
+      ? normalizedObservationSemanticContent(observation.data)
+      : invalidPlan();
+  }
+  const observation = normalizedProviderObservationV2Schema.safeParse(value);
+  return observation.success
+    ? normalizedObservationSemanticContentV2(observation.data)
+    : invalidPlan();
+}
+
+function semanticCanonicalJson(
+  normalizedContractVersion: SupportedObservationContractVersion,
+  value: unknown,
+): string {
+  return normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION
+    ? normalizedObservationSemanticCanonicalJson(value)
+    : normalizedObservationSemanticCanonicalJsonV2(value);
+}
+
 function assertProjection(
+  normalizedContractVersion: SupportedObservationContractVersion,
   provider: LaunchProviderKey,
-  semanticContent: NormalizedObservationSemanticContent,
+  semanticContent: VersionedNormalizedObservationSemanticContent,
   projection: ProviderSourceCanonicalProjectionPlan,
 ): void {
-  const identity = semanticContent.providerRecordIdentity;
+  const boundSemanticContent = parseSemanticContent(
+    normalizedContractVersion,
+    semanticContent,
+  );
+  const identity = boundSemanticContent.providerRecordIdentity;
   const expectedPrimaryKind =
     canonicalKindByLaunchScope[identity.recordIdScopeKey];
   const primary = projection.projectionKind === "primary";
@@ -216,7 +294,7 @@ function assertProjection(
     projection.platformKey !== provider ||
     projection.providerRecordId !== identity.providerRecordId ||
     projection.recordIdScopeKey !== identity.recordIdScopeKey ||
-    projection.effectiveAt !== semanticContent.effectiveAt ||
+    projection.effectiveAt !== boundSemanticContent.effectiveAt ||
     !SHA_256_PATTERN.test(projection.contentFingerprint) ||
     hashJson(projection.content) !== projection.contentFingerprint ||
     !validContentKind ||
@@ -243,10 +321,20 @@ function assertProjection(
   }
   let expectedRelationships: readonly ProviderSourceCanonicalProjectionPlan["relationships"][number][];
   try {
-    expectedRelationships = providerSourceExpectedCanonicalRelationships({
-      semanticContent,
-      projectionKind: projection.projectionKind,
-    });
+    expectedRelationships = normalizedContractVersion ===
+        PROVIDER_OBSERVATION_CONTRACT_VERSION
+      ? providerSourceExpectedCanonicalRelationships({
+          semanticContent: normalizedObservationSemanticContentSchema.parse(
+            boundSemanticContent,
+          ),
+          projectionKind: projection.projectionKind,
+        })
+      : providerSourceExpectedCanonicalRelationshipsV2({
+          semanticContent: normalizedObservationSemanticContentV2Schema.parse(
+            boundSemanticContent,
+          ),
+          projectionKind: projection.projectionKind,
+        });
   } catch {
     invalidPlan();
   }
@@ -270,15 +358,24 @@ function assertProjection(
 
 /** Revalidates mapper output again at a non-page persistence boundary. */
 export function validateProviderSourceCanonicalProjections(input: Readonly<{
+  normalizedContractVersion: string;
   provider: LaunchProviderKey;
-  semanticContent: NormalizedObservationSemanticContent;
+  semanticContent: VersionedNormalizedObservationSemanticContent;
   projections: readonly ProviderSourceCanonicalProjectionPlan[];
 }>): void {
+  const normalizedContractVersion = supportedObservationContractVersion(
+    input.normalizedContractVersion,
+  );
   if (input.projections.length < 1 || input.projections.length > 2) {
     invalidPlan();
   }
   input.projections.forEach((projection) =>
-    assertProjection(input.provider, input.semanticContent, projection),
+    assertProjection(
+      normalizedContractVersion,
+      input.provider,
+      input.semanticContent,
+      projection,
+    ),
   );
   const primary = input.projections.filter(
     ({ projectionKind }) => projectionKind === "primary",
@@ -304,7 +401,11 @@ export function validateProviderSourceAtomicPageInput(
   input: ProviderSourceAtomicPagePersistenceInput,
 ): void {
   validatePins(input.pins);
-  const parsedPage = normalizedProviderObservationPageSchema.safeParse(
+  const normalizedContractVersion = supportedObservationContractVersion(
+    input.pins.normalizedContractVersion,
+  );
+  const parsedPage = parseNormalizedPage(
+    normalizedContractVersion,
     input.plan.normalizedPage,
   );
   const rawHash =
@@ -312,38 +413,35 @@ export function validateProviderSourceAtomicPageInput(
       ? createHash("sha256").update(input.protectedRawResponse).digest("hex")
       : null;
   if (
-    !parsedPage.success ||
-    parsedPage.data.provider !== input.pins.provider ||
-    parsedPage.data.normalizedContractVersion !==
+    parsedPage.provider !== input.pins.provider ||
+    parsedPage.normalizedContractVersion !==
       input.pins.normalizedContractVersion ||
-    input.pins.normalizedContractVersion !==
-      PROVIDER_OBSERVATION_CONTRACT_VERSION ||
     !(input.committedAt instanceof Date) ||
     !Number.isFinite(input.committedAt.getTime()) ||
     input.protectedRawResponse.byteLength < 1 ||
     input.protectedRawResponse.byteLength >
       providerSourceLaunchBounds.maximumResponseBytes ||
-    parsedPage.data.measurements.responseBytes !==
+    parsedPage.measurements.responseBytes !==
       input.protectedRawResponse.byteLength ||
     !SHA_256_PATTERN.test(input.protectedRawResponseSha256) ||
     rawHash !== input.protectedRawResponseSha256 ||
-    input.plan.outcomes.length !== parsedPage.data.outcomes.length
+    input.plan.outcomes.length !== parsedPage.outcomes.length
   ) {
     invalidPlan();
   }
 
-  const nextValue = parsedPage.data.nextCursor.value;
+  const nextValue = parsedPage.nextCursor.value;
   if (
-    parsedPage.data.nextCursor.sourceInstanceId !==
+    parsedPage.nextCursor.sourceInstanceId !==
       input.pins.sourceInstanceId ||
-    parsedPage.data.nextCursor.sourceRevisionId !==
+    parsedPage.nextCursor.sourceRevisionId !==
       input.pins.sourceRevisionId ||
-    parsedPage.data.nextCursor.sourceTypeKey !== input.pins.sourceTypeKey ||
-    parsedPage.data.nextCursor.adapterVersion !==
+    parsedPage.nextCursor.sourceTypeKey !== input.pins.sourceTypeKey ||
+    parsedPage.nextCursor.adapterVersion !==
       input.pins.sourceAdapterVersion ||
-    parsedPage.data.nextCursor.cursorCodecKey !==
+    parsedPage.nextCursor.cursorCodecKey !==
       input.pins.cursorCodecVersion ||
-    parsedPage.data.nextCursor.cursorGeneration !==
+    parsedPage.nextCursor.cursorGeneration !==
       Number(input.pins.cursorGeneration) ||
     (nextValue === null) !== (input.nextCursorFingerprint === null) ||
     (input.nextCursorFingerprint !== null &&
@@ -376,7 +474,7 @@ export function validateProviderSourceAtomicPageInput(
     warnings: 0,
   };
   for (const [index, outcome] of input.plan.outcomes.entries()) {
-    const pageOutcome = parsedPage.data.outcomes[index];
+    const pageOutcome = parsedPage.outcomes[index];
     if (
       outcome.recordIndex !== index ||
       !evidence.has(outcome.protectedNativeEvidenceRef)
@@ -398,19 +496,28 @@ export function validateProviderSourceAtomicPageInput(
       }
       continue;
     }
+    const observationSemanticContent = semanticContentFromObservation(
+      normalizedContractVersion,
+      outcome.observation,
+    );
+    const plannedSemanticContent = parseSemanticContent(
+      normalizedContractVersion,
+      outcome.semanticContent,
+    );
+    const plannedSemanticCanonicalJson = semanticCanonicalJson(
+      normalizedContractVersion,
+      plannedSemanticContent,
+    );
     if (
       pageOutcome?.status !== "valid" ||
       hashJson(pageOutcome.observation) !== hashJson(outcome.observation) ||
-      normalizedObservationSemanticCanonicalJson(
-        normalizedObservationSemanticContent(outcome.observation),
-      ) !== normalizedObservationSemanticCanonicalJson(outcome.semanticContent) ||
+      semanticCanonicalJson(
+        normalizedContractVersion,
+        observationSemanticContent,
+      ) !== plannedSemanticCanonicalJson ||
       outcome.normalizedContentHash !==
         createHash("sha256")
-          .update(
-            normalizedObservationSemanticCanonicalJson(
-              outcome.semanticContent,
-            ),
-          )
+          .update(plannedSemanticCanonicalJson)
           .digest("hex")
     ) {
       invalidPlan();
@@ -435,8 +542,9 @@ export function validateProviderSourceAtomicPageInput(
       }
     } else {
       validateProviderSourceCanonicalProjections({
+        normalizedContractVersion,
         provider: input.pins.provider,
-        semanticContent: outcome.semanticContent,
+        semanticContent: plannedSemanticContent,
         projections: outcome.mapping.projections,
       });
     }

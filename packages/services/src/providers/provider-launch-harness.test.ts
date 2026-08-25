@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   emptyNormalizedProviderFacts,
   launchProviderKeys,
 } from "@packscout/contracts";
@@ -37,9 +38,10 @@ function mapped(input: Parameters<typeof registry.map>[0]) {
   return outcome;
 }
 
-test("production composition has exactly the four compatible launch mappers", () => {
+test("production composition has exact v1 and v2 mappers for all four providers", () => {
   assert.deepEqual(
-    providerMapperManifest.map(({ descriptor }) => descriptor.provider),
+    [...new Set(providerMapperManifest.map(({ descriptor }) =>
+      descriptor.provider))],
     launchProviderKeys,
   );
   assert.equal(
@@ -48,7 +50,7 @@ test("production composition has exactly the four compatible launch mappers", ()
         ({ descriptor }) => descriptor.mapperKey + "@" + descriptor.mapperVersion,
       ),
     ).size,
-    4,
+    8,
   );
   assert.equal(
     providerMapperManifest.some(
@@ -121,7 +123,15 @@ test("mapper resolution uses only the immutable mapper compatibility tuple", () 
     () => registry.resolve({ ...valid, mapperVersion: "2" }),
     (error) =>
       error instanceof ProviderObservationMapperRegistryError &&
-      error.code === "unknown_mapper_registration",
+      error.code === "incompatible_mapper_registration",
+  );
+  assert.equal(
+    registry.resolve({
+      ...valid,
+      mapperVersion: "2",
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+    }).descriptor.mapperVersion,
+    "2",
   );
   assert.throws(
     () => registry.resolve({ ...valid, provider: "phygitals" }),
