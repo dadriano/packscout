@@ -166,9 +166,9 @@ test("records list for the selected provider and kind", async (t) => {
 
   assert.match(pageText(page), /courtyard-pack-0001/);
   // The revision is its own column now rather than an inline label.
-  const cells = [...page.container.querySelectorAll("tbody td")].map((c) =>
-    c.textContent?.trim(),
-  );
+  const cells = [...page.container.querySelectorAll("tbody td")]
+    .map((c) => c.textContent?.trim())
+    .slice(1);
   assert.deepEqual(cells.slice(0, 3), ["courtyard-pack-0001", "Packs", "4"]);
 });
 
@@ -198,16 +198,88 @@ test("opening a record shows its content, hashes, and provenance", async (t) => 
   cleanupPage(t, page);
   await settlePage();
 
-  // Rows are clickable in the grid rather than carrying a button.
-  const row = page.container.querySelector<HTMLTableRowElement>("tbody tr");
-  assert.ok(row);
-  row.click();
+  const toggle = page.container.querySelector<HTMLButtonElement>(
+    ".grid-table__toggle",
+  );
+  assert.ok(toggle);
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  toggle.click();
   await settlePage();
 
-  const text = pageText(page);
-  assert.match(text, /Series One Pack/);
-  assert.match(text, /abc123/);
-  assert.match(text, /courtyard-catalog/);
+  // The detail renders inside the table, in a row beneath the one it belongs
+  // to — not in a panel below the pagination.
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  const detailRow = page.container.querySelector(".grid-table__detail-row");
+  assert.ok(detailRow, "an expanded detail row should exist");
+  const detailText = detailRow.textContent ?? "";
+  assert.match(detailText, /Series One Pack/);
+  assert.match(detailText, /abc123/);
+  assert.match(detailText, /courtyard-catalog/);
+
+  // The expander controls the row it reveals.
+  assert.equal(
+    toggle.getAttribute("aria-controls"),
+    detailRow.querySelector("td")?.id,
+  );
+});
+
+test("expanding a second record replaces the first, and re-clicking collapses", async (t) => {
+  const twoRows = {
+    ...PAGE,
+    items: [
+      PAGE.items[0]!,
+      { ...PAGE.items[0]!, entityId: "e-2", externalId: "courtyard-pack-0002" },
+    ],
+  };
+  stubFetch(t, (request) => {
+    const input = String(request.input);
+    if (input.includes("/entities/pack/")) {
+      const id = input.endsWith("0002") ? "e-2" : "e-1";
+      return jsonResponse({
+        ...PAGE.items[0],
+        entityId: id,
+        externalId: id === "e-2" ? "courtyard-pack-0002" : "courtyard-pack-0001",
+        content: { name: id === "e-2" ? "Second Pack" : "First Pack" },
+        contentHash: "h",
+        provenanceHash: "p",
+        provenance: null,
+        relationships: [],
+      });
+    }
+    if (input.includes("/entities")) return jsonResponse(twoRows);
+    return routeFetch()({ input: request.input });
+  });
+
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+
+  const toggles = [
+    ...page.container.querySelectorAll<HTMLButtonElement>(".grid-table__toggle"),
+  ];
+  assert.equal(toggles.length, 2);
+
+  toggles[0]!.click();
+  await settlePage();
+  assert.equal(
+    page.container.querySelectorAll(".grid-table__detail-row").length,
+    1,
+  );
+
+  toggles[1]!.click();
+  await settlePage();
+  // Still exactly one open row: expanding another switches rather than stacks.
+  assert.equal(
+    page.container.querySelectorAll(".grid-table__detail-row").length,
+    1,
+  );
+
+  toggles[1]!.click();
+  await settlePage();
+  assert.equal(
+    page.container.querySelectorAll(".grid-table__detail-row").length,
+    0,
+  );
 });
 
 test("an empty result reads as empty and a failed read reads as failed", async (t) => {
@@ -331,9 +403,10 @@ test("the grid renders records as rows with column headers", async (t) => {
   cleanupPage(t, page);
   await settlePage();
 
-  const headers = [...page.container.querySelectorAll("th")].map((cell) =>
-    cell.textContent?.replace(/[▲▼↕]/g, "").trim(),
-  );
+  const headers = [...page.container.querySelectorAll("th")]
+    .map((cell) => cell.textContent?.replace(/[▲▼↕]/g, "").trim())
+    // The first header is the expander, which is label-only for assistive tech.
+    .slice(1);
   assert.deepEqual(headers, [
     "External identifier",
     "Kind",

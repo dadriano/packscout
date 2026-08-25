@@ -443,3 +443,149 @@
 .grid-pagination__actions {
   flex-wrap: wrap;
 }
+
+
+/* Inline row expansion. */
+.grid-table__expander {
+  width: 2.2rem;
+  padding-inline: 0.35rem !important;
+}
+
+.grid-table__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  background: none;
+  color: var(--admin-text-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.grid-table__toggle:hover,
+.grid-table__toggle:focus-visible {
+  border-color: var(--admin-border);
+  color: var(--admin-text);
+}
+
+.grid-table__detail-row > td {
+  padding: 0 !important;
+  background: var(--admin-card-bg-muted);
+  white-space: normal !important;
+}
+
+/*
+ * Pinned to the scroller's left edge and capped to the viewport, so the detail
+ * stays readable when the table is scrolled sideways and never widens it.
+ */
+.grid-table__detail {
+  position: sticky;
+  left: 0;
+  width: min(100%, 78rem);
+  padding: 1rem 1.15rem;
+}
+
+.record-detail__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.5rem 1.5rem;
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+}
+
+.record-detail__facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--admin-border-light);
+  padding-block-end: 0.3rem;
+}
+
+.record-detail__facts dt {
+  color: var(--admin-text-muted);
+}
+
+.record-detail__facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.record-detail__hash {
+  overflow-wrap: anywhere;
+  font-family: var(--admin-font-mono);
+  font-size: 0.7rem;
+}
+
+.record-detail__panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 1.5rem;
+}
+
+.record-detail__panes h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--admin-text-muted);
+}
+
+.record-detail__panes section + section h3:not(:first-child) {
+  margin-block-start: 1rem;
+}
+
+.record-detail__content {
+  max-height: 20rem;
+  margin: 0;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.4rem;
+  background: var(--admin-card-bg);
+  font-size: 0.75rem;
+}
+
+.record-detail__provenance {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+  font-size: 0.78rem;
+}
+
+.record-detail__provenance div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.record-detail__provenance dt {
+  color: var(--admin-text-muted);
+}
+
+.record-detail__provenance dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.record-detail__edges {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  font-size: 0.78rem;
+}
+
+.record-detail__edges span[data-resolved="false"] {
+  color: var(--admin-warning, var(--admin-text-muted));
+}
+
+@media (max-width: 60rem) {
+  .record-detail__panes {
+    grid-template-columns: 1fr;
+  }
+}

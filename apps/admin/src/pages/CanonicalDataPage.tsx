@@ -103,6 +103,132 @@ function messageFor(reason: unknown, fallback: string): string {
   return fallback;
 }
 
+
+/**
+ * One record's current revision, rendered inside the row it belongs to.
+ *
+ * The detail used to sit below the pagination, which meant reading a record
+ * cost a scroll away from the row that prompted it. Expanding in place keeps
+ * the record and its identifier on screen together.
+ */
+function RecordDetail({
+  entityId,
+  detail,
+  error,
+}: {
+  entityId: string;
+  detail: CanonicalEntityDetail | null;
+  error: string | null;
+}) {
+  if (error) {
+    return (
+      <p className="admin-notice" role="alert">
+        {error}
+      </p>
+    );
+  }
+  // The fetch is per-row, so a stale detail from a previously opened row must
+  // not render under this one.
+  if (!detail || detail.entityId !== entityId) {
+    return (
+      <p aria-live="polite" aria-busy="true">
+        Loading record…
+      </p>
+    );
+  }
+
+  return (
+    <div className="record-detail">
+      <dl className="record-detail__facts">
+        <div>
+          <dt>Revision</dt>
+          <dd>{detail.revisionNumber ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>Provider reported</dt>
+          <dd>{dateText(detail.sourceUpdatedAt)}</dd>
+        </div>
+        <div>
+          <dt>Collected</dt>
+          <dd>{dateText(detail.sourceCollectedAt)}</dd>
+        </div>
+        <div>
+          <dt>Accepted</dt>
+          <dd>{dateText(detail.acceptedAt)}</dd>
+        </div>
+        <div>
+          <dt>Content hash</dt>
+          <dd className="record-detail__hash">{detail.contentHash ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>Provenance hash</dt>
+          <dd className="record-detail__hash">{detail.provenanceHash ?? "—"}</dd>
+        </div>
+      </dl>
+
+      <div className="record-detail__panes">
+        <section>
+          <h3>Canonical content</h3>
+          <pre className="record-detail__content">
+            {JSON.stringify(detail.content, null, 2)}
+          </pre>
+        </section>
+
+        <section>
+          <h3>Where it came from</h3>
+          {detail.provenance ? (
+            <dl className="record-detail__provenance">
+              <div>
+                <dt>Source record</dt>
+                <dd>{detail.provenance.sourceRecordId ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Import run</dt>
+                <dd>{detail.provenance.importRunId ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Mapper</dt>
+                <dd>
+                  {detail.provenance.mapperKey ?? "—"}
+                  {detail.provenance.mapperVersion
+                    ? ` v${detail.provenance.mapperVersion}`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>Adapter</dt>
+                <dd>{detail.provenance.adapterKey ?? "—"}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p>This revision records no provenance.</p>
+          )}
+
+          <h3>Declared relationships</h3>
+          {detail.relationships.length === 0 ? (
+            <p>This record declares no relationships.</p>
+          ) : (
+            <ul className="record-detail__edges">
+              {detail.relationships.map((edge) => (
+                <li
+                  key={`${edge.relationshipKind}:${edge.targetPlatformKey}:${edge.targetExternalId ?? ""}`}
+                >
+                  <strong>{edge.relationshipKind}</strong> →{" "}
+                  {edge.targetPlatformKey}/{edge.targetRecordKind}/
+                  {edge.targetExternalId ?? "—"}{" "}
+                  <span data-resolved={edge.resolved ? "true" : "false"}>
+                    {edge.resolved ? "resolved" : "unresolved"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function CanonicalDataView() {
   const [params, setParams] = useSearchParams();
   const platformKey = params.get("provider");
@@ -156,6 +282,7 @@ function CanonicalDataView() {
 
   const [detail, setDetail] = useState<CanonicalEntityDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const updateParams = useCallback(
     (next: Record<string, string | undefined>) => {
@@ -300,6 +427,7 @@ function CanonicalDataView() {
           }}
           onApply={(next: AppliedDataFilters) => {
             setDetail(null);
+            setExpandedId(null);
             updateParams({
               provider: next.platformKey,
               kind: next.recordKind,
@@ -309,6 +437,7 @@ function CanonicalDataView() {
           }}
           onReset={() => {
             setDetail(null);
+            setExpandedId(null);
             updateParams({ q: undefined, page: undefined });
           }}
         />
@@ -368,8 +497,25 @@ function CanonicalDataView() {
                     page: undefined,
                   })
                 }
-                selectedKey={detail?.entityId ?? null}
-                onSelect={openRecord}
+                expandedKey={expandedId}
+                onToggleExpand={(row) => {
+                  // Clicking the open row closes it; clicking another switches.
+                  if (row.entityId === expandedId) {
+                    setExpandedId(null);
+                    setDetail(null);
+                    setDetailError(null);
+                    return;
+                  }
+                  setExpandedId(row.entityId);
+                  openRecord(row);
+                }}
+                renderExpanded={(row) => (
+                  <RecordDetail
+                    entityId={row.entityId}
+                    detail={detail}
+                    error={detailError}
+                  />
+                )}
                 orderStatus={[
                   `Ordered by identifier, ${
                     direction === "asc" ? "ascending" : "descending"
@@ -397,109 +543,6 @@ function CanonicalDataView() {
         </>
       ) : null}
 
-      {detailError ? (
-        <p className="admin-notice" role="alert">
-          {detailError}
-        </p>
-      ) : null}
-
-      {detail ? (
-        <section className="inspect-detail" aria-labelledby="canonical-detail-title">
-          <header className="admin-section-header">
-            <div>
-              <span className="admin-kicker">Current revision</span>
-              <h2 id="canonical-detail-title">{detail.externalId}</h2>
-            </div>
-            <button
-              type="button"
-              className="admin-button admin-button-secondary"
-              onClick={() => setDetail(null)}
-            >
-              Close
-            </button>
-          </header>
-          <dl className="inspect-detail__facts">
-            <div>
-              <dt>Revision</dt>
-              <dd>{detail.revisionNumber ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Content hash</dt>
-              <dd className="inspect-detail__hash">{detail.contentHash ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Provenance hash</dt>
-              <dd className="inspect-detail__hash">
-                {detail.provenanceHash ?? "—"}
-              </dd>
-            </div>
-            <div>
-              <dt>Provider reported</dt>
-              <dd>{dateText(detail.sourceUpdatedAt)}</dd>
-            </div>
-            <div>
-              <dt>Collected</dt>
-              <dd>{dateText(detail.sourceCollectedAt)}</dd>
-            </div>
-            <div>
-              <dt>Accepted</dt>
-              <dd>{dateText(detail.acceptedAt)}</dd>
-            </div>
-          </dl>
-
-          {detail.provenance ? (
-            <div className="inspect-detail__provenance">
-              <h3>Where it came from</h3>
-              <dl>
-                <div>
-                  <dt>Source record</dt>
-                  <dd>{detail.provenance.sourceRecordId ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt>Import run</dt>
-                  <dd>{detail.provenance.importRunId ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt>Mapper</dt>
-                  <dd>
-                    {detail.provenance.mapperKey ?? "—"}
-                    {detail.provenance.mapperVersion
-                      ? ` v${detail.provenance.mapperVersion}`
-                      : ""}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Adapter</dt>
-                  <dd>{detail.provenance.adapterKey ?? "—"}</dd>
-                </div>
-              </dl>
-            </div>
-          ) : null}
-
-          <h3>Canonical content</h3>
-          <pre className="inspect-detail__content">
-            {JSON.stringify(detail.content, null, 2)}
-          </pre>
-
-          <h3>Declared relationships</h3>
-          {detail.relationships.length === 0 ? (
-            <p>This record declares no relationships.</p>
-          ) : (
-            <ul className="inspect-detail__edges">
-              {detail.relationships.map((edge) => (
-                <li
-                  key={`${edge.relationshipKind}:${edge.targetPlatformKey}:${edge.targetExternalId ?? ""}`}
-                >
-                  <strong>{edge.relationshipKind}</strong> →{" "}
-                  {edge.targetPlatformKey}/{edge.targetRecordKind}/
-                  {edge.targetExternalId ?? "—"}{" "}
-                  <span>{edge.resolved ? "resolved" : "unresolved"}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      ) : null}
     </div>
   );
 }

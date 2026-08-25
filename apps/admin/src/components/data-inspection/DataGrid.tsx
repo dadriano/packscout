@@ -43,8 +43,9 @@ export function DataGrid<Row>({
   sortedKey = null,
   direction = "asc",
   onSort,
-  selectedKey = null,
-  onSelect,
+  expandedKey = null,
+  onToggleExpand,
+  renderExpanded,
   orderStatus,
   minWidth = "60rem",
 }: {
@@ -56,11 +57,15 @@ export function DataGrid<Row>({
   sortedKey?: string | null;
   direction?: GridSortDirection;
   onSort?: (key: string, next: GridSortDirection) => void;
-  selectedKey?: string | null;
-  onSelect?: (row: Row) => void;
+  /** The row currently expanded in place, if any. */
+  expandedKey?: string | null;
+  onToggleExpand?: (row: Row) => void;
+  /** Rendered in a full-width row directly beneath the expanded row. */
+  renderExpanded?: (row: Row) => ReactNode;
   orderStatus?: string;
   minWidth?: string;
 }) {
+  const expandable = Boolean(onToggleExpand && renderExpanded);
   return (
     <section className="grid-region" aria-labelledby={`${title}-grid`}>
       <div className="grid-region__heading">
@@ -81,6 +86,11 @@ export function DataGrid<Row>({
         <table className="grid-table" style={{ minWidth }}>
           <thead>
             <tr>
+              {expandable ? (
+                <th scope="col" className="grid-table__expander">
+                  <span className="admin-visually-hidden">Expand</span>
+                </th>
+              ) : null}
               {columns.map((column) => {
                 const sorted = column.key === sortedKey;
                 return (
@@ -123,13 +133,41 @@ export function DataGrid<Row>({
           <tbody>
             {rows.map((row) => {
               const key = rowKey(row);
-              return (
+              const expanded = expandable && key === expandedKey;
+              const detailId = `grid-detail-${key}`;
+              return [
                 <tr
                   key={key}
-                  data-selected={key === selectedKey ? "true" : undefined}
-                  onClick={onSelect ? () => onSelect(row) : undefined}
-                  data-clickable={onSelect ? "true" : undefined}
+                  data-selected={expanded ? "true" : undefined}
+                  data-clickable={expandable ? "true" : undefined}
+                  onClick={
+                    onToggleExpand ? () => onToggleExpand(row) : undefined
+                  }
                 >
+                  {expandable ? (
+                    <td className="grid-table__expander">
+                      {/*
+                        A real button carries the expanded state and the
+                        keyboard affordance; the row click is a convenience on
+                        top of it, not the only way in.
+                      */}
+                      <button
+                        type="button"
+                        className="grid-table__toggle"
+                        aria-expanded={expanded}
+                        aria-controls={detailId}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onToggleExpand?.(row);
+                        }}
+                      >
+                        <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+                        <span className="admin-visually-hidden">
+                          {expanded ? "Collapse record" : "Expand record"}
+                        </span>
+                      </button>
+                    </td>
+                  ) : null}
                   {columns.map((column) => (
                     <td
                       key={column.key}
@@ -138,8 +176,21 @@ export function DataGrid<Row>({
                       {column.render(row)}
                     </td>
                   ))}
-                </tr>
-              );
+                </tr>,
+                expanded ? (
+                  <tr key={`${key}-detail`} className="grid-table__detail-row">
+                    <td colSpan={columns.length + 1} id={detailId}>
+                      {/*
+                        Sticky to the scroller's left edge so the detail stays
+                        readable when the table is scrolled sideways.
+                      */}
+                      <div className="grid-table__detail">
+                        {renderExpanded?.(row)}
+                      </div>
+                    </td>
+                  </tr>
+                ) : null,
+              ];
             })}
           </tbody>
         </table>
