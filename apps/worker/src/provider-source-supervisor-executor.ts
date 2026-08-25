@@ -783,7 +783,16 @@ export class ProviderSourceSupervisorWorkExecutor
       if (operationResult.ok) {
         throw new TypeError("Failed request produced a successful result.");
       }
-      await this.#completeTestResult(work, context, requestAttemptId, operationResult);
+      if (
+        operationResult.failure.disposition !== "connection_action_required"
+      ) {
+        await this.#completeTestResult(
+          work,
+          context,
+          requestAttemptId,
+          operationResult,
+        );
+      }
       if (operationResult.failure.disposition === "connection_action_required") {
         return dispositionForFailure(operationResult.failure);
       }
@@ -977,11 +986,6 @@ export class ProviderSourceSupervisorWorkExecutor
     result: SourceAdapterOperationResult<unknown>,
   ): Promise<void> {
     if (work.kind === "page_read") return;
-    if (!result.ok && result.failure.disposition === "connection_action_required") {
-      // The request terminalization transaction already wrote the immutable
-      // blocking test result and closed the exact job before permit release.
-      return;
-    }
     const common = {
       organizationId: work.organizationId,
       jobId: work.id,

@@ -26,6 +26,7 @@ import {
 } from "../testing/provider-source-operations-fixture.ts";
 import { OperationsPage } from "./OperationsPage.tsx";
 import { ProviderDetailPage } from "./ProviderDetailPage.tsx";
+import { ProvidersPage } from "./ProvidersPage.tsx";
 
 Object.assign(globalThis, { React });
 
@@ -115,6 +116,29 @@ test("operations overview renders four server rows and returns exact Run, Pause,
   await act(async () => findButton(renderer, "Pause display").click());
   assert.match(pageText(renderer), /Display updates are paused; ingestion and scheduling continue/iu);
   assert.match(pageText(renderer), /Stale display/);
+});
+
+test("provider admin lists canonical provider-source lanes without the legacy provider read model", async (context) => {
+  const requests = stubFetch(context, ({ input }) => {
+    const path = String(input);
+    if (path === "/api/provider-source-operations") {
+      return jsonResponse(operationsOverview());
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  const renderer = await renderPage(shell(<ProvidersPage />, operationsSession()));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.match(pageText(renderer), /Data providers/);
+  assert.match(pageText(renderer), /Collector Crypt/);
+  assert.match(pageText(renderer), /Courtyard/);
+  assert.match(pageText(renderer), /Phygitals/);
+  assert.match(pageText(renderer), /ClutchPacks/);
+  assert.equal(renderer.container.querySelectorAll(".source-lane").length, 4);
+  assert.deepEqual(requests.map(({ input }) => String(input)), [
+    "/api/provider-source-operations",
+  ]);
 });
 
 test("provider detail preserves safe state through refresh and action failures while filtering bounded history", async (context) => {

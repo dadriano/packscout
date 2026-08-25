@@ -355,7 +355,8 @@ test("request shapes are operation-specific and preserve an opaque cursor exactl
   await successfulCapture(adapter, continuation);
   continuation.requestLease.close();
   assert.equal(requests.length, 4);
-  assert.equal(requests[0]!.url.search, "");
+  assert.deepEqual([...requests[0]!.url.searchParams.keys()], ["limit"]);
+  assert.equal(requests[0]!.url.searchParams.get("limit"), "250");
   assert.deepEqual([...requests[1]!.url.searchParams.keys()], [
     "platform",
     "limit",

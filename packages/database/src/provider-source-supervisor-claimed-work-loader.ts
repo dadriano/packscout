@@ -132,7 +132,7 @@ export async function loadClaimedProviderSourceSupervisorWork(
       ) ?? null;
     const normalEligible = connectionJob.blocking_episode_id === null &&
       openEpisodes.length === 0 &&
-      profile.state === "active" &&
+      (profile.state === "draft" || profile.state === "active") &&
       connectionRevision.revoked_at === null &&
       connectionRevision.id ===
         (latestCandidate?.id ?? profile.active_revision_id) &&

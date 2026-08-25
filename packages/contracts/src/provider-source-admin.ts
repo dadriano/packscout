@@ -43,6 +43,10 @@ const bearerCredentialSchema = z
 const registrationKeySchema = z
   .string()
   .regex(/^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/u);
+const testResultSafeCodeSchema = z.union([
+  registrationKeySchema,
+  z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/u),
+]);
 
 export const providerSourceIntervalSecondsSchema = z.coerce
   .number()
@@ -130,7 +134,7 @@ const providerSourceTestSummarySchema = z
     current: z.boolean(),
     state: providerSourceTestStateSchema,
     outcome: z.enum(["success", "failure"]).nullable(),
-    safeCode: registrationKeySchema.nullable(),
+    safeCode: testResultSafeCodeSchema.nullable(),
     requestedAt: timestampSchema.nullable(),
     testedAt: timestampSchema.nullable(),
   })

@@ -126,14 +126,14 @@ test("connection credential input is strict while every catalog response is mask
         healthGeneration: "0",
         revokedAt: null,
         test: {
-          jobId: null,
-          connectionRevisionId: null,
-          current: false,
-          state: "not_requested",
-          outcome: null,
-          safeCode: null,
-          requestedAt: null,
-          testedAt: null,
+          jobId: ids.source,
+          connectionRevisionId: ids.revision,
+          current: true,
+          state: "fenced",
+          outcome: "failure",
+          safeCode: "TEST_RESULT_PUBLICATION_INCOMPLETE",
+          requestedAt: "2026-08-21T12:00:01.000Z",
+          testedAt: "2026-08-21T12:00:02.000Z",
         },
         createdAt: "2026-08-21T12:00:00.000Z",
       },
@@ -147,6 +147,7 @@ test("connection credential input is strict while every catalog response is mask
   assert.equal(serialized.includes("bearerCredential"), false);
   assert.equal(serialized.includes("configurationCiphertext"), false);
   assert.equal(serialized.includes("dataforrest.example"), true);
+  assert.equal(serialized.includes("TEST_RESULT_PUBLICATION_INCOMPLETE"), true);
 });
 
 test("cursor reset preview binds one provider, generation, and typed consequence", () => {

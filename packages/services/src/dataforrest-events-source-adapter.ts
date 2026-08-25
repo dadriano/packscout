@@ -266,7 +266,10 @@ function buildRequestUrl(
   validated: ValidatedCaptureOperation,
 ): URL {
   const requestUrl = new URL(validated.endpoint.toString());
-  if (operation.operationKind === "connection_test") return requestUrl;
+  if (operation.operationKind === "connection_test") {
+    requestUrl.searchParams.append("limit", String(operation.bounds.pageLimit));
+    return requestUrl;
+  }
   requestUrl.searchParams.append("platform", validated.platform!);
   requestUrl.searchParams.append("limit", String(operation.bounds.pageLimit));
   if (
