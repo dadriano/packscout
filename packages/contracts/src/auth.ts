@@ -43,6 +43,7 @@ export const operatorPermissions = [
   "beta_allowlist:manage",
   "message_delivery:view",
   "message_delivery:manage",
+  "data_inspection:view",
 ] as const;
 
 export type OperatorPermission = (typeof operatorPermissions)[number];
@@ -55,6 +56,11 @@ export type OperatorPermission = (typeof operatorPermissions)[number];
  * enter the closed beta, so its permissions are likewise administrator-only.
  * The message-delivery history is a record of who was sent what, so viewing
  * and managing it are administrator-only for the same reason.
+ *
+ * Data inspection is read-only and shows pipeline records — canonical business
+ * data and its published counterpart — rather than personal data, so both roles
+ * hold it. It is deliberately separate from `providers:view` so the grant can
+ * be withdrawn without also removing provider configuration access.
  */
 export const operatorRolePermissions: Readonly<
   Record<OperatorRole, readonly OperatorPermission[]>
@@ -73,11 +79,13 @@ export const operatorRolePermissions: Readonly<
     "beta_allowlist:manage",
     "message_delivery:view",
     "message_delivery:manage",
+    "data_inspection:view",
   ] as const),
   data_operator: Object.freeze([
     "providers:view",
     "imports:start",
     "imports:retry",
+    "data_inspection:view",
   ] as const),
 });
 

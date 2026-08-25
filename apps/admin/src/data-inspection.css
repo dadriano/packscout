@@ -1,0 +1,591 @@
+/*
+ * The Data section's surfaces. Layout and spacing only — every colour comes
+ * from the shared token vocabulary in theme.css, so these surfaces follow the
+ * light and dark themes without declaring a palette of their own.
+ */
+
+.inspect-providers,
+.inspect-summary,
+.inspect-records,
+.inspect-detail {
+  background: var(--admin-card-bg);
+  border: 1px solid var(--admin-border);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  margin-block-end: 1.5rem;
+}
+
+.inspect-providers__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+}
+
+.inspect-providers__field {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 20rem;
+  flex: 1 1 20rem;
+}
+
+.inspect-providers__field > span {
+  font-size: 0.8125rem;
+  color: var(--admin-text-muted);
+}
+
+.inspect-providers__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.inspect-summary__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.inspect-summary__card {
+  display: grid;
+  gap: 0.5rem;
+  text-align: start;
+  padding: 1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+  background: var(--admin-card-bg-muted);
+  color: inherit;
+  cursor: pointer;
+}
+
+.inspect-summary__card.is-selected {
+  border-color: var(--admin-primary);
+  box-shadow: 0 0 0 1px var(--admin-primary);
+}
+
+.inspect-summary__label {
+  font-size: 0.8125rem;
+  color: var(--admin-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inspect-summary__count {
+  font-size: 1.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A bounded count is a floor. It says so here, not in a tooltip. */
+.inspect-summary__precision {
+  font-size: 0.75rem;
+  color: var(--admin-text-muted);
+}
+
+.inspect-summary__facts,
+.inspect-records__facts,
+.inspect-detail__facts {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.inspect-summary__facts div,
+.inspect-records__facts div,
+.inspect-detail__facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.inspect-summary__facts dt,
+.inspect-records__facts dt,
+.inspect-detail__facts dt {
+  color: var(--admin-text-muted);
+}
+
+.inspect-summary__facts dd,
+.inspect-records__facts dd,
+.inspect-detail__facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.inspect-records__search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  margin-block: 1rem;
+}
+
+.inspect-records__search label {
+  display: grid;
+  gap: 0.5rem;
+  flex: 1 1 24rem;
+}
+
+.inspect-records__search label > span {
+  font-size: 0.8125rem;
+  color: var(--admin-text-muted);
+}
+
+.inspect-records__rows {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.inspect-records__rows article {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(12rem, 1fr) minmax(16rem, 2fr);
+  align-items: start;
+  padding: 1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+}
+
+.inspect-records__identity {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.inspect-records__identity > span {
+  font-size: 0.8125rem;
+  color: var(--admin-text-muted);
+}
+
+.inspect-records__open {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: start;
+  font: inherit;
+  color: var(--admin-primary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.inspect-detail__content {
+  max-height: 28rem;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+  background: var(--admin-card-bg-muted);
+  font-size: 0.8125rem;
+}
+
+.inspect-detail__hash {
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+
+.inspect-detail__edges {
+  display: grid;
+  gap: 0.5rem;
+  padding-inline-start: 1.5rem;
+  font-size: 0.875rem;
+}
+
+.inspect-detail__provenance dl {
+  display: grid;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.inspect-detail__provenance dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.inspect-detail__provenance dt {
+  color: var(--admin-text-muted);
+}
+
+.inspect-detail__provenance dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 48rem) {
+  .inspect-records__rows article {
+    grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * The data grid, following the product catalog's table structure: a bordered
+ * region, a heading row, and a real table inside its own horizontal scroller so
+ * a wide table never makes the page scroll sideways.
+ */
+
+.grid-region {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.75rem;
+  background: var(--admin-card-bg);
+  margin-block-end: 1rem;
+}
+
+.grid-region__heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.15rem 0.8rem;
+}
+
+.grid-region__eyebrow,
+.grid-region__order {
+  margin: 0;
+  color: var(--admin-text-muted);
+  font-size: 0.75rem;
+}
+
+.grid-region__eyebrow {
+  margin-bottom: 0.2rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.grid-region__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.grid-scroller {
+  contain: layout paint inline-size;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.grid-scroller:focus-visible {
+  outline: 2px solid var(--admin-primary);
+  outline-offset: -3px;
+}
+
+.grid-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.grid-table th,
+.grid-table td {
+  border-top: 1px solid var(--admin-border);
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.grid-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--admin-card-bg-muted);
+  color: var(--admin-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Digits and timestamps line up when they share an edge. */
+.grid-table th[data-numeric="true"],
+.grid-table td[data-numeric="true"] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-table__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.grid-table__caret {
+  opacity: 0.55;
+  font-size: 0.65rem;
+}
+
+.grid-table__identifier {
+  font-family: var(--admin-font-mono);
+  font-size: 0.75rem;
+}
+
+.grid-table tbody tr[data-clickable="true"] {
+  cursor: pointer;
+}
+
+.grid-table tbody tr[data-clickable="true"]:hover {
+  background: var(--admin-card-bg-muted);
+}
+
+.grid-table tbody tr[data-selected="true"] {
+  background: var(--admin-primary-bg-subtle);
+}
+
+.grid-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-block-end: 1.5rem;
+}
+
+.grid-pagination__range {
+  margin: 0;
+  color: var(--admin-text-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-pagination__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Draft-then-apply filter bar. */
+.data-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.9rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.75rem;
+  background: var(--admin-card-bg);
+  margin-block-end: 1rem;
+}
+
+.data-filters__field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 12rem;
+}
+
+.data-filters__field--grow {
+  flex: 1 1 20rem;
+}
+
+.data-filters__field > span {
+  color: var(--admin-text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.data-filters__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Cards report; they no longer act. */
+.inspect-summary__card {
+  cursor: default;
+}
+
+/* Page index: numbers, anchors, and a direct jump. */
+.grid-pagination__page {
+  min-width: 2.4rem;
+  padding-inline: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-pagination__page[data-current="true"] {
+  border-color: var(--admin-primary);
+  background: var(--admin-primary-bg-muted);
+  color: var(--admin-primary);
+  font-weight: 700;
+}
+
+.grid-pagination__note {
+  color: var(--admin-text-faint);
+}
+
+.grid-pagination__jump {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-inline-start: 0.5rem;
+}
+
+.grid-pagination__jump label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--admin-text-muted);
+  font-size: 0.78rem;
+}
+
+.grid-pagination__jump input {
+  width: 5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-pagination__actions {
+  flex-wrap: wrap;
+}
+
+
+/* Inline row expansion. */
+.grid-table__expander {
+  width: 2.2rem;
+  padding-inline: 0.35rem !important;
+}
+
+.grid-table__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  background: none;
+  color: var(--admin-text-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.grid-table__toggle:hover,
+.grid-table__toggle:focus-visible {
+  border-color: var(--admin-border);
+  color: var(--admin-text);
+}
+
+.grid-table__detail-row > td {
+  padding: 0 !important;
+  background: var(--admin-card-bg-muted);
+  white-space: normal !important;
+}
+
+/*
+ * Pinned to the scroller's left edge and capped to the viewport, so the detail
+ * stays readable when the table is scrolled sideways and never widens it.
+ */
+.grid-table__detail {
+  position: sticky;
+  left: 0;
+  width: min(100%, 78rem);
+  padding: 1rem 1.15rem;
+}
+
+.record-detail__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.5rem 1.5rem;
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+}
+
+.record-detail__facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--admin-border-light);
+  padding-block-end: 0.3rem;
+}
+
+.record-detail__facts dt {
+  color: var(--admin-text-muted);
+}
+
+.record-detail__facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.record-detail__hash {
+  overflow-wrap: anywhere;
+  font-family: var(--admin-font-mono);
+  font-size: 0.7rem;
+}
+
+.record-detail__panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 1.5rem;
+}
+
+.record-detail__panes h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--admin-text-muted);
+}
+
+.record-detail__panes section + section h3:not(:first-child) {
+  margin-block-start: 1rem;
+}
+
+.record-detail__content {
+  max-height: 20rem;
+  margin: 0;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.4rem;
+  background: var(--admin-card-bg);
+  font-size: 0.75rem;
+}
+
+.record-detail__provenance {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+  font-size: 0.78rem;
+}
+
+.record-detail__provenance div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.record-detail__provenance dt {
+  color: var(--admin-text-muted);
+}
+
+.record-detail__provenance dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.record-detail__edges {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  font-size: 0.78rem;
+}
+
+.record-detail__edges span[data-resolved="false"] {
+  color: var(--admin-warning, var(--admin-text-muted));
+}
+
+@media (max-width: 60rem) {
+  .record-detail__panes {
+    grid-template-columns: 1fr;
+  }
+}

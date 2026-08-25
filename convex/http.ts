@@ -1077,4 +1077,194 @@ http.route({
   handler: removeBetaAllowlistEntry,
 });
 
+/**
+ * Provider catalog inspection: the admin's read-only window onto what the
+ * product actually serves per provider.
+ *
+ * Same guard as the rest of this router — the deployment secret, checked before
+ * any work — and the same refusal discipline: a failure becomes a stable code,
+ * never an upstream body or a document. Every one of these runs a query, so no
+ * path here can write.
+ */
+const PROVIDER_CATALOG_REQUEST_INVALID = "PROVIDER_CATALOG_REQUEST_INVALID";
+
+const IDENTIFIED_ENTITY_KINDS = new Set([
+  "vendors",
+  "categories",
+  "repacks",
+  "collectibles",
+]);
+
+function readPlatformKey(value: unknown): string | null {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_SUBJECT_LENGTH
+    ? value
+    : null;
+}
+
+function readEntityKind(
+  value: unknown,
+): "vendors" | "categories" | "repacks" | "collectibles" | null {
+  return typeof value === "string" && IDENTIFIED_ENTITY_KINDS.has(value)
+    ? (value as "vendors" | "categories" | "repacks" | "collectibles")
+    : null;
+}
+
+const readProviderCatalogActiveRelease = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+  const platformKey = readPlatformKey(body.platformKey);
+  if (platformKey === null) {
+    return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runQuery(internal.providerCatalogInspection.activeRelease, {
+        platformKey,
+      }),
+    );
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
+const listProviderCatalogEntities = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+  const publicProviderReleaseId = readPlatformKey(body.publicProviderReleaseId);
+  const entityKind = readEntityKind(body.entityKind);
+  const paginationOpts = readPaginationOpts(body.paginationOpts);
+  if (
+    publicProviderReleaseId === null ||
+    entityKind === null ||
+    paginationOpts === null
+  ) {
+    return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runQuery(internal.providerCatalogInspection.listEntities, {
+        publicProviderReleaseId,
+        entityKind,
+        paginationOpts,
+      }),
+    );
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
+const listProviderCatalogEntityIds = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+  const publicProviderReleaseId = readPlatformKey(body.publicProviderReleaseId);
+  const entityKind = readEntityKind(body.entityKind);
+  const paginationOpts = readPaginationOpts(body.paginationOpts);
+  if (
+    publicProviderReleaseId === null ||
+    entityKind === null ||
+    paginationOpts === null
+  ) {
+    return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runQuery(internal.providerCatalogInspection.listEntityIds, {
+        publicProviderReleaseId,
+        entityKind,
+        paginationOpts,
+      }),
+    );
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
+const readProviderCatalogDocument = httpAction(async (ctx, request) => {
+  if (!isAuthorized(request)) return unauthorized();
+  const body = await readJsonObject(request);
+  if (body === null) return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+  const publicProviderReleaseId = readPlatformKey(body.publicProviderReleaseId);
+  const entityKind = readEntityKind(body.entityKind);
+  const publicEntityId = readPlatformKey(body.publicEntityId);
+  if (
+    publicProviderReleaseId === null ||
+    entityKind === null ||
+    publicEntityId === null
+  ) {
+    return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+  }
+  try {
+    return jsonResponse(
+      200,
+      await ctx.runQuery(internal.providerCatalogInspection.readDocument, {
+        publicProviderReleaseId,
+        entityKind,
+        publicEntityId,
+      }),
+    );
+  } catch (error) {
+    return refusalResponse(error);
+  }
+});
+
+const readProviderCatalogChaseReconciliation = httpAction(
+  async (ctx, request) => {
+    if (!isAuthorized(request)) return unauthorized();
+    const body = await readJsonObject(request);
+    if (body === null) return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+    const publicProviderReleaseId = readPlatformKey(
+      body.publicProviderReleaseId,
+    );
+    const publicRepackId = readPlatformKey(body.publicRepackId);
+    if (publicProviderReleaseId === null || publicRepackId === null) {
+      return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
+    }
+    try {
+      return jsonResponse(
+        200,
+        await ctx.runQuery(
+          internal.providerCatalogInspection.readRepackChaseReconciliation,
+          { publicProviderReleaseId, publicRepackId },
+        ),
+      );
+    } catch (error) {
+      return refusalResponse(error);
+    }
+  },
+);
+
+http.route({
+  path: "/admin/provider-catalog/active-release",
+  method: "POST",
+  handler: readProviderCatalogActiveRelease,
+});
+http.route({
+  path: "/admin/provider-catalog/entities",
+  method: "POST",
+  handler: listProviderCatalogEntities,
+});
+http.route({
+  path: "/admin/provider-catalog/entity-ids",
+  method: "POST",
+  handler: listProviderCatalogEntityIds,
+});
+http.route({
+  path: "/admin/provider-catalog/document",
+  method: "POST",
+  handler: readProviderCatalogDocument,
+});
+http.route({
+  path: "/admin/provider-catalog/chase-reconciliation",
+  method: "POST",
+  handler: readProviderCatalogChaseReconciliation,
+});
+
 export default http;

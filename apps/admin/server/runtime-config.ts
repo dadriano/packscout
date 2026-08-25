@@ -294,3 +294,22 @@ export function readTrustedProxies(
   if (normalized.length === 0) throw new Error(invalidMessage);
   return [...new Set(normalized)];
 }
+
+/**
+ * The deployment the admin reads promotion state for.
+ *
+ * Promotion lanes and manifest selections are keyed by deployment, so the admin
+ * must name the same deployment its workers promote into or it would read
+ * another deployment's lane as this one's. The pattern matches the worker's own
+ * validation; an unset or malformed value yields null, and the comparison
+ * surface then reports itself unconfigured rather than reading a wrong lane.
+ */
+const catalogDeploymentKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/u;
+
+export function readCatalogDeploymentKey(
+  environment: NodeJS.ProcessEnv,
+): string | null {
+  const value = environment.PACKSCOUT_CATALOG_DEPLOYMENT_KEY?.trim();
+  if (!value || !catalogDeploymentKeyPattern.test(value)) return null;
+  return value;
+}
