@@ -77,8 +77,16 @@ export type CanonicalSortDirection = (typeof canonicalSortDirections)[number];
 
 export const canonicalEntityPageSchema = z.object({
   items: z.array(canonicalEntityRowSchema),
-  /** Opaque to the caller. Null when the page is the last one. */
-  nextCursor: z.string().nullable(),
+  /** One-based, echoed so the index highlights the page actually returned. */
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+  hasMore: z.boolean(),
+  /**
+   * True when the requested page sat beyond the depth the server will scan.
+   * The response then holds the deepest reachable page rather than an empty
+   * result that would read as "no records".
+   */
+  depthCapped: z.boolean(),
   /** Echoed so the grid marks the sorted column without tracking it itself. */
   direction: z.enum(canonicalSortDirections),
 });
@@ -132,7 +140,7 @@ export const canonicalInspectionErrorCodes = [
   "CANONICAL_PROVIDER_UNKNOWN",
   "CANONICAL_ENTITY_UNKNOWN",
   "CANONICAL_RECORD_KIND_INVALID",
-  "CANONICAL_CURSOR_INVALID",
+  "CANONICAL_PAGE_INVALID",
   "CANONICAL_SEARCH_INVALID",
   "CANONICAL_PAGE_SIZE_INVALID",
   "CANONICAL_STORE_UNAVAILABLE",
@@ -151,3 +159,11 @@ export const CANONICAL_EXTERNAL_ID_MAX_LENGTH = 512;
  * exact count for the many (provider, kind) buckets that are smaller than this.
  */
 export const CANONICAL_COUNT_BOUND = 50_000;
+/**
+ * Deepest offset the listing will scan. An offset walks the index to reach its
+ * position, so an unbounded one lets a caller ask for work proportional to the
+ * whole table. Measured on a real provider bucket, reaching offset 16,000 costs
+ * well under a tenth of a second; this bound keeps the worst case in that
+ * neighbourhood and asks the operator to filter instead of scrolling further.
+ */
+export const CANONICAL_MAX_OFFSET = 100_000;

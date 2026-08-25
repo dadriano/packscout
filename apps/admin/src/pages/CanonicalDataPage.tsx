@@ -13,7 +13,10 @@ import {
   listCanonicalProviders,
   readCanonicalEntity,
 } from "../api/data-inspection";
-import { CanonicalSummary, kindLabel } from "../components/data-inspection/CanonicalSummary";
+import {
+  freshnessLine,
+  kindLabel,
+} from "../components/data-inspection/kind-presentation";
 import {
   DataFilters,
   type AppliedDataFilters,
@@ -106,30 +109,24 @@ function CanonicalDataView() {
   const recordKind = params.get("kind") ?? DEFAULT_KIND;
   const search = params.get("q") ?? "";
   /**
-   * The whole trail of page positions, not just the current one.
-   *
-   * Holding the predecessors in component state meant a shared or reloaded
-   * later-page URL came back claiming to be page one with no way back. The
-   * trail lives in the URL so a deep link restores the position *and* the
-   * ability to walk back from it. Cursors are base64url, so a comma cannot
-   * occur inside one and is safe as the separator.
+   * The page number lives in the URL, so a deep link restores the exact page
+   * and every page is reachable directly rather than by walking to it.
    */
-  const cursorTrail = (params.get("cursors") ?? "")
-    .split(",")
-    .filter((value) => value.length > 0);
-  const cursor = cursorTrail.at(-1);
+  const requestedPage = Math.max(1, Number(params.get("page") ?? "1") || 1);
   const direction: GridSortDirection =
     params.get("dir") === "desc" ? "desc" : "asc";
-
-  const trailParam = (trail: readonly string[]): string | undefined =>
-    trail.length > 0 ? trail.join(",") : undefined;
 
   const [providers, setProviders] = useState<CanonicalProviderRow[]>([]);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [providersLoaded, setProvidersLoaded] = useState(false);
 
   const [summary, setSummary] = useState<CanonicalProviderSummary | null>(null);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
+  /**
+   * A failed summary costs the counts, which the filter options and the page
+   * index read. It does not stop the records loading, so it is not surfaced as
+   * a page error — the index simply falls back to next and previous.
+   */
+  const [, setSummaryError] = useState<string | null>(null);
 
   /**
    * The page and the scope it belongs to travel together.
@@ -140,16 +137,18 @@ function CanonicalDataView() {
    * belonging to a provider they do not belong to. Binding the rows to the key
    * that produced them makes that state unrepresentable.
    */
-  const requestKey = `${platformKey ?? ""}|${recordKind}|${search}|${cursor ?? ""}|${direction}`;
+  const requestKey = `${platformKey ?? ""}|${recordKind}|${search}|${requestedPage}|${direction}`;
   const [loaded, setLoaded] = useState<{
     key: string;
     rows: CanonicalEntityRow[];
-    nextCursor: string | null;
+    page: number;
+    pageSize: number;
+    hasMore: boolean;
+    depthCapped: boolean;
   } | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const current = loaded?.key === requestKey ? loaded : null;
   const rows = current?.rows ?? [];
-  const nextCursor = current?.nextCursor ?? null;
   // Loading is derived rather than set on the way into the effect: a
   // synchronous set there schedules a second render before the first paints.
   const listLoading = platformKey !== null && current === null && !listError;
@@ -211,14 +210,23 @@ function CanonicalDataView() {
     if (!platformKey) return;
     const controller = new AbortController();
     listCanonicalEntities(
-      { platformKey, recordKind, search: search || undefined, cursor, direction },
+      {
+        platformKey,
+        recordKind,
+        search: search || undefined,
+        page: requestedPage,
+        direction,
+      },
       controller.signal,
     )
       .then((page) => {
         setLoaded({
           key: requestKey,
           rows: [...page.items],
-          nextCursor: page.nextCursor,
+          page: page.page,
+          pageSize: page.pageSize,
+          hasMore: page.hasMore,
+          depthCapped: page.depthCapped,
         });
         setListError(null);
       })
@@ -232,14 +240,13 @@ function CanonicalDataView() {
         );
       })
     return () => controller.abort();
-  }, [platformKey, recordKind, search, cursor, direction, requestKey]);
+  }, [platformKey, recordKind, search, requestedPage, direction, requestKey]);
 
   const kindSummary = summary?.kinds.find(
     (entry) => entry.recordKind === recordKind,
   );
   const kindTotal = kindSummary?.count ?? null;
   const kindTotalIsFloor = kindSummary?.precision === "at_least";
-  const pageStart = cursorTrail.length * PAGE_SIZE + 1;
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.platformKey === platformKey),
@@ -297,12 +304,12 @@ function CanonicalDataView() {
               provider: next.platformKey,
               kind: next.recordKind,
               q: next.search.trim(),
-              cursors: undefined,
+              page: undefined,
             });
           }}
           onReset={() => {
             setDetail(null);
-            updateParams({ q: undefined, cursors: undefined });
+            updateParams({ q: undefined, page: undefined });
           }}
         />
       ) : null}
@@ -313,16 +320,6 @@ function CanonicalDataView() {
           title="Choose a provider to inspect."
           description="Its record counts, freshness, and the records themselves appear here."
         />
-      ) : null}
-
-      {platformKey && summaryError ? (
-        <p className="admin-notice" data-tone="warning" role="alert">
-          {summaryError}
-        </p>
-      ) : null}
-
-      {platformKey && Array.isArray(summary?.kinds) ? (
-        <CanonicalSummary summary={summary} selectedKind={recordKind} />
       ) : null}
 
       {platformKey ? (
@@ -368,32 +365,32 @@ function CanonicalDataView() {
                 onSort={(_key, next) =>
                   updateParams({
                     dir: next === "desc" ? "desc" : undefined,
-                    cursors: undefined,
+                    page: undefined,
                   })
                 }
                 selectedKey={detail?.entityId ?? null}
                 onSelect={openRecord}
-                orderStatus={`Ordered by identifier, ${
-                  direction === "asc" ? "ascending" : "descending"
-                }`}
+                orderStatus={[
+                  `Ordered by identifier, ${
+                    direction === "asc" ? "ascending" : "descending"
+                  }`,
+                  freshnessLine(kindSummary),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               />
               <GridPagination
-                start={pageStart}
-                end={pageStart + rows.length - 1}
+                page={current?.page ?? requestedPage}
+                pageSize={current?.pageSize ?? PAGE_SIZE}
+                rowCount={rows.length}
                 total={kindTotal}
                 totalIsFloor={kindTotalIsFloor}
-                hasPrevious={cursorTrail.length > 0}
-                hasNext={Boolean(nextCursor)}
+                hasMore={current?.hasMore ?? false}
+                depthCapped={current?.depthCapped ?? false}
                 pending={listLoading}
-                onPrevious={() =>
-                  updateParams({ cursors: trailParam(cursorTrail.slice(0, -1)) })
+                onPage={(next) =>
+                  updateParams({ page: next > 1 ? String(next) : undefined })
                 }
-                onNext={() => {
-                  if (!nextCursor) return;
-                  updateParams({
-                    cursors: trailParam([...cursorTrail, nextCursor]),
-                  });
-                }}
               />
             </>
           ) : null}

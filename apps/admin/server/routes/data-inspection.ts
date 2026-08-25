@@ -145,7 +145,7 @@ export function createDataInspectionRouter(
             recordKind: String(request.query.recordKind ?? ""),
             externalId: readText(request.query.externalId),
             search: readText(request.query.search),
-            cursor: readText(request.query.cursor),
+            page: readLimit(request.query.page),
             limit: readLimit(request.query.limit),
             direction: readText(request.query.direction),
           }),

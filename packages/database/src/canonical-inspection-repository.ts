@@ -245,10 +245,18 @@ export class PrismaCanonicalInspectionRepository {
   }
 
   /**
-   * One page of entities, ordered by the stable-identity index so a resumed
-   * page cannot skip or repeat a row. `externalId` alone is unique within a
-   * bucket, but the entity id is carried in the cursor as a tiebreaker so the
-   * order stays total even if that ever changes.
+   * One page of entities, ordered by the stable-identity index.
+   *
+   * Addressed by offset rather than by cursor, because the surface offers a
+   * page index and a cursor cannot name a page it has not walked to. The
+   * ordering is still the indexed one, so the scan is an index walk; the caller
+   * bounds how deep an offset it will ask for.
+   *
+   * The trade this accepts: under concurrent writes a row inserted before the
+   * current position shifts later rows down by one, so a record can appear on
+   * two adjacent pages or be skipped between them. For an inspection surface
+   * over an actively ingesting table that is the right trade against being
+   * unable to reach page 400 at all.
    */
   async listEntities(input: {
     readonly organizationId: string;
@@ -256,7 +264,7 @@ export class PrismaCanonicalInspectionRepository {
     readonly recordKind: CanonicalRecordKindRow;
     readonly externalId?: string;
     readonly externalIdPrefix?: string;
-    readonly after?: CanonicalEntityCursor;
+    readonly offset: number;
     readonly limit: number;
     /**
      * Keyset ordering runs in either direction: descending reverses both the
@@ -266,7 +274,7 @@ export class PrismaCanonicalInspectionRepository {
     readonly direction?: "asc" | "desc";
   }): Promise<{
     items: readonly CanonicalEntityListRow[];
-    nextCursor: CanonicalEntityCursor | null;
+    hasMore: boolean;
   }> {
     const rows = await this.database.canonical_entities.findMany({
       where: {
@@ -277,27 +285,7 @@ export class PrismaCanonicalInspectionRepository {
         ...(input.externalIdPrefix
           ? { external_id: { startsWith: input.externalIdPrefix } }
           : {}),
-        ...(input.after
-          ? (input.direction ?? "asc") === "asc"
-            ? {
-                OR: [
-                  { external_id: { gt: input.after.externalId } },
-                  {
-                    external_id: input.after.externalId,
-                    id: { gt: input.after.entityId },
-                  },
-                ],
-              }
-            : {
-                OR: [
-                  { external_id: { lt: input.after.externalId } },
-                  {
-                    external_id: input.after.externalId,
-                    id: { lt: input.after.entityId },
-                  },
-                ],
-              }
-          : {}),
+
       },
       select: {
         id: true,
@@ -318,11 +306,11 @@ export class PrismaCanonicalInspectionRepository {
         { external_id: input.direction ?? "asc" },
         { id: input.direction ?? "asc" },
       ],
+      skip: input.offset,
       take: input.limit + 1,
     });
 
     const page = rows.slice(0, input.limit);
-    const last = page.at(-1);
     return {
       items: page.map((row) => {
         const revision =
@@ -338,10 +326,7 @@ export class PrismaCanonicalInspectionRepository {
           acceptedAt: revision?.accepted_at ?? null,
         };
       }),
-      nextCursor:
-        rows.length > input.limit && last
-          ? { externalId: last.external_id, entityId: last.id }
-          : null,
+      hasMore: rows.length > input.limit,
     };
   }
 

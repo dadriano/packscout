@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CANONICAL_COUNT_BOUND,
+  CANONICAL_MAX_OFFSET,
   CANONICAL_PAGE_SIZE_MAX,
 } from "@packscout/contracts";
 import {
@@ -18,7 +19,7 @@ function fakeRepository(options: {
   providers?: string[];
   bucketSize?: number;
   failWith?: Error;
-  captured?: { limit?: number; after?: unknown };
+  captured?: { limit?: number; offset?: number };
 } = {}) {
   const entities = options.entities ?? [];
   const providers = options.providers ?? ["courtyard"];
@@ -45,18 +46,11 @@ function fakeRepository(options: {
     async kindRecency() {
       return { oldest: null, newest: null };
     },
-    async listEntities(input: {
-      limit: number;
-      after?: { externalId: string; entityId: string };
-    }) {
+    async listEntities(input: { limit: number; offset: number }) {
       (options.captured ?? {}).limit = input.limit;
-      (options.captured ?? {}).after = input.after;
-      const start = input.after
-        ? entities.findIndex((e) => e.externalId === input.after!.externalId) + 1
-        : 0;
-      const slice = entities.slice(start, start + input.limit);
-      const last = slice.at(-1);
-      const more = start + input.limit < entities.length;
+      (options.captured ?? {}).offset = input.offset;
+      const slice = entities.slice(input.offset, input.offset + input.limit);
+      const more = input.offset + input.limit < entities.length;
       return {
         items: slice.map((entity) => ({
           entityId: entity.entityId,
@@ -68,9 +62,7 @@ function fakeRepository(options: {
           sourceCollectedAt: null,
           acceptedAt: null,
         })),
-        nextCursor: more && last
-          ? { externalId: last.externalId, entityId: last.entityId }
-          : null,
+        hasMore: more,
       };
     },
     async readEntity() {
@@ -99,7 +91,7 @@ function serviceOver(repository: unknown) {
   );
 }
 
-test("paging visits every entity exactly once", async () => {
+test("walking every page visits every entity exactly once", async () => {
   const entities = Array.from({ length: 7 }, (_, index) => ({
     externalId: `pack-${index}`,
     entityId: `e-${index}`,
@@ -107,39 +99,78 @@ test("paging visits every entity exactly once", async () => {
   const service = serviceOver(fakeRepository({ entities }));
 
   const seen: string[] = [];
-  let cursor: string | undefined;
-  for (let guard = 0; guard < 20; guard += 1) {
-    const page = await service.listEntities({
+  for (let page = 1; page <= 20; page += 1) {
+    const result = await service.listEntities({
       organizationId: ORGANIZATION,
       platformKey: "courtyard",
       recordKind: "pack",
       limit: 3,
-      cursor,
+      page,
     });
-    seen.push(...page.items.map((item) => item.externalId));
-    if (!page.nextCursor) break;
-    cursor = page.nextCursor;
+    seen.push(...result.items.map((item) => item.externalId));
+    if (!result.hasMore) break;
   }
 
   assert.deepEqual(seen, entities.map((entity) => entity.externalId));
   assert.equal(new Set(seen).size, seen.length, "no entity is visited twice");
 });
 
-test("a malformed cursor is refused rather than restarting silently", async () => {
+test("any page is reachable directly, without walking to it", async () => {
+  const entities = Array.from({ length: 100 }, (_, index) => ({
+    externalId: `pack-${String(index).padStart(3, "0")}`,
+    entityId: `e-${index}`,
+  }));
+  const captured: { offset?: number } = {};
+  const service = serviceOver(fakeRepository({ entities, captured }));
+
+  // Page 5 at 10 per page starts at record 41 — asked for directly.
+  const result = await service.listEntities({
+    organizationId: ORGANIZATION,
+    platformKey: "courtyard",
+    recordKind: "pack",
+    limit: 10,
+    page: 5,
+  });
+  assert.equal(captured.offset, 40);
+  assert.equal(result.page, 5);
+  assert.equal(result.items[0]?.externalId, "pack-040");
+});
+
+test("a page number that is not a positive integer is refused", async () => {
   const service = serviceOver(fakeRepository());
-  await assert.rejects(
-    () =>
-      service.listEntities({
-        organizationId: ORGANIZATION,
-        platformKey: "courtyard",
-        recordKind: "pack",
-        cursor: "not-a-cursor",
-      }),
-    (error: unknown) =>
-      error instanceof CanonicalInspectionError &&
-      error.code === "CANONICAL_CURSOR_INVALID" &&
-      error.status === 400,
-  );
+  for (const page of [0, -3, 1.5]) {
+    await assert.rejects(
+      () =>
+        service.listEntities({
+          organizationId: ORGANIZATION,
+          platformKey: "courtyard",
+          recordKind: "pack",
+          page,
+        }),
+      (error: unknown) =>
+        error instanceof CanonicalInspectionError &&
+        error.code === "CANONICAL_PAGE_INVALID",
+      `page ${page} should be refused`,
+    );
+  }
+});
+
+test("a page past the scan bound resolves to the deepest reachable page", async () => {
+  const captured: { offset?: number } = {};
+  const service = serviceOver(fakeRepository({ captured }));
+  const result = await service.listEntities({
+    organizationId: ORGANIZATION,
+    platformKey: "courtyard",
+    recordKind: "pack",
+    limit: 25,
+    page: 1_000_000,
+  });
+
+  // Capped rather than answered with an empty page, which would read as
+  // "no records" instead of "deeper than this surface will scan".
+  assert.equal(result.depthCapped, true);
+  assert.ok((captured.offset ?? 0) <= CANONICAL_MAX_OFFSET);
+  assert.ok(result.page < 1_000_000);
 });
 
 test("page size is bounded server-side whatever the caller asks for", async () => {

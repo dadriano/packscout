@@ -3,7 +3,7 @@ import type {
   CanonicalProviderRow,
   CanonicalProviderSummary,
 } from "@packscout/contracts";
-import { kindLabel } from "./CanonicalSummary";
+import { kindLabel } from "./kind-presentation";
 
 /**
  * The Data section's filter bar.

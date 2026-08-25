@@ -401,3 +401,45 @@
 .inspect-summary__card {
   cursor: default;
 }
+
+/* Page index: numbers, anchors, and a direct jump. */
+.grid-pagination__page {
+  min-width: 2.4rem;
+  padding-inline: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-pagination__page[data-current="true"] {
+  border-color: var(--admin-primary);
+  background: var(--admin-primary-bg-muted);
+  color: var(--admin-primary);
+  font-weight: 700;
+}
+
+.grid-pagination__note {
+  color: var(--admin-text-faint);
+}
+
+.grid-pagination__jump {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-inline-start: 0.5rem;
+}
+
+.grid-pagination__jump label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--admin-text-muted);
+  font-size: 0.78rem;
+}
+
+.grid-pagination__jump input {
+  width: 5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-pagination__actions {
+  flex-wrap: wrap;
+}

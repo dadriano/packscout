@@ -2,6 +2,7 @@ import {
   CANONICAL_COUNT_BOUND,
   CANONICAL_EXTERNAL_ID_MAX_LENGTH,
   CANONICAL_PAGE_SIZE_DEFAULT,
+  CANONICAL_MAX_OFFSET,
   CANONICAL_PAGE_SIZE_MAX,
   canonicalRecordKinds,
   type CanonicalEntityDetail,
@@ -11,10 +12,7 @@ import {
   type CanonicalProviderSummary,
   type CanonicalRecordKind,
 } from "@packscout/contracts";
-import type {
-  CanonicalEntityCursor,
-  PrismaCanonicalInspectionRepository,
-} from "@packscout/database";
+import type { PrismaCanonicalInspectionRepository } from "@packscout/database";
 import {
   redactSensitive,
   summarizeProvenance,
@@ -40,42 +38,17 @@ export class CanonicalInspectionError extends Error {
   }
 }
 
-/**
- * A cursor is opaque on purpose: it encodes an ordering position, and a caller
- * that could author one could ask for a position the ordering does not define.
- * It is base64url of the two ordering columns, validated on the way back in.
- */
-function encodeCursor(cursor: CanonicalEntityCursor): string {
-  return Buffer.from(
-    JSON.stringify([cursor.externalId, cursor.entityId]),
-    "utf8",
-  ).toString("base64url");
-}
-
-function decodeCursor(raw: string): CanonicalEntityCursor {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
-  } catch {
+/** One-based page numbers; anything else is a caller error, not a silent 1. */
+function assertPage(value: number | undefined): number {
+  if (value === undefined) return 1;
+  if (!Number.isInteger(value) || value < 1) {
     throw new CanonicalInspectionError(
-      "CANONICAL_CURSOR_INVALID",
-      "That page position is not valid. Start from the first page.",
+      "CANONICAL_PAGE_INVALID",
+      "That page number is not valid.",
       400,
     );
   }
-  if (
-    !Array.isArray(parsed) ||
-    parsed.length !== 2 ||
-    typeof parsed[0] !== "string" ||
-    typeof parsed[1] !== "string"
-  ) {
-    throw new CanonicalInspectionError(
-      "CANONICAL_CURSOR_INVALID",
-      "That page position is not valid. Start from the first page.",
-      400,
-    );
-  }
-  return { externalId: parsed[0], entityId: parsed[1] };
+  return value;
 }
 
 function assertRecordKind(value: string): CanonicalRecordKind {
@@ -196,7 +169,7 @@ export class CanonicalInspectionService {
     readonly recordKind: string;
     readonly externalId?: string;
     readonly search?: string;
-    readonly cursor?: string;
+    readonly page?: number;
     readonly limit?: number;
     readonly direction?: string;
   }): Promise<CanonicalEntityPage> {
@@ -204,23 +177,29 @@ export class CanonicalInspectionService {
     const externalId = assertSearchTerm(input.externalId);
     const search = assertSearchTerm(input.search);
     const limit = resolveLimit(input.limit);
-    const after = input.cursor ? decodeCursor(input.cursor) : undefined;
+    const requestedPage = assertPage(input.page);
     const direction = input.direction === "desc" ? "desc" : "asc";
     await this.assertProvider(input);
 
+    // A page beyond the scan bound resolves to the deepest reachable page
+    // rather than an empty result, which would read as "no records here".
+    const maxPage = Math.floor(CANONICAL_MAX_OFFSET / limit) + 1;
+    const page = Math.min(requestedPage, maxPage);
+    const depthCapped = page !== requestedPage;
+
     return await throughStore(async () => {
-      const page = await this.repository.listEntities({
+      const result = await this.repository.listEntities({
         organizationId: input.organizationId,
         platformKey: input.platformKey,
         recordKind,
         externalId,
         externalIdPrefix: externalId ? undefined : search,
-        after,
+        offset: (page - 1) * limit,
         limit,
         direction,
       });
       return {
-        items: page.items.map((row) => ({
+        items: result.items.map((row) => ({
           entityId: row.entityId,
           platformKey: row.platformKey,
           recordKind: row.recordKind,
@@ -230,7 +209,10 @@ export class CanonicalInspectionService {
           sourceCollectedAt: isoOrNull(row.sourceCollectedAt),
           acceptedAt: isoOrNull(row.acceptedAt),
         })),
-        nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
+        page,
+        pageSize: limit,
+        hasMore: result.hasMore,
+        depthCapped,
         direction,
       };
     });

@@ -112,7 +112,10 @@ const PAGE: CanonicalEntityPage = {
       acceptedAt: "2026-08-20T00:02:00.000Z",
     },
   ],
-  nextCursor: "cursor-2",
+  page: 1,
+  pageSize: 25,
+  hasMore: true,
+  depthCapped: false,
   direction: "asc",
 };
 
@@ -142,17 +145,17 @@ test("an operator without the permission gets the restricted treatment", async (
   assert.doesNotMatch(text, /Records by kind/i);
 });
 
-test("a bounded count renders as a floor and an exact count does not", async (t) => {
+test("a bounded count reads as a floor wherever it is shown", async (t) => {
   stubFetch(t, routeFetch());
   const page = await renderPage(route());
   cleanupPage(t, page);
   await settlePage();
 
   const text = pageText(page);
-  // The floor is stated on the card itself, not hidden in a tooltip.
+  // The floor travels with the number into the filter options and the range.
   assert.match(text, /50,000\+/);
-  assert.match(text, /counting stopped at the server bound/i);
-  assert.match(text, /Exact count/);
+  // And a floor cannot be divided into pages, so the index says why.
+  assert.match(text, /page numbers need an exact count/i);
 });
 
 test("records list for the selected provider and kind", async (t) => {
@@ -212,7 +215,14 @@ test("an empty result reads as empty and a failed read reads as failed", async (
     t,
     routeFetch({
       "/canonical/providers/courtyard/entities": () =>
-        jsonResponse({ items: [], nextCursor: null }),
+        jsonResponse({
+          items: [],
+          page: 1,
+          pageSize: 25,
+          hasMore: false,
+          depthCapped: false,
+          direction: "asc",
+        }),
     }),
   );
   const empty = await renderPage(route());
@@ -222,7 +232,7 @@ test("an empty result reads as empty and a failed read reads as failed", async (
   assert.doesNotMatch(pageText(empty), /could not be loaded/i);
 });
 
-test("a failed record read keeps the summary on screen", async (t) => {
+test("a failed record read keeps the filters and their counts on screen", async (t) => {
   stubFetch(
     t,
     routeFetch({
@@ -236,9 +246,10 @@ test("a failed record read keeps the summary on screen", async (t) => {
 
   const text = pageText(page);
   assert.match(text, /could not be loaded/i);
-  // Prior safe results stay visible: the summary read succeeded and must not
-  // be blanked because a sibling read failed.
-  assert.match(text, /Records by kind/i);
+  // Prior safe results stay visible: the summary read succeeded, so the filter
+  // options keep their counts rather than being blanked by a sibling failure.
+  assert.match(text, /50,000\+/);
+  assert.ok(page.container.querySelector("#inspect-kind"));
 });
 
 test("no providers configured reads as its own state", async (t) => {
@@ -253,20 +264,22 @@ test("no providers configured reads as its own state", async (t) => {
   assert.match(pageText(page), /No providers are configured yet/i);
 });
 
-test("a deep-linked later page keeps a working Previous", async (t) => {
-  stubFetch(t, routeFetch());
-  // Opened cold at page three: the predecessor chain must come from the URL,
-  // not from state this render never had.
+test("a deep-linked page opens directly at that page", async (t) => {
+  stubFetch(t, (request) => {
+    const input = String(request.input);
+    if (input.includes("/entities")) {
+      // The server echoes the page it served; the grid must trust that.
+      return jsonResponse({ ...PAGE, page: 3 });
+    }
+    return routeFetch()({ input: request.input });
+  });
   const page = await renderPage(
-    route(
-      inspector,
-      "/data/canonical?provider=courtyard&kind=pack&cursors=cursor-a,cursor-b",
-    ),
+    route(inspector, "/data/canonical?provider=courtyard&kind=pack&page=3"),
   );
   cleanupPage(t, page);
   await settlePage();
 
-  // Page three of a 25-row page size starts at record 51.
+  // Page three at 25 per page starts at record 51 — reached in one request.
   assert.match(pageText(page), /51–51 of/);
   const previous = findButton(page, "← Previous");
   assert.equal(previous.disabled, false);
@@ -306,12 +319,9 @@ test("collection times that were not computed say so, rather than showing a dash
   cleanupPage(t, page);
   await settlePage();
 
-  const text = pageText(page);
-  // The bucket past the count bound skipped the collection-time aggregate.
-  // "Not computed" and "nothing collected" are different facts.
-  assert.match(text, /Not computed at this size/i);
-  // The kind inside the bound still reports its real range.
-  assert.match(text, /Oldest collected/);
+  // The freshness line sits with the grid now. The pack bucket skipped the
+  // collection aggregate, and "not computed" is not "nothing collected".
+  assert.match(pageText(page), /collected range not computed at this size/i);
 });
 
 
@@ -370,14 +380,71 @@ test("the sorted column is marked and clicking it flips the direction", async (t
   assert.match(pageText(page), /descending/i);
 });
 
-test("record kind is chosen from the filter bar, not by clicking a card", async (t) => {
+test("record kind is chosen from the filter bar, and the cards are gone", async (t) => {
   stubFetch(t, routeFetch());
   const page = await renderPage(route());
   cleanupPage(t, page);
   await settlePage();
 
-  // The kind control exists...
   assert.ok(page.container.querySelector("#inspect-kind"));
-  // ...and the summary cards no longer act as controls.
-  assert.equal(page.container.querySelectorAll(".inspect-summary__card button").length, 0);
+  assert.equal(page.container.querySelectorAll(".inspect-summary__card").length, 0);
+});
+
+
+test("an exact count produces a numbered index that can jump", async (t) => {
+  const exactSummary: CanonicalProviderSummary = {
+    platformKey: "courtyard",
+    kinds: [
+      {
+        ...SUMMARY.kinds[0]!,
+        recordKind: "pack",
+        count: 500,
+        precision: "exact",
+        collectedExtremaComplete: true,
+      },
+    ],
+  };
+  const asked: string[] = [];
+  stubFetch(t, (request) => {
+    const input = String(request.input);
+    asked.push(input);
+    if (input.includes("/summary")) return jsonResponse(exactSummary);
+    if (input.includes("/entities")) return jsonResponse(PAGE);
+    return jsonResponse(PROVIDERS);
+  });
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+
+  // 500 records at 25 per page is 20 pages, so numbers are offered.
+  const numbers = [...page.container.querySelectorAll(".grid-pagination__page")]
+    .map((button) => button.textContent?.trim());
+  assert.ok(numbers.includes("1"));
+  assert.ok(numbers.length > 1, "a numbered window should render");
+
+  // Jumping is one request for that page, not a walk.
+  const target = [...page.container.querySelectorAll<HTMLButtonElement>(
+    ".grid-pagination__page",
+  )].find((button) => button.textContent?.trim() === "4");
+  assert.ok(target, "page 4 should be directly reachable");
+  target.click();
+  await settlePage();
+  assert.ok(asked.some((url) => url.includes("page=4")));
+});
+
+test("a page past the scan bound says so instead of reading as empty", async (t) => {
+  stubFetch(t, (request) => {
+    const input = String(request.input);
+    if (input.includes("/entities")) {
+      return jsonResponse({ ...PAGE, page: 4001, depthCapped: true });
+    }
+    return routeFetch()({ input: request.input });
+  });
+  const page = await renderPage(
+    route(inspector, "/data/canonical?provider=courtyard&kind=pack&page=99999"),
+  );
+  cleanupPage(t, page);
+  await settlePage();
+
+  assert.match(pageText(page), /beyond this surface's scan limit/i);
 });

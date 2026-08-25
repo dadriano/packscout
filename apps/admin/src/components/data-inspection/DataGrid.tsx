@@ -149,66 +149,171 @@ export function DataGrid<Row>({
 }
 
 /**
- * Position within the result set, not just a page number.
+ * A page index, not just next and previous.
  *
- * The total comes from the kind summary, which knows whether it is exact or a
- * floor — so a bounded count reads "51–75 of 50,000+" rather than claiming a
- * precision the count does not have.
+ * Renders a window of page numbers around the current one, with first and last
+ * anchors and a direct jump box, so reaching page 400 is one action rather than
+ * four hundred. The window keeps the control a fixed width whatever the page
+ * count is.
+ *
+ * `pageCount` is null when the total is a floor rather than a count. The index
+ * cannot honestly number pages it cannot count, so it degrades to next and
+ * previous and says why, instead of inventing a last page that may not exist.
  */
+export function pageWindow(
+  current: number,
+  pageCount: number,
+  span = 2,
+): readonly number[] {
+  const first = Math.max(1, Math.min(current - span, pageCount - span * 2));
+  const last = Math.min(pageCount, Math.max(current + span, span * 2 + 1));
+  const pages: number[] = [];
+  for (let page = first; page <= last; page += 1) pages.push(page);
+  return pages;
+}
+
 export function GridPagination({
-  start,
-  end,
+  page,
+  pageSize,
+  rowCount,
   total,
   totalIsFloor,
-  hasPrevious,
-  hasNext,
+  hasMore,
+  depthCapped = false,
   pending = false,
-  onPrevious,
-  onNext,
+  onPage,
 }: {
-  start: number;
-  end: number;
+  page: number;
+  pageSize: number;
+  rowCount: number;
   total: number | null;
   totalIsFloor?: boolean;
-  hasPrevious: boolean;
-  hasNext: boolean;
+  hasMore: boolean;
+  depthCapped?: boolean;
   pending?: boolean;
-  onPrevious: () => void;
-  onNext: () => void;
+  onPage: (page: number) => void;
 }) {
+  const start = (page - 1) * pageSize + 1;
+  const end = start + rowCount - 1;
   const totalText =
     total === null
       ? null
       : `${total.toLocaleString("en-US")}${totalIsFloor ? "+" : ""}`;
   const label =
-    end === 0
+    rowCount === 0
       ? "No results"
       : totalText
         ? `${start.toLocaleString("en-US")}–${end.toLocaleString("en-US")} of ${totalText}`
         : `${start.toLocaleString("en-US")}–${end.toLocaleString("en-US")}`;
 
+  // Only an exact total can be divided into a known number of pages.
+  const pageCount =
+    total !== null && !totalIsFloor ? Math.max(1, Math.ceil(total / pageSize)) : null;
+  const numbers = pageCount === null ? [] : pageWindow(page, pageCount);
+
   return (
     <nav className="grid-pagination" aria-label="Result pages">
       <p className="grid-pagination__range" aria-live="polite">
         {label}
+        {depthCapped ? (
+          <span className="grid-pagination__note">
+            {" "}
+            · deeper pages are beyond this surface&apos;s scan limit — narrow the
+            filters to reach them
+          </span>
+        ) : null}
+        {pageCount === null && rowCount > 0 ? (
+          <span className="grid-pagination__note">
+            {" "}
+            · page numbers need an exact count, and this one is a floor
+          </span>
+        ) : null}
       </p>
+
       <div className="grid-pagination__actions">
         <button
           type="button"
           className="admin-button admin-button-secondary"
-          disabled={!hasPrevious || pending}
-          onClick={onPrevious}
+          disabled={page <= 1 || pending}
+          onClick={() => onPage(1)}
+          aria-label="First page"
         >
-          ← Previous
+          «
         </button>
         <button
           type="button"
           className="admin-button admin-button-secondary"
-          disabled={!hasNext || pending}
-          onClick={onNext}
+          disabled={page <= 1 || pending}
+          onClick={() => onPage(page - 1)}
+        >
+          ← Previous
+        </button>
+
+        {numbers.map((number) => (
+          <button
+            key={number}
+            type="button"
+            className="admin-button admin-button-secondary grid-pagination__page"
+            data-current={number === page ? "true" : undefined}
+            aria-current={number === page ? "page" : undefined}
+            disabled={pending}
+            onClick={() => onPage(number)}
+          >
+            {number.toLocaleString("en-US")}
+          </button>
+        ))}
+
+        <button
+          type="button"
+          className="admin-button admin-button-secondary"
+          disabled={!hasMore || pending}
+          onClick={() => onPage(page + 1)}
         >
           Next →
         </button>
+        {pageCount !== null ? (
+          <button
+            type="button"
+            className="admin-button admin-button-secondary"
+            disabled={page >= pageCount || pending}
+            onClick={() => onPage(pageCount)}
+            aria-label="Last page"
+          >
+            »
+          </button>
+        ) : null}
+
+        {pageCount !== null && pageCount > 1 ? (
+          <form
+            className="grid-pagination__jump"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const field = new FormData(event.currentTarget).get("page");
+              const requested = Number(field);
+              if (!Number.isInteger(requested) || requested < 1) return;
+              onPage(Math.min(requested, pageCount));
+            }}
+          >
+            <label>
+              <span>Go to</span>
+              <input
+                name="page"
+                type="number"
+                min={1}
+                max={pageCount}
+                defaultValue={page}
+                aria-label={`Go to page, 1 to ${pageCount}`}
+              />
+            </label>
+            <button
+              type="submit"
+              className="admin-button admin-button-secondary"
+              disabled={pending}
+            >
+              Go
+            </button>
+          </form>
+        ) : null}
       </div>
     </nav>
   );

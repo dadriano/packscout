@@ -51,7 +51,7 @@ export function listCanonicalEntities(
     platformKey: string;
     recordKind: string;
     search?: string;
-    cursor?: string;
+    page?: number;
     limit?: number;
     direction?: string;
   },
@@ -60,7 +60,7 @@ export function listCanonicalEntities(
 ) {
   const query = new URLSearchParams({ recordKind: input.recordKind });
   if (input.search) query.set("search", input.search);
-  if (input.cursor) query.set("cursor", input.cursor);
+  if (input.page && input.page > 1) query.set("page", String(input.page));
   if (input.limit) query.set("limit", String(input.limit));
   if (input.direction) query.set("direction", input.direction);
   return requestJson<CanonicalEntityPage>(
