@@ -1209,6 +1209,10 @@ textarea:focus-visible {
   margin-top: 1.25rem;
 }
 
+.admin-empty-state__action .admin-form-actions {
+  justify-content: center;
+}
+
 .admin-empty-panel {
   display: grid;
   min-height: 10rem;

@@ -43,6 +43,7 @@ import { createAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
 import { createAdminMessageDeliveryRuntime } from "./message-delivery-runtime.ts";
 import { createAdminPasswordResetRuntime } from "./password-reset-runtime.ts";
 import { createAdminOperatorInvitationRuntime } from "./operator-invitation-runtime.ts";
+import { createAdminOperatorAccountCreatedNoticeRuntime } from "./operator-account-created-notice-runtime.ts";
 import { createAdminAccessDecisionNoticeRuntime } from "./access-decision-notice-runtime.ts";
 import {
   adminDevelopmentAllowedOrigins,
@@ -320,6 +321,10 @@ try {
             authService: auth.service,
             secret: emailLinkTokenSecret,
           }),
+    // Directly provisioned accounts are already active. Their informational
+    // sign-in email is an independent durable outbox intent.
+    operatorAccountCreatedNotifier:
+      createAdminOperatorAccountCreatedNoticeRuntime({ database }),
   });
 
   if (isDevelopment) {

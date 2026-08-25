@@ -25,6 +25,7 @@ export const KNOWN_MESSAGE_KINDS = [
   { kind: "welcome", label: "Welcome" },
   { kind: "operator_password_reset", label: "Operator password reset" },
   { kind: "operator_invitation", label: "Operator invitation" },
+  { kind: "operator_account_created", label: "Operator account created" },
 ] as const;
 
 export function messageKindLabel(kind: string): string {

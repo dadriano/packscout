@@ -31,6 +31,35 @@ test("a stored input renders through the catalogue into a deliverable message", 
   }
 });
 
+test("the direct operator account renderer uses the fixed sign-in link and refuses credential fields", () => {
+  const renderers = createEmailMessageOutboxRenderers();
+  const rendered = renderers.operator_account_created!(
+    { toEmail: "created@example.test" },
+    origins,
+  );
+  assert.equal(rendered.status, "rendered");
+  if (rendered.status === "rendered") {
+    assert.equal(rendered.message.kind, "operator_account_created");
+    assert.match(
+      rendered.message.textBody,
+      /https:\/\/admin\.packscout\.example\/login/,
+    );
+    assert.match(rendered.message.textBody, /separate secure channel/);
+  }
+
+  for (const input of [
+    { toEmail: "created@example.test", initialPassword: "not-for-storage" },
+    { toEmail: "created@example.test", passwordHash: "not-for-storage" },
+  ]) {
+    const refused = renderers.operator_account_created!(input, origins);
+    assert.equal(refused.status, "failed");
+    if (refused.status === "failed") {
+      assert.equal(refused.errorCode, "EMAIL_MESSAGE_INPUT_INVALID");
+      assert.doesNotMatch(refused.reason, /not-for-storage/);
+    }
+  }
+});
+
 test("malformed stored JSON becomes an explicit render failure, never a throw", () => {
   const renderers = createEmailMessageOutboxRenderers();
   for (const junk of [

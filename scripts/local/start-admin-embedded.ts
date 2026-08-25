@@ -21,7 +21,9 @@ import { createAdminBackgroundWorkRuntime } from "../../apps/admin/server/backgr
 import { createNodeAuthSecurity } from "../../apps/admin/server/auth/crypto.ts";
 import { createAdminAuthRuntime } from "../../apps/admin/server/auth/runtime.ts";
 import { createAdminImportOperationsRuntime } from "../../apps/admin/server/import-operations-runtime.ts";
+import { createAdminMessageDeliveryRuntime } from "../../apps/admin/server/message-delivery-runtime.ts";
 import { createAdminOperationalRuntime } from "../../apps/admin/server/operational-runtime.ts";
+import { createAdminOperatorAccountCreatedNoticeRuntime } from "../../apps/admin/server/operator-account-created-notice-runtime.ts";
 import { createProductUserAuditSink } from "../../apps/admin/server/product-user-audit.ts";
 import { createProductUserDirectoryReader } from "../../apps/admin/server/product-user-directory.ts";
 import { createProviderAdminRuntime } from "../../apps/admin/server/provider-runtime.ts";
@@ -214,6 +216,17 @@ async function main(): Promise<void> {
       },
       operationalAlerts: { alerts: operational.alerts },
       operationalHealth: { health: operational.health },
+      // Direct account creation commits its informational email to the same
+      // durable outbox the Messages area reads. No worker or provider delivery
+      // runs in this disposable harness.
+      operatorAccountCreatedNotifier:
+        createAdminOperatorAccountCreatedNoticeRuntime({
+          database: harness.database,
+        }),
+      messages: createAdminMessageDeliveryRuntime({
+        database: harness.database,
+        actorPseudonymKey: providerActorKey,
+      }),
     });
     const adminRoot = path.join(repositoryRoot, "apps", "admin");
     const { createServer: createViteServer } = await import("vite");
