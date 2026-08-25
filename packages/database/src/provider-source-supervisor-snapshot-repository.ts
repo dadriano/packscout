@@ -9,7 +9,6 @@ import {
 import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   type PackscoutPrismaClient,
-  type PackscoutTransactionClient,
 } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from
@@ -103,7 +102,7 @@ export class ProviderSourceSupervisorSnapshotRepository {
       throw new TypeError("Supervisor capacity snapshot is invalid.");
     }
     await this.database.$transaction(async (transaction) => {
-      const databaseNow = await this.#assertActiveEpoch(transaction, input);
+      const databaseNow = await providerSourceTransactionTime(transaction);
       const epoch = await transaction.source_supervisor_epochs.updateMany({
         where: {
           id: input.epochId,
@@ -357,26 +356,4 @@ export class ProviderSourceSupervisorSnapshotRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  async #assertActiveEpoch(
-    transaction: PackscoutTransactionClient,
-    input: ProviderSourceSupervisorEpochFence,
-  ): Promise<Date> {
-    const epochs = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      select id
-      from public.source_supervisor_epochs
-      where id = cast(${input.epochId} as uuid)
-        and owner_key = ${input.ownerKey}
-        and lease_token = cast(${input.leaseToken} as uuid)
-        and state = 'active'::public.supervisor_epoch_state
-        and lease_expires_at > clock_timestamp()
-      for share
-    `);
-    if (!epochs[0]) {
-      throw new PersistenceError(
-        "SUPERVISOR_OWNERSHIP_LOST",
-        "Supervisor snapshot epoch is not active.",
-      );
-    }
-    return providerSourceTransactionTime(transaction);
-  }
 }

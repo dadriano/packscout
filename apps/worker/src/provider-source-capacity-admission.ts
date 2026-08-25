@@ -102,15 +102,19 @@ export function providerSourceMaximumPageCommitBytes(
   const model = artifact.forecastInput;
   const perRecord = model.measuredStructuredPhysicalBytesPerRecord +
     model.measuredPreExpiryNormalizedPayloadPhysicalBytesPerRecord +
-    model.measuredQuarantinePhysicalBytes +
-    Math.max(
+    model.measuredQuarantinePhysicalBytes;
+  const protectedNativeEvidenceBytes = Math.max(
+    providerSourceLaunchBounds.maximumResponseBytes,
+    model.pageRecordLimit * Math.max(
       model.measuredAverageRawRecordBytes,
       model.measuredQuarantineEvidencePhysicalBytes,
-    );
+    ),
+  );
   // A captured page may legally fill the transport contract even when the
-  // measured fixture was smaller. Reserve the hard response-body ceiling so
-  // all four granted turns can finish without crossing the live abort fence.
+  // measured fixture was smaller. The raw response and record-local protected
+  // native evidence can coexist until retention, so reserve both independently.
   const total = providerSourceLaunchBounds.maximumResponseBytes +
+    protectedNativeEvidenceBytes +
     model.pageRecordLimit * perRecord +
     model.measuredImportPagePhysicalBytes +
     model.measuredDiagnosticPhysicalBytesPerPage +
@@ -129,38 +133,52 @@ export function evaluateProviderSourceOngoingCapacity(input: Readonly<{
   volumeCapacityBytes: number;
   volumeAvailableBytes: number;
   unreconciledAttemptCount: number;
+  minimumAvailableBytes?: number;
 }>): Readonly<{
   admitted: boolean;
-  projectedUsedBytes: number;
-  abortAtUsedBytes: number;
+  projectedAvailableBytes: number;
+  minimumAvailableBytes: number;
+  safeCode: "CAPACITY_ABORT_THRESHOLD_REACHED" |
+    "CAPACITY_DISK_RESERVE_REACHED";
 }> {
-  const { volumeCapacityBytes, volumeAvailableBytes, unreconciledAttemptCount } =
-    input;
+  const {
+    volumeCapacityBytes,
+    volumeAvailableBytes,
+    unreconciledAttemptCount,
+  } = input;
   if (
     !Number.isSafeInteger(volumeCapacityBytes) || volumeCapacityBytes < 1 ||
     !Number.isSafeInteger(volumeAvailableBytes) || volumeAvailableBytes < 0 ||
     volumeAvailableBytes > volumeCapacityBytes ||
     !Number.isSafeInteger(unreconciledAttemptCount) ||
-    unreconciledAttemptCount < 0
+    unreconciledAttemptCount < 0 ||
+    (input.minimumAvailableBytes !== undefined &&
+      (!Number.isSafeInteger(input.minimumAvailableBytes) ||
+        input.minimumAvailableBytes < 0))
   ) throw new TypeError("Provider source ongoing capacity input is invalid.");
-  const volumeUsedBytes = volumeCapacityBytes - volumeAvailableBytes;
   const outstandingReserveBytes =
     MAXIMUM_ACTIVE_PAGE_TURNS *
       providerSourceMaximumPageCommitBytes(input.artifact) +
     unreconciledAttemptCount *
       input.artifact.forecast.nonterminalAttemptBytesEach;
-  const projectedUsedBytes = volumeUsedBytes + outstandingReserveBytes;
-  if (!Number.isSafeInteger(projectedUsedBytes)) {
-    throw new TypeError("Provider source capacity projection overflowed.");
-  }
   const abortAtUsedBytes = Math.floor(
     volumeCapacityBytes * input.artifact.forecast.abortThresholdBasisPoints /
       BASIS_POINTS,
   );
+  const usesExplicitDiskReserve = input.minimumAvailableBytes !== undefined;
+  const minimumAvailableBytes = input.minimumAvailableBytes ??
+    volumeCapacityBytes - abortAtUsedBytes;
+  const projectedAvailableBytes = Math.max(
+    0,
+    volumeAvailableBytes - outstandingReserveBytes,
+  );
   return {
-    admitted: projectedUsedBytes < abortAtUsedBytes,
-    projectedUsedBytes,
-    abortAtUsedBytes,
+    admitted: projectedAvailableBytes > minimumAvailableBytes,
+    projectedAvailableBytes,
+    minimumAvailableBytes,
+    safeCode: usesExplicitDiskReserve
+      ? "CAPACITY_DISK_RESERVE_REACHED"
+      : "CAPACITY_ABORT_THRESHOLD_REACHED",
   };
 }
 
@@ -173,6 +191,7 @@ interface VolumeStats {
 export function createProviderSourceCapacityAdmissionHook(input: Readonly<{
   database: PackscoutPrismaClient;
   volumePath: string;
+  minimumAvailableBytes?: number;
   artifact?: CapacityArtifact;
   resolveVolumePath?: (path: string) => string;
   statVolume?: (path: string) => Promise<VolumeStats>;
@@ -225,13 +244,16 @@ export function createProviderSourceCapacityAdmissionHook(input: Readonly<{
           volumeCapacityBytes: safeBytes(volume.blocks) * blockSize,
           volumeAvailableBytes: safeBytes(volume.bavail) * blockSize,
           unreconciledAttemptCount,
+          ...(input.minimumAvailableBytes === undefined
+            ? {}
+            : { minimumAvailableBytes: input.minimumAvailableBytes }),
         });
         return decision.admitted
           ? { admitted: true as const }
           : {
               admitted: false as const,
               state: "blocked" as const,
-              safeCode: "CAPACITY_ABORT_THRESHOLD_REACHED",
+              safeCode: decision.safeCode,
             };
       } catch {
         return {

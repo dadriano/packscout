@@ -30,8 +30,9 @@ four stable provider roots, and prevents page reads during configuration.
   the last atomically committed cursor. Do not reset a cursor as a
   routine recovery action.
 - A full-history run requires the guarded capacity approval from the Task010
-  runbook. The supervisor's ongoing 80% disk fence is an emergency stop
-  threshold, not approval to begin a backfill.
+  runbook. Production uses the ongoing 80% disk fence as an emergency stop,
+  not as approval to begin a backfill. A shared local development volume may
+  instead use an explicit free-space reserve as described below.
 
 ## What runs where
 
@@ -52,6 +53,21 @@ Source adapter ------------ capture, validate, normalize, classify
            v
 Atomic importer ----------- evidence + canonical data + EV work + cursor
 ```
+
+## Interpreting the storage estimate
+
+Do not use the 8.76 TB maximum-throughput scenario as a prediction for a local
+backfill. It assumes four new 250-record pages every minute for 365 days. The
+first live `packscout_dev` sample instead measured 7,024 marginal bytes per
+committed record and 8,123 bytes per record including fixed database overhead.
+At the dated 14,526,877-record provider baseline, that is a provisional
+136.1–157.3 GB planning range with 25% free headroom, not 8.76 TB. See the
+[live capacity observation](../provider-source-live-capacity-observation-2026-08-24.md)
+for the samples, assumptions, and remeasurement points.
+
+The local runtime enforces the configured free-space floor on actual volume
+availability after in-flight reserves. Production continues to enforce the
+separate 80%-used emergency fence.
 
 The four provider lanes share connection health and the configured request
 limit, but each lane owns its source lifecycle, schedule, run, cursor,
@@ -105,6 +121,7 @@ The source-only supervisor reads these values from the root ignored `.env`:
 | `PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64`  | Distinct 32-byte base64 key that encrypts source-connection configuration.             |
 | `PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION` | Positive integer identifying the active source-connection encryption key.              |
 | `PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH`   | Absolute, non-root path whose filesystem holds PostgreSQL data.                        |
+| `PACKSCOUT_SOURCE_DISK_RESERVE_GIB`       | Optional local-only free-space floor. Page reads stop before projected commits would leave this many GiB free. |
 | `PACKSCOUT_WORKER_ID`                     | Optional stable process identity; a safe unique local value is generated when omitted. |
 
 The admin also requires its normal session and provider configuration,
@@ -324,13 +341,16 @@ durable.
 ### Capacity blocked or probe failed
 
 The supervisor probes the configured database volume before and after page
-work. It stops granting page reads before projected in-flight commits cross the
-80% used threshold. Operational tests may still run.
+work. Production stops granting page reads before projected in-flight commits
+cross the 80% used threshold. On a shared local development volume,
+`PACKSCOUT_SOURCE_DISK_RESERVE_GIB` replaces that percentage with an explicit
+amount that must remain free after every already-admitted page commit. This
+local setting is not Task010 capacity approval and is rejected in production.
 
 1. Verify `PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH` resolves to the actual database
    device and remains readable.
-2. Check Pipeline Status for `CAPACITY_ABORT_THRESHOLD_REACHED` or
-   `CAPACITY_PROBE_FAILED`.
+2. Check Pipeline Status for `CAPACITY_ABORT_THRESHOLD_REACHED`,
+   `CAPACITY_DISK_RESERVE_REACHED`, or `CAPACITY_PROBE_FAILED`.
 3. Resolve the filesystem or approved-capacity problem outside the application.
 4. Let the normal cooldown expire; do not repeatedly create manual runs.
 

@@ -25,6 +25,32 @@ function fallbackWorkerId(): string {
   return `${host}:${process.pid}:${randomUUID()}`;
 }
 
+function safeLocalFailure(error: unknown): Readonly<{
+  failureCode: string;
+  errorName: string;
+  message: string;
+}> {
+  const candidate = typeof error === "object" && error !== null
+    ? error as Readonly<{ code?: unknown }>
+    : null;
+  const code = typeof candidate?.code === "string" &&
+      /^[A-Za-z0-9_]{1,128}$/u.test(candidate.code)
+    ? candidate.code
+    : null;
+  const message = error instanceof Error
+    ? error.message
+      .replace(/postgres(?:ql)?:\/\/[^@\s]+@/giu, "postgresql://[redacted]@")
+      .replace(/Bearer\s+\S+/giu, "Bearer [redacted]")
+      .replace(/[A-Za-z0-9+/=]{40,}/gu, "[redacted]")
+      .slice(0, 1_024)
+    : "Unknown local supervisor failure.";
+  return {
+    failureCode: code ?? "PROVIDER_SOURCE_SUPERVISOR_FATAL",
+    errorName: error instanceof Error ? error.name : "UnknownError",
+    message,
+  };
+}
+
 runProviderSourceSupervisorOnly({
   environment: process.env,
   fallbackWorkerId: fallbackWorkerId(),
@@ -33,12 +59,15 @@ runProviderSourceSupervisorOnly({
     createRuntime: createProviderSourceSupervisorRuntime,
   },
 }).catch((error: unknown) => {
+  const failure = safeLocalFailure(error);
   console.error(JSON.stringify({
     level: "error",
     event: "provider_source_supervisor_fatal",
     failureCode: error instanceof ProviderSourceSupervisorConfigurationError
       ? error.code
-      : "PROVIDER_SOURCE_SUPERVISOR_FATAL",
+      : failure.failureCode,
+    errorName: failure.errorName,
+    message: failure.message,
   }));
   process.exitCode = 1;
 });

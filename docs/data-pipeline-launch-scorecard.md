@@ -21,13 +21,13 @@ probe, four filtered initial/continuation/restart paths, cursor/filter isolation
 the `records` / `next_cursor` / `poll_after_seconds` wrapper, `payment_method`,
 tri-state `available`, and a safe aggregate concurrency of two.
 
-A 500-record Phygitals response exceeded the 2 MiB safety cap, so the launch
-page target is 250 records. The actual full-history import remains blocked until
-the target volume has at least **8,759,332,238,475 available bytes**, as required
-by the final-schema artifact. The former 200 GB provisional floor is
-superseded. Operators must run
-`npm run preflight:provider-source-backfill:local -- --database-path <postgres-data-volume-path> --unreconciled-attempts <count>`;
-the reviewed local volume is explicitly rejected.
+A 500-record Phygitals response exceeded the original 2 MiB capture cap, so the
+page target remains 250 records. A later 250-record page also crossed that
+provisional byte bound; the runtime hard cap is now 4 MiB. The historical
+8,759,332,238,475-byte Task 010 result is a maximum-throughput stress ceiling,
+not the operational local estimate. Current local operation uses measured
+whole-database growth plus an explicit free-space floor; see
+[`provider-source-live-capacity-observation-2026-08-24.md`](./provider-source-live-capacity-observation-2026-08-24.md).
 
 ## Current launch boundary
 

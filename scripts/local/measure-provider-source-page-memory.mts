@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   DATAFORREST_EVENTS_V1_ENDPOINT,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
   providerIdentityNamespaceByLaunchProvider,
   providerSourceLaunchBounds,
   type ProviderSourcePageCommitPins,
@@ -89,7 +89,7 @@ function maximumSizeSanitizedPage(): Uint8Array {
 class InMemoryDataforrestEventsSourceAdapter
   extends DataforrestEventsSourceAdapter {
   constructor(private readonly rawResponse: Uint8Array) {
-    super();
+    super({}, dataforrestEventsV2SourceAdapterManifest);
   }
 
   override async captureUnboundRequest(
@@ -121,7 +121,7 @@ if (typeof globalThis.gc !== "function") {
 }
 
 const provider = "courtyard" as const;
-const declaration = dataforrestEventsV1SourceAdapterManifest.supportedProviders
+const declaration = dataforrestEventsV2SourceAdapterManifest.supportedProviders
   .find((candidate) => candidate.provider === provider);
 const mapper = providerMapperManifest.find(
   (candidate) => candidate.descriptor.provider === provider,
@@ -145,10 +145,10 @@ const ids = Object.freeze({
 const requestedCursor = Object.freeze({
   sourceInstanceId: ids.sourceInstanceId,
   sourceRevisionId: ids.sourceRevisionId,
-  sourceTypeKey: dataforrestEventsV1SourceAdapterManifest.sourceTypeKey,
-  adapterVersion: dataforrestEventsV1SourceAdapterManifest.adapterVersion,
+  sourceTypeKey: dataforrestEventsV2SourceAdapterManifest.sourceTypeKey,
+  adapterVersion: dataforrestEventsV2SourceAdapterManifest.adapterVersion,
   cursorCodecKey:
-    dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
+    dataforrestEventsV2SourceAdapterManifest.cursorCodecKey,
   cursorGeneration: 1,
   value: null,
 });
@@ -158,9 +158,9 @@ const pins: ProviderSourcePageCommitPins = Object.freeze({
   provider,
   sourceInstanceId: ids.sourceInstanceId,
   sourceRevisionId: ids.sourceRevisionId,
-  sourceTypeKey: dataforrestEventsV1SourceAdapterManifest.sourceTypeKey,
+  sourceTypeKey: dataforrestEventsV2SourceAdapterManifest.sourceTypeKey,
   sourceAdapterVersion:
-    dataforrestEventsV1SourceAdapterManifest.adapterVersion,
+    dataforrestEventsV2SourceAdapterManifest.adapterVersion,
   normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
   mapperKey: mapper.descriptor.mapperKey,
   mapperVersion: mapper.descriptor.mapperVersion,
@@ -182,7 +182,7 @@ const pins: ProviderSourcePageCommitPins = Object.freeze({
   pageId: ids.pageId,
   pageNumber: 1,
   cursorCodecVersion:
-    dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
+    dataforrestEventsV2SourceAdapterManifest.cursorCodecKey,
   cursorGeneration: 1n,
   requestedCursor,
   requestedCursorFingerprint: null,
@@ -247,7 +247,7 @@ async function processMaximumSizePage(): Promise<Readonly<{
 }>> {
   const adapterResult = await completeAuthenticPageReadForTest(
     {
-      manifest: dataforrestEventsV1SourceAdapterManifest,
+      manifest: dataforrestEventsV2SourceAdapterManifest,
       pins: requestPins,
       requestedCursor,
       connectionConfiguration: {
@@ -314,6 +314,7 @@ const result = {
     architecture: process.arch,
   },
   path: "authentic-capture-terminalize-interpret-complete-import-plan",
+  sourceAdapterVersion: dataforrestEventsV2SourceAdapterManifest.adapterVersion,
   warmupPageCount,
   trialCount,
   pagesPerTrial,

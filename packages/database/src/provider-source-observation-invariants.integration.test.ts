@@ -29,6 +29,35 @@ const sourceDefinition = {
   hashCharacter: "b",
 } as const;
 
+test("canonical text keeps a trailing v and rejects actual trim whitespace", async () => {
+  const fixture = await createProviderSourceAcceptanceFixture(
+    "observation-text-canonicalization",
+  );
+  try {
+    const [result] = await fixture.database.$queryRaw<Array<{
+      trailing_v: boolean;
+      leading_vertical_tab: boolean;
+      trailing_vertical_tab: boolean;
+    }>>`
+      select
+        normalized_text_is_canonical('provider-record-v', 4096)
+          as trailing_v,
+        normalized_text_is_canonical(chr(11) || 'provider-record-v', 4096)
+          as leading_vertical_tab,
+        normalized_text_is_canonical('provider-record-v' || chr(11), 4096)
+          as trailing_vertical_tab
+    `;
+
+    assert.deepEqual(result, {
+      trailing_v: true,
+      leading_vertical_tab: false,
+      trailing_vertical_tab: false,
+    });
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("launch scope meaning and canonical semantic identity fail closed in PostgreSQL", async () => {
   const fixture = await createProviderSourceAcceptanceFixture(
     "observation-invariants",

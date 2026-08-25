@@ -24,6 +24,7 @@ import {
   reviseProviderSourceInterval,
   revokeSourceConnectionRevision,
   rotateSourceConnectionCredential,
+  upgradeSourceConnectionAdapter,
 } from "../api/provider-sources";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -312,6 +313,10 @@ export function SourceConfigurationPage() {
           ) : null}
           <SourceConnectionLedger
             connections={catalog.connections}
+            currentSourceAdapterVersion={
+              catalog.providers[0]?.sourceRegistration.sourceAdapterVersion ??
+                null
+            }
             canManage={canManage}
             canManageSecrets={canManageSecrets}
             pendingKey={pendingKey}
@@ -340,6 +345,24 @@ export function SourceConfigurationPage() {
                 "Recovery candidate saved. Run the exact recovery test before activation.",
               );
             }}
+            onUpgrade={(connection, targetSourceAdapterVersion) => confirm({
+              tier: "danger",
+              title: `Create ${targetSourceAdapterVersion} candidate?`,
+              description: "The stored credential will be decrypted only in the server, validated by the new adapter, and re-encrypted for a new untested revision. Existing pinned work keeps its prior revision.",
+              confirmLabel: "Create adapter upgrade candidate",
+              action: async () => {
+                await upgradeSourceConnectionAdapter(connection.id, {
+                  expectedRevisionId: connection.latestRevision.id,
+                  expectedSourceAdapterVersion:
+                    connection.latestRevision.sourceAdapterVersion,
+                  targetSourceAdapterVersion,
+                  confirmation: "UPGRADE_ADAPTER",
+                });
+                await reload();
+                setNotice("Adapter upgrade candidate saved. Test and activate the exact revision before creating replacement sources.");
+              },
+              successMessage: "Adapter upgrade candidate created.",
+            })}
             onCommand={connectionCommand}
           />
           {catalog.providers.length === 0 ? (

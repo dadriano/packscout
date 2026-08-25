@@ -77,6 +77,10 @@ export interface RunControlPlaneTransactionInput<TResult> {
     context: ControlPlaneTransactionContext,
   ) => TResult | Promise<TResult>;
   readonly onExhausted: () => void | Promise<void>;
+  /** Observability-only work may leave the runtime active for a later retry. */
+  readonly fenceOnExhausted?: boolean;
+  /** Records the exact boundary before the shared fence aborts sibling work. */
+  readonly beforeFence?: () => void;
   readonly classifyFailure?: (error: unknown) => ControlPlaneFailureCode;
   readonly now?: () => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
@@ -221,7 +225,10 @@ export async function runControlPlaneTransaction<TResult>(
     }
   }
 
-  input.runtimeFence.fence();
+  if (input.fenceOnExhausted !== false) {
+    input.beforeFence?.();
+    input.runtimeFence.fence();
+  }
   await input.onExhausted();
   throw new ControlPlaneRetryExhaustedError();
 }

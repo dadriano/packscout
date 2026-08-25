@@ -9,11 +9,14 @@ For routine source operation after bootstrap, use the
 owns only the guarded Task010 target, configuration, first backfill, and final
 reconciliation procedure.
 
-**Current admission state (2026-08-22): BLOCKED.** The read-only audit found
-102,168,420,352 available bytes, a deficit of 8,657,163,818,123 bytes against
-Task 010's required 8,759,332,238,475 available bytes. The filesystem is 89.72%
-used, beyond the independently enforced 80% fence. Do not run a real backfill
-on this host.
+**Historical Task 010 admission state (2026-08-22): BLOCKED.** That isolated
+bootstrap procedure used an 8,759,332,238,475-byte maximum-throughput stress
+ceiling and an 80%-used volume fence. The stress ceiling is not the operational
+estimate for the current `packscout_dev` import. For early local development,
+use the normal ingestion guide's explicit free-space floor and the
+[2026-08-24 live capacity observation](provider-source-live-capacity-observation-2026-08-24.md).
+This runbook still must not be used to bypass the isolated Task 010 target's
+own historical receipt checks.
 
 ## 1. Install and create the private configuration file
 

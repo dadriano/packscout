@@ -6,6 +6,7 @@ import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   PUBLIC_PACK_AVAILABILITY_INPUT_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
   normalizedObservationSemanticContent,
   normalizedProviderObservationPageSchema,
   providerIdentityNamespaceByLaunchProvider,
@@ -885,6 +886,56 @@ function replaceProjectionContent(
   };
   return { ...input, plan };
 }
+
+test("durable raw page boundary accepts exactly 4 MiB and rejects the next byte", async () => {
+  const maximumResponseBytes = providerSourceLaunchBounds.maximumResponseBytes;
+  const runtime = await createRuntime("raw-response-boundary", {
+    sourceManifest: dataforrestEventsV2SourceAdapterManifest,
+    protectedRawResponseText: "x".repeat(maximumResponseBytes),
+  });
+  try {
+    const repository = new ProviderSourcePageRepository(runtime.database, {
+      actorPseudonymKey: actorKey,
+    });
+    const exact = plannedPersistenceInput(runtime);
+    const oversizedRawResponse = new Uint8Array(maximumResponseBytes + 1);
+    const oversized = {
+      ...exact,
+      plan: {
+        ...exact.plan,
+        normalizedPage: normalizedProviderObservationPageSchema.parse({
+          ...exact.plan.normalizedPage,
+          measurements: {
+            ...exact.plan.normalizedPage.measurements,
+            responseBytes: oversizedRawResponse.byteLength,
+          },
+        }),
+      },
+      protectedRawResponse: oversizedRawResponse,
+      protectedRawResponseSha256: createHash("sha256")
+        .update(oversizedRawResponse)
+        .digest("hex"),
+    };
+
+    await assert.rejects(
+      repository.commitPage(oversized),
+      (error: unknown) =>
+        error instanceof ProviderSourceAtomicPagePersistenceError &&
+        error.code === "invalid_page_plan",
+    );
+    assert.equal(await runtime.database.import_pages.count(), 0);
+
+    await repository.commitPage(exact);
+    const rows = await runtime.database.$queryRaw<Array<{ bytes: number }>>`
+      select octet_length(protected_raw_response)::integer as bytes
+      from import_pages
+      where id = ${runtime.pins.pageId}::uuid
+    `;
+    assert.equal(rows[0]?.bytes, maximumResponseBytes);
+  } finally {
+    await runtime.close();
+  }
+});
 
 test("closed canonical content rejects secrets and malformed event money before any write", async () => {
   const runtime = await createRuntime("closed-canonical-content");

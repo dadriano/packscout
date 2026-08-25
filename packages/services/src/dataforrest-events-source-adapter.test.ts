@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
-  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestIdentityNamespaceByProvider,
+  dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
   launchRecordIdScopeDeclarations,
   sourceAdapterFailureSchema,
   type LaunchProviderKey,
@@ -41,6 +43,8 @@ import {
   type PageReadRequestPins,
   type SourceTestRequestPins,
 } from "./source-request-lease.ts";
+import { createProviderObservationMapperRegistryFromManifest } from "./providers/provider-mapper-manifest.ts";
+import { mapperInput } from "./providers/provider-observation-mapper.test-support.ts";
 
 const bounds = Object.freeze({
   pageLimit: 250,
@@ -78,7 +82,7 @@ function runtime(cap = 2): TestRuntime {
 const commonPins = {
   organizationId: "organization-1",
   sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-  adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  adapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   singletonFencingEpoch: 7,
   connectionProfileId: "profile-1",
   connectionProfileRevisionId: "profile-revision-1",
@@ -110,7 +114,7 @@ function cursor(
     sourceInstanceId: `source-${provider}`,
     sourceRevisionId: `source-revision-${provider}`,
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    adapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
     cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     cursorGeneration: 1,
     value,
@@ -273,7 +277,7 @@ function adapterWithClient(httpClient: PinnedProviderHttpClient) {
   return new DataforrestEventsSourceAdapter({
     httpClient,
     resolveHost: async () => ["198.204.245.26"],
-  });
+  }, dataforrestEventsV2SourceAdapterManifest);
 }
 
 function acknowledgeTerminalization(
@@ -381,7 +385,31 @@ test("request shapes are operation-specific and preserve an opaque cursor exactl
   }
 });
 
+test("a v1 adapter refuses to interpret a v2-pinned capture", async () => {
+  const httpClient = async () =>
+    jsonResponse(dataforestEventsV1EvidenceFixture.collector_crypt.initial);
+  const v2 = adapterWithClient(httpClient);
+  const v1 = new DataforrestEventsSourceAdapter({
+    httpClient,
+    resolveHost: async () => ["198.204.245.26"],
+  }, dataforrestEventsV1SourceAdapterManifest);
+  const testRuntime = runtime();
+  const operation = await pageOperation(testRuntime, "collector_crypt", null);
+  const captured = await successfulCapture(v2, operation);
+  const interpreted = await v1.interpretPage(
+    sourceAdapterInterpretationContextOf(operation),
+    captured,
+  );
+  assert.equal(interpreted.ok, false);
+  if (!interpreted.ok) {
+    assert.equal(interpreted.failure.code, "invalid_source_configuration");
+    assert.equal(interpreted.diagnostics[0]?.code, "adapter_pin_mismatch");
+  }
+  operation.requestLease.close();
+});
+
 test("all four filters normalize initial, continuation, replay, empty, and poll-after pages independently", async () => {
+  const mappers = createProviderObservationMapperRegistryFromManifest();
   for (const provider of [
     "courtyard",
     "collector_crypt",
@@ -407,6 +435,42 @@ test("all four filters normalize initial, continuation, replay, empty, and poll-
       true,
     );
     assert.deepEqual(first.value.normalizedPage.continuation, { kind: "continue" });
+    if (provider === "collector_crypt") {
+      const packOutcome = first.value.normalizedPage.outcomes[0];
+      assert.equal(packOutcome?.status, "valid");
+      if (packOutcome?.status !== "valid") {
+        assert.fail("expected a valid Collector Crypt pack observation");
+      }
+      assert.equal(packOutcome.observation.kind, "catalog");
+      if (packOutcome.observation.kind !== "catalog") {
+        assert.fail("expected a Collector Crypt catalog observation");
+      }
+      assert.equal(packOutcome.observation.entity, "pack");
+      assert.deepEqual(packOutcome.observation.providerFacts.displayName, {
+        state: "present",
+        value: "Collector Crypt Fixture Pack",
+      });
+      assert.equal(
+        JSON.stringify(packOutcome.observation.providerFacts).includes(
+          "ignored_native_field",
+        ),
+        false,
+      );
+      const mapped = mappers.map(
+        mapperInput("collector_crypt", packOutcome.observation),
+      );
+      assert.equal(mapped.status, "mapped");
+      if (mapped.status !== "mapped") {
+        assert.fail("expected an accepted Collector Crypt pack candidate");
+      }
+      assert.equal(mapped.candidate.candidateKind, "pack");
+      assert.equal(
+        mapped.candidate.candidateKind === "pack"
+          ? mapped.candidate.displayName
+          : null,
+        "Collector Crypt Fixture Pack",
+      );
+    }
 
     const cursor = first.value.normalizedPage.nextCursor.value;
     initial.requestLease.close();

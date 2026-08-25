@@ -108,7 +108,9 @@ export class ProviderSourceLifecycleService {
 
     let adapter;
     try {
-      adapter = this.#sourceAdapters.resolveOnlyVersion(parsed.data.sourceTypeKey);
+      adapter = this.#sourceAdapters.resolveCurrentVersion(
+        parsed.data.sourceTypeKey,
+      );
     } catch {
       return this.#invalid();
     }

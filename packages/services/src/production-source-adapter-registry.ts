@@ -1,4 +1,9 @@
-import { dataforrestEventsV1SourceAdapterManifest } from "@packscout/contracts";
+import {
+  DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
+} from "@packscout/contracts";
 import {
   DataforrestEventsSourceAdapter,
 } from "./dataforrest-events-source-adapter.ts";
@@ -8,26 +13,46 @@ import { SourceAdminConfigurationCodecRegistry } from "./source-admin-configurat
 import { SourceAdapterRegistry } from "./source-adapter-registry.ts";
 
 export const productionSourceAdapterManifests = Object.freeze([
-  dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
 ]);
 
 export function createProductionSourceAdapterRegistry(
   dependencies: HardenedProviderRequestDependencies = {},
 ): SourceAdapterRegistry {
-  return new SourceAdapterRegistry([
-    new DataforrestEventsSourceAdapter(dependencies),
-  ]);
+  return new SourceAdapterRegistry(
+    [
+      new DataforrestEventsSourceAdapter(
+        dependencies,
+        dataforrestEventsV1SourceAdapterManifest,
+      ),
+      new DataforrestEventsSourceAdapter(
+        dependencies,
+        dataforrestEventsV2SourceAdapterManifest,
+      ),
+    ],
+    {
+      [DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY]:
+        DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    },
+  );
 }
 
 export function createProductionSourceAdminConfigurationCodecRegistry(
   sourceAdapters: SourceAdapterRegistry,
 ): SourceAdminConfigurationCodecRegistry {
-  const adapter = sourceAdapters.resolveOnlyVersion(
-    dataforrestEventsV1SourceAdapterManifest.sourceTypeKey,
+  return new SourceAdminConfigurationCodecRegistry(
+    [
+      dataforrestEventsV1SourceAdapterManifest,
+      dataforrestEventsV2SourceAdapterManifest,
+    ].map((manifest) =>
+      new DataforrestEventsAdminConfigurationCodec(
+        sourceAdapters.resolveSourceType(
+          manifest.sourceTypeKey,
+          manifest.adapterVersion,
+        ),
+      )
+    ),
   );
-  return new SourceAdminConfigurationCodecRegistry([
-    new DataforrestEventsAdminConfigurationCodec(adapter),
-  ]);
 }
 
 export const productionSourceAdapterRegistry =

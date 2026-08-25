@@ -4,6 +4,7 @@ import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
 } from "@packscout/contracts";
 import {
@@ -131,7 +132,7 @@ function repository(
   return { value, requestedScopes };
 }
 
-test("catalog is tenant-scoped, production-only, and exposes masked credential presence", async () => {
+test("catalog advertises current v2 while retaining masked v1 connection and source history", async () => {
   const records = repository();
   const resolutionInputs: unknown[] = [];
   const service = new ProviderSourceAdminCatalogService({
@@ -169,7 +170,7 @@ test("catalog is tenant-scoped, production-only, and exposes masked credential p
   assert.equal(catalog.availableSourceTypes.length, 1);
   assert.deepEqual(catalog.providers[0]?.sourceRegistration, {
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     mapperKey: "courtyard-provider-observation",
     mapperVersion: "1",
@@ -185,6 +186,10 @@ test("catalog is tenant-scoped, production-only, and exposes masked credential p
     "198.204.245.26.sslip.io");
   assert.equal(catalog.connections[0]?.latestRevision.credentialMask, "••••••••");
   assert.equal(catalog.sources[0]?.test.state, "pending");
+  assert.equal(
+    catalog.sources[0]?.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
   assert.equal(catalog.sources[0]?.cursor.resumeLabel, "Feed start");
   assert.equal(JSON.stringify(catalog).includes("must-never-leave"), false);
   assert.equal(JSON.stringify(catalog).includes("/v1/events"), false);

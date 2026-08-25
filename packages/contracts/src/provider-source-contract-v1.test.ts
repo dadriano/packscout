@@ -23,12 +23,15 @@ import {
   sourceAdapterManifestV1Schema,
   validateSourceIntervalSeconds,
 } from "./provider-source-contract-v1.ts";
-import { dataforrestEventsV1SourceAdapterManifest } from "./dataforrest-events-v1.ts";
+import {
+  dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
+} from "./dataforrest-events-v1.ts";
 
 test("launch source constants retain the evidence-backed operating envelope", () => {
   assert.deepEqual(providerSourceLaunchBounds, {
     pageTargetRecords: 250,
-    maximumResponseBytes: 2_097_152,
+    maximumResponseBytes: 4_194_304,
     requestTimeoutMilliseconds: 10_000,
     stableProfileRequestCap: 2,
     genericExecutionSlots: 4,
@@ -282,24 +285,34 @@ test("record scopes cannot relabel their frozen source kind", () => {
   assert.equal(sourceAdapterManifestV1Schema.safeParse(manifest).success, false);
 });
 
-test("adapter manifest is credential-free, strict, and pins four providers", () => {
-  const parsed = sourceAdapterManifestV1Schema.parse(
+test("adapter manifests are credential-free, strict, and retain exact version bounds", () => {
+  const parsedV1 = sourceAdapterManifestV1Schema.parse(
     dataforrestEventsV1SourceAdapterManifest,
   );
-  assert.equal(parsed.sourceTypeKey, "dataforrest-events-v1");
-  assert.deepEqual(parsed.requestBounds, {
+  const parsedV2 = sourceAdapterManifestV1Schema.parse(
+    dataforrestEventsV2SourceAdapterManifest,
+  );
+  assert.equal(parsedV1.sourceTypeKey, "dataforrest-events-v1");
+  assert.deepEqual(parsedV1.requestBounds, {
     pageLimit: 250,
     maximumResponseBytes: 2_097_152,
     timeoutMilliseconds: 10_000,
   });
-  assert.equal(parsed.maximumConnectionRequestCap, 2);
+  assert.deepEqual(parsedV2.requestBounds, {
+    pageLimit: 250,
+    maximumResponseBytes: 4_194_304,
+    timeoutMilliseconds: 10_000,
+  });
+  assert.equal(parsedV1.maximumConnectionRequestCap, 2);
   assert.deepEqual(
-    parsed.supportedProviders.map(({ provider }) => provider),
+    parsedV1.supportedProviders.map(({ provider }) => provider),
     ["courtyard", "collector_crypt", "phygitals", "clutchpacks"],
   );
-  assert.equal(JSON.stringify(parsed).match(/credential|authorization|token/iu), null);
+  assert.equal(JSON.stringify([parsedV1, parsedV2]).match(
+    /credential|authorization|token/iu,
+  ), null);
   assert.equal(
-    sourceAdapterManifestV1Schema.safeParse({ ...parsed, token: "forbidden" }).success,
+    sourceAdapterManifestV1Schema.safeParse({ ...parsedV2, token: "forbidden" }).success,
     false,
   );
 });
