@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { providerSourceRunBounds } from "@packscout/contracts";
 import type { PackscoutTransactionClient } from "./database.ts";
-import { PersistenceError } from "./persistence-error.ts";
 import type { ProviderSourceImportRunRepository } from
   "./provider-source-import-run-repository.ts";
 import type { ProviderSourceSupervisorQueueCandidate } from
@@ -14,6 +13,45 @@ function pageCount(value: unknown): number {
   return Number.isSafeInteger(candidate) && Number(candidate) >= 0
     ? Number(candidate)
     : 0;
+}
+
+/**
+ * Stops an incompatible elapsed run from pinning the global queue forever.
+ * The run is already durably incomplete; the operator can now replace or
+ * repair the active source revision without crashing unrelated source lanes.
+ */
+export async function markProviderSourceContinuationUnavailable(
+  transaction: PackscoutTransactionClient,
+  input: Readonly<{
+    sourceInstanceId: string;
+    sourceRevisionId: string;
+    runId: string;
+    occurredAt: Date;
+  }>,
+): Promise<void> {
+  await transaction.provider_source_runtime_states.updateMany({
+    where: {
+      source_instance_id: input.sourceInstanceId,
+      source_revision_id: input.sourceRevisionId,
+      current_run_id: input.runId,
+    },
+    data: {
+      supervisor_epoch_id: null,
+      phase: "action_required",
+      activity: "action_required",
+      wait_reason: null,
+      action_required_code: "SOURCE_CONTINUATION_UNAVAILABLE",
+      current_run_id: null,
+      run_lease_acquired_at: null,
+      run_lease_expires_at: null,
+      retry_attempt: 0,
+      retry_not_before: null,
+      continuation_kind: null,
+      continuation_minimum_delay_seconds: null,
+      queued_at: null,
+      updated_at: input.occurredAt,
+    },
+  });
 }
 
 /** Rolls an elapsed/page-bounded queued run before it can make another call. */
@@ -98,10 +136,13 @@ export async function rolloverExpiredQueuedProviderSourceRun(
     expectedSourceRevisionId: run.sourceRevisionId,
   });
   if (continuation.kind !== "created") {
-    throw new PersistenceError(
-      "SOURCE_FENCED",
-      "Expired queued run did not create its exact continuation.",
-    );
+    await markProviderSourceContinuationUnavailable(transaction, {
+      sourceInstanceId: run.sourceInstanceId,
+      sourceRevisionId: run.sourceRevisionId,
+      runId: run.id,
+      occurredAt: databaseNow,
+    });
+    return true;
   }
   await transaction.provider_source_runtime_states.updateMany({
     where: {

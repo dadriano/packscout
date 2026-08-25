@@ -594,6 +594,9 @@ export class ProviderSourceAdminLifecycleRepository
         from public.source_connection_revisions as connection_revision
         where connection_revision.organization_id = source.organization_id
           and connection_revision.connection_profile_id = source.connection_profile_id
+          and connection_revision.source_type_key = revision.source_type_key
+          and connection_revision.source_adapter_version =
+            revision.source_adapter_version
         order by
           (connection_revision.id = profile.active_revision_id) desc,
           connection_revision.revision_number desc,

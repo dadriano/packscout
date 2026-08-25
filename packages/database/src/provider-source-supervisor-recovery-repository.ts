@@ -12,6 +12,8 @@ import type { ProviderSourceDiagnosticRepository } from
   "./provider-source-diagnostic-repository.ts";
 import { providerSourceSupervisorTransitionDiagnosticId } from
   "./provider-source-supervisor-work-diagnostic.ts";
+import { markProviderSourceContinuationUnavailable } from
+  "./provider-source-supervisor-queued-rollover-repository.ts";
 import type { ProviderSourceSupervisorEpochFence } from
   "./provider-source-supervisor-work-repository.ts";
 
@@ -329,10 +331,15 @@ export class ProviderSourceSupervisorRecoveryRepository {
           },
         );
         if (continuation.kind !== "created") {
-          throw new PersistenceError(
-            "SOURCE_FENCED",
-            "Recovered continuation did not win its exact queue transition.",
-          );
+          await markProviderSourceContinuationUnavailable(transaction, {
+            sourceInstanceId: source.id,
+            sourceRevisionId: run.source_revision_id,
+            runId: run.id,
+            occurredAt: databaseNow,
+          });
+          await this.#appendRecoveredDiagnostic(transaction, run, databaseNow);
+          recovered += 1;
+          continue;
         }
         nextRunId = continuation.run.id;
       } else {

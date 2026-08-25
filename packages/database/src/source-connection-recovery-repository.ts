@@ -82,7 +82,7 @@ export class SourceConnectionRecoveryRepository {
         "Same-revision recovery episode changed before lanes resumed.",
       );
     }
-    return this.#queueRecoveryRuns(transaction, {
+    const runIds = await this.#queueRecoveryRuns(transaction, {
       organizationId: input.organizationId,
       connectionProfileId: input.connectionProfileId,
       connectionRevisionId: input.connectionRevisionId,
@@ -93,6 +93,73 @@ export class SourceConnectionRecoveryRepository {
       preserveBlockedRunPins: true,
       preserveBlockedRunFinishedAfter: episode.opened_at,
     });
+    await this.restoreInactiveLanesAfterRecoveryInTransaction(transaction, input);
+    return runIds;
+  }
+
+  async restoreInactiveLanesAfterRecoveryInTransaction(
+    transaction: PackscoutTransactionClient,
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      connectionRevisionId: string | null;
+      blockingEpisodeId: string | null;
+      supervisorEpochId: string | null;
+      resumedAt: Date;
+    }>,
+  ): Promise<void> {
+    await transaction.$executeRaw(Prisma.sql`
+      update public.provider_source_runtime_states as runtime
+      set supervisor_epoch_id = coalesce(
+            cast(${input.supervisorEpochId} as uuid),
+            runtime.supervisor_epoch_id
+          ),
+          phase = case source.state
+            when 'paused'::public.provider_source_instance_state then 'paused'
+            when 'disabled'::public.provider_source_instance_state then 'terminal'
+            when 'replaced'::public.provider_source_instance_state then 'terminal'
+            else 'idle'
+          end,
+          activity = case source.state
+            when 'paused'::public.provider_source_instance_state then 'paused'
+            else 'inactive'
+          end,
+          wait_reason = null,
+          action_required_code = null,
+          retry_attempt = 0,
+          retry_not_before = null,
+          blocking_episode_id = null,
+          blocking_health_generation = null,
+          queued_at = null,
+          updated_at = ${input.resumedAt}
+      from public.provider_source_instances as source
+      where source.id = runtime.source_instance_id
+        and source.organization_id = runtime.organization_id
+        and source.connection_profile_id = runtime.connection_profile_id
+        and source.state <> 'active'::public.provider_source_instance_state
+        and runtime.organization_id = cast(${input.organizationId} as uuid)
+        and runtime.connection_profile_id = cast(${input.connectionProfileId} as uuid)
+        and (
+          cast(${input.connectionRevisionId} as uuid) is null
+          or runtime.connection_revision_id = cast(${input.connectionRevisionId} as uuid)
+        )
+        and (
+          cast(${input.blockingEpisodeId} as uuid) is null
+          or runtime.blocking_episode_id = cast(${input.blockingEpisodeId} as uuid)
+        )
+        and exists (
+          select 1
+          from public.source_connection_health_episodes as episode
+          where episode.id = runtime.blocking_episode_id
+            and episode.organization_id = runtime.organization_id
+            and episode.connection_profile_id = runtime.connection_profile_id
+            and episode.connection_revision_id = runtime.connection_revision_id
+            and episode.closed_at is not null
+        )
+        and runtime.current_run_id is null
+        and runtime.run_lease_acquired_at is null
+        and runtime.run_lease_expires_at is null
+    `);
   }
 
   async addRecoveryConnectionRevision(input: Readonly<{

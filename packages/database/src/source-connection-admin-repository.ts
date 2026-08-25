@@ -470,6 +470,17 @@ export class SourceConnectionAdminRepository {
         );
       }
       const previousRevisionId = profile.active_revision_id;
+      await this.#recovery.restoreInactiveLanesAfterRecoveryInTransaction(
+        transaction,
+        {
+          organizationId: input.organizationId,
+          connectionProfileId: input.connectionProfileId,
+          connectionRevisionId: previousRevisionId,
+          blockingEpisodeId: null,
+          supervisorEpochId: null,
+          resumedAt: input.activatedAt,
+        },
+      );
       if (previousRevisionId && previousRevisionId !== revision.id) {
         await transaction.source_connection_revisions.updateMany({
           where: {
