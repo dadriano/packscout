@@ -688,20 +688,32 @@ export class ProviderSourceSupervisor<
     epoch: SourceSupervisorEpoch,
     drain: boolean,
   ): Promise<void> {
-    while (!this.#stopping && !this.#fenceStarted) {
-      const recoverable = await this.#runControlPlane(
-        () => this.#dependencies.queue.listRecoverableClaims(epoch),
-        "CLAIM_RECOVERY_FAILED",
-      );
-      if (recoverable.length === 0) return;
-      for (const claim of recoverable) {
-        if (this.#stopping || this.#fenceStarted) return;
-        await this.#runControlPlane(
-          () => this.#dependencies.queue.recoverClaim(epoch, claim),
+    try {
+      while (!this.#stopping && !this.#fenceStarted) {
+        const recoverable = await this.#runControlPlane(
+          () => this.#dependencies.queue.listRecoverableClaims(epoch),
           "CLAIM_RECOVERY_FAILED",
+          { fenceOnExhausted: drain },
         );
+        if (recoverable.length === 0) return;
+        for (const claim of recoverable) {
+          if (this.#stopping || this.#fenceStarted) return;
+          await this.#runControlPlane(
+            () => this.#dependencies.queue.recoverClaim(epoch, claim),
+            "CLAIM_RECOVERY_FAILED",
+            { fenceOnExhausted: drain },
+          );
+        }
+        if (!drain) return;
       }
-      if (!drain) return;
+    } catch (error) {
+      // Startup takeover must drain every predecessor claim before this epoch
+      // admits work. During an ordinary poll, however, the same claims remain
+      // durably discoverable. Page commits can hold their rows longer than one
+      // short control-plane retry window, so leave the runtime active and
+      // revisit recovery on the next poll instead of restarting healthy work.
+      if (!drain && error instanceof ControlPlaneRetryExhaustedError) return;
+      throw error;
     }
   }
 

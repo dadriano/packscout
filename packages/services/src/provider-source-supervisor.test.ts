@@ -380,6 +380,27 @@ class LateRecoveryUnitQueue extends FixtureQueue {
   }
 }
 
+class ContendedLateRecoveryUnitQueue extends LateRecoveryUnitQueue {
+  listCalls = 0;
+  #remainingContention = 0;
+
+  contendUntilNextPoll(): void {
+    this.makeRecoverable();
+    this.#remainingContention = 3;
+  }
+
+  override async listRecoverableClaims(): Promise<
+    readonly SourceSupervisorRecoverableClaim[]
+  > {
+    this.listCalls += 1;
+    if (this.#remainingContention > 0) {
+      this.#remainingContention -= 1;
+      throw new ControlPlaneTransactionError("timeout");
+    }
+    return super.listRecoverableClaims();
+  }
+}
+
 function fixtureWork(
   id: string,
   profile: "slow-profile" | "independent-profile",
@@ -598,6 +619,39 @@ test("a claim expiring after takeover is recovered by a later poll", async () =>
   queue.makeRecoverable();
   await supervisor.runCycle();
 
+  assert.deepEqual(queue.recovered, [
+    { kind: "page_read", id: "late-expired-run" },
+  ]);
+  await supervisor.stop();
+});
+
+test("transient late-claim recovery contention retries on the next poll", async () => {
+  const ownership = new FixtureOwnership();
+  const queue = new ContendedLateRecoveryUnitQueue([]);
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue,
+    executor: new MeteredExecutor(),
+    capacity,
+    snapshot,
+    diagnostics,
+    classifyControlPlaneFailure: (error) =>
+      error instanceof ControlPlaneTransactionError ? error.code : "invariant",
+    ids: { id: () => "unused-continuation-id" },
+    sleep: async () => undefined,
+  });
+
+  await supervisor.initialize();
+  queue.contendUntilNextPoll();
+  await supervisor.runCycle();
+
+  assert.equal(ownership.calls.includes("fence"), false);
+  assert.deepEqual(queue.recovered, []);
+
+  await supervisor.runCycle();
   assert.deepEqual(queue.recovered, [
     { kind: "page_read", id: "late-expired-run" },
   ]);
