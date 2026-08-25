@@ -147,6 +147,7 @@ export function createDataInspectionRouter(
             search: readText(request.query.search),
             cursor: readText(request.query.cursor),
             limit: readLimit(request.query.limit),
+            direction: readText(request.query.direction),
           }),
         );
       } catch (reason) {

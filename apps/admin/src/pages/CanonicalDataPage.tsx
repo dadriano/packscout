@@ -14,10 +14,18 @@ import {
   readCanonicalEntity,
 } from "../api/data-inspection";
 import { CanonicalSummary, kindLabel } from "../components/data-inspection/CanonicalSummary";
+import {
+  DataFilters,
+  type AppliedDataFilters,
+} from "../components/data-inspection/DataFilters";
 import { DataSectionGate } from "../components/data-inspection/DataSectionGate";
-import { ProviderPicker } from "../components/data-inspection/ProviderPicker";
+import {
+  DataGrid,
+  GridPagination,
+  type DataGridColumn,
+  type GridSortDirection,
+} from "../components/data-inspection/DataGrid";
 import { EmptyState } from "../components/EmptyState";
-import { KeysetPagination } from "../components/operations/KeysetPagination";
 import { PageHeader } from "../components/PageHeader";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -34,6 +42,48 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
  */
 
 const DEFAULT_KIND = "pack";
+/** Page size the server also defaults to; used to place the range label. */
+const PAGE_SIZE = 25;
+
+const COLUMNS: readonly DataGridColumn<CanonicalEntityRow>[] = [
+  {
+    key: "externalId",
+    label: "External identifier",
+    sortable: true,
+    render: (row) => (
+      <span className="grid-table__identifier">{row.externalId}</span>
+    ),
+  },
+  {
+    key: "recordKind",
+    label: "Kind",
+    render: (row) => kindLabel(row.recordKind),
+  },
+  {
+    key: "revision",
+    label: "Rev",
+    numeric: true,
+    render: (row) => row.revisionNumber ?? "—",
+  },
+  {
+    key: "sourceUpdatedAt",
+    label: "Provider reported",
+    numeric: true,
+    render: (row) => dateText(row.sourceUpdatedAt),
+  },
+  {
+    key: "sourceCollectedAt",
+    label: "Collected",
+    numeric: true,
+    render: (row) => dateText(row.sourceCollectedAt),
+  },
+  {
+    key: "acceptedAt",
+    label: "Accepted",
+    numeric: true,
+    render: (row) => dateText(row.acceptedAt),
+  },
+];
 
 function dateText(value: string | null): string {
   if (!value) return "—";
@@ -68,6 +118,8 @@ function CanonicalDataView() {
     .split(",")
     .filter((value) => value.length > 0);
   const cursor = cursorTrail.at(-1);
+  const direction: GridSortDirection =
+    params.get("dir") === "desc" ? "desc" : "asc";
 
   const trailParam = (trail: readonly string[]): string | undefined =>
     trail.length > 0 ? trail.join(",") : undefined;
@@ -88,7 +140,7 @@ function CanonicalDataView() {
    * belonging to a provider they do not belong to. Binding the rows to the key
    * that produced them makes that state unrepresentable.
    */
-  const requestKey = `${platformKey ?? ""}|${recordKind}|${search}|${cursor ?? ""}`;
+  const requestKey = `${platformKey ?? ""}|${recordKind}|${search}|${cursor ?? ""}|${direction}`;
   const [loaded, setLoaded] = useState<{
     key: string;
     rows: CanonicalEntityRow[];
@@ -103,7 +155,6 @@ function CanonicalDataView() {
   const listLoading = platformKey !== null && current === null && !listError;
   const listLoaded = current !== null;
 
-  const [searchDraft, setSearchDraft] = useState(search);
   const [detail, setDetail] = useState<CanonicalEntityDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
 
@@ -160,7 +211,7 @@ function CanonicalDataView() {
     if (!platformKey) return;
     const controller = new AbortController();
     listCanonicalEntities(
-      { platformKey, recordKind, search: search || undefined, cursor },
+      { platformKey, recordKind, search: search || undefined, cursor, direction },
       controller.signal,
     )
       .then((page) => {
@@ -181,7 +232,14 @@ function CanonicalDataView() {
         );
       })
     return () => controller.abort();
-  }, [platformKey, recordKind, search, cursor, requestKey]);
+  }, [platformKey, recordKind, search, cursor, direction, requestKey]);
+
+  const kindSummary = summary?.kinds.find(
+    (entry) => entry.recordKind === recordKind,
+  );
+  const kindTotal = kindSummary?.count ?? null;
+  const kindTotalIsFloor = kindSummary?.precision === "at_least";
+  const pageStart = cursorTrail.length * PAGE_SIZE + 1;
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.platformKey === platformKey),
@@ -224,12 +282,27 @@ function CanonicalDataView() {
       ) : null}
 
       {providers.length > 0 ? (
-        <ProviderPicker
+        <DataFilters
           providers={providers}
-          selected={platformKey}
-          onSelect={(next) => {
+          summary={summary}
+          pending={listLoading}
+          applied={{
+            platformKey: platformKey ?? "",
+            recordKind,
+            search,
+          }}
+          onApply={(next: AppliedDataFilters) => {
             setDetail(null);
-            updateParams({ provider: next, cursors: undefined });
+            updateParams({
+              provider: next.platformKey,
+              kind: next.recordKind,
+              q: next.search.trim(),
+              cursors: undefined,
+            });
+          }}
+          onReset={() => {
+            setDetail(null);
+            updateParams({ q: undefined, cursors: undefined });
           }}
         />
       ) : null}
@@ -249,60 +322,11 @@ function CanonicalDataView() {
       ) : null}
 
       {platformKey && Array.isArray(summary?.kinds) ? (
-        <CanonicalSummary
-          summary={summary}
-          selectedKind={recordKind}
-          onSelectKind={(kind) => {
-            setDetail(null);
-            updateParams({ kind, cursors: undefined });
-          }}
-        />
+        <CanonicalSummary summary={summary} selectedKind={recordKind} />
       ) : null}
 
       {platformKey ? (
-        <section className="inspect-records" aria-labelledby="canonical-records-title">
-          <header className="admin-section-header">
-            <div>
-              <span className="admin-kicker">
-                {selectedProvider?.displayName ?? platformKey}
-              </span>
-              <h2 id="canonical-records-title">{kindLabel(recordKind)}</h2>
-            </div>
-          </header>
-
-          <form
-            className="inspect-records__search"
-            onSubmit={(event) => {
-              event.preventDefault();
-              updateParams({ q: searchDraft.trim(), cursors: undefined });
-            }}
-          >
-            <label>
-              <span>Find by external identifier</span>
-              <input
-                type="search"
-                value={searchDraft}
-                placeholder="Exact id, or a leading fragment"
-                onChange={(event) => setSearchDraft(event.target.value)}
-              />
-            </label>
-            <button type="submit" className="admin-button admin-button-secondary">
-              Search
-            </button>
-            {search ? (
-              <button
-                type="button"
-                className="admin-button admin-button-secondary"
-                onClick={() => {
-                  setSearchDraft("");
-                  updateParams({ q: undefined, cursors: undefined });
-                }}
-              >
-                Clear
-              </button>
-            ) : null}
-          </form>
-
+        <>
           {listError ? (
             <p className="admin-notice" role="alert">
               {listError}
@@ -325,62 +349,55 @@ function CanonicalDataView() {
               }
               description={
                 search
-                  ? "Check the identifier, or clear the search to page through every record of this kind."
+                  ? "Check the identifier, or reset the filters to page through every record of this kind."
                   : "The pipeline has not landed a record of this kind for this provider yet."
               }
             />
           ) : null}
 
           {rows.length > 0 ? (
-            <div className="inspect-records__rows">
-              {rows.map((row) => (
-                <article key={row.entityId}>
-                  <div className="inspect-records__identity">
-                    <button
-                      type="button"
-                      className="inspect-records__open"
-                      onClick={() => openRecord(row)}
-                    >
-                      {row.externalId}
-                    </button>
-                    <span>
-                      Revision {row.revisionNumber ?? "—"} · {kindLabel(row.recordKind)}
-                    </span>
-                  </div>
-                  <dl className="inspect-records__facts">
-                    <div>
-                      <dt>Provider reported</dt>
-                      <dd>{dateText(row.sourceUpdatedAt)}</dd>
-                    </div>
-                    <div>
-                      <dt>Collected</dt>
-                      <dd>{dateText(row.sourceCollectedAt)}</dd>
-                    </div>
-                    <div>
-                      <dt>Accepted</dt>
-                      <dd>{dateText(row.acceptedAt)}</dd>
-                    </div>
-                  </dl>
-                </article>
-              ))}
-            </div>
+            <>
+              <DataGrid
+                eyebrow={selectedProvider?.displayName ?? platformKey}
+                title={kindLabel(recordKind)}
+                columns={COLUMNS}
+                rows={rows}
+                rowKey={(row) => row.entityId}
+                sortedKey="externalId"
+                direction={direction}
+                onSort={(_key, next) =>
+                  updateParams({
+                    dir: next === "desc" ? "desc" : undefined,
+                    cursors: undefined,
+                  })
+                }
+                selectedKey={detail?.entityId ?? null}
+                onSelect={openRecord}
+                orderStatus={`Ordered by identifier, ${
+                  direction === "asc" ? "ascending" : "descending"
+                }`}
+              />
+              <GridPagination
+                start={pageStart}
+                end={pageStart + rows.length - 1}
+                total={kindTotal}
+                totalIsFloor={kindTotalIsFloor}
+                hasPrevious={cursorTrail.length > 0}
+                hasNext={Boolean(nextCursor)}
+                pending={listLoading}
+                onPrevious={() =>
+                  updateParams({ cursors: trailParam(cursorTrail.slice(0, -1)) })
+                }
+                onNext={() => {
+                  if (!nextCursor) return;
+                  updateParams({
+                    cursors: trailParam([...cursorTrail, nextCursor]),
+                  });
+                }}
+              />
+            </>
           ) : null}
-
-          <KeysetPagination
-            page={cursorTrail.length + 1}
-            hasPrevious={cursorTrail.length > 0}
-            hasNext={Boolean(nextCursor)}
-            onPrevious={() => {
-              updateParams({
-                cursors: trailParam(cursorTrail.slice(0, -1)),
-              });
-            }}
-            onNext={() => {
-              if (!nextCursor) return;
-              updateParams({ cursors: trailParam([...cursorTrail, nextCursor]) });
-            }}
-          />
-        </section>
+        </>
       ) : null}
 
       {detailError ? (

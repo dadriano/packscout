@@ -198,12 +198,14 @@ export class CanonicalInspectionService {
     readonly search?: string;
     readonly cursor?: string;
     readonly limit?: number;
+    readonly direction?: string;
   }): Promise<CanonicalEntityPage> {
     const recordKind = assertRecordKind(input.recordKind);
     const externalId = assertSearchTerm(input.externalId);
     const search = assertSearchTerm(input.search);
     const limit = resolveLimit(input.limit);
     const after = input.cursor ? decodeCursor(input.cursor) : undefined;
+    const direction = input.direction === "desc" ? "desc" : "asc";
     await this.assertProvider(input);
 
     return await throughStore(async () => {
@@ -215,6 +217,7 @@ export class CanonicalInspectionService {
         externalIdPrefix: externalId ? undefined : search,
         after,
         limit,
+        direction,
       });
       return {
         items: page.items.map((row) => ({
@@ -228,6 +231,7 @@ export class CanonicalInspectionService {
           acceptedAt: isoOrNull(row.acceptedAt),
         })),
         nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
+        direction,
       };
     });
   }

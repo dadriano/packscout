@@ -39,11 +39,9 @@ function dateText(value: string | null): string {
 export function CanonicalSummary({
   summary,
   selectedKind,
-  onSelectKind,
 }: {
   summary: CanonicalProviderSummary;
   selectedKind: string;
-  onSelectKind: (kind: string) => void;
 }) {
   return (
     <section
@@ -60,13 +58,11 @@ export function CanonicalSummary({
         {summary.kinds.map((kind) => {
           const selected = kind.recordKind === selectedKind;
           return (
-            <button
+            <div
               key={kind.recordKind}
-              type="button"
               role="listitem"
               className={`inspect-summary__card${selected ? " is-selected" : ""}`}
-              aria-pressed={selected}
-              onClick={() => onSelectKind(kind.recordKind)}
+              aria-current={selected ? "true" : undefined}
             >
               <span className="inspect-summary__label">
                 {kindLabel(kind.recordKind)}
@@ -110,7 +106,7 @@ export function CanonicalSummary({
                   <dd>{dateText(kind.newestAcceptedAt)}</dd>
                 </div>
               </dl>
-            </button>
+            </div>
           );
         })}
       </div>

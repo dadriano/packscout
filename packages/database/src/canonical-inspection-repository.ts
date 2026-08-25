@@ -258,6 +258,12 @@ export class PrismaCanonicalInspectionRepository {
     readonly externalIdPrefix?: string;
     readonly after?: CanonicalEntityCursor;
     readonly limit: number;
+    /**
+     * Keyset ordering runs in either direction: descending reverses both the
+     * comparison and the sort. Both stay on the stable-identity index, so a
+     * reversed listing costs exactly what a forward one does.
+     */
+    readonly direction?: "asc" | "desc";
   }): Promise<{
     items: readonly CanonicalEntityListRow[];
     nextCursor: CanonicalEntityCursor | null;
@@ -272,15 +278,25 @@ export class PrismaCanonicalInspectionRepository {
           ? { external_id: { startsWith: input.externalIdPrefix } }
           : {}),
         ...(input.after
-          ? {
-              OR: [
-                { external_id: { gt: input.after.externalId } },
-                {
-                  external_id: input.after.externalId,
-                  id: { gt: input.after.entityId },
-                },
-              ],
-            }
+          ? (input.direction ?? "asc") === "asc"
+            ? {
+                OR: [
+                  { external_id: { gt: input.after.externalId } },
+                  {
+                    external_id: input.after.externalId,
+                    id: { gt: input.after.entityId },
+                  },
+                ],
+              }
+            : {
+                OR: [
+                  { external_id: { lt: input.after.externalId } },
+                  {
+                    external_id: input.after.externalId,
+                    id: { lt: input.after.entityId },
+                  },
+                ],
+              }
           : {}),
       },
       select: {
@@ -298,7 +314,10 @@ export class PrismaCanonicalInspectionRepository {
             },
           },
       },
-      orderBy: [{ external_id: "asc" }, { id: "asc" }],
+      orderBy: [
+        { external_id: input.direction ?? "asc" },
+        { id: input.direction ?? "asc" },
+      ],
       take: input.limit + 1,
     });
 

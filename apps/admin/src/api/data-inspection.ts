@@ -53,6 +53,7 @@ export function listCanonicalEntities(
     search?: string;
     cursor?: string;
     limit?: number;
+    direction?: string;
   },
   signal?: AbortSignal,
   fetcher?: Fetcher,
@@ -61,6 +62,7 @@ export function listCanonicalEntities(
   if (input.search) query.set("search", input.search);
   if (input.cursor) query.set("cursor", input.cursor);
   if (input.limit) query.set("limit", String(input.limit));
+  if (input.direction) query.set("direction", input.direction);
   return requestJson<CanonicalEntityPage>(
     `/data-inspection/canonical/providers/${encodeURIComponent(input.platformKey)}/entities?${query}`,
     { signal },

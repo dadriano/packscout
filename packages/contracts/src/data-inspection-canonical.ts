@@ -72,10 +72,15 @@ export const canonicalEntityRowSchema = z.object({
 
 export type CanonicalEntityRow = z.infer<typeof canonicalEntityRowSchema>;
 
+export const canonicalSortDirections = ["asc", "desc"] as const;
+export type CanonicalSortDirection = (typeof canonicalSortDirections)[number];
+
 export const canonicalEntityPageSchema = z.object({
   items: z.array(canonicalEntityRowSchema),
   /** Opaque to the caller. Null when the page is the last one. */
   nextCursor: z.string().nullable(),
+  /** Echoed so the grid marks the sorted column without tracking it itself. */
+  direction: z.enum(canonicalSortDirections),
 });
 
 export type CanonicalEntityPage = z.infer<typeof canonicalEntityPageSchema>;

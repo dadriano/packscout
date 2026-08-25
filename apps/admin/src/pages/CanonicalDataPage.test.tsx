@@ -113,6 +113,7 @@ const PAGE: CanonicalEntityPage = {
     },
   ],
   nextCursor: "cursor-2",
+  direction: "asc",
 };
 
 function routeFetch(
@@ -161,7 +162,11 @@ test("records list for the selected provider and kind", async (t) => {
   await settlePage();
 
   assert.match(pageText(page), /courtyard-pack-0001/);
-  assert.match(pageText(page), /Revision 4/);
+  // The revision is its own column now rather than an inline label.
+  const cells = [...page.container.querySelectorAll("tbody td")].map((c) =>
+    c.textContent?.trim(),
+  );
+  assert.deepEqual(cells.slice(0, 3), ["courtyard-pack-0001", "Packs", "4"]);
 });
 
 test("opening a record shows its content, hashes, and provenance", async (t) => {
@@ -190,8 +195,10 @@ test("opening a record shows its content, hashes, and provenance", async (t) => 
   cleanupPage(t, page);
   await settlePage();
 
-  const open = findButton(page, "courtyard-pack-0001");
-  open.click();
+  // Rows are clickable in the grid rather than carrying a button.
+  const row = page.container.querySelector<HTMLTableRowElement>("tbody tr");
+  assert.ok(row);
+  row.click();
   await settlePage();
 
   const text = pageText(page);
@@ -259,9 +266,9 @@ test("a deep-linked later page keeps a working Previous", async (t) => {
   cleanupPage(t, page);
   await settlePage();
 
-  const text = pageText(page);
-  assert.match(text, /Page 3/i);
-  const previous = findButton(page, "Previous");
+  // Page three of a 25-row page size starts at record 51.
+  assert.match(pageText(page), /51–51 of/);
+  const previous = findButton(page, "← Previous");
   assert.equal(previous.disabled, false);
 });
 
@@ -305,4 +312,72 @@ test("collection times that were not computed say so, rather than showing a dash
   assert.match(text, /Not computed at this size/i);
   // The kind inside the bound still reports its real range.
   assert.match(text, /Oldest collected/);
+});
+
+
+test("the grid renders records as rows with column headers", async (t) => {
+  stubFetch(t, routeFetch());
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+
+  const headers = [...page.container.querySelectorAll("th")].map((cell) =>
+    cell.textContent?.replace(/[▲▼↕]/g, "").trim(),
+  );
+  assert.deepEqual(headers, [
+    "External identifier",
+    "Kind",
+    "Rev",
+    "Provider reported",
+    "Collected",
+    "Accepted",
+  ]);
+
+  const cells = [...page.container.querySelectorAll("tbody td")].map((cell) =>
+    cell.textContent?.trim(),
+  );
+  assert.ok(cells.includes("courtyard-pack-0001"));
+  assert.ok(cells.includes("4"));
+});
+
+test("the range label uses the kind's own count and its precision", async (t) => {
+  stubFetch(t, routeFetch());
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+
+  // The pack bucket is a floor of 50,000, so the range must not imply an exact
+  // total it does not have.
+  assert.match(pageText(page), /1–1 of 50,000\+/);
+});
+
+test("the sorted column is marked and clicking it flips the direction", async (t) => {
+  stubFetch(t, routeFetch());
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+
+  const header = page.container.querySelector('th[aria-sort]');
+  assert.equal(header?.getAttribute("aria-sort"), "ascending");
+
+  const sortButton = page.container.querySelector<HTMLButtonElement>(
+    ".grid-table__sort",
+  );
+  assert.ok(sortButton);
+  sortButton.click();
+  await settlePage();
+
+  assert.match(pageText(page), /descending/i);
+});
+
+test("record kind is chosen from the filter bar, not by clicking a card", async (t) => {
+  stubFetch(t, routeFetch());
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+
+  // The kind control exists...
+  assert.ok(page.container.querySelector("#inspect-kind"));
+  // ...and the summary cards no longer act as controls.
+  assert.equal(page.container.querySelectorAll(".inspect-summary__card button").length, 0);
 });
