@@ -285,7 +285,7 @@ const dataforrestDisplayNameFieldByProvider = Object.freeze({
     trade: "provider_label",
   }),
   clutchpacks: Object.freeze({
-    pack: "provider_label",
+    pack: "name",
     card: "provider_label",
     pull: "provider_label",
     trade: "provider_label",

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   dataforrestEventRecordV1Schema,
+  dataforrestEventRecordV2Schema,
   emptyNormalizedProviderFacts,
   launchProviderKeys,
   normalizeDataforrestEventRecordV2,
+  normalizeDataforrestEventRecordV3,
   providerEventCodes,
 } from "@packscout/contracts";
 import {
@@ -92,6 +94,37 @@ test("Collector Crypt native pack name reaches an accepted canonical pack", () =
   assert.equal(
     outcome.candidate.identity.providerRecordId,
     "collector-pack-native-name",
+  );
+});
+
+test("ClutchPacks native pack name reaches an accepted canonical pack", () => {
+  const observation = normalizeDataforrestEventRecordV3(
+    dataforrestEventRecordV2Schema.parse({
+      platform: "clutchpacks",
+      stream: "catalog",
+      entity: "pack",
+      record_id: "clutchpacks-pack-native-name",
+      occurred_at: "2026-08-01T00:00:00.000Z",
+      collected_at: "2026-08-01T00:00:01.000Z",
+      first_seen_at: "2026-08-01T00:00:00.000Z",
+      available: true,
+      data: {
+        name: "ClutchPacks Alpha",
+        provider_label: "ignored provider label",
+      },
+    }),
+    "clutchpacks",
+    "page_record:0",
+  );
+  const outcome = mapped(mapperInput("clutchpacks", observation));
+  assert.equal(outcome.candidate.candidateKind, "pack");
+  if (outcome.candidate.candidateKind !== "pack") {
+    assert.fail("expected canonical pack candidate");
+  }
+  assert.equal(outcome.candidate.displayName, "ClutchPacks Alpha");
+  assert.equal(
+    outcome.candidate.identity.providerRecordId,
+    "clutchpacks-pack-native-name",
   );
 });
 

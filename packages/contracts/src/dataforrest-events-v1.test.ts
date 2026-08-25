@@ -9,6 +9,7 @@ import {
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   dataforrestContinuation,
   dataforrestEventRecordV1Schema,
+  dataforrestEventRecordV2Schema,
   dataforrestEventsPageV1Schema,
   dataforrestEventsConnectionConfigurationV1Schema,
   dataforrestIdentityNamespaceByProvider,
@@ -16,6 +17,7 @@ import {
   dataforrestOpaqueCursorV1Schema,
   normalizeDataforrestEventRecord,
   normalizeDataforrestEventRecordV2,
+  normalizeDataforrestEventRecordV3,
 } from "./dataforrest-events-v1.ts";
 import {
   normalizedProviderObservationPageSchema,
@@ -232,6 +234,37 @@ test("Collector Crypt pack names normalize from the evidenced native name field"
   assert.notEqual(
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
+});
+
+test("ClutchPacks pack names normalize from the evidenced native name field", () => {
+  const raw = dataforrestEventRecordV2Schema.parse({
+    ...dataforestEventsV1EvidenceFixture.clutchpacks.initial.records[0],
+    stream: "catalog",
+    entity: "pack",
+    first_seen_at: "2026-01-01T00:00:00.000Z",
+    available: true,
+    data: {
+      name: "  ClutchPacks Alpha  ",
+      provider_label: "must not override the provider declaration",
+    },
+  });
+  const observation = normalizeDataforrestEventRecordV3(
+    raw,
+    "clutchpacks",
+    "fixture:clutchpacks-pack",
+  );
+  assert.equal(observation.kind, "catalog");
+  if (observation.kind !== "catalog") {
+    assert.fail("expected catalog observation");
+  }
+  assert.deepEqual(observation.providerFacts, {
+    ...emptyNormalizedProviderFacts("pack"),
+    displayName: { state: "present", value: "ClutchPacks Alpha" },
+  });
+  assert.equal(
+    JSON.stringify(observation.providerFacts).includes("must not override"),
+    false,
   );
 });
 
