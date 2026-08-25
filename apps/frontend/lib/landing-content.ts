@@ -25,50 +25,31 @@ export const LANDING_COPY = Object.freeze({
   eyebrow: "PackScout · Closed beta",
   headline: "Scout the repack market before you spend",
   lede:
-    "PackScout is a market-intelligence dashboard for collectible repacks. " +
-    "It lines up listings from multiple repack providers side by side and " +
-    "puts an estimated expected value — with the reasoning behind it — next " +
-    "to every pack.",
-  betaStatement:
-    "PackScout is in closed beta, so access is limited right now. Signing " +
-    "in is the access request: if your email or wallet address is on the " +
-    "allowlist you are in right away, and everyone else is placed in review.",
+    "PackScout is a market-intelligence dashboard that lines up repack " +
+    "listings from every provider side by side, each with an estimated " +
+    "expected value and the reasoning behind it.",
   valueHeading: "What PackScout does",
   valuePoints: Object.freeze([
     Object.freeze({
       title: "Estimated EV beside every price",
       body:
-        "Each repack listing carries an estimated expected value with its " +
-        "assumptions in the open. EV is a long-run estimate — it never " +
-        "predicts the contents or outcome of a single rip.",
+        "Every listing shows an estimated expected value with its " +
+        "assumptions in the open. EV is a long-run estimate, never a " +
+        "prediction about one rip.",
     }),
     Object.freeze({
       title: "One dashboard across providers",
       body:
-        "Compare repacks from multiple providers in one place, with filters " +
-        "that narrow the field and data freshness you can check at a glance " +
-        "instead of tab-hopping storefronts.",
+        "Compare repacks from every provider in one place, with filters " +
+        "that narrow the field and data freshness you can check at a glance.",
     }),
     Object.freeze({
       title: "Methodology in the open",
       body:
-        "Plain-language guides document where the data comes from, how the " +
-        "estimates are built, and the red flags worth a closer look — so you " +
-        "can judge the numbers, not just read them.",
+        "Plain-language guides show where the data comes from, how the " +
+        "estimates are built, and the red flags worth a second look.",
     }),
   ]) satisfies readonly LandingValuePoint[],
-  accessHeading: "How access works during the beta",
-  accessLede:
-    "There is no waitlist form and no email capture. The sign-in itself is " +
-    "the access request.",
-  accessSteps: Object.freeze([
-    "Choose Sign in. PackScout uses one hosted wallet-or-social sign-in — " +
-      "the same one the product uses everywhere.",
-    "If your email or wallet address is on the beta allowlist, you are in " +
-      "immediately.",
-    "If it is not, your request is placed in review, and you are in as soon " +
-      "as it is approved.",
-  ]),
   disclaimer:
     "PackScout provides educational market context, not financial advice. " +
     "EV figures are estimates. Opening a repack involves risk and can " +

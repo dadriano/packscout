@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { LANDING_COPY, LANDING_METADATA } from "./landing-content";
+import { presentLandingAccessAction } from "@/components/landing/landing-presentation";
 
 function collectStrings(value: unknown, collected: string[] = []): string[] {
   if (typeof value === "string") {
@@ -27,15 +28,16 @@ test("the landing copy states plainly what PackScout is", () => {
 });
 
 test("the closed-beta statement is honest about both admission paths", () => {
-  assert.match(LANDING_COPY.betaStatement, /closed beta/i);
-  assert.match(LANDING_COPY.betaStatement, /allowlist/i);
-  assert.match(LANDING_COPY.betaStatement, /review/i);
+  // The page no longer carries a prose beta statement: the eyebrow names the
+  // closed beta and the call to action names what pressing it does. What must
+  // never be lost is that a stranger is told, before signing in, that this is
+  // a beta and that signing in is a request rather than an entry.
+  assert.match(LANDING_COPY.eyebrow, /closed beta/i);
+  const signedOutAction = presentLandingAccessAction("signed_out");
+  // With the beta prose gone, this label is the whole promise a stranger
+  // reads before signing in: it is a request, not an entry.
+  assert.match(signedOutAction.label, /request access/i);
   // The sign-in record is the access request: no waitlist, no lead capture.
-  assert.match(LANDING_COPY.accessLede, /no waitlist form and no email capture/i);
-  assert.match(LANDING_COPY.accessLede, /sign-in itself is the access request/i);
-  assert.equal(LANDING_COPY.accessSteps.length, 3);
-  assert.match(LANDING_COPY.accessSteps[1], /allowlist/i);
-  assert.match(LANDING_COPY.accessSteps[2], /review/i);
 });
 
 test("the copy never overclaims what estimates can do", () => {

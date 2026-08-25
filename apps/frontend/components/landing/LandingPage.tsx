@@ -33,7 +33,6 @@ export function LandingPage() {
           {LANDING_COPY.headline}
         </h1>
         <p className={styles.lede}>{LANDING_COPY.lede}</p>
-        <p className={styles.betaNote}>{LANDING_COPY.betaStatement}</p>
         <LandingAccessCta />
       </header>
 
@@ -52,21 +51,6 @@ export function LandingPage() {
             </li>
           ))}
         </ul>
-      </section>
-
-      <section
-        aria-labelledby="landing-access-heading"
-        className={styles.accessSection}
-      >
-        <h2 className={styles.sectionHeading} id="landing-access-heading">
-          {LANDING_COPY.accessHeading}
-        </h2>
-        <p className={styles.accessLede}>{LANDING_COPY.accessLede}</p>
-        <ol className={styles.accessSteps}>
-          {LANDING_COPY.accessSteps.map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
       </section>
 
       <p className={styles.disclaimer} role="note">
