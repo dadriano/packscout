@@ -7,6 +7,7 @@ import {
   dataforrestEventsV1SourceAdapterManifest,
   launchRecordIdScopeDeclarations,
   providerIdentityNamespaceByLaunchProvider,
+  providerSourceControlPlaneRetry,
   type LaunchProviderKey,
 } from "@packscout/contracts";
 import { dataforestEventsV1EvidenceFixture } from
@@ -106,6 +107,7 @@ function createRealSupervisor(input: Readonly<{
   sourceAdapters: SourceAdapterRegistry;
   environmentKey: string;
   pageFailures?: unknown[];
+  beforePageImport?: () => Promise<void>;
 }>) {
   const ownerKey = `runtime-e2e-${input.environmentKey}`;
   const leaseToken = randomUUID();
@@ -125,6 +127,7 @@ function createRealSupervisor(input: Readonly<{
   const importPage = pageImports.importPage.bind(pageImports);
   pageImports.importPage = async (page) => {
     try {
+      await input.beforePageImport?.();
       return await importPage(page);
     } catch (error) {
       input.pageFailures?.push(error);
@@ -766,6 +769,54 @@ test("test-only alternate adapter uses the unchanged supervisor and durable page
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
     assert.equal(adapter.captureCount, 1);
   } finally {
+    await supervisor?.stop().catch(() => undefined);
+    await fixture.close();
+  }
+});
+
+test("a data-plane page commit is awaited once beyond the control-plane deadline", async () => {
+  const fixture = await createMigratedTestDatabase();
+  const pageImportStarted = deferred();
+  const releasePageImport = deferred();
+  let pageImportCalls = 0;
+  let supervisor: ProviderSourceSupervisor<ProviderSourceSupervisorClaimedWork>
+    | null = null;
+  try {
+    const setup = await createAlternateFixture(fixture.database);
+    supervisor = createRealSupervisor({
+      database: fixture.database,
+      cipher: setup.cipher,
+      sourceAdapters: new SourceAdapterRegistry([
+        new AlternateBookmarkSourceAdapter(),
+      ]),
+      environmentKey: "runtime-e2e-slow-page-commit",
+      beforePageImport: async () => {
+        pageImportCalls += 1;
+        pageImportStarted.resolve();
+        await releasePageImport.promise;
+      },
+    });
+    await supervisor.initialize();
+    await supervisor.runCycle();
+    await pageImportStarted.promise;
+    await new Promise<void>((resolve) => setTimeout(
+      resolve,
+      providerSourceControlPlaneRetry.transactionTimeoutMilliseconds +
+        providerSourceControlPlaneRetry.backoffMilliseconds[1] + 100,
+    ));
+    assert.equal(pageImportCalls, 1);
+    assert.equal(supervisor.state, "active");
+    assert.equal(await fixture.database.import_pages.count(), 0);
+
+    releasePageImport.resolve();
+    await waitFor(async () => {
+      assert.equal(await fixture.database.import_pages.count(), 1);
+      assert.equal(await fixture.database.import_runs.count({
+        where: { state: "succeeded" },
+      }), 1);
+    });
+  } finally {
+    releasePageImport.resolve();
     await supervisor?.stop().catch(() => undefined);
     await fixture.close();
   }
