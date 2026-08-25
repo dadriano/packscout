@@ -233,6 +233,11 @@ test("a replacement requires an idle paused or disabled compatible predecessor a
   );
   assert.equal(replacement.sourceInstanceId, sourceId);
   assert.equal(repository.createInput?.replacesSourceInstanceId, oldSourceId);
+  assert.deepEqual(repository.createInput?.replacementPredecessor, {
+    mapperKey: "courtyard-provider-observation",
+    mapperVersion: "1",
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  });
   assert.equal(
     repository.createInput?.sourceAdapterVersion,
     DATAFORREST_EVENTS_V3_ADAPTER_VERSION,

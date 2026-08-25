@@ -149,6 +149,11 @@ export class ProviderSourceLifecycleService {
     const recordIdScopes = declaration.recordIdScopes.map(
       (scope) => scope.recordIdScopeKey,
     );
+    let replacementPredecessor: Readonly<{
+      mapperKey: string;
+      mapperVersion: string;
+      normalizedContractVersion: string;
+    }> | null = null;
     if (replacesSourceInstanceId !== null) {
       const previous = await this.#repository.loadSource({
         organizationId: context.organizationId,
@@ -177,6 +182,11 @@ export class ProviderSourceLifecycleService {
       } catch {
         this.#conflict();
       }
+      replacementPredecessor = Object.freeze({
+        mapperKey: previous.mapperKey,
+        mapperVersion: previous.mapperVersion,
+        normalizedContractVersion: previous.normalizedContractVersion,
+      });
     }
     const createdAt = this.#clock.now();
     const created = await this.#repository.createSource({
@@ -195,6 +205,7 @@ export class ProviderSourceLifecycleService {
       recordIdScopes,
       intervalSeconds: parsed.data.intervalSeconds,
       replacesSourceInstanceId,
+      replacementPredecessor,
       actorKey: context.actorKey,
       createdAt,
     });

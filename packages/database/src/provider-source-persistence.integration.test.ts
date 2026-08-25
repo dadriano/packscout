@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { providerIdentityNamespaceByLaunchProvider } from "@packscout/contracts";
+import {
+  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+  providerIdentityNamespaceByLaunchProvider,
+} from "@packscout/contracts";
 import { PrismaAdminImportRunRepository } from "./admin-import-run-repository.ts";
 import type { PackscoutPrismaClient } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
@@ -103,6 +107,84 @@ async function sourceFixture() {
     ...source,
   };
 }
+
+test("replacement persistence accepts an explicitly authorized v1 to v2 mapper transition", async () => {
+  const fixture = await sourceFixture();
+  try {
+    await fixture.database.provider_source_instances.update({
+      where: { id: fixture.sourceInstanceId },
+      data: { state: "paused", activated_at: base, paused_at: base },
+    });
+    const v3Connection = await fixture.lifecycle.createConnectionProfileRevision({
+      organizationId: fixture.organizationId,
+      sourceTypeKey,
+      connectionTypeKey: "dataforrest-events-connection-v1",
+      displayName: "DataForrest v3",
+      requestLimit: 2,
+      sourceAdapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+      revisionNumber: 1,
+      configurationCiphertext: new Uint8Array(32).fill(4),
+      configurationNonce: new Uint8Array(12).fill(5),
+      configurationAuthTag: new Uint8Array(16).fill(6),
+      encryptionKeyVersion: 1,
+      configurationFingerprint: "c".repeat(64),
+      actorKey: "operator-admin",
+      createdAt: new Date(base.getTime() + 1_000),
+    });
+    const replacement = await fixture.lifecycle.createSourceInstanceRevision({
+      organizationId: fixture.organizationId,
+      providerId: fixture.providerId,
+      connectionProfileId: v3Connection.profileId,
+      sourceTypeKey,
+      sourceAdapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+      mapperKey: "courtyard-provider-observation",
+      mapperVersion: "2",
+      identityNamespaceKey: "dataforrest-courtyard-records-v1",
+      cursorCodecVersion,
+      revisionNumber: 1,
+      intervalSeconds: 60,
+      configuration: { provider: "courtyard" },
+      configurationHash: "d".repeat(64),
+      recordIdScopes: [
+        "catalog-pack-v1",
+        "catalog-card-v1",
+        "pull-v1",
+        "trade-v1",
+      ],
+      replacesSourceInstanceId: fixture.sourceInstanceId,
+      replacementPredecessor: {
+        mapperKey: "courtyard-provider-observation",
+        mapperVersion: "1",
+        normalizedContractVersion,
+      },
+      actorKey: "operator-admin",
+      createdAt: new Date(base.getTime() + 2_000),
+    });
+    const [predecessor, revision] = await Promise.all([
+      fixture.database.provider_source_instances.findUniqueOrThrow({
+        where: { id: fixture.sourceInstanceId },
+        select: { state: true },
+      }),
+      fixture.database.provider_source_revisions.findUniqueOrThrow({
+        where: { id: replacement.sourceRevisionId },
+        select: {
+          source_adapter_version: true,
+          normalized_contract_version: true,
+          mapper_version: true,
+        },
+      }),
+    ]);
+    assert.equal(predecessor.state, "replaced");
+    assert.deepEqual(revision, {
+      source_adapter_version: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+      normalized_contract_version: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+      mapper_version: "2",
+    });
+  } finally {
+    await fixture.close();
+  }
+});
 
 test("four provider sources share one profile while schedules, cursors, and health stay isolated", async () => {
   const fixture = await sourceFixture();

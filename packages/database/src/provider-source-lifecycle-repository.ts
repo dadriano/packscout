@@ -231,6 +231,11 @@ export class ProviderSourceLifecycleRepository {
     configurationHash: string;
     recordIdScopes: readonly string[];
     replacesSourceInstanceId?: string | null;
+    replacementPredecessor?: Readonly<{
+      mapperKey: string;
+      mapperVersion: string;
+      normalizedContractVersion: string;
+    }> | null;
     actorKey: string;
     createdAt: Date;
   }>): Promise<{ sourceInstanceId: string; sourceRevisionId: string }> {
@@ -270,6 +275,27 @@ export class ProviderSourceLifecycleRepository {
       "Cursor codec version",
     );
     input.recordIdScopes.forEach((scope) => requireRegistrationKey(scope, "Record-ID scope"));
+    const replacementPredecessor = input.replacementPredecessor
+      ? {
+          mapperKey: requireRegistrationKey(
+            input.replacementPredecessor.mapperKey,
+            "Replacement predecessor mapper key",
+          ),
+          mapperVersion: requireRegistrationKey(
+            input.replacementPredecessor.mapperVersion,
+            "Replacement predecessor mapper version",
+          ),
+          normalizedContractVersion: requireVersionKey(
+            input.replacementPredecessor.normalizedContractVersion,
+            "Replacement predecessor normalized contract version",
+          ),
+        }
+      : null;
+    if (Boolean(input.replacesSourceInstanceId) !== Boolean(replacementPredecessor)) {
+      throw new TypeError(
+        "Replacement source and predecessor compatibility pin must be provided together.",
+      );
+    }
     if (mapperKey === sourceTypeKey) {
       throw new TypeError("Mapper identity must be distinct from source type identity.");
     }
@@ -315,7 +341,10 @@ export class ProviderSourceLifecycleRepository {
                   source_instance_id: replacement.id,
                   id: replacement.activeRevisionId,
                   identity_namespace_key: identityNamespaceKey,
-                  normalized_contract_version: normalizedContractVersion,
+                  mapper_key: replacementPredecessor!.mapperKey,
+                  mapper_version: replacementPredecessor!.mapperVersion,
+                  normalized_contract_version:
+                    replacementPredecessor!.normalizedContractVersion,
                   record_id_scopes_json: { equals: asJson(input.recordIdScopes) },
                 },
                 select: { id: true },
