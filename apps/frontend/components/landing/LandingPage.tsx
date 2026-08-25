@@ -33,6 +33,7 @@ export function LandingPage() {
           {LANDING_COPY.headline}
         </h1>
         <p className={styles.lede}>{LANDING_COPY.lede}</p>
+        <p className={styles.accessOutcome}>{LANDING_COPY.accessOutcome}</p>
         <LandingAccessCta />
       </header>
 

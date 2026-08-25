@@ -34,9 +34,12 @@ test("the closed-beta statement is honest about both admission paths", () => {
   // a beta and that signing in is a request rather than an entry.
   assert.match(LANDING_COPY.eyebrow, /closed beta/i);
   const signedOutAction = presentLandingAccessAction("signed_out");
-  // With the beta prose gone, this label is the whole promise a stranger
-  // reads before signing in: it is a request, not an entry.
   assert.match(signedOutAction.label, /request access/i);
+  // A visitor must be able to learn what signing in will do to them BEFORE
+  // they start the hosted flow. The prose that used to carry this was cut for
+  // being said three times; it survives here once.
+  assert.match(LANDING_COPY.accessOutcome, /allowlist/i);
+  assert.match(LANDING_COPY.accessOutcome, /review/i);
   // The sign-in record is the access request: no waitlist, no lead capture.
 });
 
@@ -88,4 +91,13 @@ test("social metadata mirrors the page identity", () => {
     LANDING_METADATA.twitter?.description,
     LANDING_METADATA.description,
   );
+});
+
+test("the copy claims only the coverage the product actually has", () => {
+  // Four source contracts are approved for launch; "every provider" would
+  // read as market-wide coverage the registry deliberately does not offer.
+  const allCopy = collectStrings(LANDING_COPY).join(" ");
+  assert.doesNotMatch(allCopy, /every provider/i);
+  assert.doesNotMatch(allCopy, /all providers/i);
+  assert.match(allCopy, /supported providers/i);
 });

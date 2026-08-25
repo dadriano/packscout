@@ -26,8 +26,11 @@ export const LANDING_COPY = Object.freeze({
   headline: "Scout the repack market before you spend",
   lede:
     "PackScout is a market-intelligence dashboard that lines up repack " +
-    "listings from every provider side by side, each with an estimated " +
+    "listings from supported providers side by side, each with an estimated " +
     "expected value and the reasoning behind it.",
+  accessOutcome:
+    "On the allowlist? You are in immediately. Otherwise your request goes " +
+    "to review.",
   valueHeading: "What PackScout does",
   valuePoints: Object.freeze([
     Object.freeze({
@@ -40,7 +43,7 @@ export const LANDING_COPY = Object.freeze({
     Object.freeze({
       title: "One dashboard across providers",
       body:
-        "Compare repacks from every provider in one place, with filters " +
+        "Compare repacks from supported providers in one place, with filters " +
         "that narrow the field and data freshness you can check at a glance.",
     }),
     Object.freeze({

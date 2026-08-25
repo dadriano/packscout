@@ -58,12 +58,21 @@
  * keeps its height, so the provider booting after a returning session or a
  * sign-in click never shifts the page around it.
  */
+.accessOutcome {
+  margin: 0;
+  max-width: 44ch;
+  color: var(--surface-text-muted, #59607a);
+  font-size: 1.12rem;
+  line-height: 1.6;
+  text-wrap: balance;
+}
+
 .ctaSlot {
   display: grid;
   align-content: start;
   justify-items: center;
   gap: 0.7rem;
-  min-height: 8rem;
+  min-height: 10rem;
   margin-top: 0.85rem;
 }
 
