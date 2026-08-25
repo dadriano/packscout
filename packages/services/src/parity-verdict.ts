@@ -153,6 +153,13 @@ function newestAccepted(kinds: readonly CanonicalKindSummary[]): string | null {
 function buildFigures(
   kinds: readonly CanonicalKindSummary[],
   publishedCounts: Readonly<Record<string, number>> | null,
+  /**
+   * False when canonical has settled past what was published. The two counts
+   * are then taken at different points in the lane's history — the published
+   * one is frozen at its release, the canonical one is read live — so a
+   * difference is the expected consequence of ingestion, not evidence of drift.
+   */
+  countsComparable: boolean,
 ): readonly ComparableKindFigures[] {
   const figures: ComparableKindFigures[] = [];
   for (const summary of kinds) {
@@ -163,8 +170,11 @@ function buildFigures(
     // at least N and the product serves fewer than N, records are missing. A
     // floor below the published total proves nothing either way.
     const comparable =
-      publishedCount !== null && summary.precision === "exact";
+      countsComparable &&
+      publishedCount !== null &&
+      summary.precision === "exact";
     const disagrees =
+      countsComparable &&
       publishedCount !== null &&
       (summary.precision === "exact"
         ? summary.count !== publishedCount
@@ -257,7 +267,7 @@ export function judgeProviderParity(input: {
       "PUBLISHED_SIDE_UNREADABLE",
       `The published side could not be read: ${input.published.detail}`,
       noPublished,
-      buildFigures(input.canonical.kinds, null),
+      buildFigures(input.canonical.kinds, null, false),
     );
   }
 
@@ -267,7 +277,7 @@ export function judgeProviderParity(input: {
       "NO_ACTIVE_MANIFEST",
       "The product is serving no catalog manifest at all, so nothing is published for any provider.",
       noPublished,
-      buildFigures(input.canonical.kinds, null),
+      buildFigures(input.canonical.kinds, null, false),
     );
   }
 
@@ -277,7 +287,7 @@ export function judgeProviderParity(input: {
       "PLATFORM_NOT_REFERENCED",
       "The active manifest does not reference this provider, so the product serves nothing for it.",
       noPublished,
-      buildFigures(input.canonical.kinds, null),
+      buildFigures(input.canonical.kinds, null, false),
     );
   }
 
@@ -292,7 +302,7 @@ export function judgeProviderParity(input: {
         fingerprint: null,
         dataAsOf: null,
       },
-      buildFigures(input.canonical.kinds, null),
+      buildFigures(input.canonical.kinds, null, false),
     );
   }
 
@@ -303,7 +313,22 @@ export function judgeProviderParity(input: {
     fingerprint: active.providerReleaseFingerprint,
     dataAsOf: active.dataAsOf,
   };
-  const figures = buildFigures(input.canonical.kinds, active.counts);
+  /**
+   * Has canonical settled past what was published?
+   *
+   * This is checked before the counts because it decides whether the counts can
+   * be compared at all, and before the drift branches that use them.
+   */
+  const behind =
+    checkpointAhead(
+      input.canonical.settledCheckpoint,
+      input.canonical.completedCheckpoint,
+    ) ||
+    checkpointAhead(
+      input.canonical.sourceHeadCheckpoint,
+      input.canonical.completedCheckpoint,
+    );
+  const figures = buildFigures(input.canonical.kinds, active.counts, !behind);
 
   if (active.lifecycle !== "complete") {
     return settle(
@@ -337,32 +362,33 @@ export function judgeProviderParity(input: {
     );
   }
 
-  const countDisagreement = figures.find((figure) => figure.disagrees);
-  if (countDisagreement) {
+  if (behind) {
+    // Reached before the count comparison on purpose. Ordinary ingestion moves
+    // canonical past the published release, which makes the counts differ by
+    // construction; calling that drift would put a red alarm on every actively
+    // ingesting provider.
+    const settledAhead = checkpointAhead(
+      input.canonical.settledCheckpoint,
+      input.canonical.completedCheckpoint,
+    );
     return settle(
-      "drifted",
-      "COUNTS_DISAGREE",
-      `The pipeline and the product disagree on how many ${countDisagreement.publishedKind} exist for this provider.`,
+      "behind",
+      "CANONICAL_SETTLED_BEYOND_PUBLISHED",
+      settledAhead
+        ? "What the product serves matches the last completed promotion, but the pipeline has settled further since."
+        : "What the product serves matches the last completed promotion, but the provider has reported further changes that have not settled yet.",
       published,
       figures,
     );
   }
 
-  const behind =
-    checkpointAhead(
-      input.canonical.settledCheckpoint,
-      input.canonical.completedCheckpoint,
-    ) ||
-    checkpointAhead(
-      input.canonical.sourceHeadCheckpoint,
-      input.canonical.completedCheckpoint,
-    );
-
-  if (behind) {
+  // Only meaningful once caught up: both numbers are then as of the same point.
+  const countDisagreement = figures.find((figure) => figure.disagrees);
+  if (countDisagreement) {
     return settle(
-      "behind",
-      "CANONICAL_SETTLED_BEYOND_PUBLISHED",
-      "What the product serves matches the last completed promotion, but the pipeline has settled further since.",
+      "drifted",
+      "COUNTS_DISAGREE",
+      `The pipeline and the product disagree on how many ${countDisagreement.publishedKind} exist for this provider, with nothing landed since the last promotion to explain it.`,
       published,
       figures,
     );

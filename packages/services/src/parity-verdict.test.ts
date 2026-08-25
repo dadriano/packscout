@@ -212,3 +212,78 @@ test("pipeline-only kinds are named out of scope, not missing", () => {
   const compared = parity.figures.map((figure) => figure.canonicalKind);
   for (const entry of scope) assert.ok(!compared.includes(entry.canonicalKind));
 });
+
+test("ordinary ingestion since the last promotion is behind, not drift", () => {
+  // The pipeline landed one new pack. Fingerprints agree, nothing is wrong.
+  // The published count is frozen at its release and the canonical count is
+  // read live, so they differ by construction — that is what `behind` names.
+  const parity = judge(
+    canonicalRead({
+      kinds: [kindSummary("pack", 11), kindSummary("catalog_asset", 4)],
+      settledCheckpoint: "140",
+      completedCheckpoint: "100",
+    }),
+    publishedActive({ counts: { repacks: 10, collectibles: 4 } }),
+  );
+  assert.equal(parity.verdict, "behind");
+  assert.equal(parity.reasonCode, "CANONICAL_SETTLED_BEYOND_PUBLISHED");
+  // And the differing count is not presented as a comparison that failed.
+  const packs = parity.figures.find((figure) => figure.canonicalKind === "pack");
+  assert.equal(packs?.comparable, false);
+  assert.equal(packs?.disagrees, false);
+});
+
+test("counts only prove drift once the lane has caught up", () => {
+  // Same count difference, but nothing has settled since the promotion, so
+  // there is no ingestion to explain it.
+  const parity = judge(
+    canonicalRead({
+      kinds: [kindSummary("pack", 11), kindSummary("catalog_asset", 4)],
+      settledCheckpoint: "100",
+      sourceHeadCheckpoint: "100",
+      completedCheckpoint: "100",
+    }),
+    publishedActive({ counts: { repacks: 10, collectibles: 4 } }),
+  );
+  assert.equal(parity.verdict, "drifted");
+  assert.equal(parity.reasonCode, "COUNTS_DISAGREE");
+});
+
+test("a moved source head is behind, and says the changes have not settled", () => {
+  const parity = judge(
+    canonicalRead({
+      settledCheckpoint: "100",
+      sourceHeadCheckpoint: "180",
+      completedCheckpoint: "100",
+    }),
+    publishedActive(),
+  );
+  assert.equal(parity.verdict, "behind");
+  // The wording must not claim the pipeline settled further when it did not.
+  assert.match(parity.explanation, /have not settled yet/);
+});
+
+test("checkpoints compare numerically, not as strings", () => {
+  // "1000" sorts before "999" lexically and after it numerically. A string
+  // comparison here would report a caught-up lane as behind, or worse, miss a
+  // lane that is genuinely behind.
+  const caughtUp = judge(
+    canonicalRead({
+      settledCheckpoint: "999",
+      sourceHeadCheckpoint: "999",
+      completedCheckpoint: "1000",
+    }),
+    publishedActive(),
+  );
+  assert.equal(caughtUp.verdict, "in_sync");
+
+  const genuinelyBehind = judge(
+    canonicalRead({
+      settledCheckpoint: "1000",
+      sourceHeadCheckpoint: "1000",
+      completedCheckpoint: "999",
+    }),
+    publishedActive(),
+  );
+  assert.equal(genuinelyBehind.verdict, "behind");
+});

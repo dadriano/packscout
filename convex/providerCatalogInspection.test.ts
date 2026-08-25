@@ -8,6 +8,11 @@ import {
   MOCK_PROVIDER_PLATFORM_KEYS,
 } from "./mockProviderCatalogFixture";
 import { MOCK_DATA_RELEASE_CONFIDENCE_POLICY_VERSION } from "./mockDataReleaseFixture";
+import {
+  boundedPageSize,
+  MAX_ID_PAGE_ITEMS,
+  MAX_PAGE_ITEMS,
+} from "./providerCatalogInspection";
 import schema from "./schema";
 
 const SEED_TIME = "2026-08-24T00:00:00.000Z";
@@ -206,7 +211,28 @@ describe("entity paging is stable, complete, and server-bounded", () => {
     expect(new Set(seen).size).toBe(total);
   });
 
-  test("the server caps the page size a caller asks for", async () => {
+  /**
+   * Asserted on the clamp itself.
+   *
+   * The seeded release holds a single repack per platform, so any assertion of
+   * the form "the returned page is at most the ceiling" passes whether or not
+   * the server clamps anything. The bound is observable here instead.
+   */
+  test("the server clamps a caller's requested page size to its own ceiling", () => {
+    expect(boundedPageSize(100_000, MAX_PAGE_ITEMS)).toBe(MAX_PAGE_ITEMS);
+    expect(boundedPageSize(100_000, MAX_ID_PAGE_ITEMS)).toBe(MAX_ID_PAGE_ITEMS);
+    // A sane request passes through untouched.
+    expect(boundedPageSize(25, MAX_PAGE_ITEMS)).toBe(25);
+    // Nonsense falls back to the ceiling rather than to zero or a negative
+    // page, either of which would page forever.
+    for (const nonsense of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(boundedPageSize(nonsense, MAX_PAGE_ITEMS)).toBe(MAX_PAGE_ITEMS);
+    }
+    // Identity pages are allowed to be wider than document pages.
+    expect(MAX_ID_PAGE_ITEMS).toBeGreaterThan(MAX_PAGE_ITEMS);
+  });
+
+  test("an oversized request still returns a usable page", async () => {
     const convex = createTest();
     authorize();
     const seeded = await seedActiveCatalog(convex);
@@ -216,9 +242,9 @@ describe("entity paging is stable, complete, and server-bounded", () => {
         entityKind: "repacks",
         paginationOpts: { numItems: 100_000, cursor: null },
       })
-    ).json()) as { items: unknown[] };
-    // The server applies its own ceiling rather than honouring the request.
-    expect(page.items.length).toBeLessThanOrEqual(200);
+    ).json()) as { status: string; items: unknown[] };
+    expect(page.status).toBe("ok");
+    expect(page.items.length).toBeGreaterThan(0);
   });
 
   test("an unknown release is representable, not an error", async () => {

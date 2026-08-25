@@ -521,3 +521,55 @@ test("a page past the scan bound says so instead of reading as empty", async (t)
 
   assert.match(pageText(page), /beyond this surface's scan limit/i);
 });
+
+test("a filtered result is not counted against the unfiltered bucket", async (t) => {
+  stubFetch(
+    t,
+    routeFetch({
+      "/entities": () => jsonResponse({ ...PAGE, hasMore: false }),
+    }),
+  );
+  const page = await renderPage(
+    route(inspector, "/data/canonical?provider=courtyard&kind=pack&q=courtyard-pack-01"),
+  );
+  cleanupPage(t, page);
+  await settlePage();
+
+  const text = pageText(page);
+  // The summary counts the whole bucket and knows nothing about the search, so
+  // offering it as the match count would overstate the result...
+  assert.doesNotMatch(text, /of 50,000\+/);
+  // ...and numbering pages from it would offer pages that hold nothing.
+  assert.equal(page.container.querySelectorAll(".grid-pagination__page").length, 0);
+  assert.equal(page.container.querySelector(".grid-pagination__jump"), null);
+});
+
+test("a stale summary is never attributed to a newly selected provider", async (t) => {
+  let summaryCalls = 0;
+  stubFetch(t, (request) => {
+    const input = String(request.input);
+    if (input.includes("/summary")) {
+      summaryCalls += 1;
+      // Courtyard answers; phygitals fails, as it would on a 503.
+      if (input.includes("/phygitals/")) {
+        return jsonResponse({ error: "down", code: "CANONICAL_STORE_UNAVAILABLE" }, 503);
+      }
+      return jsonResponse(SUMMARY);
+    }
+    if (input.includes("/entities")) return jsonResponse(PAGE);
+    return jsonResponse(PROVIDERS);
+  });
+
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+  assert.match(pageText(page), /50,000\+/);
+
+  changeControl(page, "inspect-provider", "phygitals");
+  await settlePage();
+
+  assert.ok(summaryCalls >= 2, "the new provider should be summarized");
+  // Courtyard's counts must not render under the Phygitals heading. The
+  // summary carries its own platformKey, so a stale one is detectable.
+  assert.doesNotMatch(pageText(page), /50,000\+/);
+});

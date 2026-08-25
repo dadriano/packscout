@@ -176,11 +176,11 @@ async function findEntity(
 }
 
 /** Server-enforced ceiling; a caller asking for more gets this. */
-const MAX_PAGE_ITEMS = 200;
+export const MAX_PAGE_ITEMS = 200;
 /** Identity-only pages carry no document bodies, so they page wider. */
-const MAX_ID_PAGE_ITEMS = 1_000;
+export const MAX_ID_PAGE_ITEMS = 1_000;
 
-function boundedPageSize(requested: number, ceiling: number): number {
+export function boundedPageSize(requested: number, ceiling: number): number {
   if (!Number.isFinite(requested) || requested < 1) return ceiling;
   return Math.min(Math.floor(requested), ceiling);
 }

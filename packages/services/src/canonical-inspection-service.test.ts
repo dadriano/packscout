@@ -19,7 +19,7 @@ function fakeRepository(options: {
   providers?: string[];
   bucketSize?: number;
   failWith?: Error;
-  captured?: { limit?: number; offset?: number };
+  captured?: { limit?: number; offset?: number; collectedExtrema?: boolean };
 } = {}) {
   const entities = options.entities ?? [];
   const providers = options.providers ?? ["courtyard"];
@@ -43,8 +43,17 @@ function fakeRepository(options: {
         ? { count: input.bound, bounded: true }
         : { count: total, bounded: false };
     },
-    async kindRecency() {
-      return { oldest: null, newest: null };
+    async kindRecency(input: { collectedExtrema: boolean }) {
+      (options.captured ?? {}).collectedExtrema = input.collectedExtrema;
+      // Mirrors the repository's real return shape, including the flag that
+      // says whether the collection aggregate was affordable to run.
+      return {
+        oldestCollectedAt: input.collectedExtrema ? new Date("2026-01-01") : null,
+        newestCollectedAt: input.collectedExtrema ? new Date("2026-08-01") : null,
+        oldestAcceptedAt: new Date("2026-01-02"),
+        newestAcceptedAt: new Date("2026-08-02"),
+        collectedExtremaComplete: input.collectedExtrema,
+      };
     },
     async listEntities(input: { limit: number; offset: number }) {
       (options.captured ?? {}).limit = input.limit;
@@ -266,4 +275,53 @@ test("record detail is redacted and its provenance summarized", async () => {
   assert.equal(content.upstreamToken, REDACTED);
   assert.equal(detail.provenance?.mapperKey, "courtyard-catalog");
   assert.equal(detail.provenance?.additional.apiKey, REDACTED);
+});
+
+
+test("the collection aggregate is skipped exactly when the count was bounded", async () => {
+  // The rule the service documents: a bucket past the count bound is too large
+  // to aggregate collection times over, so the aggregate is not run and the
+  // summary says the range was not computed rather than showing a null range
+  // that reads as "nothing collected".
+  const bounded: { collectedExtrema?: boolean } = {};
+  const overBound = serviceOver(
+    fakeRepository({ bucketSize: CANONICAL_COUNT_BOUND + 1, captured: bounded }),
+  );
+  const large = await overBound.summarizeProvider({
+    organizationId: ORGANIZATION,
+    platformKey: "courtyard",
+  });
+  assert.equal(bounded.collectedExtrema, false);
+  const largePack = large.kinds.find((kind) => kind.recordKind === "pack");
+  assert.equal(largePack?.collectedExtremaComplete, false);
+  assert.equal(largePack?.oldestCollectedAt, null);
+  // Acceptance times are cheap and still reported.
+  assert.ok(largePack?.newestAcceptedAt);
+
+  const inside: { collectedExtrema?: boolean } = {};
+  const underBound = serviceOver(
+    fakeRepository({ bucketSize: 12, captured: inside }),
+  );
+  const small = await underBound.summarizeProvider({
+    organizationId: ORGANIZATION,
+    platformKey: "courtyard",
+  });
+  assert.equal(inside.collectedExtrema, true);
+  const smallPack = small.kinds.find((kind) => kind.recordKind === "pack");
+  assert.equal(smallPack?.collectedExtremaComplete, true);
+  assert.ok(smallPack?.oldestCollectedAt);
+});
+
+test("summary timestamps are mapped to their own fields, not transposed", async () => {
+  const service = serviceOver(fakeRepository({ bucketSize: 5 }));
+  const summary = await service.summarizeProvider({
+    organizationId: ORGANIZATION,
+    platformKey: "courtyard",
+  });
+  const pack = summary.kinds.find((kind) => kind.recordKind === "pack");
+  // Distinct fixture values, so a swapped mapping cannot pass.
+  assert.equal(pack?.oldestCollectedAt, new Date("2026-01-01").toISOString());
+  assert.equal(pack?.newestCollectedAt, new Date("2026-08-01").toISOString());
+  assert.equal(pack?.oldestAcceptedAt, new Date("2026-01-02").toISOString());
+  assert.equal(pack?.newestAcceptedAt, new Date("2026-08-02").toISOString());
 });

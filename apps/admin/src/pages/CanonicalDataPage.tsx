@@ -325,7 +325,10 @@ function CanonicalDataView() {
       })
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return;
-        // The previous reading stays on screen; only the notice changes.
+        // Keeping the previous reading is right when re-reading the same
+        // provider and wrong across a switch: counts and freshness would be
+        // attributed to a provider they did not come from. The render guard
+        // below drops it either way; this only records why.
         setSummaryError(
           messageFor(reason, "The record summary could not be refreshed."),
         );
@@ -369,11 +372,27 @@ function CanonicalDataView() {
     return () => controller.abort();
   }, [platformKey, recordKind, search, requestedPage, direction, requestKey]);
 
-  const kindSummary = summary?.kinds.find(
+  /**
+   * The summary is only usable under the provider it was read for.
+   *
+   * `CanonicalProviderSummary` carries its own `platformKey`, so a stale
+   * reading from the previous provider is detectable rather than silently
+   * attributed to this one — the same binding the rows already have to their
+   * request key.
+   */
+  const providerSummary =
+    summary && summary.platformKey === platformKey ? summary : null;
+  const kindSummary = providerSummary?.kinds.find(
     (entry) => entry.recordKind === recordKind,
   );
-  const kindTotal = kindSummary?.count ?? null;
-  const kindTotalIsFloor = kindSummary?.precision === "at_least";
+  /**
+   * The summary counts a whole (provider, kind) bucket and takes no search
+   * term, so it is not the total of a filtered result. Offering it as one would
+   * both overstate the match count and number pages that hold nothing, so a
+   * filtered view reports no total and the index degrades to next/previous.
+   */
+  const kindTotal = search ? null : (kindSummary?.count ?? null);
+  const kindTotalIsFloor = !search && kindSummary?.precision === "at_least";
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.platformKey === platformKey),
@@ -418,7 +437,7 @@ function CanonicalDataView() {
       {providers.length > 0 ? (
         <DataFilters
           providers={providers}
-          summary={summary}
+          summary={providerSummary}
           pending={listLoading}
           applied={{
             platformKey: platformKey ?? "",
