@@ -1,5 +1,7 @@
 import type { ZodError } from "zod";
 import {
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestContinuation,
   dataforrestEventRecordV1Schema,
@@ -7,7 +9,9 @@ import {
   dataforrestEventsSourceConfigurationV1Schema,
   dataforrestNextCursor,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
   normalizeDataforrestEventRecord,
+  normalizeDataforrestEventRecordV2,
   sourceAdapterFailureSchema,
   type DataforrestEventsPageV1,
   type LaunchProviderKey,
@@ -29,6 +33,20 @@ import type {
 type PageParseResult =
   | Readonly<{ ok: true; page: DataforrestEventsPageV1 }>
   | Readonly<{ ok: false }>;
+
+type DataforrestAdapterVersion =
+  | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+  | typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION;
+
+function dataforrestManifest(adapterVersion: string) {
+  if (adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION) {
+    return dataforrestEventsV1SourceAdapterManifest;
+  }
+  if (adapterVersion === DATAFORREST_EVENTS_V2_ADAPTER_VERSION) {
+    return dataforrestEventsV2SourceAdapterManifest;
+  }
+  return null;
+}
 
 const knownStreams = new Set(["catalog", "pulls", "trades"]);
 const timestampFields = new Set([
@@ -152,8 +170,9 @@ function parsePage(
 function sourceContextIsValid(
   context: SourceTestInterpretationContext | PageReadInterpretationContext,
 ): boolean {
-  const declaration = dataforrestEventsV1SourceAdapterManifest
-    .supportedProviders.find(({ provider }) => provider === context.provider);
+  const declaration = dataforrestManifest(context.adapterVersion)
+    ?.supportedProviders
+    .find(({ provider }) => provider === context.provider);
   const configuration = dataforrestEventsSourceConfigurationV1Schema.safeParse(
     context.sourceConfiguration,
   );
@@ -249,6 +268,7 @@ function interpretRecord(
   record: Record<string, unknown>,
   provider: LaunchProviderKey,
   recordIndex: number,
+  adapterVersion: DataforrestAdapterVersion,
 ): NormalizedObservationOutcome {
   const evidenceReference = `page_record:${recordIndex}`;
   if (
@@ -305,7 +325,9 @@ function interpretRecord(
     return {
       status: "valid",
       recordIndex,
-      observation: normalizeDataforrestEventRecord(
+      observation: (adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+        ? normalizeDataforrestEventRecord
+        : normalizeDataforrestEventRecordV2)(
         parsed.data,
         provider,
         evidenceReference,
@@ -328,9 +350,16 @@ function interpretRecord(
 function interpretRecords(
   page: DataforrestEventsPageV1,
   provider: LaunchProviderKey,
+  adapterVersion: string,
 ): readonly NormalizedObservationOutcome[] {
+  if (
+    adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_EVENTS_V2_ADAPTER_VERSION
+  ) {
+    throw new RangeError("dataforrest_events.adapter_version_unsupported");
+  }
   return page.records.map((record, recordIndex) =>
-    interpretRecord(record, provider, recordIndex)
+    interpretRecord(record, provider, recordIndex, adapterVersion)
   );
 }
 
@@ -379,7 +408,11 @@ async function interpretDataforrestSourceTestUnsafe(
       diagnostics: [diagnostic("source_response_invalid")],
     };
   }
-  const outcomes = interpretRecords(parsed.page, context.provider);
+  const outcomes = interpretRecords(
+    parsed.page,
+    context.provider,
+    context.adapterVersion,
+  );
   const invalidRecords = outcomes.filter(({ status }) => status === "invalid")
     .length;
   if (invalidRecords > 0) {
@@ -433,7 +466,11 @@ async function interpretDataforrestPageUnsafe(
       diagnostics: [diagnostic("continuation_did_not_advance")],
     };
   }
-  const outcomes = interpretRecords(parsed.page, context.provider);
+  const outcomes = interpretRecords(
+    parsed.page,
+    context.provider,
+    context.adapterVersion,
+  );
   const invalidRecords = outcomes.filter(({ status }) => status === "invalid")
     .length;
   return {

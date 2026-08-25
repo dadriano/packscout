@@ -186,7 +186,7 @@ export class ProviderSourceAdminCatalogService {
     }
     let sourceAdapter;
     try {
-      sourceAdapter = this.#sourceAdapters.resolveOnlyVersion(
+      sourceAdapter = this.#sourceAdapters.resolveCurrentVersion(
         availableSourceType.sourceTypeKey,
       );
     } catch {
@@ -246,13 +246,29 @@ export class ProviderSourceAdminCatalogService {
     const visibleSources = sources.filter((source) => {
       const visibleProvider = visibleProviderById.get(source.providerId);
       const registration = visibleProvider?.sourceRegistration;
+      if (!visibleProvider || source.provider !== visibleProvider.provider) {
+        return false;
+      }
+      let pinnedAdapter;
+      try {
+        pinnedAdapter = this.#sourceAdapters.resolve(
+          source.sourceTypeKey,
+          source.sourceAdapterVersion,
+          visibleProvider.provider,
+        );
+      } catch {
+        return false;
+      }
+      const pinnedDeclaration = pinnedAdapter.manifest.supportedProviders.find(
+        ({ provider }) => provider === source.provider,
+      );
       return productionSourceTypes.has(source.sourceTypeKey) &&
         visibleProviderIds.has(source.providerId) &&
-        source.provider === visibleProvider?.provider &&
+        pinnedDeclaration !== undefined &&
         registration?.sourceTypeKey === source.sourceTypeKey &&
-        registration.sourceAdapterVersion === source.sourceAdapterVersion &&
-        registration.normalizedContractVersion ===
+        pinnedAdapter.manifest.normalizedContractVersion ===
           source.normalizedContractVersion &&
+        pinnedDeclaration.identityNamespaceKey === source.identityNamespaceKey &&
         registration.mapperKey === source.mapperKey &&
         registration.mapperVersion === source.mapperVersion &&
         registration.identityNamespaceKey === source.identityNamespaceKey &&

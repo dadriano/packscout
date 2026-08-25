@@ -111,6 +111,39 @@ test("source supervisor reads only ingestion-owned secret boundaries", () => {
   assert.equal(configuration.sourceDatabaseVolumePath, "/tmp");
   assert.equal(configuration.workerId, "source-supervisor:fallback");
   assert.equal(configuration.environment, "production");
+  assert.equal(configuration.sourceDiskReserveBytes, undefined);
+});
+
+test("source supervisor permits an explicit free-space reserve only locally", () => {
+  const configuration = readProviderSourceSupervisorConfiguration(
+    validEnvironment({
+      NODE_ENV: "development",
+      PACKSCOUT_SOURCE_DISK_RESERVE_GIB: "16",
+    }),
+    "source-supervisor:local",
+  );
+
+  assert.equal(configuration.sourceDiskReserveBytes, 16 * 1_073_741_824);
+
+  for (const [nodeEnvironment, reserve] of [
+    ["production", "16"],
+    ["test", "16"],
+    ["development", "0"],
+    ["development", "1.5"],
+    ["development", " 16"],
+    ["development", "8388608"],
+  ] as const) {
+    assert.throws(
+      () => readProviderSourceSupervisorConfiguration(
+        validEnvironment({
+          NODE_ENV: nodeEnvironment,
+          PACKSCOUT_SOURCE_DISK_RESERVE_GIB: reserve,
+        }),
+        "source-supervisor:capacity-policy",
+      ),
+      hasConfigurationCode("SOURCE_DISK_RESERVE_GIB_INVALID"),
+    );
+  }
 });
 
 test("source connection encryption settings are required without provider fallback", () => {

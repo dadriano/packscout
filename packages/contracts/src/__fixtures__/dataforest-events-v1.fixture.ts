@@ -11,6 +11,17 @@ const fixtureNativeData = Object.freeze({
   optional_value: null,
 });
 
+const collectorCryptPackNativeData = Object.freeze({
+  name: "  Collector Crypt Fixture Pack  ",
+  ignored_native_field: null,
+});
+
+function packNativeData(platform: string) {
+  return platform === "collector_crypt"
+    ? collectorCryptPackNativeData
+    : fixtureNativeData;
+}
+
 function initialRecords(platform: string) {
   return [
     {
@@ -19,7 +30,7 @@ function initialRecords(platform: string) {
       record_id: `${platform}-pack-001`,
       occurred_at: "2026-01-01T00:00:00.000Z",
       collected_at: "2026-01-01T00:00:01.000Z",
-      data: fixtureNativeData,
+      data: packNativeData(platform),
       entity: "pack",
       first_seen_at: "2026-01-01T00:00:00.000Z",
       available: true,
@@ -70,7 +81,7 @@ function continuationRecords(platform: string) {
       record_id: `${platform}-pack-001`,
       occurred_at: "2026-01-04T00:00:00.000Z",
       collected_at: "2026-01-04T00:00:01.000Z",
-      data: fixtureNativeData,
+      data: packNativeData(platform),
       entity: "pack",
       first_seen_at: "2026-01-01T00:00:00.000Z",
       available: false,

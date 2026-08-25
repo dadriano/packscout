@@ -7,6 +7,7 @@ import {
   normalizedObservationSemanticContent,
   normalizedProviderObservationPageSchema,
   opaqueCursorEnvelopeSchema,
+  providerSourceLaunchBounds,
   providerSourceExpectedCanonicalRelationships,
   providerSourceCanonicalCatalogAssetContentV1Schema,
   providerSourceCanonicalEvInputContentV1Schema,
@@ -28,8 +29,6 @@ const REGISTRATION_KEY_PATTERN =
   /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const MAXIMUM_PROTECTED_RAW_RESPONSE_BYTES = 2 * 1024 * 1024;
-
 export type ProviderSourceAtomicPagePersistenceErrorCode =
   | "idempotency_conflict"
   | "invalid_page_plan"
@@ -323,7 +322,7 @@ export function validateProviderSourceAtomicPageInput(
     !Number.isFinite(input.committedAt.getTime()) ||
     input.protectedRawResponse.byteLength < 1 ||
     input.protectedRawResponse.byteLength >
-      MAXIMUM_PROTECTED_RAW_RESPONSE_BYTES ||
+      providerSourceLaunchBounds.maximumResponseBytes ||
     parsedPage.data.measurements.responseBytes !==
       input.protectedRawResponse.byteLength ||
     !SHA_256_PATTERN.test(input.protectedRawResponseSha256) ||

@@ -24,13 +24,23 @@ export class SourceAdapterRegistryError extends Error {
 
 export class SourceAdapterRegistry {
   readonly #adapters = new Map<string, SourceAdapter>();
+  readonly #currentVersions = new Map<string, string>();
 
   static #registrationKey(sourceTypeKey: string, adapterVersion: string): string {
     return JSON.stringify([sourceTypeKey, adapterVersion]);
   }
 
-  constructor(adapters: Iterable<SourceAdapter> = []) {
+  constructor(
+    adapters: Iterable<SourceAdapter> = [],
+    currentVersions: Readonly<Record<string, string>> = {},
+  ) {
     for (const adapter of adapters) this.register(adapter);
+    for (const [sourceTypeKey, adapterVersion] of Object.entries(
+      currentVersions,
+    )) {
+      this.resolveSourceType(sourceTypeKey, adapterVersion);
+      this.#currentVersions.set(sourceTypeKey, adapterVersion);
+    }
   }
 
   register(adapter: SourceAdapter): this {
@@ -121,6 +131,13 @@ export class SourceAdapterRegistry {
       throw new SourceAdapterRegistryError("adapter_version_mismatch");
     }
     return adapters[0]!;
+  }
+
+  resolveCurrentVersion(sourceTypeKey: string): SourceAdapter {
+    const currentVersion = this.#currentVersions.get(sourceTypeKey);
+    return currentVersion === undefined
+      ? this.resolveOnlyVersion(sourceTypeKey)
+      : this.resolveSourceType(sourceTypeKey, currentVersion);
   }
 
   keys(): readonly string[] {

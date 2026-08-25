@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ENDPOINT,
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
 } from "@packscout/contracts";
 import {
   createProductionSourceAdminConfigurationCodecRegistry,
@@ -36,6 +38,9 @@ class MemoryConnectionRepository
   >[0] | null = null;
   recoveryRevisionInput: Parameters<
     SourceConnectionConfigurationAdminRepository["addRecoveryConnectionRevision"]
+  >[0] | null = null;
+  adapterRevisionInput: Parameters<
+    SourceConnectionConfigurationAdminRepository["addConnectionAdapterRevision"]
   >[0] | null = null;
   recoveryTestInput: Parameters<
     SourceConnectionConfigurationAdminRepository["requestConnectionRecoveryTest"]
@@ -77,6 +82,24 @@ class MemoryConnectionRepository
   async addConnectionRevision(input: Parameters<
     SourceConnectionConfigurationAdminRepository["addConnectionRevision"]
   >[0]) {
+    this.revisions.set(input.revisionId, {
+      organizationId: input.organizationId,
+      connectionProfileId: input.connectionProfileId,
+      connectionRevisionId: input.revisionId,
+      sourceTypeKey: input.sourceTypeKey,
+      sourceAdapterVersion: input.sourceAdapterVersion,
+      revisionNumber: input.revisionNumber,
+      state: "candidate",
+      healthGeneration: 0n,
+      configurationFingerprint: input.configurationFingerprint,
+      encryptedConfiguration: input.encryptedConfiguration,
+    });
+  }
+
+  async addConnectionAdapterRevision(input: Parameters<
+    SourceConnectionConfigurationAdminRepository["addConnectionAdapterRevision"]
+  >[0]) {
+    this.adapterRevisionInput = input;
     this.revisions.set(input.revisionId, {
       organizationId: input.organizationId,
       connectionProfileId: input.connectionProfileId,
@@ -136,23 +159,25 @@ class MemoryConnectionRepository
   async revokeConnectionRevision() {}
 }
 
-function fixture() {
+function fixture(
+  ids = [profileId, revisionOneId, revisionTwoId],
+) {
   const repository = new MemoryConnectionRepository();
-  const ids = [profileId, revisionOneId, revisionTwoId];
   const sourceAdapters = createProductionSourceAdapterRegistry();
+  const cipher = new AesGcmSourceConnectionConfigurationCipher({
+    primaryVersion: 7,
+    keys: new Map([[7, new Uint8Array(32).fill(7)]]),
+  });
   const service = new SourceConnectionConfigurationService({
     repository,
-    cipher: new AesGcmSourceConnectionConfigurationCipher({
-      primaryVersion: 7,
-      keys: new Map([[7, new Uint8Array(32).fill(7)]]),
-    }),
+    cipher,
     sourceAdapters,
     adminConfigurationCodecs:
       createProductionSourceAdminConfigurationCodecRegistry(sourceAdapters),
     clock: { now: () => now },
     ids: { id: () => ids.shift()! },
   });
-  return { repository, service };
+  return { cipher, repository, service };
 }
 
 test("one shared credential is encrypted under exact organization/profile/revision AAD and never echoed", async () => {
@@ -240,6 +265,85 @@ test("same-endpoint rotation creates a tested candidate and normal activation pr
   );
   assert.equal(repository.activationInput?.preservePinnedWork, true);
   assert.equal(repository.activationInput?.connectionRevisionId, revisionTwoId);
+});
+
+test("adapter upgrade revalidates and re-encrypts a v1 credential as an untested v2 candidate", async () => {
+  const { cipher, repository, service } = fixture([revisionTwoId]);
+  const secret = "stored-v1-secret";
+  repository.revisions.set(revisionOneId, {
+    organizationId,
+    connectionProfileId: profileId,
+    connectionRevisionId: revisionOneId,
+    sourceTypeKey: "dataforrest-events-v1",
+    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    revisionNumber: 1,
+    state: "active",
+    healthGeneration: 15n,
+    configurationFingerprint: "a".repeat(64),
+    encryptedConfiguration: cipher.encrypt(
+      JSON.stringify({
+        endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+        bearerToken: secret,
+      }),
+      { organizationId, connectionProfileId: profileId, connectionRevisionId: revisionOneId },
+    ),
+  });
+
+  const result = await service.upgradeAdapter(
+    { organizationId, actorKey: "operator-admin" },
+    profileId,
+    {
+      expectedRevisionId: revisionOneId,
+      expectedSourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+      targetSourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+      confirmation: "UPGRADE_ADAPTER",
+    },
+  );
+  assert.equal(result.revisionId, revisionTwoId);
+  assert.equal(
+    result.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
+  assert.equal(JSON.stringify(result).includes(secret), false);
+  assert.equal(
+    repository.adapterRevisionInput?.expectedSourceAdapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+  assert.equal(
+    repository.adapterRevisionInput?.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
+  const candidate = repository.revisions.get(revisionTwoId)!;
+  assert.equal(
+    Buffer.from(candidate.encryptedConfiguration.ciphertext).includes(
+      Buffer.from(secret),
+    ),
+    false,
+  );
+  const resolved = await service.resolveSourceConnectionConfiguration({
+    organizationId,
+    connectionProfileId: profileId,
+    connectionRevisionId: revisionTwoId,
+    configurationFingerprint: candidate.configurationFingerprint,
+  });
+  assert.deepEqual(resolved.configuration, {
+    endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+    bearerToken: secret,
+  });
+
+  await assert.rejects(
+    service.upgradeAdapter(
+      { organizationId, actorKey: "operator-admin" },
+      profileId,
+      {
+        expectedRevisionId: revisionTwoId,
+        expectedSourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+        targetSourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+        confirmation: "UPGRADE_ADAPTER",
+      },
+    ),
+    /invalid_source_configuration/u,
+  );
 });
 
 test("recovery commands retain the exact blocked revision, episode, generation, and candidate pins", async () => {

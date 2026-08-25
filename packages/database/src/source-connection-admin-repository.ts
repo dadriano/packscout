@@ -221,6 +221,83 @@ export class SourceConnectionAdminRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
+  async addConnectionAdapterRevision(input: Readonly<{
+    organizationId: string;
+    connectionProfileId: string;
+    expectedRevisionId: string;
+    expectedSourceAdapterVersion: string;
+    revisionId: string;
+    revisionNumber: number;
+    sourceTypeKey: string;
+    sourceAdapterVersion: string;
+    encryptedConfiguration: EncryptedConfiguration;
+    configurationFingerprint: string;
+    actorKey: string;
+    createdAt: Date;
+  }>): Promise<void> {
+    await this.database.$transaction(async (transaction) => {
+      const profile = await transaction.$queryRaw<Array<{
+        id: string;
+        sourceTypeKey: string;
+      }>>(Prisma.sql`
+        select id, source_type_key as "sourceTypeKey"
+        from public.source_connection_profiles
+        where id = cast(${input.connectionProfileId} as uuid)
+          and organization_id = cast(${input.organizationId} as uuid)
+          and state <> 'disabled'
+          and not exists (
+            select 1 from public.source_connection_health_episodes episode
+            where episode.connection_profile_id = source_connection_profiles.id
+              and episode.organization_id = source_connection_profiles.organization_id
+              and episode.closed_at is null
+          )
+        for update
+      `);
+      if (!profile[0] || profile[0].sourceTypeKey !== input.sourceTypeKey) {
+        this.#tenantViolation();
+      }
+      const latest = await transaction.source_connection_revisions.findFirst({
+        where: {
+          organization_id: input.organizationId,
+          connection_profile_id: input.connectionProfileId,
+        },
+        orderBy: [{ revision_number: "desc" }, { id: "desc" }],
+        select: { id: true, revision_number: true, source_adapter_version: true },
+      });
+      if (
+        latest?.id !== input.expectedRevisionId ||
+        latest.revision_number + 1 !== input.revisionNumber ||
+        latest.source_adapter_version !== input.expectedSourceAdapterVersion ||
+        input.sourceAdapterVersion === input.expectedSourceAdapterVersion
+      ) this.#fenced("Connection revision changed before adapter upgrade.");
+      await transaction.source_connection_revisions.create({
+        data: {
+          id: input.revisionId,
+          organization_id: input.organizationId,
+          connection_profile_id: input.connectionProfileId,
+          revision_number: input.revisionNumber,
+          source_type_key: input.sourceTypeKey,
+          source_adapter_version: input.sourceAdapterVersion,
+          configuration_ciphertext: bytes(input.encryptedConfiguration.ciphertext),
+          configuration_nonce: bytes(input.encryptedConfiguration.nonce),
+          configuration_auth_tag: bytes(input.encryptedConfiguration.authTag),
+          encryption_key_version: input.encryptedConfiguration.keyVersion,
+          configuration_fingerprint: input.configurationFingerprint,
+          created_by_actor_key: input.actorKey,
+          created_at: input.createdAt,
+        },
+      });
+      await this.#audit(transaction, {
+        organizationId: input.organizationId,
+        actorKey: input.actorKey,
+        action: "source_connection.upgrade_adapter",
+        subjectId: input.connectionProfileId,
+        revisionId: input.revisionId,
+        occurredAt: input.createdAt,
+      });
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
   async requestConnectionTest(input: Readonly<{
     organizationId: string;
     connectionProfileId: string;

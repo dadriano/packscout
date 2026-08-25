@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { providerSourceLaunchBounds } from "@packscout/contracts";
 import type { PackscoutPrismaClient } from "@packscout/database";
 import {
   createProviderSourceCapacityAdmissionHook,
@@ -31,7 +32,7 @@ test("committed capacity evidence remains admitted after one planned page", () =
   assert.equal(afterOneMeasuredPage.admitted, true);
 });
 
-test("ongoing capacity reserves four commits and blocks at the 80 percent boundary", () => {
+test("ongoing capacity reserves four commits and blocks at the default 80 percent boundary", () => {
   const artifact = loadCommittedProviderSourceCapacityArtifact();
   const capacity = 10_000_000_000_000;
   const abortAt = Math.floor(capacity * 8_000 / 10_000);
@@ -50,9 +51,60 @@ test("ongoing capacity reserves four commits and blocks at the 80 percent bounda
     unreconciledAttemptCount: 0,
   });
   assert.equal(admitted.admitted, true);
-  assert.equal(admitted.projectedUsedBytes, abortAt - 1);
+  assert.equal(admitted.projectedAvailableBytes, capacity - abortAt + 1);
+  assert.equal(admitted.minimumAvailableBytes, capacity - abortAt);
   assert.equal(blocked.admitted, false);
-  assert.equal(blocked.projectedUsedBytes, abortAt);
+  assert.equal(blocked.projectedAvailableBytes, capacity - abortAt);
+  assert.equal(blocked.safeCode, "CAPACITY_ABORT_THRESHOLD_REACHED");
+});
+
+test("one maximum commit reserves independent raw and protected-evidence copies", () => {
+  const artifact = loadCommittedProviderSourceCapacityArtifact();
+  const model = artifact.forecastInput;
+  const bytesWithoutProtectedNativeEvidence =
+    providerSourceLaunchBounds.maximumResponseBytes +
+    model.pageRecordLimit * (
+      model.measuredStructuredPhysicalBytesPerRecord +
+      model.measuredPreExpiryNormalizedPayloadPhysicalBytesPerRecord +
+      model.measuredQuarantinePhysicalBytes
+    ) +
+    model.measuredImportPagePhysicalBytes +
+    model.measuredDiagnosticPhysicalBytesPerPage +
+    model.measuredTerminalAttemptPhysicalBytes +
+    model.measuredCompactAttemptPhysicalBytes;
+
+  assert.equal(
+    providerSourceMaximumPageCommitBytes(artifact) -
+      bytesWithoutProtectedNativeEvidence,
+    providerSourceLaunchBounds.maximumResponseBytes,
+  );
+});
+
+test("local disk reserve projects remaining free bytes instead of host utilization", () => {
+  const artifact = loadCommittedProviderSourceCapacityArtifact();
+  const capacity = 1_000_000_000_000;
+  const diskReserve = 16 * 1_073_741_824;
+  const fourMaximumPages = 4 * providerSourceMaximumPageCommitBytes(artifact);
+  const admitted = evaluateProviderSourceOngoingCapacity({
+    artifact,
+    volumeCapacityBytes: capacity,
+    volumeAvailableBytes: diskReserve + fourMaximumPages + 1,
+    unreconciledAttemptCount: 0,
+    minimumAvailableBytes: diskReserve,
+  });
+  const blocked = evaluateProviderSourceOngoingCapacity({
+    artifact,
+    volumeCapacityBytes: capacity,
+    volumeAvailableBytes: diskReserve + fourMaximumPages,
+    unreconciledAttemptCount: 0,
+    minimumAvailableBytes: diskReserve,
+  });
+
+  assert.equal(admitted.admitted, true);
+  assert.equal(admitted.projectedAvailableBytes, diskReserve + 1);
+  assert.equal(blocked.admitted, false);
+  assert.equal(blocked.projectedAvailableBytes, diskReserve);
+  assert.equal(blocked.safeCode, "CAPACITY_DISK_RESERVE_REACHED");
 });
 
 test("capacity hook uses the validated volume and fails closed", async () => {

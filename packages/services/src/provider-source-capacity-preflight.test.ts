@@ -5,6 +5,10 @@ import { test } from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  providerSourceLaunchBounds,
+} from "@packscout/contracts";
+import {
   ProviderSourceCapacityInputError,
   buildProviderSourceCapacityForecast,
   evaluateProviderSourceCapacityPreflight,
@@ -17,6 +21,7 @@ import {
 interface MemoryMeasurement {
   readonly version: "provider-source-page-memory-v2";
   readonly path: "authentic-capture-terminalize-interpret-complete-import-plan";
+  readonly sourceAdapterVersion: typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION;
   readonly trialCount: number;
   readonly pagesPerTrial: number;
   readonly pageCount: number;
@@ -214,11 +219,18 @@ test("fresh authentic 100-page import planning stays within measured memory limi
     memory.path,
     "authentic-capture-terminalize-interpret-complete-import-plan",
   );
+  assert.equal(
+    memory.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
   assert.equal(memory.retainedMetric, "theil-sen-managed-bytes-per-page");
   assert.ok(memory.trialCount >= 3);
   assert.equal(memory.trialCount * memory.pagesPerTrial, memory.pageCount);
   assert.equal(memory.recordsPerPage, 250);
-  assert.equal(memory.responseBytesPerPage, 2 * 1024 * 1024);
+  assert.equal(
+    memory.responseBytesPerPage,
+    providerSourceLaunchBounds.maximumResponseBytes,
+  );
   assert.equal(
     memory.totalRecordsProcessed,
     memory.pageCount * memory.recordsPerPage,
@@ -228,6 +240,7 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   assert.equal(memory.passes, true);
   assert.equal(fresh.version, memory.version);
   assert.equal(fresh.path, memory.path);
+  assert.equal(fresh.sourceAdapterVersion, memory.sourceAdapterVersion);
   assert.equal(fresh.pageCount, memory.pageCount);
   assert.equal(fresh.recordsPerPage, memory.recordsPerPage);
   assert.equal(fresh.responseBytesPerPage, memory.responseBytesPerPage);

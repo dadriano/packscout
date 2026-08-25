@@ -311,6 +311,8 @@ export interface ProviderSourceSupervisorDependencies<
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly pollIntervalMilliseconds?: number;
   /** Test/runtime scheduling override; never greater than the launch bound. */
+  readonly ownershipRenewalIntervalMilliseconds?: number;
+  /** Test/runtime scheduling override; never greater than the launch bound. */
   readonly claimRenewalIntervalMilliseconds?: number;
   readonly claimLookahead?: number;
 }
@@ -359,6 +361,7 @@ export class ProviderSourceSupervisor<
   #cyclePromise: Promise<void> | null = null;
   #renewalTimer: ReturnType<typeof setInterval> | null = null;
   #renewalInFlight: Promise<void> | null = null;
+  #pendingFenceReasonCode: string | null = null;
   #snapshotTail: Promise<void> = Promise.resolve();
   #capacityProbeNotBeforeMilliseconds = 0;
   #stopping = false;
@@ -376,14 +379,18 @@ export class ProviderSourceSupervisor<
     ) {
       throw new TypeError("Source supervisor identity must not be blank.");
     }
-    const renewalInterval = dependencies.claimRenewalIntervalMilliseconds;
-    if (
-      renewalInterval !== undefined &&
-      (!Number.isSafeInteger(renewalInterval) || renewalInterval < 1 ||
-        renewalInterval >
-          providerSourceSingletonTiming.maximumRenewalIntervalSeconds * 1_000)
-    ) {
-      throw new TypeError("Claim renewal interval exceeds the launch bound.");
+    for (const [name, renewalInterval] of [
+      ["Ownership", dependencies.ownershipRenewalIntervalMilliseconds],
+      ["Claim", dependencies.claimRenewalIntervalMilliseconds],
+    ] as const) {
+      if (
+        renewalInterval !== undefined &&
+        (!Number.isSafeInteger(renewalInterval) || renewalInterval < 1 ||
+          renewalInterval >
+            providerSourceSingletonTiming.maximumRenewalIntervalSeconds * 1_000)
+      ) {
+        throw new TypeError(`${name} renewal interval exceeds the launch bound.`);
+      }
     }
     this.#dependencies = dependencies;
   }
@@ -430,20 +437,7 @@ export class ProviderSourceSupervisor<
         );
       }
       if (this.#stopping) return epoch;
-      while (!this.#stopping && !this.#fenceStarted) {
-        const recoverable = await this.#runControlPlane(
-          () => this.#dependencies.queue.listRecoverableClaims(epoch),
-          "CLAIM_RECOVERY_FAILED",
-        );
-        if (recoverable.length === 0) break;
-        for (const claim of recoverable) {
-          if (this.#stopping || this.#fenceStarted) return epoch;
-          await this.#runControlPlane(
-            () => this.#dependencies.queue.recoverClaim(epoch, claim),
-            "CLAIM_RECOVERY_FAILED",
-          );
-        }
-      }
+      await this.#recoverClaims(epoch, true);
       if (this.#stopping) return epoch;
       await this.#publishSnapshot();
       if (!this.#stopping) this.#startRenewal();
@@ -484,6 +478,11 @@ export class ProviderSourceSupervisor<
     this.#runtimeFence.assertActive();
     if (this.#stopping) return;
     try {
+      // A replacement supervisor can acquire the singleton lease before a
+      // predecessor's longer-lived work claims expire. Revisit recovery on
+      // every poll so those claims do not remain running forever merely
+      // because they were still valid during startup reconciliation.
+      await this.#recoverClaims(epoch, false);
       const dueWork = await this.#runControlPlane(
         () => this.#dependencies.queue.listDue(epoch),
         "DUE_MATERIALIZATION_FAILED",
@@ -685,6 +684,27 @@ export class ProviderSourceSupervisor<
     }
   }
 
+  async #recoverClaims(
+    epoch: SourceSupervisorEpoch,
+    drain: boolean,
+  ): Promise<void> {
+    while (!this.#stopping && !this.#fenceStarted) {
+      const recoverable = await this.#runControlPlane(
+        () => this.#dependencies.queue.listRecoverableClaims(epoch),
+        "CLAIM_RECOVERY_FAILED",
+      );
+      if (recoverable.length === 0) return;
+      for (const claim of recoverable) {
+        if (this.#stopping || this.#fenceStarted) return;
+        await this.#runControlPlane(
+          () => this.#dependencies.queue.recoverClaim(epoch, claim),
+          "CLAIM_RECOVERY_FAILED",
+        );
+      }
+      if (!drain) return;
+    }
+  }
+
   async stop(): Promise<void> {
     if (this.#stopPromise) return this.#stopPromise;
     this.#stopping = true;
@@ -769,6 +789,7 @@ export class ProviderSourceSupervisor<
       const renewal = this.#runControlPlane(
         () => this.#dependencies.queue.renewClaim(epoch, work),
         "WORK_CLAIM_RENEWAL_LOST",
+        { fenceOnExhausted: false },
       ).then(async (renewedUntil) => {
         if (renewedUntil !== null) return;
         const closing = durableCloseInFlight;
@@ -786,7 +807,12 @@ export class ProviderSourceSupervisor<
         workController.abort();
         this.#dependencies.executor.abortAll("claim_lost");
         await this.#beginFence("WORK_CLAIM_RENEWAL_LOST");
-      }).catch(async () => {
+      }).catch(async (error: unknown) => {
+        // The durable lease still has multiple renewal intervals remaining.
+        // A single contention window is not ownership loss; retry on the next
+        // timer tick. A null renewal or any non-transient failure still takes
+        // the exact fail-closed path above/below.
+        if (error instanceof ControlPlaneRetryExhaustedError) return;
         const closing = durableCloseInFlight;
         if (closing) await closing.catch(() => undefined);
         if (workClosed || this.#stopping || this.#fenceStarted) return;
@@ -1075,8 +1101,8 @@ export class ProviderSourceSupervisor<
   }
 
   #startRenewal(): void {
-    const interval = providerSourceSingletonTiming.maximumRenewalIntervalSeconds
-      * 1_000;
+    const interval = this.#dependencies.ownershipRenewalIntervalMilliseconds ??
+      providerSourceSingletonTiming.maximumRenewalIntervalSeconds * 1_000;
     this.#renewalTimer = setInterval(() => {
       const epoch = this.#epoch;
       if (!epoch || this.#fenceStarted || this.#stopping || this.#renewalInFlight) {
@@ -1085,12 +1111,31 @@ export class ProviderSourceSupervisor<
       const renewal = this.#runControlPlane(
         () => this.#dependencies.ownership.renew(epoch),
         "SUPERVISOR_RENEWAL_LOST",
-      ).then(async () => {
+        { fenceOnExhausted: false },
+      ).then(() => {
         if (!this.#stopping && !this.#fenceStarted) {
-          await this.#publishSnapshot();
+          // Snapshot persistence is ordered on its own tail. A delayed
+          // observability write must never suppress the next ownership
+          // heartbeat and let an otherwise healthy singleton lease expire.
+          void this.#publishSnapshot().catch(() => undefined);
         }
-      }).catch(async () => {
+      }).catch(async (error: unknown) => {
         if (this.#stopping) return;
+        // The 30-second durable singleton lease spans several heartbeat
+        // intervals. Page commits intentionally hold the epoch fence and can
+        // consume one bounded control-plane retry window; retry at the next
+        // heartbeat instead of converting ordinary commit contention into a
+        // false ownership loss. Real lost ownership still fences in
+        // #runControlPlane before reaching this branch.
+        if (error instanceof ControlPlaneRetryExhaustedError) return;
+        if (!this.#fenceStarted && !(error instanceof RuntimeLocallyFencedError)) {
+          // A failed renewal call is not proof that another owner exists. The
+          // durable lease remains authoritative, and every poll/request/page
+          // boundary independently revalidates it. Retry on the next heartbeat;
+          // confirmed lost ownership is converted to RuntimeLocallyFencedError
+          // inside #runControlPlane and still takes the fence path below.
+          return;
+        }
         try {
           // #beginFence stops admission before it aborts in-flight leases, so
           // the ownership-lost abort cannot throw ahead of the durable fence.
@@ -1113,6 +1158,7 @@ export class ProviderSourceSupervisor<
 
   async #beginFence(safeReasonCode: string): Promise<void> {
     if (!this.#fencePersistencePromise) {
+      this.#pendingFenceReasonCode ??= safeReasonCode;
       this.#fenceStarted = true;
       this.#runtimeFence.fence();
       this.#coordinator.stopAdmission();
@@ -1121,7 +1167,7 @@ export class ProviderSourceSupervisor<
       this.#dependencies.executor.abortAll("ownership_lost");
       const epoch = this.#epoch;
       this.#fencePersistencePromise = epoch
-        ? this.#persistFence(epoch, safeReasonCode)
+        ? this.#persistFence(epoch, this.#pendingFenceReasonCode)
         : Promise.resolve(false);
     }
     const epoch = this.#epoch;
@@ -1181,14 +1227,24 @@ export class ProviderSourceSupervisor<
       // Capture current counters only after every older publication settled;
       // a slow stale write can therefore never overwrite a newer grant or
       // drained state.
-      await this.#runControlPlane(
-        () => this.#dependencies.snapshot.publish({
-          epoch,
-          capacity: this.#coordinator.snapshot(),
-          admission: this.#admission,
-        }),
-        "SNAPSHOT_PUBLISH_FAILED",
-      );
+      try {
+        await this.#runControlPlane(
+          () => this.#dependencies.snapshot.publish({
+            epoch,
+            capacity: this.#coordinator.snapshot(),
+            admission: this.#admission,
+          }),
+          "SNAPSHOT_PUBLISH_FAILED",
+          { fenceOnExhausted: false, fenceOnLostOwnership: false },
+        );
+      } catch (error) {
+        if (
+          error instanceof ControlPlaneRetryExhaustedError ||
+          this.#dependencies.classifyControlPlaneFailure(error) ===
+            "lost_ownership"
+        ) return;
+        throw error;
+      }
     });
     this.#snapshotTail = publication.catch(() => undefined);
     await publication;
@@ -1245,13 +1301,23 @@ export class ProviderSourceSupervisor<
   async #runControlPlane<TResult>(
     operation: () => TResult | Promise<TResult>,
     fenceReasonCode: string,
+    options?: Readonly<{
+      fenceOnExhausted?: boolean;
+      fenceOnLostOwnership?: boolean;
+    }>,
   ): Promise<TResult> {
     try {
       return await runControlPlaneTransaction({
         runtimeFence: this.#runtimeFence,
         revalidate: () => this.#runtimeFence.assertActive(),
         transact: () => operation(),
-        onExhausted: () => this.#beginFence(fenceReasonCode),
+        fenceOnExhausted: options?.fenceOnExhausted,
+        beforeFence: () => {
+          this.#pendingFenceReasonCode ??= fenceReasonCode;
+        },
+        onExhausted: () => options?.fenceOnExhausted === false
+          ? undefined
+          : this.#beginFence(fenceReasonCode),
         classifyFailure: (error) => error instanceof ControlPlaneTransactionError
           ? error.code
           : this.#dependencies.classifyControlPlaneFailure(error),
@@ -1264,7 +1330,11 @@ export class ProviderSourceSupervisor<
         ? error.code
         : this.#dependencies.classifyControlPlaneFailure(error);
       if (code === "lost_ownership") {
-        await this.#beginFence("SUPERVISOR_OWNERSHIP_LOST");
+        if (options?.fenceOnLostOwnership === false) throw error;
+        // Preserve the exact control-plane boundary that detected ownership
+        // loss. The repository error still carries SUPERVISOR_OWNERSHIP_LOST;
+        // this durable reason identifies which operation failed its fence.
+        await this.#beginFence(fenceReasonCode);
         throw new RuntimeLocallyFencedError();
       }
       if (code === "stale_fence") throw new SourceSupervisorStaleWorkError();

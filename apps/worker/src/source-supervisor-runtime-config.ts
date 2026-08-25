@@ -13,6 +13,7 @@ export type ProviderSourceSupervisorConfigurationErrorCode =
   | "NODE_ENV_INVALID"
   | "SOURCE_CONNECTION_KEY_INVALID"
   | "SOURCE_CONNECTION_KEY_VERSION_INVALID"
+  | "SOURCE_DISK_RESERVE_GIB_INVALID"
   | "SOURCE_DATABASE_VOLUME_PATH_INVALID"
   | "WORKER_ID_INVALID";
 
@@ -36,6 +37,32 @@ export interface ProviderSourceSupervisorConfiguration
   readonly sourceConnectionConfigurationKey: Uint8Array;
   readonly sourceConnectionConfigurationKeyVersion: number;
   readonly sourceDatabaseVolumePath: string;
+  readonly sourceDiskReserveBytes?: number;
+}
+
+const BYTES_PER_GIBIBYTE = 1_073_741_824;
+
+function sourceDiskReserveBytesFor(
+  value: string | undefined,
+  environment: ProviderSourceSupervisorEnvironment,
+): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (
+    environment !== "local" ||
+    !/^[1-9][0-9]*$/u.test(value)
+  ) {
+    throw new ProviderSourceSupervisorConfigurationError(
+      "SOURCE_DISK_RESERVE_GIB_INVALID",
+    );
+  }
+  const gibibytes = Number(value);
+  const bytes = gibibytes * BYTES_PER_GIBIBYTE;
+  if (!Number.isSafeInteger(bytes)) {
+    throw new ProviderSourceSupervisorConfigurationError(
+      "SOURCE_DISK_RESERVE_GIB_INVALID",
+    );
+  }
+  return bytes;
 }
 
 function databaseVolumePathFor(value: string | undefined): string {
@@ -136,6 +163,7 @@ const supervisorOnlyVariables = [
   "PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64",
   "PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION",
   "PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH",
+  "PACKSCOUT_SOURCE_DISK_RESERVE_GIB",
 ] as const;
 
 /**
@@ -172,11 +200,16 @@ export function readProviderSourceSupervisorConfiguration(
   environment: NodeJS.ProcessEnv,
   fallbackWorkerId: string,
 ): ProviderSourceSupervisorConfiguration {
+  const shared = readProviderSourceSupervisorSharedConfiguration(
+    environment,
+    fallbackWorkerId,
+  );
+  const sourceDiskReserveBytes = sourceDiskReserveBytesFor(
+    environment.PACKSCOUT_SOURCE_DISK_RESERVE_GIB,
+    shared.environment,
+  );
   return Object.freeze({
-    ...readProviderSourceSupervisorSharedConfiguration(
-      environment,
-      fallbackWorkerId,
-    ),
+    ...shared,
     sourceConnectionConfigurationKey: canonicalKeyFor(
       environment.PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64,
       "SOURCE_CONNECTION_KEY_INVALID",
@@ -187,5 +220,8 @@ export function readProviderSourceSupervisorConfiguration(
     sourceDatabaseVolumePath: databaseVolumePathFor(
       environment.PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH,
     ),
+    ...(sourceDiskReserveBytes === undefined
+      ? {}
+      : { sourceDiskReserveBytes }),
   });
 }

@@ -226,6 +226,34 @@ test("data operators receive dense read-only evidence without configuration cont
   assert.equal(renderer.container.querySelector(".source-config-editor"), null);
 });
 
+test("secret administrators get an explicit confirmed adapter-upgrade candidate control", async (context) => {
+  const upgradeCatalog: ProviderSourceAdminCatalog = {
+    ...catalog,
+    providers: catalog.providers.map((provider) => ({
+      ...provider,
+      sourceRegistration: {
+        ...provider.sourceRegistration,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      },
+    })),
+  };
+  stubFetch(context, () => jsonResponse({ catalog: upgradeCatalog }));
+  const renderer = await renderPage(page(session(true)));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  await act(async () => {
+    findButton(renderer, "Create adapter upgrade candidate").click();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  assert.match(pageText(renderer), /Create dataforrest-events-adapter-v2 candidate/u);
+  assert.match(
+    pageText(renderer),
+    /decrypted only in the server.*re-encrypted for a new untested revision/u,
+  );
+  assert.ok(findButton(renderer, "Create adapter upgrade candidate"));
+});
+
 test("an old retired-revision episode remains recoverable through the healthy latest active revision", async (context) => {
   const recoveryCatalog: ProviderSourceAdminCatalog = {
     ...catalog,

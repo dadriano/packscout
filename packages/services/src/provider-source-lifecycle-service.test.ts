@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   providerIdentityNamespaceByLaunchProvider,
 } from "@packscout/contracts";
@@ -186,6 +187,10 @@ test("source creation derives the immutable platform filter and contract-only ma
     repository.createInput?.identityNamespaceKey,
     providerIdentityNamespaceByLaunchProvider.courtyard,
   );
+  assert.equal(
+    repository.createInput?.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
   assert.deepEqual(repository.createInput?.recordIdScopes, [
     "catalog-pack-v1",
     "catalog-card-v1",
@@ -227,6 +232,10 @@ test("a replacement requires an idle paused or disabled compatible predecessor a
   );
   assert.equal(replacement.sourceInstanceId, sourceId);
   assert.equal(repository.createInput?.replacesSourceInstanceId, oldSourceId);
+  assert.equal(
+    repository.createInput?.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
   assert.notEqual(replacement.sourceInstanceId, oldSourceId);
 });
 

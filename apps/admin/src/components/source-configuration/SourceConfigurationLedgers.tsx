@@ -25,6 +25,7 @@ function tone(value: string): StatusTone {
 
 interface ConnectionLedgerProps {
   readonly connections: readonly SourceConnectionProfileAdminSummary[];
+  readonly currentSourceAdapterVersion: string | null;
   readonly canManage: boolean;
   readonly canManageSecrets: boolean;
   readonly pendingKey: string | null;
@@ -37,6 +38,10 @@ interface ConnectionLedgerProps {
     connection: SourceConnectionProfileAdminSummary,
     bearerCredential: string,
   ) => Promise<boolean>;
+  readonly onUpgrade: (
+    connection: SourceConnectionProfileAdminSummary,
+    targetSourceAdapterVersion: string,
+  ) => Promise<boolean>;
   readonly onCommand: (
     action: "test" | "activate" | "revoke" | "recovery-test" | "recovery-activate",
     connection: SourceConnectionProfileAdminSummary,
@@ -45,12 +50,14 @@ interface ConnectionLedgerProps {
 
 export function SourceConnectionLedger({
   connections,
+  currentSourceAdapterVersion,
   canManage,
   canManageSecrets,
   pendingKey,
   onCreate,
   onRotate,
   onRecover,
+  onUpgrade,
   onCommand,
 }: ConnectionLedgerProps) {
   const [name, setName] = useState("");
@@ -141,6 +148,11 @@ export function SourceConnectionLedger({
           const canTestSameRevisionRecovery = recovery !== null &&
             recovery.blockedRevisionId === revision.id &&
             revision.state === "active";
+          const canUpgradeAdapter = canManageSecrets &&
+            recovery === null &&
+            currentSourceAdapterVersion !== null &&
+            revision.sourceAdapterVersion !== currentSourceAdapterVersion &&
+            revision.state !== "revoked";
           return (
             <article key={connection.id}>
               <div className="source-config-ledger__identity">
@@ -203,6 +215,17 @@ export function SourceConnectionLedger({
                       disabled={pendingKey !== null || revision.state === "revoked"}
                       onClick={() => onCommand("revoke", connection)}
                     >Revoke</button>
+                  ) : null}
+                  {canUpgradeAdapter ? (
+                    <button
+                      type="button"
+                      className="admin-button admin-button-secondary"
+                      disabled={pendingKey !== null}
+                      onClick={() => void onUpgrade(
+                        connection,
+                        currentSourceAdapterVersion,
+                      )}
+                    >Create adapter upgrade candidate</button>
                   ) : null}
                 </div>
               ) : null}
