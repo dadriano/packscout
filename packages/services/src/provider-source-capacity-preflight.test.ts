@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  providerSourceLaunchBounds,
+  dataforrestEventsV2SourceAdapterManifest,
 } from "@packscout/contracts";
 import {
   ProviderSourceCapacityInputError,
@@ -229,7 +229,7 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   assert.equal(memory.recordsPerPage, 250);
   assert.equal(
     memory.responseBytesPerPage,
-    providerSourceLaunchBounds.maximumResponseBytes,
+    dataforrestEventsV2SourceAdapterManifest.requestBounds.maximumResponseBytes,
   );
   assert.equal(
     memory.totalRecordsProcessed,

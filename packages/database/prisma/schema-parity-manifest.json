@@ -4185,7 +4185,7 @@
           "value": "(((source_instance_id IS NULL) AND (normalized_commit_hash IS NULL)) OR ((source_instance_id IS NOT NULL) AND (normalized_commit_hash IS NOT NULL) AND (normalized_commit_hash ~ '^[0-9a-f]{64}$'::text)))"
         },
         "import_pages_normalized_runtime_shape_check": {
-          "value": "((source_instance_id IS NULL) OR ((has_more IS NULL) AND (protected_raw_response_sha256 ~ '^[0-9a-f]{64}$'::text) AND (((protected_raw_response IS NOT NULL) AND ((octet_length(protected_raw_response) >= 1) AND (octet_length(protected_raw_response) <= 4194304)) AND (payload_expired_at IS NULL)) OR ((protected_raw_response IS NULL) AND (payload_expired_at IS NOT NULL)))))"
+          "value": "((source_instance_id IS NULL) OR ((has_more IS NULL) AND (protected_raw_response_sha256 ~ '^[0-9a-f]{64}$'::text) AND (((protected_raw_response IS NOT NULL) AND ((octet_length(protected_raw_response) >= 1) AND (octet_length(protected_raw_response) <= 8388608)) AND (payload_expired_at IS NULL)) OR ((protected_raw_response IS NULL) AND (payload_expired_at IS NOT NULL)))))"
         },
         "import_pages_page_number_positive": {
           "value": "(page_number > 0)"

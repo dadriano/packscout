@@ -3,17 +3,21 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   dataforrestIdentityNamespaceByProvider,
   dataforrestEventsV1SourceAdapterManifest,
   dataforrestEventsV2SourceAdapterManifest,
+  dataforrestEventsV3SourceAdapterManifest,
   launchRecordIdScopeDeclarations,
   sourceAdapterFailureSchema,
   type LaunchProviderKey,
   type ProviderSourceRequestBounds,
+  type VersionedSourceAdapterManifest,
 } from "@packscout/contracts";
 import { dataforestEventsV1EvidenceFixture } from "@packscout/contracts/test-fixtures/dataforrest-events-v1";
 import { ConnectionPermitCoordinator } from "./connection-permit-coordinator.ts";
@@ -109,12 +113,13 @@ function nextRequestIdentity(kind: string) {
 function cursor(
   provider: LaunchProviderKey,
   value: string | null,
+  adapterVersion: string = DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
 ) {
   return {
     sourceInstanceId: `source-${provider}`,
     sourceRevisionId: `source-revision-${provider}`,
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    adapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    adapterVersion,
     cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     cursorGeneration: 1,
     value,
@@ -211,17 +216,29 @@ async function pageOperation(
   provider: LaunchProviderKey,
   value: string | null,
   pageBounds: ProviderSourceRequestBounds = bounds,
+  adapterIdentity: Readonly<{
+    adapterVersion: string;
+    normalizedContractVersion: string;
+  }> = {
+    adapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  },
 ): Promise<PageReadOperation> {
-  const requestedCursor = cursor(provider, value);
+  const requestedCursor = cursor(
+    provider,
+    value,
+    adapterIdentity.adapterVersion,
+  );
   const requestIdentity = nextRequestIdentity(`page-${provider}`);
   const pins: PageReadRequestPins = {
     ...commonPins,
+    adapterVersion: adapterIdentity.adapterVersion,
     ...requestIdentity,
     operationKind: "page_read",
     provider,
     sourceInstanceId: requestedCursor.sourceInstanceId,
     sourceRevisionId: requestedCursor.sourceRevisionId,
-    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    normalizedContractVersion: adapterIdentity.normalizedContractVersion,
     identityNamespaceKey: dataforrestIdentityNamespaceByProvider[provider],
     importRunId: `run-${provider}`,
     runClaimLeaseId: `run-lease-${provider}`,
@@ -238,6 +255,7 @@ async function pageOperation(
   });
   const operation = createPageReadOperation({
     ...commonOperationFields,
+    adapterVersion: adapterIdentity.adapterVersion,
     operationKind: "page_read",
     provider,
     sourceInstanceId: pins.sourceInstanceId,
@@ -273,11 +291,15 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
-function adapterWithClient(httpClient: PinnedProviderHttpClient) {
+function adapterWithClient(
+  httpClient: PinnedProviderHttpClient,
+  manifest: VersionedSourceAdapterManifest =
+    dataforrestEventsV2SourceAdapterManifest,
+) {
   return new DataforrestEventsSourceAdapter({
     httpClient,
     resolveHost: async () => ["198.204.245.26"],
-  }, dataforrestEventsV2SourceAdapterManifest);
+  }, manifest);
 }
 
 function acknowledgeTerminalization(
@@ -968,6 +990,85 @@ test("data-rich 250-record pages remain valid within the transport and per-node 
     assert.equal(result.value.normalizedPage.outcomes.length, 250);
   }
   operation.requestLease.close();
+});
+
+test("adapter v3 captures valid pages above 4 MiB and rejects pages above 8 MiB", async () => {
+  const formerMaximumResponseBytes =
+    dataforrestEventsV2SourceAdapterManifest.requestBounds.maximumResponseBytes;
+  const currentBounds = dataforrestEventsV3SourceAdapterManifest.requestBounds;
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const page = (paddingLength: number) => JSON.stringify({
+    records: Array.from({ length: 250 }, (_, recordIndex) => ({
+      ...base,
+      record_id: `large-card-${recordIndex}`,
+      data: {
+        ...base.data,
+        native_payload: "x".repeat(paddingLength),
+      },
+    })),
+    next_cursor: "large-page-next",
+    poll_after_seconds: 0,
+  });
+  const acceptedRawPage = page(18_000);
+  const acceptedBytes = Buffer.byteLength(acceptedRawPage, "utf8");
+  assert.equal(acceptedBytes > formerMaximumResponseBytes, true);
+  assert.equal(acceptedBytes <= currentBounds.maximumResponseBytes, true);
+
+  const adapter = adapterWithClient(
+    async () => new Response(acceptedRawPage),
+    dataforrestEventsV3SourceAdapterManifest,
+  );
+  const adapterIdentity = {
+    adapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+  } as const;
+  const acceptedOperation = await pageOperation(
+    runtime(),
+    "courtyard",
+    null,
+    currentBounds,
+    adapterIdentity,
+  );
+  const capture = await successfulCapture(adapter, acceptedOperation);
+  assert.equal(capture.measurements.responseBytes, acceptedBytes);
+  const interpreted = await interpretSourceAdapterPage(
+    adapter,
+    acceptedOperation,
+    capture,
+  );
+  assert.equal(interpreted.ok, true);
+  if (interpreted.ok) {
+    assert.equal(interpreted.value.normalizedPage.outcomes.length, 250);
+  }
+  acceptedOperation.requestLease.close();
+
+  const rejectedRawPage = page(34_000);
+  assert.equal(
+    Buffer.byteLength(rejectedRawPage, "utf8") >
+      currentBounds.maximumResponseBytes,
+    true,
+  );
+  const rejectedAdapter = adapterWithClient(
+    async () => new Response(rejectedRawPage),
+    dataforrestEventsV3SourceAdapterManifest,
+  );
+  const rejectedOperation = await pageOperation(
+    runtime(),
+    "courtyard",
+    null,
+    currentBounds,
+    adapterIdentity,
+  );
+  const rejected = await captureRequest(rejectedAdapter, rejectedOperation);
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) {
+    assert.deepEqual(rejected.failure, {
+      disposition: "source_action_required",
+      code: "invalid_response",
+    });
+    assert.equal(rejected.diagnostics[0]?.code, "response_too_large");
+  }
+  rejectedOperation.requestLease.close();
 });
 
 test("reserved JSON keys are rejected before provider evidence can be silently rewritten", async () => {

@@ -887,10 +887,17 @@ function replaceProjectionContent(
   return { ...input, plan };
 }
 
-test("durable raw page boundary accepts exactly 4 MiB and rejects the next byte", async () => {
+test("durable raw page boundary accepts the launch maximum and rejects the next byte", async () => {
   const maximumResponseBytes = providerSourceLaunchBounds.maximumResponseBytes;
+  const sourceManifest: SourceAdapterManifestV1 = {
+    ...dataforrestEventsV2SourceAdapterManifest,
+    requestBounds: {
+      ...dataforrestEventsV2SourceAdapterManifest.requestBounds,
+      maximumResponseBytes,
+    },
+  };
   const runtime = await createRuntime("raw-response-boundary", {
-    sourceManifest: dataforrestEventsV2SourceAdapterManifest,
+    sourceManifest,
     protectedRawResponseText: "x".repeat(maximumResponseBytes),
   });
   try {

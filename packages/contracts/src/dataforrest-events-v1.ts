@@ -218,7 +218,7 @@ export const dataforrestEventsV1SourceAdapterManifest =
 export const dataforrestEventsV2SourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(
     DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-    providerSourceLaunchBounds.maximumResponseBytes,
+    4 * 1024 * 1024,
   );
 
 export const dataforrestEventsV3SourceAdapterManifest =

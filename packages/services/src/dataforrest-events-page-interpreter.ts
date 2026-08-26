@@ -69,8 +69,8 @@ const timestampFields = new Set([
   "first_seen_at",
 ]);
 const maximumJsonNestingDepth = 64;
-// The transport already caps the raw response at 4 MiB. Data-rich catalog
-// records can legitimately contain hundreds of bounded native facts each, so
+// Versioned transport manifests cap raw responses at no more than 8 MiB.
+// Data-rich catalog records can contain hundreds of bounded native facts, so
 // a full 250-record page needs a higher aggregate traversal allowance while
 // the independent depth, object-key, and array-item limits remain enforced.
 const maximumJsonNodeCount = 1_000_000;

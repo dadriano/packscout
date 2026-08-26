@@ -28,7 +28,8 @@ const trialCount = 5;
 const pagesPerTrial = 20;
 const pageCount = trialCount * pagesPerTrial;
 const recordsPerPage = providerSourceLaunchBounds.pageTargetRecords;
-const maximumResponseBytes = providerSourceLaunchBounds.maximumResponseBytes;
+const maximumResponseBytes =
+  dataforrestEventsV2SourceAdapterManifest.requestBounds.maximumResponseBytes;
 const mebibyte = 1024 * 1024;
 
 function median(values: readonly number[]): number {

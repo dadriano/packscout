@@ -22,8 +22,10 @@ the `records` / `next_cursor` / `poll_after_seconds` wrapper, `payment_method`,
 tri-state `available`, and a safe aggregate concurrency of two.
 
 A 500-record Phygitals response exceeded the original 2 MiB capture cap, so the
-page target remains 250 records. A later 250-record page also crossed that
-provisional byte bound; the runtime hard cap is now 4 MiB. The historical
+page target remains 250 records. Later 250-record pages crossed the legacy 2 MiB
+and 4 MiB bounds; adapter V3 now has an 8 MiB hard cap after a protected replay
+measured the failing page at 4,730,013 bytes. V1 and V2 remain at 2 MiB and
+4 MiB respectively. The historical
 8,759,332,238,475-byte Task 010 result is a maximum-throughput stress ceiling,
 not the operational local estimate. Current local operation uses measured
 whole-database growth plus an explicit free-space floor; see

@@ -40,7 +40,7 @@ relationships, replay identity, catalog revision, and reached-head shape.
 | Setting | Launch value | Evidence |
 | --- | ---: | --- |
 | Filtered page target | 250 records | A 500-record Phygitals response advertised 3,114,066 bytes and was rejected by the 2 MiB cap. Two 250-record Phygitals pages were 1,415,669 and 1,698,526 bytes. |
-| Maximum response | 4,194,304 bytes | The original 2 MiB bound fit the eight launch samples but a later live 250-record Phygitals page crossed it. The 4 MiB hard bound preserves 250-record throughput while remaining below the memory benchmark's four-slot envelope. |
+| Maximum response | V1: 2,097,152 bytes; V2: 4,194,304 bytes; V3: 8,388,608 bytes | The original 2 MiB bound fit the eight launch samples, but later live 250-record Phygitals pages crossed both legacy bounds. The page that triggered the V3 increase replayed as HTTP 200 with the exact three-key wrapper, 250 records, and 4,730,013 bytes. V1 and V2 remain unchanged; only V3 admits the larger response. |
 | Request timeout | 10,000 ms | Fourteen successful filtered requests ranged from 435 to 4,042 ms, averaging 1,728 ms. |
 | Stable-profile request cap | 2 | Two different filters overlapped in the client, both returned 200, both remained filter-correct, and their cursors were independent. A higher value was not tested. |
 | Generic execution slots | 4 | Host-local processing bound; connection requests remain capped separately at two. |
@@ -246,6 +246,14 @@ projected only 87,707 retained bytes across
 100 pages, within the 64 MiB peak and 8 MiB retained limits. Four execution
 slots therefore reserve at most 256 MiB of page-working-set budget before normal
 process overhead.
+
+That measurement remains the V2 four-slot proof. The V3 8 MiB transport bound
+was introduced after a protected replay measured a valid 4,730,013-byte
+Phygitals page. Local V3 backfill uses one execution slot while the larger-page
+four-slot memory measurement is pending; PackScout engineering owns that
+remeasurement, and restoring more than one local execution slot is its removal
+trigger. The shared admission envelope reserves the larger V3 page size, while
+the V1 and V2 adapter manifests retain their narrower transport caps.
 
 The storage submeasurement remains the reviewed August 22 measurement because
 the later constraint migration widens only the admissible protected-byte bound;

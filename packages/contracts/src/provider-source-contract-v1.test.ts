@@ -26,12 +26,13 @@ import {
 import {
   dataforrestEventsV1SourceAdapterManifest,
   dataforrestEventsV2SourceAdapterManifest,
+  dataforrestEventsV3SourceAdapterManifest,
 } from "./dataforrest-events-v1.ts";
 
 test("launch source constants retain the evidence-backed operating envelope", () => {
   assert.deepEqual(providerSourceLaunchBounds, {
     pageTargetRecords: 250,
-    maximumResponseBytes: 4_194_304,
+    maximumResponseBytes: 8_388_608,
     requestTimeoutMilliseconds: 10_000,
     stableProfileRequestCap: 2,
     genericExecutionSlots: 4,
@@ -301,6 +302,11 @@ test("adapter manifests are credential-free, strict, and retain exact version bo
   assert.deepEqual(parsedV2.requestBounds, {
     pageLimit: 250,
     maximumResponseBytes: 4_194_304,
+    timeoutMilliseconds: 10_000,
+  });
+  assert.deepEqual(dataforrestEventsV3SourceAdapterManifest.requestBounds, {
+    pageLimit: 250,
+    maximumResponseBytes: 8_388_608,
     timeoutMilliseconds: 10_000,
   });
   assert.equal(parsedV1.maximumConnectionRequestCap, 2);
