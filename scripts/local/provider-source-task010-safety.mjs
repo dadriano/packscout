@@ -8,6 +8,7 @@ export const TASK010_SAFETY_VERSION =
   "packscout.provider-source-task010-safety.v1";
 export const TASK010_LOCAL_ACKNOWLEDGEMENT =
   "I_UNDERSTAND_THIS_TARGET_IS_LOCAL_AND_EMPTY";
+export const TASK010_SOURCE_EXECUTION_SLOTS = "1";
 export const TASK010_BOOTSTRAP_ACTION = "provider_source.task010.bootstrap";
 export const TASK010_PAGE_RECORD_COUNT_SQL = `
   coalesce((record_counts_json->>'catalog')::bigint, 0) +
@@ -450,6 +451,11 @@ export function sanitizedTask010WorkerEnvironment(environment) {
       environment[name] === undefined ? [] : [[name, environment[name]]],
     ),
   );
+  // V3 admits responses above the measured four-slot V2 envelope. The
+  // dedicated Task 010 runner therefore owns this bound and cannot inherit a
+  // wider value from the ignored environment file or the ambient process.
+  sanitized.PACKSCOUT_SOURCE_EXECUTION_SLOTS =
+    TASK010_SOURCE_EXECUTION_SLOTS;
   return Object.freeze(sanitized);
 }
 

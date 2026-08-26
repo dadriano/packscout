@@ -163,8 +163,10 @@ supervisor can claim work.
 The backfill start requires exactly one active tested profile at cap 2 and
 exactly four tested, fully pinned paused-or-active sources. In Operations,
 select **Resume** for all four sources; Resume makes each lane due immediately.
-Verify two provider lanes overlap while each individual cursor remains
-sequential.
+The dedicated Task 010 runner forces `PACKSCOUT_SOURCE_EXECUTION_SLOTS=1` for
+the V3 memory boundary, even if its private environment file omits or attempts
+to change that value. Verify each individual cursor remains sequential and the
+four source lanes continue taking turns without starvation.
 
 After multiple sources have committed pages, stop Terminal B with `Ctrl-C`.
 Restart the same backfill command and verify each source resumes from its own

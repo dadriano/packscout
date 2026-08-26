@@ -149,14 +149,17 @@ normalized observation. Adapter v1 allowlists only a nonblank
 
 Local Collector Crypt capture evidence reviewed on 2026-08-24 showed catalog
 pack names at `data.name`, including all three pack records in the retained
-partial run. Adapters v2 and v3 therefore use one closed provider-and-kind declaration:
-Collector Crypt catalog packs read exactly `data.name`; every other launch
-provider and kind retains `data.provider_label`. There is no cross-field
-fallback: a missing, null, or malformed Collector Crypt `name` remains absent or
-malformed even if `provider_label` is present. Every other nested key stays
-protected provenance. The mapper never receives the native object, and this
-provider-local extraction does not add provider-specific canonical rules to the
-generic mapper.
+partial run. Adapter v2 therefore retains its frozen provider-and-kind
+declaration: Collector Crypt catalog packs read exactly `data.name`, while
+Courtyard, Phygitals, ClutchPacks, and every non-pack kind read exactly
+`data.provider_label`. Adapter v3 keeps that Collector Crypt behavior and reads
+catalog pack display names from `data.name` for Phygitals and ClutchPacks as
+well; Courtyard and every non-pack kind continue to read
+`data.provider_label`. There is no cross-field fallback: a missing, null, or
+malformed declared field remains absent or malformed even when the other field
+is present. Every other nested key stays protected provenance. The mapper never
+receives the native object, and this provider-local extraction does not add
+provider-specific canonical rules to the generic mapper.
 
 Adapters v1 and v2 remain registered only for immutable connection revisions,
 source revisions, and import runs already pinned to their exact adapter version.

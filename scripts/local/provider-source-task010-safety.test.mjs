@@ -364,10 +364,17 @@ test("worker environment strips evidence token and starter cannot reload dotenv 
   const sanitized = sanitizedTask010WorkerEnvironment({
     ...baseEnvironment,
     PACKSCOUT_DATA_API_TOKEN: evidenceToken,
+    PACKSCOUT_SOURCE_EXECUTION_SLOTS: "4",
   });
   assert.equal(sanitized.PACKSCOUT_DATA_API_TOKEN, undefined);
   assert.equal(JSON.stringify(sanitized).includes(evidenceToken), false);
   assert.equal(sanitized.PACKSCOUT_TASK010_ADMIN_PASSWORD, undefined);
+  assert.equal(sanitized.PACKSCOUT_SOURCE_EXECUTION_SLOTS, "1");
+  assert.equal(
+    sanitizedTask010WorkerEnvironment(baseEnvironment)
+      .PACKSCOUT_SOURCE_EXECUTION_SLOTS,
+    "1",
+  );
   assert.throws(
     () =>
       assertBootstrapPasswordAbsent({
@@ -409,6 +416,7 @@ test("worker environment strips evidence token and starter cannot reload dotenv 
     initializer,
     /PACKSCOUT_ADMIN_ALLOWED_ORIGINS=http:\/\/127\.0\.0\.1:5101,http:\/\/localhost:5101/u,
   );
+  assert.match(initializer, /PACKSCOUT_SOURCE_EXECUTION_SLOTS=/u);
   assert.match(initializer, /PACKSCOUT_ADMIN_TRUSTED_PROXIES=/u);
   assert.match(initializer, /PACKSCOUT_SESSION_IDLE_MS=3600000/u);
   assert.match(initializer, /PACKSCOUT_SESSION_ABSOLUTE_MS=43200000/u);

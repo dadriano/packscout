@@ -265,51 +265,68 @@ export type DataforrestEventsPageV2 = z.infer<
   typeof dataforrestEventsPageV2Schema
 >;
 
-const dataforrestDisplayNameFieldByProvider = Object.freeze({
-  courtyard: Object.freeze({
-    pack: "provider_label",
-    card: "provider_label",
-    pull: "provider_label",
-    trade: "provider_label",
+type DataforrestAdapterVersion =
+  | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+  | typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION
+  | typeof DATAFORREST_EVENTS_V3_ADAPTER_VERSION;
+type DataforrestDisplayNameField = "name" | "provider_label";
+
+const dataforrestProviderLabelFields = Object.freeze({
+  pack: "provider_label",
+  card: "provider_label",
+  pull: "provider_label",
+  trade: "provider_label",
+} as const);
+
+const dataforrestNativePackNameFields = Object.freeze({
+  pack: "name",
+  card: "provider_label",
+  pull: "provider_label",
+  trade: "provider_label",
+} as const);
+
+const dataforrestDisplayNameFieldByAdapterVersion = Object.freeze({
+  [DATAFORREST_EVENTS_V1_ADAPTER_VERSION]: Object.freeze({
+    courtyard: dataforrestProviderLabelFields,
+    collector_crypt: dataforrestProviderLabelFields,
+    phygitals: dataforrestProviderLabelFields,
+    clutchpacks: dataforrestProviderLabelFields,
   }),
-  collector_crypt: Object.freeze({
-    pack: "name",
-    card: "provider_label",
-    pull: "provider_label",
-    trade: "provider_label",
+  [DATAFORREST_EVENTS_V2_ADAPTER_VERSION]: Object.freeze({
+    courtyard: dataforrestProviderLabelFields,
+    collector_crypt: dataforrestNativePackNameFields,
+    phygitals: dataforrestProviderLabelFields,
+    clutchpacks: dataforrestProviderLabelFields,
   }),
-  phygitals: Object.freeze({
-    pack: "name",
-    card: "provider_label",
-    pull: "provider_label",
-    trade: "provider_label",
-  }),
-  clutchpacks: Object.freeze({
-    pack: "name",
-    card: "provider_label",
-    pull: "provider_label",
-    trade: "provider_label",
+  [DATAFORREST_EVENTS_V3_ADAPTER_VERSION]: Object.freeze({
+    courtyard: dataforrestProviderLabelFields,
+    collector_crypt: dataforrestNativePackNameFields,
+    phygitals: dataforrestNativePackNameFields,
+    clutchpacks: dataforrestNativePackNameFields,
   }),
 } as const satisfies Readonly<
   Record<
-    LaunchProviderKey,
-    Readonly<Record<NormalizedProviderFacts["kind"], string>>
+    DataforrestAdapterVersion,
+    Readonly<
+      Record<
+        LaunchProviderKey,
+        Readonly<
+          Record<NormalizedProviderFacts["kind"], DataforrestDisplayNameField>
+        >
+      >
+    >
   >
 >);
 
 function dataforrestProviderFacts(
-  adapterVersion:
-    | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-    | typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION
-    | typeof DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+  adapterVersion: DataforrestAdapterVersion,
   provider: LaunchProviderKey,
   kind: NormalizedProviderFacts["kind"],
   nativeData: Readonly<Record<string, unknown>>,
 ): NormalizedProviderFacts {
   const empty = emptyNormalizedProviderFacts(kind);
-  const displayNameField = adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-    ? "provider_label"
-    : dataforrestDisplayNameFieldByProvider[provider][kind];
+  const displayNameField =
+    dataforrestDisplayNameFieldByAdapterVersion[adapterVersion][provider][kind];
   const providerDisplayName = nativeData[displayNameField];
   const displayName = providerDisplayName === undefined || providerDisplayName === null
     ? { state: "absent" as const }
@@ -334,9 +351,7 @@ function normalizeDataforrestEventRecordForAdapter(
   record: DataforrestEventRecordV1,
   expectedProvider: LaunchProviderKey,
   protectedNativeEvidenceRef: string,
-  adapterVersion:
-    | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-    | typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  adapterVersion: DataforrestAdapterVersion,
 ): NormalizedProviderObservation {
   if (record.platform !== expectedProvider) {
     throw new RangeError("dataforrest_events.platform_mismatch");
@@ -461,10 +476,11 @@ export function normalizeDataforrestEventRecordV3(
   protectedNativeEvidenceRef: string,
 ): NormalizedProviderObservationV2 {
   if (record.stream !== "pulls") {
-    return normalizeDataforrestEventRecordV2(
+    return normalizeDataforrestEventRecordForAdapter(
       record,
       expectedProvider,
       protectedNativeEvidenceRef,
+      DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
     );
   }
   if (record.platform !== expectedProvider) {

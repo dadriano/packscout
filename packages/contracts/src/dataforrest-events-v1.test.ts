@@ -237,35 +237,118 @@ test("Collector Crypt pack names normalize from the evidenced native name field"
   );
 });
 
-test("ClutchPacks pack names normalize from the evidenced native name field", () => {
-  const raw = dataforrestEventRecordV2Schema.parse({
-    ...dataforestEventsV1EvidenceFixture.clutchpacks.initial.records[0],
-    stream: "catalog",
-    entity: "pack",
-    first_seen_at: "2026-01-01T00:00:00.000Z",
-    available: true,
-    data: {
-      name: "  ClutchPacks Alpha  ",
-      provider_label: "must not override the provider declaration",
+test("adapter v2 keeps Phygitals and ClutchPacks on immutable provider-label extraction", () => {
+  const fixtures = [
+    {
+      provider: "phygitals" as const,
+      nativeName: "Phygitals Black Pack",
+      legacyName: "Phygitals legacy label",
     },
-  });
-  const observation = normalizeDataforrestEventRecordV3(
-    raw,
-    "clutchpacks",
-    "fixture:clutchpacks-pack",
-  );
-  assert.equal(observation.kind, "catalog");
-  if (observation.kind !== "catalog") {
-    assert.fail("expected catalog observation");
+    {
+      provider: "clutchpacks" as const,
+      nativeName: "ClutchPacks Alpha",
+      legacyName: "ClutchPacks legacy label",
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const raw = dataforrestEventRecordV2Schema.parse({
+      ...dataforestEventsV1EvidenceFixture[fixture.provider].initial.records[0],
+      stream: "catalog",
+      entity: "pack",
+      first_seen_at: "2026-01-01T00:00:00.000Z",
+      available: true,
+      data: {
+        name: fixture.nativeName,
+        provider_label: fixture.legacyName,
+      },
+    });
+    if (raw.stream !== "catalog") assert.fail("expected catalog fixture");
+
+    const observation = normalizeDataforrestEventRecordV2(
+      raw,
+      fixture.provider,
+      `fixture:${fixture.provider}:pack-v2`,
+    );
+    assert.equal(observation.kind, "catalog");
+    if (observation.kind !== "catalog") {
+      assert.fail("expected catalog observation");
+    }
+    assert.deepEqual(observation.providerFacts, {
+      ...emptyNormalizedProviderFacts("pack"),
+      displayName: { state: "present", value: fixture.legacyName },
+    });
+
+    const nameOnly = normalizeDataforrestEventRecordV2(
+      { ...raw, data: { name: fixture.nativeName } },
+      fixture.provider,
+      `fixture:${fixture.provider}:pack-v2-name-only`,
+    );
+    assert.equal(nameOnly.kind, "catalog");
+    if (nameOnly.kind !== "catalog") {
+      assert.fail("expected catalog observation");
+    }
+    assert.deepEqual(
+      nameOnly.providerFacts,
+      emptyNormalizedProviderFacts("pack"),
+    );
   }
-  assert.deepEqual(observation.providerFacts, {
-    ...emptyNormalizedProviderFacts("pack"),
-    displayName: { state: "present", value: "ClutchPacks Alpha" },
-  });
-  assert.equal(
-    JSON.stringify(observation.providerFacts).includes("must not override"),
-    false,
-  );
+});
+
+test("adapter v3 uses native Phygitals and ClutchPacks pack names without legacy fallback", () => {
+  const fixtures = [
+    {
+      provider: "phygitals" as const,
+      nativeName: "Phygitals Black Pack",
+      legacyName: "Phygitals legacy label",
+    },
+    {
+      provider: "clutchpacks" as const,
+      nativeName: "ClutchPacks Alpha",
+      legacyName: "ClutchPacks legacy label",
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const raw = dataforrestEventRecordV2Schema.parse({
+      ...dataforestEventsV1EvidenceFixture[fixture.provider].initial.records[0],
+      stream: "catalog",
+      entity: "pack",
+      first_seen_at: "2026-01-01T00:00:00.000Z",
+      available: true,
+      data: {
+        name: fixture.nativeName,
+        provider_label: fixture.legacyName,
+      },
+    });
+    const observation = normalizeDataforrestEventRecordV3(
+      raw,
+      fixture.provider,
+      `fixture:${fixture.provider}:pack-v3`,
+    );
+    assert.equal(observation.kind, "catalog");
+    if (observation.kind !== "catalog") {
+      assert.fail("expected catalog observation");
+    }
+    assert.deepEqual(observation.providerFacts, {
+      ...emptyNormalizedProviderFacts("pack"),
+      displayName: { state: "present", value: fixture.nativeName },
+    });
+
+    const legacyLabelOnly = normalizeDataforrestEventRecordV3(
+      { ...raw, data: { provider_label: fixture.legacyName } },
+      fixture.provider,
+      `fixture:${fixture.provider}:pack-v3-provider-label-only`,
+    );
+    assert.equal(legacyLabelOnly.kind, "catalog");
+    if (legacyLabelOnly.kind !== "catalog") {
+      assert.fail("expected catalog observation");
+    }
+    assert.deepEqual(
+      legacyLabelOnly.providerFacts,
+      emptyNormalizedProviderFacts("pack"),
+    );
+  }
 });
 
 test("raw IDs may repeat across evidenced scopes without aliasing", () => {
