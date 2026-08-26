@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import type { PackscoutPrismaClient } from "@packscout/database";
-import { runProviderSourceSupervisorOnly } from
-  "./source-supervisor-bootstrap.ts";
+import {
+  runProviderSourceSupervisorOnly,
+} from "./source-supervisor-bootstrap.ts";
+import { ProviderSourceSupervisorLifecycleError } from
+  "./source-supervisor-fatal.ts";
 
 const sourceConnectionKey = Buffer.alloc(32, 13).toString("base64");
 const actorKey = Buffer.alloc(32, 17).toString("base64");
@@ -202,7 +205,13 @@ test("a signal-path stop rejection is sunk and still surfaces at shutdown", asyn
   // before startup finishes, so the shutdown path must build a fresh wrapper.
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
   releaseStart?.();
-  await assert.rejects(running, (error: unknown) => error === stopFailure);
+  await assert.rejects(
+    running,
+    (error: unknown) =>
+      error instanceof ProviderSourceSupervisorLifecycleError &&
+      error.code === "SUPERVISOR_RUNTIME_STOP_FAILED" &&
+      error.cause === stopFailure,
+  );
 
   assert.equal(stopCalls, 2);
   assert.deepEqual(events, [
@@ -210,6 +219,94 @@ test("a signal-path stop rejection is sunk and still surfaces at shutdown", asyn
     "runtime_starting",
     "database_closed",
   ]);
+});
+
+test("a synchronous signal-path stop failure is sunk and classified", async () => {
+  const listeners = new Map<string, () => void>();
+  let releaseStart: (() => void) | undefined;
+  const startGate = new Promise<void>((resolve) => {
+    releaseStart = resolve;
+  });
+  let startEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => {
+    startEntered = resolve;
+  });
+  const stopFailure = new Error("synchronous stop refused");
+
+  const running = runProviderSourceSupervisorOnly({
+    environment: sourceEnvironment(),
+    fallbackWorkerId: "source-supervisor:fallback",
+    dependencies: {
+      createDatabaseLifecycle() {
+        return {
+          client: {} as PackscoutPrismaClient,
+          async start() {},
+          async close() {},
+        };
+      },
+      createRuntime() {
+        return {
+          async start() {
+            startEntered?.();
+            await startGate;
+          },
+          stop() {
+            throw stopFailure;
+          },
+        };
+      },
+      signals: {
+        once(signal, listener) { listeners.set(signal, listener); },
+        removeListener(signal) { listeners.delete(signal); },
+      },
+    },
+  });
+
+  await entered;
+  assert.doesNotThrow(() => listeners.get("SIGTERM")?.());
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  releaseStart?.();
+
+  await assert.rejects(
+    running,
+    (error: unknown) =>
+      error instanceof ProviderSourceSupervisorLifecycleError &&
+      error.code === "SUPERVISOR_RUNTIME_STOP_FAILED" &&
+      error.cause === stopFailure,
+  );
+});
+
+test("a runtime start rejection retains only its lifecycle stage", async () => {
+  const startFailure = new Error("runtime start rejected");
+  const running = runProviderSourceSupervisorOnly({
+    environment: sourceEnvironment(),
+    fallbackWorkerId: "source-supervisor:fallback",
+    dependencies: {
+      createDatabaseLifecycle() {
+        return {
+          client: {} as PackscoutPrismaClient,
+          async start() {},
+          async close() {},
+        };
+      },
+      createRuntime() {
+        return {
+          async start() {
+            throw startFailure;
+          },
+          async stop() {},
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    running,
+    (error: unknown) =>
+      error instanceof ProviderSourceSupervisorLifecycleError &&
+      error.code === "SUPERVISOR_RUNTIME_START_FAILED" &&
+      error.cause === startFailure,
+  );
 });
 
 test("source-only bootstrap fails configuration before database startup", async () => {
@@ -251,6 +348,7 @@ test("source-only bootstrap import graph excludes unrelated worker lanes", async
   );
 
   assert.deepEqual(imports.sort(), [
+    "./source-supervisor-fatal.ts",
     "./source-supervisor-runtime-config.ts",
     "@packscout/contracts",
     "@packscout/database",

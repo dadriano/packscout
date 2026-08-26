@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { providerSourceSupervisorFatalRecord } from
-  "./source-supervisor-fatal.ts";
+import {
+  providerSourceSupervisorFatalRecord,
+  ProviderSourceSupervisorLifecycleError,
+} from "./source-supervisor-fatal.ts";
 import { ProviderSourceSupervisorConfigurationError } from
   "./source-supervisor-runtime-config.ts";
 
@@ -38,4 +40,21 @@ test("fatal supervisor output retains allowlisted configuration codes", () => {
       },
     );
   }
+});
+
+test("fatal supervisor output retains only the allowlisted lifecycle stage", () => {
+  const opaqueToken = "opaque-database-password";
+  const error = new ProviderSourceSupervisorLifecycleError(
+    "SUPERVISOR_RUNTIME_STOP_FAILED",
+    new Error(`shutdown rejected ${opaqueToken}`),
+  );
+
+  const record = providerSourceSupervisorFatalRecord(error);
+
+  assert.deepEqual(record, {
+    level: "error",
+    event: "provider_source_supervisor_fatal",
+    failureCode: "SUPERVISOR_RUNTIME_STOP_FAILED",
+  });
+  assert.equal(JSON.stringify(record).includes(opaqueToken), false);
 });

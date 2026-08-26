@@ -735,13 +735,17 @@ export class ProviderSourceSupervisor<
 
   async #stopAfterInitialization(): Promise<void> {
     this.#coordinator.stopAdmission();
-    if (this.#renewalTimer) clearInterval(this.#renewalTimer);
-    this.#renewalTimer = null;
     await this.#initialization?.catch(() => undefined);
     await this.#renewalInFlight?.catch(() => undefined);
     await this.#cyclePromise?.catch(() => undefined);
     await Promise.allSettled([...this.#activeTurns]);
     await this.#snapshotTail.catch(() => undefined);
+    // Graceful drain may be waiting on the full bounded page transaction.
+    // Retain singleton ownership until every active turn and ordered snapshot
+    // has settled; only then stop heartbeats immediately before release.
+    if (this.#renewalTimer) clearInterval(this.#renewalTimer);
+    this.#renewalTimer = null;
+    await this.#renewalInFlight?.catch(() => undefined);
     const epoch = this.#epoch;
     if (epoch && !this.#fenceStarted) {
       // Publish the drained zero-capacity state before the singleton release.
@@ -1125,7 +1129,7 @@ export class ProviderSourceSupervisor<
       providerSourceSingletonTiming.maximumRenewalIntervalSeconds * 1_000;
     this.#renewalTimer = setInterval(() => {
       const epoch = this.#epoch;
-      if (!epoch || this.#fenceStarted || this.#stopping || this.#renewalInFlight) {
+      if (!epoch || this.#fenceStarted || this.#renewalInFlight) {
         return;
       }
       const renewal = this.#runControlPlane(
@@ -1141,12 +1145,12 @@ export class ProviderSourceSupervisor<
         }
       }).catch(async (error: unknown) => {
         if (this.#stopping) return;
-        // The 30-second durable singleton lease spans several heartbeat
-        // intervals. Page commits intentionally hold the epoch fence and can
-        // consume one bounded control-plane retry window; retry at the next
-        // heartbeat instead of converting ordinary commit contention into a
-        // false ownership loss. Real lost ownership still fences in
-        // #runControlPlane before reaching this branch.
+        // The durable singleton lease spans several heartbeat intervals. Page
+        // commits intentionally hold the epoch fence and can consume one
+        // bounded control-plane retry window; retry at the next heartbeat
+        // instead of converting ordinary commit contention into a false
+        // ownership loss. Real lost ownership still fences in #runControlPlane
+        // before reaching this branch.
         if (error instanceof ControlPlaneRetryExhaustedError) return;
         if (!this.#fenceStarted && !(error instanceof RuntimeLocallyFencedError)) {
           // A failed renewal call is not proof that another owner exists. The

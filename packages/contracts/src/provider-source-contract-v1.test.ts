@@ -44,7 +44,7 @@ test("launch source constants retain the evidence-backed operating envelope", ()
     terminalRequestAttemptDays: 30,
   });
   assert.deepEqual(providerSourceSingletonTiming, {
-    leaseSeconds: 30,
+    leaseSeconds: 60,
     maximumRenewalIntervalSeconds: 5,
     takeoverGraceSeconds: 15,
   });

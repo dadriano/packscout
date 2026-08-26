@@ -9,6 +9,7 @@ import {
   ProviderSourceRequestRepository,
   ProviderSourceTestResultRepository,
   type ClaimedConnectionTestWork,
+  type ClaimedPageReadWork,
   type ClaimedSourceTestWork,
 } from "@packscout/database";
 import {
@@ -99,6 +100,25 @@ function sourceWork(): ClaimedSourceTestWork {
   };
 }
 
+function pageWork(): ClaimedPageReadWork {
+  return {
+    ...sourceWork(),
+    id: "page-run-1",
+    kind: "page_read",
+    runId: "page-run-1",
+    runTrigger: "scheduled",
+    runStartedAt: new Date("2026-08-21T12:00:00.000Z"),
+    committedPages: 0,
+    committedRecords: 0,
+    retryAttempt: 0,
+    pageNumber: 1,
+    cursorGeneration: 1n,
+    requestedCursorValue: null,
+    requestedCursorFingerprint: null,
+    sourceIntervalSeconds: 60,
+  };
+}
+
 class RecordingAdapter extends AlternateBookmarkSourceAdapter {
   throwOnCapture = false;
   constructor(private readonly events: string[]) {
@@ -130,6 +150,7 @@ function fixture(overrides: Readonly<{
   capacityChanged?: () => Promise<void>;
   recordDiagnostic?: () => Promise<void>;
   resolveMapper?: () => void;
+  importPage?: () => Promise<never>;
 }> = {}): ExecutorFixture {
   const events: string[] = [];
   const adapter = new RecordingAdapter(events);
@@ -203,6 +224,7 @@ function fixture(overrides: Readonly<{
     testResults,
     pageImports: {
       async importPage() {
+        if (overrides.importPage) return await overrides.importPage();
         throw new Error("page import is outside this fixture");
       },
     } as never,
@@ -230,6 +252,55 @@ function fixture(overrides: Readonly<{
     },
   };
 }
+
+test("a bounded page persistence timeout preserves the cursor for retry", async () => {
+  const execution = fixture({
+    async importPage() {
+      throw new ControlPlaneTransactionError("timeout");
+    },
+  });
+
+  const result = await execution.executor.execute(
+    pageWork(),
+    execution.context,
+  );
+
+  assert.deepEqual(result, {
+    kind: "retryable",
+    safeCode: "PAGE_PERSISTENCE_TIMEOUT",
+  });
+  assert.deepEqual(execution.coordinator.snapshot(), {
+    maximumExecutionSlots: 4,
+    activeExecutionSlots: 1,
+    queuedOperations: 0,
+    profiles: [{
+      organizationId: "organization-1",
+      connectionProfileId: "profile-1",
+      approvedAggregateRequestCap: 2,
+      activeRequestPermits: 0,
+      queuedOperations: 0,
+    }],
+  });
+
+  execution.releaseRetained();
+  assert.equal(execution.coordinator.snapshot().activeExecutionSlots, 0);
+});
+
+test("an uncertain page commit connection loss fences local execution", async () => {
+  const execution = fixture({
+    async importPage() {
+      throw new ControlPlaneTransactionError("connection");
+    },
+  });
+
+  await assert.rejects(
+    execution.executor.execute(pageWork(), execution.context),
+    (error: unknown) => error instanceof RuntimeLocallyFencedError,
+  );
+
+  execution.releaseRetained();
+  assert.equal(execution.coordinator.snapshot().activeExecutionSlots, 0);
+});
 
 test("production executor begins and terminalizes once before publishing a test result", async () => {
   const subject = fixture();
