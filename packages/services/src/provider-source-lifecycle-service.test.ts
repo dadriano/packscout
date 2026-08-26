@@ -66,6 +66,9 @@ function snapshot(
 class MemoryLifecycleRepository
   implements ProviderSourceLifecycleAdminRepository {
   source = snapshot();
+  profileState: "draft" | "active" | "disabled" = "active";
+  activeRevisionSourceAdapterVersion: string | null =
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION;
   createInput: Parameters<ProviderSourceLifecycleAdminRepository["createSource"]>[0] | null = null;
   resetInput: Parameters<ProviderSourceLifecycleAdminRepository["resetCursor"]>[0] | null = null;
 
@@ -85,8 +88,12 @@ class MemoryLifecycleRepository
           organizationId,
           connectionProfileId: profileId,
           sourceTypeKey: "dataforrest-events-v1",
-          state: "active" as const,
-          activeRevisionId: connectionRevisionId,
+          state: this.profileState,
+          activeRevisionId: this.profileState === "draft"
+            ? null
+            : connectionRevisionId,
+          activeRevisionSourceAdapterVersion:
+            this.activeRevisionSourceAdapterVersion,
         }
       : null;
   }
@@ -204,6 +211,41 @@ test("source creation derives the immutable platform filter and contract-only ma
       { ...sourceRequest, mapperKey: "collector-crypt-provider-observation" },
     ),
     /invalid_source_configuration/u,
+  );
+});
+
+test("active profiles require the current adapter for creation and replacement while drafts can stage it", async () => {
+  const { repository, service } = fixture();
+  repository.activeRevisionSourceAdapterVersion =
+    "dataforrest-events-adapter-v1";
+
+  await assert.rejects(
+    service.createSource(
+      { organizationId, actorKey: "operator-admin" },
+      sourceRequest,
+    ),
+    /source_dependency_required/u,
+  );
+  await assert.rejects(
+    service.createReplacement(
+      { organizationId, actorKey: "operator-admin" },
+      { ...sourceRequest, replacesSourceInstanceId: oldSourceId },
+    ),
+    /source_dependency_required/u,
+  );
+  assert.equal(repository.createInput, null);
+
+  const draft = fixture();
+  draft.repository.profileState = "draft";
+  draft.repository.activeRevisionSourceAdapterVersion = null;
+  const created = await draft.service.createSource(
+    { organizationId, actorKey: "operator-admin" },
+    sourceRequest,
+  );
+  assert.equal(created.sourceInstanceId, sourceId);
+  assert.equal(
+    draft.repository.createInput?.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   );
 });
 

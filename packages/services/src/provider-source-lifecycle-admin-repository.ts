@@ -33,6 +33,7 @@ export interface ProviderSourceProfileBinding {
   readonly sourceTypeKey: string;
   readonly state: "draft" | "active" | "disabled";
   readonly activeRevisionId: string | null;
+  readonly activeRevisionSourceAdapterVersion: string | null;
 }
 
 export interface ProviderSourceProviderRecord {

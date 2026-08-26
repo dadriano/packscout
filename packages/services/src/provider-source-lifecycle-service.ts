@@ -114,6 +114,11 @@ export class ProviderSourceLifecycleService {
     } catch {
       return this.#invalid();
     }
+    if (
+      profile.state === "active" &&
+      profile.activeRevisionSourceAdapterVersion !==
+        adapter.manifest.adapterVersion
+    ) this.#dependency();
     let providerAdapter;
     try {
       providerAdapter = this.#sourceAdapters.resolve(

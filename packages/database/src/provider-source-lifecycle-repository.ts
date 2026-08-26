@@ -330,11 +330,25 @@ export class ProviderSourceLifecycleRepository {
         }
       }
       const profile = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        select id from public.source_connection_profiles
-        where id = cast(${input.connectionProfileId} as uuid)
-          and organization_id = cast(${input.organizationId} as uuid)
-          and source_type_key = ${sourceTypeKey}
-          and state <> 'disabled'
+        select profile.id from public.source_connection_profiles as profile
+        where profile.id = cast(${input.connectionProfileId} as uuid)
+          and profile.organization_id = cast(${input.organizationId} as uuid)
+          and profile.source_type_key = ${sourceTypeKey}
+          and profile.state <> 'disabled'
+          and (
+            profile.state = 'draft'
+            or exists (
+              select 1
+              from public.source_connection_revisions as active_revision
+              where active_revision.id = profile.active_revision_id
+                and active_revision.organization_id = profile.organization_id
+                and active_revision.connection_profile_id = profile.id
+                and active_revision.source_type_key = profile.source_type_key
+                and active_revision.source_adapter_version = ${sourceAdapterVersion}
+                and active_revision.state = 'active'
+                and active_revision.revoked_at is null
+            )
+          )
         for share
       `);
       const compatibleConnectionRevision =
