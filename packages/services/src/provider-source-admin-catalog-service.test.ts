@@ -167,7 +167,11 @@ test("catalog advertises current v2 while retaining masked v1 connection and sou
     connectionRevisionId,
     configurationFingerprint: "a".repeat(64),
   }]);
-  assert.equal(catalog.availableSourceTypes.length, 1);
+  assert.deepEqual(catalog.availableSourceTypes, [{
+    sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+    sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    label: "DataForrest events",
+  }]);
   assert.deepEqual(catalog.providers[0]?.sourceRegistration, {
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
     sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,

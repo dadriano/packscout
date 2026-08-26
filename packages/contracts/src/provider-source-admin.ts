@@ -220,6 +220,7 @@ export const providerSourceAdminCatalogSchema = z
         z
           .object({
             sourceTypeKey: productionProviderSourceTypeKeySchema,
+            sourceAdapterVersion: registrationKeySchema,
             label: z.string().min(1).max(120),
           })
           .strict(),

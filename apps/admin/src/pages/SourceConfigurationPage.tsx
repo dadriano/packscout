@@ -315,7 +315,7 @@ export function SourceConfigurationPage() {
             connections={catalog.connections}
             sources={catalog.sources}
             currentSourceAdapterVersion={
-              catalog.providers[0]?.sourceRegistration.sourceAdapterVersion ??
+              catalog.availableSourceTypes[0]?.sourceAdapterVersion ??
                 null
             }
             canManage={canManage}

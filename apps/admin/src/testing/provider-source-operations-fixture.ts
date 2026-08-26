@@ -347,6 +347,7 @@ export function sourceAdminCatalog(): ProviderSourceAdminCatalog {
   return {
     availableSourceTypes: [{
       sourceTypeKey: "dataforrest-events-v1",
+      sourceAdapterVersion: "dataforrest-events-adapter-v1",
       label: "DataForrest events",
     }],
     providers: sources.map((source) => ({

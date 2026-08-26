@@ -325,7 +325,10 @@ export class ProviderSourceAdminCatalogService {
       };
     }));
     const candidate = {
-      availableSourceTypes: this.#availableSourceTypes,
+      availableSourceTypes: this.#availableSourceTypes.map((sourceType) => ({
+        ...sourceType,
+        sourceAdapterVersion: sourceAdapter.manifest.adapterVersion,
+      })),
       providers: visibleProviders,
       connections: connectionSummaries,
       sources: visibleSources.map((record) => ({

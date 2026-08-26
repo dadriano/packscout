@@ -38,6 +38,7 @@ const fingerprint = "a".repeat(64);
 const catalog: ProviderSourceAdminCatalog = {
   availableSourceTypes: [{
     sourceTypeKey: "dataforrest-events-v1",
+    sourceAdapterVersion: "dataforrest-events-adapter-v1",
     label: "DataForrest events",
   }],
   providers: [{
@@ -227,17 +228,15 @@ test("data operators receive dense read-only evidence without configuration cont
   assert.equal(renderer.container.querySelector(".source-config-editor"), null);
 });
 
-test("secret administrators get an explicit confirmed adapter-upgrade candidate control", async (context) => {
+test("secret administrators can upgrade a legacy profile without provider records", async (context) => {
   const upgradeCatalog: ProviderSourceAdminCatalog = {
     ...catalog,
-    providers: catalog.providers.map((provider) => ({
-      ...provider,
-      sourceRegistration: {
-        ...provider.sourceRegistration,
-        sourceAdapterVersion: "dataforrest-events-adapter-v2",
-      },
+    availableSourceTypes: catalog.availableSourceTypes.map((sourceType) => ({
+      ...sourceType,
+      sourceAdapterVersion: "dataforrest-events-adapter-v2",
     })),
-    sources: catalog.sources.map((source) => ({ ...source, state: "disabled" })),
+    providers: [],
+    sources: [],
   };
   stubFetch(context, () => jsonResponse({ catalog: upgradeCatalog }));
   const renderer = await renderPage(page(session(true)));
@@ -268,6 +267,10 @@ test("secret administrators get an explicit confirmed adapter-upgrade candidate 
 test("legacy source pins direct operators to a separate current-adapter profile", async (context) => {
   const upgradeCatalog: ProviderSourceAdminCatalog = {
     ...catalog,
+    availableSourceTypes: catalog.availableSourceTypes.map((sourceType) => ({
+      ...sourceType,
+      sourceAdapterVersion: "dataforrest-events-adapter-v2",
+    })),
     providers: catalog.providers.map((provider) => ({
       ...provider,
       sourceRegistration: {
@@ -299,6 +302,10 @@ test("legacy source pins direct operators to a separate current-adapter profile"
 test("legacy source pins disable activation of an incompatible adapter candidate", async (context) => {
   const candidateCatalog: ProviderSourceAdminCatalog = {
     ...catalog,
+    availableSourceTypes: catalog.availableSourceTypes.map((sourceType) => ({
+      ...sourceType,
+      sourceAdapterVersion: "dataforrest-events-adapter-v2",
+    })),
     providers: catalog.providers.map((provider) => ({
       ...provider,
       sourceRegistration: {

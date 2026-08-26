@@ -35,6 +35,7 @@ function sourceIds(index: number) {
 const catalog = providerSourceAdminCatalogSchema.parse({
   availableSourceTypes: [{
     sourceTypeKey: "dataforrest-events-v1",
+    sourceAdapterVersion: "dataforrest-events-adapter-v1",
     label: "Registered event source",
   }],
   providers: providers.map((provider, index) => ({

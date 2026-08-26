@@ -85,6 +85,7 @@ test("connection credential input is strict while every catalog response is mask
   const catalog = providerSourceAdminCatalogSchema.parse({
     availableSourceTypes: [{
       sourceTypeKey: "dataforrest-events-v1",
+      sourceAdapterVersion: "dataforrest-events-adapter-v1",
       label: "DataForrest events",
     }],
     providers: [{
