@@ -193,6 +193,7 @@ export function operationsOverview(): ProviderSourceOperationsOverview {
   return {
     version: "packscout.provider-source-operations.v1",
     refreshedAt: now,
+    connectionMode: "shared",
     connection: {
       connectionProfileId: operationsFixtureIds.profile,
       displayName: "Shared DataForrest",

@@ -266,11 +266,17 @@ function connectionSummary(input: Readonly<{
   source: ProviderSourceAdminSummary | null;
 }>): ProviderSourceOperationsConnection | null {
   const preferredProfileId = input.source?.connectionProfileId;
-  const connection = input.catalog.connections.find(
-    ({ id }) => id === preferredProfileId,
-  ) ?? input.catalog.connections.find(({ state }) => state === "active") ??
-    input.catalog.connections[0] ?? null;
-  if (!connection) return null;
+  const connection = preferredProfileId === undefined
+    ? input.catalog.connections.find(({ state }) => state === "active") ??
+      input.catalog.connections[0] ?? null
+    : input.catalog.connections.find(({ id }) => id === preferredProfileId) ??
+      null;
+  if (!connection) {
+    if (preferredProfileId !== undefined) {
+      throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
+    }
+    return null;
+  }
   if (
     connection.activeRevisionId !== (connection.activeRevision?.id ?? null) ||
     (connection.activeRevision !== null &&
@@ -522,7 +528,11 @@ export class ProviderSourceOperationsService {
     this.#dependencies = dependencies;
   }
 
-  async overview(organizationId: string): Promise<ProviderSourceOperationsOverview> {
+  async #composeOverview(organizationId: string): Promise<Readonly<{
+    catalog: ProviderSourceAdminCatalog;
+    connections: readonly (ProviderSourceOperationsConnection | null)[];
+    response: ProviderSourceOperationsOverview;
+  }>> {
     const [catalog, snapshot] = await Promise.all([
       this.#dependencies.catalog.read(organizationId),
       this.#dependencies.snapshot.read({
@@ -542,14 +552,43 @@ export class ProviderSourceOperationsService {
       ),
       connectionProfileIds: catalog.connections.map(({ id }) => id),
     });
-    const primarySource = sources.find(Boolean) ?? null;
-    const connection = connectionSummary({
-      dependencies: this.#dependencies,
-      catalog,
-      snapshot,
-      facts,
-      source: primarySource,
-    });
+    const connections = sources.map((source) =>
+      source === null
+        ? null
+        : connectionSummary({
+            dependencies: this.#dependencies,
+            catalog,
+            snapshot,
+            facts,
+            source,
+          })
+    );
+    const configuredConnections = connections.filter(
+      (connection): connection is ProviderSourceOperationsConnection =>
+        connection !== null,
+    );
+    const connectionProfileIds = new Set(
+      configuredConnections.map(({ connectionProfileId }) =>
+        connectionProfileId
+      ),
+    );
+    const connection = configuredConnections.length === 0
+      ? connectionSummary({
+          dependencies: this.#dependencies,
+          catalog,
+          snapshot,
+          facts,
+          source: null,
+        })
+      : connectionProfileIds.size === 1
+        ? configuredConnections[0] ?? null
+        : null;
+    let connectionMode: "none" | "shared" | "split";
+    if (configuredConnections.length === 0) {
+      connectionMode = connection === null ? "none" : "shared";
+    } else {
+      connectionMode = connectionProfileIds.size === 1 ? "shared" : "split";
+    }
     const summaries = catalog.providers.map((provider, index) => {
       const source = sources[index] ?? null;
       const providerRecord = facts.providers.find(
@@ -563,52 +602,56 @@ export class ProviderSourceOperationsService {
         displayName: providerRecord.displayName,
         source,
         facts: source
-          ? facts.sources.find(
+            ? facts.sources.find(
               ({ sourceInstanceId }) => sourceInstanceId === source.sourceInstanceId,
             ) ?? null
           : null,
         snapshot,
-        connection,
+        connection: connections[index] ?? null,
       });
     });
-    return providerSourceOperationsOverviewSchema.parse({
+    const response = providerSourceOperationsOverviewSchema.parse({
       version: PROVIDER_SOURCE_OPERATIONS_VERSION,
       refreshedAt: snapshot.presence.databaseTime,
+      connectionMode,
       connection,
       sources: summaries,
     });
+    return { catalog, connections, response };
+  }
+
+  async overview(organizationId: string): Promise<ProviderSourceOperationsOverview> {
+    return (await this.#composeOverview(organizationId)).response;
   }
 
   async detail(
     organizationId: string,
     providerId: string,
   ): Promise<ProviderSourceOperationsDetail> {
-    const overview = await this.overview(organizationId);
-    const source = overview.sources.find(
+    const overview = await this.#composeOverview(organizationId);
+    const sourceIndex = overview.response.sources.findIndex(
       (candidate) => candidate.providerId === providerId,
     );
+    const source = overview.response.sources[sourceIndex];
     if (!source?.source) {
       throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_NOT_FOUND");
     }
-    const [record, catalog] = await Promise.all([
-      this.#dependencies.repository.readDetail({
-        organizationId,
-        providerId,
-        sourceInstanceId: source.source.sourceInstanceId,
-      }),
-      this.#dependencies.catalog.read(organizationId),
-    ]);
+    const record = await this.#dependencies.repository.readDetail({
+      organizationId,
+      providerId,
+      sourceInstanceId: source.source.sourceInstanceId,
+    });
     if (!record) {
       throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_NOT_FOUND");
     }
-    const adminSource = catalog.sources.find(
+    const adminSource = overview.catalog.sources.find(
       ({ sourceInstanceId }) =>
         sourceInstanceId === source.source!.sourceInstanceId,
     );
     return providerSourceOperationsDetailSchema.parse({
       version: PROVIDER_SOURCE_OPERATIONS_VERSION,
-      refreshedAt: overview.refreshedAt,
-      connection: overview.connection,
+      refreshedAt: overview.response.refreshedAt,
+      connection: overview.connections[sourceIndex] ?? null,
       source,
       runHistory: record.runs.map(runSummary),
       pageProgress: record.pages.map((page) => ({

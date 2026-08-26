@@ -401,7 +401,10 @@ export function ProviderDetailPage() {
       {detailFailure ? <div className="ops-error" role="alert"><p>{detailFailure}</p><button type="button" className="admin-button admin-button-secondary" onClick={refresh}>Refresh current state</button></div> : null}
       {actionFailure ? <div className="ops-error" role="alert"><p>{actionFailure}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => setActionFailure(null)}>Dismiss</button></div> : null}
 
-      <ConnectionOperationsSummary connection={detail.connection} />
+      <ConnectionOperationsSummary
+        connection={detail.connection}
+        mode={detail.connection === null ? "none" : "shared"}
+      />
       <ProviderSourceOperationsLedger
         sources={[source]}
         canOperate={canOperate}

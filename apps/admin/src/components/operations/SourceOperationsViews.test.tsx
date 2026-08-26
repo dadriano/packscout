@@ -152,7 +152,7 @@ test("source-neutral overview renders shared capacity and the exact supplied reg
   );
   const html = renderToStaticMarkup(
     <MemoryRouter>
-      <ConnectionOperationsSummary connection={connection} />
+      <ConnectionOperationsSummary connection={connection} mode="shared" />
       <ProviderSourceOperationsLedger sources={sources} canOperate pendingKey={null} onCommand={() => undefined} />
     </MemoryRouter>,
   );
@@ -167,6 +167,18 @@ test("source-neutral overview renders shared capacity and the exact supplied reg
   assert.match(html, /60 · Total unknown/);
   assert.match(html, /12\.5\/s/);
   assert.doesNotMatch(html, /bearer|authorization|rawPayload|vendorCursor/i);
+});
+
+test("split-profile migration renders an intentional transition instead of missing configuration", () => {
+  Object.assign(globalThis, { React });
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <ConnectionOperationsSummary connection={null} mode="split" />
+    </MemoryRouter>,
+  );
+  assert.match(html, /Multiple profiles in service/);
+  assert.match(html, /exact adapter, health, and capacity evidence/);
+  assert.doesNotMatch(html, /Not configured|before activating/u);
 });
 
 test("bounded operational labels cover worker, capacity, recovery, retry, pause, failure, and head states", () => {

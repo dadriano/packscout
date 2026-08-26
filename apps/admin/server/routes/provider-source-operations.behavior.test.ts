@@ -85,6 +85,7 @@ function source(index: number): ProviderSourceOperationsSource {
 const overview: ProviderSourceOperationsOverview = {
   version: PROVIDER_SOURCE_OPERATIONS_VERSION,
   refreshedAt: now,
+  connectionMode: "none",
   connection: null,
   sources: [source(0), source(1), source(2), source(3)],
 };
