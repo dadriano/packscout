@@ -38,7 +38,7 @@ export function LandingAccessCta() {
         </button>
       )}
       <p aria-live="polite" className={styles.ctaNote}>
-        {action.note}
+        {action.note ?? null}
       </p>
     </div>
   );

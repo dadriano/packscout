@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { LANDING_COPY, LANDING_METADATA } from "./landing-content";
+import { presentLandingAccessAction } from "@/components/landing/landing-presentation";
 
 function collectStrings(value: unknown, collected: string[] = []): string[] {
   if (typeof value === "string") {
@@ -27,15 +28,19 @@ test("the landing copy states plainly what PackScout is", () => {
 });
 
 test("the closed-beta statement is honest about both admission paths", () => {
-  assert.match(LANDING_COPY.betaStatement, /closed beta/i);
-  assert.match(LANDING_COPY.betaStatement, /allowlist/i);
-  assert.match(LANDING_COPY.betaStatement, /review/i);
+  // The page no longer carries a prose beta statement: the eyebrow names the
+  // closed beta and the call to action names what pressing it does. What must
+  // never be lost is that a stranger is told, before signing in, that this is
+  // a beta and that signing in is a request rather than an entry.
+  assert.match(LANDING_COPY.eyebrow, /closed beta/i);
+  const signedOutAction = presentLandingAccessAction("signed_out");
+  assert.match(signedOutAction.label, /request access/i);
+  // A visitor must be able to learn what signing in will do to them BEFORE
+  // they start the hosted flow. The prose that used to carry this was cut for
+  // being said three times; it survives here once.
+  assert.match(LANDING_COPY.accessOutcome, /allowlist/i);
+  assert.match(LANDING_COPY.accessOutcome, /review/i);
   // The sign-in record is the access request: no waitlist, no lead capture.
-  assert.match(LANDING_COPY.accessLede, /no waitlist form and no email capture/i);
-  assert.match(LANDING_COPY.accessLede, /sign-in itself is the access request/i);
-  assert.equal(LANDING_COPY.accessSteps.length, 3);
-  assert.match(LANDING_COPY.accessSteps[1], /allowlist/i);
-  assert.match(LANDING_COPY.accessSteps[2], /review/i);
 });
 
 test("the copy never overclaims what estimates can do", () => {
@@ -86,4 +91,13 @@ test("social metadata mirrors the page identity", () => {
     LANDING_METADATA.twitter?.description,
     LANDING_METADATA.description,
   );
+});
+
+test("the copy claims only the coverage the product actually has", () => {
+  // Four source contracts are approved for launch; "every provider" would
+  // read as market-wide coverage the registry deliberately does not offer.
+  const allCopy = collectStrings(LANDING_COPY).join(" ");
+  assert.doesNotMatch(allCopy, /every provider/i);
+  assert.doesNotMatch(allCopy, /all providers/i);
+  assert.match(allCopy, /supported providers/i);
 });
