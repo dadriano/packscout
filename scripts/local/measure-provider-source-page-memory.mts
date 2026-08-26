@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   DATAFORREST_EVENTS_V1_ENDPOINT,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  dataforrestEventsV2SourceAdapterManifest,
+  dataforrestEventsV1SourceAdapterManifest,
   providerIdentityNamespaceByLaunchProvider,
   providerSourceLaunchBounds,
   type ProviderSourcePageCommitPins,
@@ -22,13 +22,15 @@ import {
 import { completeAuthenticPageReadForTest } from
   "../../packages/services/src/source-adapter-page-result.test-support.ts";
 
-const benchmarkVersion = "provider-source-page-memory-v2";
+const benchmarkVersion = "provider-source-page-memory-v1";
 const warmupPageCount = 10;
 const trialCount = 5;
 const pagesPerTrial = 20;
 const pageCount = trialCount * pagesPerTrial;
 const recordsPerPage = providerSourceLaunchBounds.pageTargetRecords;
-const maximumResponseBytes = providerSourceLaunchBounds.maximumResponseBytes;
+const maximumResponseBytes =
+  dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes;
+const emptyObjectFactsPerRecord = 600;
 const mebibyte = 1024 * 1024;
 
 function median(values: readonly number[]): number {
@@ -51,7 +53,25 @@ async function collectGarbage(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-function maximumSizeSanitizedPage(): Uint8Array {
+function countJsonNodes(root: unknown): number {
+  const pending: unknown[] = [root];
+  let count = 0;
+  while (pending.length > 0) {
+    const value = pending.pop();
+    count += 1;
+    if (Array.isArray(value)) {
+      for (const item of value) pending.push(item);
+    } else if (value !== null && typeof value === "object") {
+      for (const item of Object.values(value)) pending.push(item);
+    }
+  }
+  return count;
+}
+
+function maximumSizeSanitizedPage(): Readonly<{
+  bytes: Uint8Array;
+  jsonNodeCount: number;
+}> {
   const records = Array.from({ length: recordsPerPage }, (_, index) => ({
     stream: "catalog",
     platform: "courtyard",
@@ -60,36 +80,40 @@ function maximumSizeSanitizedPage(): Uint8Array {
     collected_at: "2026-08-21T12:00:01.000Z",
     data: {
       provider_label: `Capacity pack ${index}`,
+      // Empty objects are the highest-overhead JSON nodes admitted by the
+      // parser. This keeps the maximum-byte fixture close to the 160k-node cap
+      // instead of measuring a large string in isolation.
+      native_facts: Array.from(
+        { length: emptyObjectFactsPerRecord },
+        () => ({}),
+      ),
       sanitized_padding: "",
     },
     entity: "pack",
     first_seen_at: "2026-08-21T12:00:00.000Z",
     available: true,
   }));
-  let serialized = JSON.stringify({
+  const page = {
     records,
     next_cursor: "capacity-cursor-001",
     poll_after_seconds: 60,
-  });
+  };
+  let serialized = JSON.stringify(page);
   const remainingBytes = maximumResponseBytes - Buffer.byteLength(serialized);
   if (remainingBytes < 0) throw new Error("capacity page fixture exceeds bound");
   records[0]!.data.sanitized_padding = "x".repeat(remainingBytes);
-  serialized = JSON.stringify({
-    records,
-    next_cursor: "capacity-cursor-001",
-    poll_after_seconds: 60,
-  });
+  serialized = JSON.stringify(page);
   const bytes = new TextEncoder().encode(serialized);
   if (bytes.byteLength !== maximumResponseBytes) {
     throw new Error("capacity page fixture does not reach the response bound");
   }
-  return bytes;
+  return { bytes, jsonNodeCount: countJsonNodes(page) };
 }
 
 class InMemoryDataforrestEventsSourceAdapter
   extends DataforrestEventsSourceAdapter {
   constructor(private readonly rawResponse: Uint8Array) {
-    super({}, dataforrestEventsV2SourceAdapterManifest);
+    super({}, dataforrestEventsV1SourceAdapterManifest);
   }
 
   override async captureUnboundRequest(
@@ -121,10 +145,12 @@ if (typeof globalThis.gc !== "function") {
 }
 
 const provider = "courtyard" as const;
-const declaration = dataforrestEventsV2SourceAdapterManifest.supportedProviders
+const declaration = dataforrestEventsV1SourceAdapterManifest.supportedProviders
   .find((candidate) => candidate.provider === provider);
 const mapper = providerMapperManifest.find(
-  (candidate) => candidate.descriptor.provider === provider,
+  (candidate) => candidate.descriptor.provider === provider &&
+    candidate.descriptor.normalizedContractVersion ===
+      PROVIDER_OBSERVATION_CONTRACT_VERSION,
 );
 if (!declaration || !mapper) throw new Error("capacity descriptor unavailable");
 
@@ -145,10 +171,10 @@ const ids = Object.freeze({
 const requestedCursor = Object.freeze({
   sourceInstanceId: ids.sourceInstanceId,
   sourceRevisionId: ids.sourceRevisionId,
-  sourceTypeKey: dataforrestEventsV2SourceAdapterManifest.sourceTypeKey,
-  adapterVersion: dataforrestEventsV2SourceAdapterManifest.adapterVersion,
+  sourceTypeKey: dataforrestEventsV1SourceAdapterManifest.sourceTypeKey,
+  adapterVersion: dataforrestEventsV1SourceAdapterManifest.adapterVersion,
   cursorCodecKey:
-    dataforrestEventsV2SourceAdapterManifest.cursorCodecKey,
+    dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
   cursorGeneration: 1,
   value: null,
 });
@@ -158,9 +184,9 @@ const pins: ProviderSourcePageCommitPins = Object.freeze({
   provider,
   sourceInstanceId: ids.sourceInstanceId,
   sourceRevisionId: ids.sourceRevisionId,
-  sourceTypeKey: dataforrestEventsV2SourceAdapterManifest.sourceTypeKey,
+  sourceTypeKey: dataforrestEventsV1SourceAdapterManifest.sourceTypeKey,
   sourceAdapterVersion:
-    dataforrestEventsV2SourceAdapterManifest.adapterVersion,
+    dataforrestEventsV1SourceAdapterManifest.adapterVersion,
   normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
   mapperKey: mapper.descriptor.mapperKey,
   mapperVersion: mapper.descriptor.mapperVersion,
@@ -182,7 +208,7 @@ const pins: ProviderSourcePageCommitPins = Object.freeze({
   pageId: ids.pageId,
   pageNumber: 1,
   cursorCodecVersion:
-    dataforrestEventsV2SourceAdapterManifest.cursorCodecKey,
+    dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
   cursorGeneration: 1n,
   requestedCursor,
   requestedCursorFingerprint: null,
@@ -211,9 +237,8 @@ const requestPins = Object.freeze({
   cursorGeneration: Number(pins.cursorGeneration),
   requestedCursorFingerprint: null,
 });
-const adapter = new InMemoryDataforrestEventsSourceAdapter(
-  maximumSizeSanitizedPage(),
-);
+const maximumPage = maximumSizeSanitizedPage();
+const adapter = new InMemoryDataforrestEventsSourceAdapter(maximumPage.bytes);
 const importService = new ProviderSourcePageImportService(
   new ProviderSourcePagePlanner(
     createProviderObservationMapperRegistryFromManifest(),
@@ -247,7 +272,7 @@ async function processMaximumSizePage(): Promise<Readonly<{
 }>> {
   const adapterResult = await completeAuthenticPageReadForTest(
     {
-      manifest: dataforrestEventsV2SourceAdapterManifest,
+      manifest: dataforrestEventsV1SourceAdapterManifest,
       pins: requestPins,
       requestedCursor,
       connectionConfiguration: {
@@ -314,13 +339,15 @@ const result = {
     architecture: process.arch,
   },
   path: "authentic-capture-terminalize-interpret-complete-import-plan",
-  sourceAdapterVersion: dataforrestEventsV2SourceAdapterManifest.adapterVersion,
+  sourceAdapterVersion: dataforrestEventsV1SourceAdapterManifest.adapterVersion,
   warmupPageCount,
   trialCount,
   pagesPerTrial,
   pageCount,
   recordsPerPage,
   responseBytesPerPage: maximumResponseBytes,
+  jsonNodesPerPage: maximumPage.jsonNodeCount,
+  emptyObjectFactsPerRecord,
   totalRecordsProcessed: checksum,
   elapsedMilliseconds: Number((performance.now() - startedAt).toFixed(3)),
   idleRssBytes,

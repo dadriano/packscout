@@ -6,12 +6,12 @@ import {
   type LaunchProviderKey,
   type LaunchRecordIdScopeKey,
   type NormalizedProviderFacts,
-  type NormalizedProviderObservation,
   type NormalizedRelationshipIdentity,
   type ProviderCanonicalKind,
+  type NormalizedProviderObservation,
 } from "@packscout/contracts";
 import { fingerprintCanonicalProviderContent } from "./provider-observation-canonical-content.ts";
-import type { SourceMapperCompatibilityDescriptor } from "./source-mapper-descriptors.ts";
+import type { SourceMapperDescriptor } from "./source-mapper-descriptors.ts";
 
 export type CanonicalCatalogAvailability =
   | "available"
@@ -184,7 +184,7 @@ export interface ProviderObservationMapperInput {
 }
 
 export interface ProviderObservationMapper {
-  readonly descriptor: SourceMapperCompatibilityDescriptor;
+  readonly descriptor: SourceMapperDescriptor;
   map(input: ProviderObservationMapperInput): ProviderObservationMappingOutcome;
 }
 
@@ -408,7 +408,7 @@ function evInputFromFacts(
 
 function incompatible(
   input: ProviderObservationMapperInput,
-  descriptor: SourceMapperCompatibilityDescriptor,
+  descriptor: SourceMapperDescriptor,
 ): ProviderObservationMappingOutcome | null {
   if (input.provider !== descriptor.provider) {
     return {
@@ -436,11 +436,13 @@ function incompatible(
 
 function mapNormalizedObservation(
   input: ProviderObservationMapperInput,
-  descriptor: SourceMapperCompatibilityDescriptor,
+  descriptor: SourceMapperDescriptor,
 ): ProviderObservationMappingOutcome {
   const mismatch = incompatible(input, descriptor);
   if (mismatch) return mismatch;
-  const observation = normalizedProviderObservationSchema.parse(input.observation);
+  const observation = normalizedProviderObservationSchema.parse(
+    input.observation,
+  );
   const warnings: MapperWarning[] = [];
   const recordId = observation.providerRecordIdentity.providerRecordId;
   const scope = observation.providerRecordIdentity.recordIdScopeKey;
@@ -698,9 +700,12 @@ function mapNormalizedObservation(
 }
 
 export function createLaunchProviderObservationMapper(
-  descriptor: SourceMapperCompatibilityDescriptor,
+  descriptor: SourceMapperDescriptor,
 ): ProviderObservationMapper {
-  if (descriptor.normalizedContractVersion !== PROVIDER_OBSERVATION_CONTRACT_VERSION) {
+  if (
+    descriptor.normalizedContractVersion !==
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+  ) {
     throw new Error("provider_mapper.normalized_contract_mismatch");
   }
   return Object.freeze({

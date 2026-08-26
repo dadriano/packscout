@@ -55,6 +55,12 @@ export interface ProviderSourceAtomicPageCommitResult {
 }
 
 export interface ProviderSourceAtomicPageRepository {
+  /**
+   * Implementations must snapshot the command synchronously before their first
+   * asynchronous boundary. The canonical capture owns its response buffer;
+   * this handoff deliberately avoids a second page-sized copy, while the
+   * repository snapshot preserves command immutability during persistence.
+   */
   commitPage(
     input: ProviderSourceAtomicPagePersistenceInput,
   ): Promise<ProviderSourceAtomicPageCommitResult>;
@@ -295,9 +301,7 @@ export class ProviderSourcePageImportService {
     return this.pages.commitPage({
       pins: input.pins,
       plan,
-      protectedRawResponse: new Uint8Array(
-        captured.requestCapture.protectedRawResponse,
-      ),
+      protectedRawResponse: captured.requestCapture.protectedRawResponse,
       protectedRawResponseSha256:
         captured.requestCapture.protectedRawResponseSha256,
       protectedNativeEvidence: captured.protectedNativeEvidence,

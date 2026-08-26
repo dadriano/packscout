@@ -198,7 +198,7 @@ test("provider detail preserves safe state through refresh and action failures w
   await settlePage();
 
   assert.match(pageText(routed), /Source contract/);
-  assert.match(pageText(routed), /provider-observation-v1/);
+  assert.match(pageText(routed), /packscout\.provider-observation\.v1/);
   assert.match(pageText(routed), /Safe fingerprint/);
   assert.match(pageText(routed), /Page committed/);
   assert.match(pageText(routed), /Shared connection/);

@@ -14,6 +14,13 @@ For a first full-history backfill, do not use this guide by itself. Follow the
 It binds the exact database and backing volume, proves capacity, bootstraps the
 four stable provider roots, and prevents page reads during configuration.
 
+After intentionally replacing the normal disposable development database,
+first follow the
+[local reset and first-administrator bootstrap](../local-development-first-admin-bootstrap.md),
+then return to **Configure a new pipeline** below. That path recreates the one
+administrator without putting its password in argv or a runtime environment
+variable; it is not valid for Task010 or any non-loopback target.
+
 ## Safety rules
 
 - Run exactly one source-supervisor owner for a database. Do not run the
@@ -137,7 +144,7 @@ approved secret store or ignored local environment. Never prefix a secret with
 | `providers:view`          | View configuration, pipeline status, runs, safe diagnostics, quarantine, workers, and alerts. |
 | `imports:start`           | Run now, pause, and resume a provider source.                                                 |
 | `imports:retry`           | Retry retained quarantined records.                                                           |
-| `providers:manage`        | Create, test, and activate sources; revise timing; replace, disable, or reset a source.       |
+| `providers:manage`        | Create, test, and activate sources; revise timing; disable or reset a source.                 |
 | `provider_secrets:manage` | Additionally create, rotate, recover, or revoke connection credentials.                       |
 
 ## Start and stop the pipeline
@@ -208,8 +215,10 @@ For each stable provider root:
    page read.
 
 Activation pins the exact source, adapter, normalized contract, mapper,
-connection revision, schedule, and cursor generation. Changing those pins
-requires an explicit tested revision or replacement.
+connection revision, schedule, and cursor generation. The DataForrest runtime
+accepts only the current v1/v1/v1 adapter, observation, and mapper tuple. During
+early development, changing those semantic pins requires the guarded full local
+database reset and a complete reimport; it is not an in-place source operation.
 
 ### 3. Begin ingestion
 
@@ -233,7 +242,6 @@ not create parallel work for one source.
 | Save timing      | Provider detail or Source Configuration | Creates a schedule revision between 60 seconds and 24 hours; does not reset the cursor.                                                                     |
 | Retry quarantine | Quarantine                              | Reprocesses retained evidence independently; never rewinds the source cursor.                                                                                   |
 | Disable source   | Source Configuration                    | Stops future work after the safe boundary while preserving history and cursor evidence.                                                                     |
-| Replace source   | Source Configuration                    | Creates a separately tested source with its own cursor; identity compatibility is required.                                                                 |
 
 At provider head, the next fetch waits for the greater of the configured source
 interval and the adapter's source-neutral minimum delay. Repeated database polls
@@ -329,9 +337,10 @@ committed.
 
 An active source in **Action required** cannot be recovered by repeatedly
 requesting a manual run. An administrator must correct the underlying issue,
-disable the source at its safe boundary, request a fresh source test, activate
-the tested source in paused state, and then resume it from the committed
-cursor. Use replacement only when the source contract itself must change.
+  disable the source at its safe boundary, request a fresh source test, activate
+  the tested source in paused state, and then resume it from the committed
+  cursor. If the DataForrest contract itself changes during early development,
+  stop the runtimes and use the guarded full local reset and reimport procedure.
 
 Protected raw page bytes expire after seven days. Quarantined evidence and safe
 processor diagnostics are retained for 30 days. Compact dispositions, hashes,
@@ -379,9 +388,6 @@ linked diagnostics; do not force a second process or mutate runtime tables.
   tested rotation for routine credential changes.
 - **Disable** intentionally prevents future source work. It is not a temporary
   pause.
-- **Replacement** starts a new source instance at **Feed start** and requires the
-  same provider identity namespace and record-ID scopes. It never transfers an
-  old cursor.
 - **Reset cursor** is a last-resort replay operation. The source must be
   paused or disabled; review the preview, type its exact confirmation, and
   understand that the next resume starts at **Feed start**. Never reset to fix a

@@ -13,9 +13,10 @@ export const DATAFOREST_PLATFORM_FILTERS = Object.freeze([
   "phygitals",
   "clutchpacks",
 ]);
+export const DATAFOREST_CAPTURE_MAX_BYTES = 8 * 1024 * 1024;
 export const DATAFOREST_CAPTURE_DEFAULTS = Object.freeze({
   limit: 500,
-  maxBytes: 4 * 1024 * 1024,
+  maxBytes: DATAFOREST_CAPTURE_MAX_BYTES,
   timeoutMs: 10_000,
   concurrency: 2,
 });
@@ -35,7 +36,7 @@ JSON evidence report to stdout. The endpoint is fixed and cannot be overridden.
 
 Options may only make the approved request bounds stricter:
   --limit <1-500>             Records requested per filtered page (default 500)
-  --max-bytes <1-4194304>     Maximum response bytes (default 4194304)
+  --max-bytes <1-8388608>     Maximum response bytes (default 8388608)
   --timeout-ms <1-10000>      Per-request timeout (default 10000)
   --concurrency <2-4>         Parallel filtered probes (default 2)
   --help                      Show this message

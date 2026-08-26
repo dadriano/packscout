@@ -23,14 +23,19 @@ test("fatal supervisor output never copies dependency error fields", () => {
 });
 
 test("fatal supervisor output retains allowlisted configuration codes", () => {
-  assert.deepEqual(
-    providerSourceSupervisorFatalRecord(
-      new ProviderSourceSupervisorConfigurationError("DATABASE_URL_INVALID"),
-    ),
-    {
-      level: "error",
-      event: "provider_source_supervisor_fatal",
-      failureCode: "DATABASE_URL_INVALID",
-    },
-  );
+  for (const code of [
+    "DATABASE_URL_INVALID",
+    "SOURCE_EXECUTION_SLOTS_INVALID",
+  ] as const) {
+    assert.deepEqual(
+      providerSourceSupervisorFatalRecord(
+        new ProviderSourceSupervisorConfigurationError(code),
+      ),
+      {
+        level: "error",
+        event: "provider_source_supervisor_fatal",
+        failureCode: code,
+      },
+    );
+  }
 });

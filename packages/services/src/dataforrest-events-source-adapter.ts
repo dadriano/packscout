@@ -71,7 +71,7 @@ function failedRequest(
   failure: SourceAdapterFailure,
   durationMilliseconds = 0,
   responseBytes = 0,
-  code = failure.code,
+  code: string = failure.code,
 ): UnboundSourceAdapterRequestResult {
   return Object.freeze({
     ok: false,
@@ -483,6 +483,7 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
           mapTransportFailure(operation, error),
           error.durationMilliseconds,
           error.responseBytes,
+          error.code,
         );
       }
       return failedRequest(

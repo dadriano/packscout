@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { providerIdentityNamespaceByLaunchProvider } from "@packscout/contracts";
+import {
+  providerIdentityNamespaceByLaunchProvider,
+} from "@packscout/contracts";
 import { PrismaAdminImportRunRepository } from "./admin-import-run-repository.ts";
 import type { PackscoutPrismaClient } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
@@ -609,7 +611,7 @@ test("terminal request proof compacts permanently and diagnostic feeds expire sa
   }
 });
 
-test("replacement source lineage rejects cross-tenant profile and audit references", async () => {
+test("source lineage rejects cross-tenant profile and audit references", async () => {
   const fixture = await sourceFixture();
   try {
     const unrelatedConnection =

@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   DATAFOREST_CAPTURE_DEFAULTS,
+  DATAFOREST_CAPTURE_MAX_BYTES,
   DATAFOREST_ENDPOINT,
   DATAFOREST_PLATFORM_FILTERS,
   captureDataforestEvidence,
@@ -143,13 +144,13 @@ test("parseCaptureOptions uses approved defaults and only accepts stricter bound
     },
   );
   assert.equal(
-    parseCaptureOptions(["--max-bytes", "4194304"]).options.maxBytes,
-    4 * 1024 * 1024,
+    parseCaptureOptions(["--max-bytes", "8388608"]).options.maxBytes,
+    DATAFOREST_CAPTURE_MAX_BYTES,
   );
 
   for (const argumentsList of [
     ["--limit", "501"],
-    ["--max-bytes", "4194305"],
+    ["--max-bytes", "8388609"],
     ["--timeout-ms", "10001"],
     ["--concurrency", "1"],
     ["--endpoint", "https://example.test"],
@@ -216,7 +217,7 @@ test("captureDataforestEvidence executes the fixed bounded probe matrix without 
   assert.equal(report.endpoint.host, "198.204.245.26.sslip.io");
   assert.equal(report.endpoint.path, "/v1/events");
   assert.equal(report.bounds.recordsPerFilteredRequest, 500);
-  assert.equal(report.bounds.maximumResponseBytes, 4 * 1024 * 1024);
+  assert.equal(report.bounds.maximumResponseBytes, DATAFOREST_CAPTURE_MAX_BYTES);
   assert.equal(report.bounds.requestTimeoutMs, 10_000);
   assert.equal(report.bounds.parallelRequestCount, 2);
   assert.equal(report.bounds.actualRequestCount, 22);

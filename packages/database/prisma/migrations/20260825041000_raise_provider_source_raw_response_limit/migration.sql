@@ -1,5 +1,5 @@
--- Keep durable protected page evidence aligned with the contract-owned launch
--- response bound. Historical rows remain valid; only the upper bound widens.
+-- Keep durable protected page evidence aligned with the sole contract-owned
+-- launch response bound.
 ALTER TABLE "import_pages"
   DROP CONSTRAINT "import_pages_normalized_runtime_shape_check",
   ADD CONSTRAINT "import_pages_normalized_runtime_shape_check"
@@ -11,7 +11,7 @@ ALTER TABLE "import_pages"
       AND (
         (
           "protected_raw_response" IS NOT NULL
-          AND octet_length("protected_raw_response") BETWEEN 1 AND 4194304
+          AND octet_length("protected_raw_response") BETWEEN 1 AND 8388608
           AND "payload_expired_at" IS NULL
         )
         OR (

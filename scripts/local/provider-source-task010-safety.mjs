@@ -8,6 +8,7 @@ export const TASK010_SAFETY_VERSION =
   "packscout.provider-source-task010-safety.v1";
 export const TASK010_LOCAL_ACKNOWLEDGEMENT =
   "I_UNDERSTAND_THIS_TARGET_IS_LOCAL_AND_EMPTY";
+export const TASK010_SOURCE_EXECUTION_SLOTS = "1";
 export const TASK010_BOOTSTRAP_ACTION = "provider_source.task010.bootstrap";
 export const TASK010_PAGE_RECORD_COUNT_SQL = `
   coalesce((record_counts_json->>'catalog')::bigint, 0) +
@@ -16,9 +17,9 @@ export const TASK010_PAGE_RECORD_COUNT_SQL = `
   coalesce((record_counts_json->>'adapterInvalid')::bigint, 0)
 `;
 export const TASK010_REQUIRED_MIGRATION = Object.freeze({
-  name: "20260821040000_provider_source_page_plan_digest",
-  checksum: "da6cfb6f7d7cff1818d6d1d62d7688683e9840a872220cac6a64b35f9969c1b9",
-  tableCount: 80,
+  name: "20260825041000_raise_provider_source_raw_response_limit",
+  checksum: "25899178e7256a15fc4d86c158f560e597b9fa0e8c949caa696aa55439cc57c8",
+  tableCount: 84,
 });
 
 export const TASK010_PROVIDER_IDENTITIES = Object.freeze([
@@ -450,6 +451,11 @@ export function sanitizedTask010WorkerEnvironment(environment) {
       environment[name] === undefined ? [] : [[name, environment[name]]],
     ),
   );
+  // The sole production v1 admits the evidenced 8 MiB response boundary. The
+  // dedicated Task 010 runner owns the one-slot safety bound and cannot inherit
+  // a wider value from the ignored environment file or the ambient process.
+  sanitized.PACKSCOUT_SOURCE_EXECUTION_SLOTS =
+    TASK010_SOURCE_EXECUTION_SLOTS;
   return Object.freeze(sanitized);
 }
 

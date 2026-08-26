@@ -289,6 +289,7 @@ export function createProviderSourceSupervisorRuntime(
     environmentKey: input.configuration.environment,
     ownerKey: input.configuration.workerId,
     leaseToken: randomUUID(),
+    executionSlots: input.configuration.executionSlots,
     ownership: {
       async acquire(identity) {
         const acquired = await ownershipRepository.acquire({

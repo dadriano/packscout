@@ -626,6 +626,117 @@ test("unresolved pull relationships persist and reconcile when a pack arrives", 
   }
 });
 
+test("one catalog arrival resolves more than one allocation bound of prior relationships", async () => {
+  const harness = await createPipelineHarness();
+  try {
+    const recordsPerPage = 550;
+    const targetExternalId = "fanout-card";
+    const pullPage = (
+      pageNumber: number,
+      start: number,
+      requestedCursor: string | null,
+      nextCursor: string,
+    ): CommitPageInput => initialPage({
+      pageNumber,
+      requestedCursor,
+      nextCursor,
+      hasMore: true,
+      committedAt: new Date(committedAt.getTime() + pageNumber * 1_000),
+      payload: { kind: "relationship-fanout", pageNumber },
+      records: Array.from({ length: recordsPerPage }, (_, offset) => {
+        const index = start + offset;
+        return {
+          recordKind: "pull" as const,
+          externalId: `fanout-pull-source-${index}`,
+          sourceTime,
+          collectedAt,
+          payload: { id: `fanout-pull-source-${index}` },
+          projections: [{
+            platformKey: "beezie",
+            recordKind: "pull" as const,
+            externalId: `fanout-pull-${index}`,
+            content: { cardExternalId: targetExternalId },
+            sourceUpdatedAt: sourceTime,
+            sourceCollectedAt: collectedAt,
+            relationships: [{
+              relationshipKind: "contains_card",
+              targetPlatformKey: "beezie",
+              targetRecordKind: "catalog_asset" as const,
+              targetExternalId,
+            }],
+          }],
+        };
+      }),
+      quarantines: [],
+    });
+
+    await harness.ingestion.commitPage(
+      pullPage(1, 0, null, "fanout-cursor-1"),
+    );
+    await harness.ingestion.commitPage(
+      pullPage(2, recordsPerPage, "fanout-cursor-1", "fanout-cursor-2"),
+    );
+    assert.equal(
+      await harness.database.canonical_relationships.count({
+        where: {
+          organization_id: ids.organization,
+          target_external_id: targetExternalId,
+          target_entity_id: null,
+        },
+      }),
+      recordsPerPage * 2,
+    );
+
+    await harness.ingestion.commitPage(initialPage({
+      pageNumber: 3,
+      requestedCursor: "fanout-cursor-2",
+      nextCursor: null,
+      hasMore: false,
+      committedAt: new Date(committedAt.getTime() + 3_000),
+      payload: { kind: "relationship-fanout-target" },
+      records: [{
+        recordKind: "catalog",
+        externalId: "fanout-card-source",
+        sourceTime,
+        collectedAt,
+        payload: { id: targetExternalId },
+        projections: [{
+          platformKey: "beezie",
+          recordKind: "catalog_asset",
+          externalId: targetExternalId,
+          content: { name: "Fanout Card" },
+          sourceUpdatedAt: sourceTime,
+          sourceCollectedAt: collectedAt,
+        }],
+      }],
+      quarantines: [],
+    }));
+
+    const resolved = await harness.database.canonical_relationships.findMany({
+      where: {
+        organization_id: ids.organization,
+        target_external_id: targetExternalId,
+      },
+      select: {
+        target_entity_id: true,
+        created_public_change_sequence: true,
+        resolved_public_change_sequence: true,
+      },
+    });
+    assert.equal(resolved.length, recordsPerPage * 2);
+    assert.equal(resolved.every(({ target_entity_id }) => target_entity_id !== null), true);
+    assert.equal(
+      resolved.every(({ created_public_change_sequence, resolved_public_change_sequence }) =>
+        resolved_public_change_sequence !== null &&
+        resolved_public_change_sequence > created_public_change_sequence
+      ),
+      true,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 test("a replay that adds a relationship after settlement receives a fresh causal sequence", async () => {
   const harness = await createPipelineHarness();
   try {

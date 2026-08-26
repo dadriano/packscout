@@ -64,7 +64,6 @@ export interface ProviderSourceLifecycleAdminRepository {
     configurationHash: string;
     recordIdScopes: readonly string[];
     intervalSeconds: number;
-    replacesSourceInstanceId: string | null;
     actorKey: string;
     createdAt: Date;
   }>): Promise<Readonly<{ sourceInstanceId: string; sourceRevisionId: string }>>;

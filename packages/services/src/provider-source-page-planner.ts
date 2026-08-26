@@ -1,18 +1,21 @@
 import { createHash } from "node:crypto";
 import {
   PROVIDER_OBSERVATION_HASH_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
   canonicalKindByLaunchScope,
   normalizedObservationSemanticContent,
+  normalizedObservationSemanticContentSchema,
   normalizedObservationSemanticCanonicalJson,
+  normalizedProviderObservationSchema,
   normalizedProviderObservationPageSchema,
   providerSourceExpectedCanonicalRelationships,
   providerSourceCanonicalContentV1Schemas,
   type LaunchProviderKey,
+  type ProviderSourceCanonicalProjectionPlan,
+  type ProviderSourceCanonicalRelationshipPlan,
   type NormalizedObservationSemanticContent,
   type NormalizedProviderObservation,
   type NormalizedProviderObservationPage,
-  type ProviderSourceCanonicalProjectionPlan,
-  type ProviderSourceCanonicalRelationshipPlan,
   type ProviderSourcePagePlan,
   type ProviderSourcePlannedOutcome,
 } from "@packscout/contracts";
@@ -24,6 +27,8 @@ import type {
 } from "./provider-observation-mapper.ts";
 import { fingerprintCanonicalProviderCandidate } from "./provider-observation-mapper.ts";
 import { canonicalProviderObservationContent } from "./provider-observation-canonical-content.ts";
+import { isCompletedNormalizedProviderObservationPage } from
+  "./source-adapter-completed-page-capability.ts";
 
 export type ProviderSourcePagePlanningErrorCode =
   | "mapper_descriptor_mismatch"
@@ -186,6 +191,7 @@ export interface ProviderSourceMappingValidationContext {
   readonly organizationId: string;
   readonly providerId: string;
   readonly provider: LaunchProviderKey;
+  readonly normalizedContractVersion: string;
   readonly observation: NormalizedProviderObservation;
 }
 
@@ -300,8 +306,18 @@ function assertProjection(
       throw new TypeError("provider_source.mapper_relationship_invalid");
     }
   }
+  const semanticContent = normalizedSemanticContentForVersion(
+    observation,
+    input.normalizedContractVersion,
+  );
+  if (
+    input.normalizedContractVersion !== PROVIDER_OBSERVATION_CONTRACT_VERSION
+  ) {
+    throw new TypeError("provider_source.normalized_contract_invalid");
+  }
   const expectedRelationships = providerSourceExpectedCanonicalRelationships({
-    semanticContent: normalizedObservationSemanticContent(observation),
+    semanticContent:
+      normalizedObservationSemanticContentSchema.parse(semanticContent),
     projectionKind,
   });
   const relationshipKey = (
@@ -449,9 +465,28 @@ export interface ProviderSourcePagePlanningInput {
   readonly page: NormalizedProviderObservationPage;
 }
 
-function semanticHash(content: NormalizedObservationSemanticContent): string {
+function normalizedSemanticContentForVersion(
+  observation: NormalizedProviderObservation,
+  normalizedContractVersion: string,
+): NormalizedObservationSemanticContent {
+  if (normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION) {
+    return normalizedObservationSemanticContent(
+      normalizedProviderObservationSchema.parse(observation),
+    );
+  }
+  throw new TypeError("provider_source.normalized_contract_invalid");
+}
+
+function semanticHash(
+  content: NormalizedObservationSemanticContent,
+  normalizedContractVersion: string,
+): string {
+  if (normalizedContractVersion !== PROVIDER_OBSERVATION_CONTRACT_VERSION) {
+    throw new TypeError("provider_source.normalized_contract_invalid");
+  }
+  const canonicalJson = normalizedObservationSemanticCanonicalJson(content);
   return createHash("sha256")
-    .update(normalizedObservationSemanticCanonicalJson(content))
+    .update(canonicalJson)
     .digest("hex");
 }
 
@@ -554,7 +589,15 @@ export class ProviderSourcePagePlanner {
   plan(input: ProviderSourcePagePlanningInput): ProviderSourcePagePlan {
     let page: NormalizedProviderObservationPage;
     try {
-      page = deepFreeze(normalizedProviderObservationPageSchema.parse(input.page));
+      if (
+        input.normalizedContractVersion !==
+          PROVIDER_OBSERVATION_CONTRACT_VERSION
+      ) {
+        throw new TypeError("provider_source.normalized_contract_invalid");
+      }
+      page = isCompletedNormalizedProviderObservationPage(input.page)
+        ? input.page
+        : deepFreeze(normalizedProviderObservationPageSchema.parse(input.page));
     } catch {
       throw new ProviderSourcePagePlanningError("normalized_page_invalid");
     }
@@ -595,7 +638,10 @@ export class ProviderSourcePagePlanner {
         }
 
         const observation = outcome.observation;
-        const semanticContent = normalizedObservationSemanticContent(observation);
+        const semanticContent = normalizedSemanticContentForVersion(
+          observation,
+          input.normalizedContractVersion,
+        );
         try {
           const mapperOutput: unknown = mapper.map({
             organizationId: input.organizationId,
@@ -615,7 +661,10 @@ export class ProviderSourcePagePlanner {
             recordIndex: outcome.recordIndex,
             observation,
             semanticContent,
-            normalizedContentHash: semanticHash(semanticContent),
+            normalizedContentHash: semanticHash(
+              semanticContent,
+              input.normalizedContractVersion,
+            ),
             protectedNativeEvidenceRef:
               observation.protectedNativeEvidenceRef,
             protectedTransactionEvidenceRef:
@@ -662,7 +711,10 @@ export class ProviderSourcePagePlanner {
             recordIndex: outcome.recordIndex,
             observation,
             semanticContent,
-            normalizedContentHash: semanticHash(semanticContent),
+            normalizedContentHash: semanticHash(
+              semanticContent,
+              input.normalizedContractVersion,
+            ),
             protectedNativeEvidenceRef:
               observation.protectedNativeEvidenceRef,
             protectedTransactionEvidenceRef:
@@ -688,8 +740,10 @@ export class ProviderSourcePagePlanner {
         mapperQuarantined,
         warnings,
       }),
-    });
+    }) as ProviderSourcePagePlan;
   }
 }
 
-export { PROVIDER_OBSERVATION_HASH_VERSION };
+export {
+  PROVIDER_OBSERVATION_HASH_VERSION,
+};

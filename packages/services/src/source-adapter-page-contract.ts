@@ -1,7 +1,7 @@
 import type {
-  NormalizedProviderObservationPage,
   SourceAdapterFailure,
   SourceAdapterSafeDiagnostic,
+  NormalizedProviderObservationPage,
 } from "@packscout/contracts";
 import type { SourceAdapterRequestCaptureV1 } from "./source-adapter.ts";
 
@@ -19,10 +19,8 @@ export interface CapturedSourcePageV1 {
   readonly normalizedPage: NormalizedProviderObservationPage;
 }
 
-export type InterpretedNormalizedProviderObservationPage = Omit<
-  NormalizedProviderObservationPage,
-  "measurements" | "diagnostics"
->;
+export type InterpretedNormalizedProviderObservationPage =
+  Omit<NormalizedProviderObservationPage, "measurements" | "diagnostics">;
 
 export interface InterpretedSourcePageV1 {
   readonly protectedNativeEvidence: CapturedSourcePageV1["protectedNativeEvidence"];

@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
 import {
-  normalizedProviderObservationPageSchema,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
   providerSourceRequestBoundsSchema,
   sourceAdapterFailureSchema,
   sourceAdapterMeasurementsSchema,
   sourceAdapterSafeDiagnosticSchema,
   type ProviderSourceRequestBounds,
   type LaunchProviderKey,
-  type NormalizedProviderObservationPage,
   type OpaqueCursorEnvelope,
   type RecordIdScopeDeclaration,
   type SourceAdapterFailure,
@@ -28,6 +27,12 @@ import {
   isRecord,
   type SourceAdapterContractErrorCode,
 } from "./source-adapter-contract-primitives.ts";
+import { completeNormalizedProviderObservationPage } from
+  "./source-adapter-completed-page-capability.ts";
+import { takeProtectedRawResponse } from
+  "./source-adapter-request-buffer.ts";
+import { canonicalizeProtectedNativeEvidence } from
+  "./trusted-protected-native-evidence.ts";
 import {
   SourceRequestLease,
   SourceRequestLeaseAuthority,
@@ -801,11 +806,8 @@ function canonicalizeUnboundSourceAdapterRequest(
       ) {
         throw new SourceAdapterContractError("invalid_request_capture");
       }
-      const protectedRawResponse = new Uint8Array(
-        request.value.protectedRawResponse,
-      );
       const protectedRawResponseSha256 = createHash("sha256")
-        .update(protectedRawResponse)
+        .update(request.value.protectedRawResponse)
         .digest("hex");
       const measurements = canonicalizeRequestMeasurements(
         operation,
@@ -814,10 +816,14 @@ function canonicalizeUnboundSourceAdapterRequest(
       if (
         protectedRawResponseSha256 !==
           request.value.protectedRawResponseSha256 ||
-        measurements.responseBytes !== protectedRawResponse.byteLength
+        measurements.responseBytes !==
+          request.value.protectedRawResponse.byteLength
       ) {
         throw new SourceAdapterContractError("invalid_request_capture");
       }
+      const protectedRawResponse = takeProtectedRawResponse(
+        request.value.protectedRawResponse,
+      );
       return Object.freeze({
         ok: true,
         value: Object.freeze({
@@ -1226,32 +1232,6 @@ export function completeSourceAdapterSourceTest(
   );
 }
 
-function canonicalizeProtectedNativeEvidence(
-  evidence: CapturedSourcePageV1["protectedNativeEvidence"],
-): CapturedSourcePageV1["protectedNativeEvidence"] {
-  if (!Array.isArray(evidence)) {
-    throw new SourceAdapterContractError("invalid_interpretation_shape");
-  }
-  try {
-    return Object.freeze(evidence.map((item) => {
-      if (
-        !hasExactKeys(item, ["reference", "value"]) ||
-        typeof item.reference !== "string" ||
-        !isRecord(item.value)
-      ) {
-        throw new SourceAdapterContractError("invalid_interpretation_shape");
-      }
-      return Object.freeze({
-        reference: item.reference,
-        value: canonicalizeConfiguration(item.value),
-      });
-    }));
-  } catch (error) {
-    if (error instanceof SourceAdapterContractError) throw error;
-    throw new SourceAdapterContractError("invalid_interpretation_shape");
-  }
-}
-
 function completeValidatedSourceAdapterPageInterpretation(
   operation: PageReadOperation,
   request: SuccessfulSourceAdapterRequest,
@@ -1297,25 +1277,17 @@ function completeValidatedSourceAdapterPageInterpretation(
     ...request.measurements,
     recordCount,
   });
-  let parsedPage: NormalizedProviderObservationPage;
-  try {
-    parsedPage = normalizedProviderObservationPageSchema.parse({
-      ...interpretation.value.normalizedPage,
-      measurements: draftMeasurements,
-      diagnostics,
-    });
-  } catch {
+  if (
+    operation.normalizedContractVersion !==
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+  ) {
     throw new SourceAdapterContractError("invalid_interpretation_shape");
   }
-  let normalizedPage: NormalizedProviderObservationPage;
-  try {
-    normalizedPage = canonicalizeJsonValue(
-      parsedPage,
-      new Set(),
-    ) as NormalizedProviderObservationPage;
-  } catch {
-    throw new SourceAdapterContractError("invalid_interpretation_shape");
-  }
+  const normalizedPage = completeNormalizedProviderObservationPage({
+    ...interpretation.value.normalizedPage,
+    measurements: draftMeasurements,
+    diagnostics,
+  });
   const measurements = normalizedPage.measurements;
   const canonicalPageDiagnostics = normalizedPage.diagnostics;
   const requestedCursor = operation.correlation.requestedCursor;

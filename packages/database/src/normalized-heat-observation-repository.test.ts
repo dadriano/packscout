@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Prisma } from "@prisma/client";
 import { IngestionPersistenceRepository } from "./ingestion-repository.ts";
 import {
+  normalizedHeatRetainedUntilSql,
   persistNormalizedHeatObservationsForCanonicalWrites,
   PrismaNormalizedHeatObservationRepository,
 } from "./normalized-heat-observation-repository.ts";
@@ -1173,6 +1175,21 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       });
     assert.equal(highSequenceRead.observations.length, 1);
     assert.equal(highSequenceRead.observations[0]?.causalSequence, highSequence);
+
+    const [springForwardRetention] = await harness.client.$transaction(
+      async (transaction) => {
+        await transaction.$executeRaw`set local time zone 'America/Los_Angeles'`;
+        return transaction.$queryRaw<Array<{ retainedUntil: Date }>>(Prisma.sql`
+          select ${normalizedHeatRetainedUntilSql(
+            new Date("2026-03-08T08:51:59.000Z"),
+          )} as "retainedUntil"
+        `);
+      },
+    );
+    assert.equal(
+      springForwardRetention?.retainedUntil.toISOString(),
+      "2026-03-15T07:51:59.000Z",
+    );
 
     const immutableHistory = await harness.client.normalized_heat_observations.findMany({
       orderBy: [{ public_change_sequence: "asc" }],

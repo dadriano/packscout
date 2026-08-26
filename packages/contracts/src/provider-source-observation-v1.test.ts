@@ -9,9 +9,16 @@ import {
   normalizedProviderMoneySchema,
 } from "./provider-source-facts-v1.ts";
 import {
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_HASH_VERSION,
+} from "./provider-source-contract-v1.ts";
+import {
+  normalizedObservationSemanticCanonicalJson,
   normalizedObservationSemanticContent,
   normalizedObservationSemanticContentSchema,
+  normalizedProviderObservationPageSchema,
   normalizedProviderObservationSchema,
+  semanticObservationIdentitySchema,
 } from "./provider-source-observation-v1.ts";
 
 const packFacts = normalizedPackProviderFactsSchema.parse({
@@ -254,4 +261,136 @@ test("normalized currency tickers reject noncanonical provider values", () => {
       false,
     );
   }
+});
+
+const packRelationship = {
+  relationship: "pack" as const,
+  target: {
+    recordIdScopeKey: "catalog-pack-v1" as const,
+    providerRecordId: "pack-42",
+  },
+};
+const cardRelationship = {
+  relationship: "card" as const,
+  target: {
+    recordIdScopeKey: "catalog-card-v1" as const,
+    providerRecordId: "card-42",
+  },
+};
+const pullBase = {
+  kind: "pull" as const,
+  providerRecordIdentity: {
+    recordIdScopeKey: "pull-v1" as const,
+    providerRecordId: "pull-42",
+  },
+  effectiveAt: "2026-08-20T12:00:00.000Z",
+  collectedAt: "2026-08-20T12:00:01.000Z",
+  providerFacts: emptyNormalizedProviderFacts("pull"),
+  protectedNativeEvidenceRef: "protected:page:record:0",
+};
+
+test("observation v1 accepts either one-sided pull", () => {
+  for (const relationships of [[cardRelationship], [packRelationship]]) {
+    const parsed = normalizedProviderObservationSchema.parse({
+      ...pullBase,
+      relationships,
+    });
+    const semantic = normalizedObservationSemanticContent(parsed);
+    assert.equal("collectedAt" in semantic, false);
+    assert.equal("protectedNativeEvidenceRef" in semantic, false);
+    assert.equal(
+      normalizedObservationSemanticContentSchema.safeParse(semantic).success,
+      true,
+    );
+    assert.doesNotThrow(() =>
+      normalizedObservationSemanticCanonicalJson(semantic)
+    );
+  }
+});
+
+test("observation v1 orders pack before card and rejects empty or duplicate edges", () => {
+  const withPack = normalizedProviderObservationSchema.parse({
+    ...pullBase,
+    relationships: [cardRelationship, packRelationship],
+  });
+  assert.deepEqual(
+    withPack.relationships.map(({ relationship }) => relationship),
+    ["pack", "card"],
+  );
+
+  for (const relationships of [
+    [],
+    [cardRelationship, cardRelationship],
+    [packRelationship, packRelationship],
+    [packRelationship, cardRelationship, cardRelationship],
+  ]) {
+    assert.equal(
+      normalizedProviderObservationSchema.safeParse({
+        ...pullBase,
+        relationships,
+      }).success,
+      false,
+      relationships.map(({ relationship }) => relationship).join(","),
+    );
+  }
+});
+
+test("observation pages, semantic identities, and hashes retain the sole v1 domain", () => {
+  assert.equal(
+    PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    "packscout.provider-observation.v1",
+  );
+  assert.equal(
+    PROVIDER_OBSERVATION_HASH_VERSION,
+    "packscout.provider-observation-hash.v1",
+  );
+  const observation = normalizedProviderObservationSchema.parse({
+    ...pullBase,
+    relationships: [cardRelationship],
+  });
+  const page = normalizedProviderObservationPageSchema.parse({
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    provider: "clutchpacks",
+    outcomes: [{ status: "valid", recordIndex: 0, observation }],
+    nextCursor: {
+      sourceInstanceId: "source-1",
+      sourceRevisionId: "revision-1",
+      sourceTypeKey: "dataforrest-events-v1",
+      adapterVersion: "dataforrest-events-adapter-v1",
+      cursorCodecKey: "dataforrest-cursor-v1",
+      cursorGeneration: 1,
+      value: "next",
+    },
+    continuation: { kind: "continue" },
+    measurements: {
+      durationMilliseconds: 1,
+      responseBytes: 100,
+      recordCount: 1,
+    },
+    diagnostics: [],
+  });
+  assert.equal(page.normalizedContractVersion, PROVIDER_OBSERVATION_CONTRACT_VERSION);
+  const semantic = normalizedObservationSemanticContent(observation);
+  assert.equal(
+    normalizedObservationSemanticCanonicalJson(semantic),
+    normalizedObservationSemanticCanonicalJson({
+      relationships: semantic.relationships,
+      providerFacts: semantic.providerFacts,
+      kind: semantic.kind,
+      effectiveAt: semantic.effectiveAt,
+      providerRecordIdentity: semantic.providerRecordIdentity,
+    }),
+  );
+  assert.equal(semanticObservationIdentitySchema.safeParse({
+    sourceRecord: {
+      organizationId: "organization-1",
+      sourceInstanceId: "source-1",
+      recordIdScopeKey: "pull-v1",
+      providerRecordId: "pull-42",
+    },
+    effectiveAt: observation.effectiveAt,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
+    normalizedContentHash: "a".repeat(64),
+  }).success, true);
 });

@@ -30,6 +30,29 @@ async function settleMicrotasks(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
+test("a configured execution-slot cap bounds independent profiles", async () => {
+  const coordinator = new ConnectionPermitCoordinator(1);
+  const firstProfile = configure(coordinator, "profile-a", 2);
+  const secondProfile = configure(coordinator, "profile-b", 1);
+  const first = await coordinator.acquire({ profile: firstProfile });
+  let secondGranted = false;
+  const secondPromise = coordinator.acquire({ profile: secondProfile }).then(
+    (permit) => {
+      secondGranted = true;
+      return permit;
+    },
+  );
+
+  await settleMicrotasks();
+  assert.equal(secondGranted, false);
+  assert.equal(coordinator.snapshot().maximumExecutionSlots, 1);
+
+  first.releaseAll();
+  const second = await secondPromise;
+  assert.equal(secondGranted, true);
+  second.releaseAll();
+});
+
 test("a stable profile cap is shared while independent profiles can run", async () => {
   const coordinator = new ConnectionPermitCoordinator();
   const shared = configure(coordinator, "shared-data-service", 2);

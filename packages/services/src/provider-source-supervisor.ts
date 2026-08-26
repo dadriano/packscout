@@ -315,6 +315,7 @@ export interface ProviderSourceSupervisorDependencies<
   /** Test/runtime scheduling override; never greater than the launch bound. */
   readonly claimRenewalIntervalMilliseconds?: number;
   readonly claimLookahead?: number;
+  readonly executionSlots?: number;
 }
 
 const SAFE_CODE = /^[A-Z][A-Z0-9_]{0,127}$/u;
@@ -347,8 +348,8 @@ export class ProviderSourceSupervisor<
   TWork extends SourceSupervisorWorkItem,
 > {
   readonly #dependencies: ProviderSourceSupervisorDependencies<TWork>;
-  readonly #coordinator = new ConnectionPermitCoordinator();
-  readonly #requestLeases = new SourceRequestLeaseAuthority(this.#coordinator);
+  readonly #coordinator: ConnectionPermitCoordinator;
+  readonly #requestLeases: SourceRequestLeaseAuthority;
   readonly #runtimeFence = new RuntimeControlPlaneFence();
   readonly #activeSources = new Set<string>();
   readonly #activeTurns = new Set<Promise<void>>();
@@ -372,6 +373,10 @@ export class ProviderSourceSupervisor<
   } = { state: "available", safeCode: null };
 
   constructor(dependencies: ProviderSourceSupervisorDependencies<TWork>) {
+    this.#coordinator = new ConnectionPermitCoordinator(
+      dependencies.executionSlots,
+    );
+    this.#requestLeases = new SourceRequestLeaseAuthority(this.#coordinator);
     if (
       !dependencies.environmentKey.trim() ||
       !dependencies.ownerKey.trim() ||
@@ -482,7 +487,7 @@ export class ProviderSourceSupervisor<
       // predecessor's longer-lived work claims expire. Revisit recovery on
       // every poll so those claims do not remain running forever merely
       // because they were still valid during startup reconciliation.
-      await this.#recoverClaims(epoch, false);
+      if (!(await this.#recoverClaims(epoch, false))) return;
       const dueWork = await this.#runControlPlane(
         () => this.#dependencies.queue.listDue(epoch),
         "DUE_MATERIALIZATION_FAILED",
@@ -622,7 +627,7 @@ export class ProviderSourceSupervisor<
         !waitsForProfile &&
         this.#coordinator.snapshot().activeExecutionSlots +
               pendingExecutionSlots >=
-          providerSourceSupervisorDefaults.executionSlots
+          this.#coordinator.snapshot().maximumExecutionSlots
       ) {
         await this.#runControlPlane(
           () => this.#dependencies.queue.releaseUnstarted(
@@ -687,21 +692,36 @@ export class ProviderSourceSupervisor<
   async #recoverClaims(
     epoch: SourceSupervisorEpoch,
     drain: boolean,
-  ): Promise<void> {
-    while (!this.#stopping && !this.#fenceStarted) {
-      const recoverable = await this.#runControlPlane(
-        () => this.#dependencies.queue.listRecoverableClaims(epoch),
-        "CLAIM_RECOVERY_FAILED",
-      );
-      if (recoverable.length === 0) return;
-      for (const claim of recoverable) {
-        if (this.#stopping || this.#fenceStarted) return;
-        await this.#runControlPlane(
-          () => this.#dependencies.queue.recoverClaim(epoch, claim),
+  ): Promise<boolean> {
+    try {
+      while (!this.#stopping && !this.#fenceStarted) {
+        const recoverable = await this.#runControlPlane(
+          () => this.#dependencies.queue.listRecoverableClaims(epoch),
           "CLAIM_RECOVERY_FAILED",
+          { fenceOnExhausted: drain },
         );
+        if (recoverable.length === 0) return true;
+        for (const claim of recoverable) {
+          if (this.#stopping || this.#fenceStarted) return false;
+          await this.#runControlPlane(
+            () => this.#dependencies.queue.recoverClaim(epoch, claim),
+            "CLAIM_RECOVERY_FAILED",
+            { fenceOnExhausted: drain },
+          );
+        }
+        if (!drain) return true;
       }
-      if (!drain) return;
+      return false;
+    } catch (error) {
+      // Startup takeover must drain every predecessor claim before this epoch
+      // admits work. During an ordinary poll, however, the same claims remain
+      // durably discoverable. Page commits can hold their rows longer than one
+      // short control-plane retry window, so leave the runtime active and
+      // revisit recovery on the next poll instead of restarting healthy work.
+      if (!drain && error instanceof ControlPlaneRetryExhaustedError) {
+        return false;
+      }
+      throw error;
     }
   }
 

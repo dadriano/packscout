@@ -385,6 +385,62 @@ class LateRecoveryUnitQueue extends FixtureQueue {
   }
 }
 
+class ContendedLateRecoveryUnitQueue extends LateRecoveryUnitQueue {
+  listCalls = 0;
+  dueCalls = 0;
+  claimCalls = 0;
+  #remainingContention = 0;
+
+  contendUntilNextPoll(): void {
+    this.makeRecoverable();
+    this.#remainingContention = 3;
+  }
+
+  override async listRecoverableClaims(): Promise<
+    readonly SourceSupervisorRecoverableClaim[]
+  > {
+    this.listCalls += 1;
+    if (this.#remainingContention > 0) {
+      this.#remainingContention -= 1;
+      throw new ControlPlaneTransactionError("timeout");
+    }
+    return super.listRecoverableClaims();
+  }
+
+  override async listDue(): Promise<readonly []> {
+    this.dueCalls += 1;
+    return [];
+  }
+
+  override async claimNext(
+    claimEpoch: SourceSupervisorEpoch,
+    command: Parameters<FixtureQueue["claimNext"]>[1],
+  ): Promise<FixtureWork | null> {
+    this.claimCalls += 1;
+    return super.claimNext(claimEpoch, command);
+  }
+}
+
+class ContendedRecoverClaimQueue extends ContendedLateRecoveryUnitQueue {
+  #remainingRecoveryContention = 0;
+
+  contendOnRecoveryUntilNextPoll(): void {
+    this.makeRecoverable();
+    this.#remainingRecoveryContention = 3;
+  }
+
+  override async recoverClaim(
+    claimEpoch: SourceSupervisorEpoch,
+    claim: SourceSupervisorRecoverableClaim,
+  ): Promise<void> {
+    if (this.#remainingRecoveryContention > 0) {
+      this.#remainingRecoveryContention -= 1;
+      throw new ControlPlaneTransactionError("timeout");
+    }
+    await super.recoverClaim(claimEpoch, claim);
+  }
+}
+
 function fixtureWork(
   id: string,
   profile: "slow-profile" | "independent-profile",
@@ -612,6 +668,80 @@ test("a claim expiring after takeover is recovered by a later poll", async () =>
   await supervisor.stop();
 });
 
+test("transient late-claim recovery contention retries on the next poll", async () => {
+  const ownership = new FixtureOwnership();
+  const queue = new ContendedLateRecoveryUnitQueue([]);
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue,
+    executor: new MeteredExecutor(),
+    capacity,
+    snapshot,
+    diagnostics,
+    classifyControlPlaneFailure: (error) =>
+      error instanceof ControlPlaneTransactionError ? error.code : "invariant",
+    ids: { id: () => "unused-continuation-id" },
+    sleep: async () => undefined,
+  });
+
+  await supervisor.initialize();
+  queue.contendUntilNextPoll();
+  await supervisor.runCycle();
+
+  assert.equal(ownership.calls.includes("fence"), false);
+  assert.deepEqual(queue.recovered, []);
+  assert.equal(queue.dueCalls, 0);
+  assert.equal(queue.claimCalls, 0);
+
+  await supervisor.runCycle();
+  assert.deepEqual(queue.recovered, [
+    { kind: "page_read", id: "late-expired-run" },
+  ]);
+  assert.equal(queue.dueCalls, 1);
+  assert.equal(queue.claimCalls, 1);
+  await supervisor.stop();
+});
+
+test("deferred claim recovery prevents new admission until the next poll", async () => {
+  const ownership = new FixtureOwnership();
+  const queue = new ContendedRecoverClaimQueue([]);
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue,
+    executor: new MeteredExecutor(),
+    capacity,
+    snapshot,
+    diagnostics,
+    classifyControlPlaneFailure: (error) =>
+      error instanceof ControlPlaneTransactionError ? error.code : "invariant",
+    ids: { id: () => "unused-continuation-id" },
+    sleep: async () => undefined,
+  });
+
+  await supervisor.initialize();
+  queue.contendOnRecoveryUntilNextPoll();
+  await supervisor.runCycle();
+
+  assert.equal(ownership.calls.includes("fence"), false);
+  assert.deepEqual(queue.recovered, []);
+  assert.equal(queue.dueCalls, 0);
+  assert.equal(queue.claimCalls, 0);
+
+  await supervisor.runCycle();
+  assert.deepEqual(queue.recovered, [
+    { kind: "page_read", id: "late-expired-run" },
+  ]);
+  assert.equal(queue.dueCalls, 1);
+  assert.equal(queue.claimCalls, 1);
+  await supervisor.stop();
+});
+
 test("ownership renewals continue while snapshot publication is delayed", async () => {
   const ownership = new FixtureOwnership();
   const renewalSnapshot = new GatedRenewalSnapshot();
@@ -730,8 +860,8 @@ test("a snapshot that proves ownership loss fences the owner immediately", async
     environmentKey: "test",
     ownerKey: epoch.ownerKey,
     leaseToken: epoch.leaseToken,
-    ownership,
-    queue: new FixtureQueue([]),
+      ownership,
+      queue: new FixtureQueue([]),
     executor,
     capacity,
     snapshot: new StaleSnapshot(),

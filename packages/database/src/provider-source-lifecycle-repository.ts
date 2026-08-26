@@ -230,7 +230,6 @@ export class ProviderSourceLifecycleRepository {
     configuration: Readonly<Record<string, unknown>>;
     configurationHash: string;
     recordIdScopes: readonly string[];
-    replacesSourceInstanceId?: string | null;
     actorKey: string;
     createdAt: Date;
   }>): Promise<{ sourceInstanceId: string; sourceRevisionId: string }> {
@@ -284,51 +283,6 @@ export class ProviderSourceLifecycleRepository {
           and organization_id = cast(${input.organizationId} as uuid)
         for share
       `);
-      let replacement: { id: string; activeRevisionId: string } | null = null;
-      if (input.replacesSourceInstanceId) {
-        const locked = await transaction.$queryRaw<Array<{
-          id: string;
-          activeRevisionId: string;
-        }>>(Prisma.sql`
-          select id, active_revision_id as "activeRevisionId"
-          from public.provider_source_instances
-          where id = cast(${input.replacesSourceInstanceId} as uuid)
-            and organization_id = cast(${input.organizationId} as uuid)
-            and provider_id = cast(${input.providerId} as uuid)
-            and state in ('paused', 'disabled')
-          for update
-        `);
-        replacement = locked[0] ?? null;
-        const [activeRun, revision] = replacement
-          ? await Promise.all([
-              transaction.import_runs.findFirst({
-                where: {
-                  organization_id: input.organizationId,
-                  source_instance_id: replacement.id,
-                  state: { in: ["queued", "running"] },
-                },
-                select: { id: true },
-              }),
-              transaction.provider_source_revisions.findFirst({
-                where: {
-                  organization_id: input.organizationId,
-                  source_instance_id: replacement.id,
-                  id: replacement.activeRevisionId,
-                  identity_namespace_key: identityNamespaceKey,
-                  normalized_contract_version: normalizedContractVersion,
-                  record_id_scopes_json: { equals: asJson(input.recordIdScopes) },
-                },
-                select: { id: true },
-              }),
-            ])
-          : [null, null];
-        if (!replacement || activeRun || !revision) {
-          throw new PersistenceError(
-            "SOURCE_FENCED",
-            "Replacement source must be idle, paused or disabled, and namespace-compatible.",
-          );
-        }
-      }
       const profile = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         select profile.id from public.source_connection_profiles as profile
         where profile.id = cast(${input.connectionProfileId} as uuid)
@@ -453,31 +407,15 @@ export class ProviderSourceLifecycleRepository {
           },
         }),
       ]);
-      if (replacement) {
-        await transaction.provider_source_instances.update({
-          where: { id: replacement.id },
-          data: {
-            state: "replaced",
-            replaced_at: input.createdAt,
-            pause_requested_at: null,
-            updated_at: input.createdAt,
-          },
-        });
-      }
       await transaction.audit_events.create({
         data: {
           organization_id: input.organizationId,
           actor_key: input.actorKey,
-          action: replacement
-            ? "provider_source.create_replacement"
-            : "provider_source.create",
+          action: "provider_source.create",
           subject_type: "provider_source",
           subject_id: source.id,
           outcome: "success",
-          metadata_json: {
-            sourceRevisionId: sourceRevision.id,
-            ...(replacement ? { replacesSourceInstanceId: replacement.id } : {}),
-          },
+          metadata_json: { sourceRevisionId: sourceRevision.id },
           occurred_at: input.createdAt,
         },
       });

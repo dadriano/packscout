@@ -997,29 +997,34 @@ export async function writeCanonicalProjectionBatch(
         and relationship.target_entity_id is null
       for update of relationship
     `);
-    const resolutionCauses = await allocatePublicChangeCauses(database, {
-      organizationId: scope.organizationId,
-      changes: unresolved.map((relationship) => ({
-        changeKind: "relationship_resolution",
-        entityKey: relationshipPublicEntityKey(relationship),
-        sourceKey: relationship.targetPlatformKey,
-        sourceRevisionKey: canonicalSourceRevisionKey(scope.origin),
-        metadata: { relationshipState: "resolved" },
-        occurredAt: scope.acceptedAt,
-        catalogImpact: relationshipCatalogImpact(
-          relationship.sourcePlatformKey,
-          relationship.targetPlatformKey,
-        ),
-      })),
-    });
-    const resolutionRows = unresolved.map((relationship, index) => {
-      const sequence = resolutionCauses[index]?.sequence;
-      if (sequence === undefined) throw new Error("Resolution cause is missing.");
-      return Prisma.sql`(
-        ${uuid(relationship.id)}, ${uuid(relationship.targetEntityId)}, ${sequence}
-      )`;
-    });
-    if (resolutionRows.length > 0) {
+    // One newly delivered catalog entity can resolve an unbounded backlog of
+    // relationships accumulated across earlier pages. Keep every cause and
+    // update in this page transaction, but honor both the public-change
+    // allocator and SQL write bounds instead of treating the fan-out as one
+    // allocation.
+    for (const resolutionBatch of batches(unresolved)) {
+      const resolutionCauses = await allocatePublicChangeCauses(database, {
+        organizationId: scope.organizationId,
+        changes: resolutionBatch.map((relationship) => ({
+          changeKind: "relationship_resolution",
+          entityKey: relationshipPublicEntityKey(relationship),
+          sourceKey: relationship.targetPlatformKey,
+          sourceRevisionKey: canonicalSourceRevisionKey(scope.origin),
+          metadata: { relationshipState: "resolved" },
+          occurredAt: scope.acceptedAt,
+          catalogImpact: relationshipCatalogImpact(
+            relationship.sourcePlatformKey,
+            relationship.targetPlatformKey,
+          ),
+        })),
+      });
+      const resolutionRows = resolutionBatch.map((relationship, index) => {
+        const sequence = resolutionCauses[index]?.sequence;
+        if (sequence === undefined) throw new Error("Resolution cause is missing.");
+        return Prisma.sql`(
+          ${uuid(relationship.id)}, ${uuid(relationship.targetEntityId)}, ${sequence}
+        )`;
+      });
       await database.$executeRaw(Prisma.sql`
         update public.canonical_relationships as relationship
         set target_entity_id = resolutions.target_entity_id,

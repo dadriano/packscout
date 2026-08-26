@@ -1,15 +1,15 @@
+import { createHash } from "node:crypto";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   PROVIDER_OBSERVATION_HASH_VERSION,
   launchRecordIdScopeDeclarations,
-  normalizedObservationSemanticContentSchema,
   normalizedObservationSemanticCanonicalJson,
+  normalizedObservationSemanticContentSchema,
   type NormalizedObservationSemanticContent,
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
 import type { PackscoutTransactionClient } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
-import { createHash } from "node:crypto";
 
 const SHA_256_PATTERN = /^[0-9a-f]{64}$/;
 const SAFE_REASON_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9:._-]{0,254}[a-z0-9])?$/;
@@ -34,7 +34,7 @@ export type LaunchSourceRecordMeaning =
       recordDiscriminator: "trade";
     }>;
 
-export type UpsertSemanticObservationInput = Readonly<{
+type UpsertSemanticObservationCommon = Readonly<{
   organizationId: string;
   providerId: string;
   sourceInstanceId: string;
@@ -42,12 +42,34 @@ export type UpsertSemanticObservationInput = Readonly<{
   recordIdScopeKey: string;
   providerRecordId: string;
   effectiveSourceTime: Date;
+  normalizedContentHash: string;
+}> & LaunchSourceRecordMeaning;
+
+export type UpsertSemanticObservationInput = UpsertSemanticObservationCommon &
+  Readonly<{
+    normalizedContractVersion:
+      ProviderSourceObservationVersionPins["normalizedContractVersion"];
+    hashVersion: ProviderSourceObservationVersionPins["hashVersion"];
+    normalizedContent: NormalizedObservationSemanticContent;
+  }>;
+
+export type ProviderSourceObservationVersionPins = Readonly<{
   normalizedContractVersion: typeof PROVIDER_OBSERVATION_CONTRACT_VERSION;
   hashVersion: typeof PROVIDER_OBSERVATION_HASH_VERSION;
-  normalizedContentHash: string;
-  normalizedContent: NormalizedObservationSemanticContent;
-}> &
-  LaunchSourceRecordMeaning;
+}>;
+
+/** Exact persistence-domain dispatch; unknown versions never fall back. */
+export function providerSourceObservationVersionPins(
+  normalizedContractVersion: string,
+): ProviderSourceObservationVersionPins {
+  if (normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION) {
+    return {
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
+    };
+  }
+  throw new TypeError("Normalized observation contract version is unsupported.");
+}
 
 /** Resolves launch scope meaning only from the shared provider contract. */
 export function resolveLaunchSourceRecordMeaning(
@@ -219,14 +241,10 @@ export class ProviderSourceObservationRepository {
         `Record-ID scope ${input.recordIdScopeKey} requires ${expectedMeaning.recordKind}/${expectedMeaning.recordDiscriminator}.`,
       );
     }
-    if (
-      input.normalizedContractVersion !== PROVIDER_OBSERVATION_CONTRACT_VERSION
-    ) {
-      throw new TypeError(
-        "Normalized observation contract version is unsupported.",
-      );
-    }
-    if (input.hashVersion !== PROVIDER_OBSERVATION_HASH_VERSION) {
+    const versionPins = providerSourceObservationVersionPins(
+      input.normalizedContractVersion,
+    );
+    if (input.hashVersion !== versionPins.hashVersion) {
       throw new TypeError(
         "Normalized observation hash version is unsupported.",
       );

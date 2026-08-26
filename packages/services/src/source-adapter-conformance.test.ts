@@ -3,13 +3,13 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestIdentityNamespaceByProvider,
-  dataforrestEventsV2SourceAdapterManifest,
+  dataforrestEventsV1SourceAdapterManifest,
   launchRecordIdScopeDeclarations,
 } from "@packscout/contracts";
 import { dataforestEventsV1EvidenceFixture } from "@packscout/contracts/test-fixtures/dataforrest-events-v1";
@@ -248,7 +248,7 @@ function nestedObjectKeys(value: unknown): readonly string[] {
 test("DataForrest and an alternate wrapper satisfy one transport-neutral adapter harness", async () => {
   const dataforrestBuilders = operationBuilders({
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    adapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     connectionConfiguration: {
       endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
@@ -261,7 +261,7 @@ test("DataForrest and an alternate wrapper satisfy one transport-neutral adapter
     httpClient: async () => new Response(JSON.stringify(
       dataforestEventsV1EvidenceFixture.courtyard.initial,
     )),
-  }, dataforrestEventsV2SourceAdapterManifest);
+  }, dataforrestEventsV1SourceAdapterManifest);
   const dataforrestResult = await assertSourceAdapterConformance({
     adapter: dataforrest,
     provider: "courtyard",

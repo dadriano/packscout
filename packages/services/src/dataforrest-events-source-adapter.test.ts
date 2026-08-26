@@ -2,22 +2,26 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestIdentityNamespaceByProvider,
+  dataforrestEventsPageV1Schema,
   dataforrestEventsV1SourceAdapterManifest,
-  dataforrestEventsV2SourceAdapterManifest,
   launchRecordIdScopeDeclarations,
   sourceAdapterFailureSchema,
   type LaunchProviderKey,
   type ProviderSourceRequestBounds,
+  type SourceAdapterManifestV1,
 } from "@packscout/contracts";
 import { dataforestEventsV1EvidenceFixture } from "@packscout/contracts/test-fixtures/dataforrest-events-v1";
 import { ConnectionPermitCoordinator } from "./connection-permit-coordinator.ts";
 import { DataforrestEventsSourceAdapter } from "./dataforrest-events-source-adapter.ts";
+import { isBoundedDataforrestEventsPageV1 } from "./dataforrest-events-page-interpreter.ts";
+import { isDeepFrozenJsonValue } from "./source-adapter-contract-primitives.ts";
+import { isTrustedProtectedNativeEvidence } from "./trusted-protected-native-evidence.ts";
 import type { PinnedProviderHttpClient } from "./pinned-provider-http-client.ts";
 import {
   SourceAdapterCaptureInvocation,
@@ -82,7 +86,7 @@ function runtime(cap = 2): TestRuntime {
 const commonPins = {
   organizationId: "organization-1",
   sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-  adapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   singletonFencingEpoch: 7,
   connectionProfileId: "profile-1",
   connectionProfileRevisionId: "profile-revision-1",
@@ -109,12 +113,13 @@ function nextRequestIdentity(kind: string) {
 function cursor(
   provider: LaunchProviderKey,
   value: string | null,
+  adapterVersion: string = DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
 ) {
   return {
-    sourceInstanceId: `source-${provider}`,
-    sourceRevisionId: `source-revision-${provider}`,
-    sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    adapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+      sourceInstanceId: `source-${provider}`,
+      sourceRevisionId: `source-revision-${provider}`,
+      sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+    adapterVersion,
     cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     cursorGeneration: 1,
     value,
@@ -211,17 +216,29 @@ async function pageOperation(
   provider: LaunchProviderKey,
   value: string | null,
   pageBounds: ProviderSourceRequestBounds = bounds,
+  adapterIdentity: Readonly<{
+    adapterVersion: string;
+    normalizedContractVersion: string;
+  }> = {
+    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  },
 ): Promise<PageReadOperation> {
-  const requestedCursor = cursor(provider, value);
+  const requestedCursor = cursor(
+    provider,
+    value,
+    adapterIdentity.adapterVersion,
+  );
   const requestIdentity = nextRequestIdentity(`page-${provider}`);
   const pins: PageReadRequestPins = {
     ...commonPins,
+    adapterVersion: adapterIdentity.adapterVersion,
     ...requestIdentity,
     operationKind: "page_read",
     provider,
     sourceInstanceId: requestedCursor.sourceInstanceId,
     sourceRevisionId: requestedCursor.sourceRevisionId,
-    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    normalizedContractVersion: adapterIdentity.normalizedContractVersion,
     identityNamespaceKey: dataforrestIdentityNamespaceByProvider[provider],
     importRunId: `run-${provider}`,
     runClaimLeaseId: `run-lease-${provider}`,
@@ -238,6 +255,7 @@ async function pageOperation(
   });
   const operation = createPageReadOperation({
     ...commonOperationFields,
+    adapterVersion: adapterIdentity.adapterVersion,
     operationKind: "page_read",
     provider,
     sourceInstanceId: pins.sourceInstanceId,
@@ -273,12 +291,104 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
-function adapterWithClient(httpClient: PinnedProviderHttpClient) {
+function adapterWithClient(
+  httpClient: PinnedProviderHttpClient,
+  manifest: SourceAdapterManifestV1 =
+    dataforrestEventsV1SourceAdapterManifest,
+) {
   return new DataforrestEventsSourceAdapter({
     httpClient,
     resolveHost: async () => ["198.204.245.26"],
-  }, dataforrestEventsV2SourceAdapterManifest);
+  }, manifest);
 }
+
+test("copy-free V1 envelope validation stays in parity with canonical schema bounds", () => {
+  const envelope = (overrides: Record<string, unknown> = {}) => ({
+    records: [{ native: { nested: [null, true, 1, "value"] } }],
+    next_cursor: "page-next",
+    poll_after_seconds: 60,
+    ...overrides,
+  });
+  const sixtyFiveFields = Object.fromEntries(
+    Array.from({ length: 65 }, (_, index) => [`field_${index}`, null]),
+  );
+  const cases = [
+    { label: "valid", value: envelope(), expected: true },
+    {
+      label: "missing wrapper key",
+      value: { records: [], next_cursor: "page-next" },
+      expected: false,
+    },
+    {
+      label: "extra wrapper key",
+      value: envelope({ extra: null }),
+      expected: false,
+    },
+    {
+      label: "exact cursor bound",
+      value: envelope({ next_cursor: "é".repeat(8_192) }),
+      expected: true,
+    },
+    {
+      label: "oversized cursor",
+      value: envelope({ next_cursor: `${"é".repeat(8_192)}a` }),
+      expected: false,
+    },
+    {
+      label: "blank cursor",
+      value: envelope({ next_cursor: " \t " }),
+      expected: false,
+    },
+    {
+      label: "invalid poll value",
+      value: envelope({ poll_after_seconds: 1 }),
+      expected: false,
+    },
+    {
+      label: "record count bound",
+      value: envelope({
+        records: Array.from({ length: 5_001 }, () => ({})),
+      }),
+      expected: false,
+    },
+    {
+      label: "record field count bound",
+      value: envelope({ records: [sixtyFiveFields] }),
+      expected: false,
+    },
+    {
+      label: "record key bound",
+      value: envelope({ records: [{ ["x".repeat(129)]: null }] }),
+      expected: false,
+    },
+    {
+      label: "non-JSON record value",
+      value: envelope({ records: [{ native: undefined }] }),
+      expected: false,
+    },
+    {
+      label: "non-finite record value",
+      value: envelope({ records: [{ native: Number.POSITIVE_INFINITY }] }),
+      expected: false,
+    },
+  ] as const;
+  for (const { label, value, expected } of cases) {
+    assert.equal(
+      dataforrestEventsPageV1Schema.safeParse(value).success,
+      expected,
+      `canonical schema: ${label}`,
+    );
+    assert.equal(
+      isBoundedDataforrestEventsPageV1(value, 5_000),
+      expected,
+      `copy-free validator: ${label}`,
+    );
+  }
+
+  const operationBounded = envelope({ records: [{}, {}] });
+  assert.equal(dataforrestEventsPageV1Schema.safeParse(operationBounded).success, true);
+  assert.equal(isBoundedDataforrestEventsPageV1(operationBounded, 1), false);
+});
 
 function acknowledgeTerminalization(
   input: SourceAdapterRequestTerminalizationInput,
@@ -334,6 +444,67 @@ async function completedPage(
   );
 }
 
+test("fixed DataForrest interpretation seals native evidence for zero-copy completion", async () => {
+  const adapter = adapterWithClient(async () =>
+    jsonResponse(dataforestEventsV1EvidenceFixture.courtyard.initial)
+  );
+  const operation = await pageOperation(runtime(), "courtyard", null);
+  const captured = await successfulCapture(adapter, operation);
+  const context = sourceAdapterInterpretationContextOf(operation);
+  const interpreted = await interpretSourceAdapterPage(
+    adapter,
+    operation,
+    captured,
+  );
+  assert.equal(interpreted.ok, true);
+  if (!interpreted.ok) assert.fail("DataForrest page interpretation failed.");
+  const evidence = interpreted.value.protectedNativeEvidence;
+  assert.equal(isTrustedProtectedNativeEvidence(evidence), true);
+  assert.equal(isDeepFrozenJsonValue(evidence), true);
+
+  const completed = completeSourceAdapterPageRead(
+    operation,
+    context,
+    captured,
+    interpreted,
+  );
+  assert.equal(completed.ok, true);
+  if (!completed.ok) assert.fail("DataForrest page completion failed.");
+  assert.strictEqual(completed.value.protectedNativeEvidence, evidence);
+  operation.requestLease.close();
+});
+
+test("page interpretation rejects malformed UTF-8 instead of accepting replacement text", async () => {
+  const encoder = new TextEncoder();
+  const prefix = encoder.encode('{"records":[],"next_cursor":"');
+  const suffix = encoder.encode('","poll_after_seconds":60}');
+  const malformed = new Uint8Array(prefix.length + 2 + suffix.length);
+  malformed.set(prefix);
+  malformed.set([0xc3, 0x28], prefix.length);
+  malformed.set(suffix, prefix.length + 2);
+  const adapter = adapterWithClient(async () =>
+    new Response(malformed, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  );
+  const operation = await pageOperation(runtime(), "courtyard", null);
+  const captured = await successfulCapture(adapter, operation);
+  const interpreted = await interpretSourceAdapterPage(
+    adapter,
+    operation,
+    captured,
+  );
+  assert.equal(interpreted.ok, false);
+  if (!interpreted.ok) {
+    assert.deepEqual(interpreted.failure, {
+      disposition: "source_action_required",
+      code: "invalid_response",
+    });
+  }
+  operation.requestLease.close();
+});
+
 test("request shapes are operation-specific and preserve an opaque cursor exactly", async () => {
   const requests: Array<Readonly<{ url: URL; init: RequestInit }>> = [];
   const adapter = adapterWithClient(async (url, init) => {
@@ -385,19 +556,18 @@ test("request shapes are operation-specific and preserve an opaque cursor exactl
   }
 });
 
-test("a v1 adapter refuses to interpret a v2-pinned capture", async () => {
+test("the sole v1 adapter refuses a removed v2 interpretation pin", async () => {
   const httpClient = async () =>
     jsonResponse(dataforestEventsV1EvidenceFixture.collector_crypt.initial);
-  const v2 = adapterWithClient(httpClient);
-  const v1 = new DataforrestEventsSourceAdapter({
-    httpClient,
-    resolveHost: async () => ["198.204.245.26"],
-  }, dataforrestEventsV1SourceAdapterManifest);
+  const v1 = adapterWithClient(httpClient);
   const testRuntime = runtime();
   const operation = await pageOperation(testRuntime, "collector_crypt", null);
-  const captured = await successfulCapture(v2, operation);
+  const captured = await successfulCapture(v1, operation);
   const interpreted = await v1.interpretPage(
-    sourceAdapterInterpretationContextOf(operation),
+    {
+      ...sourceAdapterInterpretationContextOf(operation),
+      adapterVersion: "dataforrest-events-adapter-v2",
+    },
     captured,
   );
   assert.equal(interpreted.ok, false);
@@ -939,6 +1109,160 @@ test("deep sub-2MiB JSON fails as one sanitized operation-appropriate result", a
   page.requestLease.close();
 });
 
+test("adversarial structural limits reject before materializing the provider tree", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const placeholder = "packscout-raw-json-placeholder";
+  const rawPageWithData = (rawData: string) =>
+    JSON.stringify({
+      records: [{ ...base, data: placeholder }],
+      next_cursor: "adversarial-page-next",
+      poll_after_seconds: 0,
+    }).replace(JSON.stringify(placeholder), rawData);
+  const adversarialPages = [
+    rawPageWithData(`{"nested":${"[".repeat(100_000)}0${"]".repeat(100_000)}}`),
+    rawPageWithData(`{"native_facts":[${"0,".repeat(5_000)}0]}`),
+    JSON.stringify({
+      records: Array.from({ length: 250 }, (_, recordIndex) => ({
+        ...base,
+        record_id: `node-limit-card-${recordIndex}`,
+        data: {
+          provider_label: `Node limit card ${recordIndex}`,
+          native_facts: Array.from({ length: 630 }, () => ({})),
+        },
+      })),
+      next_cursor: "node-limit-page-next",
+      poll_after_seconds: 0,
+    }),
+  ];
+  for (const [index, rawPage] of adversarialPages.entries()) {
+    assert.equal(
+      Buffer.byteLength(rawPage, "utf8") < bounds.maximumResponseBytes,
+      true,
+    );
+    const adapter = adapterWithClient(async () => new Response(rawPage));
+    const operation = await pageOperation(runtime(), "courtyard", null);
+    const capture = await successfulCapture(adapter, operation);
+    const result = await interpretSourceAdapterPage(adapter, operation, capture);
+    assert.equal(result.ok, false, `adversarial page ${index}`);
+    if (!result.ok) {
+      assert.deepEqual(result.failure, {
+        disposition: "source_action_required",
+        code: "invalid_response",
+      });
+    }
+    operation.requestLease.close();
+  }
+});
+
+test("object-heavy 250-record pages remain valid near the global node bound", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const records = Array.from({ length: 250 }, (_, recordIndex) => ({
+    ...base,
+    record_id: `data-rich-card-${recordIndex}`,
+    data: {
+      ...base.data,
+      native_facts: Array.from({ length: 600 }, () => ({})),
+    },
+  }));
+  assert.equal(records.length * 600 > 100_000, true);
+  const rawPage = JSON.stringify({
+    records,
+    next_cursor: "data-rich-next",
+    poll_after_seconds: 0,
+  });
+  assert.equal(
+    new TextEncoder().encode(rawPage).byteLength <= bounds.maximumResponseBytes,
+    true,
+  );
+  const adapter = adapterWithClient(async () => new Response(rawPage));
+  const operation = await pageOperation(runtime(), "courtyard", null);
+  const capture = await successfulCapture(adapter, operation);
+  const result = await interpretSourceAdapterPage(adapter, operation, capture);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.normalizedPage.outcomes.length, 250);
+  }
+  operation.requestLease.close();
+});
+
+test("the sole v1 adapter captures valid pages above 4 MiB and rejects pages above 8 MiB", async () => {
+  const formerMaximumResponseBytes = 4 * 1024 * 1024;
+  const currentBounds = dataforrestEventsV1SourceAdapterManifest.requestBounds;
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const page = (paddingLength: number) => JSON.stringify({
+    records: Array.from({ length: 250 }, (_, recordIndex) => ({
+      ...base,
+      record_id: `large-card-${recordIndex}`,
+      data: {
+        ...base.data,
+        native_payload: "x".repeat(paddingLength),
+      },
+    })),
+    next_cursor: "large-page-next",
+    poll_after_seconds: 0,
+  });
+  const acceptedRawPage = page(18_000);
+  const acceptedBytes = Buffer.byteLength(acceptedRawPage, "utf8");
+  assert.equal(acceptedBytes > formerMaximumResponseBytes, true);
+  assert.equal(acceptedBytes <= currentBounds.maximumResponseBytes, true);
+
+  const adapter = adapterWithClient(
+    async () => new Response(acceptedRawPage),
+    dataforrestEventsV1SourceAdapterManifest,
+  );
+  const adapterIdentity = {
+    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  } as const;
+  const acceptedOperation = await pageOperation(
+    runtime(),
+    "courtyard",
+    null,
+    currentBounds,
+    adapterIdentity,
+  );
+  const capture = await successfulCapture(adapter, acceptedOperation);
+  assert.equal(capture.measurements.responseBytes, acceptedBytes);
+  const interpreted = await interpretSourceAdapterPage(
+    adapter,
+    acceptedOperation,
+    capture,
+  );
+  assert.equal(interpreted.ok, true);
+  if (interpreted.ok) {
+    assert.equal(interpreted.value.normalizedPage.outcomes.length, 250);
+  }
+  acceptedOperation.requestLease.close();
+
+  const rejectedRawPage = page(34_000);
+  assert.equal(
+    Buffer.byteLength(rejectedRawPage, "utf8") >
+      currentBounds.maximumResponseBytes,
+    true,
+  );
+  const rejectedAdapter = adapterWithClient(
+    async () => new Response(rejectedRawPage),
+    dataforrestEventsV1SourceAdapterManifest,
+  );
+  const rejectedOperation = await pageOperation(
+    runtime(),
+    "courtyard",
+    null,
+    currentBounds,
+    adapterIdentity,
+  );
+  const rejected = await captureRequest(rejectedAdapter, rejectedOperation);
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) {
+    assert.deepEqual(rejected.failure, {
+      disposition: "source_action_required",
+      code: "invalid_response",
+    });
+    assert.equal(rejected.diagnostics[0]?.code, "response_too_large");
+  }
+  rejectedOperation.requestLease.close();
+});
+
 test("reserved JSON keys are rejected before provider evidence can be silently rewritten", async () => {
   const protectedMarker = "reserved-json-provider-secret-must-not-cross";
   for (const reservedKey of ["__proto__", "constructor", "prototype"]) {
@@ -968,6 +1292,180 @@ test("reserved JSON keys are rejected before provider evidence can be silently r
     assert.equal(JSON.stringify(result).includes(protectedMarker), false);
     page.requestLease.close();
   }
+
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const placeholder = "packscout-escaped-reserved-placeholder";
+  const escapedRawPage = JSON.stringify({
+    records: [{ ...base, data: placeholder }],
+    next_cursor: "escaped-reserved-key-next",
+    poll_after_seconds: 0,
+  }).replace(
+    JSON.stringify(placeholder),
+    `{"provider_label":"fixture","\\u005f\\u005fproto__":{"marker":"${protectedMarker}"}}`,
+  );
+  const escapedAdapter = adapterWithClient(
+    async () => new Response(escapedRawPage),
+  );
+  const escapedOperation = await pageOperation(runtime(), "courtyard", null);
+  const escapedCapture = await successfulCapture(
+    escapedAdapter,
+    escapedOperation,
+  );
+  const escapedResult = await interpretSourceAdapterPage(
+    escapedAdapter,
+    escapedOperation,
+    escapedCapture,
+  );
+  assert.equal(escapedResult.ok, false);
+  assert.equal(JSON.stringify(escapedResult).includes(protectedMarker), false);
+  escapedOperation.requestLease.close();
+});
+
+test("duplicate members retain JSON last-write semantics within the parser-work bound", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const placeholder = "packscout-duplicate-member-placeholder";
+  const rawPageWithData = (rawData: string) =>
+    JSON.stringify({
+      records: [{ ...base, data: placeholder }],
+      next_cursor: "duplicate-member-next",
+      poll_after_seconds: 0,
+    }).replace(JSON.stringify(placeholder), rawData);
+
+  const acceptedRawPage = rawPageWithData(
+    '{"provider_label":"first","provider_label":"second"}',
+  );
+  const acceptedAdapter = adapterWithClient(
+    async () => new Response(acceptedRawPage),
+  );
+  const acceptedOperation = await pageOperation(runtime(), "courtyard", null);
+  const acceptedCapture = await successfulCapture(
+    acceptedAdapter,
+    acceptedOperation,
+  );
+  const accepted = await interpretSourceAdapterPage(
+    acceptedAdapter,
+    acceptedOperation,
+    acceptedCapture,
+  );
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) {
+    const evidence = accepted.value.protectedNativeEvidence[0] as unknown as {
+      readonly value: Readonly<{
+        data: Readonly<{ provider_label: string }>;
+      }>;
+    };
+    assert.equal(evidence.value.data.provider_label, "second");
+  }
+  acceptedOperation.requestLease.close();
+
+  const repeatedMembers = Array.from({ length: 257 }, (_, index) =>
+    `"provider_label":"duplicate-${index}"`
+  ).join(",");
+  const rejectedRawPage = rawPageWithData(`{${repeatedMembers}}`);
+  const rejectedAdapter = adapterWithClient(
+    async () => new Response(rejectedRawPage),
+  );
+  const rejectedOperation = await pageOperation(runtime(), "courtyard", null);
+  const rejectedCapture = await successfulCapture(
+    rejectedAdapter,
+    rejectedOperation,
+  );
+  const rejected = await interpretSourceAdapterPage(
+    rejectedAdapter,
+    rejectedOperation,
+    rejectedCapture,
+  );
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.equal(rejected.failure.code, "invalid_response");
+  rejectedOperation.requestLease.close();
+});
+
+test("finite long numbers and astral UTF-8 split at the parser chunk retain JSON parity", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const placeholder = "packscout-parser-parity-placeholder";
+  const rawPageWithData = (rawData: string, nextCursor: string) =>
+    JSON.stringify({
+      records: [{ ...base, data: placeholder }],
+      next_cursor: nextCursor,
+      poll_after_seconds: 0,
+    }).replace(JSON.stringify(placeholder), rawData);
+
+  const finiteNumberRawPage = rawPageWithData(
+    `{"provider_label":"fixture","native_number":${"1".repeat(65)}}`,
+    "finite-number-next",
+  );
+  const finiteNumberAdapter = adapterWithClient(
+    async () => new Response(finiteNumberRawPage),
+  );
+  const finiteNumberOperation = await pageOperation(
+    runtime(),
+    "courtyard",
+    null,
+  );
+  const finiteNumberCapture = await successfulCapture(
+    finiteNumberAdapter,
+    finiteNumberOperation,
+  );
+  const finiteNumberResult = await interpretSourceAdapterPage(
+    finiteNumberAdapter,
+    finiteNumberOperation,
+    finiteNumberCapture,
+  );
+  assert.equal(finiteNumberResult.ok, true);
+  if (finiteNumberResult.ok) {
+    const evidence = finiteNumberResult.value.protectedNativeEvidence[0] as unknown as {
+      readonly value: Readonly<{
+        data: Readonly<{ native_number: number }>;
+      }>;
+    };
+    assert.equal(Number.isFinite(evidence.value.data.native_number), true);
+  }
+  finiteNumberOperation.requestLease.close();
+
+  const astralTemplate = rawPageWithData(
+    `{"provider_label":"fixture","native_text":"${placeholder}"}`,
+    "astral-next",
+  );
+  const encodedPlaceholder = JSON.stringify(placeholder);
+  const placeholderIndex = astralTemplate.indexOf(encodedPlaceholder);
+  assert.notEqual(placeholderIndex, -1);
+  const prefixBytes = Buffer.byteLength(
+    astralTemplate.slice(0, placeholderIndex),
+    "utf8",
+  );
+  const emojiStartOffset = 64 * 1024 - 1;
+  const paddingLength = emojiStartOffset - prefixBytes - 1;
+  assert.ok(paddingLength > 0);
+  const nativeText = `${"x".repeat(paddingLength)}🙂`;
+  const astralRawPage = astralTemplate.replace(
+    encodedPlaceholder,
+    JSON.stringify(nativeText),
+  );
+  const emojiIndex = astralRawPage.indexOf("🙂");
+  assert.equal(
+    Buffer.byteLength(astralRawPage.slice(0, emojiIndex), "utf8"),
+    emojiStartOffset,
+  );
+  const astralAdapter = adapterWithClient(
+    async () => new Response(astralRawPage),
+  );
+  const astralOperation = await pageOperation(runtime(), "courtyard", null);
+  const astralCapture = await successfulCapture(astralAdapter, astralOperation);
+  const astralResult = await interpretSourceAdapterPage(
+    astralAdapter,
+    astralOperation,
+    astralCapture,
+  );
+  assert.equal(astralResult.ok, true);
+  if (astralResult.ok) {
+    const evidence = astralResult.value.protectedNativeEvidence[0] as unknown as {
+      readonly value: Readonly<{
+        data: Readonly<{ native_text: string }>;
+      }>;
+    };
+    assert.equal(evidence.value.data.native_text, nativeText);
+  }
+  astralOperation.requestLease.close();
 });
 
 test("DataForrest request and returned cursors enforce the shared 16 KiB UTF-8 cap", async () => {
@@ -1107,6 +1605,29 @@ test("DataForrest rejects cursor text that cannot be persisted losslessly", asyn
     );
   }
   astralOperation.requestLease.close();
+
+  const escapedAstralRaw =
+    '{"records":[],"next_cursor":"cursor-\\ud83d\\ude42-value","poll_after_seconds":60}';
+  const escapedAstralAdapter = adapterWithClient(
+    async () => new Response(escapedAstralRaw),
+  );
+  const escapedAstralOperation = await pageOperation(
+    runtime(),
+    "courtyard",
+    null,
+  );
+  const escapedAstralResult = await completedPage(
+    escapedAstralAdapter,
+    escapedAstralOperation,
+  );
+  assert.equal(escapedAstralResult.ok, true);
+  if (escapedAstralResult.ok) {
+    assert.equal(
+      escapedAstralResult.value.normalizedPage.nextCursor.value,
+      "cursor-🙂-value",
+    );
+  }
+  escapedAstralOperation.requestLease.close();
 });
 
 test("two platform reads overlap without sharing filters, cursors, or results", async () => {

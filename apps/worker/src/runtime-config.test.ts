@@ -112,6 +112,39 @@ test("source supervisor reads only ingestion-owned secret boundaries", () => {
   assert.equal(configuration.workerId, "source-supervisor:fallback");
   assert.equal(configuration.environment, "production");
   assert.equal(configuration.sourceDiskReserveBytes, undefined);
+  assert.equal(configuration.executionSlots, 4);
+});
+
+test("source supervisor permits a reduced execution-slot cap only locally", () => {
+  const configuration = readProviderSourceSupervisorConfiguration(
+    validEnvironment({
+      NODE_ENV: "development",
+      PACKSCOUT_SOURCE_EXECUTION_SLOTS: "1",
+    }),
+    "source-supervisor:local",
+  );
+
+  assert.equal(configuration.executionSlots, 1);
+
+  for (const [nodeEnvironment, executionSlots] of [
+    ["production", "1"],
+    ["test", "1"],
+    ["development", "0"],
+    ["development", "5"],
+    ["development", "1.5"],
+    ["development", " 1"],
+  ] as const) {
+    assert.throws(
+      () => readProviderSourceSupervisorConfiguration(
+        validEnvironment({
+          NODE_ENV: nodeEnvironment,
+          PACKSCOUT_SOURCE_EXECUTION_SLOTS: executionSlots,
+        }),
+        "source-supervisor:execution-slots",
+      ),
+      hasConfigurationCode("SOURCE_EXECUTION_SLOTS_INVALID"),
+    );
+  }
 });
 
 test("source supervisor permits an explicit free-space reserve only locally", () => {

@@ -17,7 +17,8 @@
     "test:volume": "node --import tsx --test src/catalog-release-volume.test.ts"
   },
   "dependencies": {
-    "@packscout/contracts": "0.0.0"
+    "@packscout/contracts": "0.0.0",
+    "@streamparser/json": "0.0.26"
   },
   "devDependencies": {
     "@packscout/database": "0.0.0",

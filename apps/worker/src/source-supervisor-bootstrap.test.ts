@@ -252,6 +252,7 @@ test("source-only bootstrap import graph excludes unrelated worker lanes", async
 
   assert.deepEqual(imports.sort(), [
     "./source-supervisor-runtime-config.ts",
+    "@packscout/contracts",
     "@packscout/database",
     "node:path",
   ]);

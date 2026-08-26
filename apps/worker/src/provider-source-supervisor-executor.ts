@@ -889,7 +889,7 @@ export class ProviderSourceSupervisorWorkExecutor
       requestedCursor: cursor!,
       requestedCursorFingerprint: work.requestedCursorFingerprint,
     };
-    const committed = await this.#controlPlane(context, () =>
+    const committed = await this.#dataPlane(context, () =>
       this.dependencies.pageImports.importPage({
         pins: commitPins,
         adapterResult: result,
@@ -950,6 +950,30 @@ export class ProviderSourceSupervisorWorkExecutor
           work.sourceAdapterVersion,
           work.provider,
         );
+  }
+
+  async #dataPlane<TResult>(
+    context: SourceSupervisorExecutionContext,
+    transact: () => Promise<TResult>,
+  ): Promise<TResult> {
+    context.runtimeFence.assertActive();
+    if (context.signal.aborted) throw new RuntimeLocallyFencedError();
+    try {
+      // Page persistence owns a bounded 30-second atomic transaction. Await it
+      // exactly once: the short control-plane deadline cannot cancel Prisma's
+      // transaction, so retrying before this promise settles would overlap the
+      // same page commit and could fence an otherwise healthy supervisor.
+      return await transact();
+    } catch (error) {
+      const classification = this.dependencies.classifyControlPlaneFailure(error);
+      if (classification === "stale_fence") {
+        throw new SourceSupervisorStaleWorkError();
+      }
+      if (classification === "lost_ownership") {
+        throw new RuntimeLocallyFencedError();
+      }
+      throw error;
+    }
   }
 
   async #controlPlane<TResult>(

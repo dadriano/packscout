@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_HASH_VERSION,
   decideProviderSourceCanonicalLifecycle,
   providerSourcePageCommitCanonicalJson,
   type ProviderSourceCanonicalProjectionPlan,
@@ -25,6 +24,7 @@ import { ProviderSourceCursorRepository } from "./provider-source-cursor-reposit
 import { ProviderSourceDiagnosticRepository } from "./provider-source-diagnostic-repository.ts";
 import {
   ProviderSourceObservationRepository,
+  providerSourceObservationVersionPins,
   resolveLaunchSourceRecordMeaning,
   type RecordDeliveryOccurrenceInput,
   type SourceDeliveryDisposition,
@@ -65,7 +65,8 @@ export interface ProviderSourceAtomicPageCommitResult {
   readonly kind: "committed" | "already_committed";
   readonly pageId: string;
   readonly cursorFingerprint: string | null;
-  readonly continuation: ProviderSourcePagePlan["normalizedPage"]["continuation"];
+  readonly continuation:
+    ProviderSourcePagePlan["normalizedPage"]["continuation"];
   readonly counts: Readonly<{
     inserted: number;
     revised: number;
@@ -137,11 +138,18 @@ function asPrismaBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
 function normalizedCommitHash(
   input: ProviderSourceAtomicPagePersistenceInput,
 ): string {
+  if (
+    input.pins.normalizedContractVersion !==
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
+  ) {
+    invalidPlan();
+  }
+  const canonical = providerSourcePageCommitCanonicalJson({
+    plan: input.plan,
+    protectedNativeEvidence: input.protectedNativeEvidence,
+  });
   return createHash("sha256")
-    .update(providerSourcePageCommitCanonicalJson({
-      plan: input.plan,
-      protectedNativeEvidence: input.protectedNativeEvidence,
-    }))
+    .update(canonical)
     .digest("hex");
 }
 
@@ -350,6 +358,9 @@ export class ProviderSourcePageRepository {
       const evidence = new Map(
         input.protectedNativeEvidence.map((item) => [item.reference, item.value]),
       );
+      const observationVersionPins = providerSourceObservationVersionPins(
+        input.pins.normalizedContractVersion,
+      );
       const counts = emptyCounts(input.plan.counts.warnings);
       const evCauses = new Map<string, bigint[]>();
 
@@ -408,8 +419,7 @@ export class ProviderSourcePageRepository {
               recordIdScopeKey: identity.recordIdScopeKey,
               providerRecordId: identity.providerRecordId,
               effectiveSourceTime: new Date(outcome.semanticContent.effectiveAt),
-              normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
-              hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
+              ...observationVersionPins,
               normalizedContentHash: outcome.normalizedContentHash,
               normalizedContent: outcome.semanticContent,
               ...meaning,

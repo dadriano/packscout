@@ -6,7 +6,6 @@ import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   PUBLIC_PACK_AVAILABILITY_INPUT_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
-  dataforrestEventsV2SourceAdapterManifest,
   normalizedObservationSemanticContent,
   normalizedProviderObservationPageSchema,
   providerIdentityNamespaceByLaunchProvider,
@@ -887,10 +886,17 @@ function replaceProjectionContent(
   return { ...input, plan };
 }
 
-test("durable raw page boundary accepts exactly 4 MiB and rejects the next byte", async () => {
+test("durable raw page boundary accepts the launch maximum and rejects the next byte", async () => {
   const maximumResponseBytes = providerSourceLaunchBounds.maximumResponseBytes;
+  const sourceManifest: SourceAdapterManifestV1 = {
+    ...dataforrestEventsV1SourceAdapterManifest,
+    requestBounds: {
+      ...dataforrestEventsV1SourceAdapterManifest.requestBounds,
+      maximumResponseBytes,
+    },
+  };
   const runtime = await createRuntime("raw-response-boundary", {
-    sourceManifest: dataforrestEventsV2SourceAdapterManifest,
+    sourceManifest,
     protectedRawResponseText: "x".repeat(maximumResponseBytes),
   });
   try {
@@ -1166,6 +1172,54 @@ test("atomic persistence snapshots raw bytes and nested plan content before its 
         where: { id: packEntity.current_revision_id! },
       });
     assert.deepEqual(packRevision.content_json, validatedProjectionContent);
+  } finally {
+    release.resolve();
+    await independent.$disconnect();
+    await runtime.close();
+  }
+});
+
+test("page import snapshots canonical raw bytes before caller mutation can interleave", async () => {
+  const runtime = await createRuntime("immutable-import-handoff");
+  const independent = await runtime.createIndependentClient();
+  const locked = deferred();
+  const release = deferred();
+  try {
+    assert.equal(runtime.adapterResult.ok, true);
+    if (!runtime.adapterResult.ok) assert.fail("Captured page unavailable.");
+    const canonicalRaw =
+      runtime.adapterResult.value.requestCapture.protectedRawResponse;
+    const validatedRaw = new Uint8Array(canonicalRaw);
+    const validatedRawHash =
+      runtime.adapterResult.value.requestCapture.protectedRawResponseSha256;
+
+    const blocker = independent.$transaction(async (transaction) => {
+      await transaction.$queryRaw`
+        select id from public.provider_sources
+        where id = ${runtime.providerId}::uuid
+        for update
+      `;
+      locked.resolve();
+      await release.promise;
+    });
+    await locked.promise;
+    const importing = service(runtime).importPage({
+      pins: runtime.pins,
+      adapterResult: runtime.adapterResult,
+      committedAt: new Date("2000-01-01T00:00:00.000Z"),
+    });
+
+    canonicalRaw[0] = canonicalRaw[0]! ^ 255;
+    await assertPending(importing);
+    release.resolve();
+    await blocker;
+    assert.equal((await importing).kind, "committed");
+
+    const page = await runtime.database.import_pages.findUniqueOrThrow({
+      where: { id: runtime.pins.pageId },
+    });
+    assert.equal(page.payload_hash, validatedRawHash);
+    assert.deepEqual(page.protected_raw_response, validatedRaw);
   } finally {
     release.resolve();
     await independent.$disconnect();

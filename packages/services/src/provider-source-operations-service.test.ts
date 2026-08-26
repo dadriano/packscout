@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   PROVIDER_SOURCE_SUPERVISOR_SNAPSHOT_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
-  dataforrestEventsV2SourceAdapterManifest,
   providerSourceAdminCatalogSchema,
   providerSourceSupervisorSnapshotSchema,
   type LaunchProviderKey,
@@ -214,7 +212,7 @@ const snapshot = providerSourceSupervisorSnapshotSchema.parse({
   }),
 });
 
-const catalogWithV2Candidate = providerSourceAdminCatalogSchema.parse({
+const catalogWithCredentialCandidate = providerSourceAdminCatalogSchema.parse({
   ...catalog,
   connections: catalog.connections.map((connection) => ({
     ...connection,
@@ -222,7 +220,7 @@ const catalogWithV2Candidate = providerSourceAdminCatalogSchema.parse({
       ...connection.latestRevision,
       id: uuid(5),
       revisionNumber: 2,
-      sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+      sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
       state: "candidate",
       endpointHost: "candidate.events.example.test",
       healthGeneration: "99",
@@ -240,18 +238,18 @@ const catalogWithV2Candidate = providerSourceAdminCatalogSchema.parse({
   })),
 });
 
-const migratedConnectionProfileId = uuid(6);
-const migratedConnectionRevisionId = uuid(7);
-const migratedConnectionRevision = {
+const splitConnectionProfileId = uuid(6);
+const splitConnectionRevisionId = uuid(7);
+const splitConnectionRevision = {
   ...activeConnectionRevision,
-  id: migratedConnectionRevisionId,
-  sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  endpointHost: "v2.events.example.test",
+  id: splitConnectionRevisionId,
+  sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  endpointHost: "split.events.example.test",
   healthGeneration: "6",
   test: {
     ...activeConnectionRevision.test,
     jobId: uuid(8),
-    connectionRevisionId: migratedConnectionRevisionId,
+    connectionRevisionId: splitConnectionRevisionId,
   },
 };
 const splitProfileCatalog = providerSourceAdminCatalogSchema.parse({
@@ -262,7 +260,7 @@ const splitProfileCatalog = providerSourceAdminCatalogSchema.parse({
           ...provider,
           sourceRegistration: {
             ...provider.sourceRegistration,
-            sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+            sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
           },
         }
       : provider
@@ -271,11 +269,11 @@ const splitProfileCatalog = providerSourceAdminCatalogSchema.parse({
     ...catalog.connections,
     {
       ...catalog.connections[0],
-      id: migratedConnectionProfileId,
-      displayName: "Migrated feed",
-      activeRevisionId: migratedConnectionRevisionId,
-      activeRevision: migratedConnectionRevision,
-      latestRevision: migratedConnectionRevision,
+      id: splitConnectionProfileId,
+      displayName: "Split feed",
+      activeRevisionId: splitConnectionRevisionId,
+      activeRevision: splitConnectionRevision,
+      latestRevision: splitConnectionRevision,
       recoveryFence: null,
     },
   ],
@@ -283,9 +281,9 @@ const splitProfileCatalog = providerSourceAdminCatalogSchema.parse({
     index === 1
       ? {
           ...source,
-          sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-          connectionProfileId: migratedConnectionProfileId,
-          connectionRevisionId: migratedConnectionRevisionId,
+          sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+          connectionProfileId: splitConnectionProfileId,
+          connectionRevisionId: splitConnectionRevisionId,
         }
       : source
   ),
@@ -298,7 +296,7 @@ const splitProfileSnapshot = providerSourceSupervisorSnapshotSchema.parse({
       ...snapshot.capacity.profiles,
       {
         organizationId,
-        connectionProfileId: migratedConnectionProfileId,
+        connectionProfileId: splitConnectionProfileId,
         used: 0,
         maximum: 2,
         waiting: 0,
@@ -309,9 +307,9 @@ const splitProfileSnapshot = providerSourceSupervisorSnapshotSchema.parse({
     index === 1
       ? {
           ...source,
-          connectionProfileId: migratedConnectionProfileId,
-          connectionRevisionId: migratedConnectionRevisionId,
-          sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+          connectionProfileId: splitConnectionProfileId,
+          connectionRevisionId: splitConnectionRevisionId,
+          sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
         }
       : source
   ),
@@ -351,16 +349,10 @@ function runtime(
     environmentKey: "local",
     catalog: { async read() { return catalogValue; } },
     snapshot: { async read() { return snapshotValue; } },
-    sourceTypes: [
-      {
-        label: "Current event source",
-        manifest: dataforrestEventsV2SourceAdapterManifest,
-      },
-      {
-        label: "Registered event source",
-        manifest: dataforrestEventsV1SourceAdapterManifest,
-      },
-    ],
+    sourceTypes: [{
+      label: "Registered event source",
+      manifest: dataforrestEventsV1SourceAdapterManifest,
+    }],
     repository: {
       async readOverview() {
         return {
@@ -446,10 +438,6 @@ test("source operations compose the registered four rows with durable supervisor
     overview.connection?.sourceType.adapterVersion,
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
-  assert.notEqual(
-    overview.connection?.sourceType.adapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  );
   assert.equal(overview.connection?.capacity.requestPermits.waiting, 1);
   assert.equal(overview.connection?.health.state, "blocked");
   const courtyard = overview.sources[0]!;
@@ -470,7 +458,7 @@ test("source operations compose the registered four rows with durable supervisor
 
 test("source operations report the complete active revision while a newer candidate reconnects", async () => {
   const catalogWithoutSources = providerSourceAdminCatalogSchema.parse({
-    ...catalogWithV2Candidate,
+    ...catalogWithCredentialCandidate,
     sources: [],
   });
   const overview = await runtime("current", catalogWithoutSources).overview(
@@ -487,16 +475,12 @@ test("source operations report the complete active revision while a newer candid
 });
 
 test("source operations report the selected source adapter ahead of a newer profile candidate", async () => {
-  const overview = await runtime("current", catalogWithV2Candidate).overview(
+  const overview = await runtime("current", catalogWithCredentialCandidate).overview(
     organizationId,
   );
   assert.equal(
     overview.connection?.sourceType.adapterVersion,
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  );
-  assert.notEqual(
-    overview.connection?.sourceType.adapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   );
   assert.equal(overview.connection?.endpointHost, "events.example.test");
   assert.equal(overview.connection?.test.state, "succeeded");
@@ -505,8 +489,8 @@ test("source operations report the selected source adapter ahead of a newer prof
 
 test("source operations reject a live source pinned outside the displayed revision", async () => {
   const inconsistentCatalog = providerSourceAdminCatalogSchema.parse({
-    ...catalogWithV2Candidate,
-    sources: catalogWithV2Candidate.sources.map((source, index) =>
+    ...catalogWithCredentialCandidate,
+    sources: catalogWithCredentialCandidate.sources.map((source, index) =>
       index === 0
         ? { ...source, connectionRevisionId: uuid(5) }
         : source
@@ -518,7 +502,7 @@ test("source operations reject a live source pinned outside the displayed revisi
   );
 });
 
-test("split-profile migration reports each source against its own connection", async () => {
+test("split profiles report each source against its own connection", async () => {
   const service = runtime(
     "current",
     splitProfileCatalog,
@@ -536,13 +520,13 @@ test("split-profile migration reports each source against its own connection", a
   );
   assert.equal(
     detail.connection?.connectionProfileId,
-    migratedConnectionProfileId,
+    splitConnectionProfileId,
   );
   assert.equal(
     detail.connection?.sourceType.adapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
-  assert.equal(detail.connection?.endpointHost, "v2.events.example.test");
+  assert.equal(detail.connection?.endpointHost, "split.events.example.test");
   assert.equal(detail.connection?.health.generation, "6");
   assert.deepEqual(detail.connection?.capacity.requestPermits, {
     used: 0,

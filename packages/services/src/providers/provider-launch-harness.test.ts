@@ -37,9 +37,10 @@ function mapped(input: Parameters<typeof registry.map>[0]) {
   return outcome;
 }
 
-test("production composition has exactly the four compatible launch mappers", () => {
+test("production composition has one exact v1 mapper for all four providers", () => {
   assert.deepEqual(
-    providerMapperManifest.map(({ descriptor }) => descriptor.provider),
+    [...new Set(providerMapperManifest.map(({ descriptor }) =>
+      descriptor.provider))],
     launchProviderKeys,
   );
   assert.equal(

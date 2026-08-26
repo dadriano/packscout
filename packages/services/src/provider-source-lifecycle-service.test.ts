@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   providerIdentityNamespaceByLaunchProvider,
 } from "@packscout/contracts";
@@ -25,7 +25,6 @@ const profileId = "00000000-0000-4000-8000-000000000003";
 const connectionRevisionId = "00000000-0000-4000-8000-000000000004";
 const sourceId = "00000000-0000-4000-8000-000000000005";
 const sourceRevisionId = "00000000-0000-4000-8000-000000000006";
-const oldSourceId = "00000000-0000-4000-8000-000000000007";
 const scheduleRevisionId = "00000000-0000-4000-8000-000000000008";
 const now = new Date("2026-08-21T12:00:00.000Z");
 
@@ -68,7 +67,7 @@ class MemoryLifecycleRepository
   source = snapshot();
   profileState: "draft" | "active" | "disabled" = "active";
   activeRevisionSourceAdapterVersion: string | null =
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION;
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION;
   createInput: Parameters<ProviderSourceLifecycleAdminRepository["createSource"]>[0] | null = null;
   resetInput: Parameters<ProviderSourceLifecycleAdminRepository["resetCursor"]>[0] | null = null;
 
@@ -113,7 +112,7 @@ class MemoryLifecycleRepository
     if (
       input.organizationId !== organizationId ||
       input.providerId !== providerId ||
-      ![sourceId, oldSourceId].includes(input.sourceInstanceId)
+      input.sourceInstanceId !== sourceId
     ) return null;
     return { ...this.source, sourceInstanceId: input.sourceInstanceId };
   }
@@ -196,7 +195,7 @@ test("source creation derives the immutable platform filter and contract-only ma
   );
   assert.equal(
     repository.createInput?.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
   assert.deepEqual(repository.createInput?.recordIdScopes, [
     "catalog-pack-v1",
@@ -214,22 +213,15 @@ test("source creation derives the immutable platform filter and contract-only ma
   );
 });
 
-test("active profiles require the current adapter for creation and replacement while drafts can stage it", async () => {
+test("active profiles require the current adapter for creation while drafts can stage it", async () => {
   const { repository, service } = fixture();
   repository.activeRevisionSourceAdapterVersion =
-    "dataforrest-events-adapter-v1";
+    "dataforrest-events-adapter-v2";
 
   await assert.rejects(
     service.createSource(
       { organizationId, actorKey: "operator-admin" },
       sourceRequest,
-    ),
-    /source_dependency_required/u,
-  );
-  await assert.rejects(
-    service.createReplacement(
-      { organizationId, actorKey: "operator-admin" },
-      { ...sourceRequest, replacesSourceInstanceId: oldSourceId },
     ),
     /source_dependency_required/u,
   );
@@ -245,40 +237,8 @@ test("active profiles require the current adapter for creation and replacement w
   assert.equal(created.sourceInstanceId, sourceId);
   assert.equal(
     draft.repository.createInput?.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
-});
-
-test("a replacement requires an idle paused or disabled compatible predecessor and always creates a fresh source", async () => {
-  const { repository, service } = fixture();
-  repository.source = snapshot({
-    sourceInstanceId: oldSourceId,
-    state: "active",
-    hasActiveRun: true,
-  });
-  await assert.rejects(
-    service.createReplacement(
-      { organizationId, actorKey: "operator-admin" },
-      { ...sourceRequest, replacesSourceInstanceId: oldSourceId },
-    ),
-    /source_conflict/u,
-  );
-  repository.source = snapshot({
-    sourceInstanceId: oldSourceId,
-    state: "disabled",
-    hasActiveRun: false,
-  });
-  const replacement = await service.createReplacement(
-    { organizationId, actorKey: "operator-admin" },
-    { ...sourceRequest, replacesSourceInstanceId: oldSourceId },
-  );
-  assert.equal(replacement.sourceInstanceId, sourceId);
-  assert.equal(repository.createInput?.replacesSourceInstanceId, oldSourceId);
-  assert.equal(
-    repository.createInput?.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  );
-  assert.notEqual(replacement.sourceInstanceId, oldSourceId);
 });
 
 test("activation delegates exact tested pins and cursor reset binds preview generation, fingerprint, and typed provider", async () => {

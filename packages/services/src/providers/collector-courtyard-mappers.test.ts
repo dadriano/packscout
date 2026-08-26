@@ -4,7 +4,7 @@ import {
   dataforrestEventRecordV1Schema,
   emptyNormalizedProviderFacts,
   launchProviderKeys,
-  normalizeDataforrestEventRecordV2,
+  normalizeDataforrestEventRecord,
   providerEventCodes,
 } from "@packscout/contracts";
 import {
@@ -64,7 +64,7 @@ test("all four platform mappers project normalized pack, card, pull, and trade o
 });
 
 test("Collector Crypt native pack name reaches an accepted canonical pack", () => {
-  const observation = normalizeDataforrestEventRecordV2(
+  const observation = normalizeDataforrestEventRecord(
     dataforrestEventRecordV1Schema.parse({
       platform: "collector_crypt",
       stream: "catalog",
@@ -92,6 +92,68 @@ test("Collector Crypt native pack name reaches an accepted canonical pack", () =
   assert.equal(
     outcome.candidate.identity.providerRecordId,
     "collector-pack-native-name",
+  );
+});
+
+test("ClutchPacks native pack name reaches an accepted canonical pack", () => {
+  const observation = normalizeDataforrestEventRecord(
+    dataforrestEventRecordV1Schema.parse({
+      platform: "clutchpacks",
+      stream: "catalog",
+      entity: "pack",
+      record_id: "clutchpacks-pack-native-name",
+      occurred_at: "2026-08-01T00:00:00.000Z",
+      collected_at: "2026-08-01T00:00:01.000Z",
+      first_seen_at: "2026-08-01T00:00:00.000Z",
+      available: true,
+      data: {
+        name: "ClutchPacks Alpha",
+        provider_label: "ignored provider label",
+      },
+    }),
+    "clutchpacks",
+    "page_record:0",
+  );
+  const outcome = mapped(mapperInput("clutchpacks", observation));
+  assert.equal(outcome.candidate.candidateKind, "pack");
+  if (outcome.candidate.candidateKind !== "pack") {
+    assert.fail("expected canonical pack candidate");
+  }
+  assert.equal(outcome.candidate.displayName, "ClutchPacks Alpha");
+  assert.equal(
+    outcome.candidate.identity.providerRecordId,
+    "clutchpacks-pack-native-name",
+  );
+});
+
+test("Phygitals native pack name reaches an accepted canonical pack", () => {
+  const observation = normalizeDataforrestEventRecord(
+    dataforrestEventRecordV1Schema.parse({
+      platform: "phygitals",
+      stream: "catalog",
+      entity: "pack",
+      record_id: "phygitals-pack-native-name",
+      occurred_at: "2026-08-01T00:00:00.000Z",
+      collected_at: "2026-08-01T00:00:01.000Z",
+      first_seen_at: "2026-08-01T00:00:00.000Z",
+      available: false,
+      data: {
+        name: "Phygitals Black Pack",
+        provider_label: null,
+      },
+    }),
+    "phygitals",
+    "page_record:0",
+  );
+  const outcome = mapped(mapperInput("phygitals", observation));
+  assert.equal(outcome.candidate.candidateKind, "pack");
+  if (outcome.candidate.candidateKind !== "pack") {
+    assert.fail("expected canonical pack candidate");
+  }
+  assert.equal(outcome.candidate.displayName, "Phygitals Black Pack");
+  assert.equal(
+    outcome.candidate.identity.providerRecordId,
+    "phygitals-pack-native-name",
   );
 });
 

@@ -137,11 +137,14 @@ async function fixture(continuation: "continue" | "poll_after" = "continue") {
       { rawResponse: raw, protectedNativeEvidence, normalizedPage: page },
     ),
   );
-  return { pins, adapterResult, guard };
+  return { pins, adapterResult, guard, page };
 }
 
 test("completed normalized page is planned once and handed to one atomic repository", async () => {
   const { pins, adapterResult, guard } = await fixture();
+  assert.equal(adapterResult.ok, true);
+  if (!adapterResult.ok) assert.fail("Captured page fixture unavailable.");
+  const capturedResponse = adapterResult.value.requestCapture.protectedRawResponse;
   const committed: ProviderSourceAtomicPagePersistenceInput[] = [];
   const service = new ProviderSourcePageImportService(
     new ProviderSourcePagePlanner(
@@ -179,7 +182,12 @@ test("completed normalized page is planned once and handed to one atomic reposit
   assert.equal(result.kind, "committed");
   assert.equal(committed.length, 1);
   assert.equal(committed[0]?.plan.outcomes.length, 1);
+  assert.strictEqual(
+    committed[0]?.plan.normalizedPage,
+    adapterResult.ok ? adapterResult.value.normalizedPage : undefined,
+  );
   assert.equal(committed[0]?.protectedRawResponseSha256.length, 64);
+  assert.strictEqual(committed[0]?.protectedRawResponse, capturedResponse);
   assert.equal(
     committed[0]?.nextCursorFingerprint,
     guard.fingerprint(adapterResult.ok
@@ -303,8 +311,8 @@ test("a structurally matching but unregistered result fails before planner or pe
   assert.equal(persistenceCalls, 0);
 });
 
-test("an authentic result deeply freezes normalized identity and projection inputs", async () => {
-  const { adapterResult } = await fixture();
+test("an authentic result isolates and deeply freezes normalized identity and projection inputs", async () => {
+  const { adapterResult, page } = await fixture();
   assert.equal(adapterResult.ok, true);
   if (!adapterResult.ok) assert.fail("Captured page fixture unavailable.");
   const outcome = adapterResult.value.normalizedPage.outcomes[0];
@@ -326,6 +334,19 @@ test("an authentic result deeply freezes normalized identity and projection inpu
       }
     ).providerRecordId = "mutated-after-completion";
   }, TypeError);
+  assert.equal(
+    outcome.observation.providerRecordIdentity.providerRecordId,
+    "pack-1",
+  );
+  const adapterOwnedOutcome = page.outcomes[0];
+  if (!adapterOwnedOutcome || adapterOwnedOutcome.status !== "valid") {
+    assert.fail("Adapter-owned observation fixture unavailable.");
+  }
+  (
+    adapterOwnedOutcome.observation.providerRecordIdentity as {
+      providerRecordId: string;
+    }
+  ).providerRecordId = "adapter-mutated-after-completion";
   assert.equal(
     outcome.observation.providerRecordIdentity.providerRecordId,
     "pack-1",

@@ -20,7 +20,6 @@ import type {
   PublicRepackIdentityMappingRow as MappingRow,
 } from "./public-repack-identity-mapping-repository.ts";
 
-const sevenDaysInMilliseconds = 7 * 24 * 60 * 60 * 1_000;
 const maximumAvailableChaseCount = 10_000;
 const maximumWriteCandidates = 1_000;
 // Canonical revisions persisted before the availability rename still hold
@@ -171,8 +170,11 @@ function requireCanonicalTimestamp(value: string, field: string): Date {
   return parsed;
 }
 
-function retainedUntil(occurredAt: Date): Date {
-  return new Date(occurredAt.getTime() + sevenDaysInMilliseconds);
+export function normalizedHeatRetainedUntilSql(occurredAt: Date): Prisma.Sql {
+  // The schema defines retention as seven PostgreSQL calendar days. Compute
+  // the value in the same database session so daylight-saving boundaries do
+  // not disagree with the table check constraint.
+  return Prisma.sql`${occurredAt} + interval '7 days'`;
 }
 
 function mappingKey(platformKey: string, packExternalId: string): string {
@@ -1292,7 +1294,8 @@ export async function persistNormalizedHeatObservationsForCanonicalWrites(
       ${observation.realizedReturnBasisPoints},
       ${observation.valueMultipleBasisPoints},
       ${observation.availableChaseCount}, ${textArray(observation.outcomeKeys)},
-      ${retainedUntil(observation.revision.occurredAt)}, ${input.createdAt}
+      ${normalizedHeatRetainedUntilSql(observation.revision.occurredAt)},
+      ${input.createdAt}
     )`);
     const inserted = await database.$queryRaw<
       Array<{ observationId: string; observationKey: string }>
@@ -1339,7 +1342,8 @@ export async function persistNormalizedHeatObservationsForCanonicalWrites(
       ${outcome.mapping ? uuid(outcome.mapping.publicRepackId) : Prisma.sql`null::uuid`},
       ${outcome.status}, ${outcome.reasonCode},
       ${outcome.observationId ? uuid(outcome.observationId) : Prisma.sql`null::uuid`},
-      ${retainedUntil(outcome.revision.occurredAt)}, ${input.createdAt}
+      ${normalizedHeatRetainedUntilSql(outcome.revision.occurredAt)},
+      ${input.createdAt}
     )`);
     await database.$executeRaw(Prisma.sql`
       insert into public.normalized_heat_observation_outcomes (

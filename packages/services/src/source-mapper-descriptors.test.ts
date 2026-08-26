@@ -7,22 +7,35 @@ import {
   launchProviderKeys,
 } from "@packscout/contracts";
 import {
-  SourceMapperCompatibilityError,
+  SourceMapperDescriptorError,
   SourceMapperDescriptorRegistry,
   launchSourceMapperDescriptors,
 } from "./source-mapper-descriptors.ts";
 
-test("launch publishes exactly one independent mapper descriptor per provider", () => {
+test("launch publishes one exact v1 mapper descriptor per provider", () => {
   assert.deepEqual(
-    launchSourceMapperDescriptors.map(({ provider }) => provider),
+    [...new Set(launchSourceMapperDescriptors.map(({ provider }) => provider))],
     launchProviderKeys,
   );
+  assert.equal(launchSourceMapperDescriptors.length, 4);
   assert.equal(new Set(launchSourceMapperDescriptors.map(({ mapperKey }) => mapperKey)).size, 4);
   for (const descriptor of launchSourceMapperDescriptors) {
     assert.notEqual(descriptor.mapperKey, DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY);
     assert.equal(
       descriptor.identityNamespaceKey,
       dataforrestIdentityNamespaceByProvider[descriptor.provider],
+    );
+  }
+  for (const provider of launchProviderKeys) {
+    const descriptors = launchSourceMapperDescriptors.filter(
+      (descriptor) => descriptor.provider === provider,
+    );
+    assert.deepEqual(
+      descriptors.map(({ mapperVersion, normalizedContractVersion }) => [
+        mapperVersion,
+        normalizedContractVersion,
+      ]),
+      [["1", PROVIDER_OBSERVATION_CONTRACT_VERSION]],
     );
   }
 });
@@ -40,7 +53,7 @@ test("activation compatibility fails closed for every mismatched pin", () => {
     [{ ...valid, mapperVersion: "missing" }, "unknown_mapper_descriptor"],
     [{ ...valid, provider: "phygitals" }, "provider_mismatch"],
     [{ ...valid, normalizedContractVersion: "future" }, "normalized_contract_mismatch"],
-    [{ ...valid, identityNamespaceKey: "different" }, "replacement_namespace_mismatch"],
+    [{ ...valid, identityNamespaceKey: "different" }, "identity_namespace_mismatch"],
     [{ ...valid, mapperKey: valid.sourceTypeKey }, "mapper_identity_conflicts_with_source_type"],
   ] as const;
 
@@ -48,7 +61,7 @@ test("activation compatibility fails closed for every mismatched pin", () => {
     assert.throws(
       () => registry.requireCompatible(input),
       (error) =>
-        error instanceof SourceMapperCompatibilityError &&
+        error instanceof SourceMapperDescriptorError &&
         error.code === expectedCode,
     );
   }

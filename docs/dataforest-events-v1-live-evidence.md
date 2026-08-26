@@ -40,10 +40,10 @@ relationships, replay identity, catalog revision, and reached-head shape.
 | Setting | Launch value | Evidence |
 | --- | ---: | --- |
 | Filtered page target | 250 records | A 500-record Phygitals response advertised 3,114,066 bytes and was rejected by the 2 MiB cap. Two 250-record Phygitals pages were 1,415,669 and 1,698,526 bytes. |
-| Maximum response | 4,194,304 bytes | The original 2 MiB bound fit the eight launch samples but a later live 250-record Phygitals page crossed it. The 4 MiB hard bound preserves 250-record throughput while remaining below the memory benchmark's four-slot envelope. |
+| Maximum response | 8,388,608 bytes | The original smaller bounds fit the first launch samples, but later live 250-record Phygitals pages crossed them. The triggering page replayed as HTTP 200 with the exact three-key wrapper, 250 records, and 4,730,013 bytes. The sole current V1 adapter owns the 8 MiB hard cap. |
 | Request timeout | 10,000 ms | Fourteen successful filtered requests ranged from 435 to 4,042 ms, averaging 1,728 ms. |
 | Stable-profile request cap | 2 | Two different filters overlapped in the client, both returned 200, both remained filter-correct, and their cursors were independent. A higher value was not tested. |
-| Generic execution slots | 4 | Host-local processing bound; connection requests remain capped separately at two. |
+| Generic execution slots | 4; guarded Task 010 slots: 1 | Connection requests remain capped separately at two. The dedicated Task 010 runner starts at one slot under the passing 8 MiB single-slot measurement; a concurrency increase requires separate evidence. |
 | Source interval | 60–86,400 seconds; default 60 | Product decision. A positive provider hint is a minimum, so scheduling uses `max(source interval, provider minimum)`. |
 | Raw page retention | 7 days | One authoritative protected copy only. |
 | Quarantine, diagnostics, terminal attempts | 30 days | Protected quarantine remains independently retryable; diagnostics and attempts are sanitized. |
@@ -137,34 +137,34 @@ relationship and canonical domain remain unambiguous:
 This mapping is injective from scope to canonical kind. Equal raw IDs in
 different evidenced scopes remain distinct; a kind or pack/card discriminator
 change inside one scope is an identity conflict. Each platform uses a separate
-`dataforrest-<platform>-records-v1` replacement namespace. A future PackScout or
-third-party adapter may reuse the platform mapper and canonical identities only
-after proving it emits the same IDs, scopes, and namespace; otherwise activation
-must stop for a separately designed identity migration.
+stable `dataforrest-<platform>-records-v1` provider identity namespace. Changing
+that namespace or its evidenced record-ID scopes requires a separately designed
+identity migration.
 
-Both adapter versions copy the two timestamps, outer relationships, event code,
-amount, currency, payment method, and tri-state availability into the versioned
-normalized observation. Adapter v1 allowlists only a nonblank
-`data.provider_label` as the source-neutral display-name fact.
+The sole current V1 adapter copies the two timestamps, outer relationships,
+event code, amount, currency, payment method, and tri-state availability into
+`packscout.provider-observation.v1`.
 
-Local Collector Crypt capture evidence reviewed on 2026-08-24 showed catalog
-pack names at `data.name`, including all three pack records in the retained
-partial run. Adapter v2 therefore uses one closed provider-and-kind declaration:
-Collector Crypt catalog packs read exactly `data.name`; every other launch
-provider and kind retains `data.provider_label`. There is no cross-field
-fallback: a missing, null, or malformed Collector Crypt `name` remains absent or
-malformed even if `provider_label` is present. Every other nested key stays
-protected provenance. The mapper never receives the native object, and this
-provider-local extraction does not add provider-specific canonical rules to the
-generic mapper.
+Local capture evidence reviewed on 2026-08-24 showed catalog pack names at
+`data.name` for Collector Crypt, Phygitals, and ClutchPacks. Their pack records
+therefore read exactly `data.name`; Courtyard packs and every non-pack kind read
+exactly `data.provider_label`. There is no cross-field fallback: a missing,
+null, or malformed declared field remains absent or malformed even when the
+other field is present. Every other nested key stays protected provenance. The
+mapper never receives the native object, and this provider-local extraction
+does not add provider-specific canonical rules to the generic mapper.
 
-Adapter v1 remains registered only for immutable connection revisions, source
-revisions, and import runs already pinned to `dataforrest-events-adapter-v1`.
-New connection and source revisions select v2, and the admin upgrade action
-creates a separately testable v2 revision without changing existing pins. The
-PackScout data-pipeline owner may remove v1 only after a database audit proves
-that no retained connection revision, source revision, or import run references
-v1 and the corresponding retention window has elapsed.
+V1 also accepts evidenced one-sided pulls: `pack_id` and `card_id` are each
+nullable, at least one must be present, and relationships remain ordered pack
+before card. A canonical pull receives only the authoritative edge or edges in
+the source record; PackScout never fabricates the missing identity.
+
+Only the V1 adapter, observation, and mapper tuple is registered. Connection
+revisions, source revisions, and import runs continue to expose their immutable
+current pins for diagnostics, but there is no compatibility reader, adapter
+upgrade, or source-replacement path. An early-development database containing a
+historical tuple must be cleared with the guarded full local reset and reimported
+from Feed start.
 
 ## Failure contract
 
@@ -192,9 +192,9 @@ independent 24-page windows: 288 input records, 216 accepted records, and 72
 quarantined records. Every retained component uses a PostgreSQL physical
 table/index/TOAST slope. The committed bound adds one measured 8 KiB allocation
 page per affected relation instead of an arbitrary multiplier. This produces
-11,520 structured/canonical bytes per input record, 2,640 bytes per record for
-the seven-day normalized payload, 9,217 bytes per permanently retained expired
-page lineage, and separately measured quarantine lineage/evidence. The complete
+11,776 structured/canonical bytes per input record, 2,640 bytes per record for
+the seven-day normalized payload, 15,020 bytes per committed page before raw
+payload expiry, and separately measured quarantine lineage/evidence. The complete
 machine-readable artifact is
 [`provider-source-capacity-measurement-v1.json`](./provider-source-capacity-measurement-v1.json).
 
@@ -220,45 +220,53 @@ twice. It projects:
 
 | Component | Projected bytes |
 | --- | ---: |
-| Structured and canonical data | 6,222,261,623,040 |
+| Structured and canonical data | 6,360,534,103,552 |
 | Conservative raw full history | 98,700,000,000 |
 | Seven-day steady-poll raw pages | 25,902,938,880 |
 | Seven-day normalized page payload | 64,962,155,280 |
-| Permanent expired page lineage | 21,389,029,200 |
-| Quarantine lineage and evidence | 120,851,217,000 |
+| Permanent expired page lineage | 32,450,830,160 |
+| Quarantine lineage and evidence | 125,772,433,264 |
 | Page diagnostics | 473,130,492 |
 | Terminal request attempts | 946,030,076 |
 | Permanent compact attempt lineage | 14,013,054,888 |
-| **Total** | **6,569,499,178,856** |
+| **Total** | **6,723,754,676,592** |
 
 At a 60-second interval, four sources create 172,800 poll attempts in 30 days;
 including the 58,108 initial pages gives 230,908 first-window attempts. Leaving
 25% of the target volume free after the projected import requires
-**8,759,332,238,475 available bytes** before Task 010 may start. The 200 GB
+**8,965,006,235,456 available bytes** before Task 010 may start. The 200 GB
 provisional floor is therefore superseded by this measured requirement. The
 80%-used abort threshold remains independently enforced.
 
 The refreshed committed host measurement reported 994,662,584,320 bytes of capacity and
-only 104,786,628,608 available bytes. Admission was rejected for insufficient
+only 120,935,391,232 available bytes. Admission was rejected for insufficient
 free bytes, an already-exceeded 80% threshold, and a projected threshold
 breach. Task 010 must not start a real backfill on this host. This does not block
 contract, adapter, mapper, importer, scheduler, admin, or UI implementation.
 
-The bounded-memory benchmark processed 10 warm-up pages and five 20-page trials
-(100 measured pages total), each exactly 250 records and 4 MiB, through the
-authentic capture, durable-terminalization acknowledgement, interpretation,
-deep immutable completion, import validation, mapping, planning, and discard
-path under `dataforrest-events-adapter-v2`. Peak RSS rose 47,415,296 bytes. The
-allocator-tolerant Theil–Sen trend over settled heap-plus-external samples
-projected only 98,800 retained bytes across
-100 pages, within the 64 MiB peak and 8 MiB retained limits. Four execution
-slots therefore reserve at most 256 MiB of page-working-set budget before normal
-process overhead.
+The current parser preserves the exact malformed-UTF-8, lone-surrogate,
+reserved-key, depth, and transport rejection boundaries without retaining an
+additional decoded copy of the complete response. It rejects more than 64
+container levels, 160,000 JSON values, 5,000 array items, or 256 syntactic
+member occurrences in one object; duplicate names count toward the work bound
+and otherwise retain JSON last-write semantics. The committed 8 MiB V1
+measurement on 2026-08-26 processed all 25,000 records across 100 pages. Every
+page also carried 153,254 JSON values, including 600 high-overhead empty-object
+facts per record, to exercise the maximum-byte and near-maximum-node boundaries
+together. Its peak delta was 57,901,056 bytes and retained growth was 151,976
+bytes, passing the unchanged 64 MiB peak-delta and 8 MiB retained-growth gates.
+
+Eight independent fresh-process repetitions of that combined worst-shape
+measurement all passed; 57,901,056 bytes was the worst peak delta and 231,614
+bytes was the largest retained-growth result. The dedicated Task 010 runner
+still begins at one execution slot.
+Restoring more than one slot requires a separately reviewed concurrency
+measurement rather than extrapolation from the single-slot result.
 
 The storage submeasurement remains the reviewed August 22 measurement because
-the later constraint migration widens only the admissible protected-byte bound;
-it does not change row shape. The adapter-v2 4 MiB memory submeasurement was
-refreshed independently on August 25 Pacific time and carries its own timestamp.
+the current contract changes admissible values, not the persisted row shape.
+The current 8 MiB memory measurement carries its own August 26 timestamp and is
+the passing launch-gate result.
 
 Reproduction and drift checks are executable from the repository root:
 

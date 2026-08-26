@@ -4,7 +4,6 @@ import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
 } from "@packscout/contracts";
 import {
@@ -136,7 +135,7 @@ function repository(
   return { value, requestedScopes };
 }
 
-test("catalog advertises current v2 while retaining masked v1 connection and source history", async () => {
+test("catalog advertises the sole v1 tuple while retaining masked connection and source history", async () => {
   const records = repository();
   const resolutionInputs: unknown[] = [];
   const service = new ProviderSourceAdminCatalogService({
@@ -173,12 +172,12 @@ test("catalog advertises current v2 while retaining masked v1 connection and sou
   }]);
   assert.deepEqual(catalog.availableSourceTypes, [{
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     label: "DataForrest events",
   }]);
   assert.deepEqual(catalog.providers[0]?.sourceRegistration, {
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     mapperKey: "courtyard-provider-observation",
     mapperVersion: "1",
@@ -207,7 +206,7 @@ test("catalog advertises current v2 while retaining masked v1 connection and sou
   assert.equal(JSON.stringify(catalog).includes("/v1/events"), false);
 });
 
-test("catalog keeps the complete active revision separate from a newer adapter candidate", async () => {
+test("catalog keeps the complete active revision separate from a newer credential candidate", async () => {
   const records = repository();
   const candidateRepository: ProviderSourceAdminCatalogRepository = {
     ...records.value,
@@ -218,7 +217,7 @@ test("catalog keeps the complete active revision separate from a newer adapter c
           ...connection.revision,
           id: candidateRevisionId,
           revisionNumber: 2,
-          sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+          sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
           state: "candidate" as const,
           configurationFingerprint: "b".repeat(64),
           healthGeneration: 9n,
@@ -271,7 +270,7 @@ test("catalog keeps the complete active revision separate from a newer adapter c
   );
   assert.equal(
     catalog.connections[0]?.latestRevision.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
   assert.equal(catalog.connections[0]?.latestRevision.healthGeneration, "9");
   assert.equal(catalog.connections[0]?.latestRevision.test.state, "not_requested");

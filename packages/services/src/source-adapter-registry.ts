@@ -44,10 +44,11 @@ export class SourceAdapterRegistry {
   }
 
   register(adapter: SourceAdapter): this {
-    const manifest = sourceAdapterManifestV1Schema.safeParse(adapter.manifest);
-    if (!manifest.success) {
+    const parsed = sourceAdapterManifestV1Schema.safeParse(adapter.manifest);
+    if (!parsed.success) {
       throw new SourceAdapterRegistryError("invalid_adapter_manifest");
     }
+    const manifest = parsed.data;
     for (const capability of [
       "validateConnectionConfiguration",
       "validateSourceConfiguration",
@@ -62,13 +63,13 @@ export class SourceAdapterRegistry {
       }
     }
     const registrationKey = SourceAdapterRegistry.#registrationKey(
-      manifest.data.sourceTypeKey,
-      manifest.data.adapterVersion,
+      manifest.sourceTypeKey,
+      manifest.adapterVersion,
     );
     if (this.#adapters.has(registrationKey)) {
       throw new SourceAdapterRegistryError("duplicate_adapter_registration");
     }
-    const frozenManifest = deepFreeze(manifest.data);
+    const frozenManifest = deepFreeze(manifest);
     this.#adapters.set(
       registrationKey,
       Object.freeze({

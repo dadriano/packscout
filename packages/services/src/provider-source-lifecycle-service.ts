@@ -3,12 +3,10 @@ import {
   createProviderSourceRequestSchema,
   previewProviderSourceCursorResetRequestSchema,
   providerSourceRevisionCommandSchema,
-  replaceProviderSourceRequestSchema,
   reviseProviderSourceIntervalRequestSchema,
   type CreateProviderSourceRequest,
   type ProviderSourceAdminAuditReceipt,
   type ProviderSourceCursorResetPreview,
-  type ReplaceProviderSourceRequest,
 } from "@packscout/contracts";
 import {
   hashProviderSourceConfiguration,
@@ -61,33 +59,16 @@ export class ProviderSourceLifecycleService {
     this.#clock = dependencies.clock ?? { now: () => new Date() };
   }
 
-  createSource(
+  async createSource(
     context: ProviderSourceAdminCommandContext,
     request: CreateProviderSourceRequest,
-  ) {
-    return this.#create(context, request, null);
-  }
-
-  createReplacement(
-    context: ProviderSourceAdminCommandContext,
-    request: ReplaceProviderSourceRequest,
-  ) {
-    return this.#create(context, request, request.replacesSourceInstanceId);
-  }
-
-  async #create(
-    context: ProviderSourceAdminCommandContext,
-    request: CreateProviderSourceRequest | ReplaceProviderSourceRequest,
-    replacesSourceInstanceId: string | null,
   ): Promise<Readonly<{
     sourceInstanceId: string;
     sourceRevisionId: string;
     audit: ProviderSourceAdminAuditReceipt;
   }>> {
     requireProviderSourceAdminContext(context);
-    const parsed = (replacesSourceInstanceId === null
-      ? createProviderSourceRequestSchema
-      : replaceProviderSourceRequestSchema).safeParse(request);
+    const parsed = createProviderSourceRequestSchema.safeParse(request);
     if (!parsed.success) this.#invalid();
     const [provider, profile] = await Promise.all([
       this.#repository.loadProvider({
@@ -154,25 +135,6 @@ export class ProviderSourceLifecycleService {
     const recordIdScopes = declaration.recordIdScopes.map(
       (scope) => scope.recordIdScopeKey,
     );
-    if (replacesSourceInstanceId !== null) {
-      const previous = await this.#repository.loadSource({
-        organizationId: context.organizationId,
-        providerId: provider.providerId,
-        sourceInstanceId: replacesSourceInstanceId,
-      });
-      if (!previous) this.#sourceNotFound();
-      if (
-        !["paused", "disabled"].includes(previous.state) ||
-        previous.hasActiveRun ||
-        previous.identityNamespaceKey !== mapper.identityNamespaceKey ||
-        previous.normalizedContractVersion !==
-          providerAdapter.manifest.normalizedContractVersion ||
-        previous.recordIdScopes.length !== recordIdScopes.length ||
-        !previous.recordIdScopes.every(
-          (scope, index) => scope === recordIdScopes[index],
-        )
-      ) this.#conflict();
-    }
     const createdAt = this.#clock.now();
     const created = await this.#repository.createSource({
       organizationId: context.organizationId,
@@ -189,16 +151,13 @@ export class ProviderSourceLifecycleService {
       configurationHash: hashProviderSourceConfiguration(validated.value),
       recordIdScopes,
       intervalSeconds: parsed.data.intervalSeconds,
-      replacesSourceInstanceId,
       actorKey: context.actorKey,
       createdAt,
     });
     return Object.freeze({
       ...created,
       audit: commandReceipt(
-        replacesSourceInstanceId === null
-          ? "source_created"
-          : "source_replacement_created",
+        "source_created",
         created.sourceInstanceId,
         created.sourceRevisionId,
         createdAt,

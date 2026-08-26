@@ -1,8 +1,5 @@
 import {
-  DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
-  dataforrestEventsV2SourceAdapterManifest,
 } from "@packscout/contracts";
 import {
   DataforrestEventsSourceAdapter,
@@ -14,7 +11,6 @@ import { SourceAdapterRegistry } from "./source-adapter-registry.ts";
 
 export const productionSourceAdapterManifests = Object.freeze([
   dataforrestEventsV1SourceAdapterManifest,
-  dataforrestEventsV2SourceAdapterManifest,
 ]);
 
 export function createProductionSourceAdapterRegistry(
@@ -26,15 +22,7 @@ export function createProductionSourceAdapterRegistry(
         dependencies,
         dataforrestEventsV1SourceAdapterManifest,
       ),
-      new DataforrestEventsSourceAdapter(
-        dependencies,
-        dataforrestEventsV2SourceAdapterManifest,
-      ),
     ],
-    {
-      [DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY]:
-        DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-    },
   );
 }
 
@@ -42,10 +30,7 @@ export function createProductionSourceAdminConfigurationCodecRegistry(
   sourceAdapters: SourceAdapterRegistry,
 ): SourceAdminConfigurationCodecRegistry {
   return new SourceAdminConfigurationCodecRegistry(
-    [
-      dataforrestEventsV1SourceAdapterManifest,
-      dataforrestEventsV2SourceAdapterManifest,
-    ].map((manifest) =>
+    [dataforrestEventsV1SourceAdapterManifest].map((manifest) =>
       new DataforrestEventsAdminConfigurationCodec(
         sourceAdapters.resolveSourceType(
           manifest.sourceTypeKey,

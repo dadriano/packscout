@@ -15,7 +15,10 @@ import {
   type UpsertSemanticObservationInput,
 } from "./provider-source-observation-repository.ts";
 import {
+  ACCEPTANCE_CURSOR_CODEC_VERSION,
   ACCEPTANCE_CREATED_AT,
+  ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+  ACCEPTANCE_SOURCE_TYPE_KEY,
   createAcceptanceProviderSource,
   createProviderSourceAcceptanceFixture,
 } from "./provider-source-acceptance-test-support.ts";
@@ -58,6 +61,207 @@ test("canonical text keeps a trailing v and rejects actual trim whitespace", asy
   }
 });
 
+test("observation v1 persists one-target pulls in its sole strict history domain", async () => {
+  const fixture = await createProviderSourceAcceptanceFixture(
+    "observation-v1-packless-pulls",
+  );
+  try {
+    const providerId = await fixture.setup.createProviderSource({
+      organizationId: fixture.organizationId,
+      platformKey: "clutchpacks",
+      displayName: "ClutchPacks",
+      createdAt: ACCEPTANCE_CREATED_AT,
+    });
+    const source = await fixture.lifecycle.createSourceInstanceRevision({
+      organizationId: fixture.organizationId,
+      providerId,
+      connectionProfileId: fixture.connectionProfileId,
+      sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
+      sourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+      mapperKey: "clutchpacks-provider-observation",
+      mapperVersion: "1",
+      identityNamespaceKey: "dataforrest-clutchpacks-records-v1",
+      cursorCodecVersion: ACCEPTANCE_CURSOR_CODEC_VERSION,
+      revisionNumber: 1,
+      intervalSeconds: 60,
+      configuration: { provider: "clutchpacks" },
+      configurationHash: "7".repeat(64),
+      recordIdScopes: [
+        "catalog-pack-v1",
+        "catalog-card-v1",
+        "pull-v1",
+        "trade-v1",
+      ],
+      actorKey: "operator-admin",
+      createdAt: ACCEPTANCE_CREATED_AT,
+    });
+    assert.equal(
+      (
+        await fixture.database.provider_source_revisions.findUniqueOrThrow({
+          where: { id: source.sourceRevisionId },
+        })
+      ).normalized_contract_version,
+      PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    );
+
+    const repository = new ProviderSourceObservationRepository();
+    const relationshipVariants = [
+      [{
+        relationship: "card",
+        target: {
+          recordIdScopeKey: "catalog-card-v1",
+          providerRecordId: "v1-card-42",
+        },
+      }],
+      [{
+        relationship: "pack",
+        target: {
+          recordIdScopeKey: "catalog-pack-v1",
+          providerRecordId: "v1-pack-42",
+        },
+      }],
+      [
+        {
+          relationship: "card",
+          target: {
+            recordIdScopeKey: "catalog-card-v1",
+            providerRecordId: "v1-card-42",
+          },
+        },
+        {
+          relationship: "pack",
+          target: {
+            recordIdScopeKey: "catalog-pack-v1",
+            providerRecordId: "v1-pack-42",
+          },
+        },
+      ],
+    ] as const;
+    const persisted = [] as Array<{
+      sourceRecordId: string;
+      semanticObservationId: string;
+    }>;
+    for (const [index, relationships] of relationshipVariants.entries()) {
+      const providerRecordId = `v1-pull-${index + 1}`;
+      const content = normalizedObservationSemanticContentSchema.parse({
+        kind: "pull",
+        providerRecordIdentity: {
+          recordIdScopeKey: "pull-v1",
+          providerRecordId,
+        },
+        effectiveAt: ACCEPTANCE_CREATED_AT.toISOString(),
+        providerFacts: emptyNormalizedProviderFacts("pull"),
+        relationships,
+      });
+      const result = await fixture.database.$transaction((transaction) =>
+        repository.upsertSemanticObservationInTransaction(transaction, {
+          organizationId: fixture.organizationId,
+          providerId,
+          sourceInstanceId: source.sourceInstanceId,
+          sourceRevisionId: source.sourceRevisionId,
+          recordIdScopeKey: "pull-v1",
+          providerRecordId,
+          recordKind: "pull",
+          recordDiscriminator: "pull",
+          effectiveSourceTime: ACCEPTANCE_CREATED_AT,
+          normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+          hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
+          normalizedContentHash:
+            hashNormalizedObservationSemanticContent(content),
+          normalizedContent: content,
+        }),
+      );
+      assert.equal(result.kind, "ready");
+      if (result.kind === "ready") persisted.push(result);
+    }
+    assert.equal(persisted.length, 3);
+    const stored = await fixture.database.source_semantic_observations.findMany({
+      where: { id: { in: persisted.map(({ semanticObservationId }) =>
+        semanticObservationId) } },
+      orderBy: { normalized_content_hash: "asc" },
+    });
+    assert.equal(stored.length, 3);
+    assert.deepEqual(
+      new Set(stored.map(({ normalized_contract_version: version }) => version)),
+      new Set([PROVIDER_OBSERVATION_CONTRACT_VERSION]),
+    );
+    assert.deepEqual(
+      new Set(stored.map(({ hash_version: version }) => version)),
+      new Set([PROVIDER_OBSERVATION_HASH_VERSION]),
+    );
+
+    const oneTargetRow = (relationship: "card" | "pack") => stored.find((row) =>
+      (row.normalized_content_json as { relationships?: unknown[] })
+        .relationships?.length === 1 &&
+      (row.normalized_content_json as {
+        relationships?: Array<{ relationship?: string }>;
+      }).relationships?.[0]?.relationship === relationship
+    )!;
+    const cardOnly = oneTargetRow("card");
+    const cardOnlyContent = normalizedObservationSemanticContentSchema.parse(
+      cardOnly.normalized_content_json,
+    );
+    await assert.rejects(
+      fixture.database.source_semantic_observations.create({
+        data: {
+          organization_id: fixture.organizationId,
+          source_record_id: cardOnly.source_record_id,
+          effective_source_time: ACCEPTANCE_CREATED_AT,
+          normalized_contract_version: "packscout.provider-observation.v2",
+          hash_version: "packscout.provider-observation-hash.v2",
+          normalized_content_hash: "9".repeat(64),
+          normalized_content_json: cardOnlyContent,
+        },
+      }),
+      /source_semantic_observations_content_check/u,
+    );
+    for (const [normalizedContentHash, relationships, message] of [
+      ["a".repeat(64), [], /semantic pull content/u],
+      [
+        "b".repeat(64),
+        [
+          {
+            relationship: "pack",
+            target: {
+              recordIdScopeKey: "catalog-pack-v1",
+              providerRecordId: "duplicate-pack-1",
+            },
+          },
+          {
+            relationship: "pack",
+            target: {
+              recordIdScopeKey: "catalog-pack-v1",
+              providerRecordId: "duplicate-pack-2",
+            },
+          },
+        ],
+        /semantic relationship set is duplicated/u,
+      ],
+    ] as const) {
+      await assert.rejects(
+        fixture.database.source_semantic_observations.create({
+          data: {
+            organization_id: fixture.organizationId,
+            source_record_id: cardOnly.source_record_id,
+            effective_source_time: ACCEPTANCE_CREATED_AT,
+            normalized_contract_version:
+              PROVIDER_OBSERVATION_CONTRACT_VERSION,
+            hash_version: PROVIDER_OBSERVATION_HASH_VERSION,
+            normalized_content_hash: normalizedContentHash,
+            normalized_content_json: {
+              ...cardOnlyContent,
+              relationships: [...relationships],
+            },
+          },
+        }),
+        message,
+      );
+    }
+  } finally {
+    await fixture.close();
+  }
+});
 test("launch scope meaning and canonical semantic identity fail closed in PostgreSQL", async () => {
   const fixture = await createProviderSourceAcceptanceFixture(
     "observation-invariants",

@@ -124,7 +124,7 @@ export const sourceKindByLaunchScope = Object.freeze({
 
 export const providerSourceLaunchBounds = Object.freeze({
   pageTargetRecords: 250,
-  maximumResponseBytes: 4 * 1024 * 1024,
+  maximumResponseBytes: 8 * 1024 * 1024,
   requestTimeoutMilliseconds: 10_000,
   stableProfileRequestCap: 2,
   genericExecutionSlots: 4,

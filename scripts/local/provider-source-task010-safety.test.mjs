@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   symlink,
   writeFile,
@@ -57,6 +59,40 @@ const baseEnvironment = Object.freeze({
 function expectedEnvironment() {
   return readTask010Environment(baseEnvironment);
 }
+
+test("Task010 required migration marker matches the terminal schema", async () => {
+  const migrationsRoot = new URL(
+    "../../packages/database/prisma/migrations/",
+    import.meta.url,
+  );
+  const migrationNames = (await readdir(migrationsRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  const terminalMigration = migrationNames.at(-1);
+  assert.ok(terminalMigration, "expected at least one Prisma migration");
+  const migrationSql = await readFile(
+    new URL(`${terminalMigration}/migration.sql`, migrationsRoot),
+  );
+  const migrationChecksum = createHash("sha256")
+    .update(migrationSql)
+    .digest("hex");
+  const schemaParityManifest = JSON.parse(
+    await readFile(
+      new URL(
+        "../../packages/database/prisma/schema-parity-manifest.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+
+  assert.deepEqual(TASK010_REQUIRED_MIGRATION, {
+    name: terminalMigration,
+    checksum: migrationChecksum,
+    tableCount: Object.keys(schemaParityManifest.tables).length,
+  });
+});
 
 test("Task010 environment rejects broad, remote, production, and argument-bearing targets", () => {
   for (const patch of [
@@ -364,10 +400,17 @@ test("worker environment strips evidence token and starter cannot reload dotenv 
   const sanitized = sanitizedTask010WorkerEnvironment({
     ...baseEnvironment,
     PACKSCOUT_DATA_API_TOKEN: evidenceToken,
+    PACKSCOUT_SOURCE_EXECUTION_SLOTS: "4",
   });
   assert.equal(sanitized.PACKSCOUT_DATA_API_TOKEN, undefined);
   assert.equal(JSON.stringify(sanitized).includes(evidenceToken), false);
   assert.equal(sanitized.PACKSCOUT_TASK010_ADMIN_PASSWORD, undefined);
+  assert.equal(sanitized.PACKSCOUT_SOURCE_EXECUTION_SLOTS, "1");
+  assert.equal(
+    sanitizedTask010WorkerEnvironment(baseEnvironment)
+      .PACKSCOUT_SOURCE_EXECUTION_SLOTS,
+    "1",
+  );
   assert.throws(
     () =>
       assertBootstrapPasswordAbsent({
@@ -409,6 +452,7 @@ test("worker environment strips evidence token and starter cannot reload dotenv 
     initializer,
     /PACKSCOUT_ADMIN_ALLOWED_ORIGINS=http:\/\/127\.0\.0\.1:5101,http:\/\/localhost:5101/u,
   );
+  assert.match(initializer, /PACKSCOUT_SOURCE_EXECUTION_SLOTS=/u);
   assert.match(initializer, /PACKSCOUT_ADMIN_TRUSTED_PROXIES=/u);
   assert.match(initializer, /PACKSCOUT_SESSION_IDLE_MS=3600000/u);
   assert.match(initializer, /PACKSCOUT_SESSION_ABSOLUTE_MS=43200000/u);

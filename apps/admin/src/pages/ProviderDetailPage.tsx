@@ -416,7 +416,7 @@ export function ProviderDetailPage() {
         <aside className="source-operator-boundary">
           <strong>{canOperate ? "Operation access, not configuration access" : "Read-only provider evidence"}</strong>
           <p>{canOperate
-            ? "You may run, pause, resume, and retry authorized quarantine records. Credential, binding, interval, activation, replacement, disable, and cursor controls remain administrator-only."
+            ? "You may run, pause, resume, and retry authorized quarantine records. Credential, binding, interval, activation, disable, and cursor controls remain administrator-only."
             : "Your role can inspect current safe processor, run, page, and diagnostic evidence but cannot operate or configure this source."}</p>
         </aside>
       ) : (
