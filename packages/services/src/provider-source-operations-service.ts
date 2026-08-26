@@ -271,6 +271,27 @@ function connectionSummary(input: Readonly<{
   ) ?? input.catalog.connections.find(({ state }) => state === "active") ??
     input.catalog.connections[0] ?? null;
   if (!connection) return null;
+  if (
+    connection.activeRevisionId !== (connection.activeRevision?.id ?? null) ||
+    (connection.activeRevision !== null &&
+      (connection.activeRevision.state !== "active" ||
+        connection.activeRevision.revokedAt !== null))
+  ) {
+    throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
+  }
+  const revision = connection.activeRevision ?? connection.latestRevision;
+  const sourceUsesConnection = input.source !== null &&
+    !["disabled", "replaced"].includes(input.source.state);
+  if (
+    sourceUsesConnection &&
+    (input.source.sourceAdapterVersion !== revision.sourceAdapterVersion ||
+      (input.source.connectionRevisionId === null &&
+        input.source.state !== "draft") ||
+      (input.source.connectionRevisionId !== null &&
+        input.source.connectionRevisionId !== revision.id))
+  ) {
+    throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
+  }
   const episode = input.facts.connectionEpisodes.find(
     ({ connectionProfileId }) => connectionProfileId === connection.id,
   );
@@ -283,37 +304,30 @@ function connectionSummary(input: Readonly<{
   const profileCapacity = input.snapshot.capacity.profiles.find(
     ({ connectionProfileId }) => connectionProfileId === connection.id,
   );
-  const sourceAdapterVersion = input.source?.sourceAdapterVersion ??
-    (connection.activeRevisionId === null
-      ? connection.latestRevision.sourceAdapterVersion
-      : connection.activeRevisionSourceAdapterVersion);
-  if (sourceAdapterVersion === null) {
-    throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
-  }
   return {
     connectionProfileId: connection.id,
     displayName: connection.displayName,
     sourceType: sourceTypeSummary(
       input.dependencies,
       connection.sourceTypeKey,
-      sourceAdapterVersion,
+      revision.sourceAdapterVersion,
     ),
     state: connection.state,
-    endpointHost: connection.latestRevision.endpointHost,
+    endpointHost: revision.endpointHost,
     credential: {
-      configured: connection.latestRevision.credentialConfigured,
-      mask: connection.latestRevision.credentialMask,
+      configured: revision.credentialConfigured,
+      mask: revision.credentialMask,
     },
     test: {
-      state: connection.latestRevision.test.state,
-      outcome: connection.latestRevision.test.outcome,
-      safeCode: connection.latestRevision.test.safeCode,
-      requestedAt: connection.latestRevision.test.requestedAt,
-      testedAt: connection.latestRevision.test.testedAt,
-      current: connection.latestRevision.test.current,
+      state: revision.test.state,
+      outcome: revision.test.outcome,
+      safeCode: revision.test.safeCode,
+      requestedAt: revision.test.requestedAt,
+      testedAt: revision.test.testedAt,
+      current: revision.test.current,
     },
     health: {
-      generation: connection.latestRevision.healthGeneration,
+      generation: revision.healthGeneration,
       state: reconnecting ? "reconnecting" : episode ? "blocked" : "healthy",
       blocking: episode
         ? {

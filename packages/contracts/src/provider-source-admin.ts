@@ -167,7 +167,7 @@ export const sourceConnectionProfileAdminSummarySchema = z
     state: z.enum(["draft", "active", "disabled"]),
     requestLimit: z.literal(2),
     activeRevisionId: uuidSchema.nullable(),
-    activeRevisionSourceAdapterVersion: registrationKeySchema.nullable(),
+    activeRevision: sourceConnectionRevisionAdminSummarySchema.nullable(),
     recoveryFence: z
       .object({
         blockedRevisionId: uuidSchema,

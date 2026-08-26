@@ -344,6 +344,29 @@ export function diagnosticHistory(
 
 export function sourceAdminCatalog(): ProviderSourceAdminCatalog {
   const sources = [0, 1, 2, 3].map((index) => operationSource(index));
+  const activeConnectionRevision = {
+    id: operationsFixtureIds.connectionRevision,
+    revisionNumber: 1,
+    sourceAdapterVersion: "dataforrest-events-adapter-v1",
+    state: "active" as const,
+    endpointHost: "198.204.245.26.sslip.io",
+    credentialConfigured: true as const,
+    credentialMask: "••••••••" as const,
+    encryptionKeyVersion: 1,
+    healthGeneration: "2",
+    revokedAt: null,
+    test: {
+      jobId: operationsFixtureIds.connectionRevision,
+      connectionRevisionId: operationsFixtureIds.connectionRevision,
+      current: true,
+      state: "succeeded" as const,
+      outcome: "success" as const,
+      safeCode: "connection_valid" as const,
+      requestedAt: now,
+      testedAt: now,
+    },
+    createdAt: now,
+  };
   return {
     availableSourceTypes: [{
       sourceTypeKey: "dataforrest-events-v1",
@@ -371,31 +394,9 @@ export function sourceAdminCatalog(): ProviderSourceAdminCatalog {
       state: "active",
       requestLimit: 2,
       activeRevisionId: operationsFixtureIds.connectionRevision,
-      activeRevisionSourceAdapterVersion: "dataforrest-events-adapter-v1",
+      activeRevision: activeConnectionRevision,
       recoveryFence: null,
-      latestRevision: {
-        id: operationsFixtureIds.connectionRevision,
-        revisionNumber: 1,
-        sourceAdapterVersion: "dataforrest-events-adapter-v1",
-        state: "active",
-        endpointHost: "198.204.245.26.sslip.io",
-        credentialConfigured: true,
-        credentialMask: "••••••••",
-        encryptionKeyVersion: 1,
-        healthGeneration: "2",
-        revokedAt: null,
-        test: {
-          jobId: operationsFixtureIds.connectionRevision,
-          connectionRevisionId: operationsFixtureIds.connectionRevision,
-          current: true,
-          state: "succeeded",
-          outcome: "success",
-          safeCode: "connection_valid",
-          requestedAt: now,
-          testedAt: now,
-        },
-        createdAt: now,
-      },
+      latestRevision: activeConnectionRevision,
       createdAt: now,
       updatedAt: now,
     }],

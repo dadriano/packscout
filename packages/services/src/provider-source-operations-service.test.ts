@@ -36,6 +36,30 @@ function sourceIds(index: number) {
   };
 }
 
+const activeConnectionRevision = {
+  id: connectionRevisionId,
+  revisionNumber: 1,
+  sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  state: "active" as const,
+  endpointHost: "events.example.test",
+  credentialConfigured: true as const,
+  credentialMask: "••••••••" as const,
+  encryptionKeyVersion: 1,
+  healthGeneration: "3",
+  revokedAt: null,
+  test: {
+    jobId: uuid(91),
+    connectionRevisionId,
+    current: true,
+    state: "succeeded" as const,
+    outcome: "success" as const,
+    safeCode: null,
+    requestedAt: now.toISOString(),
+    testedAt: now.toISOString(),
+  },
+  createdAt: now.toISOString(),
+};
+
 const catalog = providerSourceAdminCatalogSchema.parse({
   availableSourceTypes: [{
     sourceTypeKey: "dataforrest-events-v1",
@@ -68,35 +92,12 @@ const catalog = providerSourceAdminCatalogSchema.parse({
     state: "active",
     requestLimit: 2,
     activeRevisionId: connectionRevisionId,
-    activeRevisionSourceAdapterVersion:
-      DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    activeRevision: activeConnectionRevision,
     recoveryFence: {
       blockedRevisionId: connectionRevisionId,
       blockingEpisodeId: uuid(90),
     },
-    latestRevision: {
-      id: connectionRevisionId,
-      revisionNumber: 1,
-      sourceAdapterVersion: "dataforrest-events-adapter-v1",
-      state: "active",
-      endpointHost: "events.example.test",
-      credentialConfigured: true,
-      credentialMask: "••••••••",
-      encryptionKeyVersion: 1,
-      healthGeneration: "3",
-      revokedAt: null,
-      test: {
-        jobId: uuid(91),
-        connectionRevisionId,
-        current: true,
-        state: "succeeded",
-        outcome: "success",
-        safeCode: null,
-        requestedAt: now.toISOString(),
-        testedAt: now.toISOString(),
-      },
-      createdAt: now.toISOString(),
-    },
+    latestRevision: activeConnectionRevision,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   }],
@@ -222,9 +223,17 @@ const catalogWithV2Candidate = providerSourceAdminCatalogSchema.parse({
       revisionNumber: 2,
       sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
       state: "candidate",
+      endpointHost: "candidate.events.example.test",
+      healthGeneration: "99",
       test: {
-        ...connection.latestRevision.test,
-        connectionRevisionId: uuid(5),
+        jobId: null,
+        connectionRevisionId: null,
+        current: false,
+        state: "not_requested",
+        outcome: null,
+        safeCode: null,
+        requestedAt: null,
+        testedAt: null,
       },
     },
   })),
@@ -380,7 +389,7 @@ test("source operations compose the registered four rows with durable supervisor
   assert.doesNotMatch(JSON.stringify(overview), /credential-value|cursor-value/);
 });
 
-test("source operations report the active profile adapter when no source is selected", async () => {
+test("source operations report the complete active revision while a newer candidate reconnects", async () => {
   const catalogWithoutSources = providerSourceAdminCatalogSchema.parse({
     ...catalogWithV2Candidate,
     sources: [],
@@ -392,6 +401,10 @@ test("source operations report the active profile adapter when no source is sele
     overview.connection?.sourceType.adapterVersion,
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
+  assert.equal(overview.connection?.endpointHost, "events.example.test");
+  assert.equal(overview.connection?.test.state, "succeeded");
+  assert.equal(overview.connection?.health.generation, "3");
+  assert.equal(overview.connection?.health.state, "reconnecting");
 });
 
 test("source operations report the selected source adapter ahead of a newer profile candidate", async () => {
@@ -405,6 +418,24 @@ test("source operations report the selected source adapter ahead of a newer prof
   assert.notEqual(
     overview.connection?.sourceType.adapterVersion,
     DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
+  assert.equal(overview.connection?.endpointHost, "events.example.test");
+  assert.equal(overview.connection?.test.state, "succeeded");
+  assert.equal(overview.connection?.health.generation, "3");
+});
+
+test("source operations reject a live source pinned outside the displayed revision", async () => {
+  const inconsistentCatalog = providerSourceAdminCatalogSchema.parse({
+    ...catalogWithV2Candidate,
+    sources: catalogWithV2Candidate.sources.map((source, index) =>
+      index === 0
+        ? { ...source, connectionRevisionId: uuid(5) }
+        : source
+    ),
+  });
+  await assert.rejects(
+    runtime("current", inconsistentCatalog).overview(organizationId),
+    /provider_source_operations\.source_operations_unavailable/u,
   );
 });
 

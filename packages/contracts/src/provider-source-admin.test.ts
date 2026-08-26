@@ -114,7 +114,7 @@ test("connection credential input is strict while every catalog response is mask
       state: "draft",
       requestLimit: 2,
       activeRevisionId: null,
-      activeRevisionSourceAdapterVersion: null,
+      activeRevision: null,
       recoveryFence: null,
       latestRevision: {
         id: ids.revision,

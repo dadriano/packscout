@@ -35,6 +35,18 @@ interface TestRecord {
   readonly testedAt: Date | null;
 }
 
+interface ConnectionRevisionRecord {
+  readonly id: string;
+  readonly revisionNumber: number;
+  readonly sourceAdapterVersion: string;
+  readonly state: "candidate" | "active" | "retired" | "revoked";
+  readonly configurationFingerprint: string;
+  readonly encryptionKeyVersion: number;
+  readonly healthGeneration: bigint;
+  readonly revokedAt: Date | null;
+  readonly createdAt: Date;
+}
+
 export interface ProviderSourceAdminConnectionRecord {
   readonly id: string;
   readonly displayName: string;
@@ -43,22 +55,15 @@ export interface ProviderSourceAdminConnectionRecord {
   readonly state: "draft" | "active" | "disabled";
   readonly requestLimit: number;
   readonly activeRevisionId: string | null;
-  readonly activeRevisionSourceAdapterVersion: string | null;
+  readonly activeRevision: Readonly<{
+    revision: ConnectionRevisionRecord;
+    test: TestRecord;
+  }> | null;
   readonly recoveryFence: Readonly<{
     blockedRevisionId: string;
     blockingEpisodeId: string | null;
   }> | null;
-  readonly revision: Readonly<{
-    id: string;
-    revisionNumber: number;
-    sourceAdapterVersion: string;
-    state: "candidate" | "active" | "retired" | "revoked";
-    configurationFingerprint: string;
-    encryptionKeyVersion: number;
-    healthGeneration: bigint;
-    revokedAt: Date | null;
-    createdAt: Date;
-  }>;
+  readonly revision: ConnectionRevisionRecord;
   readonly test: TestRecord;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -279,21 +284,65 @@ export class ProviderSourceAdminCatalogService {
         );
     });
     const connectionSummaries = await Promise.all(visibleConnections.map(async (record) => {
-      const resolved = await this.#configurations.resolveSourceConnectionConfiguration({
-        organizationId: context.organizationId,
-        connectionProfileId: record.id,
-        connectionRevisionId: record.revision.id,
-        configurationFingerprint: record.revision.configurationFingerprint,
-      });
-      const configuration = resolved.configuration;
-      if (typeof configuration !== "object" || configuration === null || Array.isArray(configuration)) {
+      const summarizeRevision = async (
+        revision: ConnectionRevisionRecord,
+        test: TestRecord,
+      ) => {
+        const resolved = await this.#configurations
+          .resolveSourceConnectionConfiguration({
+            organizationId: context.organizationId,
+            connectionProfileId: record.id,
+            connectionRevisionId: revision.id,
+            configurationFingerprint: revision.configurationFingerprint,
+          });
+        const configuration = resolved.configuration;
+        if (
+          typeof configuration !== "object" || configuration === null ||
+          Array.isArray(configuration)
+        ) {
+          upstreamFailure();
+        }
+        const description = this.#adminConfigurationCodecs.resolve(
+          record.sourceTypeKey,
+          revision.sourceAdapterVersion,
+        ).describeConnection(
+          configuration as Readonly<Record<string, unknown>>,
+        );
+        if (!description) upstreamFailure();
+        return {
+          id: revision.id,
+          revisionNumber: revision.revisionNumber,
+          sourceAdapterVersion: revision.sourceAdapterVersion,
+          state: revision.state,
+          endpointHost: description.endpointHost,
+          credentialConfigured: true as const,
+          credentialMask: "••••••••" as const,
+          encryptionKeyVersion: revision.encryptionKeyVersion,
+          healthGeneration: revision.healthGeneration.toString(),
+          revokedAt: revision.revokedAt?.toISOString() ?? null,
+          test: testSummary(test, revision.id, revision.healthGeneration),
+          createdAt: revision.createdAt.toISOString(),
+        };
+      };
+      const latestRevision = await summarizeRevision(
+        record.revision,
+        record.test,
+      );
+      const activeRevision = record.activeRevision === null
+        ? null
+        : record.activeRevision.revision.id === record.revision.id
+          ? latestRevision
+          : await summarizeRevision(
+              record.activeRevision.revision,
+              record.activeRevision.test,
+            );
+      if (
+        record.activeRevisionId !== (activeRevision?.id ?? null) ||
+        (activeRevision !== null &&
+          (activeRevision.state !== "active" || activeRevision.revokedAt !== null))
+      ) {
         upstreamFailure();
       }
-      const description = this.#adminConfigurationCodecs.resolve(
-        record.sourceTypeKey,
-        record.revision.sourceAdapterVersion,
-      ).describeConnection(configuration as Readonly<Record<string, unknown>>);
-      if (!description) upstreamFailure();
       return {
         id: record.id,
         displayName: record.displayName,
@@ -302,27 +351,9 @@ export class ProviderSourceAdminCatalogService {
         state: record.state,
         requestLimit: record.requestLimit,
         activeRevisionId: record.activeRevisionId,
-        activeRevisionSourceAdapterVersion:
-          record.activeRevisionSourceAdapterVersion,
+        activeRevision,
         recoveryFence: record.recoveryFence,
-        latestRevision: {
-          id: record.revision.id,
-          revisionNumber: record.revision.revisionNumber,
-          sourceAdapterVersion: record.revision.sourceAdapterVersion,
-          state: record.revision.state,
-          endpointHost: description.endpointHost,
-          credentialConfigured: true as const,
-          credentialMask: "••••••••" as const,
-          encryptionKeyVersion: record.revision.encryptionKeyVersion,
-          healthGeneration: record.revision.healthGeneration.toString(),
-          revokedAt: record.revision.revokedAt?.toISOString() ?? null,
-          test: testSummary(
-            record.test,
-            record.revision.id,
-            record.revision.healthGeneration,
-          ),
-          createdAt: record.revision.createdAt.toISOString(),
-        },
+        latestRevision,
         createdAt: record.createdAt.toISOString(),
         updatedAt: record.updatedAt.toISOString(),
       };

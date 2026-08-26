@@ -56,16 +56,17 @@ export class ProviderSourceAdminCatalogRepository {
               select: { id: true },
             })
           : null,
-        profile.active_revision_id
-          ? this.database.source_connection_revisions.findFirst({
-              where: {
-                id: profile.active_revision_id,
-                organization_id: organizationId,
-                connection_profile_id: profile.id,
-              },
-              select: { source_adapter_version: true },
-            })
-          : null,
+        profile.active_revision_id === revision.id
+          ? revision
+          : profile.active_revision_id
+            ? this.database.source_connection_revisions.findFirst({
+                where: {
+                  id: profile.active_revision_id,
+                  organization_id: organizationId,
+                  connection_profile_id: profile.id,
+                },
+              })
+            : null,
       ]);
       const job = await this.database.source_connection_test_jobs.findFirst({
         where: {
@@ -75,11 +76,30 @@ export class ProviderSourceAdminCatalogRepository {
         },
         orderBy: [{ created_at: "desc" }, { id: "desc" }],
       });
+      const activeJob = activeRevision === null
+        ? null
+        : activeRevision.id === revision.id
+          ? job
+          : await this.database.source_connection_test_jobs.findFirst({
+              where: {
+                organization_id: organizationId,
+                connection_profile_id: profile.id,
+                connection_revision_id: activeRevision.id,
+              },
+              orderBy: [{ created_at: "desc" }, { id: "desc" }],
+            });
       const result = job
         ? await this.database.source_connection_test_results.findUnique({
             where: { job_id: job.id },
           })
         : null;
+      const activeResult = activeJob === null
+        ? null
+        : activeJob.id === job?.id
+          ? result
+          : await this.database.source_connection_test_results.findUnique({
+              where: { job_id: activeJob.id },
+            });
       return {
         id: profile.id,
         displayName: profile.display_name,
@@ -88,8 +108,36 @@ export class ProviderSourceAdminCatalogRepository {
         state: profile.state,
         requestLimit: profile.request_limit,
         activeRevisionId: profile.active_revision_id,
-        activeRevisionSourceAdapterVersion:
-          activeRevision?.source_adapter_version ?? null,
+        activeRevision: activeRevision
+          ? {
+              revision: {
+                id: activeRevision.id,
+                revisionNumber: activeRevision.revision_number,
+                sourceAdapterVersion: activeRevision.source_adapter_version,
+                state: activeRevision.state,
+                configurationFingerprint:
+                  activeRevision.configuration_fingerprint,
+                encryptionKeyVersion: activeRevision.encryption_key_version,
+                healthGeneration: activeRevision.health_generation,
+                revokedAt: activeRevision.revoked_at,
+                createdAt: activeRevision.created_at,
+              },
+              test: {
+                jobId: activeJob?.id ?? null,
+                connectionRevisionId:
+                  activeJob?.connection_revision_id ?? null,
+                expectedHealthGeneration:
+                  activeJob?.expected_health_generation ?? null,
+                resultingHealthGeneration:
+                  activeResult?.resulting_health_generation ?? null,
+                state: activeJob?.state ?? null,
+                outcome: activeResult?.outcome ?? null,
+                safeCode: activeResult?.safe_code ?? null,
+                requestedAt: activeJob?.created_at ?? null,
+                testedAt: activeResult?.tested_at ?? null,
+              },
+            }
+          : null,
         recoveryFence: openEpisode
           ? {
               blockedRevisionId: openEpisode.connection_revision_id,

@@ -34,6 +34,29 @@ const scheduleRevisionId = "00000000-0000-4000-8000-000000000006";
 const blockedRevisionId = "00000000-0000-4000-8000-000000000007";
 const adapterCandidateRevisionId = "00000000-0000-4000-8000-000000000009";
 const fingerprint = "a".repeat(64);
+const activeConnectionRevision = {
+  id: connectionRevisionId,
+  revisionNumber: 1,
+  sourceAdapterVersion: "dataforrest-events-adapter-v1",
+  state: "active" as const,
+  endpointHost: "198.204.245.26.sslip.io",
+  credentialConfigured: true as const,
+  credentialMask: "••••••••" as const,
+  encryptionKeyVersion: 1,
+  healthGeneration: "0",
+  revokedAt: null,
+  test: {
+    jobId: connectionRevisionId,
+    connectionRevisionId,
+    current: true,
+    state: "succeeded" as const,
+    outcome: "success" as const,
+    safeCode: "connection_valid" as const,
+    requestedAt: "2026-08-21T12:00:00.000Z",
+    testedAt: "2026-08-21T12:00:05.000Z",
+  },
+  createdAt: "2026-08-21T12:00:00.000Z",
+};
 
 const catalog: ProviderSourceAdminCatalog = {
   availableSourceTypes: [{
@@ -67,31 +90,9 @@ const catalog: ProviderSourceAdminCatalog = {
     state: "active",
     requestLimit: 2,
     activeRevisionId: connectionRevisionId,
-    activeRevisionSourceAdapterVersion: "dataforrest-events-adapter-v1",
+    activeRevision: activeConnectionRevision,
     recoveryFence: null,
-    latestRevision: {
-      id: connectionRevisionId,
-      revisionNumber: 1,
-      sourceAdapterVersion: "dataforrest-events-adapter-v1",
-      state: "active",
-      endpointHost: "198.204.245.26.sslip.io",
-      credentialConfigured: true,
-      credentialMask: "••••••••",
-      encryptionKeyVersion: 1,
-      healthGeneration: "0",
-      revokedAt: null,
-      test: {
-        jobId: connectionRevisionId,
-        connectionRevisionId,
-        current: true,
-        state: "succeeded",
-        outcome: "success",
-        safeCode: "connection_valid",
-        requestedAt: "2026-08-21T12:00:00.000Z",
-        testedAt: "2026-08-21T12:00:05.000Z",
-      },
-      createdAt: "2026-08-21T12:00:00.000Z",
-    },
+    latestRevision: activeConnectionRevision,
     createdAt: "2026-08-21T12:00:00.000Z",
     updatedAt: "2026-08-21T12:00:05.000Z",
   }],

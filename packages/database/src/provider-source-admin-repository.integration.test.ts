@@ -15,6 +15,7 @@ import {
   type ProviderSourceAcceptanceFixture,
 } from "./provider-source-acceptance-test-support.ts";
 import { PersistenceError } from "./persistence-error.ts";
+import { ProviderSourceAdminCatalogRepository } from "./provider-source-admin-catalog-repository.ts";
 import { ProviderSourceAdminLifecycleRepository } from "./provider-source-admin-lifecycle-repository.ts";
 import { ProviderSourceAdminFailureAuditRepository } from "./provider-source-admin-failure-audit-repository.ts";
 import { ProviderSourceCursorRepository } from "./provider-source-cursor-repository.ts";
@@ -282,6 +283,22 @@ test("connection adapter upgrade creates one fenced cross-version candidate", as
       "dataforrest-events-adapter-v2",
     );
     assert.equal(stored.state, "candidate");
+    const catalogConnection = (await new ProviderSourceAdminCatalogRepository(
+      isolated.database,
+    ).listConnections(isolated.organizationId))[0];
+    assert.equal(catalogConnection?.revision.id, candidateId);
+    assert.equal(
+      catalogConnection?.revision.sourceAdapterVersion,
+      "dataforrest-events-adapter-v2",
+    );
+    assert.equal(
+      catalogConnection?.activeRevision?.revision.id,
+      isolated.connectionRevisionId,
+    );
+    assert.equal(
+      catalogConnection?.activeRevision?.revision.sourceAdapterVersion,
+      ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+    );
     assert.equal(await isolated.database.audit_events.count({
       where: {
         organization_id: isolated.organizationId,

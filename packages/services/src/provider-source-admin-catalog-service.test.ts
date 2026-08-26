@@ -36,6 +36,7 @@ const connectionRevisionId = "00000000-0000-4000-8000-000000000004";
 const sourceId = "00000000-0000-4000-8000-000000000005";
 const sourceRevisionId = "00000000-0000-4000-8000-000000000006";
 const scheduleRevisionId = "00000000-0000-4000-8000-000000000007";
+const candidateRevisionId = "00000000-0000-4000-8000-000000000008";
 const now = new Date("2026-08-21T12:00:00.000Z");
 
 function repository(
@@ -49,6 +50,28 @@ function repository(
     },
     async listConnections(scope) {
       requestedScopes.push(scope);
+      const revision = {
+        id: connectionRevisionId,
+        revisionNumber: 1,
+        sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+        state: "active" as const,
+        configurationFingerprint: "a".repeat(64),
+        encryptionKeyVersion: 1,
+        healthGeneration: 0n,
+        revokedAt: null,
+        createdAt: now,
+      };
+      const connectionTest = {
+        jobId: connectionRevisionId,
+        connectionRevisionId,
+        expectedHealthGeneration: 0n,
+        resultingHealthGeneration: 0n,
+        state: "succeeded" as const,
+        outcome: "success",
+        safeCode: null,
+        requestedAt: now,
+        testedAt: now,
+      };
       return [{
         id: profileId,
         displayName: "Shared DataForrest",
@@ -57,31 +80,10 @@ function repository(
         state: "active",
         requestLimit: 2,
         activeRevisionId: connectionRevisionId,
-        activeRevisionSourceAdapterVersion:
-          DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+        activeRevision: { revision, test: connectionTest },
         recoveryFence: null,
-        revision: {
-          id: connectionRevisionId,
-          revisionNumber: 1,
-          sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-          state: "active",
-          configurationFingerprint: "a".repeat(64),
-          encryptionKeyVersion: 1,
-          healthGeneration: 0n,
-          revokedAt: null,
-          createdAt: now,
-        },
-        test: {
-          jobId: null,
-          connectionRevisionId: null,
-          expectedHealthGeneration: null,
-          resultingHealthGeneration: null,
-          state: null,
-          outcome: null,
-          safeCode: null,
-          requestedAt: null,
-          testedAt: null,
-        },
+        revision,
+        test: connectionTest,
         createdAt: now,
         updatedAt: now,
       }];
@@ -192,7 +194,7 @@ test("catalog advertises current v2 while retaining masked v1 connection and sou
     "198.204.245.26.sslip.io");
   assert.equal(catalog.connections[0]?.latestRevision.credentialMask, "••••••••");
   assert.equal(
-    catalog.connections[0]?.activeRevisionSourceAdapterVersion,
+    catalog.connections[0]?.activeRevision?.sourceAdapterVersion,
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
   assert.equal(catalog.sources[0]?.test.state, "pending");
@@ -203,6 +205,83 @@ test("catalog advertises current v2 while retaining masked v1 connection and sou
   assert.equal(catalog.sources[0]?.cursor.resumeLabel, "Feed start");
   assert.equal(JSON.stringify(catalog).includes("must-never-leave"), false);
   assert.equal(JSON.stringify(catalog).includes("/v1/events"), false);
+});
+
+test("catalog keeps the complete active revision separate from a newer adapter candidate", async () => {
+  const records = repository();
+  const candidateRepository: ProviderSourceAdminCatalogRepository = {
+    ...records.value,
+    async listConnections(scope) {
+      return (await records.value.listConnections(scope)).map((connection) => ({
+        ...connection,
+        revision: {
+          ...connection.revision,
+          id: candidateRevisionId,
+          revisionNumber: 2,
+          sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+          state: "candidate" as const,
+          configurationFingerprint: "b".repeat(64),
+          healthGeneration: 9n,
+        },
+        test: {
+          jobId: null,
+          connectionRevisionId: null,
+          expectedHealthGeneration: null,
+          resultingHealthGeneration: null,
+          state: null,
+          outcome: null,
+          safeCode: null,
+          requestedAt: null,
+          testedAt: null,
+        },
+      }));
+    },
+  };
+  const resolutionInputs: unknown[] = [];
+  const service = new ProviderSourceAdminCatalogService({
+    ...sourceRegistries(),
+    repository: candidateRepository,
+    availableSourceTypes: [{
+      sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+      label: "DataForrest events",
+    }],
+    connectionConfigurations: {
+      async resolveSourceConnectionConfiguration(input) {
+        resolutionInputs.push(input);
+        return {
+          ...input,
+          configuration: {
+            endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+            bearerToken: "must-never-leave-the-service",
+          },
+        };
+      },
+    },
+  });
+
+  const catalog = await service.getCatalog({
+    organizationId,
+    actorKey: "actor:v1:safe",
+  });
+  assert.deepEqual(
+    resolutionInputs.map((input) =>
+      (input as Readonly<{ connectionRevisionId: string }>).connectionRevisionId
+    ),
+    [candidateRevisionId, connectionRevisionId],
+  );
+  assert.equal(
+    catalog.connections[0]?.latestRevision.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
+  assert.equal(catalog.connections[0]?.latestRevision.healthGeneration, "9");
+  assert.equal(catalog.connections[0]?.latestRevision.test.state, "not_requested");
+  assert.equal(
+    catalog.connections[0]?.activeRevision?.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+  assert.equal(catalog.connections[0]?.activeRevision?.healthGeneration, "0");
+  assert.equal(catalog.connections[0]?.activeRevision?.test.state, "succeeded");
+  assert.equal(JSON.stringify(catalog).includes("must-never-leave"), false);
 });
 
 test("catalog filters non-production source evidence without letting it poison the production response", async () => {
