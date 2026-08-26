@@ -38,7 +38,7 @@ export interface SourceConnectionConfigurationAdminRepository {
     connectionProfileId: string;
     connectionRevisionId?: string;
   }>): Promise<SourceConnectionRevisionSecretRecord | null>;
-  hasIncompatibleRunnableSourceAdapterPins(input: Readonly<{
+  hasIncompatibleSourceAdapterPins(input: Readonly<{
     organizationId: string;
     connectionProfileId: string;
     sourceAdapterVersion: string;

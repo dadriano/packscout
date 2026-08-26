@@ -26,7 +26,7 @@ function safeAuditMetadata(revisionId: string): Prisma.InputJsonObject {
   return { connectionRevisionId: revisionId };
 }
 
-async function hasIncompatibleRunnableSourceAdapterPins(
+async function hasIncompatibleSourceAdapterPins(
   database: PackscoutQueryClient,
   input: Readonly<{
     organizationId: string;
@@ -46,7 +46,7 @@ async function hasIncompatibleRunnableSourceAdapterPins(
        and revision.connection_profile_id = source.connection_profile_id
       where source.organization_id = cast(${input.organizationId} as uuid)
         and source.connection_profile_id = cast(${input.connectionProfileId} as uuid)
-        and source.state in ('active', 'paused')
+        and source.state in ('draft', 'active', 'paused')
         and revision.source_adapter_version <> ${input.sourceAdapterVersion}
     ) as blocked
   `);
@@ -186,12 +186,12 @@ export class SourceConnectionAdminRepository {
     };
   }
 
-  hasIncompatibleRunnableSourceAdapterPins(input: Readonly<{
+  hasIncompatibleSourceAdapterPins(input: Readonly<{
     organizationId: string;
     connectionProfileId: string;
     sourceAdapterVersion: string;
   }>): Promise<boolean> {
-    return hasIncompatibleRunnableSourceAdapterPins(this.database, input);
+    return hasIncompatibleSourceAdapterPins(this.database, input);
   }
 
   async addConnectionRevision(
@@ -342,12 +342,12 @@ export class SourceConnectionAdminRepository {
         input.sourceAdapterVersion === input.expectedSourceAdapterVersion
       )
         this.#fenced("Connection revision changed before adapter upgrade.");
-      if (await hasIncompatibleRunnableSourceAdapterPins(transaction, {
+      if (await hasIncompatibleSourceAdapterPins(transaction, {
         organizationId: input.organizationId,
         connectionProfileId: input.connectionProfileId,
         sourceAdapterVersion: input.sourceAdapterVersion,
       })) {
-        this.#fenced("Runnable sources are pinned to another adapter version.");
+        this.#fenced("Sources are pinned to another adapter version.");
       }
       await transaction.source_connection_revisions.create({
         data: {
@@ -536,12 +536,12 @@ export class SourceConnectionAdminRepository {
       if (latestRevision?.id !== revision.id) {
         this.#fenced("Only the latest connection revision can activate.");
       }
-      if (await hasIncompatibleRunnableSourceAdapterPins(transaction, {
+      if (await hasIncompatibleSourceAdapterPins(transaction, {
         organizationId: input.organizationId,
         connectionProfileId: input.connectionProfileId,
         sourceAdapterVersion: revision.source_adapter_version,
       })) {
-        this.#fenced("Runnable sources are pinned to another adapter version.");
+        this.#fenced("Sources are pinned to another adapter version.");
       }
       const successfulTest =
         latestTestJob?.state === "succeeded"

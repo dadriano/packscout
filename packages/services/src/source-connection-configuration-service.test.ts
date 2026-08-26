@@ -33,7 +33,7 @@ const now = new Date("2026-08-21T12:00:00.000Z");
 class MemoryConnectionRepository
   implements SourceConnectionConfigurationAdminRepository {
   readonly revisions = new Map<string, SourceConnectionRevisionSecretRecord>();
-  incompatibleRunnablePins = false;
+  incompatibleSourcePins = false;
   createInput: Parameters<
     SourceConnectionConfigurationAdminRepository["createConnectionProfile"]
   >[0] | null = null;
@@ -83,8 +83,8 @@ class MemoryConnectionRepository
       : null;
   }
 
-  async hasIncompatibleRunnableSourceAdapterPins() {
-    return this.incompatibleRunnablePins;
+  async hasIncompatibleSourceAdapterPins() {
+    return this.incompatibleSourcePins;
   }
 
   async addConnectionRevision(input: Parameters<
@@ -391,9 +391,9 @@ test("adapter upgrade rejects a revoked latest revision before decrypting it", a
   assert.equal(repository.adapterRevisionInput, null);
 });
 
-test("adapter upgrade rejects incompatible runnable source pins before decrypting", async () => {
+test("adapter upgrade rejects an incompatible draft source pin before decrypting", async () => {
   const { repository, service } = fixture([revisionTwoId]);
-  repository.incompatibleRunnablePins = true;
+  repository.incompatibleSourcePins = true;
   repository.revisions.set(revisionOneId, {
     organizationId,
     connectionProfileId: profileId,
@@ -429,7 +429,7 @@ test("adapter upgrade rejects incompatible runnable source pins before decryptin
   assert.equal(repository.adapterRevisionInput, null);
 });
 
-test("connection activation rejects incompatible runnable source pins", async () => {
+test("connection activation rejects an incompatible draft source pin", async () => {
   const { repository, service } = fixture();
   await service.createProfile(
     { organizationId, actorKey: "operator-admin" },
@@ -441,7 +441,7 @@ test("connection activation rejects incompatible runnable source pins", async ()
       requestLimit: 2,
     },
   );
-  repository.incompatibleRunnablePins = true;
+  repository.incompatibleSourcePins = true;
 
   await assert.rejects(
     service.activateRevision(

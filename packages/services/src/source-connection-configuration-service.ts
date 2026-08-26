@@ -242,7 +242,7 @@ export class SourceConnectionConfigurationService
       targetAdapter.manifest.adapterVersion !==
         parsed.data.targetSourceAdapterVersion
     ) this.#invalid();
-    if (await this.#repository.hasIncompatibleRunnableSourceAdapterPins({
+    if (await this.#repository.hasIncompatibleSourceAdapterPins({
       organizationId: context.organizationId,
       connectionProfileId,
       sourceAdapterVersion: targetAdapter.manifest.adapterVersion,
@@ -476,7 +476,7 @@ export class SourceConnectionConfigurationService
       connectionRevisionId: parsed.data.expectedRevisionId,
     });
     if (!revision) this.#connectionNotFound();
-    if (await this.#repository.hasIncompatibleRunnableSourceAdapterPins({
+    if (await this.#repository.hasIncompatibleSourceAdapterPins({
       organizationId: context.organizationId,
       connectionProfileId,
       sourceAdapterVersion: revision.sourceAdapterVersion,

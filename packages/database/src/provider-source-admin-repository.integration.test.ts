@@ -346,8 +346,8 @@ test("connection adapter upgrade rejects a revoked latest revision", async () =>
   }
 });
 
-test("connection adapter upgrade rejects active and paused legacy source pins", async () => {
-  for (const sourceState of ["active", "paused"] as const) {
+test("connection adapter upgrade rejects draft, active, and paused legacy source pins", async () => {
+  for (const sourceState of ["draft", "active", "paused"] as const) {
     const isolated = await createProviderSourceAcceptanceFixture(
       `adapter-upgrade-${sourceState}`,
     );
@@ -358,14 +358,17 @@ test("connection adapter upgrade rejects active and paused legacy source pins", 
         mapperKey: "courtyard-provider-observation",
         identityNamespaceKey: "courtyard-v1",
         intervalSeconds: 60,
-        hashCharacter: sourceState === "active" ? "c" : "d",
+        hashCharacter:
+          sourceState === "draft" ? "b" : sourceState === "active" ? "c" : "d",
       });
-      await activateAcceptanceRuntime(
-        isolated.database,
-        isolated,
-        pinnedSource,
-        ACCEPTANCE_CREATED_AT,
-      );
+      if (sourceState !== "draft") {
+        await activateAcceptanceRuntime(
+          isolated.database,
+          isolated,
+          pinnedSource,
+          ACCEPTANCE_CREATED_AT,
+        );
+      }
       if (sourceState === "paused") {
         await isolated.database.provider_source_instances.update({
           where: { id: pinnedSource.sourceInstanceId },
@@ -378,7 +381,7 @@ test("connection adapter upgrade rejects active and paused legacy source pins", 
       const connections = new SourceConnectionAdminRepository(
         isolated.database,
       );
-      assert.equal(await connections.hasIncompatibleRunnableSourceAdapterPins({
+      assert.equal(await connections.hasIncompatibleSourceAdapterPins({
         organizationId: isolated.organizationId,
         connectionProfileId: isolated.connectionProfileId,
         sourceAdapterVersion: "dataforrest-events-adapter-v2",
@@ -417,19 +420,75 @@ test("connection adapter upgrade rejects active and paused legacy source pins", 
   }
 });
 
-test("connection activation rejects a candidate incompatible with a newly runnable source", async () => {
+test("connection adapter upgrade ignores disabled and replaced legacy source pins", async () => {
+  for (const sourceState of ["disabled", "replaced"] as const) {
+    const isolated = await createProviderSourceAcceptanceFixture(
+      `adapter-upgrade-${sourceState}`,
+    );
+    try {
+      const pinnedSource = await createAcceptanceProviderSource(isolated, {
+        platformKey: "courtyard",
+        displayName: `Courtyard ${sourceState}`,
+        mapperKey: "courtyard-provider-observation",
+        identityNamespaceKey: "courtyard-v1",
+        intervalSeconds: 60,
+        hashCharacter: sourceState === "disabled" ? "e" : "f",
+      });
+      await isolated.database.provider_source_instances.update({
+        where: { id: pinnedSource.sourceInstanceId },
+        data: sourceState === "disabled"
+          ? {
+            state: "disabled",
+            disabled_at: new Date("2026-08-21T12:09:00.000Z"),
+          }
+          : {
+            state: "replaced",
+            replaced_at: new Date("2026-08-21T12:09:00.000Z"),
+          },
+      });
+      const connections = new SourceConnectionAdminRepository(
+        isolated.database,
+      );
+      assert.equal(await connections.hasIncompatibleSourceAdapterPins({
+        organizationId: isolated.organizationId,
+        connectionProfileId: isolated.connectionProfileId,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      }), false);
+      const candidateId = randomUUID();
+
+      await connections.addConnectionAdapterRevision({
+        organizationId: isolated.organizationId,
+        connectionProfileId: isolated.connectionProfileId,
+        expectedRevisionId: isolated.connectionRevisionId,
+        expectedSourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+        revisionId: candidateId,
+        revisionNumber: 2,
+        sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+        encryptedConfiguration: {
+          ciphertext: new Uint8Array(32).fill(2),
+          nonce: new Uint8Array(12).fill(3),
+          authTag: new Uint8Array(16).fill(4),
+          keyVersion: 1,
+        },
+        configurationFingerprint: "2".repeat(64),
+        actorKey: "operator-admin",
+        createdAt: new Date("2026-08-21T12:10:00.000Z"),
+      });
+      assert.equal(await isolated.database.source_connection_revisions.count({
+        where: { id: candidateId },
+      }), 1);
+    } finally {
+      await isolated.close();
+    }
+  }
+});
+
+test("connection activation rejects a candidate incompatible with a newly created draft source", async () => {
   const isolated = await createProviderSourceAcceptanceFixture(
     "adapter-activation-pins",
   );
   try {
-    const pinnedSource = await createAcceptanceProviderSource(isolated, {
-      platformKey: "courtyard",
-      displayName: "Courtyard activation pin",
-      mapperKey: "courtyard-provider-observation",
-      identityNamespaceKey: "courtyard-v1",
-      intervalSeconds: 60,
-      hashCharacter: "e",
-    });
     const connections = new SourceConnectionAdminRepository(isolated.database);
     const candidateId = randomUUID();
     await connections.addConnectionAdapterRevision({
@@ -451,12 +510,14 @@ test("connection activation rejects a candidate incompatible with a newly runnab
       actorKey: "operator-admin",
       createdAt: new Date("2026-08-21T12:10:00.000Z"),
     });
-    await activateAcceptanceRuntime(
-      isolated.database,
-      isolated,
-      pinnedSource,
-      new Date("2026-08-21T12:11:00.000Z"),
-    );
+    await createAcceptanceProviderSource(isolated, {
+      platformKey: "courtyard",
+      displayName: "Courtyard draft activation pin",
+      mapperKey: "courtyard-provider-observation",
+      identityNamespaceKey: "courtyard-v1",
+      intervalSeconds: 60,
+      hashCharacter: "9",
+    });
 
     await assert.rejects(
       connections.activateTestedConnectionRevision({
@@ -479,7 +540,7 @@ test("connection activation rejects a candidate incompatible with a newly runnab
         where: { id: candidateId },
       }),
     ]);
-    assert.equal(profile.active_revision_id, isolated.connectionRevisionId);
+    assert.equal(profile.active_revision_id, null);
     assert.equal(candidate.state, "candidate");
     assert.equal(await isolated.database.audit_events.count({
       where: {
