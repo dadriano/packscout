@@ -51,9 +51,20 @@ test("launch source constants retain the evidence-backed operating envelope", ()
   assert.deepEqual(providerSourceControlPlaneRetry, {
     maximumAttempts: 3,
     backoffMilliseconds: [0, 100, 400],
-    transactionTimeoutMilliseconds: 750,
-    wallClockLimitMilliseconds: 3_000,
+    transactionTimeoutMilliseconds: 5_000,
+    wallClockLimitMilliseconds: 16_000,
   });
+  const completeRetryEnvelope =
+    providerSourceControlPlaneRetry.maximumAttempts *
+      providerSourceControlPlaneRetry.transactionTimeoutMilliseconds +
+    providerSourceControlPlaneRetry.backoffMilliseconds.reduce<number>(
+      (total, delay) => total + delay,
+      0,
+    );
+  assert.ok(
+    providerSourceControlPlaneRetry.wallClockLimitMilliseconds >=
+      completeRetryEnvelope,
+  );
   assert.deepEqual(sourceLifecycleStates, [
     "draft",
     "paused",

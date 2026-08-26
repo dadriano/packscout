@@ -27,7 +27,7 @@ test("transient retries use exactly 0, 100, 400 ms and revalidate every attempt"
   assert.equal(result, "committed");
   assert.deepEqual(attempts, [1, 2, 3]);
   assert.deepEqual(delays, [100, 400]);
-  assert.deepEqual(timeouts, [750, 750, 750]);
+  assert.deepEqual(timeouts, [5_000, 5_000, 5_000]);
 });
 
 test("nontransient failures never retry or self-fence", async () => {
@@ -168,6 +168,6 @@ test("a hung transaction is aborted at the fixed attempt deadline and cannot out
   const elapsed = Date.now() - startedAt;
   assert.equal(transactionSignal?.aborted, true);
   assert.equal(fence.state, "fenced_draining");
-  assert.ok(elapsed >= 500, `deadline fired too early: ${elapsed}ms`);
-  assert.ok(elapsed < 2_500, `deadline failed to bound the call: ${elapsed}ms`);
+  assert.ok(elapsed >= 15_000, `deadline fired too early: ${elapsed}ms`);
+  assert.ok(elapsed < 17_500, `deadline failed to bound the call: ${elapsed}ms`);
 });
