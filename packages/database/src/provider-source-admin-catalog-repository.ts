@@ -35,7 +35,7 @@ export class ProviderSourceAdminCatalogRepository {
         orderBy: [{ revision_number: "desc" }, { id: "desc" }],
       });
       if (!revision) return null;
-      const [openEpisode, revokedRevision] = await Promise.all([
+      const [openEpisode, revokedRevision, activeRevision] = await Promise.all([
         this.database.source_connection_health_episodes.findFirst({
           where: {
             organization_id: organizationId,
@@ -54,6 +54,16 @@ export class ProviderSourceAdminCatalogRepository {
               },
               orderBy: [{ revision_number: "desc" }, { id: "desc" }],
               select: { id: true },
+            })
+          : null,
+        profile.active_revision_id
+          ? this.database.source_connection_revisions.findFirst({
+              where: {
+                id: profile.active_revision_id,
+                organization_id: organizationId,
+                connection_profile_id: profile.id,
+              },
+              select: { source_adapter_version: true },
             })
           : null,
       ]);
@@ -78,6 +88,8 @@ export class ProviderSourceAdminCatalogRepository {
         state: profile.state,
         requestLimit: profile.request_limit,
         activeRevisionId: profile.active_revision_id,
+        activeRevisionSourceAdapterVersion:
+          activeRevision?.source_adapter_version ?? null,
         recoveryFence: openEpisode
           ? {
               blockedRevisionId: openEpisode.connection_revision_id,

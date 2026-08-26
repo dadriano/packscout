@@ -248,9 +248,9 @@ The bounded-memory benchmark processed 10 warm-up pages and five 20-page trials
 (100 measured pages total), each exactly 250 records and 4 MiB, through the
 authentic capture, durable-terminalization acknowledgement, interpretation,
 deep immutable completion, import validation, mapping, planning, and discard
-path under `dataforrest-events-adapter-v2`. Peak RSS rose 34,471,936 bytes. The
+path under `dataforrest-events-adapter-v2`. Peak RSS rose 47,415,296 bytes. The
 allocator-tolerant Theil–Sen trend over settled heap-plus-external samples
-projected only 87,707 retained bytes across
+projected only 98,800 retained bytes across
 100 pages, within the 64 MiB peak and 8 MiB retained limits. Four execution
 slots therefore reserve at most 256 MiB of page-working-set budget before normal
 process overhead.
@@ -258,7 +258,7 @@ process overhead.
 The storage submeasurement remains the reviewed August 22 measurement because
 the later constraint migration widens only the admissible protected-byte bound;
 it does not change row shape. The adapter-v2 4 MiB memory submeasurement was
-refreshed independently on August 24 Pacific time and carries its own timestamp.
+refreshed independently on August 25 Pacific time and carries its own timestamp.
 
 Reproduction and drift checks are executable from the repository root:
 

@@ -67,6 +67,7 @@ const catalog: ProviderSourceAdminCatalog = {
     state: "active",
     requestLimit: 2,
     activeRevisionId: connectionRevisionId,
+    activeRevisionSourceAdapterVersion: "dataforrest-events-adapter-v1",
     recoveryFence: null,
     latestRevision: {
       id: connectionRevisionId,

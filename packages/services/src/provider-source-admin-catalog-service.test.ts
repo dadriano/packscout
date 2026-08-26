@@ -57,6 +57,8 @@ function repository(
         state: "active",
         requestLimit: 2,
         activeRevisionId: connectionRevisionId,
+        activeRevisionSourceAdapterVersion:
+          DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
         recoveryFence: null,
         revision: {
           id: connectionRevisionId,
@@ -189,6 +191,10 @@ test("catalog advertises current v2 while retaining masked v1 connection and sou
   assert.equal(catalog.connections[0]?.latestRevision.endpointHost,
     "198.204.245.26.sslip.io");
   assert.equal(catalog.connections[0]?.latestRevision.credentialMask, "••••••••");
+  assert.equal(
+    catalog.connections[0]?.activeRevisionSourceAdapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
   assert.equal(catalog.sources[0]?.test.state, "pending");
   assert.equal(
     catalog.sources[0]?.sourceAdapterVersion,

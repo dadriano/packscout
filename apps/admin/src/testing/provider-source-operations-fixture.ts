@@ -371,6 +371,7 @@ export function sourceAdminCatalog(): ProviderSourceAdminCatalog {
       state: "active",
       requestLimit: 2,
       activeRevisionId: operationsFixtureIds.connectionRevision,
+      activeRevisionSourceAdapterVersion: "dataforrest-events-adapter-v1",
       recoveryFence: null,
       latestRevision: {
         id: operationsFixtureIds.connectionRevision,

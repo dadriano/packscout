@@ -9,6 +9,7 @@ import {
   providerSourceAdminCatalogSchema,
   providerSourceSupervisorSnapshotSchema,
   type LaunchProviderKey,
+  type ProviderSourceAdminCatalog,
 } from "@packscout/contracts";
 import { ProviderSourceOperationsService } from "./provider-source-operations-service.ts";
 
@@ -67,6 +68,8 @@ const catalog = providerSourceAdminCatalogSchema.parse({
     state: "active",
     requestLimit: 2,
     activeRevisionId: connectionRevisionId,
+    activeRevisionSourceAdapterVersion:
+      DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     recoveryFence: {
       blockedRevisionId: connectionRevisionId,
       blockingEpisodeId: uuid(90),
@@ -209,6 +212,24 @@ const snapshot = providerSourceSupervisorSnapshotSchema.parse({
   }),
 });
 
+const catalogWithV2Candidate = providerSourceAdminCatalogSchema.parse({
+  ...catalog,
+  connections: catalog.connections.map((connection) => ({
+    ...connection,
+    latestRevision: {
+      ...connection.latestRevision,
+      id: uuid(5),
+      revisionNumber: 2,
+      sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+      state: "candidate",
+      test: {
+        ...connection.latestRevision.test,
+        connectionRevisionId: uuid(5),
+      },
+    },
+  })),
+});
+
 const counters = {
   pages: 5,
   records: 20,
@@ -221,7 +242,10 @@ const counters = {
   quarantined: 1,
 };
 
-function runtime(historyState: "current" | "expired" = "current") {
+function runtime(
+  historyState: "current" | "expired" = "current",
+  catalogValue: ProviderSourceAdminCatalog = catalog,
+) {
   const run = {
     id: runId,
     sourceInstanceId: sourceIds(0).sourceInstanceId,
@@ -237,7 +261,7 @@ function runtime(historyState: "current" | "expired" = "current") {
   };
   return new ProviderSourceOperationsService({
     environmentKey: "local",
-    catalog: { async read() { return catalog; } },
+    catalog: { async read() { return catalogValue; } },
     snapshot: { async read() { return snapshot; } },
     sourceTypes: [
       {
@@ -354,6 +378,34 @@ test("source operations compose the registered four rows with durable supervisor
   assert.equal(courtyard.quality.state, "warning");
   assert.equal(courtyard.connectionImpact.state, "blocked");
   assert.doesNotMatch(JSON.stringify(overview), /credential-value|cursor-value/);
+});
+
+test("source operations report the active profile adapter when no source is selected", async () => {
+  const catalogWithoutSources = providerSourceAdminCatalogSchema.parse({
+    ...catalogWithV2Candidate,
+    sources: [],
+  });
+  const overview = await runtime("current", catalogWithoutSources).overview(
+    organizationId,
+  );
+  assert.equal(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+});
+
+test("source operations report the selected source adapter ahead of a newer profile candidate", async () => {
+  const overview = await runtime("current", catalogWithV2Candidate).overview(
+    organizationId,
+  );
+  assert.equal(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+  assert.notEqual(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
 });
 
 test("provider detail and filtered diagnostics expose safe links without diagnostic correlation ids", async () => {

@@ -283,13 +283,20 @@ function connectionSummary(input: Readonly<{
   const profileCapacity = input.snapshot.capacity.profiles.find(
     ({ connectionProfileId }) => connectionProfileId === connection.id,
   );
+  const sourceAdapterVersion = input.source?.sourceAdapterVersion ??
+    (connection.activeRevisionId === null
+      ? connection.latestRevision.sourceAdapterVersion
+      : connection.activeRevisionSourceAdapterVersion);
+  if (sourceAdapterVersion === null) {
+    throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
+  }
   return {
     connectionProfileId: connection.id,
     displayName: connection.displayName,
     sourceType: sourceTypeSummary(
       input.dependencies,
       connection.sourceTypeKey,
-      connection.latestRevision.sourceAdapterVersion,
+      sourceAdapterVersion,
     ),
     state: connection.state,
     endpointHost: connection.latestRevision.endpointHost,

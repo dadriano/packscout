@@ -142,10 +142,14 @@ test("parseCaptureOptions uses approved defaults and only accepts stricter bound
       },
     },
   );
+  assert.equal(
+    parseCaptureOptions(["--max-bytes", "4194304"]).options.maxBytes,
+    4 * 1024 * 1024,
+  );
 
   for (const argumentsList of [
     ["--limit", "501"],
-    ["--max-bytes", "2097153"],
+    ["--max-bytes", "4194305"],
     ["--timeout-ms", "10001"],
     ["--concurrency", "1"],
     ["--endpoint", "https://example.test"],
@@ -212,7 +216,7 @@ test("captureDataforestEvidence executes the fixed bounded probe matrix without 
   assert.equal(report.endpoint.host, "198.204.245.26.sslip.io");
   assert.equal(report.endpoint.path, "/v1/events");
   assert.equal(report.bounds.recordsPerFilteredRequest, 500);
-  assert.equal(report.bounds.maximumResponseBytes, 2 * 1024 * 1024);
+  assert.equal(report.bounds.maximumResponseBytes, 4 * 1024 * 1024);
   assert.equal(report.bounds.requestTimeoutMs, 10_000);
   assert.equal(report.bounds.parallelRequestCount, 2);
   assert.equal(report.bounds.actualRequestCount, 22);

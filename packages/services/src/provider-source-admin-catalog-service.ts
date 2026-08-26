@@ -43,6 +43,7 @@ export interface ProviderSourceAdminConnectionRecord {
   readonly state: "draft" | "active" | "disabled";
   readonly requestLimit: number;
   readonly activeRevisionId: string | null;
+  readonly activeRevisionSourceAdapterVersion: string | null;
   readonly recoveryFence: Readonly<{
     blockedRevisionId: string;
     blockingEpisodeId: string | null;
@@ -301,6 +302,8 @@ export class ProviderSourceAdminCatalogService {
         state: record.state,
         requestLimit: record.requestLimit,
         activeRevisionId: record.activeRevisionId,
+        activeRevisionSourceAdapterVersion:
+          record.activeRevisionSourceAdapterVersion,
         recoveryFence: record.recoveryFence,
         latestRevision: {
           id: record.revision.id,
