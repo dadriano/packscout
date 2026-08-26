@@ -165,8 +165,11 @@ const cursorTextDecoder = new TextDecoder("utf-8", {
 export const providerSourceControlPlaneRetry = Object.freeze({
   maximumAttempts: 3,
   backoffMilliseconds: Object.freeze([0, 100, 400] as const),
-  transactionTimeoutMilliseconds: 750,
-  wallClockLimitMilliseconds: 3_000,
+  // Page persistence can keep the local database busy for several seconds.
+  // Give each idempotent control-plane command enough time to enter and commit
+  // while retaining a bounded fail-closed window beneath the ownership lease.
+  transactionTimeoutMilliseconds: 5_000,
+  wallClockLimitMilliseconds: 16_000,
 });
 
 const registrationKeySchema = z
