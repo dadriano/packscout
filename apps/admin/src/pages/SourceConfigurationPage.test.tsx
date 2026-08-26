@@ -32,11 +32,36 @@ const sourceId = "00000000-0000-4000-8000-000000000004";
 const sourceRevisionId = "00000000-0000-4000-8000-000000000005";
 const scheduleRevisionId = "00000000-0000-4000-8000-000000000006";
 const blockedRevisionId = "00000000-0000-4000-8000-000000000007";
+const adapterCandidateRevisionId = "00000000-0000-4000-8000-000000000009";
 const fingerprint = "a".repeat(64);
+const activeConnectionRevision = {
+  id: connectionRevisionId,
+  revisionNumber: 1,
+  sourceAdapterVersion: "dataforrest-events-adapter-v1",
+  state: "active" as const,
+  endpointHost: "198.204.245.26.sslip.io",
+  credentialConfigured: true as const,
+  credentialMask: "••••••••" as const,
+  encryptionKeyVersion: 1,
+  healthGeneration: "0",
+  revokedAt: null,
+  test: {
+    jobId: connectionRevisionId,
+    connectionRevisionId,
+    current: true,
+    state: "succeeded" as const,
+    outcome: "success" as const,
+    safeCode: "connection_valid" as const,
+    requestedAt: "2026-08-21T12:00:00.000Z",
+    testedAt: "2026-08-21T12:00:05.000Z",
+  },
+  createdAt: "2026-08-21T12:00:00.000Z",
+};
 
 const catalog: ProviderSourceAdminCatalog = {
   availableSourceTypes: [{
     sourceTypeKey: "dataforrest-events-v1",
+    sourceAdapterVersion: "dataforrest-events-adapter-v1",
     label: "DataForrest events",
   }],
   providers: [{
@@ -65,30 +90,9 @@ const catalog: ProviderSourceAdminCatalog = {
     state: "active",
     requestLimit: 2,
     activeRevisionId: connectionRevisionId,
+    activeRevision: activeConnectionRevision,
     recoveryFence: null,
-    latestRevision: {
-      id: connectionRevisionId,
-      revisionNumber: 1,
-      sourceAdapterVersion: "dataforrest-events-adapter-v1",
-      state: "active",
-      endpointHost: "198.204.245.26.sslip.io",
-      credentialConfigured: true,
-      credentialMask: "••••••••",
-      encryptionKeyVersion: 1,
-      healthGeneration: "0",
-      revokedAt: null,
-      test: {
-        jobId: connectionRevisionId,
-        connectionRevisionId,
-        current: true,
-        state: "succeeded",
-        outcome: "success",
-        safeCode: "connection_valid",
-        requestedAt: "2026-08-21T12:00:00.000Z",
-        testedAt: "2026-08-21T12:00:05.000Z",
-      },
-      createdAt: "2026-08-21T12:00:00.000Z",
-    },
+    latestRevision: activeConnectionRevision,
     createdAt: "2026-08-21T12:00:00.000Z",
     updatedAt: "2026-08-21T12:00:05.000Z",
   }],
@@ -224,6 +228,120 @@ test("data operators receive dense read-only evidence without configuration cont
   assert.equal([...renderer.container.querySelectorAll("button")]
     .some((button) => button.textContent?.trim() === "Revoke"), false);
   assert.equal(renderer.container.querySelector(".source-config-editor"), null);
+});
+
+test("secret administrators can upgrade a legacy profile without provider records", async (context) => {
+  const upgradeCatalog: ProviderSourceAdminCatalog = {
+    ...catalog,
+    availableSourceTypes: catalog.availableSourceTypes.map((sourceType) => ({
+      ...sourceType,
+      sourceAdapterVersion: "dataforrest-events-adapter-v2",
+    })),
+    providers: [],
+    sources: [],
+  };
+  stubFetch(context, () => jsonResponse({ catalog: upgradeCatalog }));
+  const renderer = await renderPage(page(session(true)));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  await act(async () => {
+    findButton(renderer, "Create adapter upgrade candidate").click();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  assert.match(pageText(renderer), /Create dataforrest-events-adapter-v2 candidate/u);
+  assert.match(
+    pageText(renderer),
+    /decrypted only in the server.*re-encrypted for a new untested revision/u,
+  );
+  assert.match(
+    pageText(renderer),
+    /In-place adapter upgrades are blocked while any draft, active, or paused source uses this profile/u,
+  );
+  assert.match(
+    pageText(renderer),
+    /Create a separate current-adapter profile and replace those sources instead/u,
+  );
+  assert.doesNotMatch(pageText(renderer), /Existing pinned work keeps/u);
+  assert.ok(findButton(renderer, "Create adapter upgrade candidate"));
+});
+
+test("legacy source pins direct operators to a separate current-adapter profile", async (context) => {
+  const upgradeCatalog: ProviderSourceAdminCatalog = {
+    ...catalog,
+    availableSourceTypes: catalog.availableSourceTypes.map((sourceType) => ({
+      ...sourceType,
+      sourceAdapterVersion: "dataforrest-events-adapter-v2",
+    })),
+    providers: catalog.providers.map((provider) => ({
+      ...provider,
+      sourceRegistration: {
+        ...provider.sourceRegistration,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      },
+    })),
+  };
+  stubFetch(context, () => jsonResponse({ catalog: upgradeCatalog }));
+  const renderer = await renderPage(page(session(true)));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.match(pageText(renderer), /Use a separate profile for this adapter change/u);
+  assert.match(
+    pageText(renderer),
+    /Create a new current-adapter connection profile, test and activate it/u,
+  );
+  assert.match(
+    pageText(renderer),
+    /pause or disable each dependent source at a planned boundary/u,
+  );
+  assert.equal([...renderer.container.querySelectorAll("button")]
+    .some((button) =>
+      button.textContent?.trim() === "Create adapter upgrade candidate"
+    ), false);
+});
+
+test("legacy source pins disable activation of an incompatible adapter candidate", async (context) => {
+  const candidateCatalog: ProviderSourceAdminCatalog = {
+    ...catalog,
+    availableSourceTypes: catalog.availableSourceTypes.map((sourceType) => ({
+      ...sourceType,
+      sourceAdapterVersion: "dataforrest-events-adapter-v2",
+    })),
+    providers: catalog.providers.map((provider) => ({
+      ...provider,
+      sourceRegistration: {
+        ...provider.sourceRegistration,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      },
+    })),
+    connections: catalog.connections.map((connection) => ({
+      ...connection,
+      latestRevision: {
+        ...connection.latestRevision,
+        id: adapterCandidateRevisionId,
+        revisionNumber: 2,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+        state: "candidate",
+        test: {
+          ...connection.latestRevision.test,
+          jobId: adapterCandidateRevisionId,
+          connectionRevisionId: adapterCandidateRevisionId,
+        },
+      },
+    })),
+  };
+  stubFetch(context, () => jsonResponse({ catalog: candidateCatalog }));
+  const renderer = await renderPage(page(session(true)));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.equal(findButton(renderer, "Activate revision").disabled, true);
+  assert.match(pageText(renderer), /Use a separate profile for this adapter change/u);
+  assert.match(
+    pageText(renderer),
+    /In-place adapter changes are blocked while draft, active, or paused sources use this profile/u,
+  );
 });
 
 test("an old retired-revision episode remains recoverable through the healthy latest active revision", async (context) => {

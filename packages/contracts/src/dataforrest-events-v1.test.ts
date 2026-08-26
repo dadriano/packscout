@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { dataforestEventsV1EvidenceFixture } from "./__fixtures__/dataforest-events-v1.fixture.ts";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   dataforrestContinuation,
@@ -14,6 +15,7 @@ import {
   dataforrestNextCursor,
   dataforrestOpaqueCursorV1Schema,
   normalizeDataforrestEventRecord,
+  normalizeDataforrestEventRecordV2,
 } from "./dataforrest-events-v1.ts";
 import {
   normalizedProviderObservationPageSchema,
@@ -104,12 +106,12 @@ test("availability is three-state and false never invents sold_out", () => {
   });
 });
 
-test("DataForrest allowlists only provider_label into source-neutral facts", () => {
+test("DataForrest allowlists only the declared provider display-name field", () => {
   const raw = dataforrestEventRecordV1Schema.parse(
     dataforestEventsV1EvidenceFixture.courtyard.initial.records[0],
   );
   const expectedEmpty = emptyNormalizedProviderFacts("pack");
-  const present = normalizeDataforrestEventRecord(
+  const present = normalizeDataforrestEventRecordV2(
     { ...raw, data: { provider_label: "  Court Kings  ", hidden_price: 99 } },
     "courtyard",
     "fixture:facts-present",
@@ -123,7 +125,7 @@ test("DataForrest allowlists only provider_label into source-neutral facts", () 
   assert.equal(JSON.stringify(present.providerFacts).includes("hidden_price"), false);
 
   for (const providerLabel of [" ", 42, {}, "a".repeat(10_001)]) {
-    const malformed = normalizeDataforrestEventRecord(
+    const malformed = normalizeDataforrestEventRecordV2(
       { ...raw, data: { provider_label: providerLabel, price: 12.5 } },
       "courtyard",
       "fixture:facts-malformed",
@@ -143,7 +145,7 @@ test("DataForrest allowlists only provider_label into source-neutral facts", () 
     { provider_label: null, optional_value: "ignored" },
   ];
   for (const data of absentData) {
-    const absent = normalizeDataforrestEventRecord(
+    const absent = normalizeDataforrestEventRecordV2(
       { ...raw, data },
       "courtyard",
       "fixture:facts-absent",
@@ -152,6 +154,85 @@ test("DataForrest allowlists only provider_label into source-neutral facts", () 
     if (absent.kind !== "catalog") assert.fail("expected catalog observation");
     assert.deepEqual(absent.providerFacts, expectedEmpty);
   }
+
+});
+
+test("Collector Crypt pack names normalize from the evidenced native name field", () => {
+  const raw = dataforrestEventRecordV1Schema.parse({
+    ...dataforestEventsV1EvidenceFixture.collector_crypt.initial.records[0],
+    stream: "catalog",
+    entity: "pack",
+    first_seen_at: "2026-01-01T00:00:00.000Z",
+    available: true,
+  });
+  const expectedEmpty = emptyNormalizedProviderFacts("pack");
+  const present = normalizeDataforrestEventRecordV2(
+    {
+      ...raw,
+      data: {
+        name: "  Collector Crypt Alpha  ",
+        provider_label: "must not override the provider declaration",
+        price: { amount: 99 },
+      },
+    },
+    "collector_crypt",
+    "fixture:collector-crypt-pack",
+  );
+  assert.equal(present.kind, "catalog");
+  if (present.kind !== "catalog") assert.fail("expected catalog observation");
+  assert.deepEqual(present.providerFacts, {
+    ...expectedEmpty,
+    displayName: { state: "present", value: "Collector Crypt Alpha" },
+  });
+  assert.equal(JSON.stringify(present.providerFacts).includes("99"), false);
+  assert.equal(
+    JSON.stringify(present.providerFacts).includes("must not override"),
+    false,
+  );
+
+  for (const name of [" ", 42, {}, "a".repeat(10_001)]) {
+    const malformed = normalizeDataforrestEventRecordV2(
+      { ...raw, data: { name } },
+      "collector_crypt",
+      "fixture:collector-crypt-pack-malformed",
+    );
+    assert.equal(malformed.kind, "catalog");
+    if (malformed.kind !== "catalog") {
+      assert.fail("expected catalog observation");
+    }
+    assert.deepEqual(malformed.providerFacts, {
+      ...expectedEmpty,
+      displayName: { state: "malformed" },
+    });
+  }
+
+  const absentData: Array<Record<string, string | null>> = [
+    {},
+    { name: null, provider_label: "ignored" },
+  ];
+  for (const data of absentData) {
+    const absent = normalizeDataforrestEventRecordV2(
+      { ...raw, data },
+      "collector_crypt",
+      "fixture:collector-crypt-pack-absent",
+    );
+    assert.equal(absent.kind, "catalog");
+    if (absent.kind !== "catalog") assert.fail("expected catalog observation");
+    assert.deepEqual(absent.providerFacts, expectedEmpty);
+  }
+
+  const v1 = normalizeDataforrestEventRecord(
+    { ...raw, data: { name: "Collector Crypt Alpha" } },
+    "collector_crypt",
+    "fixture:collector-crypt-pack-v1",
+  );
+  assert.equal(v1.kind, "catalog");
+  if (v1.kind !== "catalog") assert.fail("expected catalog observation");
+  assert.deepEqual(v1.providerFacts, expectedEmpty);
+  assert.notEqual(
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
 });
 
 test("raw IDs may repeat across evidenced scopes without aliasing", () => {

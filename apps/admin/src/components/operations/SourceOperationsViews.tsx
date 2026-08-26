@@ -1,5 +1,6 @@
 import type {
   ProviderSourceOperationsConnection,
+  ProviderSourceOperationsConnectionMode,
   ProviderSourceOperationsSource,
 } from "@packscout/contracts";
 import { Link } from "react-router-dom";
@@ -73,9 +74,28 @@ export function sourceOperationalLabel(
 
 export function ConnectionOperationsSummary({
   connection,
+  mode,
 }: {
   connection: ProviderSourceOperationsConnection | null;
+  mode: ProviderSourceOperationsConnectionMode;
 }) {
+  if (mode === "split") {
+    return (
+      <section className="source-connection-band" aria-labelledby="connection-title">
+        <div>
+          <span className="admin-kicker">Connection transition</span>
+          <h2 id="connection-title">Multiple profiles in service</h2>
+          <p>
+            Providers are using separate connection profiles during migration.
+            Open a provider for its exact adapter, health, and capacity evidence.
+          </p>
+        </div>
+        <Link className="admin-button admin-button-secondary" to="/source-configuration">
+          Review connections
+        </Link>
+      </section>
+    );
+  }
   if (!connection) {
     return (
       <section className="source-connection-band is-empty" aria-labelledby="connection-title">

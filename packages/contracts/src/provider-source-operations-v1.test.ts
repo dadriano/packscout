@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   PROVIDER_SOURCE_OPERATIONS_VERSION,
   providerSourceDiagnosticEventSchema,
+  providerSourceOperationsConnectionModeSchema,
   providerSourceOperationsOverviewSchema,
 } from "./provider-source-operations-v1.ts";
 
@@ -10,10 +11,19 @@ test("operations overview requires exactly four registered source rows", () => {
   const parsed = providerSourceOperationsOverviewSchema.safeParse({
     version: PROVIDER_SOURCE_OPERATIONS_VERSION,
     refreshedAt: "2026-08-21T12:00:00.000Z",
+    connectionMode: "none",
     connection: null,
     sources: [],
   });
   assert.equal(parsed.success, false);
+});
+
+test("operations overview exposes explicit connection presentation modes", () => {
+  assert.deepEqual(providerSourceOperationsConnectionModeSchema.options, [
+    "none",
+    "shared",
+    "split",
+  ]);
 });
 
 test("diagnostic events reject raw payload, cursor, and correlation fields", () => {

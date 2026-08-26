@@ -85,6 +85,15 @@ function dependencies() {
       calls.push({ name: "rotateCredential", context, body });
       return { profileId, revisionId, audit };
     },
+    async upgradeAdapter(context: unknown, _id: string, body: unknown) {
+      calls.push({ name: "upgradeAdapter", context, body });
+      return {
+        profileId,
+        revisionId,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+        audit,
+      };
+    },
     async requestTest(context: unknown, _id: string, body: unknown) {
       calls.push({ name: "connectionTest", context, body });
       return { jobId: revisionId, state: "pending", audit };
@@ -175,6 +184,7 @@ function dependencies() {
           return {
             availableSourceTypes: [{
               sourceTypeKey: "dataforrest-events-v1" as const,
+              sourceAdapterVersion: "dataforrest-events-adapter-v1",
               label: "DataForrest events",
             }],
             providers: [{
@@ -299,6 +309,49 @@ test("secret mutation requires secret authority, trusted Origin, CSRF, and stric
       organizationId,
       actorKey: `actor:v1:${organizationId}:${admin.operatorId}`,
     });
+  } finally {
+    await server.close();
+  }
+});
+
+test("adapter upgrade is secret-admin only and requires an exact confirmed version transition", async () => {
+  const fixture = dependencies();
+  const server = await start(app(fixture.dependencies));
+  const url = `${server.url}/connections/${profileId}/upgrade-adapter`;
+  const body = {
+    expectedRevisionId: revisionId,
+    expectedSourceAdapterVersion: "dataforrest-events-adapter-v1",
+    targetSourceAdapterVersion: "dataforrest-events-adapter-v2",
+    confirmation: "UPGRADE_ADAPTER",
+  };
+  try {
+    const forbidden = await fetch(url, {
+      method: "POST",
+      headers: headers("operator-session"),
+      body: JSON.stringify(body),
+    });
+    assert.equal(forbidden.status, 403);
+    const invalid = await fetch(url, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ ...body, confirmation: "upgrade" }),
+    });
+    assert.equal(invalid.status, 422);
+    assert.equal(
+      fixture.calls.some(({ name }) => name === "upgradeAdapter"),
+      false,
+    );
+
+    const valid = await fetch(url, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    assert.equal(valid.status, 200);
+    assert.deepEqual(
+      fixture.calls.find(({ name }) => name === "upgradeAdapter")?.body,
+      body,
+    );
   } finally {
     await server.close();
   }

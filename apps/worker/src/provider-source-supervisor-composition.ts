@@ -425,6 +425,12 @@ export function createProviderSourceSupervisorRuntime(
     capacity: input.capacity ?? createProviderSourceCapacityAdmissionHook({
       database: input.database,
       volumePath: input.configuration.sourceDatabaseVolumePath,
+      ...(input.configuration.sourceDiskReserveBytes === undefined
+        ? {}
+        : {
+            minimumAvailableBytes:
+              input.configuration.sourceDiskReserveBytes,
+          }),
     }),
     snapshot: {
       publish: ({ epoch, capacity, admission }) => snapshots.publish({

@@ -6,7 +6,11 @@
 
 **Reviewer:** PackScout engineering (automated structural capture plus manual contract review)
 
-**Verdict:** PASS for tasks 002–009; the real local backfill remains capacity-blocked. The measured Task 010 admission requirement is 8,759,332,238,475 available bytes, and this host is explicitly rejected.
+**Historical verdict:** PASS for tasks 002–009. The original Task 010 gate
+rejected this host using an 8,759,332,238,475-byte maximum-throughput stress
+ceiling. That ceiling is not an operational storage forecast. The later live
+local observation and free-space-floor policy are documented in
+[`provider-source-live-capacity-observation-2026-08-24.md`](./provider-source-live-capacity-observation-2026-08-24.md).
 
 ## Safety boundary
 
@@ -36,7 +40,7 @@ relationships, replay identity, catalog revision, and reached-head shape.
 | Setting | Launch value | Evidence |
 | --- | ---: | --- |
 | Filtered page target | 250 records | A 500-record Phygitals response advertised 3,114,066 bytes and was rejected by the 2 MiB cap. Two 250-record Phygitals pages were 1,415,669 and 1,698,526 bytes. |
-| Maximum response | 2,097,152 bytes | Every reviewed 250-record page fit. The capture rejected the oversized 500-record response before reading its body. |
+| Maximum response | 4,194,304 bytes | The original 2 MiB bound fit the eight launch samples but a later live 250-record Phygitals page crossed it. The 4 MiB hard bound preserves 250-record throughput while remaining below the memory benchmark's four-slot envelope. |
 | Request timeout | 10,000 ms | Fourteen successful filtered requests ranged from 435 to 4,042 ms, averaging 1,728 ms. |
 | Stable-profile request cap | 2 | Two different filters overlapped in the client, both returned 200, both remained filter-correct, and their cursors were independent. A higher value was not tested. |
 | Generic execution slots | 4 | Host-local processing bound; connection requests remain capped separately at two. |
@@ -93,7 +97,7 @@ outer field types:
 | `record_id` | string | Provider record identity; never replaced with `tx_hash` |
 | `occurred_at` | string | Effective provider time |
 | `collected_at` | string | DataForrest collection time |
-| `data` | object | Protected provider-native evidence; generic code does not interpret it |
+| `data` | object | Protected provider-native evidence; only versioned adapter declarations may promote reviewed fields |
 | `entity` | string on catalog | `pack` or `card` |
 | `first_seen_at` | string on catalog | Initial catalog observation time |
 | `available` | boolean or null on catalog | Pack availability; card values are nullable |
@@ -138,13 +142,29 @@ third-party adapter may reuse the platform mapper and canonical identities only
 after proving it emits the same IDs, scopes, and namespace; otherwise activation
 must stop for a separately designed identity migration.
 
-The adapter copies the two timestamps, outer relationships, event code, amount,
-currency, payment method, and tri-state availability into the versioned
-normalized observation. From native `data`, it allowlists only the evidenced
-nonblank `provider_label` as the source-neutral display-name fact; missing or
-malformed labels remain explicit and every other nested key stays protected
-provenance. The mapper never receives the native object, and the adapter does
-not apply provider-specific canonical rules.
+Both adapter versions copy the two timestamps, outer relationships, event code,
+amount, currency, payment method, and tri-state availability into the versioned
+normalized observation. Adapter v1 allowlists only a nonblank
+`data.provider_label` as the source-neutral display-name fact.
+
+Local Collector Crypt capture evidence reviewed on 2026-08-24 showed catalog
+pack names at `data.name`, including all three pack records in the retained
+partial run. Adapter v2 therefore uses one closed provider-and-kind declaration:
+Collector Crypt catalog packs read exactly `data.name`; every other launch
+provider and kind retains `data.provider_label`. There is no cross-field
+fallback: a missing, null, or malformed Collector Crypt `name` remains absent or
+malformed even if `provider_label` is present. Every other nested key stays
+protected provenance. The mapper never receives the native object, and this
+provider-local extraction does not add provider-specific canonical rules to the
+generic mapper.
+
+Adapter v1 remains registered only for immutable connection revisions, source
+revisions, and import runs already pinned to `dataforrest-events-adapter-v1`.
+New connection and source revisions select v2, and the admin upgrade action
+creates a separately testable v2 revision without changing existing pins. The
+PackScout data-pipeline owner may remove v1 only after a database audit proves
+that no retained connection revision, source revision, or import run references
+v1 and the corresponding retention window has elapsed.
 
 ## Failure contract
 
@@ -178,14 +198,16 @@ page lineage, and separately measured quarantine lineage/evidence. The complete
 machine-readable artifact is
 [`provider-source-capacity-measurement-v1.json`](./provider-source-capacity-measurement-v1.json).
 
-No observed steady-state delivery rate is available. The forecast therefore
-fails closed at the transport maximum: every one of the four sources returns a
+No observed steady-state delivery rate was available for this evidence window.
+The historical stress ceiling therefore failed closed at the transport
+maximum: every one of the four sources returns a
 full 250-record page on every 60-second poll throughout the 365-day growth
 horizon. That budgets 525,600,000 incremental records permanently, plus
 10,080,000 incremental records in the rolling seven-day payload window and
-43,200,000 in the rolling 30-day quarantine window. This is an admission upper
-bound, not a claim about likely provider volume; replacing it requires new
-reviewed evidence and a regenerated versioned artifact.
+43,200,000 in the rolling 30-day quarantine window. This is a stress upper
+bound, not a prediction of likely provider volume or current-backfill storage.
+The 2026-08-24 operational reassessment uses measured whole-database growth and
+an actual free-space floor instead.
 
 The forecast retains one conservative full-history raw copy, seven days of
 steady-poll raw pages, seven-day normalized payload, permanent expired page
@@ -223,14 +245,20 @@ breach. Task 010 must not start a real backfill on this host. This does not bloc
 contract, adapter, mapper, importer, scheduler, admin, or UI implementation.
 
 The bounded-memory benchmark processed 10 warm-up pages and five 20-page trials
-(100 measured pages total), each exactly 250 records and 2 MiB, through the
+(100 measured pages total), each exactly 250 records and 4 MiB, through the
 authentic capture, durable-terminalization acknowledgement, interpretation,
 deep immutable completion, import validation, mapping, planning, and discard
-path. Peak RSS rose 36,290,560 bytes. The allocator-tolerant Theil–Sen trend over
-settled heap-plus-external samples projected only 187,134 retained bytes across
+path under `dataforrest-events-adapter-v2`. Peak RSS rose 47,415,296 bytes. The
+allocator-tolerant Theil–Sen trend over settled heap-plus-external samples
+projected only 98,800 retained bytes across
 100 pages, within the 64 MiB peak and 8 MiB retained limits. Four execution
 slots therefore reserve at most 256 MiB of page-working-set budget before normal
 process overhead.
+
+The storage submeasurement remains the reviewed August 22 measurement because
+the later constraint migration widens only the admissible protected-byte bound;
+it does not change row shape. The adapter-v2 4 MiB memory submeasurement was
+refreshed independently on August 25 Pacific time and carries its own timestamp.
 
 Reproduction and drift checks are executable from the repository root:
 

@@ -5,12 +5,14 @@ import {
   requestSourceConnectionRecoveryTestSchema,
   activateSourceConnectionRecoveryRequestSchema,
   rotateSourceConnectionCredentialRequestSchema,
+  upgradeSourceConnectionAdapterRequestSchema,
   sourceConnectionRevisionCommandSchema,
   revokeSourceConnectionRevisionRequestSchema,
   type CreateSourceConnectionProfileRequest,
   type CreateSourceConnectionRecoveryRevisionRequest,
   type ProviderSourceAdminAuditReceipt,
   type RotateSourceConnectionCredentialRequest,
+  type UpgradeSourceConnectionAdapterRequest,
 } from "@packscout/contracts";
 import { SourceAdapterRegistry } from "./source-adapter-registry.ts";
 import {
@@ -200,6 +202,81 @@ export class SourceConnectionConfigurationService
       revisionId,
       audit: providerSourceAdminAuditReceipt(
         "connection_credential_rotated",
+        "source_connection_profile",
+        connectionProfileId,
+        revisionId,
+        createdAt,
+      ),
+    });
+  }
+
+  async upgradeAdapter(
+    context: ProviderSourceAdminCommandContext,
+    connectionProfileId: string,
+    request: UpgradeSourceConnectionAdapterRequest,
+  ): Promise<Readonly<{
+    profileId: string;
+    revisionId: string;
+    sourceAdapterVersion: string;
+    audit: ProviderSourceAdminAuditReceipt;
+  }>> {
+    requireProviderSourceAdminContext(context);
+    const parsed = upgradeSourceConnectionAdapterRequestSchema.safeParse(request);
+    if (!parsed.success) this.#invalid();
+    const current = await this.#repository.loadConnectionRevision({
+      organizationId: context.organizationId,
+      connectionProfileId,
+      connectionRevisionId: parsed.data.expectedRevisionId,
+    });
+    if (!current) this.#connectionNotFound();
+    if (current.state === "revoked") this.#conflict();
+    if (
+      current.sourceAdapterVersion !==
+        parsed.data.expectedSourceAdapterVersion
+    ) this.#invalid();
+    const targetAdapter = this.#resolveSourceType(current.sourceTypeKey);
+    if (targetAdapter.manifest.adapterVersion === current.sourceAdapterVersion) {
+      this.#invalid();
+    }
+    if (
+      targetAdapter.manifest.adapterVersion !==
+        parsed.data.targetSourceAdapterVersion
+    ) this.#invalid();
+    if (await this.#repository.hasIncompatibleSourceAdapterPins({
+      organizationId: context.organizationId,
+      connectionProfileId,
+      sourceAdapterVersion: targetAdapter.manifest.adapterVersion,
+    })) this.#conflict();
+    const existing = await this.#decryptRecord(current);
+    const validated = targetAdapter.validateConnectionConfiguration(existing);
+    if (!validated.ok) this.#invalid();
+
+    const revisionId = this.#ids.id();
+    const createdAt = this.#clock.now();
+    const encryptedConfiguration = this.#cipher.encrypt(
+      encodedConfiguration(validated.value),
+      this.#scope(context.organizationId, connectionProfileId, revisionId),
+    );
+    await this.#repository.addConnectionAdapterRevision({
+      organizationId: context.organizationId,
+      connectionProfileId,
+      expectedRevisionId: current.connectionRevisionId,
+      expectedSourceAdapterVersion: current.sourceAdapterVersion,
+      revisionId,
+      revisionNumber: current.revisionNumber + 1,
+      sourceTypeKey: current.sourceTypeKey,
+      sourceAdapterVersion: targetAdapter.manifest.adapterVersion,
+      encryptedConfiguration,
+      configurationFingerprint: configurationFingerprint(encryptedConfiguration),
+      actorKey: context.actorKey,
+      createdAt,
+    });
+    return Object.freeze({
+      profileId: connectionProfileId,
+      revisionId,
+      sourceAdapterVersion: targetAdapter.manifest.adapterVersion,
+      audit: providerSourceAdminAuditReceipt(
+        "connection_adapter_upgrade_revision_created",
         "source_connection_profile",
         connectionProfileId,
         revisionId,
@@ -399,6 +476,11 @@ export class SourceConnectionConfigurationService
       connectionRevisionId: parsed.data.expectedRevisionId,
     });
     if (!revision) this.#connectionNotFound();
+    if (await this.#repository.hasIncompatibleSourceAdapterPins({
+      organizationId: context.organizationId,
+      connectionProfileId,
+      sourceAdapterVersion: revision.sourceAdapterVersion,
+    })) this.#conflict();
     const activatedAt = this.#clock.now();
     await this.#repository.activateTestedConnectionRevision({
       organizationId: context.organizationId,
@@ -505,7 +587,7 @@ export class SourceConnectionConfigurationService
       if (adapterVersion) {
         return this.#sourceAdapters.resolveSourceType(sourceTypeKey, adapterVersion);
       }
-      return this.#sourceAdapters.resolveOnlyVersion(sourceTypeKey);
+      return this.#sourceAdapters.resolveCurrentVersion(sourceTypeKey);
     } catch {
       return this.#invalid();
     }
@@ -528,5 +610,9 @@ export class SourceConnectionConfigurationService
 
   #connectionNotFound(): never {
     throw new ProviderSourceAdminServiceError("CONNECTION_NOT_FOUND", 404);
+  }
+
+  #conflict(): never {
+    throw new ProviderSourceAdminServiceError("SOURCE_CONFLICT", 409);
   }
 }

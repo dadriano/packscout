@@ -25,6 +25,8 @@ function tone(value: string): StatusTone {
 
 interface ConnectionLedgerProps {
   readonly connections: readonly SourceConnectionProfileAdminSummary[];
+  readonly sources: readonly ProviderSourceAdminSummary[];
+  readonly currentSourceAdapterVersion: string | null;
   readonly canManage: boolean;
   readonly canManageSecrets: boolean;
   readonly pendingKey: string | null;
@@ -37,6 +39,10 @@ interface ConnectionLedgerProps {
     connection: SourceConnectionProfileAdminSummary,
     bearerCredential: string,
   ) => Promise<boolean>;
+  readonly onUpgrade: (
+    connection: SourceConnectionProfileAdminSummary,
+    targetSourceAdapterVersion: string,
+  ) => Promise<boolean>;
   readonly onCommand: (
     action: "test" | "activate" | "revoke" | "recovery-test" | "recovery-activate",
     connection: SourceConnectionProfileAdminSummary,
@@ -45,12 +51,15 @@ interface ConnectionLedgerProps {
 
 export function SourceConnectionLedger({
   connections,
+  sources,
+  currentSourceAdapterVersion,
   canManage,
   canManageSecrets,
   pendingKey,
   onCreate,
   onRotate,
   onRecover,
+  onUpgrade,
   onCommand,
 }: ConnectionLedgerProps) {
   const [name, setName] = useState("");
@@ -129,10 +138,20 @@ export function SourceConnectionLedger({
       <div className="source-config-ledger__rows">
         {connections.map((connection) => {
           const revision = connection.latestRevision;
+          const dependentSources = sources.filter((source) =>
+            source.connectionProfileId === connection.id &&
+            ["draft", "active", "paused"].includes(source.state)
+          );
+          const hasIncompatibleSourcePins = (adapterVersion: string) =>
+            dependentSources.some((source) =>
+              source.sourceAdapterVersion !== adapterVersion
+            );
           const hasCurrentSuccessfulTest = revision.test.state === "succeeded" &&
             revision.test.outcome === "success" && revision.test.current;
+          const activationBlockedByPins = revision.state === "candidate" &&
+            hasIncompatibleSourcePins(revision.sourceAdapterVersion);
           const canActivate = hasCurrentSuccessfulTest &&
-            revision.state === "candidate";
+            revision.state === "candidate" && !activationBlockedByPins;
           const recovery = connection.recoveryFence;
           const latestRevisionCanRecover = recovery !== null &&
             revision.state === "candidate";
@@ -141,6 +160,17 @@ export function SourceConnectionLedger({
           const canTestSameRevisionRecovery = recovery !== null &&
             recovery.blockedRevisionId === revision.id &&
             revision.state === "active";
+          const upgradeBlockedByPins = currentSourceAdapterVersion !== null &&
+            hasIncompatibleSourcePins(currentSourceAdapterVersion);
+          const canUpgradeAdapter = canManageSecrets &&
+            recovery === null &&
+            currentSourceAdapterVersion !== null &&
+            revision.sourceAdapterVersion !== currentSourceAdapterVersion &&
+            revision.state !== "revoked" &&
+            !upgradeBlockedByPins;
+          const requiresSeparateProfile = activationBlockedByPins ||
+            (revision.sourceAdapterVersion !== currentSourceAdapterVersion &&
+              upgradeBlockedByPins);
           return (
             <article key={connection.id}>
               <div className="source-config-ledger__identity">
@@ -158,6 +188,18 @@ export function SourceConnectionLedger({
                 <div><dt>Request cap</dt><dd>{connection.requestLimit} shared requests</dd></div>
                 <div><dt>Revision state</dt><dd>{label(revision.state)}</dd></div>
               </dl>
+              {requiresSeparateProfile ? (
+                <aside className="source-config-note">
+                  <strong>Use a separate profile for this adapter change</strong>
+                  <p>
+                    Create a new current-adapter connection profile, test and activate it,
+                    then pause or disable each dependent source at a planned boundary and
+                    select the new profile when replacing that source. In-place adapter
+                    changes are blocked while draft, active, or paused sources use this
+                    profile.
+                  </p>
+                </aside>
+              ) : null}
               {canManage ? (
                 <div className="source-config-ledger__actions">
                   <button
@@ -203,6 +245,17 @@ export function SourceConnectionLedger({
                       disabled={pendingKey !== null || revision.state === "revoked"}
                       onClick={() => onCommand("revoke", connection)}
                     >Revoke</button>
+                  ) : null}
+                  {canUpgradeAdapter ? (
+                    <button
+                      type="button"
+                      className="admin-button admin-button-secondary"
+                      disabled={pendingKey !== null}
+                      onClick={() => void onUpgrade(
+                        connection,
+                        currentSourceAdapterVersion,
+                      )}
+                    >Create adapter upgrade candidate</button>
                   ) : null}
                 </div>
               ) : null}

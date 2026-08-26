@@ -108,10 +108,17 @@ export class ProviderSourceLifecycleService {
 
     let adapter;
     try {
-      adapter = this.#sourceAdapters.resolveOnlyVersion(parsed.data.sourceTypeKey);
+      adapter = this.#sourceAdapters.resolveCurrentVersion(
+        parsed.data.sourceTypeKey,
+      );
     } catch {
       return this.#invalid();
     }
+    if (
+      profile.state === "active" &&
+      profile.activeRevisionSourceAdapterVersion !==
+        adapter.manifest.adapterVersion
+    ) this.#dependency();
     let providerAdapter;
     try {
       providerAdapter = this.#sourceAdapters.resolve(

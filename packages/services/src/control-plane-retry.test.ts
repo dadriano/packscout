@@ -106,21 +106,43 @@ test("a local fence in the assertion-to-transaction gap starts no transaction", 
 
 test("exhaustion fences locally before its durable fence callback", async () => {
   const fence = new RuntimeControlPlaneFence();
+  let boundaryState: string | undefined;
   let exhaustedState: string | undefined;
   await assert.rejects(
     runControlPlaneTransaction({
       runtimeFence: fence,
       revalidate: () => undefined,
       transact: () => { throw new ControlPlaneTransactionError("timeout"); },
+      beforeFence: () => { boundaryState = fence.state; },
       onExhausted: () => { exhaustedState = fence.state; },
       sleep: async () => undefined,
       now: () => 0,
     }),
     ControlPlaneRetryExhaustedError,
   );
+  assert.equal(boundaryState, "active");
   assert.equal(exhaustedState, "fenced_draining");
   assert.equal(fence.signal.aborted, true);
   assert.throws(() => fence.assertActive(), RuntimeLocallyFencedError);
+});
+
+test("explicit noncritical exhaustion leaves the runtime active", async () => {
+  const fence = new RuntimeControlPlaneFence();
+  let exhaustedState: string | undefined;
+  await assert.rejects(
+    runControlPlaneTransaction({
+      runtimeFence: fence,
+      revalidate: () => undefined,
+      transact: () => { throw new ControlPlaneTransactionError("timeout"); },
+      fenceOnExhausted: false,
+      onExhausted: () => { exhaustedState = fence.state; },
+      sleep: async () => undefined,
+      now: () => 0,
+    }),
+    ControlPlaneRetryExhaustedError,
+  );
+  assert.equal(exhaustedState, "active");
+  assert.equal(fence.state, "active");
 });
 
 test("a hung transaction is aborted at the fixed attempt deadline and cannot outlive the wall clock", async () => {

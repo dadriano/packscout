@@ -24,6 +24,7 @@ import {
   reviseProviderSourceInterval,
   revokeSourceConnectionRevision,
   rotateSourceConnectionCredential,
+  upgradeSourceConnectionAdapter,
 } from "../api/provider-sources";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -42,7 +43,7 @@ function errorMessage(error: unknown): string {
   }
   if (error.status === 403) return "Your role cannot change this source configuration.";
   if (error.code === "SOURCE_CONFLICT") {
-    return "This source changed in another session. Reload its current revision before trying again.";
+    return "This command conflicts with current source pins or newer state. Reload before retrying. Adapter changes with dependent sources require a separate current-adapter connection profile and replacement sources.";
   }
   if (error.code === "SOURCE_TEST_REQUIRED") {
     return "A current successful connection and source test is required before activation.";
@@ -312,6 +313,11 @@ export function SourceConfigurationPage() {
           ) : null}
           <SourceConnectionLedger
             connections={catalog.connections}
+            sources={catalog.sources}
+            currentSourceAdapterVersion={
+              catalog.availableSourceTypes[0]?.sourceAdapterVersion ??
+                null
+            }
             canManage={canManage}
             canManageSecrets={canManageSecrets}
             pendingKey={pendingKey}
@@ -340,6 +346,24 @@ export function SourceConfigurationPage() {
                 "Recovery candidate saved. Run the exact recovery test before activation.",
               );
             }}
+            onUpgrade={(connection, targetSourceAdapterVersion) => confirm({
+              tier: "danger",
+              title: `Create ${targetSourceAdapterVersion} candidate?`,
+              description: "The stored credential will be decrypted only in the server, validated by the new adapter, and re-encrypted for a new untested revision. In-place adapter upgrades are blocked while any draft, active, or paused source uses this profile. Create a separate current-adapter profile and replace those sources instead.",
+              confirmLabel: "Create adapter upgrade candidate",
+              action: async () => {
+                await upgradeSourceConnectionAdapter(connection.id, {
+                  expectedRevisionId: connection.latestRevision.id,
+                  expectedSourceAdapterVersion:
+                    connection.latestRevision.sourceAdapterVersion,
+                  targetSourceAdapterVersion,
+                  confirmation: "UPGRADE_ADAPTER",
+                });
+                await reload();
+                setNotice("Adapter upgrade candidate saved. Test it before activation; activation is blocked if any draft, active, or paused source uses this profile with another adapter.");
+              },
+              successMessage: "Adapter upgrade candidate created.",
+            })}
             onCommand={connectionCommand}
           />
           {catalog.providers.length === 0 ? (

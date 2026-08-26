@@ -134,7 +134,9 @@ test("registry rejects duplicates, invalid manifests, and unsupported providers"
 test("pinned runs can resolve two immutable adapter versions for one source type", () => {
   const first = fixtureAdapter("fixture-source-v1", "fixture-adapter-v1");
   const second = fixtureAdapter("fixture-source-v1", "fixture-adapter-v2");
-  const registry = new SourceAdapterRegistry([first, second]);
+  const registry = new SourceAdapterRegistry([second, first], {
+    "fixture-source-v1": "fixture-adapter-v2",
+  });
 
   assert.equal(
     registry.resolve("fixture-source-v1", "fixture-adapter-v1", "courtyard")
@@ -146,7 +148,19 @@ test("pinned runs can resolve two immutable adapter versions for one source type
       .manifest.adapterVersion,
     second.manifest.adapterVersion,
   );
+  assert.equal(
+    registry.resolveCurrentVersion("fixture-source-v1").manifest.adapterVersion,
+    "fixture-adapter-v2",
+  );
   assert.deepEqual(registry.keys(), ["fixture-source-v1"]);
+  assert.throws(
+    () => new SourceAdapterRegistry([first, second], {
+      "fixture-source-v1": "fixture-adapter-v3",
+    }),
+    (error) =>
+      error instanceof SourceAdapterRegistryError &&
+      error.code === "adapter_version_mismatch",
+  );
 });
 
 test("registration snapshots manifest identity against later mutation", () => {

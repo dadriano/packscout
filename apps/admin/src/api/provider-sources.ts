@@ -9,6 +9,7 @@ import type {
   ReplaceProviderSourceRequest,
   ReviseProviderSourceIntervalRequest,
   RotateSourceConnectionCredentialRequest,
+  UpgradeSourceConnectionAdapterRequest,
 } from "@packscout/contracts";
 import { requestJson } from "./client";
 
@@ -40,6 +41,21 @@ export function rotateSourceConnectionCredential(
     method: "POST",
     json: input,
   });
+}
+
+export function upgradeSourceConnectionAdapter(
+  connectionProfileId: string,
+  input: UpgradeSourceConnectionAdapterRequest,
+) {
+  return requestJson<{
+    profileId: string;
+    revisionId: string;
+    sourceAdapterVersion: string;
+    audit: ProviderSourceAdminAuditReceipt;
+  }>(
+    `/provider-sources/connections/${encodeURIComponent(connectionProfileId)}/upgrade-adapter`,
+    { method: "POST", json: input },
+  );
 }
 
 export function requestSourceConnectionTest(

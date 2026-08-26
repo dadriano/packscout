@@ -252,7 +252,10 @@ export function OperationsPage({
 
       {overview ? (
         <>
-          <ConnectionOperationsSummary connection={overview.connection} />
+          <ConnectionOperationsSummary
+            connection={overview.connection}
+            mode={overview.connectionMode}
+          />
           {providerCatalog && overview.sources.length === 0 ? (
             <EmptyState
               title="No stable providers are available"

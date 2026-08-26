@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   dataforrestEventsConnectionConfigurationV1Schema,
   dataforrestOpaqueCursorV1Schema,
   dataforrestEventsSourceConfigurationV1Schema,
@@ -10,6 +8,7 @@ import {
   type LaunchProviderKey,
   type SourceAdapterFailure,
   type SourceAdapterSafeDiagnostic,
+  type SourceAdapterManifestV1,
 } from "@packscout/contracts";
 import {
   HardenedProviderRequestError,
@@ -93,8 +92,8 @@ function operationLostOwnership(): UnboundSourceAdapterRequestResult {
 function recordsScopesMatch(operation: Exclude<
   SourceAdapterOperation,
   Readonly<{ operationKind: "connection_test" }>
->): boolean {
-  const declaration = dataforrestEventsV1SourceAdapterManifest
+>, manifest: SourceAdapterManifestV1): boolean {
+  const declaration = manifest
     .supportedProviders.find(({ provider }) => provider === operation.provider);
   if (declaration === undefined) return false;
   const actual = [...operation.recordIdScopes].sort((left, right) =>
@@ -115,14 +114,15 @@ function recordsScopesMatch(operation: Exclude<
 
 function validateCaptureOperation(
   operation: SourceAdapterOperation,
+  manifest: SourceAdapterManifestV1,
 ): OperationValidation {
   if (
-    operation.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY ||
-    operation.adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+    operation.sourceTypeKey !== manifest.sourceTypeKey ||
+    operation.adapterVersion !== manifest.adapterVersion
   ) {
     return { ok: false, failure: stableFailure("cancelled", "lost_ownership") };
   }
-  const manifestBounds = dataforrestEventsV1SourceAdapterManifest.requestBounds;
+  const manifestBounds = manifest.requestBounds;
   if (
     operation.bounds.maximumResponseBytes >
       manifestBounds.maximumResponseBytes ||
@@ -199,16 +199,16 @@ function validateCaptureOperation(
   const source = dataforrestEventsSourceConfigurationV1Schema.safeParse(
     operation.sourceConfiguration,
   );
-  const declaration = dataforrestEventsV1SourceAdapterManifest
+  const declaration = manifest
     .supportedProviders.find(({ provider }) => provider === operation.provider);
   if (
     !source.success ||
     source.data.platform !== operation.provider ||
     declaration === undefined ||
     operation.normalizedContractVersion !==
-      dataforrestEventsV1SourceAdapterManifest.normalizedContractVersion ||
+      manifest.normalizedContractVersion ||
     operation.identityNamespaceKey !== declaration.identityNamespaceKey ||
-    !recordsScopesMatch(operation)
+    !recordsScopesMatch(operation, manifest)
   ) {
     return {
       ok: false,
@@ -238,7 +238,7 @@ function validateCaptureOperation(
       cursor.sourceTypeKey !== operation.sourceTypeKey ||
       cursor.adapterVersion !== operation.adapterVersion ||
       cursor.cursorCodecKey !==
-        dataforrestEventsV1SourceAdapterManifest.cursorCodecKey ||
+        manifest.cursorCodecKey ||
       cursor.cursorGeneration !==
         operation.correlation.cursorGeneration ||
       (cursor.value !== null &&
@@ -371,13 +371,16 @@ function mapTransportFailure(
 }
 
 export class DataforrestEventsSourceAdapter implements SourceAdapter {
-  readonly manifest = dataforrestEventsV1SourceAdapterManifest;
+  readonly manifest: SourceAdapterManifestV1;
   readonly #requestDependencies: HardenedProviderRequestDependencies;
 
   constructor(
     requestDependencies: HardenedProviderRequestDependencies = {},
+    manifest: SourceAdapterManifestV1 =
+      dataforrestEventsV1SourceAdapterManifest,
   ) {
     this.#requestDependencies = requestDependencies;
+    this.manifest = manifest;
   }
 
   validateConnectionConfiguration(
@@ -438,7 +441,7 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
       }
       throw error;
     }
-    const validation = validateCaptureOperation(operation);
+    const validation = validateCaptureOperation(operation, this.manifest);
     if (!validation.ok) return failedRequest(validation.failure);
     try {
       const capture = await captureHardenedProviderResponse(
@@ -492,6 +495,21 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
     context: ConnectionTestInterpretationContext,
     request: SuccessfulSourceAdapterRequest,
   ): Promise<SourceAdapterInterpretationResult<ConnectionTestValue>> {
+    if (!this.#interpretationContextMatches(context)) {
+      return Promise.resolve({
+        ok: false,
+        failure: stableFailure(
+          "connection_action_required",
+          "profile_configuration_invalid",
+        ),
+        recordCount: 0,
+        diagnostics: [{
+          severity: "critical",
+          phase: "response_interpretation",
+          code: "adapter_pin_mismatch",
+        }],
+      });
+    }
     return interpretDataforrestConnectionTest(context, request);
   }
 
@@ -499,6 +517,21 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
     context: SourceTestInterpretationContext,
     request: SuccessfulSourceAdapterRequest,
   ): Promise<SourceAdapterInterpretationResult<SourceTestValue>> {
+    if (!this.#interpretationContextMatches(context)) {
+      return Promise.resolve({
+        ok: false,
+        failure: stableFailure(
+          "source_action_required",
+          "invalid_source_configuration",
+        ),
+        recordCount: 0,
+        diagnostics: [{
+          severity: "critical",
+          phase: "response_interpretation",
+          code: "adapter_pin_mismatch",
+        }],
+      });
+    }
     return interpretDataforrestSourceTest(context, request);
   }
 
@@ -506,7 +539,31 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
     context: PageReadInterpretationContext,
     request: SuccessfulSourceAdapterRequest,
   ): Promise<SourceAdapterPageInterpretationResult> {
+    if (!this.#interpretationContextMatches(context)) {
+      return Promise.resolve({
+        ok: false,
+        failure: stableFailure(
+          "source_action_required",
+          "invalid_source_configuration",
+        ),
+        diagnostics: [{
+          severity: "critical",
+          phase: "response_interpretation",
+          code: "adapter_pin_mismatch",
+        }],
+      });
+    }
     return interpretDataforrestPage(context, request);
+  }
+
+  #interpretationContextMatches(
+    context:
+      | ConnectionTestInterpretationContext
+      | SourceTestInterpretationContext
+      | PageReadInterpretationContext,
+  ): boolean {
+    return context.sourceTypeKey === this.manifest.sourceTypeKey &&
+      context.adapterVersion === this.manifest.adapterVersion;
   }
 
   cancelRequest(lease: SourceRequestLease): void {

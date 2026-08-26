@@ -223,7 +223,7 @@ const artifact = {
   storageMeasurement: {
     environment: {
       postgresVersionMajor: 16,
-      schemaMigration: "20260821040000_provider_source_page_plan_digest",
+      schemaMigration: "20260825041000_raise_provider_source_raw_response_limit",
     },
     ...storageMeasurement,
   },

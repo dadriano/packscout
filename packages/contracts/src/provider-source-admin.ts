@@ -77,6 +77,7 @@ const providerSourceAdminAuditReceiptBaseSchema = z
       "connection_profile_created",
       "connection_test_requested",
       "connection_revision_activated",
+      "connection_adapter_upgrade_revision_created",
       "connection_credential_rotated",
       "connection_revision_revoked",
       "connection_recovery_revision_created",
@@ -166,6 +167,7 @@ export const sourceConnectionProfileAdminSummarySchema = z
     state: z.enum(["draft", "active", "disabled"]),
     requestLimit: z.literal(2),
     activeRevisionId: uuidSchema.nullable(),
+    activeRevision: sourceConnectionRevisionAdminSummarySchema.nullable(),
     recoveryFence: z
       .object({
         blockedRevisionId: uuidSchema,
@@ -219,6 +221,7 @@ export const providerSourceAdminCatalogSchema = z
         z
           .object({
             sourceTypeKey: productionProviderSourceTypeKeySchema,
+            sourceAdapterVersion: registrationKeySchema,
             label: z.string().min(1).max(120),
           })
           .strict(),
@@ -262,6 +265,15 @@ export const rotateSourceConnectionCredentialRequestSchema = z
   .object({
     expectedRevisionId: uuidSchema,
     bearerCredential: bearerCredentialSchema,
+  })
+  .strict();
+
+export const upgradeSourceConnectionAdapterRequestSchema = z
+  .object({
+    expectedRevisionId: uuidSchema,
+    expectedSourceAdapterVersion: registrationKeySchema,
+    targetSourceAdapterVersion: registrationKeySchema,
+    confirmation: z.literal("UPGRADE_ADAPTER"),
   })
   .strict();
 
@@ -374,6 +386,9 @@ export type CreateSourceConnectionProfileRequest = z.input<
 >;
 export type RotateSourceConnectionCredentialRequest = z.input<
   typeof rotateSourceConnectionCredentialRequestSchema
+>;
+export type UpgradeSourceConnectionAdapterRequest = z.input<
+  typeof upgradeSourceConnectionAdapterRequestSchema
 >;
 export type CreateSourceConnectionRecoveryRevisionRequest = z.input<
   typeof createSourceConnectionRecoveryRevisionRequestSchema

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ControlPlaneTransactionError } from "./control-plane-retry.ts";
+import {
+  ControlPlaneTransactionError,
+  RuntimeLocallyFencedError,
+} from "./control-plane-retry.ts";
 import {
   ProviderSourceSupervisor,
   type SourceSupervisorCapacityAdmissionHook,
@@ -32,6 +35,7 @@ const epoch: SourceSupervisorEpoch = {
 
 class FixtureOwnership implements SourceSupervisorOwnershipPort {
   readonly calls: string[] = [];
+  readonly fenceReasons: string[] = [];
 
   async acquire(): Promise<SourceSupervisorEpoch> {
     this.calls.push("acquire");
@@ -43,8 +47,9 @@ class FixtureOwnership implements SourceSupervisorOwnershipPort {
     return epoch.leaseExpiresAt;
   }
 
-  async fence(): Promise<void> {
+  async fence(_epoch: SourceSupervisorEpoch, safeReasonCode: string): Promise<void> {
     this.calls.push("fence");
+    this.fenceReasons.push(safeReasonCode);
   }
 
   async release(): Promise<void> {
@@ -57,6 +62,30 @@ class FixtureOwnership implements SourceSupervisorOwnershipPort {
   }
 
   async reconcilePredecessorAttempt(): Promise<void> {}
+}
+
+class ContendedRenewalOwnership extends FixtureOwnership {
+  renewalCalls = 0;
+
+  override async renew(): Promise<Date> {
+    this.calls.push("renew");
+    this.renewalCalls += 1;
+    if (this.renewalCalls <= 3) {
+      throw new ControlPlaneTransactionError("timeout");
+    }
+    return epoch.leaseExpiresAt;
+  }
+}
+
+class IndeterminateRenewalOwnership extends FixtureOwnership {
+  renewalCalls = 0;
+
+  override async renew(): Promise<Date> {
+    this.calls.push("renew");
+    this.renewalCalls += 1;
+    if (this.renewalCalls === 1) throw new Error("indeterminate renewal failure");
+    return epoch.leaseExpiresAt;
+  }
 }
 
 class GatedAcquireOwnership extends FixtureOwnership {
@@ -263,6 +292,18 @@ class LostRenewalQueue extends FixtureQueue {
   }
 }
 
+class ContendedRenewalQueue extends FixtureQueue {
+  renewalCalls = 0;
+
+  override async renewClaim(): Promise<Date | null> {
+    this.renewalCalls += 1;
+    if (this.renewalCalls <= 3) {
+      throw new ControlPlaneTransactionError("timeout");
+    }
+    return epoch.leaseExpiresAt;
+  }
+}
+
 class GatedClaimQueue extends FixtureQueue {
   readonly entered: Promise<void>;
   #signalEntered: (() => void) | null = null;
@@ -321,6 +362,29 @@ class RecoveryUnitQueue extends FixtureQueue {
   }
 }
 
+class LateRecoveryUnitQueue extends FixtureQueue {
+  readonly recovered: SourceSupervisorRecoverableClaim[] = [];
+  #claim: SourceSupervisorRecoverableClaim | null = null;
+
+  makeRecoverable(): void {
+    this.#claim = { kind: "page_read", id: "late-expired-run" };
+  }
+
+  override async listRecoverableClaims(): Promise<
+    readonly SourceSupervisorRecoverableClaim[]
+  > {
+    return this.#claim ? [this.#claim] : [];
+  }
+
+  override async recoverClaim(
+    _epoch: SourceSupervisorEpoch,
+    claim: SourceSupervisorRecoverableClaim,
+  ): Promise<void> {
+    this.recovered.push(claim);
+    this.#claim = null;
+  }
+}
+
 function fixtureWork(
   id: string,
   profile: "slow-profile" | "independent-profile",
@@ -353,6 +417,7 @@ function fixturePageWork(id: string, queuedOffset: number): FixtureWork {
 
 class MeteredExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
   readonly starts: string[] = [];
+  readonly abortReasons: string[] = [];
   readonly maximumByProfile = new Map<string, number>();
   readonly #inFlight = new Map<string, number>();
 
@@ -420,7 +485,9 @@ class MeteredExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
     return { kind: "test_terminal" };
   }
 
-  abortAll(): void {}
+  abortAll(reason: "capacity" | "claim_lost" | "ownership_lost" | "shutdown"): void {
+    this.abortReasons.push(reason);
+  }
 }
 
 const capacity: SourceSupervisorCapacityAdmissionHook<FixtureWork> = {
@@ -452,6 +519,43 @@ class StopFailingSnapshot implements SourceSupervisorSnapshotPort {
   }
 }
 
+class GatedRenewalSnapshot implements SourceSupervisorSnapshotPort {
+  calls = 0;
+  readonly #gate: Promise<void>;
+  #releaseGate: (() => void) | null = null;
+
+  constructor() {
+    this.#gate = new Promise((resolve) => {
+      this.#releaseGate = resolve;
+    });
+  }
+
+  async publish(): Promise<void> {
+    this.calls += 1;
+    if (this.calls > 1) await this.#gate;
+  }
+
+  release(): void {
+    this.#releaseGate?.();
+    this.#releaseGate = null;
+  }
+}
+
+class ContendedSnapshot implements SourceSupervisorSnapshotPort {
+  calls = 0;
+
+  async publish(): Promise<void> {
+    this.calls += 1;
+    throw new ControlPlaneTransactionError("timeout");
+  }
+}
+
+class StaleSnapshot implements SourceSupervisorSnapshotPort {
+  async publish(): Promise<void> {
+    throw new ControlPlaneTransactionError("lost_ownership");
+  }
+}
+
 const diagnostics: SourceSupervisorDiagnosticPort<FixtureWork> = {
   async record() {},
 };
@@ -479,6 +583,172 @@ test("startup retries each expired claim as one control-plane unit", async () =>
     "recover:page_read:expired-run",
     "list",
   ]);
+  await supervisor.stop();
+});
+
+test("a claim expiring after takeover is recovered by a later poll", async () => {
+  const queue = new LateRecoveryUnitQueue([]);
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership: new FixtureOwnership(),
+    queue,
+    executor: new MeteredExecutor(),
+    capacity,
+    snapshot,
+    diagnostics,
+    classifyControlPlaneFailure: () => "invariant",
+    ids: { id: () => "unused-continuation-id" },
+  });
+
+  await supervisor.initialize();
+  queue.makeRecoverable();
+  await supervisor.runCycle();
+
+  assert.deepEqual(queue.recovered, [
+    { kind: "page_read", id: "late-expired-run" },
+  ]);
+  await supervisor.stop();
+});
+
+test("ownership renewals continue while snapshot publication is delayed", async () => {
+  const ownership = new FixtureOwnership();
+  const renewalSnapshot = new GatedRenewalSnapshot();
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue: new FixtureQueue([]),
+    executor: new MeteredExecutor(),
+    capacity,
+    snapshot: renewalSnapshot,
+    diagnostics,
+    classifyControlPlaneFailure: () => "invariant",
+    ids: { id: () => "unused-continuation-id" },
+    ownershipRenewalIntervalMilliseconds: 1,
+  });
+
+  await supervisor.initialize();
+  while (ownership.calls.filter((call) => call === "renew").length < 2) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.equal(renewalSnapshot.calls, 2);
+  renewalSnapshot.release();
+  await supervisor.stop();
+  assert.equal(ownership.calls.at(-1), "release");
+});
+
+test("transient ownership-renewal contention retries on the next heartbeat", async () => {
+  const ownership = new ContendedRenewalOwnership();
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue: new FixtureQueue([]),
+    executor: new MeteredExecutor(),
+    capacity,
+    snapshot,
+    diagnostics,
+    classifyControlPlaneFailure: (error) =>
+      error instanceof ControlPlaneTransactionError ? error.code : "invariant",
+    ids: { id: () => "unused-continuation-id" },
+    sleep: async () => undefined,
+    ownershipRenewalIntervalMilliseconds: 5,
+  });
+
+  await supervisor.initialize();
+  while (ownership.renewalCalls < 4) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.equal(ownership.calls.includes("fence"), false);
+  await supervisor.stop();
+});
+
+test("an indeterminate renewal failure waits for durable ownership proof", async () => {
+  const ownership = new IndeterminateRenewalOwnership();
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue: new FixtureQueue([]),
+    executor: new MeteredExecutor(),
+    capacity,
+    snapshot,
+    diagnostics,
+    classifyControlPlaneFailure: () => "invariant",
+    ids: { id: () => "unused-continuation-id" },
+    ownershipRenewalIntervalMilliseconds: 5,
+  });
+
+  await supervisor.initialize();
+  while (ownership.renewalCalls < 2) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.equal(ownership.calls.includes("fence"), false);
+  await supervisor.stop();
+});
+
+test("snapshot contention preserves ownership and retries on a later publication", async () => {
+  const ownership = new FixtureOwnership();
+  const contendedSnapshot = new ContendedSnapshot();
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue: new FixtureQueue([]),
+    executor: new MeteredExecutor(),
+    capacity,
+    snapshot: contendedSnapshot,
+    diagnostics,
+    classifyControlPlaneFailure: (error) =>
+      error instanceof ControlPlaneTransactionError ? error.code : "invariant",
+    ids: { id: () => "unused-continuation-id" },
+    sleep: async () => undefined,
+  });
+
+  await supervisor.initialize();
+
+  assert.equal(supervisor.state, "active");
+  assert.equal(contendedSnapshot.calls, 3);
+  assert.ok(!ownership.calls.includes("fence"));
+  await supervisor.stop();
+  assert.equal(ownership.calls.at(-1), "release");
+});
+
+test("a snapshot that proves ownership loss fences the owner immediately", async () => {
+  const ownership = new FixtureOwnership();
+  const executor = new MeteredExecutor();
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue: new FixtureQueue([]),
+    executor,
+    capacity,
+    snapshot: new StaleSnapshot(),
+    diagnostics,
+    classifyControlPlaneFailure: (error) =>
+      error instanceof ControlPlaneTransactionError ? error.code : "invariant",
+    ids: { id: () => "unused-continuation-id" },
+  });
+
+  await assert.rejects(
+    supervisor.initialize(),
+    (error: unknown) => error instanceof RuntimeLocallyFencedError,
+  );
+
+  assert.equal(supervisor.state, "fenced_draining");
+  assert.deepEqual(ownership.fenceReasons, ["SNAPSHOT_PUBLISH_FAILED"]);
+  assert.deepEqual(executor.abortReasons, ["ownership_lost"]);
   await supervisor.stop();
 });
 
@@ -705,9 +975,12 @@ test("a blocked volume cools down page claims while connection tests continue", 
 test("a durable claim-loss event is mirrored before the owner fences", async () => {
   const order: string[] = [];
   const ownership = new class extends FixtureOwnership {
-    override async fence(): Promise<void> {
+    override async fence(
+      fenceEpoch: SourceSupervisorEpoch,
+      safeReasonCode: string,
+    ): Promise<void> {
       order.push("fence");
-      await super.fence();
+      await super.fence(fenceEpoch, safeReasonCode);
     }
   }();
   const supervisor = new ProviderSourceSupervisor({
@@ -739,6 +1012,40 @@ test("a durable claim-loss event is mirrored before the owner fences", async () 
   assert.deepEqual(order, ["lease_lost", "fence"]);
   assert.equal(supervisor.state, "fenced_draining");
   await supervisor.stop();
+});
+
+test("transient claim-renewal contention retries without fencing the owner", async () => {
+  const ownership = new FixtureOwnership();
+  const queue = new ContendedRenewalQueue([
+    fixtureWork("contended-renewal", "slow-profile", 1),
+  ]);
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue,
+    executor: new MeteredExecutor(30),
+    capacity,
+    snapshot,
+    diagnostics,
+    classifyControlPlaneFailure: (error) =>
+      error instanceof ControlPlaneTransactionError ? error.code : "invariant",
+    ids: { id: () => "contended-renewal-command" },
+    sleep: async () => undefined,
+    claimRenewalIntervalMilliseconds: 1,
+  });
+
+  await supervisor.initialize();
+  await supervisor.runCycle();
+  while (queue.completed.length < 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.ok(queue.renewalCalls >= 4);
+  assert.ok(!ownership.calls.includes("fence"));
+  await supervisor.stop();
+  assert.equal(ownership.calls.at(-1), "release");
 });
 
 test("stop joins an in-progress acquire and releases without starting work", async () => {
@@ -814,7 +1121,7 @@ test("stop joins a committed claim and releases it before owner release", async 
   assert.equal(ownership.calls.at(-1), "release");
 });
 
-test("a failing final snapshot selects exactly one fenced release path", async () => {
+test("a contended final snapshot preserves the clean owner release path", async () => {
   const ownership = new FixtureOwnership();
   const stopSnapshot = new StopFailingSnapshot();
   const supervisor = new ProviderSourceSupervisor({
@@ -836,7 +1143,7 @@ test("a failing final snapshot selects exactly one fenced release path", async (
   await supervisor.initialize();
   await supervisor.stop();
 
-  assert.equal(ownership.calls.filter((call) => call === "fence").length, 1);
+  assert.equal(ownership.calls.filter((call) => call === "fence").length, 0);
   assert.equal(ownership.calls.filter((call) => call === "release").length, 1);
   assert.equal(ownership.calls.at(-1), "release");
 });
