@@ -11,6 +11,7 @@ import {
   inspectSchema,
   loadSchemaParityManifest,
 } from "./schema-parity.ts";
+import { endPoolFully } from "./postgres-test-support.ts";
 
 const execFileAsync = promisify(execFile);
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
@@ -30,31 +31,6 @@ const ids = {
   duplicateActiveRun: "00000000-0000-4000-8000-000000000031",
   secret: "00000000-0000-4000-8000-000000000040",
 } as const;
-
-async function endPoolFully(pool: Pool): Promise<void> {
-  const expectedRemovals = pool.totalCount;
-  if (expectedRemovals === 0) {
-    await pool.end();
-    return;
-  }
-
-  let removalCount = 0;
-  let resolveRemovals: (() => void) | undefined;
-  const removals = new Promise<void>((resolve) => {
-    resolveRemovals = resolve;
-  });
-  const onRemove = () => {
-    removalCount += 1;
-    if (removalCount === expectedRemovals) resolveRemovals?.();
-  };
-  pool.on("remove", onRemove);
-  try {
-    await pool.end();
-    await removals;
-  } finally {
-    pool.off("remove", onRemove);
-  }
-}
 
 async function createDisposableDatabase(): Promise<{
   db: Pool;
