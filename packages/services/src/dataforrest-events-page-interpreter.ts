@@ -54,9 +54,10 @@ const maximumJsonNestingDepth = 64;
 // Data-rich catalog records can contain hundreds of bounded native facts, so
 // a full 250-record page needs a higher aggregate traversal allowance while
 // the independent depth, object-key, and array-item limits remain enforced.
-// The cap is above the reviewed 250 x 600 native-fact page while keeping the
-// heaviest accepted object graph inside the unchanged single-page memory gate.
-const maximumJsonNodeCount = 160_000;
+// The cap is above both the observed 183,215-node Phygitals page and the
+// reviewed 250 x 785 native-fact page while keeping the heaviest accepted
+// object graph inside the unchanged single-page memory gate.
+const maximumJsonNodeCount = 200_000;
 const maximumJsonObjectKeys = 256;
 const maximumJsonArrayItems = 5_000;
 const jsonParserInputChunkBytes = 64 * 1024;

@@ -233,8 +233,8 @@ test("fresh authentic 100-page import planning stays within measured memory limi
     memory.responseBytesPerPage,
     dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes,
   );
-  assert.equal(memory.jsonNodesPerPage, 153_254);
-  assert.equal(memory.emptyObjectFactsPerRecord, 600);
+  assert.equal(memory.jsonNodesPerPage, 199_504);
+  assert.equal(memory.emptyObjectFactsPerRecord, 785);
   assert.equal(
     memory.totalRecordsProcessed,
     memory.pageCount * memory.recordsPerPage,
