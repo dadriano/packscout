@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   PROVIDER_SOURCE_SUPERVISOR_SNAPSHOT_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
   providerSourceAdminCatalogSchema,
   providerSourceSupervisorSnapshotSchema,
   type LaunchProviderKey,
@@ -236,10 +239,16 @@ function runtime(historyState: "current" | "expired" = "current") {
     environmentKey: "local",
     catalog: { async read() { return catalog; } },
     snapshot: { async read() { return snapshot; } },
-    sourceTypes: [{
-      label: "Registered event source",
-      manifest: dataforrestEventsV1SourceAdapterManifest,
-    }],
+    sourceTypes: [
+      {
+        label: "Current event source",
+        manifest: dataforrestEventsV2SourceAdapterManifest,
+      },
+      {
+        label: "Registered event source",
+        manifest: dataforrestEventsV1SourceAdapterManifest,
+      },
+    ],
     repository: {
       async readOverview() {
         return {
@@ -321,6 +330,14 @@ test("source operations compose the registered four rows with durable supervisor
   assert.equal(overview.sources.length, 4);
   assert.deepEqual(overview.sources.map(({ provider }) => provider), providers);
   assert.equal(overview.connection?.capacity.executionSlots.used, 2);
+  assert.equal(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+  assert.notEqual(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
   assert.equal(overview.connection?.capacity.requestPermits.waiting, 1);
   assert.equal(overview.connection?.health.state, "blocked");
   const courtyard = overview.sources[0]!;

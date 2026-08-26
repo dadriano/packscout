@@ -239,9 +239,11 @@ function elapsedMilliseconds(run: RunRecord | null, databaseTime: Date): number 
 function sourceTypeSummary(
   dependencies: ProviderSourceOperationsServiceDependencies,
   sourceTypeKey: string,
+  sourceAdapterVersion: string,
 ) {
   const registration = dependencies.sourceTypes.find(
-    ({ manifest }) => manifest.sourceTypeKey === sourceTypeKey,
+    ({ manifest }) => manifest.sourceTypeKey === sourceTypeKey &&
+      manifest.adapterVersion === sourceAdapterVersion,
   );
   if (!registration) {
     throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
@@ -287,6 +289,7 @@ function connectionSummary(input: Readonly<{
     sourceType: sourceTypeSummary(
       input.dependencies,
       connection.sourceTypeKey,
+      connection.latestRevision.sourceAdapterVersion,
     ),
     state: connection.state,
     endpointHost: connection.latestRevision.endpointHost,
