@@ -5,6 +5,7 @@ import express, { type Express } from "express";
 import { AuthServiceError, type AuthenticatedActor } from "@packscout/services";
 import { createSessionCookiePolicy } from "../auth/cookies.ts";
 import { createSameOriginGuard } from "../auth/request-protection.ts";
+import type { OperatorAccountCreatedNotifier } from "../operator-account-created-notice.ts";
 import {
   createOperatorsRouter,
   type OperatorInvitationFlow,
@@ -72,18 +73,27 @@ interface InvitationOverrides {
   absent?: boolean;
 }
 
+interface AccountCreatedNotificationOverrides {
+  notifier?: OperatorAccountCreatedNotifier;
+  /** Omitted entirely, as a defensive unconfigured composition. */
+  absent?: boolean;
+}
+
 function createHarness(
   overrides: Partial<OperatorsRouterDependencies["service"]> = {},
   invitationOverrides: InvitationOverrides = {},
+  notificationOverrides: AccountCreatedNotificationOverrides = {},
 ) {
   const calls = {
     provision: 0,
+    directProvision: 0,
     update: 0,
     issue: 0,
     revoke: 0,
     cancel: 0,
     reissueAudits: [] as Array<{ operatorId: string; outcome: string }>,
     issuedFor: [] as Array<{ operatorId: string; invitedByDisplayName: string }>,
+    notifiedFor: [] as Array<{ operatorId: string; toEmail: string }>,
   };
   const flow: OperatorInvitationFlow = {
     async issueInvitation(input) {
@@ -148,6 +158,18 @@ function createHarness(
       calls.provision += 1;
       return { operator: invited };
     },
+    async provisionOperator(_actor, input) {
+      calls.directProvision += 1;
+      return {
+        operator: {
+          ...operator,
+          email: input.email,
+          displayName: input.displayName,
+          role: input.role,
+          state: "active",
+        },
+      };
+    },
     async updateOperator() {
       calls.update += 1;
       return { operator };
@@ -168,6 +190,13 @@ function createHarness(
     },
     ...overrides,
   };
+  const accountCreatedNotifier: OperatorAccountCreatedNotifier =
+    notificationOverrides.notifier ?? {
+      async notifyOperatorAccountCreated(input) {
+        calls.notifiedFor.push(input);
+        return { status: "enqueued", deduplicated: false };
+      },
+    };
   const cookiePolicy = createSessionCookiePolicy({
     production: false,
     maxAgeMs: 12 * 60 * 60 * 1_000,
@@ -181,6 +210,7 @@ function createHarness(
       cookiePolicy,
       sameOrigin: createSameOriginGuard([origin]),
       ...(invitationOverrides.absent ? {} : { invitations: { flow } }),
+      ...(notificationOverrides.absent ? {} : { accountCreatedNotifier }),
     }),
   );
   return { app, calls, cookiePolicy };
@@ -284,6 +314,169 @@ test("inviting an operator enforces admin, Origin, CSRF, and password-free input
   assert.equal(calls.provision, 1);
   assert.equal(calls.issue, 1);
   assert.equal(calls.issuedFor[0]?.invitedByDisplayName, "Primary Admin");
+});
+
+test("direct provisioning enforces admin, Origin, CSRF, and its strict password contract", async () => {
+  const { app, calls, cookiePolicy } = createHarness();
+  const validBody = {
+    email: "direct@packscout.test",
+    displayName: "Direct Operator",
+    password: "an initial secure password",
+    role: "data_operator",
+  };
+  await withServer(app, async (baseUrl) => {
+    const anonymous = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: origin,
+        "X-CSRF-Token": "csrf-token",
+      },
+      body: JSON.stringify(validBody),
+    });
+    assert.equal(anonymous.status, 401);
+    assert.equal((await anonymous.json()).code, "AUTH_REQUIRED");
+
+    const restricted = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy, "data-session"),
+      body: JSON.stringify(validBody),
+    });
+    assert.equal(restricted.status, 403);
+
+    const crossOrigin = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: {
+        ...mutationHeaders(cookiePolicy, "admin-session"),
+        Origin: "https://attacker.test",
+      },
+      body: JSON.stringify(validBody),
+    });
+    assert.equal(crossOrigin.status, 403);
+
+    const missingCsrf = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: origin,
+        Cookie: `${cookiePolicy.name}=admin-session`,
+      },
+      body: JSON.stringify(validBody),
+    });
+    assert.equal(missingCsrf.status, 403);
+
+    const invalidCsrf = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: {
+        ...mutationHeaders(cookiePolicy, "admin-session"),
+        "X-CSRF-Token": "wrong-token",
+      },
+      body: JSON.stringify(validBody),
+    });
+    assert.equal(invalidCsrf.status, 403);
+
+    const weakPassword = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy, "admin-session"),
+      body: JSON.stringify({ ...validBody, password: "too short" }),
+    });
+    assert.equal(weakPassword.status, 422);
+    assert.equal((await weakPassword.json()).code, "VALIDATION_FAILED");
+
+    const unknownField = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy, "admin-session"),
+      body: JSON.stringify({ ...validBody, state: "active" }),
+    });
+    assert.equal(unknownField.status, 422);
+
+    const authorized = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: mutationHeaders(cookiePolicy, "admin-session"),
+      body: JSON.stringify(validBody),
+    });
+    assert.equal(authorized.status, 201);
+    const body = await authorized.json();
+    assert.equal(body.operator.state, "active");
+    assert.deepEqual(body.notification, {
+      status: "enqueued",
+      deduplicated: false,
+    });
+    assert.doesNotMatch(
+      JSON.stringify(body),
+      /initial secure password|passwordHash|"password"/i,
+    );
+  });
+  assert.equal(calls.directProvision, 1);
+  assert.deepEqual(calls.notifiedFor, [
+    { operatorId, toEmail: "direct@packscout.test" },
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(calls.notifiedFor),
+    /initial secure password|passwordHash|"password"/i,
+  );
+});
+
+test("a committed direct account stays a 201 when its email cannot be queued", async () => {
+  const createWithNotifier = (
+    notifier: OperatorAccountCreatedNotifier,
+  ) => createHarness({}, {}, { notifier });
+  const validBody = {
+    email: "direct@packscout.test",
+    displayName: "Direct Operator",
+    password: "an initial secure password",
+    role: "data_operator",
+  };
+
+  const failed = createWithNotifier({
+    async notifyOperatorAccountCreated() {
+      return {
+        status: "failed",
+        reason: "EMAIL_OUTBOX_SOURCE_BACKLOG_EXCEEDED",
+      };
+    },
+  });
+  await withServer(failed.app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: mutationHeaders(failed.cookiePolicy, "admin-session"),
+      body: JSON.stringify(validBody),
+    });
+    assert.equal(response.status, 201);
+    assert.deepEqual(await response.json(), {
+      operator: {
+        ...operator,
+        email: validBody.email,
+        displayName: validBody.displayName,
+        state: "active",
+      },
+      notification: {
+        status: "failed",
+        reason: "EMAIL_OUTBOX_SOURCE_BACKLOG_EXCEEDED",
+      },
+    });
+  });
+
+  const throwing = createWithNotifier({
+    async notifyOperatorAccountCreated() {
+      throw new Error(`outbox failed while holding ${validBody.password}`);
+    },
+  });
+  await withServer(throwing.app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/operators/direct`, {
+      method: "POST",
+      headers: mutationHeaders(throwing.cookiePolicy, "admin-session"),
+      body: JSON.stringify(validBody),
+    });
+    assert.equal(response.status, 201);
+    const body = await response.json();
+    assert.equal(body.operator.state, "active");
+    assert.deepEqual(body.notification, {
+      status: "failed",
+      reason: "EMAIL_OUTBOX_UNAVAILABLE",
+    });
+    assert.doesNotMatch(JSON.stringify(body), /initial secure password/i);
+  });
 });
 
 test("an invitation that cannot be mailed leaves no usable half-provisioned account", async () => {

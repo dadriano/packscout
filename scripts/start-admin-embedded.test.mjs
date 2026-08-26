@@ -32,6 +32,8 @@ async function reservePorts() {
 }
 
 const email = "local-admin@example.com";
+const directEmail = "local-direct-operator@example.com";
+const directPassword = "local-direct-password-123";
 
 function startEmbedded(adminPort, hmrPort) {
   return spawn(
@@ -158,7 +160,7 @@ test("embedded admin closes HTTP, Vite, and Prisma resources on SIGTERM", async 
  * documented bounded "not connected" state rather than an unmounted endpoint,
  * which reads as "this user is not in the directory" and is simply untrue.
  */
-test("embedded admin mounts the product-user routes and degrades to not connected", async () => {
+test("embedded admin mounts preview integrations and exercises direct operator creation", async () => {
   const [adminPort, hmrPort] = await reservePorts();
   const child = startEmbedded(adminPort, hmrPort);
   const readOutput = captureOutput(child);
@@ -192,10 +194,67 @@ test("embedded admin mounts the product-user routes and degrades to not connecte
       assert.doesNotMatch(JSON.stringify(payload), /Bearer|token|convex/i);
     }
 
+    const created = await fetch(`${origin}/api/operators/direct`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        email: directEmail,
+        displayName: "Local Direct Operator",
+        password: directPassword,
+        role: "data_operator",
+      }),
+    });
+    assert.equal(created.status, 201);
+    const createdPayload = await created.json();
+    assert.equal(createdPayload.operator.state, "active");
+    assert.deepEqual(createdPayload.notification, {
+      status: "enqueued",
+      deduplicated: false,
+    });
+    assert.doesNotMatch(
+      JSON.stringify(createdPayload),
+      /local-direct-password|passwordHash|"password"/i,
+    );
+
+    // The local preview mounts the real queue read model, so browser evidence
+    // can prove the account-created intent exists without running a worker or
+    // contacting an email provider.
+    const messages = await fetch(`${origin}/api/messages/list`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ kind: "operator_account_created" }),
+    });
+    assert.equal(messages.status, 200);
+    const messagePayload = await messages.json();
+    assert.equal(messagePayload.items.length, 1);
+    assert.equal(messagePayload.items[0].kind, "operator_account_created");
+    assert.equal(messagePayload.items[0].recipient, directEmail);
+    assert.equal(messagePayload.items[0].state, "pending");
+    assert.doesNotMatch(
+      JSON.stringify(messagePayload),
+      /local-direct-password|passwordHash|"password"/i,
+    );
+
+    // The same embedded database and Argon2id path prove the directly created
+    // account is usable immediately.
+    const directLogin = await fetch(`${origin}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ email: directEmail, password: directPassword }),
+    });
+    assert.equal(directLogin.status, 200);
+    const directSession = await directLogin.json();
+    assert.equal(directSession.operator.email, directEmail);
+    assert.equal(directSession.operator.state, "active");
+    assert.equal(directSession.membership.role, "data_operator");
+
     const exitPromise = waitForExit(child);
     assert.equal(child.kill("SIGTERM"), true);
     assert.deepEqual(await exitPromise, { code: 0, signal: null });
-    assert.doesNotMatch(readOutput(), new RegExp(`${sessionSecret}|${password}`));
+    assert.doesNotMatch(
+      readOutput(),
+      new RegExp(`${sessionSecret}|${password}|${directPassword}`),
+    );
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
   }

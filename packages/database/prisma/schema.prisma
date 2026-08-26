@@ -113,6 +113,7 @@ model canonical_entities {
   @@unique([id, organization_id], map: "canonical_entities_id_organization_unique")
   @@unique([organization_id, platform_key, record_kind, external_id], map: "canonical_entities_stable_identity_unique")
   @@index([current_revision_id], map: "canonical_entities_current_revision_idx")
+  @@index([organization_id, platform_key, record_kind, updated_at(sort: Desc)], map: "canonical_entities_inspection_recency_idx")
 }
 
 model canonical_relationships {

@@ -9,7 +9,10 @@ import * as React from "react";
 import { AdminLayout } from "./layouts/AdminLayout";
 import { BackgroundWorkPage } from "./pages/BackgroundWorkPage";
 import { BetaAllowlistPage } from "./pages/BetaAllowlistPage";
+import { CanonicalDataPage } from "./pages/CanonicalDataPage";
+import { DataComparePage } from "./pages/DataComparePage";
 import { LoginPage } from "./pages/LoginPage";
+import { PublishedDataPage } from "./pages/PublishedDataPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OperatorsPage } from "./pages/OperatorsPage";
 import { OverviewPage } from "./pages/OverviewPage";
@@ -126,6 +129,9 @@ export const appRoutes = (
         {/* An opaque queue UUID, never a recipient address: this path is
             written into history, access logs, and the sign-in returnTo. */}
         <Route path="messages/:intentId" element={<MessageDetailPage />} />
+        <Route path="data/canonical" element={<CanonicalDataPage />} />
+        <Route path="data/published" element={<PublishedDataPage />} />
+        <Route path="data/compare" element={<DataComparePage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>

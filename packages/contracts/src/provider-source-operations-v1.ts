@@ -211,12 +211,28 @@ export const providerSourceOperationsSourceSchema = z.object({
   }).strict(),
 }).strict();
 
+export const providerSourceOperationsConnectionModeSchema = z.enum([
+  "none",
+  "shared",
+  "split",
+]);
+
 export const providerSourceOperationsOverviewSchema = z.object({
   version: z.literal(PROVIDER_SOURCE_OPERATIONS_VERSION),
   refreshedAt: timestampSchema,
+  connectionMode: providerSourceOperationsConnectionModeSchema,
   connection: providerSourceOperationsConnectionSchema.nullable(),
   sources: z.array(providerSourceOperationsSourceSchema).length(4),
-}).strict();
+}).strict().superRefine((overview, context) => {
+  const requiresConnection = overview.connectionMode === "shared";
+  if (requiresConnection !== (overview.connection !== null)) {
+    context.addIssue({
+      code: "custom",
+      message: "Shared overviews require exactly one representative connection",
+      path: ["connection"],
+    });
+  }
+});
 
 const pageProgressSchema = z.object({
   runId: uuidSchema,
@@ -296,6 +312,9 @@ export type ProviderSourceOperationsOverview = z.infer<
 >;
 export type ProviderSourceOperationsConnection = z.infer<
   typeof providerSourceOperationsConnectionSchema
+>;
+export type ProviderSourceOperationsConnectionMode = z.infer<
+  typeof providerSourceOperationsConnectionModeSchema
 >;
 export type ProviderSourceOperationsSource = z.infer<
   typeof providerSourceOperationsSourceSchema

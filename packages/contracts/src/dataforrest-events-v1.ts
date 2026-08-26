@@ -508,7 +508,6 @@ export function normalizeDataforrestEventRecordV3(
     relationships,
   });
 }
-
 export function dataforrestContinuation(
   page: DataforrestEventsPageV1,
 ): NormalizedContinuation {

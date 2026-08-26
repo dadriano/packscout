@@ -121,7 +121,8 @@ export function QuarantinePage() {
   const filterCount = useMemo(() => [searchParams.get("providerId"), searchParams.get("runId"), searchParams.get("state"), searchParams.get("recordKind"), searchParams.get("reasonCode")].filter(Boolean).length, [searchParams]);
   return (
     <div className="admin-page">
-      <PageHeader eyebrow="Data pipeline / Recovery" title="Quarantine" description="Review bounded record diagnostics and retry retained records independently from provider cursor progress." actions={canRetry && selected.size > 0 ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retrySelected()}>Retry selected ({selected.size})</button> : undefined} />
+      <PageHeader eyebrow="Data pipeline / Recovery" title="Quarantine" description="Records that failed validation during an import. Review why, then retry the ones worth keeping." actions={canRetry && selected.size > 0 ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retrySelected()}>Retry selected ({selected.size})</button> : undefined} />
+
       <aside className="ops-independence-note"><strong>Retries do not rewind imports.</strong><p>The original run keeps its immutable outcome. A resolved record updates current quality separately.</p></aside>
       {!canRetry ? <aside className="source-operator-boundary"><strong>Read-only quarantine evidence</strong><p>Your role can inspect retained safe evidence but cannot retry records.</p></aside> : null}
       <form className="ops-filters ops-filters--quarantine" aria-label="Filter quarantine" onSubmit={applyFilters}>

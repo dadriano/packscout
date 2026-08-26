@@ -40,4 +40,6 @@ export * from "./email-delivery.ts";
 export * from "./email-outbox.ts";
 export * from "./email-links.ts";
 export * from "./beta-allowlist.ts";
+export * from "./data-inspection.ts";
+export * from "./data-inspection-canonical.ts";
 export * from "./message-delivery.ts";

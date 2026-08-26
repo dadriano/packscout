@@ -7,6 +7,7 @@ import type {
 import { AdminApiError } from "../api/client";
 import {
   cancelOperatorInvitation,
+  createOperatorWithPassword,
   inviteOperator,
   listOperators,
   reissueOperatorInvitation,
@@ -34,6 +35,15 @@ interface ActiveDialog {
 function errorMessage(error: unknown): string {
   if (error instanceof AdminApiError) return error.message;
   return "PackScout Admin is temporarily unavailable. Your account has not been changed.";
+}
+
+function isAmbiguousDirectCreationFailure(error: unknown): boolean {
+  return !(
+    error instanceof AdminApiError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.code !== "INVALID_RESPONSE"
+  );
 }
 
 function roleName(role: OperatorRole): string {
@@ -105,6 +115,26 @@ export function OperatorsPage() {
         showToast(
           `Invitation sent to ${result.operator.email}. They choose their own password.`,
         );
+      } else if (submission.mode === "create") {
+        const result = await createOperatorWithPassword(submission.input);
+        replaceOperator(result.operator);
+        if (result.notification.status === "enqueued") {
+          showToast(
+            `${result.operator.displayName} can now sign in. Account email queued; share the initial password separately.`,
+          );
+        } else if (
+          result.notification.reason === "EMAIL_OUTBOX_UNAVAILABLE"
+        ) {
+          showToast(
+            `${result.operator.displayName} can now sign in, but email queueing could not be confirmed. Check Messages before sending sign-in details and the initial password through a secure channel.`,
+            "error",
+          );
+        } else {
+          showToast(
+            `${result.operator.displayName} can now sign in, but the account email was not queued. Share the sign-in details and initial password through a secure channel.`,
+            "error",
+          );
+        }
       } else if (submission.mode === "role" && activeDialog?.operator) {
         const result = await updateOperator(activeDialog.operator.id, {
           role: submission.role,
@@ -122,7 +152,20 @@ export function OperatorsPage() {
       }
       setActiveDialog(null);
     } catch (error) {
-      setDialogError(errorMessage(error));
+      if (
+        submission.mode === "create" &&
+        isAmbiguousDirectCreationFailure(error)
+      ) {
+        setActiveDialog(null);
+        setLoading(true);
+        setRefreshIndex((current) => current + 1);
+        showToast(
+          "PackScout could not confirm whether the account was created or the email was queued. Check the operators list and Messages before trying again.",
+          "error",
+        );
+      } else {
+        setDialogError(errorMessage(error));
+      }
     } finally {
       setDialogPending(false);
     }
@@ -201,7 +244,7 @@ export function OperatorsPage() {
         <PageHeader
           eyebrow="Workspace / Operators"
           title="Operator access"
-          description="Provision and maintain invite-only access to PackScout operations."
+          description="Provision and maintain operator access to PackScout operations."
         />
         <AuthRestrictedState />
       </div>
@@ -213,18 +256,30 @@ export function OperatorsPage() {
       <PageHeader
         eyebrow="Workspace / Operators"
         title="Operator access"
-        description="Invite operators by email, assign the least access needed, and end sessions when responsibilities change."
+        description="Invite operators to choose their own password, or create an active account with an initial password. Assign the least access needed and end sessions when responsibilities change."
         actions={
-          <button
-            type="button"
-            className="admin-button admin-button-primary"
-            onClick={() => {
-              setDialogError(null);
-              setActiveDialog({ mode: "invite" });
-            }}
-          >
-            Invite operator
-          </button>
+          <>
+            <button
+              type="button"
+              className="admin-button admin-button-secondary"
+              onClick={() => {
+                setDialogError(null);
+                setActiveDialog({ mode: "create" });
+              }}
+            >
+              Create with password
+            </button>
+            <button
+              type="button"
+              className="admin-button admin-button-primary"
+              onClick={() => {
+                setDialogError(null);
+                setActiveDialog({ mode: "invite" });
+              }}
+            >
+              Invite operator
+            </button>
+          </>
         }
       />
 
@@ -301,15 +356,30 @@ export function OperatorsPage() {
         <EmptyState
           eyebrow="Access ledger"
           title="No other operators yet"
-          description="Invite an operator by email address. PackScout mails a single-use link and they choose their own password."
+          description="Send an invitation so the operator chooses their own password, or create an active account and share its initial password securely."
           action={
-            <button
-              type="button"
-              className="admin-button admin-button-primary"
-              onClick={() => setActiveDialog({ mode: "invite" })}
-            >
-              Invite operator
-            </button>
+            <div className="admin-form-actions">
+              <button
+                type="button"
+                className="admin-button admin-button-secondary"
+                onClick={() => {
+                  setDialogError(null);
+                  setActiveDialog({ mode: "create" });
+                }}
+              >
+                Create with password
+              </button>
+              <button
+                type="button"
+                className="admin-button admin-button-primary"
+                onClick={() => {
+                  setDialogError(null);
+                  setActiveDialog({ mode: "invite" });
+                }}
+              >
+                Invite operator
+              </button>
+            </div>
           }
         />
       ) : (

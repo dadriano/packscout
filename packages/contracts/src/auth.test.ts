@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  directProvisionOperatorRequestSchema,
   inviteOperatorRequestSchema,
   loginRequestSchema,
+  operatorAccountCreatedNotificationFailureReasons,
   operatorAssignableStates,
   operatorInvitationAcceptanceRequestSchema,
   operatorStates,
@@ -46,6 +48,37 @@ test("operator mutations reject weak credentials and unknown executable fields",
     }).success,
     false,
   );
+  const direct = directProvisionOperatorRequestSchema.parse({
+    email: "  DIRECT@PackScout.Test ",
+    displayName: " Direct Operator ",
+    password: "a secure initial password",
+    role: "data_operator",
+  });
+  assert.deepEqual(direct, {
+    email: "direct@packscout.test",
+    displayName: "Direct Operator",
+    password: "a secure initial password",
+    role: "data_operator",
+  });
+  assert.equal(
+    directProvisionOperatorRequestSchema.safeParse({
+      email: "operator@packscout.test",
+      displayName: "Operator",
+      password: "too short",
+      role: "data_operator",
+    }).success,
+    false,
+  );
+  assert.equal(
+    directProvisionOperatorRequestSchema.safeParse({
+      email: "operator@packscout.test",
+      displayName: "Operator",
+      password: "a secure initial password",
+      role: "data_operator",
+      command: "grant-all",
+    }).success,
+    false,
+  );
   assert.equal(
     updateOperatorRequestSchema.safeParse({
       role: "admin",
@@ -54,6 +87,12 @@ test("operator mutations reject weak credentials and unknown executable fields",
     false,
   );
   assert.equal(updateOperatorRequestSchema.safeParse({}).success, false);
+  assert.deepEqual(operatorAccountCreatedNotificationFailureReasons, [
+    "EMAIL_OUTBOX_UNAVAILABLE",
+    "EMAIL_OUTBOX_SOURCE_BACKLOG_EXCEEDED",
+    "EMAIL_OUTBOX_REQUEST_INVALID",
+    "OPERATOR_ACCOUNT_CREATED_EMAIL_UNCONFIGURED",
+  ]);
 });
 
 test("product-user administration is granted to administrators only", () => {
@@ -67,12 +106,44 @@ test("product-user administration is granted to administrators only", () => {
   const dataOperator = permissionsForOperatorRole("data_operator");
   assert.equal(dataOperator.includes("product_users:view"), false);
   assert.equal(dataOperator.includes("product_users:manage"), false);
-  // The data operator's existing capability set is unchanged by this feature.
+  // The data operator's pipeline capabilities are unchanged by this feature.
   assert.deepEqual(dataOperator, [
     "providers:view",
     "imports:start",
     "imports:retry",
+    "data_inspection:view",
   ]);
+});
+
+/**
+ * Asserted against the authoritative grant table rather than an injected
+ * permission set. A session's permissions are built from this table, so a
+ * permission present in the vocabulary but absent from every role is invisible
+ * to every real operator — which is exactly the defect this test exists to
+ * catch.
+ */
+test("data inspection is granted to both operator roles", () => {
+  assert.ok(operatorPermissions.includes("data_inspection:view"));
+  for (const role of ["admin", "data_operator"] as const) {
+    assert.ok(
+      permissionsForOperatorRole(role).includes("data_inspection:view"),
+      `${role} should hold data_inspection:view`,
+    );
+  }
+});
+
+/**
+ * Every permission in the vocabulary reaches at least one role. A permission
+ * granted to nobody gates a surface nobody can open, and the failure is silent:
+ * routes refuse and navigation hides, with nothing to show the cause.
+ */
+test("no permission exists in the vocabulary without a role that grants it", () => {
+  const granted = new Set<string>(
+    Object.values(operatorRolePermissions).flatMap((list) => [...list]),
+  );
+  for (const permission of operatorPermissions) {
+    assert.ok(granted.has(permission), `${permission} is granted to no role.`);
+  }
 });
 
 test("role grants stay inside the shared permission vocabulary", () => {
@@ -107,12 +178,44 @@ test("beta-allowlist administration is granted to administrators only", () => {
   const dataOperator = permissionsForOperatorRole("data_operator");
   assert.equal(dataOperator.includes("beta_allowlist:view"), false);
   assert.equal(dataOperator.includes("beta_allowlist:manage"), false);
-  // The data operator's existing capability set is unchanged by this feature.
+  // The data operator's pipeline capabilities are unchanged by this feature.
   assert.deepEqual(dataOperator, [
     "providers:view",
     "imports:start",
     "imports:retry",
+    "data_inspection:view",
   ]);
+});
+
+/**
+ * Asserted against the authoritative grant table rather than an injected
+ * permission set. A session's permissions are built from this table, so a
+ * permission present in the vocabulary but absent from every role is invisible
+ * to every real operator — which is exactly the defect this test exists to
+ * catch.
+ */
+test("data inspection is granted to both operator roles", () => {
+  assert.ok(operatorPermissions.includes("data_inspection:view"));
+  for (const role of ["admin", "data_operator"] as const) {
+    assert.ok(
+      permissionsForOperatorRole(role).includes("data_inspection:view"),
+      `${role} should hold data_inspection:view`,
+    );
+  }
+});
+
+/**
+ * Every permission in the vocabulary reaches at least one role. A permission
+ * granted to nobody gates a surface nobody can open, and the failure is silent:
+ * routes refuse and navigation hides, with nothing to show the cause.
+ */
+test("no permission exists in the vocabulary without a role that grants it", () => {
+  const granted = new Set<string>(
+    Object.values(operatorRolePermissions).flatMap((list) => [...list]),
+  );
+  for (const permission of operatorPermissions) {
+    assert.ok(granted.has(permission), `${permission} is granted to no role.`);
+  }
 });
 
 test("message-delivery inspection is granted to administrators only", () => {
@@ -126,12 +229,44 @@ test("message-delivery inspection is granted to administrators only", () => {
   const dataOperator = permissionsForOperatorRole("data_operator");
   assert.equal(dataOperator.includes("message_delivery:view"), false);
   assert.equal(dataOperator.includes("message_delivery:manage"), false);
-  // The data operator's existing capability set is unchanged by this feature.
+  // The data operator's pipeline capabilities are unchanged by this feature.
   assert.deepEqual(dataOperator, [
     "providers:view",
     "imports:start",
     "imports:retry",
+    "data_inspection:view",
   ]);
+});
+
+/**
+ * Asserted against the authoritative grant table rather than an injected
+ * permission set. A session's permissions are built from this table, so a
+ * permission present in the vocabulary but absent from every role is invisible
+ * to every real operator — which is exactly the defect this test exists to
+ * catch.
+ */
+test("data inspection is granted to both operator roles", () => {
+  assert.ok(operatorPermissions.includes("data_inspection:view"));
+  for (const role of ["admin", "data_operator"] as const) {
+    assert.ok(
+      permissionsForOperatorRole(role).includes("data_inspection:view"),
+      `${role} should hold data_inspection:view`,
+    );
+  }
+});
+
+/**
+ * Every permission in the vocabulary reaches at least one role. A permission
+ * granted to nobody gates a surface nobody can open, and the failure is silent:
+ * routes refuse and navigation hides, with nothing to show the cause.
+ */
+test("no permission exists in the vocabulary without a role that grants it", () => {
+  const granted = new Set<string>(
+    Object.values(operatorRolePermissions).flatMap((list) => [...list]),
+  );
+  for (const permission of operatorPermissions) {
+    assert.ok(granted.has(permission), `${permission} is granted to no role.`);
+  }
 });
 
 test("password reset request normalizes email exactly like sign-in", () => {

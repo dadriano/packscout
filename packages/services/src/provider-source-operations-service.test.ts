@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   PROVIDER_SOURCE_SUPERVISOR_SNAPSHOT_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
   providerSourceAdminCatalogSchema,
   providerSourceSupervisorSnapshotSchema,
   type LaunchProviderKey,
+  type ProviderSourceAdminCatalog,
+  type ProviderSourceSupervisorSnapshot,
 } from "@packscout/contracts";
 import { ProviderSourceOperationsService } from "./provider-source-operations-service.ts";
 
@@ -32,9 +37,34 @@ function sourceIds(index: number) {
   };
 }
 
+const activeConnectionRevision = {
+  id: connectionRevisionId,
+  revisionNumber: 1,
+  sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  state: "active" as const,
+  endpointHost: "events.example.test",
+  credentialConfigured: true as const,
+  credentialMask: "••••••••" as const,
+  encryptionKeyVersion: 1,
+  healthGeneration: "3",
+  revokedAt: null,
+  test: {
+    jobId: uuid(91),
+    connectionRevisionId,
+    current: true,
+    state: "succeeded" as const,
+    outcome: "success" as const,
+    safeCode: null,
+    requestedAt: now.toISOString(),
+    testedAt: now.toISOString(),
+  },
+  createdAt: now.toISOString(),
+};
+
 const catalog = providerSourceAdminCatalogSchema.parse({
   availableSourceTypes: [{
     sourceTypeKey: "dataforrest-events-v1",
+    sourceAdapterVersion: "dataforrest-events-adapter-v1",
     label: "Registered event source",
   }],
   providers: providers.map((provider, index) => ({
@@ -63,33 +93,12 @@ const catalog = providerSourceAdminCatalogSchema.parse({
     state: "active",
     requestLimit: 2,
     activeRevisionId: connectionRevisionId,
+    activeRevision: activeConnectionRevision,
     recoveryFence: {
       blockedRevisionId: connectionRevisionId,
       blockingEpisodeId: uuid(90),
     },
-    latestRevision: {
-      id: connectionRevisionId,
-      revisionNumber: 1,
-      sourceAdapterVersion: "dataforrest-events-adapter-v1",
-      state: "active",
-      endpointHost: "events.example.test",
-      credentialConfigured: true,
-      credentialMask: "••••••••",
-      encryptionKeyVersion: 1,
-      healthGeneration: "3",
-      revokedAt: null,
-      test: {
-        jobId: uuid(91),
-        connectionRevisionId,
-        current: true,
-        state: "succeeded",
-        outcome: "success",
-        safeCode: null,
-        requestedAt: now.toISOString(),
-        testedAt: now.toISOString(),
-      },
-      createdAt: now.toISOString(),
-    },
+    latestRevision: activeConnectionRevision,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   }],
@@ -205,6 +214,109 @@ const snapshot = providerSourceSupervisorSnapshotSchema.parse({
   }),
 });
 
+const catalogWithV2Candidate = providerSourceAdminCatalogSchema.parse({
+  ...catalog,
+  connections: catalog.connections.map((connection) => ({
+    ...connection,
+    latestRevision: {
+      ...connection.latestRevision,
+      id: uuid(5),
+      revisionNumber: 2,
+      sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+      state: "candidate",
+      endpointHost: "candidate.events.example.test",
+      healthGeneration: "99",
+      test: {
+        jobId: null,
+        connectionRevisionId: null,
+        current: false,
+        state: "not_requested",
+        outcome: null,
+        safeCode: null,
+        requestedAt: null,
+        testedAt: null,
+      },
+    },
+  })),
+});
+
+const migratedConnectionProfileId = uuid(6);
+const migratedConnectionRevisionId = uuid(7);
+const migratedConnectionRevision = {
+  ...activeConnectionRevision,
+  id: migratedConnectionRevisionId,
+  sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  endpointHost: "v2.events.example.test",
+  healthGeneration: "6",
+  test: {
+    ...activeConnectionRevision.test,
+    jobId: uuid(8),
+    connectionRevisionId: migratedConnectionRevisionId,
+  },
+};
+const splitProfileCatalog = providerSourceAdminCatalogSchema.parse({
+  ...catalog,
+  providers: catalog.providers.map((provider, index) =>
+    index === 1
+      ? {
+          ...provider,
+          sourceRegistration: {
+            ...provider.sourceRegistration,
+            sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+          },
+        }
+      : provider
+  ),
+  connections: [
+    ...catalog.connections,
+    {
+      ...catalog.connections[0],
+      id: migratedConnectionProfileId,
+      displayName: "Migrated feed",
+      activeRevisionId: migratedConnectionRevisionId,
+      activeRevision: migratedConnectionRevision,
+      latestRevision: migratedConnectionRevision,
+      recoveryFence: null,
+    },
+  ],
+  sources: catalog.sources.map((source, index) =>
+    index === 1
+      ? {
+          ...source,
+          sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+          connectionProfileId: migratedConnectionProfileId,
+          connectionRevisionId: migratedConnectionRevisionId,
+        }
+      : source
+  ),
+});
+const splitProfileSnapshot = providerSourceSupervisorSnapshotSchema.parse({
+  ...snapshot,
+  capacity: {
+    ...snapshot.capacity,
+    profiles: [
+      ...snapshot.capacity.profiles,
+      {
+        organizationId,
+        connectionProfileId: migratedConnectionProfileId,
+        used: 0,
+        maximum: 2,
+        waiting: 0,
+      },
+    ],
+  },
+  sources: snapshot.sources.map((source, index) =>
+    index === 1
+      ? {
+          ...source,
+          connectionProfileId: migratedConnectionProfileId,
+          connectionRevisionId: migratedConnectionRevisionId,
+          sourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+        }
+      : source
+  ),
+});
+
 const counters = {
   pages: 5,
   records: 20,
@@ -217,7 +329,11 @@ const counters = {
   quarantined: 1,
 };
 
-function runtime(historyState: "current" | "expired" = "current") {
+function runtime(
+  historyState: "current" | "expired" = "current",
+  catalogValue: ProviderSourceAdminCatalog = catalog,
+  snapshotValue: ProviderSourceSupervisorSnapshot = snapshot,
+) {
   const run = {
     id: runId,
     sourceInstanceId: sourceIds(0).sourceInstanceId,
@@ -233,12 +349,18 @@ function runtime(historyState: "current" | "expired" = "current") {
   };
   return new ProviderSourceOperationsService({
     environmentKey: "local",
-    catalog: { async read() { return catalog; } },
-    snapshot: { async read() { return snapshot; } },
-    sourceTypes: [{
-      label: "Registered event source",
-      manifest: dataforrestEventsV1SourceAdapterManifest,
-    }],
+    catalog: { async read() { return catalogValue; } },
+    snapshot: { async read() { return snapshotValue; } },
+    sourceTypes: [
+      {
+        label: "Current event source",
+        manifest: dataforrestEventsV2SourceAdapterManifest,
+      },
+      {
+        label: "Registered event source",
+        manifest: dataforrestEventsV1SourceAdapterManifest,
+      },
+    ],
     repository: {
       async readOverview() {
         return {
@@ -320,6 +442,14 @@ test("source operations compose the registered four rows with durable supervisor
   assert.equal(overview.sources.length, 4);
   assert.deepEqual(overview.sources.map(({ provider }) => provider), providers);
   assert.equal(overview.connection?.capacity.executionSlots.used, 2);
+  assert.equal(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+  assert.notEqual(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
   assert.equal(overview.connection?.capacity.requestPermits.waiting, 1);
   assert.equal(overview.connection?.health.state, "blocked");
   const courtyard = overview.sources[0]!;
@@ -336,6 +466,89 @@ test("source operations compose the registered four rows with durable supervisor
   assert.equal(courtyard.quality.state, "warning");
   assert.equal(courtyard.connectionImpact.state, "blocked");
   assert.doesNotMatch(JSON.stringify(overview), /credential-value|cursor-value/);
+});
+
+test("source operations report the complete active revision while a newer candidate reconnects", async () => {
+  const catalogWithoutSources = providerSourceAdminCatalogSchema.parse({
+    ...catalogWithV2Candidate,
+    sources: [],
+  });
+  const overview = await runtime("current", catalogWithoutSources).overview(
+    organizationId,
+  );
+  assert.equal(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+  assert.equal(overview.connection?.endpointHost, "events.example.test");
+  assert.equal(overview.connection?.test.state, "succeeded");
+  assert.equal(overview.connection?.health.generation, "3");
+  assert.equal(overview.connection?.health.state, "reconnecting");
+});
+
+test("source operations report the selected source adapter ahead of a newer profile candidate", async () => {
+  const overview = await runtime("current", catalogWithV2Candidate).overview(
+    organizationId,
+  );
+  assert.equal(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+  assert.notEqual(
+    overview.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
+  assert.equal(overview.connection?.endpointHost, "events.example.test");
+  assert.equal(overview.connection?.test.state, "succeeded");
+  assert.equal(overview.connection?.health.generation, "3");
+});
+
+test("source operations reject a live source pinned outside the displayed revision", async () => {
+  const inconsistentCatalog = providerSourceAdminCatalogSchema.parse({
+    ...catalogWithV2Candidate,
+    sources: catalogWithV2Candidate.sources.map((source, index) =>
+      index === 0
+        ? { ...source, connectionRevisionId: uuid(5) }
+        : source
+    ),
+  });
+  await assert.rejects(
+    runtime("current", inconsistentCatalog).overview(organizationId),
+    /provider_source_operations\.source_operations_unavailable/u,
+  );
+});
+
+test("split-profile migration reports each source against its own connection", async () => {
+  const service = runtime(
+    "current",
+    splitProfileCatalog,
+    splitProfileSnapshot,
+  );
+  const overview = await service.overview(organizationId);
+  assert.equal(overview.connectionMode, "split");
+  assert.equal(overview.connection, null);
+  assert.equal(overview.sources[0]?.connectionImpact.state, "blocked");
+  assert.equal(overview.sources[1]?.connectionImpact.state, "none");
+
+  const detail = await service.detail(
+    organizationId,
+    sourceIds(1).providerId,
+  );
+  assert.equal(
+    detail.connection?.connectionProfileId,
+    migratedConnectionProfileId,
+  );
+  assert.equal(
+    detail.connection?.sourceType.adapterVersion,
+    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+  );
+  assert.equal(detail.connection?.endpointHost, "v2.events.example.test");
+  assert.equal(detail.connection?.health.generation, "6");
+  assert.deepEqual(detail.connection?.capacity.requestPermits, {
+    used: 0,
+    maximum: 2,
+    waiting: 0,
+  });
 });
 
 test("provider detail and filtered diagnostics expose safe links without diagnostic correlation ids", async () => {

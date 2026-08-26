@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import type {
+  DirectProvisionOperatorRequest,
   InviteOperatorRequest,
   OperatorRole,
   OperatorSummary,
@@ -7,10 +8,11 @@ import type {
 import { AdminDialog } from "../AdminDialog";
 import { AuthErrorSummary } from "./AuthErrorSummary";
 
-export type OperatorDialogMode = "invite" | "role" | "credential";
+export type OperatorDialogMode = "invite" | "create" | "role" | "credential";
 
 export type OperatorDialogSubmission =
   | { mode: "invite"; input: InviteOperatorRequest }
+  | { mode: "create"; input: DirectProvisionOperatorRequest }
   | { mode: "role"; role: OperatorRole }
   | { mode: "credential"; password: string };
 
@@ -32,6 +34,15 @@ function dialogContent(mode: OperatorDialogMode) {
         "PackScout mails a single-use link. The operator chooses their own password; nobody else ever knows it.",
       action: "Send invitation",
       pendingAction: "Sending invitation…",
+    };
+  }
+  if (mode === "create") {
+    return {
+      title: "Create an operator with a password",
+      description:
+        "The account becomes active immediately. PackScout emails the sign-in link, while you share the initial password through a separate secure channel.",
+      action: "Create account",
+      pendingAction: "Creating account…",
     };
   }
   if (mode === "role") {
@@ -78,6 +89,11 @@ export function OperatorDialog({
         mode,
         input: { email, displayName, role },
       });
+    } else if (mode === "create") {
+      await onSubmit({
+        mode,
+        input: { email, displayName, password, role },
+      });
     } else if (mode === "role") {
       await onSubmit({ mode, role });
     } else {
@@ -121,7 +137,7 @@ export function OperatorDialog({
         onSubmit={(event) => void submit(event)}
       >
         {error ? <AuthErrorSummary message={error} /> : null}
-        {mode === "invite" ? (
+        {mode === "invite" || mode === "create" ? (
           <>
             <div className="admin-field">
               <label htmlFor="operator-display-name">Display name</label>
@@ -173,12 +189,14 @@ export function OperatorDialog({
           </p>
         ) : null}
 
-        {mode === "credential" ? (
+        {mode === "create" || mode === "credential" ? (
           <div className="admin-field">
-            <label htmlFor="operator-password">New password</label>
+            <label htmlFor="operator-password">
+              {mode === "create" ? "Initial password" : "New password"}
+            </label>
             <input
               id="operator-password"
-              ref={firstInputRef}
+              ref={mode === "credential" ? firstInputRef : undefined}
               type="password"
               autoComplete="new-password"
               value={password}
@@ -190,7 +208,9 @@ export function OperatorDialog({
               onChange={(event) => setPassword(event.target.value)}
             />
             <small id="operator-password-note">
-              Use at least 12 characters. PackScout will never show this value again.
+              {mode === "create"
+                ? "Use 12–128 characters. It is never included in the email; share it through a separate secure channel."
+                : "Use at least 12 characters. PackScout will never show this value again."}
             </small>
           </div>
         ) : null}

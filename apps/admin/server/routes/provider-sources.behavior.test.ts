@@ -184,6 +184,7 @@ function dependencies() {
           return {
             availableSourceTypes: [{
               sourceTypeKey: "dataforrest-events-v1" as const,
+              sourceAdapterVersion: "dataforrest-events-adapter-v1",
               label: "DataForrest events",
             }],
             providers: [{

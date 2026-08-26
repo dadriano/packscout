@@ -31,10 +31,10 @@ export function Breadcrumbs() {
 
   const crumbs: Crumb[] = [
     { label: ROOT_TITLE, path: "/", routable: true },
-    ...segments.map((segment, index) => {
+    ...segments.map((_segment, index) => {
       const path = `/${segments.slice(0, index + 1).join("/")}`;
       return {
-        label: breadcrumbLabel(segment),
+        label: breadcrumbLabel(path),
         path,
         routable: isRoutable(path),
       };

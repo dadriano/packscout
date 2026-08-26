@@ -1255,14 +1255,10 @@ export class ProviderSourceSupervisor<
             admission: this.#admission,
           }),
           "SNAPSHOT_PUBLISH_FAILED",
-          { fenceOnExhausted: false, fenceOnLostOwnership: false },
+          { fenceOnExhausted: false },
         );
       } catch (error) {
-        if (
-          error instanceof ControlPlaneRetryExhaustedError ||
-          this.#dependencies.classifyControlPlaneFailure(error) ===
-            "lost_ownership"
-        ) return;
+        if (error instanceof ControlPlaneRetryExhaustedError) return;
         throw error;
       }
     });
@@ -1323,7 +1319,6 @@ export class ProviderSourceSupervisor<
     fenceReasonCode: string,
     options?: Readonly<{
       fenceOnExhausted?: boolean;
-      fenceOnLostOwnership?: boolean;
     }>,
   ): Promise<TResult> {
     try {
@@ -1350,7 +1345,6 @@ export class ProviderSourceSupervisor<
         ? error.code
         : this.#dependencies.classifyControlPlaneFailure(error);
       if (code === "lost_ownership") {
-        if (options?.fenceOnLostOwnership === false) throw error;
         // Preserve the exact control-plane boundary that detected ownership
         // loss. The repository error still carries SUPERVISOR_OWNERSHIP_LOST;
         // this durable reason identifies which operation failed its fence.

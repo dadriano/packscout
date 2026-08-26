@@ -167,6 +167,7 @@ export const sourceConnectionProfileAdminSummarySchema = z
     state: z.enum(["draft", "active", "disabled"]),
     requestLimit: z.literal(2),
     activeRevisionId: uuidSchema.nullable(),
+    activeRevision: sourceConnectionRevisionAdminSummarySchema.nullable(),
     recoveryFence: z
       .object({
         blockedRevisionId: uuidSchema,
@@ -220,6 +221,7 @@ export const providerSourceAdminCatalogSchema = z
         z
           .object({
             sourceTypeKey: productionProviderSourceTypeKeySchema,
+            sourceAdapterVersion: registrationKeySchema,
             label: z.string().min(1).max(120),
           })
           .strict(),

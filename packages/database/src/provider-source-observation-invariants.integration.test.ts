@@ -285,7 +285,6 @@ test("observation v2 persists one-target pulls in a separate strict history doma
     await fixture.close();
   }
 });
-
 test("launch scope meaning and canonical semantic identity fail closed in PostgreSQL", async () => {
   const fixture = await createProviderSourceAcceptanceFixture(
     "observation-invariants",

@@ -8,8 +8,8 @@ import { createProviderSourceSupervisorRuntime } from
   "./provider-source-supervisor-composition.ts";
 import { runProviderSourceSupervisorOnly } from
   "./source-supervisor-bootstrap.ts";
-import { sourceSupervisorFatalEvent } from
-  "./source-supervisor-fatal-event.ts";
+import { providerSourceSupervisorFatalRecord } from
+  "./source-supervisor-fatal.ts";
 
 const workerRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -33,6 +33,6 @@ runProviderSourceSupervisorOnly({
     createRuntime: createProviderSourceSupervisorRuntime,
   },
 }).catch((error: unknown) => {
-  console.error(JSON.stringify(sourceSupervisorFatalEvent(error)));
+  console.error(JSON.stringify(providerSourceSupervisorFatalRecord(error)));
   process.exitCode = 1;
 });

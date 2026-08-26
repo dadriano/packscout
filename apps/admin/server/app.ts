@@ -11,6 +11,7 @@ import {
   createOperatorsRouter,
   type OperatorInvitationRuntime,
 } from "./routes/operators.ts";
+import type { OperatorAccountCreatedNotifier } from "./operator-account-created-notice.ts";
 import { createOperatorInvitationsRouter } from "./routes/operator-invitations.ts";
 import { createProvidersRouter, type ProvidersRouterDependencies } from "./routes/providers.ts";
 import {
@@ -45,6 +46,10 @@ import {
   createBetaAllowlistRouter,
   type BetaAllowlistRouterDependencies,
 } from "./routes/beta-allowlist.ts";
+import {
+  createDataInspectionRouter,
+  type DataInspectionRouterDependencies,
+} from "./routes/data-inspection.ts";
 import {
   createWorkerFleetRouter,
   type WorkerFleetRouterDependencies,
@@ -104,6 +109,8 @@ export interface AdminAppDependencies {
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
+  canonical?: DataInspectionRouterDependencies["canonical"];
+  parity?: DataInspectionRouterDependencies["parity"];
   /**
    * Deployments without the source-connection keys run with source
    * administration deliberately unconfigured. The provider-source routes are
@@ -117,6 +124,7 @@ export interface AdminAppDependencies {
   >;
   passwordReset?: Omit<PasswordResetRouterDependencies, "sameOrigin">;
   operatorInvitations?: OperatorInvitationRuntime;
+  operatorAccountCreatedNotifier?: OperatorAccountCreatedNotifier;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
@@ -198,6 +206,7 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         cookiePolicy,
         sameOrigin,
         invitations: dependencies.operatorInvitations,
+        accountCreatedNotifier: dependencies.operatorAccountCreatedNotifier,
       }),
     );
     if (dependencies.providers) {
@@ -254,6 +263,18 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         }),
       );
     }
+    // Read-only and unconditional: the surface needs no injected dependency to
+    // report what is in comparison scope, and mounting it always means a caller
+    // without the permission is refused rather than routed to the API 404.
+    app.use(
+      "/api/data-inspection",
+      createDataInspectionRouter({
+        auth: service,
+        cookiePolicy,
+        canonical: dependencies.canonical,
+        parity: dependencies.parity,
+      }),
+    );
     if (dependencies.productUsers) {
       app.use(
         "/api/product-users",

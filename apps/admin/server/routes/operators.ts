@@ -1,9 +1,11 @@
 import { Router } from "express";
 import {
+  directProvisionOperatorRequestSchema,
   inviteOperatorRequestSchema,
   listOperatorsQuerySchema,
   operatorIdSchema,
   updateOperatorRequestSchema,
+  type OperatorAccountCreatedNotificationOutcome,
   type OperatorInvitationStatus,
   type OperatorSummary,
 } from "@packscout/contracts";
@@ -15,15 +17,15 @@ import {
   getAuthenticatedActor,
   sendAuthServiceError,
 } from "../auth/middleware.ts";
+import type { OperatorAccountCreatedNotifier } from "../operator-account-created-notice.ts";
 
 /**
- * Operator management. Creating an account is an invitation now: an address,
- * a name, and a role, and a single-use link mailed to the address — so a
- * working password is never chosen by one person and communicated to
- * another. Reissue and cancel sit behind the same `operators:manage`
- * permission, the same trusted-Origin and CSRF discipline, and the same
- * audit trail as every other operator mutation. Nothing here ever sees or
- * returns a token, a link, or a password.
+ * Operator management offers two explicit creation boundaries: invitation,
+ * where the recipient chooses a password through a single-use link, and
+ * direct provisioning, where an administrator sets an initial password and
+ * shares it through a separate secure channel. Both sit behind the same
+ * `operators:manage`, trusted-Origin, CSRF, and authoritative-session checks.
+ * No response, notification input, or log ever carries credential material.
  */
 
 export type IssueOperatorInvitationOutcome =
@@ -70,6 +72,7 @@ export interface OperatorsRouterDependencies {
     | "resolveSession"
     | "requirePermission"
     | "listOperators"
+    | "provisionOperator"
     | "inviteOperator"
     | "updateOperator"
     | "cancelInvitedOperator"
@@ -79,6 +82,7 @@ export interface OperatorsRouterDependencies {
   cookiePolicy: SessionCookiePolicy;
   sameOrigin: RequestHandler;
   invitations?: OperatorInvitationRuntime;
+  accountCreatedNotifier?: OperatorAccountCreatedNotifier;
 }
 
 function sendValidationError(
@@ -104,6 +108,10 @@ const INVITATION_UNAVAILABLE =
 const INVITATION_UNAVAILABLE_ACCOUNT_WAITING =
   "The invitation could not be sent. The account is waiting in the operators list — resend its invitation from there.";
 
+const ACCOUNT_CREATED_EMAIL_UNCONFIGURED =
+  "OPERATOR_ACCOUNT_CREATED_EMAIL_UNCONFIGURED";
+const ACCOUNT_CREATED_EMAIL_UNAVAILABLE = "EMAIL_OUTBOX_UNAVAILABLE";
+
 function sendInvitationUnavailable(
   response: import("express").Response,
   error: string = INVITATION_UNAVAILABLE,
@@ -123,6 +131,7 @@ export function createOperatorsRouter({
   cookiePolicy,
   sameOrigin,
   invitations,
+  accountCreatedNotifier,
 }: OperatorsRouterDependencies) {
   const router = Router();
   const requireAdmin = createRequireSession(service, cookiePolicy, {
@@ -236,6 +245,56 @@ export function createOperatorsRouter({
       sendInvitationUnavailable(response, INVITATION_UNAVAILABLE_ACCOUNT_WAITING);
     }
   });
+
+  router.post(
+    "/direct",
+    sameOrigin,
+    requireAdminMutation,
+    async (request, response) => {
+      const parsed = directProvisionOperatorRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        sendValidationError(response, parsed.error.flatten().fieldErrors);
+        return;
+      }
+      const actor = getAuthenticatedActor(response);
+      let created;
+      try {
+        created = await service.provisionOperator(actor, parsed.data);
+      } catch (error) {
+        sendAuthServiceError(response, error, cookiePolicy);
+        return;
+      }
+
+      // The account is active and committed. Notification is a separate
+      // failure domain, so every refusal or unexpected notifier exception is
+      // represented inside the 201 response instead of inviting a duplicate
+      // provisioning retry that can only conflict on the email address.
+      let notification: OperatorAccountCreatedNotificationOutcome;
+      if (!accountCreatedNotifier) {
+        notification = {
+          status: "failed",
+          reason: ACCOUNT_CREATED_EMAIL_UNCONFIGURED,
+        };
+      } else {
+        try {
+          notification =
+            await accountCreatedNotifier.notifyOperatorAccountCreated({
+              operatorId: created.operator.id,
+              toEmail: created.operator.email,
+            });
+        } catch {
+          notification = {
+            status: "failed",
+            reason: ACCOUNT_CREATED_EMAIL_UNAVAILABLE,
+          };
+        }
+      }
+      response.status(201).json({
+        operator: created.operator,
+        notification,
+      });
+    },
+  );
 
   router.post(
     "/:operatorId/invitation",

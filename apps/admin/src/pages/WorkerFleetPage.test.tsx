@@ -522,7 +522,7 @@ test("live status refreshes on a bounded cadence rather than per second", async 
   // One read per section on entry; the refresh interval is measured in tens of
   // seconds, so settling the page adds no further traffic.
   assert.equal(requests.length, 4);
-  assert.match(pageText(renderer), /Status refreshes every 15s/);
+  assert.match(pageText(renderer), /Refreshes every 15s/);
   await settlePage();
   assert.equal(requests.length, 4);
 });

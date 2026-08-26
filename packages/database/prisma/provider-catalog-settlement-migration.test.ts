@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { test } from "node:test";
 import { Pool } from "pg";
+import { endPoolFully } from "./postgres-test-support.ts";
 
 const adminDatabaseUrl = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL
   ?? `postgresql://${encodeURIComponent(userInfo().username)}@127.0.0.1:5432/postgres`;
@@ -49,17 +50,23 @@ async function createPreProviderSettlementDatabase(): Promise<{
       await applyMigration(database, migrationName);
     }
   } catch (error) {
-    await database.end();
-    await admin.query(`drop database if exists "${databaseName}" with (force)`);
-    await admin.end();
+    try {
+      await endPoolFully(database);
+      await admin.query(`drop database if exists "${databaseName}" with (force)`);
+    } finally {
+      await endPoolFully(admin);
+    }
     throw error;
   }
   return {
     database,
     close: async () => {
-      await database.end();
-      await admin.query(`drop database if exists "${databaseName}" with (force)`);
-      await admin.end();
+      try {
+        await endPoolFully(database);
+        await admin.query(`drop database if exists "${databaseName}" with (force)`);
+      } finally {
+        await endPoolFully(admin);
+      }
     },
   };
 }

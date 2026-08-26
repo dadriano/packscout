@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { OperatorSummary } from "@packscout/contracts";
+import {
+  permissionsForOperatorRole,
+  type OperatorSummary,
+} from "@packscout/contracts";
 import {
   AuthService,
   AuthServiceError,
@@ -343,11 +346,10 @@ test("session resolution rechecks authoritative role and rejects disabled accoun
     csrfToken: "valid-csrf",
   });
   assert.equal(actor.role, "data_operator");
-  assert.deepEqual(actor.permissions, [
-    "providers:view",
-    "imports:start",
-    "imports:retry",
-  ]);
+  // Compared against the authoritative grant rather than a restated literal, so
+  // this test proves the role was re-resolved and does not have to be edited
+  // every time the role's capabilities change.
+  assert.deepEqual(actor.permissions, permissionsForOperatorRole("data_operator"));
   assert.equal(state.refreshed[0]?.idleExpiresAt.toISOString(), state.authoritativeSession.absoluteExpiresAt.toISOString());
 
   state.authoritativeSession = { ...state.authoritativeSession, state: "disabled" };
@@ -655,6 +657,125 @@ test("inviting an operator creates a credential-less pending account and audits 
     }),
   );
   assert.equal(forbidden.code, "FORBIDDEN");
+});
+
+test("direct provisioning creates an active tenant-scoped account and audits without secrets", async () => {
+  const { service, state, audits } = createHarness();
+  state.provisionResult = { kind: "created", operator: summary() };
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: ["operators:manage" as const],
+    csrfToken: "csrf",
+  };
+  const password = "an initial secure password";
+
+  const result = await service.provisionOperator(actor, {
+    email: "direct@packscout.test",
+    displayName: "Direct Operator",
+    password,
+    role: "data_operator",
+  });
+
+  assert.equal(result.operator.state, "active");
+  assert.deepEqual(state.provisionInputs, [
+    {
+      id: "00000000-0000-4000-8000-000000000001",
+      organizationId: admin.organizationId,
+      emailNormalized: "direct@packscout.test",
+      displayName: "Direct Operator",
+      passwordHash: `hash:${password}`,
+      role: "data_operator",
+      state: "active",
+      now,
+    },
+  ]);
+  const audit = audits.at(-1);
+  assert.equal(audit?.action, "operator.provision");
+  assert.equal(audit?.organizationId, admin.organizationId);
+  assert.equal(audit?.actorId, admin.id);
+  assert.equal(audit?.subjectId, result.operator.id);
+  assert.equal(audit?.outcome, "success");
+  assert.doesNotMatch(JSON.stringify(audits), /initial secure password|hash:/i);
+
+  const forbidden = await captureServiceError(() =>
+    service.provisionOperator(
+      { ...actor, role: "data_operator" as const },
+      {
+        email: "forbidden@packscout.test",
+        displayName: "Forbidden Operator",
+        password,
+        role: "data_operator",
+      },
+    ),
+  );
+  assert.equal(forbidden.code, "FORBIDDEN");
+  assert.equal(state.provisionInputs.length, 1);
+});
+
+test("direct provisioning preserves stable outcomes when email or audit persistence conflicts", async () => {
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: ["operators:manage" as const],
+    csrfToken: "csrf",
+  };
+  const input = {
+    email: "direct@packscout.test",
+    displayName: "Direct Operator",
+    password: "an initial secure password",
+    role: "data_operator" as const,
+  };
+
+  const conflict = createHarness({
+    auditFailsOn: (event) => event.action === "operator.provision",
+  });
+  conflict.state.provisionResult = { kind: "email_conflict" };
+  const conflictError = await captureServiceError(() =>
+    conflict.service.provisionOperator(actor, input),
+  );
+  assert.equal(conflictError.code, "OPERATOR_EMAIL_CONFLICT");
+  assert.equal(conflictError.status, 409);
+  assert.deepEqual(conflict.auditFailures, [
+    {
+      action: "operator.provision",
+      outcome: "failure",
+      afterCommit: false,
+    },
+  ]);
+
+  const committed = createHarness({
+    auditFailsOn: (event) => event.action === "operator.provision",
+  });
+  committed.state.provisionResult = {
+    kind: "created",
+    operator: summary(),
+  };
+  const result = await committed.service.provisionOperator(actor, input);
+  assert.equal(result.operator.state, "active");
+  assert.deepEqual(committed.auditFailures, [
+    {
+      action: "operator.provision",
+      outcome: "success",
+      afterCommit: true,
+    },
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(committed.auditFailures),
+    /initial secure password|hash:/i,
+  );
 });
 
 test("a pending account is refused by every authentication path", async () => {

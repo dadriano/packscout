@@ -4,14 +4,70 @@
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:frontend"],
+      "runtimeArgs": [
+        "run",
+        "dev:frontend"
+      ],
       "port": 5100
     },
     {
       "name": "admin",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:admin"],
+      "runtimeArgs": [
+        "run",
+        "dev:admin"
+      ],
       "port": 5101
+    },
+    {
+      "name": "admin-tools",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd .worktrees/admin-tools && PACKSCOUT_ADMIN_PORT=5121 PACKSCOUT_ADMIN_HMR_PORT=5122 PACKSCOUT_SESSION_HASHING_SECRET=local-only-throwaway-session-secret-for-embedded-preview PACKSCOUT_BOOTSTRAP_ADMIN_EMAIL=admin@local.test PACKSCOUT_BOOTSTRAP_ADMIN_PASSWORD=local-preview-password npm run start:admin:embedded:local"
+      ],
+      "port": 5121,
+      "autoPort": false
+    },
+    {
+      "name": "ops-panel",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd .worktrees/admin-tools && PACKSCOUT_OPS_PANEL_PORT=5110 npm run dev:ops-panel"
+      ],
+      "port": 5110,
+      "autoPort": false
+    },
+    {
+      "name": "closed-beta-preview",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd .worktrees/closed-beta-messaging && PACKSCOUT_FRONTEND_PORT=5197 node scripts/local/start-frontend-with-convex-mock.mjs"
+      ],
+      "port": 5197,
+      "autoPort": false
+    },
+    {
+      "name": "buyback-ev-local",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "PACKSCOUT_FRONTEND_PORT=5188",
+        "node",
+        ".worktrees/buyback-adjusted-ev/scripts/local/start-frontend-with-convex-mock.mjs"
+      ],
+      "port": 5188
+    },
+    {
+      "name": "data-inspection",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd .worktrees/provider-data-inspection && NODE_ENV=production PACKSCOUT_ADMIN_HOST=127.0.0.1 PACKSCOUT_ADMIN_ALLOWED_ORIGINS='http://127.0.0.1:5141,http://localhost:5141' PACKSCOUT_DATABASE_URL='postgresql://lains@127.0.0.1:5432/packscout_dev?schema=public' PACKSCOUT_ADMIN_PORT=5141 npx tsx apps/admin/server/index.ts"
+      ],
+      "port": 5141,
+      "autoPort": false
     }
   ]
 }

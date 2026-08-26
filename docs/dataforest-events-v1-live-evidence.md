@@ -142,14 +142,14 @@ third-party adapter may reuse the platform mapper and canonical identities only
 after proving it emits the same IDs, scopes, and namespace; otherwise activation
 must stop for a separately designed identity migration.
 
-Both adapter versions copy the two timestamps, outer relationships, event code,
+All three adapter versions copy the two timestamps, outer relationships, event code,
 amount, currency, payment method, and tri-state availability into the versioned
 normalized observation. Adapter v1 allowlists only a nonblank
 `data.provider_label` as the source-neutral display-name fact.
 
 Local Collector Crypt capture evidence reviewed on 2026-08-24 showed catalog
 pack names at `data.name`, including all three pack records in the retained
-partial run. Adapter v2 therefore uses one closed provider-and-kind declaration:
+partial run. Adapters v2 and v3 therefore use one closed provider-and-kind declaration:
 Collector Crypt catalog packs read exactly `data.name`; every other launch
 provider and kind retains `data.provider_label`. There is no cross-field
 fallback: a missing, null, or malformed Collector Crypt `name` remains absent or
@@ -157,6 +157,14 @@ malformed even if `provider_label` is present. Every other nested key stays
 protected provenance. The mapper never receives the native object, and this
 provider-local extraction does not add provider-specific canonical rules to the
 generic mapper.
+
+Adapters v1 and v2 remain registered only for immutable connection revisions,
+source revisions, and import runs already pinned to their exact adapter version.
+New connection and source revisions select v3, and the admin upgrade action
+creates a separately testable v3 revision without changing existing pins. The
+PackScout data-pipeline owner may remove an older adapter only after a database
+audit proves that no retained connection revision, source revision, or import
+run references it and the corresponding retention window has elapsed.
 
 ## Failure contract
 
@@ -240,9 +248,9 @@ The bounded-memory benchmark processed 10 warm-up pages and five 20-page trials
 (100 measured pages total), each exactly 250 records and 4 MiB, through the
 authentic capture, durable-terminalization acknowledgement, interpretation,
 deep immutable completion, import validation, mapping, planning, and discard
-path under `dataforrest-events-adapter-v2`. Peak RSS rose 34,471,936 bytes. The
+path under `dataforrest-events-adapter-v2`. Peak RSS rose 47,415,296 bytes. The
 allocator-tolerant Theil–Sen trend over settled heap-plus-external samples
-projected only 87,707 retained bytes across
+projected only 98,800 retained bytes across
 100 pages, within the 64 MiB peak and 8 MiB retained limits. Four execution
 slots therefore reserve at most 256 MiB of page-working-set budget before normal
 process overhead.
@@ -258,7 +266,7 @@ the V1 and V2 adapter manifests retain their narrower transport caps.
 The storage submeasurement remains the reviewed August 22 measurement because
 the later constraint migration widens only the admissible protected-byte bound;
 it does not change row shape. The adapter-v2 4 MiB memory submeasurement was
-refreshed independently on August 24 Pacific time and carries its own timestamp.
+refreshed independently on August 25 Pacific time and carries its own timestamp.
 
 Reproduction and drift checks are executable from the repository root:
 

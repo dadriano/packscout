@@ -7,10 +7,15 @@
  * `App.tsx` — never a second per-page label table.
  */
 
-export type AdminNavSectionId = "workspace" | "pipeline";
+export type AdminNavSectionId = "workspace" | "pipeline" | "data";
 
 export interface AdminDestination {
-  /** First path segment. The empty string is the index route at `/`. */
+  /**
+   * Path below the root, without its leading slash. The empty string is the
+   * index route at `/`. A destination that lives under a shared prefix
+   * declares the whole path, for example `data/canonical`; the prefix itself
+   * is not a destination and is labelled through `NESTED_SEGMENT_TITLES`.
+   */
   readonly segment: string;
   /** Short label used in the sidebar. */
   readonly navLabel: string;
@@ -83,13 +88,6 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     permission: "providers:view",
   },
   {
-    segment: "quarantine",
-    navLabel: "Quarantine",
-    title: "Quarantine",
-    section: "pipeline",
-    permission: "providers:view",
-  },
-  {
     segment: "background-work",
     navLabel: "Background Work",
     title: "Background Work",
@@ -110,12 +108,41 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     section: "pipeline",
     permission: "providers:view",
   },
+  {
+    segment: "quarantine",
+    navLabel: "Quarantine",
+    title: "Quarantine",
+    section: "pipeline",
+    permission: "providers:view",
+  },
+  {
+    segment: "data/canonical",
+    navLabel: "Canonical",
+    title: "Canonical Data",
+    section: "data",
+    permission: "data_inspection:view",
+  },
+  {
+    segment: "data/published",
+    navLabel: "Published",
+    title: "Published Data",
+    section: "data",
+    permission: "data_inspection:view",
+  },
+  {
+    segment: "data/compare",
+    navLabel: "Compare",
+    title: "Data Comparison",
+    section: "data",
+    permission: "data_inspection:view",
+  },
 ];
 
 /** Literal segments that appear below a destination rather than as one. */
 const NESTED_SEGMENT_TITLES: Record<string, string> = {
   new: "New",
   edit: "Edit",
+  data: "Data",
 };
 
 /**
@@ -145,6 +172,9 @@ export const ROUTABLE_PATTERNS: readonly string[] = [
   "/quarantine/:quarantineId",
   "/alerts",
   "/alerts/:alertId",
+  "/data/canonical",
+  "/data/published",
+  "/data/compare",
 ];
 
 export interface AdminNavItem {
@@ -162,7 +192,11 @@ export interface AdminNavSection {
 const SECTION_HEADINGS: Record<AdminNavSectionId, string> = {
   workspace: "Workspace",
   pipeline: "Data pipeline",
+  data: "Data",
 };
+
+/** Sidebar sections in presentation order. */
+const SECTION_ORDER = ["workspace", "pipeline", "data"] as const;
 
 function destinationPath(destination: AdminDestination): string {
   return destination.segment ? `/${destination.segment}` : "/";
@@ -181,7 +215,7 @@ export function navigationSections(
   permissions: readonly string[],
 ): readonly AdminNavSection[] {
   const sections: AdminNavSection[] = [];
-  for (const id of ["workspace", "pipeline"] as const) {
+  for (const id of SECTION_ORDER) {
     const items = ADMIN_DESTINATIONS.filter(
       (destination) =>
         destination.section === id && isGranted(destination, permissions),
@@ -197,23 +231,43 @@ export function navigationSections(
   return sections;
 }
 
-/** The document title for a path, resolved from its leading segment. */
+/**
+ * The destination a path belongs to: the most specific declared path that the
+ * pathname starts with. Matching longest-first is what lets `data/canonical`
+ * win over a hypothetical `data`, so a nested destination keeps its own title
+ * instead of inheriting its prefix's.
+ */
+function destinationForPath(pathname: string): AdminDestination | undefined {
+  const segments = pathname.split("/").filter(Boolean);
+  for (let depth = segments.length; depth > 0; depth -= 1) {
+    const candidatePath = segments.slice(0, depth).join("/");
+    const destination = ADMIN_DESTINATIONS.find(
+      (candidate) => candidate.segment === candidatePath,
+    );
+    if (destination) return destination;
+  }
+  return undefined;
+}
+
+/** The document title for a path, resolved from its declared destination. */
 export function pageTitleForPath(pathname: string): string {
-  const [first] = pathname.split("/").filter(Boolean);
-  if (!first) return ROOT_TITLE;
-  const destination = ADMIN_DESTINATIONS.find(
-    (candidate) => candidate.segment === first,
-  );
-  return destination?.title ?? NOT_FOUND_TITLE;
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length === 0) return ROOT_TITLE;
+  return destinationForPath(pathname)?.title ?? NOT_FOUND_TITLE;
 }
 
 /**
- * The breadcrumb label for a single path segment. Identifiers that carry no
- * declared label fall back to the raw segment, matching the address bar.
+ * The breadcrumb label for one crumb, addressed by its cumulative path so a
+ * nested destination resolves to its own title. A path that declares no
+ * destination falls back to a literal nested label, then to the raw segment,
+ * matching the address bar.
  */
-export function breadcrumbLabel(segment: string): string {
+export function breadcrumbLabel(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  const last = segments.at(-1) ?? "";
+  const declaredPath = segments.join("/");
   const destination = ADMIN_DESTINATIONS.find(
-    (candidate) => candidate.segment === segment,
+    (candidate) => candidate.segment === declaredPath,
   );
-  return destination?.title ?? NESTED_SEGMENT_TITLES[segment] ?? segment;
+  return destination?.title ?? NESTED_SEGMENT_TITLES[last] ?? last;
 }

@@ -4,6 +4,7 @@ import {
   renderAccessDeclinedMessage,
   renderOperationalAlertMessage,
   renderOperationalAlertRecoveryMessage,
+  renderOperatorAccountCreatedMessage,
   renderOperatorInvitationMessage,
   renderOperatorPasswordResetMessage,
   renderWelcomeMessage,
@@ -11,6 +12,7 @@ import {
   type AccessDeclinedMessageInput,
   type OperationalAlertMessageInput,
   type OperationalAlertRecoveryMessageInput,
+  type OperatorAccountCreatedMessageInput,
   type OperatorInvitationMessageInput,
   type OperatorPasswordResetMessageInput,
   type WelcomeMessageInput,
@@ -66,6 +68,11 @@ export function createEmailMessageOutboxRenderers(): EmailMessageOutboxRendererM
     operator_invitation: (input, origins) =>
       renderOperatorInvitationMessage(
         input as OperatorInvitationMessageInput,
+        origins,
+      ),
+    operator_account_created: (input, origins) =>
+      renderOperatorAccountCreatedMessage(
+        input as OperatorAccountCreatedMessageInput,
         origins,
       ),
   };

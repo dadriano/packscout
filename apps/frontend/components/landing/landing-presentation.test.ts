@@ -24,7 +24,14 @@ test("every authentication status maps to one presentable action", () => {
     const action = presentLandingAccessAction(status as PackScoutAuthStatus);
     assert.equal(action.kind, kind, `status ${status}`);
     assert.ok(action.label.length > 0, `status ${status} needs a label`);
-    assert.ok(action.note.length > 0, `status ${status} needs a note`);
+    // The signed-out button explains itself; every other state must say why
+    // the button is busy, unavailable, or already satisfied.
+    if (action.kind === "sign_in") {
+      assert.equal(action.note, undefined);
+      assert.match(action.label, /request access/i);
+    } else {
+      assert.ok(action.note.length > 0, `status ${status} needs a note`);
+    }
   }
 });
 
@@ -32,7 +39,7 @@ test("a signed-out visitor is offered the sign-in that is the access request", (
   const action = presentLandingAccessAction("signed_out");
   assert.equal(action.kind, "sign_in");
   assert.equal(action.label, "Sign in to request access");
-  assert.match(action.note, /access request/i);
+  assert.match(action.label, /request access/i);
 });
 
 test("a booting session keeps the slot busy without claiming anything", () => {

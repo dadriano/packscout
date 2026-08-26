@@ -14,6 +14,8 @@ import { SourceAdminConfigurationCodecRegistry } from "./source-admin-configurat
 import { SourceAdapterRegistry } from "./source-adapter-registry.ts";
 
 export const productionSourceAdapterManifests = Object.freeze([
+  dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV2SourceAdapterManifest,
   dataforrestEventsV3SourceAdapterManifest,
 ]);
 

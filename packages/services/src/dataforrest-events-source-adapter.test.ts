@@ -116,9 +116,9 @@ function cursor(
   adapterVersion: string = DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
 ) {
   return {
-    sourceInstanceId: `source-${provider}`,
-    sourceRevisionId: `source-revision-${provider}`,
-    sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+      sourceInstanceId: `source-${provider}`,
+      sourceRevisionId: `source-revision-${provider}`,
+      sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
     adapterVersion,
     cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     cursorGeneration: 1,

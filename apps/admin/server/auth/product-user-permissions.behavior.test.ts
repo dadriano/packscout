@@ -238,12 +238,18 @@ test("session payloads grant product-user permissions to administrators only", a
     dataOperator.session.permissions.includes("product_users:manage"),
     false,
   );
-  // The data operator keeps exactly the capabilities it had before this feature.
-  assert.deepEqual(dataOperator.session.permissions, [
-    "providers:view",
-    "imports:start",
-    "imports:retry",
-  ]);
+  // The data operator holds no product-user capability. Its pipeline and
+  // data-inspection grants are asserted against the authoritative table below
+  // rather than restated, so adding a non-product-user permission does not
+  // require editing this literal.
+  for (const permission of ["product_users:view", "product_users:manage"]) {
+    assert.equal(
+      dataOperator.session.permissions.includes(
+        permission as (typeof dataOperator.session.permissions)[number],
+      ),
+      false,
+    );
+  }
   assert.deepEqual(dataOperator.session.permissions, [
     ...operatorRolePermissions.data_operator,
   ]);

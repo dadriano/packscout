@@ -16,8 +16,9 @@ import {
 import {
   SourceConnectionConfigurationService,
 } from "./source-connection-configuration-service.ts";
-import { ProviderSourceAdminServiceError } from
-  "./provider-source-admin-service-types.ts";
+import {
+  ProviderSourceAdminServiceError,
+} from "./provider-source-admin-service-types.ts";
 import type {
   SourceConnectionConfigurationAdminRepository,
   SourceConnectionRevisionSecretRecord,
@@ -354,7 +355,7 @@ test("adapter upgrade revalidates and re-encrypts a v1 credential as an untested
   );
 });
 
-test("adapter upgrade rejects a revoked latest revision before decrypting it", async () => {
+test("adapter upgrade rejects revoked revisions before decrypting stored credentials", async () => {
   const { repository, service } = fixture([revisionTwoId]);
   repository.revisions.set(revisionOneId, {
     organizationId,
@@ -385,13 +386,15 @@ test("adapter upgrade rejects a revoked latest revision before decrypting it", a
         confirmation: "UPGRADE_ADAPTER",
       },
     ),
-    (error) => error instanceof ProviderSourceAdminServiceError &&
-      error.code === "SOURCE_CONFLICT" && error.status === 409,
+    (error: unknown) =>
+      error instanceof ProviderSourceAdminServiceError &&
+      error.code === "SOURCE_CONFLICT" &&
+      error.status === 409,
   );
   assert.equal(repository.adapterRevisionInput, null);
 });
 
-test("adapter upgrade rejects an incompatible draft source pin before decrypting", async () => {
+test("adapter upgrade rejects incompatible source pins before decrypting stored credentials", async () => {
   const { repository, service } = fixture([revisionTwoId]);
   repository.incompatibleSourcePins = true;
   repository.revisions.set(revisionOneId, {
@@ -423,13 +426,15 @@ test("adapter upgrade rejects an incompatible draft source pin before decrypting
         confirmation: "UPGRADE_ADAPTER",
       },
     ),
-    (error) => error instanceof ProviderSourceAdminServiceError &&
-      error.code === "SOURCE_CONFLICT" && error.status === 409,
+    (error: unknown) =>
+      error instanceof ProviderSourceAdminServiceError &&
+      error.code === "SOURCE_CONFLICT" &&
+      error.status === 409,
   );
   assert.equal(repository.adapterRevisionInput, null);
 });
 
-test("connection activation rejects an incompatible draft source pin", async () => {
+test("normal activation rejects candidates pinned against dependent source adapters", async () => {
   const { repository, service } = fixture();
   await service.createProfile(
     { organizationId, actorKey: "operator-admin" },
@@ -449,8 +454,10 @@ test("connection activation rejects an incompatible draft source pin", async () 
       profileId,
       { expectedRevisionId: revisionOneId },
     ),
-    (error) => error instanceof ProviderSourceAdminServiceError &&
-      error.code === "SOURCE_CONFLICT" && error.status === 409,
+    (error: unknown) =>
+      error instanceof ProviderSourceAdminServiceError &&
+      error.code === "SOURCE_CONFLICT" &&
+      error.status === 409,
   );
   assert.equal(repository.activationInput, null);
 });

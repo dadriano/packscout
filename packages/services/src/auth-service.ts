@@ -2,6 +2,7 @@ import { permissionsForOperatorRole } from "@packscout/contracts";
 import type {
   AuthSessionResponse,
   ListOperatorsQuery,
+  NormalizedDirectProvisionOperatorRequest,
   NormalizedInviteOperatorRequest,
   NormalizedUpdateOperatorRequest,
   OperatorListResponse,
@@ -595,6 +596,77 @@ export class AuthService {
   ): Promise<OperatorListResponse> {
     assertAdmin(actor);
     return this.dependencies.repository.listOperators(actor.organizationId, query);
+  }
+
+  /**
+   * Directly provisions an active operator with an administrator-supplied
+   * initial password. The public contract owns password policy; this service
+   * owns hashing, organization scoping, the active initial state, and the
+   * secret-free audit trail. No credential material leaves this method.
+   */
+  async provisionOperator(
+    actor: AuthenticatedActor,
+    input: NormalizedDirectProvisionOperatorRequest,
+  ): Promise<OperatorMutationResponse> {
+    assertAdmin(actor);
+    const now = this.dependencies.clock.now();
+    const passwordHash = await this.dependencies.passwordHasher.hash(
+      input.password,
+    );
+    const result = await this.dependencies.repository.provisionOperator({
+      id: this.dependencies.random.id(),
+      organizationId: actor.organizationId,
+      emailNormalized: input.email,
+      displayName: input.displayName,
+      passwordHash,
+      role: input.role,
+      state: "active",
+      now,
+    });
+    if (result.kind === "email_conflict") {
+      try {
+        await this.dependencies.audit.append({
+          organizationId: actor.organizationId,
+          actorId: actor.operatorId,
+          action: "operator.provision",
+          subjectId: null,
+          outcome: "failure",
+          occurredAt: now,
+          metadata: { reason: "email_conflict" },
+        });
+      } catch {
+        this.#reportAuditFailure({
+          action: "operator.provision",
+          outcome: "failure",
+          afterCommit: false,
+        });
+      }
+      throw new AuthServiceError(
+        "OPERATOR_EMAIL_CONFLICT",
+        "An operator with that email already exists.",
+        409,
+      );
+    }
+    try {
+      await this.dependencies.audit.append({
+        organizationId: actor.organizationId,
+        actorId: actor.operatorId,
+        action: "operator.provision",
+        subjectId: result.operator.id,
+        outcome: "success",
+        occurredAt: now,
+        metadata: { role: result.operator.role },
+      });
+    } catch {
+      // The account is already active and durable. An audit outage is reported
+      // independently so a retry cannot be invited into an email conflict.
+      this.#reportAuditFailure({
+        action: "operator.provision",
+        outcome: "success",
+        afterCommit: true,
+      });
+    }
+    return { operator: result.operator };
   }
 
   /**

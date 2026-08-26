@@ -28,7 +28,7 @@ import type { PackScoutAuthStatus } from "@/components/auth/AuthContext.client";
  */
 
 export type LandingAccessAction =
-  | Readonly<{ kind: "sign_in"; label: string; note: string }>
+  | Readonly<{ kind: "sign_in"; label: string; note?: undefined }>
   | Readonly<{ kind: "busy"; label: string; note: string }>
   | Readonly<{ kind: "enter"; label: string; href: "/"; note: string }>
   | Readonly<{ kind: "unavailable"; label: string; note: string }>;
@@ -41,9 +41,6 @@ export function presentLandingAccessAction(
       return {
         kind: "sign_in",
         label: "Sign in to request access",
-        note:
-          "Opens PackScout's hosted wallet and social sign-in. Your sign-in " +
-          "is the access request — there is nothing else to fill in.",
       };
     case "loading":
       return {

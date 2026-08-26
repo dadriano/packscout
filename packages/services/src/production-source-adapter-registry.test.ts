@@ -17,10 +17,13 @@ import { SourceAdapterRegistryError } from "./source-adapter-registry.ts";
 test("production registry retains v1/v2 pins and selects DataForrest v3 for new work", () => {
   const registry = createProductionSourceAdapterRegistry();
   assert.deepEqual(registry.keys(), [DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY]);
-  assert.equal(productionSourceAdapterManifests.length, 1);
-  assert.equal(
-    productionSourceAdapterManifests[0]?.adapterVersion,
-    DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+  assert.deepEqual(
+    productionSourceAdapterManifests.map(({ adapterVersion }) => adapterVersion),
+    [
+      DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+      DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+      DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+    ],
   );
   const v1 = launchProviderKeys.map((provider) => registry.resolve(
     DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
