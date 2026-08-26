@@ -13,6 +13,7 @@ Related: [closed-beta operations](closed-beta-operations.md) for the access deci
 | Welcome | The welcome dispatcher, at an identity's first admitted session | The product user, once ever |
 | Operator password reset | An operator's own request on the admin sign-in screen | The operator's address |
 | Operator invitation | An administrator creating an operator | The invited address |
+| Operator account created | An administrator directly creating an active operator with an initial password | The new operator's address; the message links to admin sign-in and says to obtain the initial password through a separate secure channel |
 
 Nothing is sent inline. Every message is enqueued as a durable intent and delivered by the worker's outbox drain, so a provider outage delays messages instead of losing them.
 
@@ -41,7 +42,7 @@ None of these belong in a browser-visible variable. No value here is prefixed `N
 | Variable | Default | What it does | Missing or wrong |
 |---|---|---|---|
 | `PACKSCOUT_PUBLIC_ORIGIN` | none | Absolute origin for product links in user-facing messages | Rendering reports an explicit failure rather than emitting a relative or broken link; the intent rests terminally failed |
-| `PACKSCOUT_ADMIN_PUBLIC_ORIGIN` | none | Absolute origin for admin links (alerts, reset, invitations) | As above |
+| `PACKSCOUT_ADMIN_PUBLIC_ORIGIN` | none | Absolute origin for admin links (alerts, reset, invitations, direct-account notices) | As above |
 
 ### Alert routing — worker and admin server
 
@@ -80,7 +81,7 @@ The dispatcher reaches the product backend through `PACKSCOUT_ADMIN_DIRECTORY_UR
 
 | Variable | Default | What it does | Missing or wrong |
 |---|---|---|---|
-| `PACKSCOUT_EMAIL_LINK_TOKEN_SECRET` | none | **Secret**, at least 32 bytes. Keys the stored verifier hashes | Password reset and operator creation both report unavailable (503) rather than creating an account nobody can be told about |
+| `PACKSCOUT_EMAIL_LINK_TOKEN_SECRET` | none | **Secret**, at least 32 bytes. Keys the stored verifier hashes | Password reset and operator invitation creation both report unavailable (503) rather than creating an account nobody can be told about |
 | `PACKSCOUT_EMAIL_LINK_RESET_LIFETIME_MS` | 1 hour | Password-reset link lifetime | |
 | `PACKSCOUT_EMAIL_LINK_INVITATION_LIFETIME_MS` | 7 days | Invitation link lifetime | |
 | `PACKSCOUT_EMAIL_LINK_ISSUANCE_WINDOW_MS` / `_BLOCK_MS` | 15 min | Rate-limit window and block duration | |
@@ -125,13 +126,13 @@ Set `PACKSCOUT_ALERT_EMAIL_RECIPIENTS` on the worker and admin server and restar
 | Welcome | `PACKSCOUT_WELCOME_EMAIL_ENABLED=0` |
 | Everything | `PACKSCOUT_EMAIL_DELIVERY_MODE=disabled` — intents are still recorded, as `skipped` |
 
-Access decisions and the operator account links have no individual switch: they are consequences of an operator action, and silently disabling them would leave people waiting for a message that is never coming. Use `disabled` mode if you must stop all sending.
+Access decisions and operator account messages have no individual switch: they are consequences of an operator action, and silently disabling them would leave people waiting for a message that is never coming. Use `disabled` mode if you must stop all sending.
 
 ## Local development
 
 Set `PACKSCOUT_EMAIL_DELIVERY_MODE=console`. Every message kind then renders to the local log at delivery time — subject, plain-text body, and HTML — and the intent is recorded as `skipped` with reason `console_mode`. No provider account, no token, and no real send is involved, and the admin's Messages area still shows the full intent and attempt history. This is the supported way to see exactly what any message would say.
 
-To exercise a specific kind: operational alerts by triggering a pipeline failure; access decisions and welcome through the admin Users area and a product sign-in; reset and invitation from the admin sign-in screen and the Operators area.
+To exercise a specific kind: operational alerts by triggering a pipeline failure; access decisions and welcome through the admin Users area and a product sign-in; reset from the admin sign-in screen; and invitation or direct account creation from the Operators area. The direct-account message always links to `/login`; its stored rendering input contains only the recipient address, never an initial password or password hash.
 
 ## Adapters
 

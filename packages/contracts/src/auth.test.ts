@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  directProvisionOperatorRequestSchema,
   inviteOperatorRequestSchema,
   loginRequestSchema,
+  operatorAccountCreatedNotificationFailureReasons,
   operatorAssignableStates,
   operatorInvitationAcceptanceRequestSchema,
   operatorStates,
@@ -46,6 +48,37 @@ test("operator mutations reject weak credentials and unknown executable fields",
     }).success,
     false,
   );
+  const direct = directProvisionOperatorRequestSchema.parse({
+    email: "  DIRECT@PackScout.Test ",
+    displayName: " Direct Operator ",
+    password: "a secure initial password",
+    role: "data_operator",
+  });
+  assert.deepEqual(direct, {
+    email: "direct@packscout.test",
+    displayName: "Direct Operator",
+    password: "a secure initial password",
+    role: "data_operator",
+  });
+  assert.equal(
+    directProvisionOperatorRequestSchema.safeParse({
+      email: "operator@packscout.test",
+      displayName: "Operator",
+      password: "too short",
+      role: "data_operator",
+    }).success,
+    false,
+  );
+  assert.equal(
+    directProvisionOperatorRequestSchema.safeParse({
+      email: "operator@packscout.test",
+      displayName: "Operator",
+      password: "a secure initial password",
+      role: "data_operator",
+      command: "grant-all",
+    }).success,
+    false,
+  );
   assert.equal(
     updateOperatorRequestSchema.safeParse({
       role: "admin",
@@ -54,6 +87,12 @@ test("operator mutations reject weak credentials and unknown executable fields",
     false,
   );
   assert.equal(updateOperatorRequestSchema.safeParse({}).success, false);
+  assert.deepEqual(operatorAccountCreatedNotificationFailureReasons, [
+    "EMAIL_OUTBOX_UNAVAILABLE",
+    "EMAIL_OUTBOX_SOURCE_BACKLOG_EXCEEDED",
+    "EMAIL_OUTBOX_REQUEST_INVALID",
+    "OPERATOR_ACCOUNT_CREATED_EMAIL_UNCONFIGURED",
+  ]);
 });
 
 test("product-user administration is granted to administrators only", () => {

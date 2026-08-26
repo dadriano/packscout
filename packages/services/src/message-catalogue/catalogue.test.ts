@@ -16,12 +16,14 @@ import {
   renderAccessDeclinedMessage,
   renderOperationalAlertMessage,
   renderOperationalAlertRecoveryMessage,
+  renderOperatorAccountCreatedMessage,
   renderOperatorInvitationMessage,
   renderOperatorPasswordResetMessage,
   renderWelcomeMessage,
   type CatalogueEmailMessageKind,
   type EmailMessageCharacter,
   type OperationalAlertMessageInput,
+  type OperatorAccountCreatedMessageInput,
 } from "./catalogue.ts";
 
 const origins: MessageCatalogueOrigins = {
@@ -75,6 +77,10 @@ function renderAll(): Record<CatalogueEmailMessageKind, EmailMessageRenderResult
       },
       origins,
     ),
+    operator_account_created: renderOperatorAccountCreatedMessage(
+      { toEmail: "new-operator@example.com" },
+      origins,
+    ),
   };
 }
 
@@ -121,6 +127,8 @@ const RESET_REASON =
   "You are receiving it because a password reset was requested for the PackScout admin account at this address.";
 const INVITATION_REASON =
   "You are receiving it because an administrator invited this address to operate the PackScout admin.";
+const ACCOUNT_CREATED_REASON =
+  "You are receiving it because an administrator created an active PackScout admin operator account for this address.";
 
 function footer(reason: string): string {
   return [
@@ -158,6 +166,7 @@ test("the catalogue registry declares every kind transactional with a stable id"
       welcome: "product_user",
       operator_password_reset: "operator",
       operator_invitation: "operator",
+      operator_account_created: "operator",
     },
   );
 });
@@ -330,6 +339,54 @@ test("operator invitation renders its stable snapshot", () => {
   );
 });
 
+test("directly created operator account renders a credential-free stable snapshot", () => {
+  const message = renderedOrThrow(renderAll().operator_account_created);
+  assert.equal(message.kind, "operator_account_created");
+  assert.equal(message.toEmail, "new-operator@example.com");
+  assert.equal(message.subject, "Your PackScout admin account is ready");
+  assert.equal(
+    message.textBody,
+    [
+      "Your PackScout admin account is ready",
+      "An administrator created an active PackScout admin operator account for this address. You can sign in now.",
+      "For security, your initial password is not included in this email. Obtain it from the administrator through a separate secure channel.",
+      "Sign in to the PackScout admin:\nhttps://admin.packscout.io/login",
+      "If you were not expecting this account, contact the PackScout administrator who provided your sign-in details.",
+      footer(ACCOUNT_CREATED_REASON),
+    ].join("\n\n"),
+  );
+  assert.equal(
+    sha256(message.htmlBody),
+    "91791c61f2d702b2dbb10b9fb6f28b594e80d6e1ecc67ee5af4bb8f1a2a0ce46",
+  );
+  assert.deepEqual(urlsInText(message.textBody), new Set(["https://admin.packscout.io/login"]));
+  assert.doesNotMatch(message.textBody, /password(?:Hash)?\s*[:=]/i);
+  assert.doesNotMatch(message.htmlBody, /password(?:Hash)?\s*[:=]/i);
+});
+
+test("direct account-created input refuses credential-bearing or unsupported fields", () => {
+  for (const input of [
+    {
+      toEmail: "new-operator@example.com",
+      initialPassword: "must-not-enter-the-outbox",
+    },
+    {
+      toEmail: "new-operator@example.com",
+      passwordHash: "must-not-enter-the-outbox",
+    },
+  ]) {
+    const result = renderOperatorAccountCreatedMessage(
+      input as OperatorAccountCreatedMessageInput,
+      origins,
+    );
+    assert.equal(result.status, "failed");
+    if (result.status === "failed") {
+      assert.equal(result.errorCode, EMAIL_MESSAGE_INPUT_INVALID_ERROR_CODE);
+      assert.doesNotMatch(result.reason, /must-not-enter-the-outbox/);
+    }
+  }
+});
+
 test("every kind renders identical output for identical input", () => {
   assert.deepEqual(renderAll(), renderAll());
 });
@@ -499,6 +556,10 @@ test("a missing public origin reports an explicit failure, not a broken link", (
       },
       noAdmin,
     ),
+    renderOperatorAccountCreatedMessage(
+      { toEmail: "new-operator@example.com" },
+      noAdmin,
+    ),
   ];
   for (const result of failures) {
     assert.ok(result.status === "failed");
@@ -557,6 +618,10 @@ test("invalid or missing input values report explicit failures", () => {
         invitationLinkPath: "/invitations/accept?lookup=9a2d",
         linkExpiresAt: "2026-08-22T10:00:00.000Z",
       },
+      origins,
+    ),
+    renderOperatorAccountCreatedMessage(
+      { toEmail: "not-an-address" },
       origins,
     ),
   ];

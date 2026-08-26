@@ -37,6 +37,7 @@ export const CATALOGUE_EMAIL_MESSAGE_KINDS = [
   "welcome",
   "operator_password_reset",
   "operator_invitation",
+  "operator_account_created",
 ] as const;
 
 export type CatalogueEmailMessageKind =
@@ -118,6 +119,13 @@ export const emailMessageCatalogue: Readonly<
     reasonForReceiving:
       "You are receiving it because an administrator invited this address to operate the PackScout admin.",
   },
+  operator_account_created: {
+    kind: "operator_account_created",
+    audience: "operator",
+    character: { transactional: true },
+    reasonForReceiving:
+      "You are receiving it because an administrator created an active PackScout admin operator account for this address.",
+  },
 };
 
 /** Alert titles share the operational notification contract's title bound. */
@@ -190,6 +198,15 @@ export interface OperatorInvitationMessageInput {
   readonly invitationLinkPath: string;
   /** When the link stops working, as an ISO-8601 instant. */
   readonly linkExpiresAt: string;
+}
+
+/**
+ * The direct-provisioning notice needs only its recipient. Credential material
+ * is deliberately absent: the initial password is shared through a separate
+ * secure channel and must never enter the outbox rendering input.
+ */
+export interface OperatorAccountCreatedMessageInput {
+  readonly toEmail: string;
 }
 
 // --- Shared presentation: one visual and verbal identity for every message.
@@ -415,6 +432,35 @@ function validatedProductLink(
   return href === null
     ? { failure: invalidInput("The product link path is not valid.") }
     : { value: href };
+}
+
+function validatedOperatorAccountCreatedInput(
+  input: unknown,
+): Validated<OperatorAccountCreatedMessageInput> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return {
+      failure: invalidInput(
+        "The operator account-created message input is missing or invalid.",
+      ),
+    };
+  }
+  const keys = Object.keys(input);
+  if (keys.length !== 1 || keys[0] !== "toEmail") {
+    return {
+      failure: invalidInput(
+        "The operator account-created message input contains unsupported fields.",
+      ),
+    };
+  }
+  const toEmail = (input as { readonly toEmail?: unknown }).toEmail;
+  if (typeof toEmail !== "string") {
+    return {
+      failure: invalidInput(
+        "The operator account-created message recipient is missing or invalid.",
+      ),
+    };
+  }
+  return { value: { toEmail } };
 }
 
 interface ValidatedAlertValues {
@@ -747,6 +793,43 @@ export function renderOperatorInvitationMessage(
       ),
       paragraphBlock(
         "If you were not expecting this invitation, you can ignore this message; the account stays inactive until the link is used.",
+      ),
+    ],
+  });
+}
+
+/**
+ * Confirms that an administrator directly provisioned an active operator.
+ * The sign-in destination is fixed and credential-free; the initial password
+ * is obtained separately through a secure channel chosen by the administrator.
+ */
+export function renderOperatorAccountCreatedMessage(
+  input: OperatorAccountCreatedMessageInput,
+  origins: MessageCatalogueOrigins,
+): EmailMessageRenderResult {
+  const validatedInput = validatedOperatorAccountCreatedInput(input);
+  if ("failure" in validatedInput) return validatedInput.failure;
+  const signInHref = validatedAdminLink(
+    origins.adminOrigin,
+    "/login",
+    "admin sign-in link",
+  );
+  if ("failure" in signInHref) return signInHref.failure;
+  return renderThroughLayout({
+    kind: "operator_account_created",
+    toEmail: validatedInput.value.toEmail,
+    subject: "Your PackScout admin account is ready",
+    heading: "Your PackScout admin account is ready",
+    blocks: [
+      paragraphBlock(
+        "An administrator created an active PackScout admin operator account for this address. You can sign in now.",
+      ),
+      paragraphBlock(
+        "For security, your initial password is not included in this email. Obtain it from the administrator through a separate secure channel.",
+      ),
+      linkActionBlock("Sign in to the PackScout admin", signInHref.value),
+      paragraphBlock(
+        "If you were not expecting this account, contact the PackScout administrator who provided your sign-in details.",
       ),
     ],
   });

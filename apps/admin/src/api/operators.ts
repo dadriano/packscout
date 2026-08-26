@@ -1,4 +1,6 @@
 import type {
+  DirectProvisionOperatorRequest,
+  DirectProvisionOperatorResponse,
   InviteOperatorRequest,
   OperatorInvitationStatus,
   OperatorListResponse,
@@ -47,6 +49,22 @@ export function inviteOperator(
 ): Promise<OperatorMutationResponse> {
   return requestJson<OperatorMutationResponse>(
     "/operators",
+    { method: "POST", json: input },
+    fetcher,
+  );
+}
+
+/**
+ * Creates an active operator with an administrator-supplied initial password.
+ * The server never returns the password and reports email enqueueing as a
+ * separate outcome after the account has committed.
+ */
+export function createOperatorWithPassword(
+  input: DirectProvisionOperatorRequest,
+  fetcher?: Fetcher,
+): Promise<DirectProvisionOperatorResponse> {
+  return requestJson<DirectProvisionOperatorResponse>(
+    "/operators/direct",
     { method: "POST", json: input },
     fetcher,
   );

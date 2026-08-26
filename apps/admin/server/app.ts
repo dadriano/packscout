@@ -11,6 +11,7 @@ import {
   createOperatorsRouter,
   type OperatorInvitationRuntime,
 } from "./routes/operators.ts";
+import type { OperatorAccountCreatedNotifier } from "./operator-account-created-notice.ts";
 import { createOperatorInvitationsRouter } from "./routes/operator-invitations.ts";
 import { createProvidersRouter, type ProvidersRouterDependencies } from "./routes/providers.ts";
 import {
@@ -123,6 +124,7 @@ export interface AdminAppDependencies {
   >;
   passwordReset?: Omit<PasswordResetRouterDependencies, "sameOrigin">;
   operatorInvitations?: OperatorInvitationRuntime;
+  operatorAccountCreatedNotifier?: OperatorAccountCreatedNotifier;
 }
 
 const apiNotFound: RequestHandler = (_request, response) => {
@@ -204,6 +206,7 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         cookiePolicy,
         sameOrigin,
         invitations: dependencies.operatorInvitations,
+        accountCreatedNotifier: dependencies.operatorAccountCreatedNotifier,
       }),
     );
     if (dependencies.providers) {

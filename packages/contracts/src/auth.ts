@@ -140,6 +140,21 @@ export const inviteOperatorRequestSchema = z
   })
   .strict();
 
+/**
+ * Directly provisions an active operator with an administrator-chosen initial
+ * password. This is intentionally separate from invitation creation so each
+ * public boundary stays strict: invitations refuse passwords, while direct
+ * provisioning requires one that meets the managed credential policy.
+ */
+export const directProvisionOperatorRequestSchema = z
+  .object({
+    email: emailSchema,
+    displayName: displayNameSchema,
+    password: managedPasswordSchema,
+    role: z.enum(operatorRoles),
+  })
+  .strict();
+
 export const updateOperatorRequestSchema = z
   .object({
     displayName: displayNameSchema.optional(),
@@ -221,11 +236,44 @@ export interface OperatorMutationResponse {
   operator: OperatorSummary;
 }
 
+export const operatorAccountCreatedNotificationFailureReasons = [
+  "EMAIL_OUTBOX_UNAVAILABLE",
+  "EMAIL_OUTBOX_SOURCE_BACKLOG_EXCEEDED",
+  "EMAIL_OUTBOX_REQUEST_INVALID",
+  "OPERATOR_ACCOUNT_CREATED_EMAIL_UNCONFIGURED",
+] as const;
+
+export type OperatorAccountCreatedNotificationFailureReason =
+  (typeof operatorAccountCreatedNotificationFailureReasons)[number];
+
+export type OperatorAccountCreatedNotificationOutcome =
+  | { status: "enqueued"; deduplicated: boolean }
+  | {
+      status: "failed";
+      reason: OperatorAccountCreatedNotificationFailureReason;
+    };
+
+/**
+ * Direct provisioning commits the account before enqueueing its informational
+ * email. The explicit notification outcome keeps a durable account from being
+ * misreported as failed when only its follow-up email could not be queued.
+ */
+export interface DirectProvisionOperatorResponse
+  extends OperatorMutationResponse {
+  notification: OperatorAccountCreatedNotificationOutcome;
+}
+
 export type LoginRequest = z.input<typeof loginRequestSchema>;
 export type NormalizedLoginRequest = z.output<typeof loginRequestSchema>;
 export type InviteOperatorRequest = z.input<typeof inviteOperatorRequestSchema>;
 export type NormalizedInviteOperatorRequest = z.output<
   typeof inviteOperatorRequestSchema
+>;
+export type DirectProvisionOperatorRequest = z.input<
+  typeof directProvisionOperatorRequestSchema
+>;
+export type NormalizedDirectProvisionOperatorRequest = z.output<
+  typeof directProvisionOperatorRequestSchema
 >;
 export type UpdateOperatorRequest = z.input<typeof updateOperatorRequestSchema>;
 export type NormalizedUpdateOperatorRequest = z.output<
