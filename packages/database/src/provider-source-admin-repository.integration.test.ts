@@ -48,6 +48,31 @@ async function assertPending(promise: Promise<unknown>): Promise<void> {
   assert.equal(state, "pending");
 }
 
+function adapterUpgradeInput(
+  acceptanceFixture: ProviderSourceAcceptanceFixture,
+  revisionId: string,
+) {
+  return {
+    organizationId: acceptanceFixture.organizationId,
+    connectionProfileId: acceptanceFixture.connectionProfileId,
+    expectedRevisionId: acceptanceFixture.connectionRevisionId,
+    expectedSourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+    revisionId,
+    revisionNumber: 2,
+    sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
+    sourceAdapterVersion: "dataforrest-events-adapter-v2",
+    encryptedConfiguration: {
+      ciphertext: new Uint8Array(32).fill(2),
+      nonce: new Uint8Array(12).fill(3),
+      authTag: new Uint8Array(16).fill(4),
+      keyVersion: 1,
+    },
+    configurationFingerprint: "2".repeat(64),
+    actorKey: "operator-admin",
+    createdAt: new Date("2026-08-21T12:10:00.000Z"),
+  } as const;
+}
+
 before(async () => {
   fixture = await createProviderSourceAcceptanceFixture("admin-lifecycle");
   source = await createAcceptanceProviderSource(fixture, {
@@ -290,6 +315,225 @@ test("connection adapter upgrade creates one fenced cross-version candidate", as
     );
   } finally {
     await isolated.close();
+  }
+});
+
+test("connection adapter upgrade rejects a revoked latest revision", async () => {
+  const isolated = await createProviderSourceAcceptanceFixture(
+    "adapter-upgrade-revoked",
+  );
+  try {
+    await isolated.database.source_connection_revisions.update({
+      where: { id: isolated.connectionRevisionId },
+      data: {
+        state: "revoked",
+        revoked_at: new Date("2026-08-21T12:09:00.000Z"),
+        revoked_by_actor_key: "operator-admin",
+      },
+    });
+    const connections = new SourceConnectionAdminRepository(isolated.database);
+    const candidateId = randomUUID();
+
+    await assert.rejects(
+      connections.addConnectionAdapterRevision(
+        adapterUpgradeInput(isolated, candidateId),
+      ),
+      (error) =>
+        error instanceof PersistenceError && error.code === "SOURCE_FENCED",
+    );
+    assert.equal(await isolated.database.source_connection_revisions.count({
+      where: { id: candidateId },
+    }), 0);
+    assert.equal(await isolated.database.audit_events.count({
+      where: {
+        organization_id: isolated.organizationId,
+        action: "source_connection.upgrade_adapter",
+      },
+    }), 0);
+  } finally {
+    await isolated.close();
+  }
+});
+
+test("connection adapter upgrade rejects draft, active, and paused legacy source pins", async () => {
+  for (const sourceState of ["draft", "active", "paused"] as const) {
+    const isolated = await createProviderSourceAcceptanceFixture(
+      `adapter-upgrade-${sourceState}`,
+    );
+    try {
+      const pinnedSource = await createAcceptanceProviderSource(isolated, {
+        platformKey: "courtyard",
+        displayName: `Courtyard ${sourceState}`,
+        mapperKey: "courtyard-provider-observation",
+        identityNamespaceKey: "courtyard-v1",
+        intervalSeconds: 60,
+        hashCharacter:
+          sourceState === "draft" ? "b" : sourceState === "active" ? "c" : "d",
+      });
+      if (sourceState !== "draft") {
+        await activateAcceptanceRuntime(
+          isolated.database,
+          isolated,
+          pinnedSource,
+          ACCEPTANCE_CREATED_AT,
+        );
+      }
+      if (sourceState === "paused") {
+        await isolated.database.provider_source_instances.update({
+          where: { id: pinnedSource.sourceInstanceId },
+          data: {
+            state: "paused",
+            paused_at: new Date("2026-08-21T12:09:00.000Z"),
+          },
+        });
+      }
+      const connections = new SourceConnectionAdminRepository(
+        isolated.database,
+      );
+      assert.equal(await connections.hasIncompatibleSourceAdapterPins({
+        organizationId: isolated.organizationId,
+        connectionProfileId: isolated.connectionProfileId,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      }), true);
+      const candidateId = randomUUID();
+
+      await assert.rejects(
+        connections.addConnectionAdapterRevision(
+          adapterUpgradeInput(isolated, candidateId),
+        ),
+        (error) =>
+          error instanceof PersistenceError && error.code === "SOURCE_FENCED",
+      );
+      assert.equal(await isolated.database.source_connection_revisions.count({
+        where: { id: candidateId },
+      }), 0);
+    } finally {
+      await isolated.close();
+    }
+  }
+});
+
+test("connection adapter upgrade ignores disabled and replaced legacy source pins", async () => {
+  for (const sourceState of ["disabled", "replaced"] as const) {
+    const isolated = await createProviderSourceAcceptanceFixture(
+      `adapter-upgrade-${sourceState}`,
+    );
+    try {
+      const pinnedSource = await createAcceptanceProviderSource(isolated, {
+        platformKey: "courtyard",
+        displayName: `Courtyard ${sourceState}`,
+        mapperKey: "courtyard-provider-observation",
+        identityNamespaceKey: "courtyard-v1",
+        intervalSeconds: 60,
+        hashCharacter: sourceState === "disabled" ? "e" : "f",
+      });
+      await isolated.database.provider_source_instances.update({
+        where: { id: pinnedSource.sourceInstanceId },
+        data: sourceState === "disabled"
+          ? {
+            state: "disabled",
+            disabled_at: new Date("2026-08-21T12:09:00.000Z"),
+          }
+          : {
+            state: "replaced",
+            replaced_at: new Date("2026-08-21T12:09:00.000Z"),
+          },
+      });
+      const connections = new SourceConnectionAdminRepository(
+        isolated.database,
+      );
+      assert.equal(await connections.hasIncompatibleSourceAdapterPins({
+        organizationId: isolated.organizationId,
+        connectionProfileId: isolated.connectionProfileId,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      }), false);
+      const candidateId = randomUUID();
+
+      await connections.addConnectionAdapterRevision(
+        adapterUpgradeInput(isolated, candidateId),
+      );
+      assert.equal(await isolated.database.source_connection_revisions.count({
+        where: { id: candidateId },
+      }), 1);
+    } finally {
+      await isolated.close();
+    }
+  }
+});
+
+test("connection activation rejects candidates pinned against draft, active, and paused sources", async () => {
+  for (const sourceState of ["draft", "active", "paused"] as const) {
+    const isolated = await createProviderSourceAcceptanceFixture(
+      `adapter-activation-${sourceState}`,
+    );
+    try {
+      const connections = new SourceConnectionAdminRepository(isolated.database);
+      const candidateId = randomUUID();
+      await connections.addConnectionAdapterRevision(
+        adapterUpgradeInput(isolated, candidateId),
+      );
+      const pinnedSource = await createAcceptanceProviderSource(isolated, {
+        platformKey: "courtyard",
+        displayName: `Courtyard ${sourceState} activation pin`,
+        mapperKey: "courtyard-provider-observation",
+        identityNamespaceKey: "courtyard-v1",
+        intervalSeconds: 60,
+        hashCharacter:
+          sourceState === "draft" ? "7" : sourceState === "active" ? "8" : "9",
+      });
+      if (sourceState !== "draft") {
+        await activateAcceptanceRuntime(
+          isolated.database,
+          isolated,
+          pinnedSource,
+          new Date("2026-08-21T12:11:00.000Z"),
+        );
+      }
+      if (sourceState === "paused") {
+        await isolated.database.provider_source_instances.update({
+          where: { id: pinnedSource.sourceInstanceId },
+          data: {
+            state: "paused",
+            paused_at: new Date("2026-08-21T12:11:30.000Z"),
+          },
+        });
+      }
+
+      await assert.rejects(
+        connections.activateTestedConnectionRevision({
+          organizationId: isolated.organizationId,
+          connectionProfileId: isolated.connectionProfileId,
+          connectionRevisionId: candidateId,
+          expectedHealthGeneration: 0n,
+          preservePinnedWork: true,
+          actorKey: "operator-admin",
+          activatedAt: new Date("2026-08-21T12:12:00.000Z"),
+        }),
+        (error) =>
+          error instanceof PersistenceError && error.code === "SOURCE_FENCED",
+      );
+      const [profile, candidate] = await Promise.all([
+        isolated.database.source_connection_profiles.findUniqueOrThrow({
+          where: { id: isolated.connectionProfileId },
+        }),
+        isolated.database.source_connection_revisions.findUniqueOrThrow({
+          where: { id: candidateId },
+        }),
+      ]);
+      assert.equal(
+        profile.active_revision_id,
+        sourceState === "draft" ? null : isolated.connectionRevisionId,
+      );
+      assert.equal(candidate.state, "candidate");
+      assert.equal(await isolated.database.audit_events.count({
+        where: {
+          organization_id: isolated.organizationId,
+          action: "source_connection.activate_normal_revision",
+        },
+      }), 0);
+    } finally {
+      await isolated.close();
+    }
   }
 });
 

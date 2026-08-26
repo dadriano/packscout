@@ -38,6 +38,11 @@ export interface SourceConnectionConfigurationAdminRepository {
     connectionProfileId: string;
     connectionRevisionId?: string;
   }>): Promise<SourceConnectionRevisionSecretRecord | null>;
+  hasIncompatibleSourceAdapterPins(input: Readonly<{
+    organizationId: string;
+    connectionProfileId: string;
+    sourceAdapterVersion: string;
+  }>): Promise<boolean>;
   addConnectionRevision(input: Readonly<{
     organizationId: string;
     connectionProfileId: string;

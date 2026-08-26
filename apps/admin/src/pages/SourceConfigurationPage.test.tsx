@@ -32,6 +32,7 @@ const sourceId = "00000000-0000-4000-8000-000000000004";
 const sourceRevisionId = "00000000-0000-4000-8000-000000000005";
 const scheduleRevisionId = "00000000-0000-4000-8000-000000000006";
 const blockedRevisionId = "00000000-0000-4000-8000-000000000007";
+const adapterCandidateRevisionId = "00000000-0000-4000-8000-000000000009";
 const fingerprint = "a".repeat(64);
 
 const catalog: ProviderSourceAdminCatalog = {
@@ -236,6 +237,7 @@ test("secret administrators get an explicit confirmed adapter-upgrade candidate 
         sourceAdapterVersion: "dataforrest-events-adapter-v2",
       },
     })),
+    sources: catalog.sources.map((source) => ({ ...source, state: "disabled" })),
   };
   stubFetch(context, () => jsonResponse({ catalog: upgradeCatalog }));
   const renderer = await renderPage(page(session(true)));
@@ -251,7 +253,86 @@ test("secret administrators get an explicit confirmed adapter-upgrade candidate 
     pageText(renderer),
     /decrypted only in the server.*re-encrypted for a new untested revision/u,
   );
+  assert.match(
+    pageText(renderer),
+    /In-place adapter upgrades are blocked while any draft, active, or paused source uses this profile/u,
+  );
+  assert.match(
+    pageText(renderer),
+    /Create a separate current-adapter profile and replace those sources instead/u,
+  );
+  assert.doesNotMatch(pageText(renderer), /Existing pinned work keeps/u);
   assert.ok(findButton(renderer, "Create adapter upgrade candidate"));
+});
+
+test("legacy source pins direct operators to a separate current-adapter profile", async (context) => {
+  const upgradeCatalog: ProviderSourceAdminCatalog = {
+    ...catalog,
+    providers: catalog.providers.map((provider) => ({
+      ...provider,
+      sourceRegistration: {
+        ...provider.sourceRegistration,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      },
+    })),
+  };
+  stubFetch(context, () => jsonResponse({ catalog: upgradeCatalog }));
+  const renderer = await renderPage(page(session(true)));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.match(pageText(renderer), /Use a separate profile for this adapter change/u);
+  assert.match(
+    pageText(renderer),
+    /Create a new current-adapter connection profile, test and activate it/u,
+  );
+  assert.match(
+    pageText(renderer),
+    /pause or disable each dependent source at a planned boundary/u,
+  );
+  assert.equal([...renderer.container.querySelectorAll("button")]
+    .some((button) =>
+      button.textContent?.trim() === "Create adapter upgrade candidate"
+    ), false);
+});
+
+test("legacy source pins disable activation of an incompatible adapter candidate", async (context) => {
+  const candidateCatalog: ProviderSourceAdminCatalog = {
+    ...catalog,
+    providers: catalog.providers.map((provider) => ({
+      ...provider,
+      sourceRegistration: {
+        ...provider.sourceRegistration,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      },
+    })),
+    connections: catalog.connections.map((connection) => ({
+      ...connection,
+      latestRevision: {
+        ...connection.latestRevision,
+        id: adapterCandidateRevisionId,
+        revisionNumber: 2,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+        state: "candidate",
+        test: {
+          ...connection.latestRevision.test,
+          jobId: adapterCandidateRevisionId,
+          connectionRevisionId: adapterCandidateRevisionId,
+        },
+      },
+    })),
+  };
+  stubFetch(context, () => jsonResponse({ catalog: candidateCatalog }));
+  const renderer = await renderPage(page(session(true)));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.equal(findButton(renderer, "Activate revision").disabled, true);
+  assert.match(pageText(renderer), /Use a separate profile for this adapter change/u);
+  assert.match(
+    pageText(renderer),
+    /In-place adapter changes are blocked while draft, active, or paused sources use this profile/u,
+  );
 });
 
 test("an old retired-revision episode remains recoverable through the healthy latest active revision", async (context) => {

@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   type PackscoutPrismaClient,
+  type PackscoutQueryClient,
 } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
@@ -23,6 +24,33 @@ function bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
 
 function safeAuditMetadata(revisionId: string): Prisma.InputJsonObject {
   return { connectionRevisionId: revisionId };
+}
+
+async function hasIncompatibleSourceAdapterPins(
+  database: PackscoutQueryClient,
+  input: Readonly<{
+    organizationId: string;
+    connectionProfileId: string;
+    sourceAdapterVersion: string;
+  }>,
+): Promise<boolean> {
+  const rows = await database.$queryRaw<Array<{ blocked: boolean }>>(Prisma.sql`
+    select exists (
+      select 1
+      from public.provider_source_instances source
+      join public.provider_source_revisions revision
+        on revision.id = source.active_revision_id
+       and revision.organization_id = source.organization_id
+       and revision.provider_id = source.provider_id
+       and revision.source_instance_id = source.id
+       and revision.connection_profile_id = source.connection_profile_id
+      where source.organization_id = cast(${input.organizationId} as uuid)
+        and source.connection_profile_id = cast(${input.connectionProfileId} as uuid)
+        and source.state in ('draft', 'active', 'paused')
+        and revision.source_adapter_version <> ${input.sourceAdapterVersion}
+    ) as blocked
+  `);
+  return rows[0]?.blocked ?? false;
 }
 
 export class SourceConnectionAdminRepository {
@@ -146,6 +174,14 @@ export class SourceConnectionAdminRepository {
     };
   }
 
+  hasIncompatibleSourceAdapterPins(input: Readonly<{
+    organizationId: string;
+    connectionProfileId: string;
+    sourceAdapterVersion: string;
+  }>): Promise<boolean> {
+    return hasIncompatibleSourceAdapterPins(this.database, input);
+  }
+
   async addConnectionRevision(input: Readonly<{
     organizationId: string;
     connectionProfileId: string;
@@ -262,14 +298,29 @@ export class SourceConnectionAdminRepository {
           connection_profile_id: input.connectionProfileId,
         },
         orderBy: [{ revision_number: "desc" }, { id: "desc" }],
-        select: { id: true, revision_number: true, source_adapter_version: true },
+        select: {
+          id: true,
+          revision_number: true,
+          source_adapter_version: true,
+          state: true,
+          revoked_at: true,
+        },
       });
       if (
         latest?.id !== input.expectedRevisionId ||
         latest.revision_number + 1 !== input.revisionNumber ||
         latest.source_adapter_version !== input.expectedSourceAdapterVersion ||
+        !["candidate", "active"].includes(latest.state) ||
+        latest.revoked_at !== null ||
         input.sourceAdapterVersion === input.expectedSourceAdapterVersion
       ) this.#fenced("Connection revision changed before adapter upgrade.");
+      if (await hasIncompatibleSourceAdapterPins(transaction, {
+        organizationId: input.organizationId,
+        connectionProfileId: input.connectionProfileId,
+        sourceAdapterVersion: input.sourceAdapterVersion,
+      })) {
+        this.#fenced("Sources are pinned to another adapter version.");
+      }
       await transaction.source_connection_revisions.create({
         data: {
           id: input.revisionId,
@@ -442,6 +493,13 @@ export class SourceConnectionAdminRepository {
       if (!revision || !profile) this.#tenantViolation();
       if (latestRevision?.id !== revision.id) {
         this.#fenced("Only the latest connection revision can activate.");
+      }
+      if (await hasIncompatibleSourceAdapterPins(transaction, {
+        organizationId: input.organizationId,
+        connectionProfileId: input.connectionProfileId,
+        sourceAdapterVersion: revision.source_adapter_version,
+      })) {
+        this.#fenced("Sources are pinned to another adapter version.");
       }
       const successfulTest = latestTestJob?.state === "succeeded"
         ? await transaction.source_connection_test_results.findFirst({
