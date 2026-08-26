@@ -255,6 +255,23 @@ test("connection adapter upgrade creates one fenced cross-version candidate", as
   );
   try {
     const connections = new SourceConnectionAdminRepository(isolated.database);
+    await isolated.database.$transaction(async (transaction) => {
+      await transaction.source_connection_revisions.update({
+        where: { id: isolated.connectionRevisionId },
+        data: {
+          state: "active",
+          activated_at: new Date("2026-08-21T12:09:00.000Z"),
+        },
+      });
+      await transaction.source_connection_profiles.update({
+        where: { id: isolated.connectionProfileId },
+        data: {
+          state: "active",
+          active_revision_id: isolated.connectionRevisionId,
+          updated_at: new Date("2026-08-21T12:09:00.000Z"),
+        },
+      });
+    });
     const candidateId = randomUUID();
     await connections.addConnectionAdapterRevision({
       organizationId: isolated.organizationId,
