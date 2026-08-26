@@ -291,6 +291,21 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
+function jsonNodeCount(root: unknown): number {
+  const pending: unknown[] = [root];
+  let count = 0;
+  while (pending.length > 0) {
+    const value = pending.pop();
+    count += 1;
+    if (Array.isArray(value)) {
+      pending.push(...value);
+    } else if (value !== null && typeof value === "object") {
+      pending.push(...Object.values(value));
+    }
+  }
+  return count;
+}
+
 function adapterWithClient(
   httpClient: PinnedProviderHttpClient,
   manifest: SourceAdapterManifestV1 =
@@ -1127,7 +1142,7 @@ test("adversarial structural limits reject before materializing the provider tre
         record_id: `node-limit-card-${recordIndex}`,
         data: {
           provider_label: `Node limit card ${recordIndex}`,
-          native_facts: Array.from({ length: 630 }, () => ({})),
+          native_facts: Array.from({ length: 790 }, () => ({})),
         },
       })),
       next_cursor: "node-limit-page-next",
@@ -1154,35 +1169,116 @@ test("adversarial structural limits reject before materializing the provider tre
   }
 });
 
-test("object-heavy 250-record pages remain valid near the global node bound", async () => {
+test("sanitized 4,730,013-byte page covers the observed Phygitals node shape", async () => {
   const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
   const records = Array.from({ length: 250 }, (_, recordIndex) => ({
     ...base,
+    platform: "phygitals" as const,
     record_id: `data-rich-card-${recordIndex}`,
     data: {
       ...base.data,
-      native_facts: Array.from({ length: 600 }, () => ({})),
+      native_facts: Array.from(
+        { length: recordIndex === 0 ? 929 : 718 },
+        () => ({}),
+      ),
+      sanitized_padding: "",
     },
   }));
-  assert.equal(records.length * 600 > 100_000, true);
-  const rawPage = JSON.stringify({
+  const page = {
     records,
     next_cursor: "data-rich-next",
     poll_after_seconds: 0,
+  };
+  const targetBytes = 4_730_013;
+  const unpaddedBytes = Buffer.byteLength(JSON.stringify(page), "utf8");
+  const paddingBytes = targetBytes - unpaddedBytes;
+  assert.equal(paddingBytes > 0, true);
+  const paddingPerRecord = Math.floor(paddingBytes / records.length);
+  const extraPaddingRecords = paddingBytes % records.length;
+  records.forEach((record, index) => {
+    record.data.sanitized_padding = "x".repeat(
+      paddingPerRecord + (index < extraPaddingRecords ? 1 : 0),
+    );
   });
-  assert.equal(
-    new TextEncoder().encode(rawPage).byteLength <= bounds.maximumResponseBytes,
-    true,
+  const rawPage = JSON.stringify(page);
+  assert.equal(Buffer.byteLength(rawPage, "utf8"), targetBytes);
+  assert.equal(jsonNodeCount(JSON.parse(rawPage)), 183_215);
+  const currentBounds = dataforrestEventsV1SourceAdapterManifest.requestBounds;
+  const adapter = adapterWithClient(
+    async () => new Response(rawPage),
+    dataforrestEventsV1SourceAdapterManifest,
   );
-  const adapter = adapterWithClient(async () => new Response(rawPage));
-  const operation = await pageOperation(runtime(), "courtyard", null);
+  const operation = await pageOperation(
+    runtime(),
+    "phygitals",
+    null,
+    currentBounds,
+    {
+      adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    },
+  );
   const capture = await successfulCapture(adapter, operation);
+  assert.equal(capture.measurements.responseBytes, targetBytes);
   const result = await interpretSourceAdapterPage(adapter, operation, capture);
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.value.normalizedPage.outcomes.length, 250);
   }
   operation.requestLease.close();
+});
+
+test("the 200,000-node boundary is accepted and one additional node is rejected", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const page = (additionalFirstRecordNodes: number) => ({
+    records: Array.from({ length: 250 }, (_, recordIndex) => ({
+      ...base,
+      record_id: `node-boundary-card-${recordIndex}`,
+      data: {
+        ...base.data,
+        native_facts: Array.from(
+          {
+            length: 785 +
+              (recordIndex === 0 ? additionalFirstRecordNodes : 0),
+          },
+          () => ({}),
+        ),
+      },
+    })),
+    next_cursor: "node-boundary-next",
+    poll_after_seconds: 0,
+  });
+  const acceptedPage = page(496);
+  const rejectedPage = page(497);
+  assert.equal(jsonNodeCount(acceptedPage), 200_000);
+  assert.equal(jsonNodeCount(rejectedPage), 200_001);
+  assert.equal(isBoundedDataforrestEventsPageV1(acceptedPage, 250), true);
+  assert.equal(isBoundedDataforrestEventsPageV1(rejectedPage, 250), false);
+
+  for (const [candidate, expected] of [
+    [acceptedPage, true],
+    [rejectedPage, false],
+  ] as const) {
+    const rawPage = JSON.stringify(candidate);
+    assert.equal(
+      Buffer.byteLength(rawPage, "utf8") < bounds.maximumResponseBytes,
+      true,
+    );
+    const adapter = adapterWithClient(async () => new Response(rawPage));
+    const operation = await pageOperation(runtime(), "courtyard", null);
+    const capture = await successfulCapture(adapter, operation);
+    const result = await interpretSourceAdapterPage(adapter, operation, capture);
+    assert.equal(result.ok, expected);
+    if (result.ok) {
+      assert.equal(result.value.normalizedPage.outcomes.length, 250);
+    } else {
+      assert.deepEqual(result.failure, {
+        disposition: "source_action_required",
+        code: "invalid_response",
+      });
+    }
+    operation.requestLease.close();
+  }
 });
 
 test("the sole v1 adapter captures valid pages above 4 MiB and rejects pages above 8 MiB", async () => {

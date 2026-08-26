@@ -219,7 +219,7 @@
   },
   "memoryMeasurement": {
     "version": "provider-source-page-memory-v1",
-    "measuredAt": "2026-08-26T15:31:50.781Z",
+    "measuredAt": "2026-08-26T18:30:03.766Z",
     "environment": {
       "node": "v22.22.3",
       "platform": "darwin",
@@ -233,24 +233,24 @@
     "pageCount": 100,
     "recordsPerPage": 250,
     "responseBytesPerPage": 8388608,
-    "jsonNodesPerPage": 153254,
-    "emptyObjectFactsPerRecord": 600,
+    "jsonNodesPerPage": 199504,
+    "emptyObjectFactsPerRecord": 785,
     "totalRecordsProcessed": 25000,
-    "elapsedMilliseconds": 31453.886,
-    "idleRssBytes": 291209216,
-    "peakRssBytes": 349110272,
-    "peakDeltaBytes": 57901056,
+    "elapsedMilliseconds": 29586.696,
+    "idleRssBytes": 281182208,
+    "peakRssBytes": 330547200,
+    "peakDeltaBytes": 49364992,
     "settledManagedBytes": [
-      63908455,
-      63983391,
-      64054615,
-      64077503,
-      64099167,
-      64060431
+      64088567,
+      64249319,
+      64208887,
+      64298255,
+      64315039,
+      64231439
     ],
     "retainedMetric": "theil-sen-managed-bytes-per-page",
-    "theilSenBytesPerPage": 1519.76,
-    "retainedGrowthBytes": 151976,
+    "theilSenBytesPerPage": 1223.4,
+    "retainedGrowthBytes": 122341,
     "limits": {
       "peakDeltaBytes": 67108864,
       "retainedGrowthBytes": 8388608

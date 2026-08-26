@@ -247,17 +247,17 @@ contract, adapter, mapper, importer, scheduler, admin, or UI implementation.
 The current parser preserves the exact malformed-UTF-8, lone-surrogate,
 reserved-key, depth, and transport rejection boundaries without retaining an
 additional decoded copy of the complete response. It rejects more than 64
-container levels, 160,000 JSON values, 5,000 array items, or 256 syntactic
+container levels, 200,000 JSON values, 5,000 array items, or 256 syntactic
 member occurrences in one object; duplicate names count toward the work bound
 and otherwise retain JSON last-write semantics. The committed 8 MiB V1
 measurement on 2026-08-26 processed all 25,000 records across 100 pages. Every
-page also carried 153,254 JSON values, including 600 high-overhead empty-object
+page also carried 199,504 JSON values, including 785 high-overhead empty-object
 facts per record, to exercise the maximum-byte and near-maximum-node boundaries
-together. Its peak delta was 57,901,056 bytes and retained growth was 151,976
+together. Its peak delta was 49,364,992 bytes and retained growth was 122,341
 bytes, passing the unchanged 64 MiB peak-delta and 8 MiB retained-growth gates.
 
 Eight independent fresh-process repetitions of that combined worst-shape
-measurement all passed; 57,901,056 bytes was the worst peak delta and 231,614
+measurement all passed; 59,129,856 bytes was the worst peak delta and 215,387
 bytes was the largest retained-growth result. The dedicated Task 010 runner
 still begins at one execution slot.
 Restoring more than one slot requires a separately reviewed concurrency
