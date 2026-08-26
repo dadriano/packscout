@@ -144,7 +144,10 @@ export const providerSourceRetention = Object.freeze({
 });
 
 export const providerSourceSingletonTiming = Object.freeze({
-  leaseSeconds: 30,
+  // A page commit may own the database transaction boundary for 30 seconds
+  // while holding epoch/run ownership locks. Keep a full transaction plus ample
+  // control-plane recovery time between that bound and lease expiry.
+  leaseSeconds: 60,
   maximumRenewalIntervalSeconds: 5,
   takeoverGraceSeconds: 15,
 });

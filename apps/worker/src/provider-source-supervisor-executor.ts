@@ -113,6 +113,17 @@ function failureSafeStatus(failure: SourceAdapterFailure): number | null {
   return "safeStatus" in failure ? failure.safeStatus ?? null : null;
 }
 
+function pagePersistenceRetrySafeCode(
+  classification: ControlPlaneFailureCode,
+): string | null {
+  if (classification === "deadlock") return "PAGE_PERSISTENCE_DEADLOCK";
+  if (classification === "serialization") {
+    return "PAGE_PERSISTENCE_SERIALIZATION";
+  }
+  if (classification === "timeout") return "PAGE_PERSISTENCE_TIMEOUT";
+  return null;
+}
+
 function hasCanonicalRecordIdScopes(value: unknown): boolean {
   if (
     !Array.isArray(value) ||
@@ -889,12 +900,26 @@ export class ProviderSourceSupervisorWorkExecutor
       requestedCursor: cursor!,
       requestedCursorFingerprint: work.requestedCursorFingerprint,
     };
-    const committed = await this.#dataPlane(context, () =>
-      this.dependencies.pageImports.importPage({
-        pins: commitPins,
-        adapterResult: result,
-        committedAt: this.#clock.now(),
-      }));
+    let committed: Awaited<ReturnType<ProviderSourcePageImportService["importPage"]>>;
+    try {
+      committed = await this.#dataPlane(context, () =>
+        this.dependencies.pageImports.importPage({
+          pins: commitPins,
+          adapterResult: result,
+          committedAt: this.#clock.now(),
+        }));
+    } catch (error) {
+      const safeCode = pagePersistenceRetrySafeCode(
+        this.dependencies.classifyControlPlaneFailure(error),
+      );
+      // Serialization, deadlock, and the bounded timeout classifications prove
+      // that the atomic transaction did not commit, so the durable queue can
+      // preserve the cursor and retry the same page. Connection loss is
+      // deliberately excluded because COMMIT may have reached the database
+      // before the client lost its acknowledgement.
+      if (safeCode !== null) return { kind: "retryable", safeCode };
+      throw error;
+    }
     return {
       kind: "page_committed",
       cursorFingerprint: committed.cursorFingerprint,
@@ -970,6 +995,12 @@ export class ProviderSourceSupervisorWorkExecutor
         throw new SourceSupervisorStaleWorkError();
       }
       if (classification === "lost_ownership") {
+        throw new RuntimeLocallyFencedError();
+      }
+      if (classification === "connection") {
+        // A vanished connection after COMMIT has an uncertain atomic outcome.
+        // Fence this owner so takeover can reconcile durable page/cursor state
+        // before the same cursor is admitted under fresh request identities.
         throw new RuntimeLocallyFencedError();
       }
       throw error;

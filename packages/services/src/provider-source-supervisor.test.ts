@@ -546,6 +546,40 @@ class MeteredExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
   }
 }
 
+class GatedDrainExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
+  readonly entered: Promise<void>;
+  #signalEntered: (() => void) | null = null;
+  #releaseGate: (() => void) | null = null;
+  readonly #gate: Promise<void>;
+
+  constructor() {
+    this.entered = new Promise((resolve) => {
+      this.#signalEntered = resolve;
+    });
+    this.#gate = new Promise((resolve) => {
+      this.#releaseGate = resolve;
+    });
+  }
+
+  registeredProfileRequestLimit(): number {
+    return 1;
+  }
+
+  async execute(): Promise<SourceSupervisorExecutionResult> {
+    this.#signalEntered?.();
+    this.#signalEntered = null;
+    await this.#gate;
+    return { kind: "test_terminal" };
+  }
+
+  abortAll(): void {}
+
+  release(): void {
+    this.#releaseGate?.();
+    this.#releaseGate = null;
+  }
+}
+
 const capacity: SourceSupervisorCapacityAdmissionHook<FixtureWork> = {
   async probe() {
     return { admitted: true };
@@ -768,6 +802,49 @@ test("ownership renewals continue while snapshot publication is delayed", async 
   assert.equal(renewalSnapshot.calls, 2);
   renewalSnapshot.release();
   await supervisor.stop();
+  assert.equal(ownership.calls.at(-1), "release");
+});
+
+test("graceful drain keeps renewing singleton ownership until active turns settle", async () => {
+  const ownership = new FixtureOwnership();
+  const executor = new GatedDrainExecutor();
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership,
+    queue: new FixtureQueue([
+      fixtureWork("draining-turn", "slow-profile", 1),
+    ]),
+    executor,
+    capacity,
+    snapshot,
+    diagnostics,
+    classifyControlPlaneFailure: () => "invariant",
+    ids: { id: () => "draining-turn-command" },
+    ownershipRenewalIntervalMilliseconds: 1,
+  });
+
+  await supervisor.initialize();
+  await supervisor.runCycle();
+  await executor.entered;
+  const renewalsBeforeStop = ownership.calls.filter(
+    (call) => call === "renew",
+  ).length;
+  let stopped = false;
+  const stopping = supervisor.stop().then(() => {
+    stopped = true;
+  });
+  while (
+    ownership.calls.filter((call) => call === "renew").length <=
+      renewalsBeforeStop
+  ) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.equal(stopped, false);
+  executor.release();
+  await stopping;
   assert.equal(ownership.calls.at(-1), "release");
 });
 
