@@ -249,7 +249,10 @@ export async function releaseProviderSourceSupervisorUnstartedClaim(
       waitReason: input.waitReason,
       actionRequiredCode: null,
       currentRunId: work.kind === "page_read" ? work.runId : null,
-      retryAttempt: 0,
+      // Releasing an unstarted claim did not execute provider work. Preserve
+      // the page's durable retry budget so repeated admission waits cannot
+      // turn a bounded transient retry into an unbounded first attempt.
+      retryAttempt: work.kind === "page_read" ? work.retryAttempt : 0,
       retryNotBefore: null,
       runLeaseAcquiredAt: null,
       runLeaseExpiresAt: null,
