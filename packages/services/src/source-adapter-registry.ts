@@ -1,8 +1,6 @@
 import {
   sourceAdapterManifestV1Schema,
-  sourceAdapterManifestV2Schema,
   type LaunchProviderKey,
-  type VersionedSourceAdapterManifest,
 } from "@packscout/contracts";
 import type { SourceAdapter } from "./source-adapter.ts";
 
@@ -46,16 +44,11 @@ export class SourceAdapterRegistry {
   }
 
   register(adapter: SourceAdapter): this {
-    const v1 = sourceAdapterManifestV1Schema.safeParse(adapter.manifest);
-    const v2 = sourceAdapterManifestV2Schema.safeParse(adapter.manifest);
-    const manifest: VersionedSourceAdapterManifest | null = v1.success
-      ? v1.data
-      : v2.success
-        ? v2.data
-        : null;
-    if (!manifest) {
+    const parsed = sourceAdapterManifestV1Schema.safeParse(adapter.manifest);
+    if (!parsed.success) {
       throw new SourceAdapterRegistryError("invalid_adapter_manifest");
     }
+    const manifest = parsed.data;
     for (const capability of [
       "validateConnectionConfiguration",
       "validateSourceConfiguration",

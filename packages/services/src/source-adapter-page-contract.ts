@@ -1,7 +1,7 @@
 import type {
   SourceAdapterFailure,
   SourceAdapterSafeDiagnostic,
-  VersionedNormalizedProviderObservationPage,
+  NormalizedProviderObservationPage,
 } from "@packscout/contracts";
 import type { SourceAdapterRequestCaptureV1 } from "./source-adapter.ts";
 
@@ -16,15 +16,11 @@ export interface CapturedSourcePageV1 {
     reference: string;
     value: Readonly<Record<string, unknown>>;
   }>[];
-  readonly normalizedPage: VersionedNormalizedProviderObservationPage;
+  readonly normalizedPage: NormalizedProviderObservationPage;
 }
 
 export type InterpretedNormalizedProviderObservationPage =
-  VersionedNormalizedProviderObservationPage extends infer TPage
-    ? TPage extends VersionedNormalizedProviderObservationPage
-      ? Omit<TPage, "measurements" | "diagnostics">
-      : never
-    : never;
+  Omit<NormalizedProviderObservationPage, "measurements" | "diagnostics">;
 
 export interface InterpretedSourcePageV1 {
   readonly protectedNativeEvidence: CapturedSourcePageV1["protectedNativeEvidence"];

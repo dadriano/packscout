@@ -1,6 +1,6 @@
 {
   "version": "provider-source-capacity-measurement-v1",
-  "measuredAt": "2026-08-25T12:09:30.154Z",
+  "measuredAt": "2026-08-26T13:47:50.365Z",
   "reproduction": {
     "generatorCommand": "node --import tsx scripts/local/generate-provider-source-capacity-artifact.mts",
     "storageCommand": "PACKSCOUT_PRINT_PROVIDER_SOURCE_CAPACITY=1 node --import tsx --test --test-name-pattern='representative mixed commit measures' packages/services/src/provider-source-atomic-page.integration.test.ts",
@@ -218,37 +218,39 @@
     ]
   },
   "memoryMeasurement": {
-    "version": "provider-source-page-memory-v2",
-    "measuredAt": "2026-08-25T12:09:30.143Z",
+    "version": "provider-source-page-memory-v1",
+    "measuredAt": "2026-08-26T15:31:50.781Z",
     "environment": {
       "node": "v22.22.3",
       "platform": "darwin",
       "architecture": "arm64"
     },
     "path": "authentic-capture-terminalize-interpret-complete-import-plan",
-    "sourceAdapterVersion": "dataforrest-events-adapter-v2",
+    "sourceAdapterVersion": "dataforrest-events-adapter-v1",
     "warmupPageCount": 10,
     "trialCount": 5,
     "pagesPerTrial": 20,
     "pageCount": 100,
     "recordsPerPage": 250,
-    "responseBytesPerPage": 4194304,
+    "responseBytesPerPage": 8388608,
+    "jsonNodesPerPage": 153254,
+    "emptyObjectFactsPerRecord": 600,
     "totalRecordsProcessed": 25000,
-    "elapsedMilliseconds": 7145.989,
-    "idleRssBytes": 230506496,
-    "peakRssBytes": 277921792,
-    "peakDeltaBytes": 47415296,
+    "elapsedMilliseconds": 31453.886,
+    "idleRssBytes": 291209216,
+    "peakRssBytes": 349110272,
+    "peakDeltaBytes": 57901056,
     "settledManagedBytes": [
-      59664565,
-      59831365,
-      59839005,
-      59832149,
-      59878525,
-      59871781
+      63908455,
+      63983391,
+      64054615,
+      64077503,
+      64099167,
+      64060431
     ],
     "retainedMetric": "theil-sen-managed-bytes-per-page",
-    "theilSenBytesPerPage": 988,
-    "retainedGrowthBytes": 98800,
+    "theilSenBytesPerPage": 1519.76,
+    "retainedGrowthBytes": 151976,
     "limits": {
       "peakDeltaBytes": 67108864,
       "retainedGrowthBytes": 8388608

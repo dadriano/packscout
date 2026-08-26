@@ -77,7 +77,6 @@ const providerSourceAdminAuditReceiptBaseSchema = z
       "connection_profile_created",
       "connection_test_requested",
       "connection_revision_activated",
-      "connection_adapter_upgrade_revision_created",
       "connection_credential_rotated",
       "connection_revision_revoked",
       "connection_recovery_revision_created",
@@ -91,7 +90,6 @@ const providerSourceAdminAuditReceiptBaseSchema = z
       "source_resumed",
       "source_disabled",
       "source_interval_revised",
-      "source_replacement_created",
       "source_cursor_reset",
     ]),
     subjectType: z.enum(["source_connection_profile", "provider_source"]),
@@ -268,15 +266,6 @@ export const rotateSourceConnectionCredentialRequestSchema = z
   })
   .strict();
 
-export const upgradeSourceConnectionAdapterRequestSchema = z
-  .object({
-    expectedRevisionId: uuidSchema,
-    expectedSourceAdapterVersion: registrationKeySchema,
-    targetSourceAdapterVersion: registrationKeySchema,
-    confirmation: z.literal("UPGRADE_ADAPTER"),
-  })
-  .strict();
-
 export const createSourceConnectionRecoveryRevisionRequestSchema = z
   .object({
     expectedBlockedRevisionId: uuidSchema,
@@ -321,9 +310,6 @@ const sourcePinInputSchema = z
   .strict();
 
 export const createProviderSourceRequestSchema = sourcePinInputSchema;
-export const replaceProviderSourceRequestSchema = sourcePinInputSchema.extend({
-  replacesSourceInstanceId: uuidSchema,
-}).strict();
 
 export const providerSourceRevisionCommandSchema = z
   .object({
@@ -387,17 +373,11 @@ export type CreateSourceConnectionProfileRequest = z.input<
 export type RotateSourceConnectionCredentialRequest = z.input<
   typeof rotateSourceConnectionCredentialRequestSchema
 >;
-export type UpgradeSourceConnectionAdapterRequest = z.input<
-  typeof upgradeSourceConnectionAdapterRequestSchema
->;
 export type CreateSourceConnectionRecoveryRevisionRequest = z.input<
   typeof createSourceConnectionRecoveryRevisionRequestSchema
 >;
 export type CreateProviderSourceRequest = z.input<
   typeof createProviderSourceRequestSchema
->;
-export type ReplaceProviderSourceRequest = z.input<
-  typeof replaceProviderSourceRequestSchema
 >;
 export type ProviderSourceRevisionCommand = z.input<
   typeof providerSourceRevisionCommandSchema

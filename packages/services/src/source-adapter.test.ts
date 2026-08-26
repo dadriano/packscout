@@ -439,6 +439,56 @@ test("generic orchestration attaches the only accepted result and diagnostic sco
   requestLease.close();
 });
 
+test("request canonicalization takes standalone byte ownership and isolates shared views", async () => {
+  const ownedFixture = await connectionFixture();
+  const adapterOwnedBytes = new Uint8Array([123, 125]);
+  const ownedRequest = await bindRequest(ownedFixture.operation, {
+    ok: true,
+    value: {
+      captureVersion: SOURCE_ADAPTER_REQUEST_CAPTURE_VERSION,
+      protectedRawResponse: adapterOwnedBytes,
+      protectedRawResponseSha256: sha256(adapterOwnedBytes),
+    },
+    measurements: { durationMilliseconds: 1, responseBytes: 2 },
+    diagnostics: [],
+  });
+  assert.equal(ownedRequest.ok, true);
+  if (!ownedRequest.ok) assert.fail("expected successful owned capture");
+  assert.equal(adapterOwnedBytes.byteLength, 0);
+  assert.deepEqual(
+    [...ownedRequest.value.protectedRawResponse],
+    [123, 125],
+  );
+  assert.equal(
+    ownedRequest.value.protectedRawResponseSha256,
+    sha256(ownedRequest.value.protectedRawResponse),
+  );
+  ownedFixture.requestLease.close();
+
+  const sharedFixture = await connectionFixture();
+  const sharedBacking = new Uint8Array([0, 123, 125, 0]);
+  const sharedView = sharedBacking.subarray(1, 3);
+  const sharedRequest = await bindRequest(sharedFixture.operation, {
+    ok: true,
+    value: {
+      captureVersion: SOURCE_ADAPTER_REQUEST_CAPTURE_VERSION,
+      protectedRawResponse: sharedView,
+      protectedRawResponseSha256: sha256(sharedView),
+    },
+    measurements: { durationMilliseconds: 1, responseBytes: 2 },
+    diagnostics: [],
+  });
+  assert.equal(sharedRequest.ok, true);
+  if (!sharedRequest.ok) assert.fail("expected successful shared capture");
+  assert.equal(sharedView.byteLength, 2);
+  sharedView[0] = 91;
+  assert.deepEqual(
+    [...sharedRequest.value.protectedRawResponse],
+    [123, 125],
+  );
+  sharedFixture.requestLease.close();
+});
+
 test("runtime operation validation rejects fabricated fields before lease consumption", async () => {
   const connection = await connectionFixture();
   const source = await sourceFixture();
@@ -864,6 +914,18 @@ test("page completion owns capture, record count, measurements, and diagnostics"
   );
   assert.equal(completed.ok, true);
   if (!completed.ok) return;
+  assert.notStrictEqual(
+    completed.value.protectedNativeEvidence,
+    interpretation.value.protectedNativeEvidence,
+  );
+  (interpretation.value.protectedNativeEvidence[0]!.value as {
+    id: unknown;
+  }).id =
+    "untrusted-mutation";
+  assert.equal(
+    completed.value.protectedNativeEvidence[0]?.value.id,
+    null,
+  );
   assert.equal(completed.value.requestCapture, request.value);
   assert.equal(completed.measurements.recordCount, 1);
   assert.equal(

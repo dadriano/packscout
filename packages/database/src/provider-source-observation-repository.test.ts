@@ -2,20 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   PROVIDER_OBSERVATION_HASH_VERSION,
-  PROVIDER_OBSERVATION_HASH_VERSION_V2,
   emptyNormalizedProviderFacts,
   launchRecordIdScopeDeclarations,
   normalizedObservationSemanticContent,
-  normalizedObservationSemanticContentV2,
   normalizedProviderObservationSchema,
-  normalizedProviderObservationV2Schema,
 } from "@packscout/contracts";
 import type { PackscoutTransactionClient } from "./database.ts";
 import {
   hashNormalizedObservationSemanticContent,
-  hashNormalizedObservationSemanticContentV2,
   ProviderSourceObservationRepository,
   resolveLaunchSourceRecordMeaning,
   type RecordDeliveryOccurrenceInput,
@@ -63,8 +58,8 @@ const observationInput = Object.freeze({
   normalizedContent,
 } satisfies UpsertSemanticObservationInput);
 
-const cardOnlyPullContent = normalizedObservationSemanticContentV2(
-  normalizedProviderObservationV2Schema.parse({
+const cardOnlyPullContent = normalizedObservationSemanticContent(
+  normalizedProviderObservationSchema.parse({
     kind: "pull",
     providerRecordIdentity: {
       recordIdScopeKey: "pull-v1",
@@ -90,10 +85,10 @@ const cardOnlyPullInput = Object.freeze({
   providerRecordId: "clutchpacks-pull-without-pack-42",
   recordKind: "pull",
   recordDiscriminator: "pull",
-  normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-  hashVersion: PROVIDER_OBSERVATION_HASH_VERSION_V2,
+  normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
   normalizedContentHash:
-    hashNormalizedObservationSemanticContentV2(cardOnlyPullContent),
+    hashNormalizedObservationSemanticContent(cardOnlyPullContent),
   normalizedContent: cardOnlyPullContent,
 } satisfies UpsertSemanticObservationInput);
 
@@ -202,7 +197,7 @@ test("semantic identity rejects unsupported versions and an unverified caller ha
   assert.equal(sourceLookups, 0);
 });
 
-test("semantic identity stores a card-only pull only in the exact v2 hash domain", async () => {
+test("semantic identity stores a card-only pull in the sole v1 hash domain", async () => {
   const repository = new ProviderSourceObservationRepository();
   const semanticWrites: Array<Record<string, unknown>> = [];
   let sourceLookups = 0;
@@ -242,31 +237,27 @@ test("semantic identity stores a card-only pull only in the exact v2 hash domain
       normalizedContent: write.normalized_content_json,
     })),
     [{
-      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION_V2,
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
       normalizedContent: cardOnlyPullContent,
     }],
   );
-  assert.throws(
-    () => hashNormalizedObservationSemanticContent(cardOnlyPullContent),
-  );
-
-  for (const mismatched of [
-    {
+  for (const [mismatched, message] of [
+    [{
       ...cardOnlyPullInput,
-      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
-    },
-    {
+      hashVersion: "packscout.provider-observation-hash.v2",
+    }, /hash version is unsupported/u],
+    [{
       ...observationInput,
-      hashVersion: PROVIDER_OBSERVATION_HASH_VERSION_V2,
-    },
-  ]) {
+      normalizedContractVersion: "packscout.provider-observation.v2",
+    }, /contract version is unsupported/u],
+  ] as const) {
     await assert.rejects(
       repository.upsertSemanticObservationInTransaction(
         transaction,
         unsafeObservationInput(mismatched),
       ),
-      /hash version is unsupported/u,
+      message,
     );
   }
   assert.equal(sourceLookups, 1);

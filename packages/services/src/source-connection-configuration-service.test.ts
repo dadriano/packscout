@@ -3,8 +3,6 @@ import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ENDPOINT,
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
 } from "@packscout/contracts";
 import {
   createProductionSourceAdminConfigurationCodecRegistry,
@@ -16,9 +14,6 @@ import {
 import {
   SourceConnectionConfigurationService,
 } from "./source-connection-configuration-service.ts";
-import {
-  ProviderSourceAdminServiceError,
-} from "./provider-source-admin-service-types.ts";
 import type {
   SourceConnectionConfigurationAdminRepository,
   SourceConnectionRevisionSecretRecord,
@@ -34,7 +29,6 @@ const now = new Date("2026-08-21T12:00:00.000Z");
 class MemoryConnectionRepository
   implements SourceConnectionConfigurationAdminRepository {
   readonly revisions = new Map<string, SourceConnectionRevisionSecretRecord>();
-  incompatibleSourcePins = false;
   createInput: Parameters<
     SourceConnectionConfigurationAdminRepository["createConnectionProfile"]
   >[0] | null = null;
@@ -43,9 +37,6 @@ class MemoryConnectionRepository
   >[0] | null = null;
   recoveryRevisionInput: Parameters<
     SourceConnectionConfigurationAdminRepository["addRecoveryConnectionRevision"]
-  >[0] | null = null;
-  adapterRevisionInput: Parameters<
-    SourceConnectionConfigurationAdminRepository["addConnectionAdapterRevision"]
   >[0] | null = null;
   recoveryTestInput: Parameters<
     SourceConnectionConfigurationAdminRepository["requestConnectionRecoveryTest"]
@@ -84,31 +75,9 @@ class MemoryConnectionRepository
       : null;
   }
 
-  async hasIncompatibleSourceAdapterPins() {
-    return this.incompatibleSourcePins;
-  }
-
   async addConnectionRevision(input: Parameters<
     SourceConnectionConfigurationAdminRepository["addConnectionRevision"]
   >[0]) {
-    this.revisions.set(input.revisionId, {
-      organizationId: input.organizationId,
-      connectionProfileId: input.connectionProfileId,
-      connectionRevisionId: input.revisionId,
-      sourceTypeKey: input.sourceTypeKey,
-      sourceAdapterVersion: input.sourceAdapterVersion,
-      revisionNumber: input.revisionNumber,
-      state: "candidate",
-      healthGeneration: 0n,
-      configurationFingerprint: input.configurationFingerprint,
-      encryptedConfiguration: input.encryptedConfiguration,
-    });
-  }
-
-  async addConnectionAdapterRevision(input: Parameters<
-    SourceConnectionConfigurationAdminRepository["addConnectionAdapterRevision"]
-  >[0]) {
-    this.adapterRevisionInput = input;
     this.revisions.set(input.revisionId, {
       organizationId: input.organizationId,
       connectionProfileId: input.connectionProfileId,
@@ -204,6 +173,10 @@ test("one shared credential is encrypted under exact organization/profile/revisi
   );
   assert.equal(result.profileId, profileId);
   assert.equal(result.revisionId, revisionOneId);
+  assert.equal(
+    repository.createInput?.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
   assert.equal(JSON.stringify(result).includes(secret), false);
   assert.equal(
     Buffer.from(
@@ -274,192 +247,6 @@ test("same-endpoint rotation creates a tested candidate and normal activation pr
   );
   assert.equal(repository.activationInput?.preservePinnedWork, true);
   assert.equal(repository.activationInput?.connectionRevisionId, revisionTwoId);
-});
-
-test("adapter upgrade revalidates and re-encrypts a v1 credential as an untested current v3 candidate", async () => {
-  const { cipher, repository, service } = fixture([revisionTwoId]);
-  const secret = "stored-v1-secret";
-  repository.revisions.set(revisionOneId, {
-    organizationId,
-    connectionProfileId: profileId,
-    connectionRevisionId: revisionOneId,
-    sourceTypeKey: "dataforrest-events-v1",
-    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-    revisionNumber: 1,
-    state: "active",
-    healthGeneration: 15n,
-    configurationFingerprint: "a".repeat(64),
-    encryptedConfiguration: cipher.encrypt(
-      JSON.stringify({
-        endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
-        bearerToken: secret,
-      }),
-      { organizationId, connectionProfileId: profileId, connectionRevisionId: revisionOneId },
-    ),
-  });
-
-  const result = await service.upgradeAdapter(
-    { organizationId, actorKey: "operator-admin" },
-    profileId,
-    {
-      expectedRevisionId: revisionOneId,
-      expectedSourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-      targetSourceAdapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-      confirmation: "UPGRADE_ADAPTER",
-    },
-  );
-  assert.equal(result.revisionId, revisionTwoId);
-  assert.equal(
-    result.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-  );
-  assert.equal(JSON.stringify(result).includes(secret), false);
-  assert.equal(
-    repository.adapterRevisionInput?.expectedSourceAdapterVersion,
-    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  );
-  assert.equal(
-    repository.adapterRevisionInput?.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-  );
-  const candidate = repository.revisions.get(revisionTwoId)!;
-  assert.equal(
-    Buffer.from(candidate.encryptedConfiguration.ciphertext).includes(
-      Buffer.from(secret),
-    ),
-    false,
-  );
-  const resolved = await service.resolveSourceConnectionConfiguration({
-    organizationId,
-    connectionProfileId: profileId,
-    connectionRevisionId: revisionTwoId,
-    configurationFingerprint: candidate.configurationFingerprint,
-  });
-  assert.deepEqual(resolved.configuration, {
-    endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
-    bearerToken: secret,
-  });
-
-  await assert.rejects(
-    service.upgradeAdapter(
-      { organizationId, actorKey: "operator-admin" },
-      profileId,
-      {
-        expectedRevisionId: revisionTwoId,
-        expectedSourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-        targetSourceAdapterVersion: DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-        confirmation: "UPGRADE_ADAPTER",
-      },
-    ),
-    /invalid_source_configuration/u,
-  );
-});
-
-test("adapter upgrade rejects revoked revisions before decrypting stored credentials", async () => {
-  const { repository, service } = fixture([revisionTwoId]);
-  repository.revisions.set(revisionOneId, {
-    organizationId,
-    connectionProfileId: profileId,
-    connectionRevisionId: revisionOneId,
-    sourceTypeKey: "dataforrest-events-v1",
-    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-    revisionNumber: 1,
-    state: "revoked",
-    healthGeneration: 1n,
-    configurationFingerprint: "a".repeat(64),
-    encryptedConfiguration: {
-      ciphertext: new Uint8Array(),
-      nonce: new Uint8Array(),
-      authTag: new Uint8Array(),
-      keyVersion: 7,
-    },
-  });
-
-  await assert.rejects(
-    service.upgradeAdapter(
-      { organizationId, actorKey: "operator-admin" },
-      profileId,
-      {
-        expectedRevisionId: revisionOneId,
-        expectedSourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-        targetSourceAdapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-        confirmation: "UPGRADE_ADAPTER",
-      },
-    ),
-    (error: unknown) =>
-      error instanceof ProviderSourceAdminServiceError &&
-      error.code === "SOURCE_CONFLICT" &&
-      error.status === 409,
-  );
-  assert.equal(repository.adapterRevisionInput, null);
-});
-
-test("adapter upgrade rejects incompatible source pins before decrypting stored credentials", async () => {
-  const { repository, service } = fixture([revisionTwoId]);
-  repository.incompatibleSourcePins = true;
-  repository.revisions.set(revisionOneId, {
-    organizationId,
-    connectionProfileId: profileId,
-    connectionRevisionId: revisionOneId,
-    sourceTypeKey: "dataforrest-events-v1",
-    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-    revisionNumber: 1,
-    state: "active",
-    healthGeneration: 1n,
-    configurationFingerprint: "a".repeat(64),
-    encryptedConfiguration: {
-      ciphertext: new Uint8Array(),
-      nonce: new Uint8Array(),
-      authTag: new Uint8Array(),
-      keyVersion: 7,
-    },
-  });
-
-  await assert.rejects(
-    service.upgradeAdapter(
-      { organizationId, actorKey: "operator-admin" },
-      profileId,
-      {
-        expectedRevisionId: revisionOneId,
-        expectedSourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-        targetSourceAdapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-        confirmation: "UPGRADE_ADAPTER",
-      },
-    ),
-    (error: unknown) =>
-      error instanceof ProviderSourceAdminServiceError &&
-      error.code === "SOURCE_CONFLICT" &&
-      error.status === 409,
-  );
-  assert.equal(repository.adapterRevisionInput, null);
-});
-
-test("normal activation rejects candidates pinned against dependent source adapters", async () => {
-  const { repository, service } = fixture();
-  await service.createProfile(
-    { organizationId, actorKey: "operator-admin" },
-    {
-      sourceTypeKey: "dataforrest-events-v1",
-      displayName: "Shared DataForrest",
-      endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
-      bearerCredential: "secret",
-      requestLimit: 2,
-    },
-  );
-  repository.incompatibleSourcePins = true;
-
-  await assert.rejects(
-    service.activateRevision(
-      { organizationId, actorKey: "operator-admin" },
-      profileId,
-      { expectedRevisionId: revisionOneId },
-    ),
-    (error: unknown) =>
-      error instanceof ProviderSourceAdminServiceError &&
-      error.code === "SOURCE_CONFLICT" &&
-      error.status === 409,
-  );
-  assert.equal(repository.activationInput, null);
 });
 
 test("recovery commands retain the exact blocked revision, episode, generation, and candidate pins", async () => {

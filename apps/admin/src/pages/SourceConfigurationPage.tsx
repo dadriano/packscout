@@ -4,7 +4,6 @@ import type {
   CreateSourceConnectionProfileRequest,
   ProviderSourceAdminCatalog,
   ProviderSourceAdminSummary,
-  ReplaceProviderSourceRequest,
   SourceConnectionProfileAdminSummary,
 } from "@packscout/contracts";
 import { AdminApiError } from "../api/client";
@@ -17,14 +16,12 @@ import {
   createSourceConnectionRecoveryRevision,
   getProviderSourceCatalog,
   previewProviderSourceCursorReset,
-  replaceProviderSource,
   resetProviderSourceCursor,
   requestSourceConnectionTest,
   requestSourceConnectionRecoveryTest,
   reviseProviderSourceInterval,
   revokeSourceConnectionRevision,
   rotateSourceConnectionCredential,
-  upgradeSourceConnectionAdapter,
 } from "../api/provider-sources";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -43,7 +40,7 @@ function errorMessage(error: unknown): string {
   }
   if (error.status === 403) return "Your role cannot change this source configuration.";
   if (error.code === "SOURCE_CONFLICT") {
-    return "This command conflicts with current source pins or newer state. Reload before retrying. Adapter changes with dependent sources require a separate current-adapter connection profile and replacement sources.";
+    return "This command conflicts with current source pins or newer state. Reload before retrying.";
   }
   if (error.code === "SOURCE_TEST_REQUIRED") {
     return "A current successful connection and source test is required before activation.";
@@ -313,11 +310,6 @@ export function SourceConfigurationPage() {
           ) : null}
           <SourceConnectionLedger
             connections={catalog.connections}
-            sources={catalog.sources}
-            currentSourceAdapterVersion={
-              catalog.availableSourceTypes[0]?.sourceAdapterVersion ??
-                null
-            }
             canManage={canManage}
             canManageSecrets={canManageSecrets}
             pendingKey={pendingKey}
@@ -346,24 +338,6 @@ export function SourceConfigurationPage() {
                 "Recovery candidate saved. Run the exact recovery test before activation.",
               );
             }}
-            onUpgrade={(connection, targetSourceAdapterVersion) => confirm({
-              tier: "danger",
-              title: `Create ${targetSourceAdapterVersion} candidate?`,
-              description: "The stored credential will be decrypted only in the server, validated by the new adapter, and re-encrypted for a new untested revision. In-place adapter upgrades are blocked while any draft, active, or paused source uses this profile. Create a separate current-adapter profile and replace those sources instead.",
-              confirmLabel: "Create adapter upgrade candidate",
-              action: async () => {
-                await upgradeSourceConnectionAdapter(connection.id, {
-                  expectedRevisionId: connection.latestRevision.id,
-                  expectedSourceAdapterVersion:
-                    connection.latestRevision.sourceAdapterVersion,
-                  targetSourceAdapterVersion,
-                  confirmation: "UPGRADE_ADAPTER",
-                });
-                await reload();
-                setNotice("Adapter upgrade candidate saved. Test it before activation; activation is blocked if any draft, active, or paused source uses this profile with another adapter.");
-              },
-              successMessage: "Adapter upgrade candidate created.",
-            })}
             onCommand={connectionCommand}
           />
           {catalog.providers.length === 0 ? (
@@ -374,38 +348,11 @@ export function SourceConfigurationPage() {
               catalog={catalog}
               canManage={canManage}
               pendingKey={pendingKey}
-              onCreate={(request: CreateProviderSourceRequest | ReplaceProviderSourceRequest,
-                replacement: boolean) => {
-                if (!replacement) {
-                  return mutate(
-                    "source:create",
-                    () => createProviderSource(request as CreateProviderSourceRequest),
-                    "Inactive source created with its approved mapper and a null cursor.",
-                  );
-                }
-                const replacementRequest = request as ReplaceProviderSourceRequest;
-                const selectedProvider = catalog.providers.find(
-                  (provider) => provider.id === replacementRequest.providerId,
-                );
-                const previous = catalog.sources.find(
-                  (source) => source.sourceInstanceId ===
-                    replacementRequest.replacesSourceInstanceId,
-                );
-                const providerLabel = selectedProvider?.provider.replaceAll("_", " ") ??
-                  "selected provider";
-                return confirm({
-                  tier: "danger",
-                  title: `Replace ${providerLabel} source?`,
-                  description: `Only ${providerLabel} is affected. The ${previous?.state ?? "inactive"} source stays in history, but its cursor cannot transfer. The replacement starts at Feed start and must be tested; activation begins paused until an operator resumes it.`,
-                  confirmLabel: "Replace selected source",
-                  action: async () => {
-                    await replaceProviderSource(replacementRequest);
-                    await reload();
-                    setNotice(`Replacement for ${providerLabel} created at Feed start; prior history was retained.`);
-                  },
-                  successMessage: `Replacement for ${providerLabel} created.`,
-                });
-              }}
+              onCreate={(request: CreateProviderSourceRequest) => mutate(
+                "source:create",
+                () => createProviderSource(request),
+                "Inactive source created with its approved mapper and a null cursor.",
+              )}
               onCommand={sourceCommand}
               onInterval={(source, intervalSeconds) => mutate(
                 `source:${source.sourceInstanceId}:interval`,

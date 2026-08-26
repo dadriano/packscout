@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   launchRecordIdScopeDeclarations,
-  type VersionedNormalizedProviderObservationPage,
+  type NormalizedProviderObservationPage,
   type OpaqueCursorEnvelope,
   type SourceAdapterManifestV1,
 } from "@packscout/contracts";
@@ -47,7 +47,7 @@ export interface AuthenticPageOperationFixture {
 export interface StaticCapturedPageFixture {
   readonly rawResponse: Uint8Array;
   readonly protectedNativeEvidence: CapturedSourcePageV1["protectedNativeEvidence"];
-  readonly normalizedPage: VersionedNormalizedProviderObservationPage;
+  readonly normalizedPage: NormalizedProviderObservationPage;
 }
 
 export class StaticCapturedPageSourceAdapter implements SourceAdapter {

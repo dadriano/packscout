@@ -2,12 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   emptyNormalizedProviderFacts,
   normalizedObservationSemanticContent,
-  normalizedObservationSemanticContentV2,
   normalizedProviderObservationSchema,
-  normalizedProviderObservationV2Schema,
   type ProviderSourceCanonicalProjectionPlan,
 } from "@packscout/contracts";
 import {
@@ -97,9 +94,9 @@ test("database validation rejects canonical relationships retargeted away from s
   );
 });
 
-test("database validation accepts one-target pulls only under the exact v2 pin", () => {
-  const semanticContent = normalizedObservationSemanticContentV2(
-    normalizedProviderObservationV2Schema.parse({
+test("database validation accepts one-target pulls under the sole v1 pin", () => {
+  const semanticContent = normalizedObservationSemanticContent(
+    normalizedProviderObservationSchema.parse({
       kind: "pull",
       providerRecordIdentity: {
         recordIdScopeKey: "pull-v1",
@@ -145,13 +142,13 @@ test("database validation accepts one-target pulls only under the exact v2 pin",
   };
 
   assert.doesNotThrow(() => validateProviderSourceCanonicalProjections({
-    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     provider: "clutchpacks",
     semanticContent,
     projections: [projection],
   }));
   for (const normalizedContractVersion of [
-    PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    "packscout.provider-observation.v2",
     "packscout.provider-observation.future",
   ]) {
     assert.throws(
@@ -167,8 +164,8 @@ test("database validation accepts one-target pulls only under the exact v2 pin",
     );
   }
 
-  const packOnlySemanticContent = normalizedObservationSemanticContentV2(
-    normalizedProviderObservationV2Schema.parse({
+  const packOnlySemanticContent = normalizedObservationSemanticContent(
+    normalizedProviderObservationSchema.parse({
       kind: "pull",
       providerRecordIdentity: {
         recordIdScopeKey: "pull-v1",
@@ -198,20 +195,9 @@ test("database validation accepts one-target pulls only under the exact v2 pin",
     }],
   };
   assert.doesNotThrow(() => validateProviderSourceCanonicalProjections({
-    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     provider: "clutchpacks",
     semanticContent: packOnlySemanticContent,
     projections: [packOnlyProjection],
   }));
-  assert.throws(
-    () => validateProviderSourceCanonicalProjections({
-      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
-      provider: "clutchpacks",
-      semanticContent: packOnlySemanticContent,
-      projections: [packOnlyProjection],
-    }),
-    (error: unknown) =>
-      error instanceof ProviderSourceAtomicPagePersistenceError &&
-      error.code === "invalid_page_plan",
-  );
 });

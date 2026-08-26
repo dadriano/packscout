@@ -39,12 +39,6 @@ export class ProviderSourceAdminLifecycleRepository
     configurationHash: string;
     recordIdScopes: readonly string[];
     intervalSeconds: number;
-    replacesSourceInstanceId: string | null;
-    replacementPredecessor: Readonly<{
-      mapperKey: string;
-      mapperVersion: string;
-      normalizedContractVersion: string;
-    }> | null;
     actorKey: string;
     createdAt: Date;
   }>) {

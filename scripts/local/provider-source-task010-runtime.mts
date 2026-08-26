@@ -3,8 +3,14 @@ import { readFile, realpath, stat, statfs } from "node:fs/promises";
 import path from "node:path";
 import { Client, type PoolClient, type QueryResultRow } from "pg";
 import {
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+} from "@packscout/contracts";
+import {
   buildProviderSourceCapacityForecast,
   evaluateProviderSourceCapacityPreflight,
+  launchSourceMapperDescriptors,
   type ProviderSourceCapacityForecast,
   type ProviderSourceCapacityModelInput,
 } from "@packscout/services";
@@ -613,6 +619,83 @@ const legacyRuntimeTables = [
   "provider_secret_versions",
 ] as const;
 
+interface Task010ActiveConnectionRevisionPin {
+  readonly sourceAdapterVersion: string;
+}
+
+interface Task010ProviderSourceRevisionPin {
+  readonly providerId: string;
+  readonly sourceTypeKey: string;
+  readonly sourceAdapterVersion: string;
+  readonly normalizedContractVersion: string;
+  readonly mapperKey: string;
+  readonly mapperVersion: string;
+  readonly identityNamespaceKey: string;
+}
+
+function task010CurrentMapperDescriptor(providerId: string) {
+  const provider = TASK010_PROVIDER_IDENTITIES.find(
+    (candidate) => candidate.id === providerId,
+  );
+  if (provider === undefined) return undefined;
+  return launchSourceMapperDescriptors.find(
+    (descriptor) =>
+      descriptor.provider === provider.platformKey &&
+      descriptor.normalizedContractVersion ===
+        PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  );
+}
+
+export function assertTask010ActiveConnectionRevisionPins(
+  revisions: readonly Task010ActiveConnectionRevisionPin[],
+): void {
+  if (
+    revisions.length !== 1 ||
+    revisions[0]?.sourceAdapterVersion !==
+      DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+  ) {
+    throw new Task010SafetyError("SOURCE_CONNECTION_NOT_BACKFILL_READY");
+  }
+}
+
+export function assertTask010ConnectionRevisionPins(
+  revisions: readonly Task010ActiveConnectionRevisionPin[],
+): void {
+  if (
+    revisions.some(
+      ({ sourceAdapterVersion }) =>
+        sourceAdapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    )
+  ) {
+    throw new Task010SafetyError("SOURCE_CONNECTION_PINS_INVALID");
+  }
+}
+
+export function assertTask010ProviderSourceRevisionPins(
+  revisions: readonly Task010ProviderSourceRevisionPin[],
+): void {
+  // Configuration invokes the topology check before source revisions exist.
+  // Backfill readiness independently requires four active revisions, so an
+  // empty set is valid only before that stronger gate is requested.
+  const invalid = revisions.some((revision) => {
+    const expectedMapper = task010CurrentMapperDescriptor(revision.providerId);
+    return (
+      expectedMapper === undefined ||
+      revision.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY ||
+      revision.sourceAdapterVersion !==
+        DATAFORREST_EVENTS_V1_ADAPTER_VERSION ||
+      revision.normalizedContractVersion !==
+        PROVIDER_OBSERVATION_CONTRACT_VERSION ||
+      revision.mapperKey !== expectedMapper.mapperKey ||
+      revision.mapperVersion !== expectedMapper.mapperVersion ||
+      revision.identityNamespaceKey !== expectedMapper.identityNamespaceKey
+    );
+  });
+  if (invalid) {
+    throw new Task010SafetyError("PROVIDER_SOURCE_PINS_INVALID");
+  }
+}
+
 export async function verifyTask010SourceTopology(
   client: Client | PoolClient,
   environment: Task010Environment,
@@ -683,10 +766,19 @@ export async function verifyTask010SourceTopology(
   ) {
     throw new Task010SafetyError("SOURCE_CONNECTION_KEY_VERSION_MISMATCH");
   }
+  const connectionRevisionPins = await client.query<
+    Task010ActiveConnectionRevisionPin
+  >(`
+    select source_adapter_version as "sourceAdapterVersion"
+    from public.source_connection_revisions
+  `);
+  assertTask010ConnectionRevisionPins(connectionRevisionPins.rows);
   if (options.requireBackfillReady) {
-    const activeConnections = await client.query<{ count: string }>(
+    const activeConnections = await client.query<
+      Task010ActiveConnectionRevisionPin
+    >(
       `
-      select count(*)::text as count
+      select revision.source_adapter_version as "sourceAdapterVersion"
       from public.source_connection_profiles as profile
       join public.source_connection_revisions as revision
         on revision.id = profile.active_revision_id
@@ -702,9 +794,7 @@ export async function verifyTask010SourceTopology(
     `,
       [environment.organizationId, environment.sourceConnectionKeyVersion],
     );
-    if (Number(activeConnections.rows[0]?.count) !== 1) {
-      throw new Task010SafetyError("SOURCE_CONNECTION_NOT_BACKFILL_READY");
-    }
+    assertTask010ActiveConnectionRevisionPins(activeConnections.rows);
   }
   const sources = await client.query<{
     providerId: string;
@@ -808,30 +898,17 @@ export async function verifyTask010SourceTopology(
       })),
     });
   }
-  const invalidPins = await client.query<{ count: string }>(`
-    with expected(provider_id, mapper_key, namespace_key) as (
-      values
-        ('9c2ef352-161a-4e5f-9d7d-6ff46755a101'::uuid,
-         'courtyard-provider-observation', 'dataforrest-courtyard-records-v1'),
-        ('9c2ef352-161a-4e5f-9d7d-6ff46755a102'::uuid,
-         'collector-crypt-provider-observation', 'dataforrest-collector_crypt-records-v1'),
-        ('9c2ef352-161a-4e5f-9d7d-6ff46755a103'::uuid,
-         'phygitals-provider-observation', 'dataforrest-phygitals-records-v1'),
-        ('9c2ef352-161a-4e5f-9d7d-6ff46755a104'::uuid,
-         'clutchpacks-provider-observation', 'dataforrest-clutchpacks-records-v1')
-    )
-    select count(*)::text as count
-    from public.provider_source_revisions as revision
-    left join expected on expected.provider_id = revision.provider_id
-    where expected.provider_id is null
-       or revision.source_type_key <> 'dataforrest-events-v1'
-       or revision.mapper_key <> expected.mapper_key
-       or revision.mapper_version <> '1'
-       or revision.identity_namespace_key <> expected.namespace_key
-       or revision.normalized_contract_version <>
-          'packscout.provider-observation.v1'
+  const sourceRevisionPins = await client.query<
+    Task010ProviderSourceRevisionPin
+  >(`
+    select provider_id::text as "providerId",
+           source_type_key as "sourceTypeKey",
+           source_adapter_version as "sourceAdapterVersion",
+           normalized_contract_version as "normalizedContractVersion",
+           mapper_key as "mapperKey",
+           mapper_version as "mapperVersion",
+           identity_namespace_key as "identityNamespaceKey"
+    from public.provider_source_revisions
   `);
-  if (Number(invalidPins.rows[0]?.count) !== 0) {
-    throw new Task010SafetyError("PROVIDER_SOURCE_PINS_INVALID");
-  }
+  assertTask010ProviderSourceRevisionPins(sourceRevisionPins.rows);
 }

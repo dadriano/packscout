@@ -62,7 +62,7 @@ const EXPECTED_MIGRATIONS = Object.freeze([
   }),
   Object.freeze({
     name: "20260825041000_raise_provider_source_raw_response_limit",
-    checksum: "be9969b5cd5b02c985bd3ed6710696f264d94a3b008fb2903fe41316f3c61c4f",
+    checksum: "25899178e7256a15fc4d86c158f560e597b9fa0e8c949caa696aa55439cc57c8",
   }),
 ]);
 const EXPECTED_TABLE_COUNT = 84;

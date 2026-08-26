@@ -4,20 +4,16 @@ import { test } from "node:test";
 import { dataforestEventsV1EvidenceFixture } from "./__fixtures__/dataforest-events-v1.fixture.ts";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   dataforrestContinuation,
   dataforrestEventRecordV1Schema,
-  dataforrestEventRecordV2Schema,
   dataforrestEventsPageV1Schema,
   dataforrestEventsConnectionConfigurationV1Schema,
   dataforrestIdentityNamespaceByProvider,
   dataforrestNextCursor,
   dataforrestOpaqueCursorV1Schema,
   normalizeDataforrestEventRecord,
-  normalizeDataforrestEventRecordV2,
-  normalizeDataforrestEventRecordV3,
 } from "./dataforrest-events-v1.ts";
 import {
   normalizedProviderObservationPageSchema,
@@ -113,7 +109,7 @@ test("DataForrest allowlists only the declared provider display-name field", () 
     dataforestEventsV1EvidenceFixture.courtyard.initial.records[0],
   );
   const expectedEmpty = emptyNormalizedProviderFacts("pack");
-  const present = normalizeDataforrestEventRecordV2(
+  const present = normalizeDataforrestEventRecord(
     { ...raw, data: { provider_label: "  Court Kings  ", hidden_price: 99 } },
     "courtyard",
     "fixture:facts-present",
@@ -127,7 +123,7 @@ test("DataForrest allowlists only the declared provider display-name field", () 
   assert.equal(JSON.stringify(present.providerFacts).includes("hidden_price"), false);
 
   for (const providerLabel of [" ", 42, {}, "a".repeat(10_001)]) {
-    const malformed = normalizeDataforrestEventRecordV2(
+    const malformed = normalizeDataforrestEventRecord(
       { ...raw, data: { provider_label: providerLabel, price: 12.5 } },
       "courtyard",
       "fixture:facts-malformed",
@@ -147,7 +143,7 @@ test("DataForrest allowlists only the declared provider display-name field", () 
     { provider_label: null, optional_value: "ignored" },
   ];
   for (const data of absentData) {
-    const absent = normalizeDataforrestEventRecordV2(
+    const absent = normalizeDataforrestEventRecord(
       { ...raw, data },
       "courtyard",
       "fixture:facts-absent",
@@ -168,7 +164,7 @@ test("Collector Crypt pack names normalize from the evidenced native name field"
     available: true,
   });
   const expectedEmpty = emptyNormalizedProviderFacts("pack");
-  const present = normalizeDataforrestEventRecordV2(
+  const present = normalizeDataforrestEventRecord(
     {
       ...raw,
       data: {
@@ -193,7 +189,7 @@ test("Collector Crypt pack names normalize from the evidenced native name field"
   );
 
   for (const name of [" ", 42, {}, "a".repeat(10_001)]) {
-    const malformed = normalizeDataforrestEventRecordV2(
+    const malformed = normalizeDataforrestEventRecord(
       { ...raw, data: { name } },
       "collector_crypt",
       "fixture:collector-crypt-pack-malformed",
@@ -213,7 +209,7 @@ test("Collector Crypt pack names normalize from the evidenced native name field"
     { name: null, provider_label: "ignored" },
   ];
   for (const data of absentData) {
-    const absent = normalizeDataforrestEventRecordV2(
+    const absent = normalizeDataforrestEventRecord(
       { ...raw, data },
       "collector_crypt",
       "fixture:collector-crypt-pack-absent",
@@ -223,21 +219,9 @@ test("Collector Crypt pack names normalize from the evidenced native name field"
     assert.deepEqual(absent.providerFacts, expectedEmpty);
   }
 
-  const v1 = normalizeDataforrestEventRecord(
-    { ...raw, data: { name: "Collector Crypt Alpha" } },
-    "collector_crypt",
-    "fixture:collector-crypt-pack-v1",
-  );
-  assert.equal(v1.kind, "catalog");
-  if (v1.kind !== "catalog") assert.fail("expected catalog observation");
-  assert.deepEqual(v1.providerFacts, expectedEmpty);
-  assert.notEqual(
-    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  );
 });
 
-test("adapter v2 keeps Phygitals and ClutchPacks on immutable provider-label extraction", () => {
+test("Phygitals and ClutchPacks pack names use the native name field", () => {
   const fixtures = [
     {
       provider: "phygitals" as const,
@@ -252,7 +236,7 @@ test("adapter v2 keeps Phygitals and ClutchPacks on immutable provider-label ext
   ];
 
   for (const fixture of fixtures) {
-    const raw = dataforrestEventRecordV2Schema.parse({
+    const raw = dataforrestEventRecordV1Schema.parse({
       ...dataforestEventsV1EvidenceFixture[fixture.provider].initial.records[0],
       stream: "catalog",
       entity: "pack",
@@ -265,66 +249,10 @@ test("adapter v2 keeps Phygitals and ClutchPacks on immutable provider-label ext
     });
     if (raw.stream !== "catalog") assert.fail("expected catalog fixture");
 
-    const observation = normalizeDataforrestEventRecordV2(
+    const observation = normalizeDataforrestEventRecord(
       raw,
       fixture.provider,
-      `fixture:${fixture.provider}:pack-v2`,
-    );
-    assert.equal(observation.kind, "catalog");
-    if (observation.kind !== "catalog") {
-      assert.fail("expected catalog observation");
-    }
-    assert.deepEqual(observation.providerFacts, {
-      ...emptyNormalizedProviderFacts("pack"),
-      displayName: { state: "present", value: fixture.legacyName },
-    });
-
-    const nameOnly = normalizeDataforrestEventRecordV2(
-      { ...raw, data: { name: fixture.nativeName } },
-      fixture.provider,
-      `fixture:${fixture.provider}:pack-v2-name-only`,
-    );
-    assert.equal(nameOnly.kind, "catalog");
-    if (nameOnly.kind !== "catalog") {
-      assert.fail("expected catalog observation");
-    }
-    assert.deepEqual(
-      nameOnly.providerFacts,
-      emptyNormalizedProviderFacts("pack"),
-    );
-  }
-});
-
-test("adapter v3 uses native Phygitals and ClutchPacks pack names without legacy fallback", () => {
-  const fixtures = [
-    {
-      provider: "phygitals" as const,
-      nativeName: "Phygitals Black Pack",
-      legacyName: "Phygitals legacy label",
-    },
-    {
-      provider: "clutchpacks" as const,
-      nativeName: "ClutchPacks Alpha",
-      legacyName: "ClutchPacks legacy label",
-    },
-  ];
-
-  for (const fixture of fixtures) {
-    const raw = dataforrestEventRecordV2Schema.parse({
-      ...dataforestEventsV1EvidenceFixture[fixture.provider].initial.records[0],
-      stream: "catalog",
-      entity: "pack",
-      first_seen_at: "2026-01-01T00:00:00.000Z",
-      available: true,
-      data: {
-        name: fixture.nativeName,
-        provider_label: fixture.legacyName,
-      },
-    });
-    const observation = normalizeDataforrestEventRecordV3(
-      raw,
-      fixture.provider,
-      `fixture:${fixture.provider}:pack-v3`,
+      `fixture:${fixture.provider}:pack-v1`,
     );
     assert.equal(observation.kind, "catalog");
     if (observation.kind !== "catalog") {
@@ -335,10 +263,10 @@ test("adapter v3 uses native Phygitals and ClutchPacks pack names without legacy
       displayName: { state: "present", value: fixture.nativeName },
     });
 
-    const legacyLabelOnly = normalizeDataforrestEventRecordV3(
+    const legacyLabelOnly = normalizeDataforrestEventRecord(
       { ...raw, data: { provider_label: fixture.legacyName } },
       fixture.provider,
-      `fixture:${fixture.provider}:pack-v3-provider-label-only`,
+      `fixture:${fixture.provider}:pack-v1-provider-label-only`,
     );
     assert.equal(legacyLabelOnly.kind, "catalog");
     if (legacyLabelOnly.kind !== "catalog") {
@@ -689,5 +617,67 @@ test("DataForrest wrapper vocabulary is absent from generic contract modules", a
   ]) {
     const source = await readFile(new URL(fileName, import.meta.url), "utf8");
     assert.equal(/next_cursor|poll_after_seconds|tx_hash/u.test(source), false);
+  }
+});
+
+test("DataForrest v1 accepts either one-sided pull and canonicalizes relationships", () => {
+  const pullBase = {
+    stream: "pulls" as const,
+    platform: "clutchpacks" as const,
+    record_id: "pull-42",
+    occurred_at: "2026-08-20T12:00:00.000Z",
+    collected_at: "2026-08-20T12:00:01.000Z",
+    data: {},
+    pack_id: null,
+    card_id: "card-42",
+  };
+  for (const { raw, expected } of [
+    { raw: pullBase, expected: ["card"] },
+    {
+      raw: { ...pullBase, pack_id: "pack-42", card_id: null },
+      expected: ["pack"],
+    },
+    {
+      raw: { ...pullBase, pack_id: "pack-42" },
+      expected: ["pack", "card"],
+    },
+  ] as const) {
+    const parsed = dataforrestEventRecordV1Schema.parse(raw);
+    const observation = normalizeDataforrestEventRecord(
+      parsed,
+      "clutchpacks",
+      "page_record:0",
+    );
+    assert.equal(observation.kind, "pull");
+    assert.deepEqual(
+      observation.relationships.map(({ relationship }) => relationship),
+      expected,
+    );
+  }
+});
+
+test("DataForrest v1 requires both pull keys and at least one relationship", () => {
+  const fullyRelated = {
+    stream: "pulls" as const,
+    platform: "clutchpacks" as const,
+    record_id: "pull-42",
+    occurred_at: "2026-08-20T12:00:00.000Z",
+    collected_at: "2026-08-20T12:00:01.000Z",
+    data: {},
+    pack_id: "pack-42",
+    card_id: "card-42",
+  };
+  const { card_id: removedCardId, ...withoutCard } = fullyRelated;
+  const { pack_id: removedPackId, ...withoutPack } = fullyRelated;
+  assert.equal(removedCardId, "card-42");
+  assert.equal(removedPackId, "pack-42");
+  for (const invalid of [
+    withoutCard,
+    withoutPack,
+    { ...fullyRelated, pack_id: null, card_id: null },
+    { ...fullyRelated, card_id: "" },
+    { ...fullyRelated, pack_id: "", card_id: null },
+  ]) {
+    assert.equal(dataforrestEventRecordV1Schema.safeParse(invalid).success, false);
   }
 });

@@ -5,7 +5,7 @@ import type {
 } from "./provider-observation-mapper.ts";
 import {
   launchSourceMapperDescriptors,
-  type SourceMapperCompatibilityDescriptor,
+  type SourceMapperDescriptor,
 } from "./source-mapper-descriptors.ts";
 
 export type ProviderObservationMapperRegistryErrorCode =
@@ -24,7 +24,7 @@ export class ProviderObservationMapperRegistryError extends Error {
 
 function identity(
   descriptor: Pick<
-    SourceMapperCompatibilityDescriptor,
+    SourceMapperDescriptor,
     "mapperKey" | "mapperVersion"
   >,
 ): string {
@@ -32,17 +32,15 @@ function identity(
 }
 
 function descriptorMatches(
-  actual: SourceMapperCompatibilityDescriptor,
-  expected: SourceMapperCompatibilityDescriptor,
+  actual: SourceMapperDescriptor,
+  expected: SourceMapperDescriptor,
 ): boolean {
   return (
     actual.mapperKey === expected.mapperKey &&
     actual.mapperVersion === expected.mapperVersion &&
     actual.provider === expected.provider &&
     actual.normalizedContractVersion === expected.normalizedContractVersion &&
-    actual.identityNamespaceKey === expected.identityNamespaceKey &&
-    JSON.stringify(actual.compatiblePredecessors) ===
-      JSON.stringify(expected.compatiblePredecessors)
+    actual.identityNamespaceKey === expected.identityNamespaceKey
   );
 }
 
@@ -114,7 +112,7 @@ export class ProductionProviderObservationMapperRegistry {
     return this.resolve(input).map(input);
   }
 
-  descriptors(): readonly SourceMapperCompatibilityDescriptor[] {
+  descriptors(): readonly SourceMapperDescriptor[] {
     return Object.freeze(
       [...this.#mappers.values()].map(({ descriptor }) => descriptor),
     );

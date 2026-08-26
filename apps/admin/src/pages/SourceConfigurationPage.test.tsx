@@ -32,7 +32,6 @@ const sourceId = "00000000-0000-4000-8000-000000000004";
 const sourceRevisionId = "00000000-0000-4000-8000-000000000005";
 const scheduleRevisionId = "00000000-0000-4000-8000-000000000006";
 const blockedRevisionId = "00000000-0000-4000-8000-000000000007";
-const adapterCandidateRevisionId = "00000000-0000-4000-8000-000000000009";
 const fingerprint = "a".repeat(64);
 const activeConnectionRevision = {
   id: connectionRevisionId,
@@ -70,7 +69,7 @@ const catalog: ProviderSourceAdminCatalog = {
     sourceRegistration: {
       sourceTypeKey: "dataforrest-events-v1",
       sourceAdapterVersion: "dataforrest-events-adapter-v1",
-      normalizedContractVersion: "provider-observation-v1",
+      normalizedContractVersion: "packscout.provider-observation.v1",
       mapperKey: "courtyard-provider-observation",
       mapperVersion: "1",
       identityNamespaceKey: "dataforrest-courtyard-records-v1",
@@ -107,7 +106,7 @@ const catalog: ProviderSourceAdminCatalog = {
     connectionRevisionId,
     state: "paused",
     pauseRequested: false,
-    normalizedContractVersion: "provider-observation-v1",
+    normalizedContractVersion: "packscout.provider-observation.v1",
     mapperKey: "courtyard-provider-observation",
     mapperVersion: "1",
     identityNamespaceKey: "dataforrest-courtyard-records-v1",
@@ -201,8 +200,12 @@ test("configuration UI renders masked evidence and explicit cursor impact withou
   const text = pageText(renderer);
   assert.match(text, /Shared DataForrest/);
   assert.match(text, /•••••••• configured/);
+  assert.match(text, /dataforrest-events-adapter-v1/);
+  assert.match(text, /packscout\.provider-observation\.v1/);
   assert.match(text, /courtyard-provider-observation @ 1/);
   assert.match(text, new RegExp(fingerprint));
+  assert.doesNotMatch(text, /adapter upgrade|replace existing source/iu);
+  assert.equal(renderer.container.querySelector("#source-replacement"), null);
   assert.doesNotMatch(renderer.container.innerHTML, /bearer-token|authorization|configuration_ciphertext/i);
   for (const password of renderer.container.querySelectorAll<HTMLInputElement>('input[type="password"]')) {
     assert.equal(password.value, "");
@@ -230,119 +233,6 @@ test("data operators receive dense read-only evidence without configuration cont
   assert.equal(renderer.container.querySelector(".source-config-editor"), null);
 });
 
-test("secret administrators can upgrade a legacy profile without provider records", async (context) => {
-  const upgradeCatalog: ProviderSourceAdminCatalog = {
-    ...catalog,
-    availableSourceTypes: catalog.availableSourceTypes.map((sourceType) => ({
-      ...sourceType,
-      sourceAdapterVersion: "dataforrest-events-adapter-v2",
-    })),
-    providers: [],
-    sources: [],
-  };
-  stubFetch(context, () => jsonResponse({ catalog: upgradeCatalog }));
-  const renderer = await renderPage(page(session(true)));
-  cleanupPage(context, renderer);
-  await settlePage();
-
-  await act(async () => {
-    findButton(renderer, "Create adapter upgrade candidate").click();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  });
-  assert.match(pageText(renderer), /Create dataforrest-events-adapter-v2 candidate/u);
-  assert.match(
-    pageText(renderer),
-    /decrypted only in the server.*re-encrypted for a new untested revision/u,
-  );
-  assert.match(
-    pageText(renderer),
-    /In-place adapter upgrades are blocked while any draft, active, or paused source uses this profile/u,
-  );
-  assert.match(
-    pageText(renderer),
-    /Create a separate current-adapter profile and replace those sources instead/u,
-  );
-  assert.doesNotMatch(pageText(renderer), /Existing pinned work keeps/u);
-  assert.ok(findButton(renderer, "Create adapter upgrade candidate"));
-});
-
-test("legacy source pins direct operators to a separate current-adapter profile", async (context) => {
-  const upgradeCatalog: ProviderSourceAdminCatalog = {
-    ...catalog,
-    availableSourceTypes: catalog.availableSourceTypes.map((sourceType) => ({
-      ...sourceType,
-      sourceAdapterVersion: "dataforrest-events-adapter-v2",
-    })),
-    providers: catalog.providers.map((provider) => ({
-      ...provider,
-      sourceRegistration: {
-        ...provider.sourceRegistration,
-        sourceAdapterVersion: "dataforrest-events-adapter-v2",
-      },
-    })),
-  };
-  stubFetch(context, () => jsonResponse({ catalog: upgradeCatalog }));
-  const renderer = await renderPage(page(session(true)));
-  cleanupPage(context, renderer);
-  await settlePage();
-
-  assert.match(pageText(renderer), /Use a separate profile for this adapter change/u);
-  assert.match(
-    pageText(renderer),
-    /Create a new current-adapter connection profile, test and activate it/u,
-  );
-  assert.match(
-    pageText(renderer),
-    /pause or disable each dependent source at a planned boundary/u,
-  );
-  assert.equal([...renderer.container.querySelectorAll("button")]
-    .some((button) =>
-      button.textContent?.trim() === "Create adapter upgrade candidate"
-    ), false);
-});
-
-test("legacy source pins disable activation of an incompatible adapter candidate", async (context) => {
-  const candidateCatalog: ProviderSourceAdminCatalog = {
-    ...catalog,
-    availableSourceTypes: catalog.availableSourceTypes.map((sourceType) => ({
-      ...sourceType,
-      sourceAdapterVersion: "dataforrest-events-adapter-v2",
-    })),
-    providers: catalog.providers.map((provider) => ({
-      ...provider,
-      sourceRegistration: {
-        ...provider.sourceRegistration,
-        sourceAdapterVersion: "dataforrest-events-adapter-v2",
-      },
-    })),
-    connections: catalog.connections.map((connection) => ({
-      ...connection,
-      latestRevision: {
-        ...connection.latestRevision,
-        id: adapterCandidateRevisionId,
-        revisionNumber: 2,
-        sourceAdapterVersion: "dataforrest-events-adapter-v2",
-        state: "candidate",
-        test: {
-          ...connection.latestRevision.test,
-          jobId: adapterCandidateRevisionId,
-          connectionRevisionId: adapterCandidateRevisionId,
-        },
-      },
-    })),
-  };
-  stubFetch(context, () => jsonResponse({ catalog: candidateCatalog }));
-  const renderer = await renderPage(page(session(true)));
-  cleanupPage(context, renderer);
-  await settlePage();
-
-  assert.equal(findButton(renderer, "Activate revision").disabled, true);
-  assert.match(pageText(renderer), /Use a separate profile for this adapter change/u);
-  assert.match(
-    pageText(renderer),
-    /In-place adapter changes are blocked while draft, active, or paused sources use this profile/u,
-  );
-});
 test("an old retired-revision episode remains recoverable through the healthy latest active revision", async (context) => {
   const recoveryCatalog: ProviderSourceAdminCatalog = {
     ...catalog,
@@ -504,72 +394,4 @@ test("source testing is offered only for draft and disabled lifecycle states", a
       .some((button) => button.textContent?.trim() === "Test");
     assert.equal(hasTest, state === "draft" || state === "disabled", state);
   }
-});
-
-test("replacement waits for selected-provider confirmation and explains the cursor boundary", async (context) => {
-  let replacementBody: unknown = null;
-  const requests = stubFetch(context, ({ input, init }) => {
-    const path = String(input);
-    if (path.endsWith("/provider-sources/sources/replacements")) {
-      replacementBody = JSON.parse(String(init?.body));
-      return jsonResponse({
-        sourceInstanceId: "00000000-0000-4000-8000-000000000020",
-        sourceRevisionId: "00000000-0000-4000-8000-000000000021",
-        audit: {
-          action: "source_replacement_created",
-          subjectType: "provider_source",
-          subjectId: "00000000-0000-4000-8000-000000000020",
-          revisionId: "00000000-0000-4000-8000-000000000021",
-          outcome: "succeeded",
-          safeCode: null,
-          occurredAt: "2026-08-21T12:05:00.000Z",
-        },
-      }, 201);
-    }
-    return jsonResponse({ catalog });
-  });
-  const renderer = await renderPage(page(session(true)));
-  cleanupPage(context, renderer);
-  await settlePage();
-
-  await act(async () => {
-    changeControl(renderer, "source-provider", providerId);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  });
-  await act(async () => {
-    changeControl(renderer, "source-profile", profileId);
-    changeControl(renderer, "source-replacement", sourceId);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  });
-  const form = findButton(renderer, "Save inactive source").closest("form");
-  assert.ok(form);
-  await act(async () => {
-    form.dispatchEvent(new renderer.dom.window.Event("submit", {
-      bubbles: true,
-      cancelable: true,
-    }));
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  });
-
-  assert.equal(replacementBody, null);
-  assert.match(pageText(renderer), /Only courtyard is affected/iu);
-  assert.match(pageText(renderer), /cursor cannot transfer/iu);
-  assert.match(pageText(renderer), /activation begins paused/iu);
-
-  await act(async () => {
-    findButton(renderer, "Replace selected source").click();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  });
-  await settlePage();
-
-  assert.deepEqual(replacementBody, {
-    providerId,
-    connectionProfileId: profileId,
-    sourceTypeKey: "dataforrest-events-v1",
-    mapperKey: "courtyard-provider-observation",
-    mapperVersion: "1",
-    intervalSeconds: 60,
-    replacesSourceInstanceId: sourceId,
-  });
-  assert.ok(requests.some(({ input }) => String(input).endsWith("/provider-sources/sources/replacements")));
 });

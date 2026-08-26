@@ -17,8 +17,8 @@ function pageCount(value: unknown): number {
 
 /**
  * Stops an incompatible elapsed run from pinning the global queue forever.
- * The run is already durably incomplete; the operator can now replace or
- * repair the active source revision without crashing unrelated source lanes.
+ * The run is already durably incomplete; the operator can diagnose or disable
+ * the affected source without crashing unrelated source lanes.
  */
 export async function markProviderSourceContinuationUnavailable(
   transaction: PackscoutTransactionClient,

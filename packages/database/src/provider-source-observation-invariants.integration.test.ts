@@ -2,18 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   PROVIDER_OBSERVATION_HASH_VERSION,
-  PROVIDER_OBSERVATION_HASH_VERSION_V2,
   emptyNormalizedProviderFacts,
   launchRecordIdScopeDeclarations,
   normalizedObservationSemanticContentSchema,
-  normalizedObservationSemanticContentV2Schema,
   providerIdentityNamespaceByLaunchProvider,
 } from "@packscout/contracts";
 import {
   hashNormalizedObservationSemanticContent,
-  hashNormalizedObservationSemanticContentV2,
   ProviderSourceObservationRepository,
   resolveLaunchSourceRecordMeaning,
   type UpsertSemanticObservationInput,
@@ -65,9 +61,9 @@ test("canonical text keeps a trailing v and rejects actual trim whitespace", asy
   }
 });
 
-test("observation v2 persists one-target pulls in a separate strict history domain", async () => {
+test("observation v1 persists one-target pulls in its sole strict history domain", async () => {
   const fixture = await createProviderSourceAcceptanceFixture(
-    "observation-v2-packless-pulls",
+    "observation-v1-packless-pulls",
   );
   try {
     const providerId = await fixture.setup.createProviderSource({
@@ -82,9 +78,9 @@ test("observation v2 persists one-target pulls in a separate strict history doma
       connectionProfileId: fixture.connectionProfileId,
       sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
       sourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
-      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
       mapperKey: "clutchpacks-provider-observation",
-      mapperVersion: "2",
+      mapperVersion: "1",
       identityNamespaceKey: "dataforrest-clutchpacks-records-v1",
       cursorCodecVersion: ACCEPTANCE_CURSOR_CODEC_VERSION,
       revisionNumber: 1,
@@ -106,7 +102,7 @@ test("observation v2 persists one-target pulls in a separate strict history doma
           where: { id: source.sourceRevisionId },
         })
       ).normalized_contract_version,
-      PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+      PROVIDER_OBSERVATION_CONTRACT_VERSION,
     );
 
     const repository = new ProviderSourceObservationRepository();
@@ -115,14 +111,14 @@ test("observation v2 persists one-target pulls in a separate strict history doma
         relationship: "card",
         target: {
           recordIdScopeKey: "catalog-card-v1",
-          providerRecordId: "v2-card-42",
+          providerRecordId: "v1-card-42",
         },
       }],
       [{
         relationship: "pack",
         target: {
           recordIdScopeKey: "catalog-pack-v1",
-          providerRecordId: "v2-pack-42",
+          providerRecordId: "v1-pack-42",
         },
       }],
       [
@@ -130,14 +126,14 @@ test("observation v2 persists one-target pulls in a separate strict history doma
           relationship: "card",
           target: {
             recordIdScopeKey: "catalog-card-v1",
-            providerRecordId: "v2-card-42",
+            providerRecordId: "v1-card-42",
           },
         },
         {
           relationship: "pack",
           target: {
             recordIdScopeKey: "catalog-pack-v1",
-            providerRecordId: "v2-pack-42",
+            providerRecordId: "v1-pack-42",
           },
         },
       ],
@@ -147,8 +143,8 @@ test("observation v2 persists one-target pulls in a separate strict history doma
       semanticObservationId: string;
     }>;
     for (const [index, relationships] of relationshipVariants.entries()) {
-      const providerRecordId = `v2-pull-${index + 1}`;
-      const content = normalizedObservationSemanticContentV2Schema.parse({
+      const providerRecordId = `v1-pull-${index + 1}`;
+      const content = normalizedObservationSemanticContentSchema.parse({
         kind: "pull",
         providerRecordIdentity: {
           recordIdScopeKey: "pull-v1",
@@ -169,10 +165,10 @@ test("observation v2 persists one-target pulls in a separate strict history doma
           recordKind: "pull",
           recordDiscriminator: "pull",
           effectiveSourceTime: ACCEPTANCE_CREATED_AT,
-          normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-          hashVersion: PROVIDER_OBSERVATION_HASH_VERSION_V2,
+          normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+          hashVersion: PROVIDER_OBSERVATION_HASH_VERSION,
           normalizedContentHash:
-            hashNormalizedObservationSemanticContentV2(content),
+            hashNormalizedObservationSemanticContent(content),
           normalizedContent: content,
         }),
       );
@@ -188,11 +184,11 @@ test("observation v2 persists one-target pulls in a separate strict history doma
     assert.equal(stored.length, 3);
     assert.deepEqual(
       new Set(stored.map(({ normalized_contract_version: version }) => version)),
-      new Set([PROVIDER_OBSERVATION_CONTRACT_VERSION_V2]),
+      new Set([PROVIDER_OBSERVATION_CONTRACT_VERSION]),
     );
     assert.deepEqual(
       new Set(stored.map(({ hash_version: version }) => version)),
-      new Set([PROVIDER_OBSERVATION_HASH_VERSION_V2]),
+      new Set([PROVIDER_OBSERVATION_HASH_VERSION]),
     );
 
     const oneTargetRow = (relationship: "card" | "pack") => stored.find((row) =>
@@ -203,36 +199,17 @@ test("observation v2 persists one-target pulls in a separate strict history doma
       }).relationships?.[0]?.relationship === relationship
     )!;
     const cardOnly = oneTargetRow("card");
-    const cardOnlyContent = normalizedObservationSemanticContentV2Schema.parse(
+    const cardOnlyContent = normalizedObservationSemanticContentSchema.parse(
       cardOnly.normalized_content_json,
     );
-    for (const [index, oneTarget] of [cardOnly, oneTargetRow("pack")].entries()) {
-      await assert.rejects(
-        fixture.database.source_semantic_observations.create({
-          data: {
-            organization_id: fixture.organizationId,
-            source_record_id: oneTarget.source_record_id,
-            effective_source_time: ACCEPTANCE_CREATED_AT,
-            normalized_contract_version: PROVIDER_OBSERVATION_CONTRACT_VERSION,
-            hash_version: PROVIDER_OBSERVATION_HASH_VERSION,
-            normalized_content_hash: String(index + 8).repeat(64),
-            normalized_content_json:
-              normalizedObservationSemanticContentV2Schema.parse(
-                oneTarget.normalized_content_json,
-              ),
-          },
-        }),
-        /semantic (?:pull content|relationship set)/u,
-      );
-    }
     await assert.rejects(
       fixture.database.source_semantic_observations.create({
         data: {
           organization_id: fixture.organizationId,
           source_record_id: cardOnly.source_record_id,
           effective_source_time: ACCEPTANCE_CREATED_AT,
-          normalized_contract_version: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-          hash_version: PROVIDER_OBSERVATION_HASH_VERSION,
+          normalized_contract_version: "packscout.provider-observation.v2",
+          hash_version: "packscout.provider-observation-hash.v2",
           normalized_content_hash: "9".repeat(64),
           normalized_content_json: cardOnlyContent,
         },
@@ -269,8 +246,8 @@ test("observation v2 persists one-target pulls in a separate strict history doma
             source_record_id: cardOnly.source_record_id,
             effective_source_time: ACCEPTANCE_CREATED_AT,
             normalized_contract_version:
-              PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-            hash_version: PROVIDER_OBSERVATION_HASH_VERSION_V2,
+              PROVIDER_OBSERVATION_CONTRACT_VERSION,
+            hash_version: PROVIDER_OBSERVATION_HASH_VERSION,
             normalized_content_hash: normalizedContentHash,
             normalized_content_json: {
               ...cardOnlyContent,

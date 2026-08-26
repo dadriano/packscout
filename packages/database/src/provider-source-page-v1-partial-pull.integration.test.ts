@@ -2,16 +2,16 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-  PROVIDER_OBSERVATION_HASH_VERSION_V2,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  PROVIDER_OBSERVATION_HASH_VERSION,
   emptyNormalizedProviderFacts,
-  normalizedObservationSemanticContentV2,
-  normalizedObservationSemanticCanonicalJsonV2,
-  normalizedProviderObservationPageV2Schema,
-  normalizedProviderObservationV2Schema,
+  normalizedObservationSemanticContent,
+  normalizedObservationSemanticCanonicalJson,
+  normalizedProviderObservationPageSchema,
+  normalizedProviderObservationSchema,
   providerSourceSuccessfulCaptureCanonicalJson,
   type ProviderSourceCanonicalProjectionPlan,
-  type ProviderSourcePagePlanV2,
+  type ProviderSourcePagePlan,
 } from "@packscout/contracts";
 import {
   ACCEPTANCE_CURSOR_CODEC_VERSION,
@@ -46,7 +46,7 @@ function pullObservation(
   }>,
   effectiveAt: string,
 ) {
-  return normalizedProviderObservationV2Schema.parse({
+  return normalizedProviderObservationSchema.parse({
     kind: "pull",
     providerRecordIdentity: {
       recordIdScopeKey: "pull-v1",
@@ -93,9 +93,9 @@ function projectionFor(
   };
 }
 
-test("atomic v2 page commit stores each one-target pull without fabricating an edge", async () => {
+test("atomic v1 page commit stores each one-target pull without fabricating an edge", async () => {
   const fixture = await createProviderSourceAcceptanceFixture(
-    "atomic-v2-one-target-pulls",
+    "atomic-v1-one-target-pulls",
   );
   try {
     const now = await databaseNow(fixture.database);
@@ -111,9 +111,9 @@ test("atomic v2 page commit stores each one-target pull without fabricating an e
       connectionProfileId: fixture.connectionProfileId,
       sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
       sourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
-      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
       mapperKey: "clutchpacks-provider-observation",
-      mapperVersion: "2",
+      mapperVersion: "1",
       identityNamespaceKey: "dataforrest-clutchpacks-records-v1",
       cursorCodecVersion: ACCEPTANCE_CURSOR_CODEC_VERSION,
       revisionNumber: 1,
@@ -167,12 +167,12 @@ test("atomic v2 page commit stores each one-target pull without fabricating an e
     assert.equal(requested.kind, "created");
     if (requested.kind !== "created") throw new Error("run unavailable");
 
-    const ownerKey = "atomic-v2-worker";
+    const ownerKey = "atomic-v1-worker";
     const supervisorLeaseToken = randomUUID();
     const supervisor = await new ProviderSourceSupervisorRepository(
       fixture.database,
     ).acquire({
-      environmentKey: "atomic-v2-one-target-pulls",
+      environmentKey: "atomic-v1-one-target-pulls",
       ownerKey,
       leaseToken: supervisorLeaseToken,
       now: await databaseNow(fixture.database),
@@ -200,7 +200,7 @@ test("atomic v2 page commit stores each one-target pull without fabricating an e
       cursorGeneration: 1,
       value: null,
     } as const;
-    const nextCursor = { ...requestedCursor, value: "cursor-v2-next" };
+    const nextCursor = { ...requestedCursor, value: "cursor-v1-next" };
     const effectiveAt = now.toISOString();
     const observations = [
       pullObservation("pull-card-only", {
@@ -218,9 +218,9 @@ test("atomic v2 page commit stores each one-target pull without fabricating an e
         },
       }, effectiveAt),
     ] as const;
-    const rawResponse = new TextEncoder().encode("v2-one-target-pulls");
-    const normalizedPage = normalizedProviderObservationPageV2Schema.parse({
-      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+    const rawResponse = new TextEncoder().encode("v1-one-target-pulls");
+    const normalizedPage = normalizedProviderObservationPageSchema.parse({
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
       provider: "clutchpacks",
       outcomes: observations.map((observation, recordIndex) => ({
         status: "valid" as const,
@@ -239,7 +239,7 @@ test("atomic v2 page commit stores each one-target pull without fabricating an e
     const plan = {
       normalizedPage,
       outcomes: observations.map((observation, recordIndex) => {
-        const semanticContent = normalizedObservationSemanticContentV2(
+        const semanticContent = normalizedObservationSemanticContent(
           observation,
         );
         return {
@@ -248,7 +248,7 @@ test("atomic v2 page commit stores each one-target pull without fabricating an e
           observation,
           semanticContent,
           normalizedContentHash: createHash("sha256")
-            .update(normalizedObservationSemanticCanonicalJsonV2(
+            .update(normalizedObservationSemanticCanonicalJson(
               semanticContent,
             ))
             .digest("hex"),
@@ -269,7 +269,7 @@ test("atomic v2 page commit stores each one-target pull without fabricating an e
         mapperQuarantined: 0,
         warnings: 0,
       },
-    } satisfies ProviderSourcePagePlanV2;
+    } satisfies ProviderSourcePagePlan;
     const rawResponseSha256 = createHash("sha256")
       .update(rawResponse)
       .digest("hex");
@@ -325,9 +325,9 @@ test("atomic v2 page commit stores each one-target pull without fabricating an e
         sourceRevisionId: source.sourceRevisionId,
         sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
         sourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
-        normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+        normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
         mapperKey: "clutchpacks-provider-observation",
-        mapperVersion: "2",
+        mapperVersion: "1",
         identityNamespaceKey: "dataforrest-clutchpacks-records-v1",
         connectionProfileId: fixture.connectionProfileId,
         connectionRevisionId: fixture.connectionRevisionId,
@@ -423,8 +423,8 @@ test("atomic v2 page commit stores each one-target pull without fabricating an e
         where: {
           organization_id: fixture.organizationId,
           normalized_contract_version:
-            PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-          hash_version: PROVIDER_OBSERVATION_HASH_VERSION_V2,
+            PROVIDER_OBSERVATION_CONTRACT_VERSION,
+          hash_version: PROVIDER_OBSERVATION_HASH_VERSION,
         },
       }),
       2,

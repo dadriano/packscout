@@ -4,8 +4,6 @@ import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   launchProviderKeys,
 } from "@packscout/contracts";
 import {
@@ -14,43 +12,36 @@ import {
 } from "./production-source-adapter-registry.ts";
 import { SourceAdapterRegistryError } from "./source-adapter-registry.ts";
 
-test("production registry retains v1/v2 pins and selects DataForrest v3 for new work", () => {
+test("production registry exposes only the current DataForrest v1 adapter", () => {
   const registry = createProductionSourceAdapterRegistry();
   assert.deepEqual(registry.keys(), [DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY]);
   assert.deepEqual(
     productionSourceAdapterManifests.map(({ adapterVersion }) => adapterVersion),
-    [
-      DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-      DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-      DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-    ],
+    [DATAFORREST_EVENTS_V1_ADAPTER_VERSION],
   );
   const v1 = launchProviderKeys.map((provider) => registry.resolve(
     DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     provider,
   ));
-  const v2 = launchProviderKeys.map((provider) => registry.resolve(
-    DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-    provider,
-  ));
-  const v3 = launchProviderKeys.map((provider) => registry.resolve(
-    DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-    provider,
-  ));
   assert.equal(new Set(v1).size, 1);
-  assert.equal(new Set(v2).size, 1);
-  assert.equal(new Set(v3).size, 1);
-  assert.notEqual(v1[0], v2[0]);
   assert.deepEqual(
-    v3[0]?.manifest.supportedProviders.map(({ provider }) => provider),
+    v1[0]?.manifest.supportedProviders.map(({ provider }) => provider),
     [...launchProviderKeys],
   );
   assert.equal(
     registry.resolveCurrentVersion(DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY),
-    v3[0],
+    v1[0],
+  );
+  assert.throws(
+    () => registry.resolve(
+      DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+      "dataforrest-events-adapter-v2",
+      "courtyard",
+    ),
+    (error) =>
+      error instanceof SourceAdapterRegistryError &&
+      error.code === "adapter_version_mismatch",
   );
 });
 

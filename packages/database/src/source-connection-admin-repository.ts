@@ -3,7 +3,6 @@ import { Prisma } from "@prisma/client";
 import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   type PackscoutPrismaClient,
-  type PackscoutQueryClient,
 } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
@@ -24,33 +23,6 @@ function bytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
 
 function safeAuditMetadata(revisionId: string): Prisma.InputJsonObject {
   return { connectionRevisionId: revisionId };
-}
-
-async function hasIncompatibleSourceAdapterPins(
-  database: PackscoutQueryClient,
-  input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    sourceAdapterVersion: string;
-  }>,
-): Promise<boolean> {
-  const rows = await database.$queryRaw<Array<{ blocked: boolean }>>(Prisma.sql`
-    select exists (
-      select 1
-      from public.provider_source_instances source
-      join public.provider_source_revisions revision
-        on revision.id = source.active_revision_id
-       and revision.organization_id = source.organization_id
-       and revision.provider_id = source.provider_id
-       and revision.source_instance_id = source.id
-       and revision.connection_profile_id = source.connection_profile_id
-      where source.organization_id = cast(${input.organizationId} as uuid)
-        and source.connection_profile_id = cast(${input.connectionProfileId} as uuid)
-        and source.state in ('draft', 'active', 'paused')
-        and revision.source_adapter_version <> ${input.sourceAdapterVersion}
-    ) as blocked
-  `);
-  return rows[0]?.blocked ?? false;
 }
 
 export class SourceConnectionAdminRepository {
@@ -186,14 +158,6 @@ export class SourceConnectionAdminRepository {
     };
   }
 
-  hasIncompatibleSourceAdapterPins(input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    sourceAdapterVersion: string;
-  }>): Promise<boolean> {
-    return hasIncompatibleSourceAdapterPins(this.database, input);
-  }
-
   async addConnectionRevision(
     input: Readonly<{
       organizationId: string;
@@ -273,105 +237,6 @@ export class SourceConnectionAdminRepository {
         organizationId: input.organizationId,
         actorKey: input.actorKey,
         action: "source_connection.rotate_credential",
-        subjectId: input.connectionProfileId,
-        revisionId: input.revisionId,
-        occurredAt: input.createdAt,
-      });
-    }, PACKSCOUT_TRANSACTION_OPTIONS);
-  }
-
-  async addConnectionAdapterRevision(
-    input: Readonly<{
-      organizationId: string;
-      connectionProfileId: string;
-      expectedRevisionId: string;
-      expectedSourceAdapterVersion: string;
-      revisionId: string;
-      revisionNumber: number;
-      sourceTypeKey: string;
-      sourceAdapterVersion: string;
-      encryptedConfiguration: EncryptedConfiguration;
-      configurationFingerprint: string;
-      actorKey: string;
-      createdAt: Date;
-    }>,
-  ): Promise<void> {
-    await this.database.$transaction(async (transaction) => {
-      const profile = await transaction.$queryRaw<
-        Array<{
-          id: string;
-          sourceTypeKey: string;
-        }>
-      >(Prisma.sql`
-        select id, source_type_key as "sourceTypeKey"
-        from public.source_connection_profiles
-        where id = cast(${input.connectionProfileId} as uuid)
-          and organization_id = cast(${input.organizationId} as uuid)
-          and state <> 'disabled'
-          and not exists (
-            select 1 from public.source_connection_health_episodes episode
-            where episode.connection_profile_id = source_connection_profiles.id
-              and episode.organization_id = source_connection_profiles.organization_id
-              and episode.closed_at is null
-          )
-        for update
-      `);
-      if (!profile[0] || profile[0].sourceTypeKey !== input.sourceTypeKey) {
-        this.#tenantViolation();
-      }
-      const latest = await transaction.source_connection_revisions.findFirst({
-        where: {
-          organization_id: input.organizationId,
-          connection_profile_id: input.connectionProfileId,
-        },
-        orderBy: [{ revision_number: "desc" }, { id: "desc" }],
-        select: {
-          id: true,
-          revision_number: true,
-          source_adapter_version: true,
-          state: true,
-          revoked_at: true,
-        },
-      });
-      if (
-        latest?.id !== input.expectedRevisionId ||
-        latest.revision_number + 1 !== input.revisionNumber ||
-        latest.source_adapter_version !== input.expectedSourceAdapterVersion ||
-        !["candidate", "active"].includes(latest.state) ||
-        latest.revoked_at !== null ||
-        input.sourceAdapterVersion === input.expectedSourceAdapterVersion
-      )
-        this.#fenced("Connection revision changed before adapter upgrade.");
-      if (await hasIncompatibleSourceAdapterPins(transaction, {
-        organizationId: input.organizationId,
-        connectionProfileId: input.connectionProfileId,
-        sourceAdapterVersion: input.sourceAdapterVersion,
-      })) {
-        this.#fenced("Sources are pinned to another adapter version.");
-      }
-      await transaction.source_connection_revisions.create({
-        data: {
-          id: input.revisionId,
-          organization_id: input.organizationId,
-          connection_profile_id: input.connectionProfileId,
-          revision_number: input.revisionNumber,
-          source_type_key: input.sourceTypeKey,
-          source_adapter_version: input.sourceAdapterVersion,
-          configuration_ciphertext: bytes(
-            input.encryptedConfiguration.ciphertext,
-          ),
-          configuration_nonce: bytes(input.encryptedConfiguration.nonce),
-          configuration_auth_tag: bytes(input.encryptedConfiguration.authTag),
-          encryption_key_version: input.encryptedConfiguration.keyVersion,
-          configuration_fingerprint: input.configurationFingerprint,
-          created_by_actor_key: input.actorKey,
-          created_at: input.createdAt,
-        },
-      });
-      await this.#audit(transaction, {
-        organizationId: input.organizationId,
-        actorKey: input.actorKey,
-        action: "source_connection.upgrade_adapter",
         subjectId: input.connectionProfileId,
         revisionId: input.revisionId,
         occurredAt: input.createdAt,
@@ -535,13 +400,6 @@ export class SourceConnectionAdminRepository {
       if (!revision || !profile) this.#tenantViolation();
       if (latestRevision?.id !== revision.id) {
         this.#fenced("Only the latest connection revision can activate.");
-      }
-      if (await hasIncompatibleSourceAdapterPins(transaction, {
-        organizationId: input.organizationId,
-        connectionProfileId: input.connectionProfileId,
-        sourceAdapterVersion: revision.source_adapter_version,
-      })) {
-        this.#fenced("Sources are pinned to another adapter version.");
       }
       const successfulTest =
         latestTestJob?.state === "succeeded"

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { canonicalJson } from "./data-release-v2-canonical.ts";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   PROVIDER_OBSERVATION_HASH_VERSION,
@@ -59,7 +60,19 @@ export const normalizedRelationshipIdentitySchema = z
 
 const pullRelationshipsSchema = z
   .array(normalizedRelationshipIdentitySchema)
-  .length(2)
+  .min(1)
+  .max(2)
+  .superRefine((relationships, context) => {
+    const relationshipKinds = relationships.map(
+      ({ relationship }) => relationship,
+    );
+    if (new Set(relationshipKinds).size !== relationshipKinds.length) {
+      context.addIssue({
+        code: "custom",
+        message: "provider_source.pull_relationships_invalid",
+      });
+    }
+  })
   .transform((relationships) =>
     [...relationships].sort((left, right) =>
       left.relationship === right.relationship
@@ -121,16 +134,6 @@ const pullObservationSchema = z
         code: "custom",
         message: "provider_source.pull_scope_mismatch",
         path: ["providerRecordIdentity", "recordIdScopeKey"],
-      });
-    }
-    const relationships = value.relationships.map(
-      ({ relationship }) => relationship,
-    );
-    if (new Set(relationships).size !== 2) {
-      context.addIssue({
-        code: "custom",
-        message: "provider_source.pull_relationships_invalid",
-        path: ["relationships"],
       });
     }
   });
@@ -219,16 +222,6 @@ const pullSemanticContentSchema = z
         code: "custom",
         message: "provider_source.pull_scope_mismatch",
         path: ["providerRecordIdentity", "recordIdScopeKey"],
-      });
-    }
-    const relationships = value.relationships.map(
-      ({ relationship }) => relationship,
-    );
-    if (new Set(relationships).size !== 2) {
-      context.addIssue({
-        code: "custom",
-        message: "provider_source.pull_relationships_invalid",
-        path: ["relationships"],
       });
     }
   });
@@ -421,44 +414,11 @@ export function normalizedObservationSemanticContent(
   });
 }
 
-type CanonicalSemanticJson =
-  | boolean
-  | number
-  | string
-  | null
-  | readonly CanonicalSemanticJson[]
-  | Readonly<{ [key: string]: CanonicalSemanticJson }>;
-
-function canonicalSemanticJsonValue(value: unknown): CanonicalSemanticJson {
-  if (
-    value === null ||
-    typeof value === "boolean" ||
-    typeof value === "string" ||
-    (typeof value === "number" && Number.isFinite(value))
-  ) {
-    return value as boolean | number | string | null;
-  }
-  if (Array.isArray(value)) return value.map(canonicalSemanticJsonValue);
-  if (typeof value !== "object") {
-    throw new TypeError("Normalized semantic content is not JSON serializable.");
-  }
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => {
-        const nested = (value as Readonly<Record<string, unknown>>)[key];
-        if (nested === undefined) {
-          throw new TypeError("Normalized semantic content contains undefined.");
-        }
-        return [key, canonicalSemanticJsonValue(nested)];
-      }),
-  );
-}
-
 /** Canonical bytestring authority for PROVIDER_OBSERVATION_HASH_VERSION. */
 export function normalizedObservationSemanticCanonicalJson(
   content: unknown,
 ): string {
-  const parsed = normalizedObservationSemanticContentSchema.parse(content);
-  return JSON.stringify(canonicalSemanticJsonValue(parsed));
+  return canonicalJson(
+    normalizedObservationSemanticContentSchema.parse(content),
+  );
 }

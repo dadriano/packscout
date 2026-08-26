@@ -18,7 +18,7 @@ started. No DataForrest credential was read or used.
 | Current capacity deficit                    | 8,657,163,818,123 bytes                                                                   |
 | Admission                                   | Rejected: insufficient available bytes, already over 80% used, projected threshold breach |
 | Exact backfill DB fingerprint/OID/system ID | `null` — target not provisioned because admission is rejected                             |
-| Required migration                          | `20260821040000_provider_source_page_plan_digest`                                         |
+| Historical required migration               | `20260821040000_provider_source_page_plan_digest`                                         |
 | Organization / administrator receipt        | `not_run`                                                                                 |
 | Shared DataForrest profile and key revision | `not_run`                                                                                 |
 | Four source/mapper revision pins            | `not_run`                                                                                 |

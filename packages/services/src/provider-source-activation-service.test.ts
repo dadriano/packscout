@@ -31,10 +31,10 @@ import {
 } from "./source-adapter-registry.ts";
 import type { SourceAdapter } from "./source-adapter.ts";
 import {
-  SourceMapperCompatibilityError,
+  SourceMapperDescriptorError,
   SourceMapperDescriptorRegistry,
   launchSourceMapperDescriptors,
-  type SourceMapperCompatibilityDescriptor,
+  type SourceMapperDescriptor,
 } from "./source-mapper-descriptors.ts";
 
 const activatedAt = new Date("2026-08-21T12:00:00.000Z");
@@ -463,9 +463,9 @@ test("activation requires the exact registered mapper provider, contract, and na
     ({ provider }) => provider === "courtyard",
   )!;
   const cases: Array<{
-    descriptor: SourceMapperCompatibilityDescriptor;
+    descriptor: SourceMapperDescriptor;
     code: "provider_mismatch" | "normalized_contract_mismatch" |
-      "replacement_namespace_mismatch";
+      "identity_namespace_mismatch";
   }> = [
     {
       descriptor: { ...descriptor, provider: "collector_crypt" },
@@ -475,12 +475,12 @@ test("activation requires the exact registered mapper provider, contract, and na
       descriptor: {
         ...descriptor,
         normalizedContractVersion: "packscout.provider-observation.v2",
-      } as unknown as SourceMapperCompatibilityDescriptor,
+      } as unknown as SourceMapperDescriptor,
       code: "normalized_contract_mismatch",
     },
     {
       descriptor: { ...descriptor, identityNamespaceKey: "wrong-namespace-v1" },
-      code: "replacement_namespace_mismatch",
+      code: "identity_namespace_mismatch",
     },
   ];
   for (const fixture of cases) {
@@ -490,7 +490,7 @@ test("activation requires the exact registered mapper provider, contract, and na
     await assert.rejects(
       buildService({ candidate: baseline, mapperDescriptors }).service
         .activatePaused(request),
-      (error: unknown) => error instanceof SourceMapperCompatibilityError
+      (error: unknown) => error instanceof SourceMapperDescriptorError
         && error.code === fixture.code,
     );
   }
@@ -505,7 +505,7 @@ test("activation requires the exact registered mapper provider, contract, and na
         },
       },
     }).service.activatePaused(request),
-    (error: unknown) => error instanceof SourceMapperCompatibilityError
+    (error: unknown) => error instanceof SourceMapperDescriptorError
       && error.code === "unknown_mapper_descriptor",
   );
 });

@@ -14,7 +14,7 @@ import {
   type ProviderSourceOperationsOverview,
   type ProviderSourceOperationsSource,
   type ProviderSourceSupervisorSnapshot,
-  type VersionedSourceAdapterManifest,
+  type SourceAdapterManifestV1,
 } from "@packscout/contracts";
 
 interface CountersRecord {
@@ -175,7 +175,7 @@ export interface ProviderSourceOperationsServiceDependencies {
   readonly diagnostics: ProviderSourceOperationsDiagnosticRepository;
   readonly sourceTypes: readonly Readonly<{
     label: string;
-    manifest: VersionedSourceAdapterManifest;
+    manifest: SourceAdapterManifestV1;
   }>[];
 }
 

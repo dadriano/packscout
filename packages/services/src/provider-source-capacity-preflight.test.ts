@@ -5,8 +5,8 @@ import { test } from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  dataforrestEventsV2SourceAdapterManifest,
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  dataforrestEventsV1SourceAdapterManifest,
 } from "@packscout/contracts";
 import {
   ProviderSourceCapacityInputError,
@@ -19,14 +19,16 @@ import {
 } from "./provider-source-capacity-preflight.ts";
 
 interface MemoryMeasurement {
-  readonly version: "provider-source-page-memory-v2";
+  readonly version: "provider-source-page-memory-v1";
   readonly path: "authentic-capture-terminalize-interpret-complete-import-plan";
-  readonly sourceAdapterVersion: typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION;
+  readonly sourceAdapterVersion: typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION;
   readonly trialCount: number;
   readonly pagesPerTrial: number;
   readonly pageCount: number;
   readonly recordsPerPage: number;
   readonly responseBytesPerPage: number;
+  readonly jsonNodesPerPage: number;
+  readonly emptyObjectFactsPerRecord: number;
   readonly totalRecordsProcessed: number;
   readonly peakDeltaBytes: number;
   readonly retainedMetric: "theil-sen-managed-bytes-per-page";
@@ -214,14 +216,14 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   const { memoryMeasurement: memory } = await capacityArtifact();
   const fresh = await freshMemoryMeasurement();
   assert.ok(memory.pageCount >= 100);
-  assert.equal(memory.version, "provider-source-page-memory-v2");
+  assert.equal(memory.version, "provider-source-page-memory-v1");
   assert.equal(
     memory.path,
     "authentic-capture-terminalize-interpret-complete-import-plan",
   );
   assert.equal(
     memory.sourceAdapterVersion,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
   assert.equal(memory.retainedMetric, "theil-sen-managed-bytes-per-page");
   assert.ok(memory.trialCount >= 3);
@@ -229,8 +231,10 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   assert.equal(memory.recordsPerPage, 250);
   assert.equal(
     memory.responseBytesPerPage,
-    dataforrestEventsV2SourceAdapterManifest.requestBounds.maximumResponseBytes,
+    dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes,
   );
+  assert.equal(memory.jsonNodesPerPage, 153_254);
+  assert.equal(memory.emptyObjectFactsPerRecord, 600);
   assert.equal(
     memory.totalRecordsProcessed,
     memory.pageCount * memory.recordsPerPage,
@@ -244,6 +248,11 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   assert.equal(fresh.pageCount, memory.pageCount);
   assert.equal(fresh.recordsPerPage, memory.recordsPerPage);
   assert.equal(fresh.responseBytesPerPage, memory.responseBytesPerPage);
+  assert.equal(fresh.jsonNodesPerPage, memory.jsonNodesPerPage);
+  assert.equal(
+    fresh.emptyObjectFactsPerRecord,
+    memory.emptyObjectFactsPerRecord,
+  );
   assert.ok(fresh.peakDeltaBytes <= fresh.limits.peakDeltaBytes);
   assert.ok(fresh.retainedGrowthBytes <= fresh.limits.retainedGrowthBytes);
   assert.equal(fresh.passes, true);

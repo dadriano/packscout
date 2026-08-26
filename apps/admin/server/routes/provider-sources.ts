@@ -8,13 +8,11 @@ import {
   createSourceConnectionRecoveryRevisionRequestSchema,
   previewProviderSourceCursorResetRequestSchema,
   providerSourceRevisionCommandSchema,
-  replaceProviderSourceRequestSchema,
   requestSourceConnectionRecoveryTestSchema,
   reviseProviderSourceIntervalRequestSchema,
   revokeSourceConnectionRevisionRequestSchema,
   rotateSourceConnectionCredentialRequestSchema,
   sourceConnectionRevisionCommandSchema,
-  upgradeSourceConnectionAdapterRequestSchema,
   type ProviderSourceAdminCatalog,
   type ProviderSourceAdminAuditReceipt,
   type ProviderSourceAdminErrorCode,
@@ -66,7 +64,6 @@ export interface ProviderSourcesRouterDependencies {
     SourceConnectionConfigurationService,
     | "createProfile"
     | "rotateCredential"
-    | "upgradeAdapter"
     | "requestTest"
     | "activateRevision"
     | "revokeRevision"
@@ -77,7 +74,6 @@ export interface ProviderSourcesRouterDependencies {
   readonly sources: Pick<
     ProviderSourceLifecycleService,
     | "createSource"
-    | "createReplacement"
     | "requestTest"
     | "activatePaused"
     | "reviseInterval"
@@ -349,7 +345,6 @@ export function createProviderSourcesRouter(
   const connectionCommand = (
     action:
       | "rotate"
-      | "upgrade-adapter"
       | "test"
       | "activate"
       | "revoke"
@@ -368,19 +363,6 @@ export function createProviderSourcesRouter(
       );
       if (!body) return;
       return dependencies.connections.rotateCredential(
-        actor,
-        params.connectionProfileId,
-        body,
-      );
-    }
-    if (action === "upgrade-adapter") {
-      const body = parsedBody(
-        upgradeSourceConnectionAdapterRequestSchema,
-        request,
-        response,
-      );
-      if (!body) return;
-      return dependencies.connections.upgradeAdapter(
         actor,
         params.connectionProfileId,
         body,
@@ -469,8 +451,6 @@ export function createProviderSourcesRouter(
   }, {
     action: action === "rotate"
       ? "connection_credential_rotated"
-      : action === "upgrade-adapter"
-        ? "connection_adapter_upgrade_revision_created"
       : action === "test"
         ? "connection_test_requested"
         : action === "activate"
@@ -491,7 +471,6 @@ export function createProviderSourcesRouter(
   });
   for (const [action, secret] of [
     ["rotate", true],
-    ["upgrade-adapter", true],
     ["test", false],
     ["activate", false],
     ["revoke", true],
@@ -525,25 +504,6 @@ export function createProviderSourcesRouter(
       revisionId: () => null,
     }, true),
   );
-  router.post(
-    "/sources/replacements",
-    dependencies.sameOrigin,
-    manage,
-    audited(async (request, response) => {
-      const body = replaceProviderSourceRequestSchema.safeParse(request.body);
-      if (!body.success) return invalid(response, body.error.flatten().fieldErrors);
-      return dependencies.sources.createReplacement(
-        context(dependencies, response),
-        body.data,
-      );
-    }, {
-      action: "source_replacement_created",
-      subjectType: "provider_source",
-      subjectId: () => null,
-      revisionId: (request) => bodyRevision(request, ["replacesSourceInstanceId"]),
-    }, true),
-  );
-
   const sourceCommand = (
     action:
       | "test"

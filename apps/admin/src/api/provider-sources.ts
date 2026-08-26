@@ -6,10 +6,8 @@ import type {
   ProviderSourceAdminAuditReceipt,
   ProviderSourceAdminCatalog,
   ProviderSourceCursorResetPreview,
-  ReplaceProviderSourceRequest,
   ReviseProviderSourceIntervalRequest,
   RotateSourceConnectionCredentialRequest,
-  UpgradeSourceConnectionAdapterRequest,
 } from "@packscout/contracts";
 import { requestJson } from "./client";
 
@@ -41,21 +39,6 @@ export function rotateSourceConnectionCredential(
     method: "POST",
     json: input,
   });
-}
-
-export function upgradeSourceConnectionAdapter(
-  connectionProfileId: string,
-  input: UpgradeSourceConnectionAdapterRequest,
-) {
-  return requestJson<{
-    profileId: string;
-    revisionId: string;
-    sourceAdapterVersion: string;
-    audit: ProviderSourceAdminAuditReceipt;
-  }>(
-    `/provider-sources/connections/${encodeURIComponent(connectionProfileId)}/upgrade-adapter`,
-    { method: "POST", json: input },
-  );
 }
 
 export function requestSourceConnectionTest(
@@ -157,14 +140,6 @@ export function createProviderSource(input: CreateProviderSourceRequest) {
     sourceRevisionId: string;
     audit: ProviderSourceAdminAuditReceipt;
   }>("/provider-sources/sources", { method: "POST", json: input });
-}
-
-export function replaceProviderSource(input: ReplaceProviderSourceRequest) {
-  return requestJson<{
-    sourceInstanceId: string;
-    sourceRevisionId: string;
-    audit: ProviderSourceAdminAuditReceipt;
-  }>("/provider-sources/sources/replacements", { method: "POST", json: input });
 }
 
 function sourcePath(providerId: string, sourceInstanceId: string, action: string) {

@@ -863,8 +863,8 @@ CREATE INDEX "source_retention_executions_started_idx" ON "source_retention_exec
 -- CreateIndex
 CREATE UNIQUE INDEX "source_retention_executions_tenant_unique" ON "source_retention_executions"("id", "organization_id");
 
--- Composite lineage keys for the replacement path. Nullable source pins keep
--- untouched legacy rows outside these keys while every new source row is fully scoped.
+-- Composite lineage keys for source-supervised imports. Rows without source
+-- pins remain outside these keys; every source-supervised row is fully scoped.
 CREATE UNIQUE INDEX "audit_events_tenant_unique"
 ON "audit_events" ("id", "organization_id");
 
@@ -898,8 +898,8 @@ ON "import_pages" ("id", "organization_id", "provider_id", "run_id", "source_ins
 CREATE UNIQUE INDEX "import_pages_source_diagnostic_unique"
 ON "import_pages" ("id", "organization_id", "provider_id", "run_id", "source_instance_id", "source_revision_id", "request_attempt_id");
 
--- Replacement-path uniqueness. Legacy provider ingestion rows have null source pins and
--- are deliberately excluded until task 006 removes that inactive schema.
+-- Current-source uniqueness. Rows without source pins remain outside the
+-- source-instance lifecycle and are excluded from this partial index.
 CREATE UNIQUE INDEX "provider_source_instances_current_unique"
 ON "provider_source_instances" ("provider_id")
 WHERE "state" IN ('paused', 'active');
@@ -2026,7 +2026,7 @@ BEGIN
       OR "content"->>'kind' <> 'pull'
       OR "facts"->>'kind' <> 'pull'
       OR jsonb_typeof("content"->'relationships') <> 'array'
-      OR jsonb_array_length("content"->'relationships') <> 2
+      OR jsonb_array_length("content"->'relationships') NOT IN (1, 2)
     THEN
       RAISE EXCEPTION 'semantic pull content does not match its frozen meaning'
         USING ERRCODE = '23514',
@@ -2194,9 +2194,29 @@ BEGIN
   IF (
     "source"."record_kind" = 'pull'
     AND (
-      NOT ("seen_pack" AND "seen_card")
-      OR "content"->'relationships'->0->>'relationship' <> 'pack'
-      OR "content"->'relationships'->1->>'relationship' <> 'card'
+      (
+        "seen_pack" AND "seen_card"
+        AND (
+          jsonb_array_length("content"->'relationships') <> 2
+          OR "content"->'relationships'->0->>'relationship' <> 'pack'
+          OR "content"->'relationships'->1->>'relationship' <> 'card'
+        )
+      )
+      OR (
+        "seen_pack" AND NOT "seen_card"
+        AND (
+          jsonb_array_length("content"->'relationships') <> 1
+          OR "content"->'relationships'->0->>'relationship' <> 'pack'
+        )
+      )
+      OR (
+        NOT "seen_pack" AND "seen_card"
+        AND (
+          jsonb_array_length("content"->'relationships') <> 1
+          OR "content"->'relationships'->0->>'relationship' <> 'card'
+        )
+      )
+      OR NOT ("seen_pack" OR "seen_card")
     )
   )
     OR ("source"."record_kind" = 'trade' AND NOT "seen_card")

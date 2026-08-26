@@ -1,30 +1,22 @@
 import type { ZodError } from "zod";
+import { isUtf8 } from "node:buffer";
+import { JSONParser, TokenType } from "@streamparser/json";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
   dataforrestContinuation,
   dataforrestEventRecordV1Schema,
-  dataforrestEventRecordV2Schema,
   dataforrestEventsPageV1Schema,
-  dataforrestEventsPageV2Schema,
   dataforrestEventsSourceConfigurationV1Schema,
   dataforrestNextCursor,
   dataforrestEventsV1SourceAdapterManifest,
-  dataforrestEventsV2SourceAdapterManifest,
-  dataforrestEventsV3SourceAdapterManifest,
   normalizeDataforrestEventRecord,
-  normalizeDataforrestEventRecordV2,
-  normalizeDataforrestEventRecordV3,
   sourceAdapterFailureSchema,
   type DataforrestEventsPageV1,
-  type DataforrestEventsPageV2,
   type DataforrestEventRecordV1,
-  type DataforrestEventRecordV2,
   type LaunchProviderKey,
   type SourceAdapterFailure,
   type SourceAdapterSafeDiagnostic,
-  type VersionedNormalizedObservationOutcome,
+  type NormalizedObservationOutcome,
 } from "@packscout/contracts";
 import type {
   ConnectionTestInterpretationContext,
@@ -36,30 +28,19 @@ import type {
   SourceTestValue,
   SuccessfulSourceAdapterRequest,
 } from "./source-adapter.ts";
+import { sealTrustedProtectedNativeEvidence } from "./trusted-protected-native-evidence.ts";
 
 type PageParseResult =
   | Readonly<{
       ok: true;
-      page: DataforrestEventsPageV1 | DataforrestEventsPageV2;
+      page: DataforrestEventsPageV1;
     }>
   | Readonly<{ ok: false }>;
 
-type DataforrestAdapterVersion =
-  | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-  | typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION
-  | typeof DATAFORREST_EVENTS_V3_ADAPTER_VERSION;
-
 function dataforrestManifest(adapterVersion: string) {
-  if (adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION) {
-    return dataforrestEventsV1SourceAdapterManifest;
-  }
-  if (adapterVersion === DATAFORREST_EVENTS_V2_ADAPTER_VERSION) {
-    return dataforrestEventsV2SourceAdapterManifest;
-  }
-  if (adapterVersion === DATAFORREST_EVENTS_V3_ADAPTER_VERSION) {
-    return dataforrestEventsV3SourceAdapterManifest;
-  }
-  return null;
+  return adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+    ? dataforrestEventsV1SourceAdapterManifest
+    : null;
 }
 
 const knownStreams = new Set(["catalog", "pulls", "trades"]);
@@ -69,18 +50,198 @@ const timestampFields = new Set([
   "first_seen_at",
 ]);
 const maximumJsonNestingDepth = 64;
-// Versioned transport manifests cap raw responses at no more than 8 MiB.
+// The transport manifest caps raw responses at no more than 8 MiB.
 // Data-rich catalog records can contain hundreds of bounded native facts, so
 // a full 250-record page needs a higher aggregate traversal allowance while
 // the independent depth, object-key, and array-item limits remain enforced.
-const maximumJsonNodeCount = 1_000_000;
+// The cap is above the reviewed 250 x 600 native-fact page while keeping the
+// heaviest accepted object graph inside the unchanged single-page memory gate.
+const maximumJsonNodeCount = 160_000;
 const maximumJsonObjectKeys = 256;
 const maximumJsonArrayItems = 5_000;
+const jsonParserInputChunkBytes = 64 * 1024;
 const reservedJsonObjectKeys = new Set([
   "__proto__",
   "constructor",
   "prototype",
 ]);
+const jsonQuotationMark = 0x22;
+const jsonReverseSolidus = 0x5c;
+const jsonUnicodeEscape = 0x75;
+
+function hexadecimalNibble(value: number): number | null {
+  if (value >= 0x30 && value <= 0x39) return value - 0x30;
+  if (value >= 0x41 && value <= 0x46) return value - 0x41 + 10;
+  if (value >= 0x61 && value <= 0x66) return value - 0x61 + 10;
+  return null;
+}
+
+function unicodeEscapeCodeUnit(
+  bytes: Uint8Array,
+  firstHexadecimalIndex: number,
+): number | null {
+  let codeUnit = 0;
+  for (let offset = 0; offset < 4; offset += 1) {
+    const nibble = hexadecimalNibble(bytes[firstHexadecimalIndex + offset]!);
+    if (nibble === null) return null;
+    codeUnit = codeUnit * 16 + nibble;
+  }
+  return codeUnit;
+}
+
+/** Rejects lone surrogate escapes before the byte parser can replace them. */
+function hasOnlyScalarUnicodeEscapes(bytes: Uint8Array): boolean {
+  let inString = false;
+  for (let index = 0; index < bytes.byteLength; index += 1) {
+    const value = bytes[index];
+    if (!inString) {
+      if (value === jsonQuotationMark) {
+        inString = true;
+      }
+      continue;
+    }
+    if (value === jsonQuotationMark) {
+      inString = false;
+      continue;
+    }
+    if (value !== jsonReverseSolidus) continue;
+    index += 1;
+    if (bytes[index] !== jsonUnicodeEscape) continue;
+    const codeUnit = unicodeEscapeCodeUnit(bytes, index + 1);
+    if (codeUnit === null) return false;
+    index += 4;
+    if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) return false;
+    if (codeUnit < 0xd800 || codeUnit > 0xdbff) continue;
+    if (
+      bytes[index + 1] !== jsonReverseSolidus ||
+      bytes[index + 2] !== jsonUnicodeEscape
+    ) {
+      return false;
+    }
+    const lowSurrogate = unicodeEscapeCodeUnit(bytes, index + 3);
+    if (
+      lowSurrogate === null ||
+      lowSurrogate < 0xdc00 ||
+      lowSurrogate > 0xdfff
+    ) {
+      return false;
+    }
+    index += 6;
+  }
+  return true;
+}
+
+function parseUtf8Json(bytes: Uint8Array): unknown {
+  if (!isUtf8(bytes) || !hasOnlyScalarUnicodeEscapes(bytes)) {
+    throw new SyntaxError("dataforrest_events.utf8_invalid");
+  }
+  const parser = new JSONParser({
+    paths: ["$"],
+    stringBufferSize: 64 * 1024,
+    numberBufferSize: 64,
+  });
+  const containers: Array<
+    | { kind: "array"; itemCount: number }
+    | { kind: "object"; expectingKey: boolean; keyCount: number }
+  > = [];
+  let nodeCount = 0;
+  let parsed = false;
+  let root: unknown;
+  const registerValue = () => {
+    nodeCount += 1;
+    if (nodeCount > maximumJsonNodeCount) {
+      throw new SyntaxError("dataforrest_events.json_node_limit");
+    }
+    const parent = containers.at(-1);
+    if (parent?.kind === "array") {
+      parent.itemCount += 1;
+      if (parent.itemCount > maximumJsonArrayItems) {
+        throw new SyntaxError("dataforrest_events.json_array_limit");
+      }
+    }
+  };
+  parser.onToken = ({ token, value }) => {
+    if (token === TokenType.LEFT_BRACE) {
+      registerValue();
+      if (containers.length >= maximumJsonNestingDepth) {
+        throw new SyntaxError("dataforrest_events.json_depth_limit");
+      }
+      containers.push({ kind: "object", expectingKey: true, keyCount: 0 });
+      return;
+    }
+    if (token === TokenType.LEFT_BRACKET) {
+      registerValue();
+      if (containers.length >= maximumJsonNestingDepth) {
+        throw new SyntaxError("dataforrest_events.json_depth_limit");
+      }
+      containers.push({ kind: "array", itemCount: 0 });
+      return;
+    }
+    if (token === TokenType.RIGHT_BRACE) {
+      if (containers.at(-1)?.kind !== "object") {
+        throw new SyntaxError("dataforrest_events.json_container_mismatch");
+      }
+      containers.pop();
+      return;
+    }
+    if (token === TokenType.RIGHT_BRACKET) {
+      if (containers.at(-1)?.kind !== "array") {
+        throw new SyntaxError("dataforrest_events.json_container_mismatch");
+      }
+      containers.pop();
+      return;
+    }
+    const container = containers.at(-1);
+    if (
+      token === TokenType.STRING &&
+      container?.kind === "object" &&
+      container.expectingKey
+    ) {
+      if (reservedJsonObjectKeys.has(value as string)) {
+        throw new SyntaxError("dataforrest_events.reserved_json_key");
+      }
+      // This is a parser-work bound: repeated member names still consume input
+      // and parser work even though JSON's last-write semantics retain one key.
+      container.keyCount += 1;
+      if (container.keyCount > maximumJsonObjectKeys) {
+        throw new SyntaxError("dataforrest_events.json_object_key_limit");
+      }
+      container.expectingKey = false;
+      return;
+    }
+    if (
+      token === TokenType.STRING ||
+      token === TokenType.NUMBER ||
+      token === TokenType.TRUE ||
+      token === TokenType.FALSE ||
+      token === TokenType.NULL
+    ) {
+      registerValue();
+      return;
+    }
+    if (token === TokenType.COMMA && container?.kind === "object") {
+      container.expectingKey = true;
+    }
+  };
+  parser.onValue = ({ value, parent }) => {
+    if (parent === undefined) {
+      if (parsed) throw new SyntaxError("dataforrest_events.multiple_roots");
+      parsed = true;
+      root = value;
+    }
+  };
+  // Keep each tokenizer append at or below its fixed string buffer. Passing an
+  // entire 8 MiB response lets an individual provider string bypass that
+  // buffer and creates a second page-sized contiguous decode allocation.
+  for (let offset = 0; offset < bytes.byteLength; offset += jsonParserInputChunkBytes) {
+    parser.write(bytes.subarray(offset, offset + jsonParserInputChunkBytes));
+  }
+  if (!parser.isEnded) parser.end();
+  if (!parsed || containers.length !== 0) {
+    throw new SyntaxError("dataforrest_events.incomplete_json");
+  }
+  return root;
+}
 
 function hasBoundedJsonShape(root: unknown): boolean {
   const pending: Array<Readonly<{ value: unknown; depth: number }>> = [{
@@ -135,6 +296,60 @@ function hasBoundedJsonShape(root: unknown): boolean {
   return true;
 }
 
+function pageEnvelopeShapeCandidate(root: unknown): unknown {
+  if (root === null || typeof root !== "object" || Array.isArray(root)) {
+    return null;
+  }
+  const candidate: Record<string, unknown> = {};
+  for (const key of Object.keys(root)) {
+    const value = (root as Record<string, unknown>)[key];
+    if (key === "records") {
+      candidate[key] = Array.isArray(value)
+        ? value.map((record) => {
+          if (
+            record === null ||
+            typeof record !== "object" ||
+            Array.isArray(record)
+          ) {
+            return null;
+          }
+          return Object.fromEntries(
+            Object.keys(record).map((recordKey) => [recordKey, null]),
+          );
+        })
+        : null;
+      continue;
+    }
+    if (
+      (key === "next_cursor" && typeof value === "string") ||
+      (key === "poll_after_seconds" && typeof value === "number")
+    ) {
+      candidate[key] = value;
+    } else {
+      candidate[key] = null;
+    }
+  }
+  return candidate;
+}
+
+/**
+ * Validates an already-JSON-parsed V1 envelope without cloning its complete
+ * native evidence tree. The lightweight candidate delegates exact wrapper,
+ * cursor, poll, record-count, and record-key rules to the canonical Zod
+ * schema; the bounded traversal validates every original JSON value.
+ */
+export function isBoundedDataforrestEventsPageV1(
+  value: unknown,
+  pageLimit: number,
+): value is DataforrestEventsPageV1 {
+  if (!hasBoundedJsonShape(value)) return false;
+  const parsedShape = dataforrestEventsPageV1Schema.safeParse(
+    pageEnvelopeShapeCandidate(value),
+  );
+  return parsedShape.success &&
+    (value as DataforrestEventsPageV1).records.length <= pageLimit;
+}
+
 function failure(
   code: SourceAdapterFailure["code"],
   disposition: SourceAdapterFailure["disposition"] = "source_action_required",
@@ -160,33 +375,20 @@ function parsePage(
   pageLimit: number,
   adapterVersion: string,
 ): PageParseResult {
-  let decoded: string;
-  try {
-    decoded = new TextDecoder("utf-8", { fatal: true }).decode(
-      request.value.protectedRawResponse,
-    );
-  } catch {
-    return { ok: false };
-  }
   let raw: unknown;
   try {
-    raw = JSON.parse(decoded) as unknown;
+    raw = parseUtf8Json(request.value.protectedRawResponse);
   } catch {
     return { ok: false };
   }
-  if (!hasBoundedJsonShape(raw)) return { ok: false };
   try {
-    const parsed = adapterVersion === DATAFORREST_EVENTS_V3_ADAPTER_VERSION
-      ? dataforrestEventsPageV2Schema.safeParse(raw)
-      : adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION ||
-          adapterVersion === DATAFORREST_EVENTS_V2_ADAPTER_VERSION
-        ? dataforrestEventsPageV1Schema.safeParse(raw)
-        : null;
-    if (parsed === null) return { ok: false };
-    if (!parsed.success || parsed.data.records.length > pageLimit) {
+    if (adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION) {
       return { ok: false };
     }
-    return { ok: true, page: parsed.data };
+    if (!isBoundedDataforrestEventsPageV1(raw, pageLimit)) {
+      return { ok: false };
+    }
+    return { ok: true, page: raw };
   } catch {
     return { ok: false };
   }
@@ -256,7 +458,7 @@ function invalidOutcome(
   reasonCode: string,
   fieldPaths: readonly string[],
   protectedNativeEvidenceRef: string,
-): VersionedNormalizedObservationOutcome {
+): NormalizedObservationOutcome {
   return {
     status: "invalid",
     recordIndex,
@@ -293,8 +495,7 @@ function interpretRecord(
   record: Record<string, unknown>,
   provider: LaunchProviderKey,
   recordIndex: number,
-  adapterVersion: DataforrestAdapterVersion,
-): VersionedNormalizedObservationOutcome {
+): NormalizedObservationOutcome {
   const evidenceReference = `page_record:${recordIndex}`;
   if (
     typeof record.record_id !== "string" ||
@@ -334,9 +535,7 @@ function interpretRecord(
       evidenceReference,
     );
   }
-  const parsed = adapterVersion === DATAFORREST_EVENTS_V3_ADAPTER_VERSION
-    ? dataforrestEventRecordV2Schema.safeParse(record)
-    : dataforrestEventRecordV1Schema.safeParse(record);
+  const parsed = dataforrestEventRecordV1Schema.safeParse(record);
   if (!parsed.success) {
     const invalidTimestamp = parsed.error.issues.some(({ path }) =>
       timestampFields.has(String(path[0] ?? ""))
@@ -352,23 +551,11 @@ function interpretRecord(
     return {
       status: "valid",
       recordIndex,
-      observation: adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-        ? normalizeDataforrestEventRecord(
-            parsed.data as DataforrestEventRecordV1,
-            provider,
-            evidenceReference,
-          )
-        : adapterVersion === DATAFORREST_EVENTS_V2_ADAPTER_VERSION
-          ? normalizeDataforrestEventRecordV2(
-              parsed.data as DataforrestEventRecordV1,
-              provider,
-              evidenceReference,
-            )
-          : normalizeDataforrestEventRecordV3(
-              parsed.data as DataforrestEventRecordV2,
-              provider,
-              evidenceReference,
-            ),
+      observation: normalizeDataforrestEventRecord(
+        parsed.data as DataforrestEventRecordV1,
+        provider,
+        evidenceReference,
+      ),
     };
   } catch (error) {
     // Normalization defects are record-local: raw-valid values the normalized
@@ -388,16 +575,12 @@ function interpretRecords(
   page: DataforrestEventsPageV1,
   provider: LaunchProviderKey,
   adapterVersion: string,
-): readonly VersionedNormalizedObservationOutcome[] {
-  if (
-    adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
-    adapterVersion !== DATAFORREST_EVENTS_V2_ADAPTER_VERSION &&
-    adapterVersion !== DATAFORREST_EVENTS_V3_ADAPTER_VERSION
-  ) {
+): readonly NormalizedObservationOutcome[] {
+  if (adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION) {
     throw new RangeError("dataforrest_events.adapter_version_unsupported");
   }
   return page.records.map((record, recordIndex) =>
-    interpretRecord(record, provider, recordIndex, adapterVersion)
+    interpretRecord(record, provider, recordIndex)
   );
 }
 
@@ -519,30 +702,33 @@ async function interpretDataforrestPageUnsafe(
   );
   const invalidRecords = outcomes.filter(({ status }) => status === "invalid")
     .length;
+  const protectedNativeEvidence = sealTrustedProtectedNativeEvidence(
+    parsed.page.records.flatMap(
+      (value, recordIndex) => {
+        const evidence = [{
+          reference: `page_record:${recordIndex}`,
+          value,
+        }];
+        const outcome = outcomes[recordIndex];
+        if (
+          outcome?.status === "valid" &&
+          outcome.observation.kind === "trade" &&
+          outcome.observation.protectedTransactionEvidenceRef !== null
+        ) {
+          evidence.push({
+            reference:
+              outcome.observation.protectedTransactionEvidenceRef,
+            value: { tx_hash: value.tx_hash },
+          });
+        }
+        return evidence;
+      },
+    ),
+  );
   return {
     ok: true,
     value: {
-      protectedNativeEvidence: parsed.page.records.flatMap(
-        (value, recordIndex) => {
-          const evidence = [{
-            reference: `page_record:${recordIndex}`,
-            value,
-          }];
-          const outcome = outcomes[recordIndex];
-          if (
-            outcome?.status === "valid" &&
-            outcome.observation.kind === "trade" &&
-            outcome.observation.protectedTransactionEvidenceRef !== null
-          ) {
-            evidence.push({
-              reference:
-                outcome.observation.protectedTransactionEvidenceRef,
-              value: { tx_hash: value.tx_hash },
-            });
-          }
-          return evidence;
-        },
-      ),
+      protectedNativeEvidence,
       normalizedPage: {
         normalizedContractVersion: dataforrestManifest(
           context.adapterVersion,

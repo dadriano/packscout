@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   dataforrestEventRecordV1Schema,
-  dataforrestEventRecordV2Schema,
   emptyNormalizedProviderFacts,
   launchProviderKeys,
-  normalizeDataforrestEventRecordV2,
-  normalizeDataforrestEventRecordV3,
+  normalizeDataforrestEventRecord,
   providerEventCodes,
 } from "@packscout/contracts";
 import {
@@ -66,7 +64,7 @@ test("all four platform mappers project normalized pack, card, pull, and trade o
 });
 
 test("Collector Crypt native pack name reaches an accepted canonical pack", () => {
-  const observation = normalizeDataforrestEventRecordV2(
+  const observation = normalizeDataforrestEventRecord(
     dataforrestEventRecordV1Schema.parse({
       platform: "collector_crypt",
       stream: "catalog",
@@ -98,8 +96,8 @@ test("Collector Crypt native pack name reaches an accepted canonical pack", () =
 });
 
 test("ClutchPacks native pack name reaches an accepted canonical pack", () => {
-  const observation = normalizeDataforrestEventRecordV3(
-    dataforrestEventRecordV2Schema.parse({
+  const observation = normalizeDataforrestEventRecord(
+    dataforrestEventRecordV1Schema.parse({
       platform: "clutchpacks",
       stream: "catalog",
       entity: "pack",
@@ -129,8 +127,8 @@ test("ClutchPacks native pack name reaches an accepted canonical pack", () => {
 });
 
 test("Phygitals native pack name reaches an accepted canonical pack", () => {
-  const observation = normalizeDataforrestEventRecordV3(
-    dataforrestEventRecordV2Schema.parse({
+  const observation = normalizeDataforrestEventRecord(
+    dataforrestEventRecordV1Schema.parse({
       platform: "phygitals",
       stream: "catalog",
       entity: "pack",

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
 } from "@packscout/contracts";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { createProviderWorkerRuntime } from "./provider-worker-composition.ts";
@@ -73,22 +72,10 @@ test("worker composition runs an idle cycle against one Prisma client", async ()
           normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
         },
         {
-          provider: "courtyard",
-          mapperKey: "courtyard-provider-observation",
-          mapperVersion: "2",
-          normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-        },
-        {
           provider: "collector_crypt",
           mapperKey: "collector-crypt-provider-observation",
           mapperVersion: "1",
           normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
-        },
-        {
-          provider: "collector_crypt",
-          mapperKey: "collector-crypt-provider-observation",
-          mapperVersion: "2",
-          normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
         },
         {
           provider: "phygitals",
@@ -97,22 +84,10 @@ test("worker composition runs an idle cycle against one Prisma client", async ()
           normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
         },
         {
-          provider: "phygitals",
-          mapperKey: "phygitals-provider-observation",
-          mapperVersion: "2",
-          normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-        },
-        {
           provider: "clutchpacks",
           mapperKey: "clutchpacks-provider-observation",
           mapperVersion: "1",
           normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
-        },
-        {
-          provider: "clutchpacks",
-          mapperKey: "clutchpacks-provider-observation",
-          mapperVersion: "2",
-          normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
         },
       ],
     );

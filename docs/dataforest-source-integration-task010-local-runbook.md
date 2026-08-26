@@ -2,12 +2,37 @@
 
 **Scope:** one new, named, empty PostgreSQL database on the local loopback
 interface. This procedure never uses the disposable embedded-admin database and
-never deletes or adopts existing application data.
+never deletes or adopts existing application data. The separate normal-development
+reset note below describes a different database and is not a Task 010 step.
 
 For routine source operation after bootstrap, use the
 [ingestion pipeline operator guide](ingestion-pipelines/README.md). This runbook
 owns only the guarded Task010 target, configuration, first backfill, and final
 reconciliation procedure.
+
+DataForrest has one production identity: source type
+`dataforrest-events-v1`, adapter `dataforrest-events-adapter-v1`, normalized
+observation `packscout.provider-observation.v1`, and mapper revision `1`.
+Historical adapter, observation, and mapper revisions are not upgrade inputs.
+Any local database that contains a v2 or v3 pin must be rebuilt before this
+procedure is used.
+
+For the normal development database, stop admin and worker processes and run
+`npm run db:reset:local`. That workflow refuses any non-loopback PostgreSQL
+target, drops and reapplies every migration, and invokes the canonical local
+seed. It is intentionally a full relational reset: organizations, operators,
+sessions, audits, source configuration, imports, canonical data, and promotion
+state are removed. The seed restores only the minimum local organization and
+stable provider roots, so an administrator and the encrypted DataForrest
+connection must be provisioned again before import.
+
+Do not use `db:reset:local` as a shortcut for this dedicated Task 010 target:
+its standard seed makes the target non-empty and therefore invalidates the
+Task 010 bootstrap proof. A contaminated Task 010 target must be stopped,
+discarded, recreated as the same named empty local database, and taken through
+inspect, migrate, and bootstrap below with a new one-time administrator
+password. Cursor reset, adapter upgrade, source replacement, and selective
+table deletion are not clean-slate substitutes.
 
 **Historical Task 010 admission state (2026-08-22): BLOCKED.** That isolated
 bootstrap procedure used an 8,759,332,238,475-byte maximum-throughput stress
@@ -160,13 +185,16 @@ migrated schema, current capacity with application relations present, bootstrap
 receipt, and four-source backfill topology. Any failed recheck stops before the
 supervisor can claim work.
 
-The backfill start requires exactly one active tested profile at cap 2 and
-exactly four tested, fully pinned paused-or-active sources. In Operations,
-select **Resume** for all four sources; Resume makes each lane due immediately.
+The backfill start requires exactly one active tested profile at cap 2. Every
+connection revision must use DataForrest adapter v1, and exactly four tested,
+paused-or-active sources must have only the adapter-v1, observation-v1,
+mapper-v1 tuple across every revision. Any v2, v3, unknown, or mixed tuple
+fails closed before the supervisor starts. In Operations, select **Resume** for
+all four sources; Resume makes each lane due immediately.
 The dedicated Task 010 runner forces `PACKSCOUT_SOURCE_EXECUTION_SLOTS=1` for
-the V3 memory boundary, even if its private environment file omits or attempts
-to change that value. Verify each individual cursor remains sequential and the
-four source lanes continue taking turns without starvation.
+the current v1 8 MiB memory boundary, even if its private environment file
+omits or attempts to change that value. Verify each individual cursor remains
+sequential and the four source lanes continue taking turns without starvation.
 
 After multiple sources have committed pages, stop Terminal B with `Ctrl-C`.
 Restart the same backfill command and verify each source resumes from its own

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   PROVIDER_SOURCE_CONTRACT_VERSION,
   launchProviderKeys,
   launchRecordIdScopeDeclarations,
@@ -9,13 +8,11 @@ import {
   providerIdentityNamespaceByLaunchProvider,
   providerSourceLaunchBounds,
   sourceAdapterManifestV1Schema,
-  sourceAdapterManifestV2Schema,
   type LaunchProviderKey,
   type LaunchRecordIdScopeKey,
   type NormalizedContinuation,
   type OpaqueCursorEnvelope,
   type SourceAdapterManifestV1,
-  type SourceAdapterManifestV2,
 } from "./provider-source-contract-v1.ts";
 import {
   emptyNormalizedProviderFacts,
@@ -25,19 +22,11 @@ import {
   normalizedProviderObservationSchema,
   type NormalizedProviderObservation,
 } from "./provider-source-observation-v1.ts";
-import {
-  normalizedProviderObservationV2Schema,
-  type NormalizedProviderObservationV2,
-} from "./provider-source-observation-v2.ts";
 
 export const DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY =
   "dataforrest-events-v1" as const;
 export const DATAFORREST_EVENTS_V1_ADAPTER_VERSION =
   "dataforrest-events-adapter-v1" as const;
-export const DATAFORREST_EVENTS_V2_ADAPTER_VERSION =
-  "dataforrest-events-adapter-v2" as const;
-export const DATAFORREST_EVENTS_V3_ADAPTER_VERSION =
-  "dataforrest-events-adapter-v3" as const;
 export const DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY =
   "dataforrest-events-connection-v1" as const;
 export const DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY =
@@ -73,10 +62,19 @@ export const dataforrestPullRecordV1Schema = z
   .object({
     ...dataforrestRawBase,
     stream: z.literal("pulls"),
-    pack_id: providerRecordIdSchema,
-    card_id: providerRecordIdSchema,
+    pack_id: providerRecordIdSchema.nullable(),
+    card_id: providerRecordIdSchema.nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.pack_id === null && value.card_id === null) {
+      context.addIssue({
+        code: "custom",
+        message: "dataforrest_events.pull_relationships_missing",
+        path: ["card_id"],
+      });
+    }
+  });
 
 export const dataforrestTradeRecordV1Schema = z
   .object({
@@ -97,35 +95,6 @@ export const dataforrestEventRecordV1Schema = z.discriminatedUnion("stream", [
   dataforrestTradeRecordV1Schema,
 ]);
 
-export const dataforrestCatalogRecordV2Schema =
-  dataforrestCatalogRecordV1Schema;
-
-export const dataforrestPullRecordV2Schema = z
-  .object({
-    ...dataforrestRawBase,
-    stream: z.literal("pulls"),
-    pack_id: providerRecordIdSchema.nullable(),
-    card_id: providerRecordIdSchema.nullable(),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.pack_id === null && value.card_id === null) {
-      context.addIssue({
-        code: "custom",
-        message: "dataforrest_events.pull_relationships_missing",
-        path: ["card_id"],
-      });
-    }
-  });
-
-export const dataforrestTradeRecordV2Schema = dataforrestTradeRecordV1Schema;
-
-export const dataforrestEventRecordV2Schema = z.discriminatedUnion("stream", [
-  dataforrestCatalogRecordV2Schema,
-  dataforrestPullRecordV2Schema,
-  dataforrestTradeRecordV2Schema,
-]);
-
 export const dataforrestRawRecordEnvelopeV1Schema = z
   .record(z.string().min(1).max(128), z.json())
   .refine((value) => Object.keys(value).length <= 64, {
@@ -144,8 +113,6 @@ export const dataforrestEventsPageV1Schema = z
     poll_after_seconds: z.union([z.literal(0), z.literal(60)]),
   })
   .strict();
-
-export const dataforrestEventsPageV2Schema = dataforrestEventsPageV1Schema;
 
 export const dataforrestEventsConnectionConfigurationV1Schema = z
   .object({
@@ -178,55 +145,12 @@ const dataforrestProviderDeclarations = launchProviderKeys.map((provider) => ({
   recordIdScopes: [...launchRecordIdScopeDeclarations],
 }));
 
-function dataforrestEventsSourceAdapterManifest(
-  adapterVersion:
-    | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-    | typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  maximumResponseBytes: number,
-) {
+function dataforrestEventsSourceAdapterManifest() {
   return sourceAdapterManifestV1Schema.parse({
     providerSourceContractVersion: PROVIDER_SOURCE_CONTRACT_VERSION,
     sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    adapterVersion,
+    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
-    compatibleConnectionTypeKey: DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY,
-    cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
-    operatorLabel: "DataForrest Events V1",
-    requestBounds: {
-      pageLimit: providerSourceLaunchBounds.pageTargetRecords,
-      maximumResponseBytes,
-      timeoutMilliseconds: providerSourceLaunchBounds.requestTimeoutMilliseconds,
-    },
-    maximumConnectionRequestCap:
-      providerSourceLaunchBounds.stableProfileRequestCap,
-    capabilities: {
-      connectionTest: true,
-      sourceTest: true,
-      pageRead: true,
-      cancellation: true,
-    },
-    supportedProviders: dataforrestProviderDeclarations,
-  }) satisfies SourceAdapterManifestV1;
-}
-
-export const dataforrestEventsV1SourceAdapterManifest =
-  dataforrestEventsSourceAdapterManifest(
-    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-    2 * 1024 * 1024,
-  );
-
-export const dataforrestEventsV2SourceAdapterManifest =
-  dataforrestEventsSourceAdapterManifest(
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-    4 * 1024 * 1024,
-  );
-
-export const dataforrestEventsV3SourceAdapterManifest =
-  sourceAdapterManifestV2Schema.parse({
-    providerSourceContractVersion: PROVIDER_SOURCE_CONTRACT_VERSION,
-    sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    adapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
     compatibleConnectionTypeKey: DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY,
     cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     operatorLabel: "DataForrest Events V1",
@@ -244,13 +168,11 @@ export const dataforrestEventsV3SourceAdapterManifest =
       cancellation: true,
     },
     supportedProviders: dataforrestProviderDeclarations,
-  } satisfies SourceAdapterManifestV2);
+  }) satisfies SourceAdapterManifestV1;
+}
 
-export const dataforrestEventsSourceAdapterManifests = Object.freeze([
-  dataforrestEventsV1SourceAdapterManifest,
-  dataforrestEventsV2SourceAdapterManifest,
-  dataforrestEventsV3SourceAdapterManifest,
-]);
+export const dataforrestEventsV1SourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest();
 
 export type DataforrestEventRecordV1 = z.infer<
   typeof dataforrestEventRecordV1Schema
@@ -258,17 +180,6 @@ export type DataforrestEventRecordV1 = z.infer<
 export type DataforrestEventsPageV1 = z.infer<
   typeof dataforrestEventsPageV1Schema
 >;
-export type DataforrestEventRecordV2 = z.infer<
-  typeof dataforrestEventRecordV2Schema
->;
-export type DataforrestEventsPageV2 = z.infer<
-  typeof dataforrestEventsPageV2Schema
->;
-
-type DataforrestAdapterVersion =
-  | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-  | typeof DATAFORREST_EVENTS_V2_ADAPTER_VERSION
-  | typeof DATAFORREST_EVENTS_V3_ADAPTER_VERSION;
 type DataforrestDisplayNameField = "name" | "provider_label";
 
 const dataforrestProviderLabelFields = Object.freeze({
@@ -285,48 +196,27 @@ const dataforrestNativePackNameFields = Object.freeze({
   trade: "provider_label",
 } as const);
 
-const dataforrestDisplayNameFieldByAdapterVersion = Object.freeze({
-  [DATAFORREST_EVENTS_V1_ADAPTER_VERSION]: Object.freeze({
-    courtyard: dataforrestProviderLabelFields,
-    collector_crypt: dataforrestProviderLabelFields,
-    phygitals: dataforrestProviderLabelFields,
-    clutchpacks: dataforrestProviderLabelFields,
-  }),
-  [DATAFORREST_EVENTS_V2_ADAPTER_VERSION]: Object.freeze({
-    courtyard: dataforrestProviderLabelFields,
-    collector_crypt: dataforrestNativePackNameFields,
-    phygitals: dataforrestProviderLabelFields,
-    clutchpacks: dataforrestProviderLabelFields,
-  }),
-  [DATAFORREST_EVENTS_V3_ADAPTER_VERSION]: Object.freeze({
-    courtyard: dataforrestProviderLabelFields,
-    collector_crypt: dataforrestNativePackNameFields,
-    phygitals: dataforrestNativePackNameFields,
-    clutchpacks: dataforrestNativePackNameFields,
-  }),
+const dataforrestDisplayNameFieldByProvider = Object.freeze({
+  courtyard: dataforrestProviderLabelFields,
+  collector_crypt: dataforrestNativePackNameFields,
+  phygitals: dataforrestNativePackNameFields,
+  clutchpacks: dataforrestNativePackNameFields,
 } as const satisfies Readonly<
   Record<
-    DataforrestAdapterVersion,
+    LaunchProviderKey,
     Readonly<
-      Record<
-        LaunchProviderKey,
-        Readonly<
-          Record<NormalizedProviderFacts["kind"], DataforrestDisplayNameField>
-        >
-      >
+      Record<NormalizedProviderFacts["kind"], DataforrestDisplayNameField>
     >
   >
 >);
 
 function dataforrestProviderFacts(
-  adapterVersion: DataforrestAdapterVersion,
   provider: LaunchProviderKey,
   kind: NormalizedProviderFacts["kind"],
   nativeData: Readonly<Record<string, unknown>>,
 ): NormalizedProviderFacts {
   const empty = emptyNormalizedProviderFacts(kind);
-  const displayNameField =
-    dataforrestDisplayNameFieldByAdapterVersion[adapterVersion][provider][kind];
+  const displayNameField = dataforrestDisplayNameFieldByProvider[provider][kind];
   const providerDisplayName = nativeData[displayNameField];
   const displayName = providerDisplayName === undefined || providerDisplayName === null
     ? { state: "absent" as const }
@@ -347,11 +237,10 @@ export function dataforrestRecordIdScope(
   return record.stream === "pulls" ? "pull-v1" : "trade-v1";
 }
 
-function normalizeDataforrestEventRecordForAdapter(
+export function normalizeDataforrestEventRecord(
   record: DataforrestEventRecordV1,
   expectedProvider: LaunchProviderKey,
   protectedNativeEvidenceRef: string,
-  adapterVersion: DataforrestAdapterVersion,
 ): NormalizedProviderObservation {
   if (record.platform !== expectedProvider) {
     throw new RangeError("dataforrest_events.platform_mismatch");
@@ -378,7 +267,6 @@ function normalizeDataforrestEventRecordForAdapter(
           ? "available"
           : "unavailable",
       providerFacts: dataforrestProviderFacts(
-        adapterVersion,
         expectedProvider,
         record.entity,
         record.data,
@@ -388,31 +276,35 @@ function normalizeDataforrestEventRecordForAdapter(
   }
 
   if (record.stream === "pulls") {
+    const relationships = [
+      ...(record.pack_id === null
+        ? []
+        : [{
+            relationship: "pack" as const,
+            target: {
+              recordIdScopeKey: "catalog-pack-v1" as const,
+              providerRecordId: record.pack_id,
+            },
+          }]),
+      ...(record.card_id === null
+        ? []
+        : [{
+            relationship: "card" as const,
+            target: {
+              recordIdScopeKey: "catalog-card-v1" as const,
+              providerRecordId: record.card_id,
+            },
+          }]),
+    ];
     return normalizedProviderObservationSchema.parse({
       ...base,
       kind: "pull",
       providerFacts: dataforrestProviderFacts(
-        adapterVersion,
         expectedProvider,
         "pull",
         record.data,
       ),
-      relationships: [
-        {
-          relationship: "pack",
-          target: {
-            recordIdScopeKey: "catalog-pack-v1",
-            providerRecordId: record.pack_id,
-          },
-        },
-        {
-          relationship: "card",
-          target: {
-            recordIdScopeKey: "catalog-card-v1",
-            providerRecordId: record.card_id,
-          },
-        },
-      ],
+      relationships,
     });
   }
 
@@ -420,7 +312,6 @@ function normalizeDataforrestEventRecordForAdapter(
     ...base,
     kind: "trade",
     providerFacts: dataforrestProviderFacts(
-      adapterVersion,
       expectedProvider,
       "trade",
       record.data,
@@ -444,86 +335,6 @@ function normalizeDataforrestEventRecordForAdapter(
   });
 }
 
-export function normalizeDataforrestEventRecord(
-  record: DataforrestEventRecordV1,
-  expectedProvider: LaunchProviderKey,
-  protectedNativeEvidenceRef: string,
-): NormalizedProviderObservation {
-  return normalizeDataforrestEventRecordForAdapter(
-    record,
-    expectedProvider,
-    protectedNativeEvidenceRef,
-    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
-  );
-}
-
-export function normalizeDataforrestEventRecordV2(
-  record: DataforrestEventRecordV1,
-  expectedProvider: LaunchProviderKey,
-  protectedNativeEvidenceRef: string,
-): NormalizedProviderObservation {
-  return normalizeDataforrestEventRecordForAdapter(
-    record,
-    expectedProvider,
-    protectedNativeEvidenceRef,
-    DATAFORREST_EVENTS_V2_ADAPTER_VERSION,
-  );
-}
-
-export function normalizeDataforrestEventRecordV3(
-  record: DataforrestEventRecordV2,
-  expectedProvider: LaunchProviderKey,
-  protectedNativeEvidenceRef: string,
-): NormalizedProviderObservationV2 {
-  if (record.stream !== "pulls") {
-    return normalizeDataforrestEventRecordForAdapter(
-      record,
-      expectedProvider,
-      protectedNativeEvidenceRef,
-      DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-    );
-  }
-  if (record.platform !== expectedProvider) {
-    throw new RangeError("dataforrest_events.platform_mismatch");
-  }
-  const relationships = [
-    ...(record.pack_id === null
-      ? []
-      : [{
-          relationship: "pack" as const,
-          target: {
-            recordIdScopeKey: "catalog-pack-v1" as const,
-            providerRecordId: record.pack_id,
-          },
-        }]),
-    ...(record.card_id === null
-      ? []
-      : [{
-          relationship: "card" as const,
-          target: {
-            recordIdScopeKey: "catalog-card-v1" as const,
-            providerRecordId: record.card_id,
-          },
-        }]),
-  ];
-  return normalizedProviderObservationV2Schema.parse({
-    kind: "pull",
-    providerRecordIdentity: {
-      recordIdScopeKey: "pull-v1",
-      providerRecordId: record.record_id,
-    },
-    effectiveAt: record.occurred_at,
-    collectedAt: record.collected_at,
-    protectedNativeEvidenceRef,
-    providerFacts: dataforrestProviderFacts(
-      DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-      expectedProvider,
-      "pull",
-      record.data,
-    ),
-    relationships,
-  });
-}
 export function dataforrestContinuation(
   page: DataforrestEventsPageV1,
 ): NormalizedContinuation {

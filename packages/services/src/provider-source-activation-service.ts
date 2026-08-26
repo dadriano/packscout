@@ -8,7 +8,7 @@ import {
 import { SourceAdapterRegistry } from "./source-adapter-registry.ts";
 import {
   SourceMapperDescriptorRegistry,
-  type SourceMapperCompatibilityDescriptor,
+  type SourceMapperDescriptor,
 } from "./source-mapper-descriptors.ts";
 
 const SHA_256_PATTERN = /^[0-9a-f]{64}$/u;
@@ -144,7 +144,7 @@ export interface ActivatedProviderSourceContract {
   readonly sourceTypeKey: string;
   readonly sourceAdapterVersion: string;
   readonly normalizedContractVersion: string;
-  readonly mapper: SourceMapperCompatibilityDescriptor;
+  readonly mapper: SourceMapperDescriptor;
   readonly identityNamespaceKey: string;
   readonly cursorCodecVersion: string;
   readonly requestBounds: ProviderSourceRequestBounds;

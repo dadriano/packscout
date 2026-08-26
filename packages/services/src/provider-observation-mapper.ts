@@ -1,19 +1,17 @@
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   canonicalKindByLaunchScope,
   normalizedProviderObservationSchema,
-  normalizedProviderObservationV2Schema,
   providerEventCodes,
   type LaunchProviderKey,
   type LaunchRecordIdScopeKey,
   type NormalizedProviderFacts,
   type NormalizedRelationshipIdentity,
   type ProviderCanonicalKind,
-  type VersionedNormalizedProviderObservation,
+  type NormalizedProviderObservation,
 } from "@packscout/contracts";
 import { fingerprintCanonicalProviderContent } from "./provider-observation-canonical-content.ts";
-import type { SourceMapperCompatibilityDescriptor } from "./source-mapper-descriptors.ts";
+import type { SourceMapperDescriptor } from "./source-mapper-descriptors.ts";
 
 export type CanonicalCatalogAvailability =
   | "available"
@@ -182,11 +180,11 @@ export interface ProviderObservationMapperInput {
   readonly mapperVersion: string;
   readonly normalizedContractVersion: string;
   readonly identityNamespaceKey: string;
-  readonly observation: VersionedNormalizedProviderObservation;
+  readonly observation: NormalizedProviderObservation;
 }
 
 export interface ProviderObservationMapper {
-  readonly descriptor: SourceMapperCompatibilityDescriptor;
+  readonly descriptor: SourceMapperDescriptor;
   map(input: ProviderObservationMapperInput): ProviderObservationMappingOutcome;
 }
 
@@ -410,7 +408,7 @@ function evInputFromFacts(
 
 function incompatible(
   input: ProviderObservationMapperInput,
-  descriptor: SourceMapperCompatibilityDescriptor,
+  descriptor: SourceMapperDescriptor,
 ): ProviderObservationMappingOutcome | null {
   if (input.provider !== descriptor.provider) {
     return {
@@ -438,19 +436,13 @@ function incompatible(
 
 function mapNormalizedObservation(
   input: ProviderObservationMapperInput,
-  descriptor: SourceMapperCompatibilityDescriptor,
+  descriptor: SourceMapperDescriptor,
 ): ProviderObservationMappingOutcome {
   const mismatch = incompatible(input, descriptor);
   if (mismatch) return mismatch;
-  const observation = descriptor.normalizedContractVersion ===
-      PROVIDER_OBSERVATION_CONTRACT_VERSION
-    ? normalizedProviderObservationSchema.parse(input.observation)
-    : descriptor.normalizedContractVersion ===
-        PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
-      ? normalizedProviderObservationV2Schema.parse(input.observation)
-      : (() => {
-          throw new Error("provider_mapper.normalized_contract_mismatch");
-        })();
+  const observation = normalizedProviderObservationSchema.parse(
+    input.observation,
+  );
   const warnings: MapperWarning[] = [];
   const recordId = observation.providerRecordIdentity.providerRecordId;
   const scope = observation.providerRecordIdentity.recordIdScopeKey;
@@ -708,13 +700,11 @@ function mapNormalizedObservation(
 }
 
 export function createLaunchProviderObservationMapper(
-  descriptor: SourceMapperCompatibilityDescriptor,
+  descriptor: SourceMapperDescriptor,
 ): ProviderObservationMapper {
   if (
     descriptor.normalizedContractVersion !==
-      PROVIDER_OBSERVATION_CONTRACT_VERSION &&
-    descriptor.normalizedContractVersion !==
-      PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+      PROVIDER_OBSERVATION_CONTRACT_VERSION
   ) {
     throw new Error("provider_mapper.normalized_contract_mismatch");
   }

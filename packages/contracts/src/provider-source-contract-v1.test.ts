@@ -25,8 +25,6 @@ import {
 } from "./provider-source-contract-v1.ts";
 import {
   dataforrestEventsV1SourceAdapterManifest,
-  dataforrestEventsV2SourceAdapterManifest,
-  dataforrestEventsV3SourceAdapterManifest,
 } from "./dataforrest-events-v1.ts";
 
 test("launch source constants retain the evidence-backed operating envelope", () => {
@@ -286,25 +284,12 @@ test("record scopes cannot relabel their frozen source kind", () => {
   assert.equal(sourceAdapterManifestV1Schema.safeParse(manifest).success, false);
 });
 
-test("adapter manifests are credential-free, strict, and retain exact version bounds", () => {
+test("the adapter manifest is credential-free, strict, and uses the launch bound", () => {
   const parsedV1 = sourceAdapterManifestV1Schema.parse(
     dataforrestEventsV1SourceAdapterManifest,
   );
-  const parsedV2 = sourceAdapterManifestV1Schema.parse(
-    dataforrestEventsV2SourceAdapterManifest,
-  );
   assert.equal(parsedV1.sourceTypeKey, "dataforrest-events-v1");
   assert.deepEqual(parsedV1.requestBounds, {
-    pageLimit: 250,
-    maximumResponseBytes: 2_097_152,
-    timeoutMilliseconds: 10_000,
-  });
-  assert.deepEqual(parsedV2.requestBounds, {
-    pageLimit: 250,
-    maximumResponseBytes: 4_194_304,
-    timeoutMilliseconds: 10_000,
-  });
-  assert.deepEqual(dataforrestEventsV3SourceAdapterManifest.requestBounds, {
     pageLimit: 250,
     maximumResponseBytes: 8_388_608,
     timeoutMilliseconds: 10_000,
@@ -314,11 +299,11 @@ test("adapter manifests are credential-free, strict, and retain exact version bo
     parsedV1.supportedProviders.map(({ provider }) => provider),
     ["courtyard", "collector_crypt", "phygitals", "clutchpacks"],
   );
-  assert.equal(JSON.stringify([parsedV1, parsedV2]).match(
+  assert.equal(JSON.stringify(parsedV1).match(
     /credential|authorization|token/iu,
   ), null);
   assert.equal(
-    sourceAdapterManifestV1Schema.safeParse({ ...parsedV2, token: "forbidden" }).success,
+    sourceAdapterManifestV1Schema.safeParse({ ...parsedV1, token: "forbidden" }).success,
     false,
   );
 });

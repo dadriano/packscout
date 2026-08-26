@@ -1,12 +1,10 @@
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   decideProviderSourceCanonicalLifecycle,
   normalizedObservationSemanticContentSchema,
-  normalizedObservationSemanticContentV2Schema,
   type LaunchProviderKey,
   type ProviderSourceCanonicalProjectionPlan,
-  type VersionedNormalizedObservationSemanticContent,
+  type NormalizedObservationSemanticContent,
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
 import {
@@ -83,7 +81,7 @@ export interface ProviderSourceQuarantinePageQuery {
 export interface ProviderSourceProtectedQuarantineEvidence {
   readonly normalizedObservation: unknown;
   readonly evidence: unknown;
-  readonly semanticContent: VersionedNormalizedObservationSemanticContent | null;
+  readonly semanticContent: NormalizedObservationSemanticContent | null;
   readonly sourceRecordId: string | null;
   readonly semanticObservationId: string | null;
   readonly collectedAt: Date;
@@ -142,13 +140,11 @@ function normalizedEvidence(value: unknown): Readonly<{
 function retainedSemanticContent(
   normalizedContractVersion: string,
   value: unknown,
-): VersionedNormalizedObservationSemanticContent | null {
+): NormalizedObservationSemanticContent | null {
   const parsed = normalizedContractVersion ===
       PROVIDER_OBSERVATION_CONTRACT_VERSION
     ? normalizedObservationSemanticContentSchema.safeParse(value)
-    : normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
-      ? normalizedObservationSemanticContentV2Schema.safeParse(value)
-      : null;
+    : null;
   return parsed?.success ? parsed.data : null;
 }
 

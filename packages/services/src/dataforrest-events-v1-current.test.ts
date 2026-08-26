@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
-  DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
-  dataforrestEventsV3SourceAdapterManifest,
-  normalizedProviderObservationPageV2Schema,
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  dataforrestEventsV1SourceAdapterManifest,
+  normalizedProviderObservationPageSchema,
   type LaunchProviderKey,
 } from "@packscout/contracts";
 import { interpretDataforrestPage } from
@@ -27,7 +27,7 @@ const observedAt = "2026-08-25T12:00:00.000Z";
 function interpretationContext(
   provider: LaunchProviderKey,
 ): PageReadInterpretationContext {
-  const declaration = dataforrestEventsV3SourceAdapterManifest
+  const declaration = dataforrestEventsV1SourceAdapterManifest
     .supportedProviders.find((candidate) => candidate.provider === provider);
   if (declaration === undefined) {
     throw new Error("test_fixture.provider_declaration_missing");
@@ -35,28 +35,28 @@ function interpretationContext(
   return {
     operationKind: "page_read",
     organizationId: "organization-1",
-    sourceTypeKey: dataforrestEventsV3SourceAdapterManifest.sourceTypeKey,
-    adapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
+    sourceTypeKey: dataforrestEventsV1SourceAdapterManifest.sourceTypeKey,
+    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     connectionProfileId: "profile-1",
     connectionProfileRevisionId: "profile-revision-1",
-    bounds: dataforrestEventsV3SourceAdapterManifest.requestBounds,
+    bounds: dataforrestEventsV1SourceAdapterManifest.requestBounds,
     provider,
     sourceInstanceId: `source-${provider}`,
     sourceRevisionId: `source-revision-${provider}`,
-    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     identityNamespaceKey: declaration.identityNamespaceKey,
     recordIdScopes: declaration.recordIdScopes,
     sourceConfiguration: { platform: provider },
     requestedCursor: {
       sourceInstanceId: `source-${provider}`,
       sourceRevisionId: `source-revision-${provider}`,
-      sourceTypeKey: dataforrestEventsV3SourceAdapterManifest.sourceTypeKey,
-      adapterVersion: DATAFORREST_EVENTS_V3_ADAPTER_VERSION,
-      cursorCodecKey: dataforrestEventsV3SourceAdapterManifest.cursorCodecKey,
+      sourceTypeKey: dataforrestEventsV1SourceAdapterManifest.sourceTypeKey,
+      adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+      cursorCodecKey: dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
       cursorGeneration: 1,
       value: null,
     },
-    pageLimit: dataforrestEventsV3SourceAdapterManifest.requestBounds.pageLimit,
+    pageLimit: dataforrestEventsV1SourceAdapterManifest.requestBounds.pageLimit,
     pageNumber: 1,
   };
 }
@@ -80,7 +80,7 @@ function capturedPage(value: unknown): SuccessfulSourceAdapterRequest {
   } as unknown as SuccessfulSourceAdapterRequest;
 }
 
-test("adapter v3 projects partial pulls without fabricating a relationship", async (t) => {
+test("the sole v1 adapter projects partial pulls without fabricating a relationship", async (t) => {
   const fixtures = [
     {
       name: "Collector Crypt pack-only pull",
@@ -127,9 +127,9 @@ test("adapter v3 projects partial pulls without fabricating a relationship", asy
       });
       const interpreted = await interpretDataforrestPage(context, request);
       assert.equal(interpreted.ok, true);
-      if (!interpreted.ok) assert.fail("expected adapter-v3 page interpretation");
+      if (!interpreted.ok) assert.fail("expected adapter-v1 page interpretation");
 
-      const page = normalizedProviderObservationPageV2Schema.parse({
+      const page = normalizedProviderObservationPageSchema.parse({
         ...interpreted.value.normalizedPage,
         measurements: {
           ...request.measurements,
@@ -140,10 +140,10 @@ test("adapter v3 projects partial pulls without fabricating a relationship", asy
       const descriptor = launchSourceMapperDescriptors.find((candidate) =>
         candidate.provider === fixture.provider &&
         candidate.normalizedContractVersion ===
-          PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
+          PROVIDER_OBSERVATION_CONTRACT_VERSION
       );
       if (descriptor === undefined) {
-        assert.fail("expected an observation-v2 mapper descriptor");
+        assert.fail("expected the observation-v1 mapper descriptor");
       }
       const plan = new ProviderSourcePagePlanner(
         createProviderObservationMapperRegistryFromManifest(),

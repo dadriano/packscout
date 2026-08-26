@@ -1,23 +1,16 @@
 import { createHash } from "node:crypto";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   canonicalKindByLaunchScope,
   launchProviderKeySchema,
   normalizedObservationSemanticCanonicalJson,
-  normalizedObservationSemanticCanonicalJsonV2,
   normalizedObservationSemanticContent,
   normalizedObservationSemanticContentSchema,
-  normalizedObservationSemanticContentV2,
-  normalizedObservationSemanticContentV2Schema,
-  normalizedProviderObservationPageV2Schema,
   normalizedProviderObservationPageSchema,
   normalizedProviderObservationSchema,
-  normalizedProviderObservationV2Schema,
   opaqueCursorEnvelopeSchema,
   providerSourceLaunchBounds,
   providerSourceExpectedCanonicalRelationships,
-  providerSourceExpectedCanonicalRelationshipsV2,
   providerSourceCanonicalCatalogAssetContentV1Schema,
   providerSourceCanonicalEvInputContentV1Schema,
   providerSourceCanonicalMarketEventContentV1Schema,
@@ -26,9 +19,9 @@ import {
   type ProviderSourceCanonicalProjectionPlan,
   type LaunchProviderKey,
   type ProviderSourcePageCommitPins,
-  type VersionedNormalizedObservationSemanticContent,
-  type VersionedNormalizedProviderObservationPage,
-  type VersionedProviderSourcePagePlan,
+  type NormalizedObservationSemanticContent,
+  type NormalizedProviderObservationPage,
+  type ProviderSourcePagePlan,
 } from "@packscout/contracts";
 import { hashJson } from "./security.ts";
 
@@ -58,7 +51,7 @@ export interface ProviderSourceProtectedNativeEvidence {
 
 export interface ProviderSourceAtomicPagePersistenceInput {
   readonly pins: ProviderSourcePageCommitPins;
-  readonly plan: VersionedProviderSourcePagePlan;
+  readonly plan: ProviderSourcePagePlan;
   readonly protectedRawResponse: Uint8Array;
   readonly protectedRawResponseSha256: string;
   readonly protectedNativeEvidence: readonly ProviderSourceProtectedNativeEvidence[];
@@ -173,78 +166,46 @@ function validatePins(pins: unknown): asserts pins is ProviderSourcePageCommitPi
 }
 
 type SupportedObservationContractVersion =
-  | typeof PROVIDER_OBSERVATION_CONTRACT_VERSION
-  | typeof PROVIDER_OBSERVATION_CONTRACT_VERSION_V2;
+  typeof PROVIDER_OBSERVATION_CONTRACT_VERSION;
 
 function supportedObservationContractVersion(
   value: string,
 ): SupportedObservationContractVersion {
-  if (
-    value === PROVIDER_OBSERVATION_CONTRACT_VERSION ||
-    value === PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
-  ) {
+  if (value === PROVIDER_OBSERVATION_CONTRACT_VERSION) {
     return value;
   }
   return invalidPlan();
 }
 
 function parseNormalizedPage(
-  normalizedContractVersion: SupportedObservationContractVersion,
   value: unknown,
-): VersionedNormalizedProviderObservationPage {
-  const parsed = normalizedContractVersion ===
-      PROVIDER_OBSERVATION_CONTRACT_VERSION
-    ? normalizedProviderObservationPageSchema.safeParse(value)
-    : normalizedProviderObservationPageV2Schema.safeParse(value);
+): NormalizedProviderObservationPage {
+  const parsed = normalizedProviderObservationPageSchema.safeParse(value);
   return parsed.success ? parsed.data : invalidPlan();
 }
 
 function parseSemanticContent(
-  normalizedContractVersion: SupportedObservationContractVersion,
   value: unknown,
-): VersionedNormalizedObservationSemanticContent {
-  const parsed = normalizedContractVersion ===
-      PROVIDER_OBSERVATION_CONTRACT_VERSION
-    ? normalizedObservationSemanticContentSchema.safeParse(value)
-    : normalizedObservationSemanticContentV2Schema.safeParse(value);
+): NormalizedObservationSemanticContent {
+  const parsed = normalizedObservationSemanticContentSchema.safeParse(value);
   return parsed.success ? parsed.data : invalidPlan();
 }
 
 function semanticContentFromObservation(
-  normalizedContractVersion: SupportedObservationContractVersion,
   value: unknown,
-): VersionedNormalizedObservationSemanticContent {
-  if (normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION) {
-    const observation = normalizedProviderObservationSchema.safeParse(value);
-    return observation.success
-      ? normalizedObservationSemanticContent(observation.data)
-      : invalidPlan();
-  }
-  const observation = normalizedProviderObservationV2Schema.safeParse(value);
+): NormalizedObservationSemanticContent {
+  const observation = normalizedProviderObservationSchema.safeParse(value);
   return observation.success
-    ? normalizedObservationSemanticContentV2(observation.data)
+    ? normalizedObservationSemanticContent(observation.data)
     : invalidPlan();
 }
 
-function semanticCanonicalJson(
-  normalizedContractVersion: SupportedObservationContractVersion,
-  value: unknown,
-): string {
-  return normalizedContractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION
-    ? normalizedObservationSemanticCanonicalJson(value)
-    : normalizedObservationSemanticCanonicalJsonV2(value);
-}
-
 function assertProjection(
-  normalizedContractVersion: SupportedObservationContractVersion,
   provider: LaunchProviderKey,
-  semanticContent: VersionedNormalizedObservationSemanticContent,
+  semanticContent: NormalizedObservationSemanticContent,
   projection: ProviderSourceCanonicalProjectionPlan,
 ): void {
-  const boundSemanticContent = parseSemanticContent(
-    normalizedContractVersion,
-    semanticContent,
-  );
+  const boundSemanticContent = parseSemanticContent(semanticContent);
   const identity = boundSemanticContent.providerRecordIdentity;
   const expectedPrimaryKind =
     canonicalKindByLaunchScope[identity.recordIdScopeKey];
@@ -321,20 +282,12 @@ function assertProjection(
   }
   let expectedRelationships: readonly ProviderSourceCanonicalProjectionPlan["relationships"][number][];
   try {
-    expectedRelationships = normalizedContractVersion ===
-        PROVIDER_OBSERVATION_CONTRACT_VERSION
-      ? providerSourceExpectedCanonicalRelationships({
-          semanticContent: normalizedObservationSemanticContentSchema.parse(
-            boundSemanticContent,
-          ),
-          projectionKind: projection.projectionKind,
-        })
-      : providerSourceExpectedCanonicalRelationshipsV2({
-          semanticContent: normalizedObservationSemanticContentV2Schema.parse(
-            boundSemanticContent,
-          ),
-          projectionKind: projection.projectionKind,
-        });
+    expectedRelationships = providerSourceExpectedCanonicalRelationships({
+      semanticContent: normalizedObservationSemanticContentSchema.parse(
+        boundSemanticContent,
+      ),
+      projectionKind: projection.projectionKind,
+    });
   } catch {
     invalidPlan();
   }
@@ -360,18 +313,15 @@ function assertProjection(
 export function validateProviderSourceCanonicalProjections(input: Readonly<{
   normalizedContractVersion: string;
   provider: LaunchProviderKey;
-  semanticContent: VersionedNormalizedObservationSemanticContent;
+  semanticContent: NormalizedObservationSemanticContent;
   projections: readonly ProviderSourceCanonicalProjectionPlan[];
 }>): void {
-  const normalizedContractVersion = supportedObservationContractVersion(
-    input.normalizedContractVersion,
-  );
+  supportedObservationContractVersion(input.normalizedContractVersion);
   if (input.projections.length < 1 || input.projections.length > 2) {
     invalidPlan();
   }
   input.projections.forEach((projection) =>
     assertProjection(
-      normalizedContractVersion,
       input.provider,
       input.semanticContent,
       projection,
@@ -404,10 +354,7 @@ export function validateProviderSourceAtomicPageInput(
   const normalizedContractVersion = supportedObservationContractVersion(
     input.pins.normalizedContractVersion,
   );
-  const parsedPage = parseNormalizedPage(
-    normalizedContractVersion,
-    input.plan.normalizedPage,
-  );
+  const parsedPage = parseNormalizedPage(input.plan.normalizedPage);
   const rawHash =
     input.protectedRawResponse instanceof Uint8Array
       ? createHash("sha256").update(input.protectedRawResponse).digest("hex")
@@ -497,24 +444,16 @@ export function validateProviderSourceAtomicPageInput(
       continue;
     }
     const observationSemanticContent = semanticContentFromObservation(
-      normalizedContractVersion,
       outcome.observation,
     );
-    const plannedSemanticContent = parseSemanticContent(
-      normalizedContractVersion,
-      outcome.semanticContent,
-    );
-    const plannedSemanticCanonicalJson = semanticCanonicalJson(
-      normalizedContractVersion,
-      plannedSemanticContent,
-    );
+    const plannedSemanticContent = parseSemanticContent(outcome.semanticContent);
+    const plannedSemanticCanonicalJson =
+      normalizedObservationSemanticCanonicalJson(plannedSemanticContent);
     if (
       pageOutcome?.status !== "valid" ||
       hashJson(pageOutcome.observation) !== hashJson(outcome.observation) ||
-      semanticCanonicalJson(
-        normalizedContractVersion,
-        observationSemanticContent,
-      ) !== plannedSemanticCanonicalJson ||
+      normalizedObservationSemanticCanonicalJson(observationSemanticContent) !==
+        plannedSemanticCanonicalJson ||
       outcome.normalizedContentHash !==
         createHash("sha256")
           .update(plannedSemanticCanonicalJson)

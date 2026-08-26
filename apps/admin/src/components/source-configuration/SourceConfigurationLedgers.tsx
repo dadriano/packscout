@@ -5,7 +5,6 @@ import {
   type CreateSourceConnectionProfileRequest,
   type ProviderSourceAdminCatalog,
   type ProviderSourceAdminSummary,
-  type ReplaceProviderSourceRequest,
   type SourceConnectionProfileAdminSummary,
 } from "@packscout/contracts";
 import { StatusBadge, type StatusTone } from "../StatusBadge";
@@ -25,8 +24,6 @@ function tone(value: string): StatusTone {
 
 interface ConnectionLedgerProps {
   readonly connections: readonly SourceConnectionProfileAdminSummary[];
-  readonly sources: readonly ProviderSourceAdminSummary[];
-  readonly currentSourceAdapterVersion: string | null;
   readonly canManage: boolean;
   readonly canManageSecrets: boolean;
   readonly pendingKey: string | null;
@@ -39,10 +36,6 @@ interface ConnectionLedgerProps {
     connection: SourceConnectionProfileAdminSummary,
     bearerCredential: string,
   ) => Promise<boolean>;
-  readonly onUpgrade: (
-    connection: SourceConnectionProfileAdminSummary,
-    targetSourceAdapterVersion: string,
-  ) => Promise<boolean>;
   readonly onCommand: (
     action: "test" | "activate" | "revoke" | "recovery-test" | "recovery-activate",
     connection: SourceConnectionProfileAdminSummary,
@@ -51,15 +44,12 @@ interface ConnectionLedgerProps {
 
 export function SourceConnectionLedger({
   connections,
-  sources,
-  currentSourceAdapterVersion,
   canManage,
   canManageSecrets,
   pendingKey,
   onCreate,
   onRotate,
   onRecover,
-  onUpgrade,
   onCommand,
 }: ConnectionLedgerProps) {
   const [name, setName] = useState("");
@@ -138,20 +128,10 @@ export function SourceConnectionLedger({
       <div className="source-config-ledger__rows">
         {connections.map((connection) => {
           const revision = connection.latestRevision;
-          const dependentSources = sources.filter((source) =>
-            source.connectionProfileId === connection.id &&
-            ["draft", "active", "paused"].includes(source.state)
-          );
-          const hasIncompatibleSourcePins = (adapterVersion: string) =>
-            dependentSources.some((source) =>
-              source.sourceAdapterVersion !== adapterVersion
-            );
           const hasCurrentSuccessfulTest = revision.test.state === "succeeded" &&
             revision.test.outcome === "success" && revision.test.current;
-          const activationBlockedByPins = revision.state === "candidate" &&
-            hasIncompatibleSourcePins(revision.sourceAdapterVersion);
           const canActivate = hasCurrentSuccessfulTest &&
-            revision.state === "candidate" && !activationBlockedByPins;
+            revision.state === "candidate";
           const recovery = connection.recoveryFence;
           const latestRevisionCanRecover = recovery !== null &&
             revision.state === "candidate";
@@ -160,17 +140,6 @@ export function SourceConnectionLedger({
           const canTestSameRevisionRecovery = recovery !== null &&
             recovery.blockedRevisionId === revision.id &&
             revision.state === "active";
-          const upgradeBlockedByPins = currentSourceAdapterVersion !== null &&
-            hasIncompatibleSourcePins(currentSourceAdapterVersion);
-          const canUpgradeAdapter = canManageSecrets &&
-            recovery === null &&
-            currentSourceAdapterVersion !== null &&
-            revision.sourceAdapterVersion !== currentSourceAdapterVersion &&
-            revision.state !== "revoked" &&
-            !upgradeBlockedByPins;
-          const requiresSeparateProfile = activationBlockedByPins ||
-            (revision.sourceAdapterVersion !== currentSourceAdapterVersion &&
-              upgradeBlockedByPins);
           return (
             <article key={connection.id}>
               <div className="source-config-ledger__identity">
@@ -188,18 +157,6 @@ export function SourceConnectionLedger({
                 <div><dt>Request cap</dt><dd>{connection.requestLimit} shared requests</dd></div>
                 <div><dt>Revision state</dt><dd>{label(revision.state)}</dd></div>
               </dl>
-              {requiresSeparateProfile ? (
-                <aside className="source-config-note">
-                  <strong>Use a separate profile for this adapter change</strong>
-                  <p>
-                    Create a new current-adapter connection profile, test and activate it,
-                    then pause or disable each dependent source at a planned boundary and
-                    select the new profile when replacing that source. In-place adapter
-                    changes are blocked while draft, active, or paused sources use this
-                    profile.
-                  </p>
-                </aside>
-              ) : null}
               {canManage ? (
                 <div className="source-config-ledger__actions">
                   <button
@@ -245,17 +202,6 @@ export function SourceConnectionLedger({
                       disabled={pendingKey !== null || revision.state === "revoked"}
                       onClick={() => onCommand("revoke", connection)}
                     >Revoke</button>
-                  ) : null}
-                  {canUpgradeAdapter ? (
-                    <button
-                      type="button"
-                      className="admin-button admin-button-secondary"
-                      disabled={pendingKey !== null}
-                      onClick={() => void onUpgrade(
-                        connection,
-                        currentSourceAdapterVersion,
-                      )}
-                    >Create adapter upgrade candidate</button>
                   ) : null}
                 </div>
               ) : null}
@@ -319,10 +265,7 @@ interface SourceLedgerProps {
   readonly catalog: ProviderSourceAdminCatalog;
   readonly canManage: boolean;
   readonly pendingKey: string | null;
-  readonly onCreate: (
-    request: CreateProviderSourceRequest | ReplaceProviderSourceRequest,
-    replacement: boolean,
-  ) => Promise<boolean>;
+  readonly onCreate: (request: CreateProviderSourceRequest) => Promise<boolean>;
   readonly onCommand: (
     action: "test" | "activate" | "pause" | "resume" | "disable" | "reset",
     source: ProviderSourceAdminSummary,
@@ -343,7 +286,6 @@ export function ProviderSourceLedger({
 }: SourceLedgerProps) {
   const [providerId, setProviderId] = useState("");
   const [profileId, setProfileId] = useState("");
-  const [replacesSourceInstanceId, setReplacement] = useState("");
   const [intervalSeconds, setIntervalSeconds] = useState("60");
   const provider = catalog.providers.find((item) => item.id === providerId);
   const profile = catalog.connections.find((item) => item.id === profileId);
@@ -359,15 +301,10 @@ export function ProviderSourceLedger({
       mapperVersion: provider.sourceRegistration.mapperVersion,
       intervalSeconds: Number(intervalSeconds),
     };
-    const replacement = replacesSourceInstanceId.length > 0;
-    const saved = await onCreate(
-      replacement ? { ...base, replacesSourceInstanceId } : base,
-      replacement,
-    );
+    const saved = await onCreate(base);
     if (saved) {
       setProviderId("");
       setProfileId("");
-      setReplacement("");
       setIntervalSeconds("60");
     }
   }
@@ -384,7 +321,7 @@ export function ProviderSourceLedger({
 
       {canManage ? (
         <details className="source-config-editor">
-          <summary>Create or replace a source</summary>
+          <summary>Create a source</summary>
           <form className="source-config-form" onSubmit={(event) => void create(event)}>
             <div className="admin-field">
               <label htmlFor="source-provider">Provider</label>
@@ -392,7 +329,6 @@ export function ProviderSourceLedger({
                 onChange={(event) => {
                   setProviderId(event.target.value);
                   setProfileId("");
-                  setReplacement("");
                 }}>
                 <option value="">Select provider</option>
                 {catalog.providers.map((item) => (
@@ -415,21 +351,6 @@ export function ProviderSourceLedger({
               </select>
             </div>
             <div className="admin-field">
-              <label htmlFor="source-replacement">Replace existing source (optional)</label>
-              <select id="source-replacement" value={replacesSourceInstanceId}
-                disabled={!providerId}
-                onChange={(event) => setReplacement(event.target.value)}>
-                <option value="">New source</option>
-                {catalog.sources.filter((item) =>
-                  item.providerId === providerId && ["paused", "disabled"].includes(item.state)
-                ).map((item) => (
-                  <option key={item.sourceInstanceId} value={item.sourceInstanceId}>
-                    Replace {label(item.state)} revision {item.sourceRevisionId.slice(0, 8)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="admin-field">
               <label htmlFor="source-interval">Interval seconds</label>
               <input id="source-interval" type="number" min="60" max="86400" required
                 value={intervalSeconds}
@@ -437,7 +358,7 @@ export function ProviderSourceLedger({
             </div>
             <p className="source-config-form__evidence" aria-live="polite">
               {provider
-                ? `Mapper: ${provider.sourceRegistration.mapperKey} @ ${provider.sourceRegistration.mapperVersion} · ${provider.sourceRegistration.sourceAdapterVersion}`
+                ? `Adapter: ${provider.sourceRegistration.sourceAdapterVersion} · Observation: ${provider.sourceRegistration.normalizedContractVersion} · Mapper: ${provider.sourceRegistration.mapperKey} @ ${provider.sourceRegistration.mapperVersion}`
                 : "Select a provider to pin its approved mapper."}
             </p>
             <button type="submit" className="admin-button admin-button-primary"
@@ -474,6 +395,8 @@ export function ProviderSourceLedger({
                 <StatusBadge label={label(source.test.state)} tone={tone(source.test.state)} />
               </div>
               <dl className="source-config-ledger__facts">
+                <div><dt>Adapter</dt><dd>{source.sourceAdapterVersion}</dd></div>
+                <div><dt>Observation</dt><dd>{source.normalizedContractVersion}</dd></div>
                 <div><dt>Interval / grace</dt><dd>{source.intervalSeconds}s / 15m</dd></div>
                 <div><dt>Cursor</dt><dd>{source.cursor.resumeLabel}</dd></div>
                 <div className="source-config-ledger__fingerprint"><dt>Fingerprint</dt><dd>{source.cursor.fingerprint ?? "None"}</dd></div>

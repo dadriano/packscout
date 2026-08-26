@@ -1,12 +1,8 @@
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   normalizedObservationSemanticCanonicalJson,
-  normalizedObservationSemanticCanonicalJsonV2,
   normalizedObservationSemanticContent,
-  normalizedObservationSemanticContentV2,
   normalizedProviderObservationSchema,
-  normalizedProviderObservationV2Schema,
   quarantineIdSchema,
   quarantineRetryBulkRequestSchema,
   type LaunchProviderKey,
@@ -16,8 +12,8 @@ import {
   type QuarantineEntrySummary,
   type QuarantineRetryBulkRequest,
   type QuarantineRetryOutcome,
-  type VersionedNormalizedObservationSemanticContent,
-  type VersionedNormalizedProviderObservation,
+  type NormalizedObservationSemanticContent,
+  type NormalizedProviderObservation,
 } from "@packscout/contracts";
 import type {
   ProviderActor,
@@ -74,7 +70,7 @@ interface ProtectedProviderSourceQuarantineEvidence {
   readonly normalizedObservation: unknown;
   readonly evidence: unknown;
   readonly semanticContent:
-    VersionedNormalizedObservationSemanticContent | null;
+    NormalizedObservationSemanticContent | null;
   readonly sourceRecordId: string | null;
   readonly semanticObservationId: string | null;
   readonly collectedAt: Date;
@@ -213,7 +209,7 @@ function requireActor(actor: ProviderActor, keyer: ProviderActorKeyer): string {
 function retainedEvidenceMatches(
   evidence: ProtectedProviderSourceQuarantineEvidence,
 ): Readonly<
-  | { success: true; data: VersionedNormalizedProviderObservation }
+  | { success: true; data: NormalizedProviderObservation }
   | { success: false }
 > {
   const contractVersion = evidence.mapper.normalizedContractVersion;
@@ -221,28 +217,17 @@ function retainedEvidenceMatches(
     ? normalizedProviderObservationSchema.safeParse(
         evidence.normalizedObservation,
       )
-    : contractVersion === PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
-      ? normalizedProviderObservationV2Schema.safeParse(
-          evidence.normalizedObservation,
-        )
-      : null;
+    : null;
   if (parsed === null || !parsed.success || evidence.semanticContent === null) {
     return { success: false };
   }
-  const semanticMatches = contractVersion ===
-      PROVIDER_OBSERVATION_CONTRACT_VERSION
-    ? normalizedObservationSemanticCanonicalJson(
-        normalizedObservationSemanticContent(
-          normalizedProviderObservationSchema.parse(parsed.data),
-        ),
-      ) === normalizedObservationSemanticCanonicalJson(
-        evidence.semanticContent,
-      )
-    : normalizedObservationSemanticCanonicalJsonV2(
-        normalizedObservationSemanticContentV2(parsed.data),
-      ) === normalizedObservationSemanticCanonicalJsonV2(
-        evidence.semanticContent,
-      );
+  const semanticMatches = normalizedObservationSemanticCanonicalJson(
+    normalizedObservationSemanticContent(
+      normalizedProviderObservationSchema.parse(parsed.data),
+    ),
+  ) === normalizedObservationSemanticCanonicalJson(
+    evidence.semanticContent,
+  );
   if (!semanticMatches) return { success: false };
   const protectedReferences = Array.isArray(evidence.evidence)
     ? new Set(evidence.evidence.flatMap((item) => {

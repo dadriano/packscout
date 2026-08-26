@@ -1,15 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  PROVIDER_OBSERVATION_CONTRACT_VERSION_V2,
   decideProviderSourceCanonicalLifecycle,
   providerSourcePageCommitCanonicalJson,
-  providerSourcePageCommitCanonicalJsonV2,
   type ProviderSourceCanonicalProjectionPlan,
   type ProviderSourcePagePlan,
-  type ProviderSourcePagePlanV2,
-  type VersionedProviderSourcePagePlan,
-  type VersionedProviderSourcePlannedOutcome,
+  type ProviderSourcePlannedOutcome,
 } from "@packscout/contracts";
 import { Prisma } from "@prisma/client";
 import {
@@ -70,7 +66,7 @@ export interface ProviderSourceAtomicPageCommitResult {
   readonly pageId: string;
   readonly cursorFingerprint: string | null;
   readonly continuation:
-    VersionedProviderSourcePagePlan["normalizedPage"]["continuation"];
+    ProviderSourcePagePlan["normalizedPage"]["continuation"];
   readonly counts: Readonly<{
     inserted: number;
     revised: number;
@@ -142,19 +138,16 @@ function asPrismaBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
 function normalizedCommitHash(
   input: ProviderSourceAtomicPagePersistenceInput,
 ): string {
-  const canonical = input.pins.normalizedContractVersion ===
+  if (
+    input.pins.normalizedContractVersion !==
       PROVIDER_OBSERVATION_CONTRACT_VERSION
-    ? providerSourcePageCommitCanonicalJson({
-        plan: input.plan as ProviderSourcePagePlan,
-        protectedNativeEvidence: input.protectedNativeEvidence,
-      })
-    : input.pins.normalizedContractVersion ===
-        PROVIDER_OBSERVATION_CONTRACT_VERSION_V2
-      ? providerSourcePageCommitCanonicalJsonV2({
-          plan: input.plan as ProviderSourcePagePlanV2,
-          protectedNativeEvidence: input.protectedNativeEvidence,
-        })
-      : invalidPlan();
+  ) {
+    invalidPlan();
+  }
+  const canonical = providerSourcePageCommitCanonicalJson({
+    plan: input.plan,
+    protectedNativeEvidence: input.protectedNativeEvidence,
+  });
   return createHash("sha256")
     .update(canonical)
     .digest("hex");
@@ -179,7 +172,7 @@ function addRetentionDays(value: Date, days: number): Date {
 }
 
 function sourceRecordKind(
-  outcome: Extract<VersionedProviderSourcePlannedOutcome, { kind: "semantic" }>,
+  outcome: Extract<ProviderSourcePlannedOutcome, { kind: "semantic" }>,
 ): "catalog" | "pull" | "trade" {
   return outcome.observation.kind;
 }
@@ -788,7 +781,7 @@ export class ProviderSourcePageRepository {
   private async recordQuarantine(
     transaction: PackscoutTransactionClient,
     input: ProviderSourceAtomicPagePersistenceInput,
-    outcome: VersionedProviderSourcePlannedOutcome,
+    outcome: ProviderSourcePlannedOutcome,
     evidence: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
     committedAt: Date,
     decision: Readonly<{
