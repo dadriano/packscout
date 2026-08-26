@@ -69,7 +69,11 @@ const timestampFields = new Set([
   "first_seen_at",
 ]);
 const maximumJsonNestingDepth = 64;
-const maximumJsonNodeCount = 100_000;
+// The transport already caps the raw response at 4 MiB. Data-rich catalog
+// records can legitimately contain hundreds of bounded native facts each, so
+// a full 250-record page needs a higher aggregate traversal allowance while
+// the independent depth, object-key, and array-item limits remain enforced.
+const maximumJsonNodeCount = 1_000_000;
 const maximumJsonObjectKeys = 256;
 const maximumJsonArrayItems = 5_000;
 const reservedJsonObjectKeys = new Set([

@@ -67,6 +67,8 @@ function snapshot(
 class MemoryLifecycleRepository
   implements ProviderSourceLifecycleAdminRepository {
   source = snapshot();
+  activeRevisionSourceAdapterVersion: string | null =
+    DATAFORREST_EVENTS_V3_ADAPTER_VERSION;
   createInput: Parameters<ProviderSourceLifecycleAdminRepository["createSource"]>[0] | null = null;
   resetInput: Parameters<ProviderSourceLifecycleAdminRepository["resetCursor"]>[0] | null = null;
 
@@ -88,6 +90,8 @@ class MemoryLifecycleRepository
           sourceTypeKey: "dataforrest-events-v1",
           state: "active" as const,
           activeRevisionId: connectionRevisionId,
+          activeRevisionSourceAdapterVersion:
+            this.activeRevisionSourceAdapterVersion,
         }
       : null;
   }
@@ -206,6 +210,21 @@ test("source creation derives the immutable platform filter and contract-only ma
     ),
     /invalid_source_configuration/u,
   );
+});
+
+test("source creation rejects an active connection pinned to a legacy adapter", async () => {
+  const { repository, service } = fixture();
+  repository.activeRevisionSourceAdapterVersion =
+    "dataforrest-events-adapter-v1";
+
+  await assert.rejects(
+    service.createSource(
+      { organizationId, actorKey: "operator-admin" },
+      sourceRequest,
+    ),
+    /source_dependency_required/u,
+  );
+  assert.equal(repository.createInput, null);
 });
 
 test("a replacement requires an idle paused or disabled compatible predecessor and always creates a fresh source", async () => {

@@ -21,6 +21,7 @@ export interface ConnectionPermitAcquireInput {
 
 export type ConnectionPermitCoordinatorErrorCode =
   | "cancelled"
+  | "invalid_execution_slots"
   | "invalid_profile_identity"
   | "invalid_profile_request_cap"
   | "profile_cap_change_while_in_use"
@@ -181,9 +182,18 @@ export class ConnectionPermitCoordinator {
     return null;
   }
 
-  constructor() {
-    this.#maximumExecutionSlots =
-      providerSourceLaunchBounds.genericExecutionSlots;
+  constructor(
+    maximumExecutionSlots: number =
+      providerSourceLaunchBounds.genericExecutionSlots,
+  ) {
+    if (
+      !Number.isSafeInteger(maximumExecutionSlots) ||
+      maximumExecutionSlots < 1 ||
+      maximumExecutionSlots > providerSourceLaunchBounds.genericExecutionSlots
+    ) {
+      throw new ConnectionPermitCoordinatorError("invalid_execution_slots");
+    }
+    this.#maximumExecutionSlots = maximumExecutionSlots;
   }
 
   configureProfile(configuration: ConnectionProfilePermitConfiguration): void {
@@ -192,7 +202,7 @@ export class ConnectionPermitCoordinator {
     if (
       !Number.isSafeInteger(cap) ||
       cap < 1 ||
-      cap > this.#maximumExecutionSlots
+      cap > providerSourceLaunchBounds.stableProfileRequestCap
     ) {
       throw new ConnectionPermitCoordinatorError("invalid_profile_request_cap");
     }

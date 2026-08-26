@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   type PackscoutPrismaClient,
+  type PackscoutQueryClient,
 } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
@@ -25,6 +26,33 @@ function safeAuditMetadata(revisionId: string): Prisma.InputJsonObject {
   return { connectionRevisionId: revisionId };
 }
 
+async function hasIncompatibleRunnableSourceAdapterPins(
+  database: PackscoutQueryClient,
+  input: Readonly<{
+    organizationId: string;
+    connectionProfileId: string;
+    sourceAdapterVersion: string;
+  }>,
+): Promise<boolean> {
+  const rows = await database.$queryRaw<Array<{ blocked: boolean }>>(Prisma.sql`
+    select exists (
+      select 1
+      from public.provider_source_instances source
+      join public.provider_source_revisions revision
+        on revision.id = source.active_revision_id
+       and revision.organization_id = source.organization_id
+       and revision.provider_id = source.provider_id
+       and revision.source_instance_id = source.id
+       and revision.connection_profile_id = source.connection_profile_id
+      where source.organization_id = cast(${input.organizationId} as uuid)
+        and source.connection_profile_id = cast(${input.connectionProfileId} as uuid)
+        and source.state in ('active', 'paused')
+        and revision.source_adapter_version <> ${input.sourceAdapterVersion}
+    ) as blocked
+  `);
+  return rows[0]?.blocked ?? false;
+}
+
 export class SourceConnectionAdminRepository {
   readonly #recovery: SourceConnectionRecoveryRepository;
 
@@ -33,37 +61,45 @@ export class SourceConnectionAdminRepository {
   }
 
   addRecoveryConnectionRevision(
-    input: Parameters<SourceConnectionRecoveryRepository["addRecoveryConnectionRevision"]>[0],
+    input: Parameters<
+      SourceConnectionRecoveryRepository["addRecoveryConnectionRevision"]
+    >[0],
   ) {
     return this.#recovery.addRecoveryConnectionRevision(input);
   }
 
   requestConnectionRecoveryTest(
-    input: Parameters<SourceConnectionRecoveryRepository["requestConnectionRecoveryTest"]>[0],
+    input: Parameters<
+      SourceConnectionRecoveryRepository["requestConnectionRecoveryTest"]
+    >[0],
   ) {
     return this.#recovery.requestConnectionRecoveryTest(input);
   }
 
   activateTestedConnectionRecovery(
-    input: Parameters<SourceConnectionRecoveryRepository["activateTestedConnectionRecovery"]>[0],
+    input: Parameters<
+      SourceConnectionRecoveryRepository["activateTestedConnectionRecovery"]
+    >[0],
   ) {
     return this.#recovery.activateTestedConnectionRecovery(input);
   }
 
-  async createConnectionProfile(input: Readonly<{
-    organizationId: string;
-    profileId: string;
-    revisionId: string;
-    sourceTypeKey: string;
-    connectionTypeKey: string;
-    displayName: string;
-    requestLimit: number;
-    sourceAdapterVersion: string;
-    encryptedConfiguration: EncryptedConfiguration;
-    configurationFingerprint: string;
-    actorKey: string;
-    createdAt: Date;
-  }>): Promise<void> {
+  async createConnectionProfile(
+    input: Readonly<{
+      organizationId: string;
+      profileId: string;
+      revisionId: string;
+      sourceTypeKey: string;
+      connectionTypeKey: string;
+      displayName: string;
+      requestLimit: number;
+      sourceAdapterVersion: string;
+      encryptedConfiguration: EncryptedConfiguration;
+      configurationFingerprint: string;
+      actorKey: string;
+      createdAt: Date;
+    }>,
+  ): Promise<void> {
     await this.database.$transaction(async (transaction) => {
       const organization = await transaction.organizations.findUnique({
         where: { id: input.organizationId },
@@ -91,7 +127,9 @@ export class SourceConnectionAdminRepository {
           revision_number: 1,
           source_type_key: input.sourceTypeKey,
           source_adapter_version: input.sourceAdapterVersion,
-          configuration_ciphertext: bytes(input.encryptedConfiguration.ciphertext),
+          configuration_ciphertext: bytes(
+            input.encryptedConfiguration.ciphertext,
+          ),
           configuration_nonce: bytes(input.encryptedConfiguration.nonce),
           configuration_auth_tag: bytes(input.encryptedConfiguration.authTag),
           encryption_key_version: input.encryptedConfiguration.keyVersion,
@@ -111,11 +149,13 @@ export class SourceConnectionAdminRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  async loadConnectionRevision(input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    connectionRevisionId?: string;
-  }>) {
+  async loadConnectionRevision(
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      connectionRevisionId?: string;
+    }>,
+  ) {
     const revision = await this.database.source_connection_revisions.findFirst({
       where: {
         organization_id: input.organizationId,
@@ -146,24 +186,36 @@ export class SourceConnectionAdminRepository {
     };
   }
 
-  async addConnectionRevision(input: Readonly<{
+  hasIncompatibleRunnableSourceAdapterPins(input: Readonly<{
     organizationId: string;
     connectionProfileId: string;
-    expectedRevisionId: string;
-    revisionId: string;
-    revisionNumber: number;
-    sourceTypeKey: string;
     sourceAdapterVersion: string;
-    encryptedConfiguration: EncryptedConfiguration;
-    configurationFingerprint: string;
-    actorKey: string;
-    createdAt: Date;
-  }>): Promise<void> {
+  }>): Promise<boolean> {
+    return hasIncompatibleRunnableSourceAdapterPins(this.database, input);
+  }
+
+  async addConnectionRevision(
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      expectedRevisionId: string;
+      revisionId: string;
+      revisionNumber: number;
+      sourceTypeKey: string;
+      sourceAdapterVersion: string;
+      encryptedConfiguration: EncryptedConfiguration;
+      configurationFingerprint: string;
+      actorKey: string;
+      createdAt: Date;
+    }>,
+  ): Promise<void> {
     await this.database.$transaction(async (transaction) => {
-      const profile = await transaction.$queryRaw<Array<{
-        id: string;
-        sourceTypeKey: string;
-      }>>(Prisma.sql`
+      const profile = await transaction.$queryRaw<
+        Array<{
+          id: string;
+          sourceTypeKey: string;
+        }>
+      >(Prisma.sql`
         select id, source_type_key as "sourceTypeKey"
         from public.source_connection_profiles
         where id = cast(${input.connectionProfileId} as uuid)
@@ -186,13 +238,18 @@ export class SourceConnectionAdminRepository {
           connection_profile_id: input.connectionProfileId,
         },
         orderBy: [{ revision_number: "desc" }, { id: "desc" }],
-        select: { id: true, revision_number: true, source_adapter_version: true },
+        select: {
+          id: true,
+          revision_number: true,
+          source_adapter_version: true,
+        },
       });
       if (
         latest?.id !== input.expectedRevisionId ||
         latest.revision_number + 1 !== input.revisionNumber ||
         latest.source_adapter_version !== input.sourceAdapterVersion
-      ) this.#fenced("Connection revision changed before rotation.");
+      )
+        this.#fenced("Connection revision changed before rotation.");
       await transaction.source_connection_revisions.create({
         data: {
           id: input.revisionId,
@@ -201,7 +258,9 @@ export class SourceConnectionAdminRepository {
           revision_number: input.revisionNumber,
           source_type_key: input.sourceTypeKey,
           source_adapter_version: input.sourceAdapterVersion,
-          configuration_ciphertext: bytes(input.encryptedConfiguration.ciphertext),
+          configuration_ciphertext: bytes(
+            input.encryptedConfiguration.ciphertext,
+          ),
           configuration_nonce: bytes(input.encryptedConfiguration.nonce),
           configuration_auth_tag: bytes(input.encryptedConfiguration.authTag),
           encryption_key_version: input.encryptedConfiguration.keyVersion,
@@ -221,25 +280,29 @@ export class SourceConnectionAdminRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  async addConnectionAdapterRevision(input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    expectedRevisionId: string;
-    expectedSourceAdapterVersion: string;
-    revisionId: string;
-    revisionNumber: number;
-    sourceTypeKey: string;
-    sourceAdapterVersion: string;
-    encryptedConfiguration: EncryptedConfiguration;
-    configurationFingerprint: string;
-    actorKey: string;
-    createdAt: Date;
-  }>): Promise<void> {
+  async addConnectionAdapterRevision(
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      expectedRevisionId: string;
+      expectedSourceAdapterVersion: string;
+      revisionId: string;
+      revisionNumber: number;
+      sourceTypeKey: string;
+      sourceAdapterVersion: string;
+      encryptedConfiguration: EncryptedConfiguration;
+      configurationFingerprint: string;
+      actorKey: string;
+      createdAt: Date;
+    }>,
+  ): Promise<void> {
     await this.database.$transaction(async (transaction) => {
-      const profile = await transaction.$queryRaw<Array<{
-        id: string;
-        sourceTypeKey: string;
-      }>>(Prisma.sql`
+      const profile = await transaction.$queryRaw<
+        Array<{
+          id: string;
+          sourceTypeKey: string;
+        }>
+      >(Prisma.sql`
         select id, source_type_key as "sourceTypeKey"
         from public.source_connection_profiles
         where id = cast(${input.connectionProfileId} as uuid)
@@ -262,14 +325,30 @@ export class SourceConnectionAdminRepository {
           connection_profile_id: input.connectionProfileId,
         },
         orderBy: [{ revision_number: "desc" }, { id: "desc" }],
-        select: { id: true, revision_number: true, source_adapter_version: true },
+        select: {
+          id: true,
+          revision_number: true,
+          source_adapter_version: true,
+          state: true,
+          revoked_at: true,
+        },
       });
       if (
         latest?.id !== input.expectedRevisionId ||
         latest.revision_number + 1 !== input.revisionNumber ||
         latest.source_adapter_version !== input.expectedSourceAdapterVersion ||
+        !["candidate", "active"].includes(latest.state) ||
+        latest.revoked_at !== null ||
         input.sourceAdapterVersion === input.expectedSourceAdapterVersion
-      ) this.#fenced("Connection revision changed before adapter upgrade.");
+      )
+        this.#fenced("Connection revision changed before adapter upgrade.");
+      if (await hasIncompatibleRunnableSourceAdapterPins(transaction, {
+        organizationId: input.organizationId,
+        connectionProfileId: input.connectionProfileId,
+        sourceAdapterVersion: input.sourceAdapterVersion,
+      })) {
+        this.#fenced("Runnable sources are pinned to another adapter version.");
+      }
       await transaction.source_connection_revisions.create({
         data: {
           id: input.revisionId,
@@ -278,7 +357,9 @@ export class SourceConnectionAdminRepository {
           revision_number: input.revisionNumber,
           source_type_key: input.sourceTypeKey,
           source_adapter_version: input.sourceAdapterVersion,
-          configuration_ciphertext: bytes(input.encryptedConfiguration.ciphertext),
+          configuration_ciphertext: bytes(
+            input.encryptedConfiguration.ciphertext,
+          ),
           configuration_nonce: bytes(input.encryptedConfiguration.nonce),
           configuration_auth_tag: bytes(input.encryptedConfiguration.authTag),
           encryption_key_version: input.encryptedConfiguration.keyVersion,
@@ -298,16 +379,20 @@ export class SourceConnectionAdminRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  async requestConnectionTest(input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    connectionRevisionId: string;
-    expectedHealthGeneration: bigint;
-    requestedByActorKey: string;
-    requestedAt: Date;
-  }>): Promise<{ readonly jobId: string }> {
+  async requestConnectionTest(
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      connectionRevisionId: string;
+      expectedHealthGeneration: bigint;
+      requestedByActorKey: string;
+      requestedAt: Date;
+    }>,
+  ): Promise<{ readonly jobId: string }> {
     return this.database.$transaction(async (transaction) => {
-      const locked = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      const locked = await transaction.$queryRaw<
+        Array<{ id: string }>
+      >(Prisma.sql`
         select revision.id
         from public.source_connection_profiles profile
         join public.source_connection_revisions revision
@@ -375,15 +460,17 @@ export class SourceConnectionAdminRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  async activateTestedConnectionRevision(input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    connectionRevisionId: string;
-    expectedHealthGeneration: bigint;
-    preservePinnedWork: true;
-    actorKey: string;
-    activatedAt: Date;
-  }>): Promise<void> {
+  async activateTestedConnectionRevision(
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      connectionRevisionId: string;
+      expectedHealthGeneration: bigint;
+      preservePinnedWork: true;
+      actorKey: string;
+      activatedAt: Date;
+    }>,
+  ): Promise<void> {
     if (input.preservePinnedWork !== true) {
       throw new TypeError("Normal rotation must preserve pinned work.");
     }
@@ -394,7 +481,13 @@ export class SourceConnectionAdminRepository {
           and organization_id = cast(${input.organizationId} as uuid)
         for update
       `);
-      const [revision, latestRevision, latestTestJob, blockingEpisode, profile] = await Promise.all([
+      const [
+        revision,
+        latestRevision,
+        latestTestJob,
+        blockingEpisode,
+        profile,
+      ] = await Promise.all([
         transaction.source_connection_revisions.findFirst({
           where: {
             id: input.connectionRevisionId,
@@ -443,20 +536,28 @@ export class SourceConnectionAdminRepository {
       if (latestRevision?.id !== revision.id) {
         this.#fenced("Only the latest connection revision can activate.");
       }
-      const successfulTest = latestTestJob?.state === "succeeded"
-        ? await transaction.source_connection_test_results.findFirst({
-            where: {
-              job_id: latestTestJob.id,
-              organization_id: input.organizationId,
-              connection_profile_id: input.connectionProfileId,
-              connection_revision_id: input.connectionRevisionId,
-              resulting_health_generation: input.expectedHealthGeneration,
-              outcome: "success",
-              request_terminal_state: "captured",
-            },
-            select: { id: true },
-          })
-        : null;
+      if (await hasIncompatibleRunnableSourceAdapterPins(transaction, {
+        organizationId: input.organizationId,
+        connectionProfileId: input.connectionProfileId,
+        sourceAdapterVersion: revision.source_adapter_version,
+      })) {
+        this.#fenced("Runnable sources are pinned to another adapter version.");
+      }
+      const successfulTest =
+        latestTestJob?.state === "succeeded"
+          ? await transaction.source_connection_test_results.findFirst({
+              where: {
+                job_id: latestTestJob.id,
+                organization_id: input.organizationId,
+                connection_profile_id: input.connectionProfileId,
+                connection_revision_id: input.connectionRevisionId,
+                resulting_health_generation: input.expectedHealthGeneration,
+                outcome: "success",
+                request_terminal_state: "captured",
+              },
+              select: { id: true },
+            })
+          : null;
       if (!successfulTest) {
         throw new PersistenceError(
           "CONFIG_REVISION_UNTESTED",
@@ -470,7 +571,7 @@ export class SourceConnectionAdminRepository {
         );
       }
       const previousRevisionId = profile.active_revision_id;
-      await this.#recovery.restoreInactiveLanesAfterRecoveryInTransaction(
+      await this.#recovery.restoreUnclaimedLanesAfterRecoveryInTransaction(
         transaction,
         {
           organizationId: input.organizationId,
@@ -519,14 +620,16 @@ export class SourceConnectionAdminRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  async revokeConnectionRevision(input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    connectionRevisionId: string;
-    expectedHealthGeneration: bigint;
-    actorKey: string;
-    revokedAt: Date;
-  }>): Promise<void> {
+  async revokeConnectionRevision(
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      connectionRevisionId: string;
+      expectedHealthGeneration: bigint;
+      actorKey: string;
+      revokedAt: Date;
+    }>,
+  ): Promise<void> {
     await this.database.$transaction(async (transaction) => {
       await transaction.$queryRaw(Prisma.sql`
         select id from public.source_connection_profiles
@@ -543,7 +646,8 @@ export class SourceConnectionAdminRepository {
           revoked_at: null,
         },
       });
-      if (!revision) this.#fenced("Connection revision changed before revocation.");
+      if (!revision)
+        this.#fenced("Connection revision changed before revocation.");
       const databaseNow = await providerSourceTransactionTime(transaction);
       await transaction.source_connection_revisions.update({
         where: { id: revision.id },

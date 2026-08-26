@@ -128,6 +128,37 @@ test("ClutchPacks native pack name reaches an accepted canonical pack", () => {
   );
 });
 
+test("Phygitals native pack name reaches an accepted canonical pack", () => {
+  const observation = normalizeDataforrestEventRecordV3(
+    dataforrestEventRecordV2Schema.parse({
+      platform: "phygitals",
+      stream: "catalog",
+      entity: "pack",
+      record_id: "phygitals-pack-native-name",
+      occurred_at: "2026-08-01T00:00:00.000Z",
+      collected_at: "2026-08-01T00:00:01.000Z",
+      first_seen_at: "2026-08-01T00:00:00.000Z",
+      available: false,
+      data: {
+        name: "Phygitals Black Pack",
+        provider_label: null,
+      },
+    }),
+    "phygitals",
+    "page_record:0",
+  );
+  const outcome = mapped(mapperInput("phygitals", observation));
+  assert.equal(outcome.candidate.candidateKind, "pack");
+  if (outcome.candidate.candidateKind !== "pack") {
+    assert.fail("expected canonical pack candidate");
+  }
+  assert.equal(outcome.candidate.displayName, "Phygitals Black Pack");
+  assert.equal(
+    outcome.candidate.identity.providerRecordId,
+    "phygitals-pack-native-name",
+  );
+});
+
 test("availability has four non-overlapping states and sold out needs explicit authority", () => {
   const provider = "courtyard";
   for (const availability of [

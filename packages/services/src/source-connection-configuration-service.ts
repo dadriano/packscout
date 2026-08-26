@@ -229,6 +229,7 @@ export class SourceConnectionConfigurationService
       connectionRevisionId: parsed.data.expectedRevisionId,
     });
     if (!current) this.#connectionNotFound();
+    if (current.state === "revoked") this.#conflict();
     if (
       current.sourceAdapterVersion !==
         parsed.data.expectedSourceAdapterVersion
@@ -241,6 +242,11 @@ export class SourceConnectionConfigurationService
       targetAdapter.manifest.adapterVersion !==
         parsed.data.targetSourceAdapterVersion
     ) this.#invalid();
+    if (await this.#repository.hasIncompatibleRunnableSourceAdapterPins({
+      organizationId: context.organizationId,
+      connectionProfileId,
+      sourceAdapterVersion: targetAdapter.manifest.adapterVersion,
+    })) this.#conflict();
     const existing = await this.#decryptRecord(current);
     const validated = targetAdapter.validateConnectionConfiguration(existing);
     if (!validated.ok) this.#invalid();
@@ -470,6 +476,11 @@ export class SourceConnectionConfigurationService
       connectionRevisionId: parsed.data.expectedRevisionId,
     });
     if (!revision) this.#connectionNotFound();
+    if (await this.#repository.hasIncompatibleRunnableSourceAdapterPins({
+      organizationId: context.organizationId,
+      connectionProfileId,
+      sourceAdapterVersion: revision.sourceAdapterVersion,
+    })) this.#conflict();
     const activatedAt = this.#clock.now();
     await this.#repository.activateTestedConnectionRevision({
       organizationId: context.organizationId,
@@ -599,5 +610,9 @@ export class SourceConnectionConfigurationService
 
   #connectionNotFound(): never {
     throw new ProviderSourceAdminServiceError("CONNECTION_NOT_FOUND", 404);
+  }
+
+  #conflict(): never {
+    throw new ProviderSourceAdminServiceError("SOURCE_CONFLICT", 409);
   }
 }

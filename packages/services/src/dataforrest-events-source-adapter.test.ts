@@ -939,6 +939,37 @@ test("deep sub-2MiB JSON fails as one sanitized operation-appropriate result", a
   page.requestLease.close();
 });
 
+test("data-rich 250-record pages remain valid within the transport and per-node bounds", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const records = Array.from({ length: 250 }, (_, recordIndex) => ({
+    ...base,
+    record_id: `data-rich-card-${recordIndex}`,
+    data: {
+      ...base.data,
+      native_facts: Array.from({ length: 600 }, (_, factIndex) => factIndex),
+    },
+  }));
+  assert.equal(records.length * 600 > 100_000, true);
+  const rawPage = JSON.stringify({
+    records,
+    next_cursor: "data-rich-next",
+    poll_after_seconds: 0,
+  });
+  assert.equal(
+    new TextEncoder().encode(rawPage).byteLength <= bounds.maximumResponseBytes,
+    true,
+  );
+  const adapter = adapterWithClient(async () => new Response(rawPage));
+  const operation = await pageOperation(runtime(), "courtyard", null);
+  const capture = await successfulCapture(adapter, operation);
+  const result = await interpretSourceAdapterPage(adapter, operation, capture);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.normalizedPage.outcomes.length, 250);
+  }
+  operation.requestLease.close();
+});
+
 test("reserved JSON keys are rejected before provider evidence can be silently rewritten", async () => {
   const protectedMarker = "reserved-json-provider-secret-must-not-cross";
   for (const reservedKey of ["__proto__", "constructor", "prototype"]) {

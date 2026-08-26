@@ -67,15 +67,16 @@ export class SourceConnectionRecoveryRepository {
       resumedAt: Date;
     }>,
   ): Promise<readonly string[]> {
-    const episode = await transaction.source_connection_health_episodes.findFirst({
-      where: {
-        id: input.blockingEpisodeId,
-        organization_id: input.organizationId,
-        connection_profile_id: input.connectionProfileId,
-        connection_revision_id: input.connectionRevisionId,
-      },
-      select: { opened_at: true },
-    });
+    const episode =
+      await transaction.source_connection_health_episodes.findFirst({
+        where: {
+          id: input.blockingEpisodeId,
+          organization_id: input.organizationId,
+          connection_profile_id: input.connectionProfileId,
+          connection_revision_id: input.connectionRevisionId,
+        },
+        select: { opened_at: true },
+      });
     if (!episode) {
       throw new PersistenceError(
         "CONNECTION_BLOCKED",
@@ -93,11 +94,20 @@ export class SourceConnectionRecoveryRepository {
       preserveBlockedRunPins: true,
       preserveBlockedRunFinishedAfter: episode.opened_at,
     });
-    await this.restoreInactiveLanesAfterRecoveryInTransaction(transaction, input);
+    await this.restoreUnclaimedLanesAfterRecoveryInTransaction(
+      transaction,
+      input,
+    );
     return runIds;
   }
 
-  async restoreInactiveLanesAfterRecoveryInTransaction(
+  /**
+   * Clears a closed connection fence from every lane that has no claimed run.
+   * Active lanes are normalized to idle before a replacement revision changes
+   * the profile pin; recovery activation queues them again in the same
+   * transaction. Paused and terminal lanes retain their lifecycle state.
+   */
+  async restoreUnclaimedLanesAfterRecoveryInTransaction(
     transaction: PackscoutTransactionClient,
     input: Readonly<{
       organizationId: string;
@@ -136,7 +146,6 @@ export class SourceConnectionRecoveryRepository {
       where source.id = runtime.source_instance_id
         and source.organization_id = runtime.organization_id
         and source.connection_profile_id = runtime.connection_profile_id
-        and source.state <> 'active'::public.provider_source_instance_state
         and runtime.organization_id = cast(${input.organizationId} as uuid)
         and runtime.connection_profile_id = cast(${input.connectionProfileId} as uuid)
         and (
@@ -162,21 +171,23 @@ export class SourceConnectionRecoveryRepository {
     `);
   }
 
-  async addRecoveryConnectionRevision(input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    blockedRevisionId: string;
-    latestRevisionId: string;
-    blockingEpisodeId: string | null;
-    revisionId: string;
-    revisionNumber: number;
-    sourceTypeKey: string;
-    sourceAdapterVersion: string;
-    encryptedConfiguration: EncryptedConfiguration;
-    configurationFingerprint: string;
-    actorKey: string;
-    createdAt: Date;
-  }>): Promise<void> {
+  async addRecoveryConnectionRevision(
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      blockedRevisionId: string;
+      latestRevisionId: string;
+      blockingEpisodeId: string | null;
+      revisionId: string;
+      revisionNumber: number;
+      sourceTypeKey: string;
+      sourceAdapterVersion: string;
+      encryptedConfiguration: EncryptedConfiguration;
+      configurationFingerprint: string;
+      actorKey: string;
+      createdAt: Date;
+    }>,
+  ): Promise<void> {
     await this.database.$transaction(async (transaction) => {
       const profile = await this.#lockProfile(transaction, input);
       const latest = await transaction.source_connection_revisions.findFirst({
@@ -201,9 +212,12 @@ export class SourceConnectionRecoveryRepository {
         testedRevisionId: null,
       });
       if (
-        !latest || !blocked || latest.id !== input.latestRevisionId ||
+        !latest ||
+        !blocked ||
+        latest.id !== input.latestRevisionId ||
         latest.revision_number + 1 !== input.revisionNumber
-      ) this.#fenced("Recovery predecessor is no longer the latest revision.");
+      )
+        this.#fenced("Recovery predecessor is no longer the latest revision.");
       await transaction.source_connection_revisions.create({
         data: {
           id: input.revisionId,
@@ -212,7 +226,9 @@ export class SourceConnectionRecoveryRepository {
           revision_number: input.revisionNumber,
           source_type_key: input.sourceTypeKey,
           source_adapter_version: input.sourceAdapterVersion,
-          configuration_ciphertext: bytes(input.encryptedConfiguration.ciphertext)!,
+          configuration_ciphertext: bytes(
+            input.encryptedConfiguration.ciphertext,
+          )!,
           configuration_nonce: bytes(input.encryptedConfiguration.nonce)!,
           configuration_auth_tag: bytes(input.encryptedConfiguration.authTag)!,
           encryption_key_version: input.encryptedConfiguration.keyVersion,
@@ -234,16 +250,18 @@ export class SourceConnectionRecoveryRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  async requestConnectionRecoveryTest(input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    connectionRevisionId: string;
-    expectedHealthGeneration: bigint;
-    blockedRevisionId: string;
-    blockingEpisodeId: string | null;
-    requestedByActorKey: string;
-    requestedAt: Date;
-  }>): Promise<{ readonly jobId: string }> {
+  async requestConnectionRecoveryTest(
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      connectionRevisionId: string;
+      expectedHealthGeneration: bigint;
+      blockedRevisionId: string;
+      blockingEpisodeId: string | null;
+      requestedByActorKey: string;
+      requestedAt: Date;
+    }>,
+  ): Promise<{ readonly jobId: string }> {
     return this.database.$transaction(async (transaction) => {
       const profile = await this.#lockProfile(transaction, input);
       const tested = await transaction.source_connection_revisions.findFirst({
@@ -320,16 +338,18 @@ export class SourceConnectionRecoveryRepository {
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  async activateTestedConnectionRecovery(input: Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    connectionRevisionId: string;
-    expectedHealthGeneration: bigint;
-    blockedRevisionId: string;
-    blockingEpisodeId: string | null;
-    actorKey: string;
-    activatedAt: Date;
-  }>): Promise<Readonly<{ runIds: readonly string[] }>> {
+  async activateTestedConnectionRecovery(
+    input: Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      connectionRevisionId: string;
+      expectedHealthGeneration: bigint;
+      blockedRevisionId: string;
+      blockingEpisodeId: string | null;
+      actorKey: string;
+      activatedAt: Date;
+    }>,
+  ): Promise<Readonly<{ runIds: readonly string[] }>> {
     return this.database.$transaction(async (transaction) => {
       await transaction.$queryRaw(Prisma.sql`
         select provider.id
@@ -376,31 +396,37 @@ export class SourceConnectionRecoveryRepository {
       if (!tested || !blocked || latest?.id !== tested.id) {
         this.#fenced("Recovery activation revision pins changed.");
       }
-      const latestJob = await transaction.source_connection_test_jobs.findFirst({
-        where: {
-          organization_id: input.organizationId,
-          connection_profile_id: input.connectionProfileId,
-          connection_revision_id: tested.id,
+      const latestJob = await transaction.source_connection_test_jobs.findFirst(
+        {
+          where: {
+            organization_id: input.organizationId,
+            connection_profile_id: input.connectionProfileId,
+            connection_revision_id: tested.id,
+          },
+          orderBy: [{ created_at: "desc" }, { id: "desc" }],
         },
-        orderBy: [{ created_at: "desc" }, { id: "desc" }],
-      });
+      );
       if (
-        !latestJob || latestJob.state !== "succeeded" ||
+        !latestJob ||
+        latestJob.state !== "succeeded" ||
         latestJob.blocking_episode_id !== input.blockingEpisodeId ||
         latestJob.recovery_blocked_revision_id !== input.blockedRevisionId ||
         latestJob.expected_health_generation !== input.expectedHealthGeneration
-      ) this.#untested();
-      const result = await transaction.source_connection_test_results.findFirst({
-        where: {
-          job_id: latestJob.id,
-          organization_id: input.organizationId,
-          connection_profile_id: input.connectionProfileId,
-          connection_revision_id: tested.id,
-          resulting_health_generation: input.expectedHealthGeneration,
-          outcome: "success",
-          request_terminal_state: "captured",
+      )
+        this.#untested();
+      const result = await transaction.source_connection_test_results.findFirst(
+        {
+          where: {
+            job_id: latestJob.id,
+            organization_id: input.organizationId,
+            connection_profile_id: input.connectionProfileId,
+            connection_revision_id: tested.id,
+            resulting_health_generation: input.expectedHealthGeneration,
+            outcome: "success",
+            request_terminal_state: "captured",
+          },
         },
-      });
+      );
       if (!result) this.#untested();
 
       const episode = input.blockingEpisodeId
@@ -414,21 +440,31 @@ export class SourceConnectionRecoveryRepository {
           })
         : null;
       if (input.blockingEpisodeId && !episode) {
-        throw new PersistenceError("CONNECTION_BLOCKED", "Recovery episode changed.");
+        throw new PersistenceError(
+          "CONNECTION_BLOCKED",
+          "Recovery episode changed.",
+        );
       }
       if (episode?.closed_at === null) {
-        if (tested.id === blocked.id) this.#fenced("Same-revision recovery result did not close its episode.");
-        const advanced = await transaction.source_connection_revisions.updateMany({
-          where: {
-            id: blocked.id,
-            organization_id: input.organizationId,
-            connection_profile_id: input.connectionProfileId,
-            health_generation: episode.opened_health_generation,
-          },
-          data: { health_generation: { increment: 1n } },
-        });
+        if (tested.id === blocked.id)
+          this.#fenced(
+            "Same-revision recovery result did not close its episode.",
+          );
+        const advanced =
+          await transaction.source_connection_revisions.updateMany({
+            where: {
+              id: blocked.id,
+              organization_id: input.organizationId,
+              connection_profile_id: input.connectionProfileId,
+              health_generation: episode.opened_health_generation,
+            },
+            data: { health_generation: { increment: 1n } },
+          });
         if (advanced.count !== 1) {
-          throw new PersistenceError("HEALTH_GENERATION_STALE", "Blocked revision health changed.");
+          throw new PersistenceError(
+            "HEALTH_GENERATION_STALE",
+            "Blocked revision health changed.",
+          );
         }
         await transaction.source_connection_health_episodes.update({
           where: { id: episode.id },
@@ -442,14 +478,25 @@ export class SourceConnectionRecoveryRepository {
         this.#fenced("Recovery result does not own the closed episode.");
       }
       if (!episode) {
-        const recoveryAlreadyActive = profile.state === "active" &&
-          profile.activeRevisionId === tested.id;
+        const recoveryAlreadyActive =
+          profile.state === "active" && profile.activeRevisionId === tested.id;
         if (
           (!recoveryAlreadyActive &&
-            (profile.state !== "disabled" || profile.activeRevisionId !== null)) ||
+            (profile.state !== "disabled" ||
+              profile.activeRevisionId !== null)) ||
           blocked.state !== "revoked"
-        ) this.#fenced("Revocation recovery fence changed.");
+        )
+          this.#fenced("Revocation recovery fence changed.");
       }
+
+      await this.restoreUnclaimedLanesAfterRecoveryInTransaction(transaction, {
+        organizationId: input.organizationId,
+        connectionProfileId: input.connectionProfileId,
+        connectionRevisionId: blocked.id,
+        blockingEpisodeId: input.blockingEpisodeId,
+        supervisorEpochId: null,
+        resumedAt: input.activatedAt,
+      });
 
       const databaseNow = await providerSourceTransactionTime(transaction);
       if (blocked.id !== tested.id) {
@@ -482,7 +529,8 @@ export class SourceConnectionRecoveryRepository {
             data: {
               state: "failed",
               failure_code: "CONNECTION_RECOVERY_FENCED",
-              failure_summary: "Pinned connection revision was fenced by recovery.",
+              failure_summary:
+                "Pinned connection revision was fenced by recovery.",
               finished_at: databaseNow,
               lease_owner: null,
               lease_token: null,
@@ -497,8 +545,10 @@ export class SourceConnectionRecoveryRepository {
           });
         }
       }
-      const alreadyActive = tested.state === "active" &&
-        profile.state === "active" && profile.activeRevisionId === tested.id;
+      const alreadyActive =
+        tested.state === "active" &&
+        profile.state === "active" &&
+        profile.activeRevisionId === tested.id;
       if (!alreadyActive) {
         if (
           profile.activeRevisionId &&
@@ -517,7 +567,11 @@ export class SourceConnectionRecoveryRepository {
         }
         await transaction.source_connection_revisions.update({
           where: { id: tested.id },
-          data: { state: "active", activated_at: input.activatedAt, retired_at: null },
+          data: {
+            state: "active",
+            activated_at: input.activatedAt,
+            retired_at: null,
+          },
         });
         await transaction.source_connection_profiles.update({
           where: { id: input.connectionProfileId },
@@ -604,12 +658,16 @@ export class SourceConnectionRecoveryRepository {
                 ? { gte: input.preserveBlockedRunFinishedAfter }
                 : { not: null },
             },
-            orderBy: [{ finished_at: "desc" }, { created_at: "desc" }, { id: "desc" }],
+            orderBy: [
+              { finished_at: "desc" },
+              { created_at: "desc" },
+              { id: "desc" },
+            ],
           })
         : null;
       if (preservedRun?.connection_revision_id) {
-        const preservedConnection = await transaction.source_connection_revisions
-          .findFirst({
+        const preservedConnection =
+          await transaction.source_connection_revisions.findFirst({
             where: {
               id: preservedRun.connection_revision_id,
               organization_id: input.organizationId,
@@ -628,57 +686,55 @@ export class SourceConnectionRecoveryRepository {
           const prior = await transaction.import_runs.findUnique({
             where: { id: runId },
           });
-          const recoveryRun = prior ?? await transaction.import_runs.create({
-            data: {
-              id: runId,
-              organization_id: input.organizationId,
-              provider_id: source.provider_id,
-              config_revision_id: null,
-              trigger: "recovery",
-              state: "queued",
-              requested_by_actor_key: input.actorKey,
-              source_instance_id: source.id,
-              source_revision_id: source.active_revision_id,
-              source_type_key: preservedRun.source_type_key,
-              source_adapter_version: preservedRun.source_adapter_version,
-              normalized_contract_version:
-                preservedRun.normalized_contract_version,
-              mapper_key: preservedRun.mapper_key,
-              mapper_version: preservedRun.mapper_version,
-              identity_namespace_key: preservedRun.identity_namespace_key,
-              connection_profile_id: input.connectionProfileId,
-              connection_revision_id: preservedConnection.id,
-              cursor_codec_version: cursor.cursor_codec_version,
-              cursor_generation: cursor.cursor_generation,
-              requested_cursor: cursor.cursor,
-              requested_cursor_fingerprint:
-                cursor.cursor_fingerprint,
-              requested_cursor_key:
-                cursor.cursor_fingerprint ?? "initial",
-              current_cursor: cursor.cursor,
-              current_cursor_fingerprint:
-                cursor.cursor_fingerprint,
-              current_cursor_key:
-                cursor.cursor_fingerprint ?? "initial",
-              next_page_number: 1,
-              counters_json: {
-                pages: 0,
-                records: 0,
-                catalog: 0,
-                pulls: 0,
-                trades: 0,
-                inserted: 0,
-                revised: 0,
-                duplicate: 0,
-                quarantined: 0,
-                warnings: 0,
-                unresolvedRelationships: 0,
-                canonicalRevisions: 0,
-                evRequests: 0,
+          const recoveryRun =
+            prior ??
+            (await transaction.import_runs.create({
+              data: {
+                id: runId,
+                organization_id: input.organizationId,
+                provider_id: source.provider_id,
+                config_revision_id: null,
+                trigger: "recovery",
+                state: "queued",
+                requested_by_actor_key: input.actorKey,
+                source_instance_id: source.id,
+                source_revision_id: source.active_revision_id,
+                source_type_key: preservedRun.source_type_key,
+                source_adapter_version: preservedRun.source_adapter_version,
+                normalized_contract_version:
+                  preservedRun.normalized_contract_version,
+                mapper_key: preservedRun.mapper_key,
+                mapper_version: preservedRun.mapper_version,
+                identity_namespace_key: preservedRun.identity_namespace_key,
+                connection_profile_id: input.connectionProfileId,
+                connection_revision_id: preservedConnection.id,
+                cursor_codec_version: cursor.cursor_codec_version,
+                cursor_generation: cursor.cursor_generation,
+                requested_cursor: cursor.cursor,
+                requested_cursor_fingerprint: cursor.cursor_fingerprint,
+                requested_cursor_key: cursor.cursor_fingerprint ?? "initial",
+                current_cursor: cursor.cursor,
+                current_cursor_fingerprint: cursor.cursor_fingerprint,
+                current_cursor_key: cursor.cursor_fingerprint ?? "initial",
+                next_page_number: 1,
+                counters_json: {
+                  pages: 0,
+                  records: 0,
+                  catalog: 0,
+                  pulls: 0,
+                  trades: 0,
+                  inserted: 0,
+                  revised: 0,
+                  duplicate: 0,
+                  quarantined: 0,
+                  warnings: 0,
+                  unresolvedRelationships: 0,
+                  canonicalRevisions: 0,
+                  evRequests: 0,
+                },
+                created_at: input.activatedAt,
               },
-              created_at: input.activatedAt,
-            },
-          });
+            }));
           this.#requireExactRecoveryRun(recoveryRun, {
             ...input,
             connectionRevisionId: preservedConnection.id,
@@ -704,7 +760,9 @@ export class SourceConnectionRecoveryRepository {
         source.id,
         input.connectionRevisionId,
       );
-      const prior = await transaction.import_runs.findUnique({ where: { id: runId } });
+      const prior = await transaction.import_runs.findUnique({
+        where: { id: runId },
+      });
       if (prior) {
         this.#requireExactRecoveryRun(prior, {
           ...input,
@@ -744,7 +802,8 @@ export class SourceConnectionRecoveryRepository {
         requested.run.trigger !== "recovery" ||
         requested.run.sourceInstanceId !== source.id ||
         requested.run.sourceRevisionId !== source.active_revision_id
-      ) this.#fenced("Recovery run coalesced to different source pins.");
+      )
+        this.#fenced("Recovery run coalesced to different source pins.");
       const created = await transaction.import_runs.findUniqueOrThrow({
         where: { id: runId },
       });
@@ -853,24 +912,27 @@ export class SourceConnectionRecoveryRepository {
       run.cursor_generation === null ||
       run.requested_cursor_key !==
         (run.requested_cursor_fingerprint ?? "initial") ||
-      run.cursor_codec_version !==
-        input.cursor.cursor_codec_version ||
-        run.cursor_generation !== input.cursor.cursor_generation ||
-        run.requested_cursor_fingerprint !==
-          input.cursor.cursor_fingerprint ||
+      run.cursor_codec_version !== input.cursor.cursor_codec_version ||
+      run.cursor_generation !== input.cursor.cursor_generation ||
+      run.requested_cursor_fingerprint !== input.cursor.cursor_fingerprint ||
       run.requested_cursor !== expectedCursor
-    ) this.#fenced("Recovery run pins do not match the tested revision and cursor.");
+    )
+      this.#fenced(
+        "Recovery run pins do not match the tested revision and cursor.",
+      );
   }
 
   async #lockProfile(
     transaction: Prisma.TransactionClient,
     input: Readonly<{ organizationId: string; connectionProfileId: string }>,
   ) {
-    const rows = await transaction.$queryRaw<Array<{
-      id: string;
-      state: "draft" | "active" | "disabled";
-      activeRevisionId: string | null;
-    }>>(Prisma.sql`
+    const rows = await transaction.$queryRaw<
+      Array<{
+        id: string;
+        state: "draft" | "active" | "disabled";
+        activeRevisionId: string | null;
+      }>
+    >(Prisma.sql`
       select id, state, active_revision_id as "activeRevisionId"
       from public.source_connection_profiles
       where id = cast(${input.connectionProfileId} as uuid)
@@ -878,7 +940,10 @@ export class SourceConnectionRecoveryRepository {
       for update
     `);
     if (!rows[0]) {
-      throw new PersistenceError("TENANT_SCOPE_VIOLATION", "Connection profile is outside tenant scope.");
+      throw new PersistenceError(
+        "TENANT_SCOPE_VIOLATION",
+        "Connection profile is outside tenant scope.",
+      );
     }
     return rows[0];
   }
@@ -898,17 +963,21 @@ export class SourceConnectionRecoveryRepository {
     }>,
   ): Promise<void> {
     if (input.blockingEpisodeId) {
-      const episode = await transaction.source_connection_health_episodes.findFirst({
-        where: {
-          id: input.blockingEpisodeId,
-          organization_id: input.organizationId,
-          connection_profile_id: input.connectionProfileId,
-          connection_revision_id: input.blockedRevisionId,
-          closed_at: null,
-        },
-      });
+      const episode =
+        await transaction.source_connection_health_episodes.findFirst({
+          where: {
+            id: input.blockingEpisodeId,
+            organization_id: input.organizationId,
+            connection_profile_id: input.connectionProfileId,
+            connection_revision_id: input.blockedRevisionId,
+            closed_at: null,
+          },
+        });
       if (!episode || !["active", "disabled"].includes(input.profile.state)) {
-        throw new PersistenceError("CONNECTION_BLOCKED", "Recovery episode changed.");
+        throw new PersistenceError(
+          "CONNECTION_BLOCKED",
+          "Recovery episode changed.",
+        );
       }
       return;
     }
@@ -923,10 +992,12 @@ export class SourceConnectionRecoveryRepository {
       select: { id: true },
     });
     if (
-      !blocked || input.profile.state !== "disabled" ||
+      !blocked ||
+      input.profile.state !== "disabled" ||
       input.profile.activeRevisionId !== null ||
       input.testedRevisionId === input.blockedRevisionId
-    ) this.#fenced("Revocation recovery fence changed.");
+    )
+      this.#fenced("Revocation recovery fence changed.");
   }
 
   async #audit(
@@ -959,7 +1030,10 @@ export class SourceConnectionRecoveryRepository {
   }
 
   #untested(): never {
-    throw new PersistenceError("CONFIG_REVISION_UNTESTED", "Current recovery test is required.");
+    throw new PersistenceError(
+      "CONFIG_REVISION_UNTESTED",
+      "Current recovery test is required.",
+    );
   }
 
   #fenced(message: string): never {

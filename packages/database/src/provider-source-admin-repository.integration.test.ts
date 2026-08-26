@@ -293,6 +293,205 @@ test("connection adapter upgrade creates one fenced cross-version candidate", as
   }
 });
 
+test("connection adapter upgrade rejects a revoked latest revision", async () => {
+  const isolated = await createProviderSourceAcceptanceFixture(
+    "adapter-upgrade-revoked",
+  );
+  try {
+    await isolated.database.source_connection_revisions.update({
+      where: { id: isolated.connectionRevisionId },
+      data: {
+        state: "revoked",
+        revoked_at: new Date("2026-08-21T12:09:00.000Z"),
+        revoked_by_actor_key: "operator-admin",
+      },
+    });
+    const connections = new SourceConnectionAdminRepository(isolated.database);
+    const candidateId = randomUUID();
+
+    await assert.rejects(
+      connections.addConnectionAdapterRevision({
+        organizationId: isolated.organizationId,
+        connectionProfileId: isolated.connectionProfileId,
+        expectedRevisionId: isolated.connectionRevisionId,
+        expectedSourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+        revisionId: candidateId,
+        revisionNumber: 2,
+        sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+        encryptedConfiguration: {
+          ciphertext: new Uint8Array(32).fill(2),
+          nonce: new Uint8Array(12).fill(3),
+          authTag: new Uint8Array(16).fill(4),
+          keyVersion: 1,
+        },
+        configurationFingerprint: "2".repeat(64),
+        actorKey: "operator-admin",
+        createdAt: new Date("2026-08-21T12:10:00.000Z"),
+      }),
+      (error) =>
+        error instanceof PersistenceError && error.code === "SOURCE_FENCED",
+    );
+    assert.equal(await isolated.database.source_connection_revisions.count({
+      where: { id: candidateId },
+    }), 0);
+    assert.equal(await isolated.database.audit_events.count({
+      where: {
+        organization_id: isolated.organizationId,
+        action: "source_connection.upgrade_adapter",
+      },
+    }), 0);
+  } finally {
+    await isolated.close();
+  }
+});
+
+test("connection adapter upgrade rejects active and paused legacy source pins", async () => {
+  for (const sourceState of ["active", "paused"] as const) {
+    const isolated = await createProviderSourceAcceptanceFixture(
+      `adapter-upgrade-${sourceState}`,
+    );
+    try {
+      const pinnedSource = await createAcceptanceProviderSource(isolated, {
+        platformKey: "courtyard",
+        displayName: `Courtyard ${sourceState}`,
+        mapperKey: "courtyard-provider-observation",
+        identityNamespaceKey: "courtyard-v1",
+        intervalSeconds: 60,
+        hashCharacter: sourceState === "active" ? "c" : "d",
+      });
+      await activateAcceptanceRuntime(
+        isolated.database,
+        isolated,
+        pinnedSource,
+        ACCEPTANCE_CREATED_AT,
+      );
+      if (sourceState === "paused") {
+        await isolated.database.provider_source_instances.update({
+          where: { id: pinnedSource.sourceInstanceId },
+          data: {
+            state: "paused",
+            paused_at: new Date("2026-08-21T12:09:00.000Z"),
+          },
+        });
+      }
+      const connections = new SourceConnectionAdminRepository(
+        isolated.database,
+      );
+      assert.equal(await connections.hasIncompatibleRunnableSourceAdapterPins({
+        organizationId: isolated.organizationId,
+        connectionProfileId: isolated.connectionProfileId,
+        sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      }), true);
+      const candidateId = randomUUID();
+
+      await assert.rejects(
+        connections.addConnectionAdapterRevision({
+          organizationId: isolated.organizationId,
+          connectionProfileId: isolated.connectionProfileId,
+          expectedRevisionId: isolated.connectionRevisionId,
+          expectedSourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+          revisionId: candidateId,
+          revisionNumber: 2,
+          sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
+          sourceAdapterVersion: "dataforrest-events-adapter-v2",
+          encryptedConfiguration: {
+            ciphertext: new Uint8Array(32).fill(2),
+            nonce: new Uint8Array(12).fill(3),
+            authTag: new Uint8Array(16).fill(4),
+            keyVersion: 1,
+          },
+          configurationFingerprint: "2".repeat(64),
+          actorKey: "operator-admin",
+          createdAt: new Date("2026-08-21T12:10:00.000Z"),
+        }),
+        (error) =>
+          error instanceof PersistenceError && error.code === "SOURCE_FENCED",
+      );
+      assert.equal(await isolated.database.source_connection_revisions.count({
+        where: { id: candidateId },
+      }), 0);
+    } finally {
+      await isolated.close();
+    }
+  }
+});
+
+test("connection activation rejects a candidate incompatible with a newly runnable source", async () => {
+  const isolated = await createProviderSourceAcceptanceFixture(
+    "adapter-activation-pins",
+  );
+  try {
+    const pinnedSource = await createAcceptanceProviderSource(isolated, {
+      platformKey: "courtyard",
+      displayName: "Courtyard activation pin",
+      mapperKey: "courtyard-provider-observation",
+      identityNamespaceKey: "courtyard-v1",
+      intervalSeconds: 60,
+      hashCharacter: "e",
+    });
+    const connections = new SourceConnectionAdminRepository(isolated.database);
+    const candidateId = randomUUID();
+    await connections.addConnectionAdapterRevision({
+      organizationId: isolated.organizationId,
+      connectionProfileId: isolated.connectionProfileId,
+      expectedRevisionId: isolated.connectionRevisionId,
+      expectedSourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
+      revisionId: candidateId,
+      revisionNumber: 2,
+      sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
+      sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      encryptedConfiguration: {
+        ciphertext: new Uint8Array(32).fill(2),
+        nonce: new Uint8Array(12).fill(3),
+        authTag: new Uint8Array(16).fill(4),
+        keyVersion: 1,
+      },
+      configurationFingerprint: "2".repeat(64),
+      actorKey: "operator-admin",
+      createdAt: new Date("2026-08-21T12:10:00.000Z"),
+    });
+    await activateAcceptanceRuntime(
+      isolated.database,
+      isolated,
+      pinnedSource,
+      new Date("2026-08-21T12:11:00.000Z"),
+    );
+
+    await assert.rejects(
+      connections.activateTestedConnectionRevision({
+        organizationId: isolated.organizationId,
+        connectionProfileId: isolated.connectionProfileId,
+        connectionRevisionId: candidateId,
+        expectedHealthGeneration: 0n,
+        preservePinnedWork: true,
+        actorKey: "operator-admin",
+        activatedAt: new Date("2026-08-21T12:12:00.000Z"),
+      }),
+      (error) =>
+        error instanceof PersistenceError && error.code === "SOURCE_FENCED",
+    );
+    const [profile, candidate] = await Promise.all([
+      isolated.database.source_connection_profiles.findUniqueOrThrow({
+        where: { id: isolated.connectionProfileId },
+      }),
+      isolated.database.source_connection_revisions.findUniqueOrThrow({
+        where: { id: candidateId },
+      }),
+    ]);
+    assert.equal(profile.active_revision_id, isolated.connectionRevisionId);
+    assert.equal(candidate.state, "candidate");
+    assert.equal(await isolated.database.audit_events.count({
+      where: {
+        organization_id: isolated.organizationId,
+        action: "source_connection.activate_normal_revision",
+      },
+    }), 0);
+  } finally {
+    await isolated.close();
+  }
+});
+
 test("revoked connection recovery is fenced, tested, atomically queues exact cursor runs, and retries coalesce", async () => {
   const isolated = await createProviderSourceAcceptanceFixture("admin-recovery");
   try {

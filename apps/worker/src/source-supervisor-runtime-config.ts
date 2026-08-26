@@ -1,4 +1,5 @@
 import path from "node:path";
+import { providerSourceLaunchBounds } from "@packscout/contracts";
 
 const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/u;
 
@@ -15,6 +16,7 @@ export type ProviderSourceSupervisorConfigurationErrorCode =
   | "SOURCE_CONNECTION_KEY_VERSION_INVALID"
   | "SOURCE_DISK_RESERVE_GIB_INVALID"
   | "SOURCE_DATABASE_VOLUME_PATH_INVALID"
+  | "SOURCE_EXECUTION_SLOTS_INVALID"
   | "WORKER_ID_INVALID";
 
 export class ProviderSourceSupervisorConfigurationError extends Error {
@@ -38,6 +40,7 @@ export interface ProviderSourceSupervisorConfiguration
   readonly sourceConnectionConfigurationKeyVersion: number;
   readonly sourceDatabaseVolumePath: string;
   readonly sourceDiskReserveBytes?: number;
+  readonly executionSlots?: number;
 }
 
 const BYTES_PER_GIBIBYTE = 1_073_741_824;
@@ -63,6 +66,33 @@ function sourceDiskReserveBytesFor(
     );
   }
   return bytes;
+}
+
+function sourceExecutionSlotsFor(
+  value: string | undefined,
+  environment: ProviderSourceSupervisorEnvironment,
+): number {
+  if (value === undefined || value === "") {
+    return providerSourceLaunchBounds.genericExecutionSlots;
+  }
+  if (
+    environment !== "local" ||
+    !/^[1-9][0-9]*$/u.test(value)
+  ) {
+    throw new ProviderSourceSupervisorConfigurationError(
+      "SOURCE_EXECUTION_SLOTS_INVALID",
+    );
+  }
+  const executionSlots = Number(value);
+  if (
+    !Number.isSafeInteger(executionSlots) ||
+    executionSlots > providerSourceLaunchBounds.genericExecutionSlots
+  ) {
+    throw new ProviderSourceSupervisorConfigurationError(
+      "SOURCE_EXECUTION_SLOTS_INVALID",
+    );
+  }
+  return executionSlots;
 }
 
 function databaseVolumePathFor(value: string | undefined): string {
@@ -164,6 +194,7 @@ const supervisorOnlyVariables = [
   "PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION",
   "PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH",
   "PACKSCOUT_SOURCE_DISK_RESERVE_GIB",
+  "PACKSCOUT_SOURCE_EXECUTION_SLOTS",
 ] as const;
 
 /**
@@ -208,8 +239,13 @@ export function readProviderSourceSupervisorConfiguration(
     environment.PACKSCOUT_SOURCE_DISK_RESERVE_GIB,
     shared.environment,
   );
+  const executionSlots = sourceExecutionSlotsFor(
+    environment.PACKSCOUT_SOURCE_EXECUTION_SLOTS,
+    shared.environment,
+  );
   return Object.freeze({
     ...shared,
+    executionSlots,
     sourceConnectionConfigurationKey: canonicalKeyFor(
       environment.PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64,
       "SOURCE_CONNECTION_KEY_INVALID",
