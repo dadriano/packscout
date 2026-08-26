@@ -30,7 +30,7 @@ const pageCount = trialCount * pagesPerTrial;
 const recordsPerPage = providerSourceLaunchBounds.pageTargetRecords;
 const maximumResponseBytes =
   dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes;
-const emptyObjectFactsPerRecord = 785;
+const emptyObjectFactsPerRecord = 945;
 const mebibyte = 1024 * 1024;
 
 function median(values: readonly number[]): number {
@@ -81,7 +81,7 @@ function maximumSizeSanitizedPage(): Readonly<{
     data: {
       provider_label: `Capacity pack ${index}`,
       // Empty objects are the highest-overhead JSON nodes admitted by the
-      // parser. This keeps the maximum-byte fixture close to the 200k-node cap
+      // parser. This keeps the maximum-byte fixture close to the 240k-node cap
       // instead of measuring a large string in isolation.
       native_facts: Array.from(
         { length: emptyObjectFactsPerRecord },

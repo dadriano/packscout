@@ -1142,7 +1142,7 @@ test("adversarial structural limits reject before materializing the provider tre
         record_id: `node-limit-card-${recordIndex}`,
         data: {
           provider_label: `Node limit card ${recordIndex}`,
-          native_facts: Array.from({ length: 790 }, () => ({})),
+          native_facts: Array.from({ length: 950 }, () => ({})),
         },
       })),
       next_cursor: "node-limit-page-next",
@@ -1228,7 +1228,66 @@ test("sanitized 4,730,013-byte page covers the observed Phygitals node shape", a
   operation.requestLease.close();
 });
 
-test("the 200,000-node boundary is accepted and one additional node is rejected", async () => {
+test("sanitized 5,672,975-byte page covers the second observed Phygitals node shape", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const records = Array.from({ length: 250 }, (_, recordIndex) => ({
+    ...base,
+    platform: "phygitals" as const,
+    record_id: `second-data-rich-card-${recordIndex}`,
+    data: {
+      ...base.data,
+      native_facts: Array.from(
+        { length: recordIndex === 0 ? 1_005 : 845 },
+        () => ({}),
+      ),
+      sanitized_padding: "",
+    },
+  }));
+  const page = {
+    records,
+    next_cursor: "second-data-rich-next",
+    poll_after_seconds: 0,
+  };
+  const targetBytes = 5_672_975;
+  const unpaddedBytes = Buffer.byteLength(JSON.stringify(page), "utf8");
+  const paddingBytes = targetBytes - unpaddedBytes;
+  assert.equal(paddingBytes > 0, true);
+  const paddingPerRecord = Math.floor(paddingBytes / records.length);
+  const extraPaddingRecords = paddingBytes % records.length;
+  records.forEach((record, index) => {
+    record.data.sanitized_padding = "x".repeat(
+      paddingPerRecord + (index < extraPaddingRecords ? 1 : 0),
+    );
+  });
+  const rawPage = JSON.stringify(page);
+  assert.equal(Buffer.byteLength(rawPage, "utf8"), targetBytes);
+  assert.equal(jsonNodeCount(JSON.parse(rawPage)), 214_914);
+  const currentBounds = dataforrestEventsV1SourceAdapterManifest.requestBounds;
+  const adapter = adapterWithClient(
+    async () => new Response(rawPage),
+    dataforrestEventsV1SourceAdapterManifest,
+  );
+  const operation = await pageOperation(
+    runtime(),
+    "phygitals",
+    null,
+    currentBounds,
+    {
+      adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    },
+  );
+  const capture = await successfulCapture(adapter, operation);
+  assert.equal(capture.measurements.responseBytes, targetBytes);
+  const result = await interpretSourceAdapterPage(adapter, operation, capture);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.normalizedPage.outcomes.length, 250);
+  }
+  operation.requestLease.close();
+});
+
+test("the 240,000-node boundary is accepted and one additional node is rejected", async () => {
   const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
   const page = (additionalFirstRecordNodes: number) => ({
     records: Array.from({ length: 250 }, (_, recordIndex) => ({
@@ -1238,7 +1297,7 @@ test("the 200,000-node boundary is accepted and one additional node is rejected"
         ...base.data,
         native_facts: Array.from(
           {
-            length: 785 +
+            length: 945 +
               (recordIndex === 0 ? additionalFirstRecordNodes : 0),
           },
           () => ({}),
@@ -1250,8 +1309,8 @@ test("the 200,000-node boundary is accepted and one additional node is rejected"
   });
   const acceptedPage = page(496);
   const rejectedPage = page(497);
-  assert.equal(jsonNodeCount(acceptedPage), 200_000);
-  assert.equal(jsonNodeCount(rejectedPage), 200_001);
+  assert.equal(jsonNodeCount(acceptedPage), 240_000);
+  assert.equal(jsonNodeCount(rejectedPage), 240_001);
   assert.equal(isBoundedDataforrestEventsPageV1(acceptedPage, 250), true);
   assert.equal(isBoundedDataforrestEventsPageV1(rejectedPage, 250), false);
 
