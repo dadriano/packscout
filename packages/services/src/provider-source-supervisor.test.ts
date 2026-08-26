@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ControlPlaneTransactionError } from "./control-plane-retry.ts";
+import {
+  ControlPlaneTransactionError,
+  RuntimeLocallyFencedError,
+} from "./control-plane-retry.ts";
 import {
   ProviderSourceSupervisor,
   type SourceSupervisorCapacityAdmissionHook,
@@ -32,6 +35,7 @@ const epoch: SourceSupervisorEpoch = {
 
 class FixtureOwnership implements SourceSupervisorOwnershipPort {
   readonly calls: string[] = [];
+  readonly fenceReasons: string[] = [];
 
   async acquire(): Promise<SourceSupervisorEpoch> {
     this.calls.push("acquire");
@@ -43,8 +47,9 @@ class FixtureOwnership implements SourceSupervisorOwnershipPort {
     return epoch.leaseExpiresAt;
   }
 
-  async fence(): Promise<void> {
+  async fence(_epoch: SourceSupervisorEpoch, safeReasonCode: string): Promise<void> {
     this.calls.push("fence");
+    this.fenceReasons.push(safeReasonCode);
   }
 
   async release(): Promise<void> {
@@ -412,6 +417,7 @@ function fixturePageWork(id: string, queuedOffset: number): FixtureWork {
 
 class MeteredExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
   readonly starts: string[] = [];
+  readonly abortReasons: string[] = [];
   readonly maximumByProfile = new Map<string, number>();
   readonly #inFlight = new Map<string, number>();
 
@@ -479,7 +485,9 @@ class MeteredExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
     return { kind: "test_terminal" };
   }
 
-  abortAll(): void {}
+  abortAll(reason: "capacity" | "claim_lost" | "ownership_lost" | "shutdown"): void {
+    this.abortReasons.push(reason);
+  }
 }
 
 const capacity: SourceSupervisorCapacityAdmissionHook<FixtureWork> = {
@@ -715,15 +723,16 @@ test("snapshot contention preserves ownership and retries on a later publication
   assert.equal(ownership.calls.at(-1), "release");
 });
 
-test("a stale snapshot cannot fence an otherwise active owner", async () => {
+test("a snapshot that proves ownership loss fences the owner immediately", async () => {
   const ownership = new FixtureOwnership();
+  const executor = new MeteredExecutor();
   const supervisor = new ProviderSourceSupervisor({
     environmentKey: "test",
     ownerKey: epoch.ownerKey,
     leaseToken: epoch.leaseToken,
     ownership,
     queue: new FixtureQueue([]),
-    executor: new MeteredExecutor(),
+    executor,
     capacity,
     snapshot: new StaleSnapshot(),
     diagnostics,
@@ -732,12 +741,15 @@ test("a stale snapshot cannot fence an otherwise active owner", async () => {
     ids: { id: () => "unused-continuation-id" },
   });
 
-  await supervisor.initialize();
+  await assert.rejects(
+    supervisor.initialize(),
+    (error: unknown) => error instanceof RuntimeLocallyFencedError,
+  );
 
-  assert.equal(supervisor.state, "active");
-  assert.ok(!ownership.calls.includes("fence"));
+  assert.equal(supervisor.state, "fenced_draining");
+  assert.deepEqual(ownership.fenceReasons, ["SNAPSHOT_PUBLISH_FAILED"]);
+  assert.deepEqual(executor.abortReasons, ["ownership_lost"]);
   await supervisor.stop();
-  assert.equal(ownership.calls.at(-1), "release");
 });
 
 test("old profile waiters hold no slots and an independent profile overlaps", async () => {
@@ -963,9 +975,12 @@ test("a blocked volume cools down page claims while connection tests continue", 
 test("a durable claim-loss event is mirrored before the owner fences", async () => {
   const order: string[] = [];
   const ownership = new class extends FixtureOwnership {
-    override async fence(): Promise<void> {
+    override async fence(
+      fenceEpoch: SourceSupervisorEpoch,
+      safeReasonCode: string,
+    ): Promise<void> {
       order.push("fence");
-      await super.fence();
+      await super.fence(fenceEpoch, safeReasonCode);
     }
   }();
   const supervisor = new ProviderSourceSupervisor({
