@@ -64,8 +64,16 @@ const EXPECTED_MIGRATIONS = Object.freeze([
     name: "20260825041000_raise_provider_source_raw_response_limit",
     checksum: "25899178e7256a15fc4d86c158f560e597b9fa0e8c949caa696aa55439cc57c8",
   }),
+  Object.freeze({
+    name: "20260826005000_source_relationship_confirmations",
+    checksum: "c998b630b2d986117511f899e541bc9c885a666753ebc99f07b15ed0db49d5cc",
+  }),
+  Object.freeze({
+    name: "20260826010000_heat_relationship_causality",
+    checksum: "fd8fd289035cbd918f199d4929c5b0c9cae580d170c06729d168eb48c68222ab",
+  }),
 ]);
-const EXPECTED_TABLE_COUNT = 84;
+const EXPECTED_TABLE_COUNT = 88;
 
 interface MigrationReadinessRow {
   migrationName: string;

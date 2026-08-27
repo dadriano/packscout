@@ -126,6 +126,67 @@ test("ClutchPacks native pack name reaches an accepted canonical pack", () => {
   );
 });
 
+test("ClutchPacks V1 asset facts reach a publishable canonical catalog asset", () => {
+  const observation = normalizeDataforrestEventRecord(
+    dataforrestEventRecordV1Schema.parse({
+      platform: "clutchpacks",
+      stream: "catalog",
+      entity: "card",
+      record_id: "clutchpacks-card-native-asset",
+      occurred_at: "2026-08-01T00:00:00.000Z",
+      collected_at: "2026-08-01T00:00:01.000Z",
+      first_seen_at: "2026-08-01T00:00:00.000Z",
+      available: true,
+      data: {
+        asset: {
+          card_id: "nested-id-is-not-identity",
+          title: "2022 Select Courtside #1",
+          name: "Subject name",
+          type: "Sports",
+          subtype: "Basketball",
+          description: "Courtside parallel",
+          formatted_current_price: "$1,234.50",
+          front_image_url: "https://images.example.invalid/front.jpg",
+          back_image_url: "https://images.example.invalid/back.jpg",
+        },
+      },
+    }),
+    "clutchpacks",
+    "page_record:0",
+  );
+  const outcome = mapped(mapperInput("clutchpacks", observation));
+  assert.equal(outcome.candidate.candidateKind, "catalog_asset");
+  if (outcome.candidate.candidateKind !== "catalog_asset") {
+    assert.fail("expected canonical catalog asset candidate");
+  }
+  assert.deepEqual(outcome.candidate, {
+    candidateKind: "catalog_asset",
+    identity: {
+      organizationId: "org-task-005",
+      providerId: "provider-clutchpacks",
+      provider: "clutchpacks",
+      canonicalKind: "catalog_asset",
+      providerRecordId: "clutchpacks-card-native-asset",
+    },
+    recordIdScopeKey: "catalog-card-v1",
+    effectiveAt: "2026-08-01T00:00:00.000Z",
+    firstSeenAt: "2026-08-01T00:00:00.000Z",
+    assetType: "card",
+    displayName: "2022 Select Courtside #1",
+    description: "Courtside parallel",
+    category: "Basketball",
+    imageReferences: [
+      "https://images.example.invalid/front.jpg",
+      "https://images.example.invalid/back.jpg",
+    ],
+    availability: "available",
+    estimatedValue: { amount: 1_234.5, currency: "USD" },
+    valueSource: "clutchpacks_formatted_current_price",
+  });
+  assert.equal(outcome.warnings.length, 0);
+  assert.equal(outcome.protectedNativeEvidenceRef, "page_record:0");
+});
+
 test("Phygitals native pack name reaches an accepted canonical pack", () => {
   const observation = normalizeDataforrestEventRecord(
     dataforrestEventRecordV1Schema.parse({

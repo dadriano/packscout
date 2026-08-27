@@ -62,6 +62,88 @@ test("bootstrap precedes claims and enabled provider lanes run concurrently with
   assert.equal(events.at(-1)?.enabledProviderCount, 1);
 });
 
+test("explicit reconciliation keeps provider and manifest phases separate", async () => {
+  const calls: string[] = [];
+  const providerResult = { outcome: "published", failureCode: null };
+  const manifestResult = { outcome: "activated", failureCode: null };
+  const runtime = new PromotionV2WorkerRuntime({
+    workerId: "promotion-worker",
+    eligibility: { getSnapshot: () => Promise.resolve(snapshot(["alpha"])) },
+    validateEligibility() { calls.push("eligibility"); },
+    bootstrap: {
+      ensureVerified() { calls.push("bootstrap"); return Promise.resolve(); },
+    },
+    providerLanes: [{
+      platformKey: "alpha",
+      runCycle() { calls.push("provider"); return Promise.resolve(providerResult); },
+      runRecoveryCycle() { throw new Error("must not recover enabled lane"); },
+    }],
+    manifestLane: {
+      runCycle() { calls.push("manifest"); return Promise.resolve(manifestResult); },
+    },
+    pollIntervalMilliseconds: 5_000,
+    clock: { now: () => now },
+    logger: { write() {} },
+  });
+
+  const provider = await runtime.runProviderReconciliationCycle();
+  assert.deepEqual(calls, ["eligibility", "bootstrap", "provider"]);
+  assert.equal(provider.results[0]?.result, providerResult);
+  assert.equal(calls.includes("manifest"), false);
+
+  const manifest = await runtime.runManifestReconciliationCycle();
+  assert.deepEqual(calls, [
+    "eligibility", "bootstrap", "provider",
+    "eligibility", "bootstrap", "manifest",
+  ]);
+  assert.equal(manifest.result, manifestResult);
+});
+
+test("explicit manifest reconciliation cannot overlap a provider cycle", async () => {
+  let releaseProvider!: () => void;
+  let announceProvider!: () => void;
+  const providerStarted = new Promise<void>((resolve) => {
+    announceProvider = resolve;
+  });
+  const providerGate = new Promise<void>((resolve) => {
+    releaseProvider = resolve;
+  });
+  let manifestCalls = 0;
+  const runtime = new PromotionV2WorkerRuntime({
+    workerId: "promotion-worker",
+    eligibility: { getSnapshot: () => Promise.resolve(snapshot(["alpha"])) },
+    validateEligibility() {},
+    bootstrap: { ensureVerified() { return Promise.resolve(); } },
+    providerLanes: [{
+      platformKey: "alpha",
+      async runCycle() {
+        announceProvider();
+        await providerGate;
+        return { outcome: "published" };
+      },
+      runRecoveryCycle() { return Promise.resolve(); },
+    }],
+    manifestLane: {
+      runCycle() { manifestCalls += 1; return Promise.resolve(); },
+    },
+    pollIntervalMilliseconds: 5_000,
+    clock: { now: () => now },
+    logger: { write() {} },
+  });
+
+  const provider = runtime.runProviderReconciliationCycle();
+  await providerStarted;
+  await assert.rejects(
+    runtime.runManifestReconciliationCycle(),
+    /cycle is already running/u,
+  );
+  assert.equal(manifestCalls, 0);
+  releaseProvider();
+  await provider;
+  await runtime.runManifestReconciliationCycle();
+  assert.equal(manifestCalls, 1);
+});
+
 test("eligibility is reevaluated each cycle while bootstrap remains one-time", async () => {
   let enabled: readonly string[] = ["alpha"];
   let bootstrapCalls = 0;

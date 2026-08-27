@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
@@ -40,6 +41,7 @@ const now = new Date("2026-08-21T12:00:00.000Z");
 
 function repository(
   sourceTypeKey: string = DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+  adapterVersion: string = DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
 ) {
   const requestedScopes: string[] = [];
   const value: ProviderSourceAdminCatalogRepository = {
@@ -52,7 +54,7 @@ function repository(
       const revision = {
         id: connectionRevisionId,
         revisionNumber: 1,
-        sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+        sourceAdapterVersion: adapterVersion,
         state: "active" as const,
         configurationFingerprint: "a".repeat(64),
         encryptionKeyVersion: 1,
@@ -95,7 +97,7 @@ function repository(
         sourceInstanceId: sourceId,
         sourceRevisionId,
         sourceTypeKey,
-        sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+        sourceAdapterVersion: adapterVersion,
         connectionProfileId: profileId,
         connectionRevisionId,
         connectionHealthGeneration: 0n,
@@ -135,7 +137,7 @@ function repository(
   return { value, requestedScopes };
 }
 
-test("catalog advertises the sole v1 tuple while retaining masked connection and source history", async () => {
+test("catalog advertises the current adapter tuple while retaining masked connection and source history", async () => {
   const records = repository();
   const resolutionInputs: unknown[] = [];
   const service = new ProviderSourceAdminCatalogService({
@@ -204,6 +206,49 @@ test("catalog advertises the sole v1 tuple while retaining masked connection and
   assert.equal(catalog.sources[0]?.cursor.resumeLabel, "Feed start");
   assert.equal(JSON.stringify(catalog).includes("must-never-leave"), false);
   assert.equal(JSON.stringify(catalog).includes("/v1/events"), false);
+});
+
+test("catalog advertises v2 while retaining a visible source pinned to adapter v1", async () => {
+  const records = repository(
+    DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+    DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+  );
+  const service = new ProviderSourceAdminCatalogService({
+    ...sourceRegistries(),
+    repository: records.value,
+    availableSourceTypes: [{
+      sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+      label: "DataForrest events",
+    }],
+    connectionConfigurations: {
+      async resolveSourceConnectionConfiguration(input) {
+        return {
+          ...input,
+          configuration: {
+            endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+            bearerToken: "must-never-leave-the-service",
+          },
+        };
+      },
+    },
+  });
+
+  const catalog = await service.getCatalog({
+    organizationId,
+    actorKey: "actor:v2:legacy-history",
+  });
+  assert.equal(
+    catalog.providers[0]?.sourceRegistration.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+  assert.equal(
+    catalog.connections[0]?.activeRevision?.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+  );
+  assert.equal(
+    catalog.sources[0]?.sourceAdapterVersion,
+    DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+  );
 });
 
 test("catalog keeps the complete active revision separate from a newer credential candidate", async () => {

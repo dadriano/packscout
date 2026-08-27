@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   launchProviderKeys,
 } from "@packscout/contracts";
@@ -12,31 +13,38 @@ import {
 } from "./production-source-adapter-registry.ts";
 import { SourceAdapterRegistryError } from "./source-adapter-registry.ts";
 
-test("production registry exposes only the current DataForrest v1 adapter", () => {
+test("production registry preserves legacy pins and advertises only adapter v2", () => {
   const registry = createProductionSourceAdapterRegistry();
   assert.deepEqual(registry.keys(), [DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY]);
   assert.deepEqual(
     productionSourceAdapterManifests.map(({ adapterVersion }) => adapterVersion),
     [DATAFORREST_EVENTS_V1_ADAPTER_VERSION],
   );
-  const v1 = launchProviderKeys.map((provider) => registry.resolve(
+  const current = launchProviderKeys.map((provider) => registry.resolve(
     DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     provider,
   ));
-  assert.equal(new Set(v1).size, 1);
+  const legacy = launchProviderKeys.map((provider) => registry.resolve(
+    DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+    DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+    provider,
+  ));
+  assert.equal(new Set(current).size, 1);
+  assert.equal(new Set(legacy).size, 1);
+  assert.notEqual(current[0], legacy[0]);
   assert.deepEqual(
-    v1[0]?.manifest.supportedProviders.map(({ provider }) => provider),
+    current[0]?.manifest.supportedProviders.map(({ provider }) => provider),
     [...launchProviderKeys],
   );
   assert.equal(
     registry.resolveCurrentVersion(DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY),
-    v1[0],
+    current[0],
   );
   assert.throws(
     () => registry.resolve(
       DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-      "dataforrest-events-adapter-v2",
+      "dataforrest-events-adapter-v3",
       "courtyard",
     ),
     (error) =>

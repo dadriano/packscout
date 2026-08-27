@@ -25,6 +25,7 @@ export const publicChangeKinds = [
   "provider_projection",
   "quarantine_correction",
   "relationship_resolution",
+  "relationship_confirmation",
   "estimated_ev_outcome",
   "public_configuration",
   "provider_lifecycle",
@@ -156,6 +157,18 @@ export function relationshipPublicEntityKey(input: {
     input.targetPlatformKey,
     input.targetRecordKind,
     input.targetExternalId ?? "",
+  ]);
+}
+
+export function relationshipConfirmationPublicEntityKey(input: {
+  sourceRevisionId: string;
+  semanticObservationId: string;
+  declarationHash: string;
+}): string {
+  return publicEntityKey("relationship-confirmation", [
+    input.sourceRevisionId,
+    input.semanticObservationId,
+    input.declarationHash,
   ]);
 }
 

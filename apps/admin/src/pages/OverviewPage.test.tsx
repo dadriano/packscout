@@ -91,7 +91,7 @@ test("the overview reports live state and holds no fixed status copy", async (co
   assert.doesNotMatch(text, /What the base does not pretend/);
 });
 
-test("provider setup is offered to an operator who may create one", async (context) => {
+test("provider setup directs administrators to Provider Sources", async (context) => {
   stubOverview(context, 0);
   const renderer = await renderPage(route(administrator));
   cleanupPage(context, renderer);
@@ -99,9 +99,10 @@ test("provider setup is offered to an operator who may create one", async (conte
 
   const text = pageText(renderer);
   assert.match(text, /None yet/);
-  assert.match(text, /Set up your first provider/);
-  const action = renderer.container.querySelector('a[href="/providers/new"]');
-  assert.ok(action, "The setup prompt links to the provider draft form.");
+  assert.match(text, /Set up your first provider source/);
+  const action = renderer.container.querySelector('a[href="/source-configuration"]');
+  assert.ok(action, "The setup prompt links to Provider Sources.");
+  assert.equal(renderer.container.querySelector('a[href="/providers/new"]'), null);
 });
 
 test("provider setup is not offered to a role that cannot create one", async (context) => {
@@ -113,8 +114,8 @@ test("provider setup is not offered to a role that cannot create one", async (co
   const text = pageText(renderer);
   // Sending this role to the create form is a dead end: the providers page
   // hides that action from it.
-  assert.doesNotMatch(text, /Set up your first provider/);
-  assert.match(text, /No providers are configured yet/);
+  assert.doesNotMatch(text, /Set up your first provider source/);
+  assert.match(text, /No provider sources are configured yet/);
   assert.equal(renderer.container.querySelector('a[href="/providers/new"]'), null);
 });
 
@@ -126,8 +127,8 @@ test("setup guidance stops once a provider exists", async (context) => {
 
   const text = pageText(renderer);
   assert.match(text, /2 configured/);
-  assert.doesNotMatch(text, /Set up your first provider/);
-  assert.doesNotMatch(text, /No providers are configured yet/);
+  assert.doesNotMatch(text, /Set up your first provider source/);
+  assert.doesNotMatch(text, /No provider sources are configured yet/);
 });
 
 test("a failed provider read reports nothing rather than reporting none", async (context) => {
@@ -145,5 +146,5 @@ test("a failed provider read reports nothing rather than reporting none", async 
   assert.match(text, /Unavailable/);
   // "No providers yet" would be a claim the page cannot support.
   assert.doesNotMatch(text, /None yet/);
-  assert.doesNotMatch(text, /Set up your first provider/);
+  assert.doesNotMatch(text, /Set up your first provider source/);
 });

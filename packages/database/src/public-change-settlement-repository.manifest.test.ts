@@ -9,6 +9,8 @@ import {
 import type { PackscoutTransactionClient } from "./database.ts";
 import { PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN } from "./catalog-release-source-repository.ts";
 import { PrismaProviderCatalogSettlementRepository } from "./public-change-settlement-repository.provider-read.ts";
+import { ProviderSourceLifecycleRepository } from
+  "./provider-source-lifecycle-repository.ts";
 import {
   advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
@@ -24,6 +26,7 @@ const otherOrganizationId = "54000000-0000-4000-8000-000000000003";
 const tamperOrganizationId = "54000000-0000-4000-8000-000000000004";
 const orderingOrganizationId = "54000000-0000-4000-8000-000000000005";
 const zeroSettledOrganizationId = "54000000-0000-4000-8000-000000000006";
+const upgradeSafetyOrganizationId = "54000000-0000-4000-8000-000000000007";
 const publicCategoryId = "54222222-2222-5222-8222-222222222222";
 
 function configuration(input: {
@@ -86,7 +89,11 @@ async function seedOrganization(
   database: Awaited<ReturnType<typeof createMigratedTestDatabase>>["client"],
   organizationId: string,
   platformKeys: readonly string[],
-): Promise<ReadonlyMap<string, string>> {
+): Promise<ReadonlyMap<string, Readonly<{
+  providerId: string;
+  sourceInstanceId: string;
+  sourceRevisionId: string;
+}>>> {
   await database.organizations.create({
     data: {
       id: organizationId,
@@ -94,10 +101,46 @@ async function seedOrganization(
       name: "Manifest Eligibility",
     },
   });
-  const providers = new Map<string, string>();
-  for (const platformKey of platformKeys) {
+  const lifecycle = new ProviderSourceLifecycleRepository(database);
+  const connection = await lifecycle.createConnectionProfileRevision({
+    organizationId,
+    sourceTypeKey: "manifest-eligibility-v1",
+    connectionTypeKey: "manifest-eligibility-connection-v1",
+    displayName: "Manifest eligibility fixture",
+    requestLimit: 2,
+    sourceAdapterVersion: "manifest-eligibility-adapter-v1",
+    revisionNumber: 1,
+    configurationCiphertext: new Uint8Array(32).fill(1),
+    configurationNonce: new Uint8Array(12).fill(2),
+    configurationAuthTag: new Uint8Array(16).fill(3),
+    encryptionKeyVersion: 1,
+    configurationFingerprint: "a".repeat(64),
+    actorKey: "manifest-fixture",
+    createdAt: new Date("2026-08-16T00:00:00.000Z"),
+  });
+  await database.$transaction([
+    database.source_connection_revisions.update({
+      where: { id: connection.revisionId },
+      data: {
+        state: "active",
+        activated_at: new Date("2026-08-16T00:00:00.000Z"),
+      },
+    }),
+    database.source_connection_profiles.update({
+      where: { id: connection.profileId },
+      data: {
+        state: "active",
+        active_revision_id: connection.revisionId,
+      },
+    }),
+  ]);
+  const providers = new Map<string, Readonly<{
+    providerId: string;
+    sourceInstanceId: string;
+    sourceRevisionId: string;
+  }>>();
+  for (const [index, platformKey] of platformKeys.entries()) {
     const id = randomUUID();
-    providers.set(platformKey, id);
     await database.provider_sources.create({
       data: {
         id,
@@ -107,6 +150,32 @@ async function seedOrganization(
         state: "active",
       },
     });
+    const source = await lifecycle.createSourceInstanceRevision({
+      organizationId,
+      providerId: id,
+      connectionProfileId: connection.profileId,
+      sourceTypeKey: "manifest-eligibility-v1",
+      sourceAdapterVersion: "manifest-eligibility-adapter-v1",
+      normalizedContractVersion: "packscout.provider-observation.v1",
+      mapperKey: `${platformKey}-manifest-fixture`,
+      mapperVersion: "v1",
+      identityNamespaceKey: `${platformKey}-manifest-fixture`,
+      cursorCodecVersion: "manifest-fixture-cursor-v1",
+      revisionNumber: 1,
+      configuration: { platformKey },
+      configurationHash: String((index % 9) + 1).repeat(64),
+      recordIdScopes: ["catalog-pack-v1", "catalog-card-v1", "pull-v1"],
+      actorKey: "manifest-fixture",
+      createdAt: new Date("2026-08-16T00:00:00.000Z"),
+    });
+    await database.provider_source_instances.update({
+      where: { id: source.sourceInstanceId },
+      data: {
+        state: "active",
+        activated_at: new Date("2026-08-16T00:00:00.000Z"),
+      },
+    });
+    providers.set(platformKey, { providerId: id, ...source });
   }
   return providers;
 }
@@ -167,21 +236,34 @@ async function recordLifecycle(
   input: {
     organizationId: string;
     providerId: string;
+    sourceInstanceId: string;
+    sourceRevisionId: string;
     platformKey: string;
     state: "active" | "disabled" | "archived";
     changedAt: Date;
   },
 ): Promise<bigint> {
+  await transaction.provider_source_instances.update({
+    where: { id: input.sourceInstanceId },
+    data: {
+      state: input.state === "active" ? "active" : "disabled",
+      disabled_at: input.state === "active" ? null : input.changedAt,
+      updated_at: input.changedAt,
+    },
+  });
   const [cause] = await allocatePublicChangeCauses(transaction, {
     organizationId: input.organizationId,
     changes: [{
       changeKind: "provider_lifecycle",
       entityKey: providerPublicEntityKey(input.providerId),
       sourceKey: input.platformKey,
+      sourceRevisionKey: input.sourceRevisionId,
       metadata: {
         providerId: input.providerId,
         platformKey: input.platformKey,
         state: input.state,
+        sourceInstanceId: input.sourceInstanceId,
+        sourceRevisionId: input.sourceRevisionId,
       },
       occurredAt: input.changedAt,
       catalogImpact: {
@@ -284,9 +366,10 @@ test("manifest eligibility is atomic, tenant-scoped, and disable is manifest-onl
         configuration: initialConfiguration,
       });
       for (const platformKey of platformKeys) {
+        const provider = providers.get(platformKey)!;
         await recordLifecycle(transaction, {
           organizationId: lifecycleOrganizationId,
-          providerId: providers.get(platformKey)!,
+          ...provider,
           platformKey,
           state: "active",
           changedAt: approvedAt,
@@ -321,12 +404,12 @@ test("manifest eligibility is atomic, tenant-scoped, and disable is manifest-onl
     const disabledAt = new Date("2026-08-16T03:01:00.000Z");
     await harness.client.$transaction(async (transaction) => {
       await transaction.provider_sources.update({
-        where: { id: providers.get("beta")! },
+        where: { id: providers.get("beta")!.providerId },
         data: { state: "disabled", updated_at: disabledAt },
       });
       await recordLifecycle(transaction, {
         organizationId: lifecycleOrganizationId,
-        providerId: providers.get("beta")!,
+        ...providers.get("beta")!,
         platformKey: "beta",
         state: "disabled",
         changedAt: disabledAt,
@@ -345,7 +428,7 @@ test("manifest eligibility is atomic, tenant-scoped, and disable is manifest-onl
 
     await assert.rejects(
       harness.client.provider_sources.update({
-        where: { id: providers.get("alpha")! },
+        where: { id: providers.get("alpha")!.providerId },
         data: { platform_key: "renamed-alpha" },
       }),
       /immutable/i,
@@ -375,9 +458,10 @@ test("a new shared epoch exposes its blocking provider until every enabled check
         }),
       });
       for (const platformKey of platformKeys) {
+        const provider = providers.get(platformKey)!;
         await recordLifecycle(transaction, {
           organizationId: barrierOrganizationId,
-          providerId: providers.get(platformKey)!,
+          ...provider,
           platformKey,
           state: "active",
           changedAt: firstAt,
@@ -561,7 +645,7 @@ test("provider checkpoint reads authenticate the shared configuration epoch", as
       });
       await recordLifecycle(transaction, {
         organizationId: tamperOrganizationId,
-        providerId: providers.get("alpha")!,
+        ...providers.get("alpha")!,
         platformKey: "alpha",
         state: "active",
         changedAt: approvedAt,
@@ -606,9 +690,10 @@ test("manifest eligibility returns provider keys in canonical byte order", async
         }),
       });
       for (const platformKey of platformKeys) {
+        const provider = providers.get(platformKey)!;
         await recordLifecycle(transaction, {
           organizationId: orderingOrganizationId,
-          providerId: providers.get(platformKey)!,
+          ...provider,
           platformKey,
           state: "active",
           changedAt,
@@ -635,6 +720,92 @@ test("manifest eligibility returns provider keys in canonical byte order", async
   }
 });
 
+test("an active source without source-native lifecycle causality blocks manifest eligibility", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const providers = await seedOrganization(
+      harness.client,
+      upgradeSafetyOrganizationId,
+      ["alpha"],
+    );
+    const source = providers.get("alpha")!;
+    const approvedAt = new Date("2026-08-16T06:30:00.000Z");
+    await harness.client.$transaction(async (transaction) => {
+      await approveConfiguration(transaction, {
+        organizationId: upgradeSafetyOrganizationId,
+        configuration: configuration({
+          platformKeys: ["alpha"],
+          revision: 1,
+          approvedAt: approvedAt.toISOString(),
+        }),
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: upgradeSafetyOrganizationId,
+        settledAt: approvedAt,
+      });
+    });
+
+    const repository = new PrismaProviderCatalogSettlementRepository(
+      harness.client,
+    );
+    assert.equal(await repository.loadManifestEligibilitySnapshot({
+      organizationId: upgradeSafetyOrganizationId,
+    }), null);
+
+    const legacyAt = new Date("2026-08-16T06:31:00.000Z");
+    await harness.client.$transaction(async (transaction) => {
+      await allocatePublicChangeCauses(transaction, {
+        organizationId: upgradeSafetyOrganizationId,
+        changes: [{
+          changeKind: "provider_lifecycle",
+          entityKey: providerPublicEntityKey(source.providerId),
+          sourceKey: "alpha",
+          sourceRevisionKey: source.sourceRevisionId,
+          metadata: {
+            providerId: source.providerId,
+            platformKey: "alpha",
+            state: "active",
+            configurationRevisionId: randomUUID(),
+          },
+          occurredAt: legacyAt,
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: ["alpha"],
+            manifestLifecycle: { platformKey: "alpha", state: "active" },
+          },
+        }],
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: upgradeSafetyOrganizationId,
+        settledAt: legacyAt,
+      });
+    });
+    assert.equal(await repository.loadManifestEligibilitySnapshot({
+      organizationId: upgradeSafetyOrganizationId,
+    }), null);
+
+    const reassertedAt = new Date("2026-08-16T06:32:00.000Z");
+    await harness.client.$transaction(async (transaction) => {
+      await recordLifecycle(transaction, {
+        organizationId: upgradeSafetyOrganizationId,
+        ...source,
+        platformKey: "alpha",
+        state: "active",
+        changedAt: reassertedAt,
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: upgradeSafetyOrganizationId,
+        settledAt: reassertedAt,
+      });
+    });
+    assert.deepEqual((await repository.loadManifestEligibilitySnapshot({
+      organizationId: upgradeSafetyOrganizationId,
+    }))?.enabledPlatformKeys, ["alpha"]);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("provider checkpoint reads preserve a truthful null timestamp at zero settlement", async () => {
   const harness = await createMigratedTestDatabase();
   try {
@@ -655,7 +826,7 @@ test("provider checkpoint reads preserve a truthful null timestamp at zero settl
       });
       await recordLifecycle(transaction, {
         organizationId: zeroSettledOrganizationId,
-        providerId: providers.get("alpha")!,
+        ...providers.get("alpha")!,
         platformKey: "alpha",
         state: "active",
         changedAt: approvedAt,

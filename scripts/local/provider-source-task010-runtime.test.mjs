@@ -8,6 +8,10 @@ const {
   assertTask010ConnectionRevisionPins,
   assertTask010ProviderSourceRevisionPins,
 } = await tsImport("./provider-source-task010-runtime.mts", import.meta.url);
+const {
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+} = await tsImport("@packscout/contracts", import.meta.url);
 
 const mapperPins = Object.freeze({
   courtyard: Object.freeze({
@@ -31,7 +35,7 @@ const mapperPins = Object.freeze({
 const currentSourcePins = TASK010_PROVIDER_IDENTITIES.map((provider) => ({
   providerId: provider.id,
   sourceTypeKey: "dataforrest-events-v1",
-  sourceAdapterVersion: "dataforrest-events-adapter-v1",
+  sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   normalizedContractVersion: "packscout.provider-observation.v1",
   mapperKey: mapperPins[provider.platformKey].mapperKey,
   mapperVersion: "1",
@@ -49,16 +53,16 @@ function hasSafetyCode(code) {
 test("Task010 topology accepts only the current active connection adapter", () => {
   assert.doesNotThrow(() =>
     assertTask010ActiveConnectionRevisionPins([
-      { sourceAdapterVersion: "dataforrest-events-adapter-v1" },
+      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION },
     ]),
   );
   for (const revisions of [
     [],
-    [{ sourceAdapterVersion: "dataforrest-events-adapter-v2" }],
+    [{ sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION }],
     [{ sourceAdapterVersion: "dataforrest-events-adapter-v3" }],
     [
-      { sourceAdapterVersion: "dataforrest-events-adapter-v1" },
-      { sourceAdapterVersion: "dataforrest-events-adapter-v2" },
+      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION },
+      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION },
     ],
   ]) {
     assert.throws(
@@ -72,16 +76,16 @@ test("Task010 topology rejects historical connection revision contamination", ()
   assert.doesNotThrow(() => assertTask010ConnectionRevisionPins([]));
   assert.doesNotThrow(() =>
     assertTask010ConnectionRevisionPins([
-      { sourceAdapterVersion: "dataforrest-events-adapter-v1" },
-      { sourceAdapterVersion: "dataforrest-events-adapter-v1" },
+      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION },
+      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION },
     ]),
   );
   for (const revisions of [
-    [{ sourceAdapterVersion: "dataforrest-events-adapter-v2" }],
+    [{ sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION }],
     [{ sourceAdapterVersion: "dataforrest-events-adapter-v3" }],
     [
-      { sourceAdapterVersion: "dataforrest-events-adapter-v1" },
-      { sourceAdapterVersion: "dataforrest-events-adapter-v2" },
+      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION },
+      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION },
     ],
   ]) {
     assert.throws(
@@ -95,7 +99,7 @@ test("Task010 configuration topology permits no source revisions yet", () => {
   assert.doesNotThrow(() => assertTask010ProviderSourceRevisionPins([]));
 });
 
-test("Task010 topology accepts only the sole v1 adapter, mapper, and observation tuple", () => {
+test("Task010 topology accepts only the current adapter-v2 observation-v1 mapper-v1 tuple", () => {
   assert.doesNotThrow(() =>
     assertTask010ProviderSourceRevisionPins(currentSourcePins),
   );
@@ -106,11 +110,11 @@ test("Task010 topology rejects legacy and mixed provider source tuples", () => {
   assert.ok(current);
   for (const patch of [
     {
-      sourceAdapterVersion: "dataforrest-events-adapter-v2",
+      sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
       mapperVersion: "2",
       normalizedContractVersion: "packscout.provider-observation.v2",
     },
-    { sourceAdapterVersion: "dataforrest-events-adapter-v2" },
+    { sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION },
     { sourceAdapterVersion: "dataforrest-events-adapter-v3" },
     { mapperVersion: "2" },
     { normalizedContractVersion: "packscout.provider-observation.v2" },

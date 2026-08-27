@@ -29,6 +29,7 @@ async function providerPlan(
     configuration,
     platformKey,
     revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
   return await buildProviderCatalogReleasePublishPlan({

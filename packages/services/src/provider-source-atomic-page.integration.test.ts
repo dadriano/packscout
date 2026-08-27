@@ -7,7 +7,9 @@ import {
   PUBLIC_PACK_AVAILABILITY_INPUT_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
   normalizedObservationSemanticContent,
+  normalizedObservationSemanticContentSchema,
   normalizedProviderObservationPageSchema,
+  normalizedProviderObservationSchema,
   providerIdentityNamespaceByLaunchProvider,
   providerSourceLaunchBounds,
   projectCanonicalPackAvailabilityV1,
@@ -23,6 +25,7 @@ import {
   PersistenceError,
   PrismaAdminImportRunRepository,
   PrismaEstimatedEvRecomputationRepository,
+  PrismaSourceRelationshipConfirmationBackfillRepository,
   ProviderSourceAdminLifecycleRepository,
   ProviderSourceImportRunRepository,
   ProviderSourceAtomicPagePersistenceError,
@@ -35,7 +38,10 @@ import {
   ProviderSourceTestResultRepository,
   SourceConnectionRecoveryRepository,
   hashJson,
+  loadProviderV1RelationshipConfirmationReadiness,
+  providerSourceProjectionCommand,
   type PackscoutPrismaClient,
+  type SourceRelationshipConfirmationBackfillProjectionResolver,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { OpaqueCursorGuard } from "./opaque-cursor-guard.ts";
@@ -48,6 +54,7 @@ import {
 } from "./provider-source-page-import-service.ts";
 import {
   ProviderSourcePagePlanner,
+  providerSourceCanonicalProjectionsForValidatedMapping,
   type ProviderObservationMapperResolver,
 } from "./provider-source-page-planner.ts";
 import { ProviderSourceQuarantineService } from "./provider-source-quarantine-service.ts";
@@ -536,6 +543,168 @@ function service(
   );
 }
 
+async function seedExactLegacyPull(
+  runtime: Awaited<ReturnType<typeof createRuntime>>,
+  suppliedObservation?: ReturnType<typeof pullObservation>,
+) {
+  if (!runtime.adapterResult.ok) {
+    throw new Error("Captured source page is unavailable.");
+  }
+  const pullOutcome = runtime.adapterResult.value.normalizedPage.outcomes.find(
+    (outcome) => outcome.status === "valid" && outcome.observation.kind === "pull",
+  );
+  if (!pullOutcome || pullOutcome.status !== "valid") {
+    throw new Error("Pull observation is unavailable.");
+  }
+  const observation = suppliedObservation ?? pullOutcome.observation;
+  if (observation.kind !== "pull") throw new Error("Pull observation is invalid.");
+  const mappers = createProviderObservationMapperRegistryFromManifest();
+  const mapper = mappers.resolve({
+    mapperKey: runtime.pins.mapperKey,
+    mapperVersion: runtime.pins.mapperVersion,
+    provider: runtime.pins.provider,
+    normalizedContractVersion: runtime.pins.normalizedContractVersion,
+    identityNamespaceKey: runtime.pins.identityNamespaceKey,
+  });
+  const projections = providerSourceCanonicalProjectionsForValidatedMapping(
+    mapper.map({
+      organizationId: runtime.organizationId,
+      providerId: runtime.providerId,
+      provider: runtime.pins.provider,
+      mapperKey: runtime.pins.mapperKey,
+      mapperVersion: runtime.pins.mapperVersion,
+      normalizedContractVersion: runtime.pins.normalizedContractVersion,
+      identityNamespaceKey: runtime.pins.identityNamespaceKey,
+      observation,
+    }),
+    {
+      organizationId: runtime.organizationId,
+      providerId: runtime.providerId,
+      provider: runtime.pins.provider,
+      normalizedContractVersion: runtime.pins.normalizedContractVersion,
+      observation,
+    },
+  );
+  const pullProjection = projections.find((projection) =>
+    projection.projectionKind === "primary" && projection.recordKind === "pull"
+  );
+  if (!pullProjection) throw new Error("Mapped pull projection is unavailable.");
+  const configuration = await runtime.database.provider_config_revisions
+    .findFirstOrThrow({
+      where: {
+        organization_id: runtime.organizationId,
+        provider_id: runtime.providerId,
+      },
+    });
+  const legacyRunId = randomUUID();
+  const acceptedAt = await databaseNow(runtime.database);
+  await new PipelineSetupRepository(runtime.database).createImportRun({
+    id: legacyRunId,
+    organizationId: runtime.organizationId,
+    providerId: runtime.providerId,
+    configRevisionId: configuration.id,
+    trigger: "recovery",
+    state: "succeeded",
+    createdAt: acceptedAt,
+  });
+  await new IngestionPersistenceRepository(runtime.database, {
+    retentionDays: 90,
+    actorPseudonymKey: actorKey,
+  }).commitPage({
+    organizationId: runtime.organizationId,
+    providerId: runtime.providerId,
+    configRevisionId: configuration.id,
+    runId: legacyRunId,
+    pageNumber: 1,
+    requestedCursor: null,
+    nextCursor: null,
+    hasMore: false,
+    payload: { fixture: "legacy-exact-pull" },
+    committedAt: acceptedAt,
+    records: [{
+      recordKind: "pull",
+      externalId: pullProjection.providerRecordId,
+      sourceTime: new Date(pullProjection.effectiveAt),
+      collectedAt: acceptedAt,
+      payload: { fixture: "legacy-exact-pull" },
+      projections: [providerSourceProjectionCommand(
+        pullProjection,
+        observation.collectedAt,
+      )],
+    }],
+  });
+  const entity = await runtime.database.canonical_entities.findFirstOrThrow({
+    where: {
+      organization_id: runtime.organizationId,
+      platform_key: runtime.pins.provider,
+      record_kind: "pull",
+      external_id: pullProjection.providerRecordId,
+    },
+  });
+  if (!entity.current_revision_id) {
+    throw new Error("Legacy pull revision is unavailable.");
+  }
+  return {
+    observation,
+    pullProjection,
+    entityId: entity.id,
+    revisionId: entity.current_revision_id,
+  };
+}
+
+function productionRelationshipConfirmationBackfillResolver():
+  SourceRelationshipConfirmationBackfillProjectionResolver {
+  const mappers = createProviderObservationMapperRegistryFromManifest();
+  return {
+    resolvePullProjection(candidate) {
+      const semantic = normalizedObservationSemanticContentSchema.parse(
+        candidate.normalizedContent,
+      );
+      if (semantic.kind !== "pull") {
+        throw new TypeError("Backfill semantic is not a pull.");
+      }
+      const observation = normalizedProviderObservationSchema.parse({
+        ...semantic,
+        collectedAt: candidate.collectedAt.toISOString(),
+        protectedNativeEvidenceRef: candidate.protectedNativeEvidenceRef,
+      });
+      const mapper = mappers.resolve({
+        mapperKey: candidate.mapperKey,
+        mapperVersion: candidate.mapperVersion,
+        provider: candidate.provider,
+        normalizedContractVersion: candidate.normalizedContractVersion,
+        identityNamespaceKey: candidate.identityNamespaceKey,
+      });
+      const primary = providerSourceCanonicalProjectionsForValidatedMapping(
+        mapper.map({
+          organizationId: candidate.organizationId,
+          providerId: candidate.providerId,
+          provider: candidate.provider,
+          mapperKey: candidate.mapperKey,
+          mapperVersion: candidate.mapperVersion,
+          normalizedContractVersion: candidate.normalizedContractVersion,
+          identityNamespaceKey: candidate.identityNamespaceKey,
+          observation,
+        }),
+        {
+          organizationId: candidate.organizationId,
+          providerId: candidate.providerId,
+          provider: candidate.provider,
+          normalizedContractVersion: candidate.normalizedContractVersion,
+          observation,
+        },
+      ).filter((projection) =>
+        projection.projectionKind === "primary"
+        && projection.recordKind === "pull"
+      );
+      if (primary.length !== 1) {
+        throw new TypeError("Backfill pull projection is ambiguous.");
+      }
+      return primary[0]!;
+    },
+  };
+}
+
 const capacityRelations = [
   "import_pages",
   "source_record_identities",
@@ -544,6 +713,8 @@ const capacityRelations = [
   "canonical_entities",
   "canonical_revisions",
   "canonical_relationships",
+  "source_relationship_confirmation_sets",
+  "source_relationship_confirmations",
   "public_change_causes",
   "public_derivation_obligations",
   "estimated_ev_recomputation_requests",
@@ -559,6 +730,8 @@ const structuredCapacityRelations = new Set<string>([
   "canonical_entities",
   "canonical_revisions",
   "canonical_relationships",
+  "source_relationship_confirmation_sets",
+  "source_relationship_confirmations",
   "public_change_causes",
   "public_derivation_obligations",
   "estimated_ev_recomputation_requests",
@@ -659,6 +832,14 @@ async function measureCapacityRelations(
     union all select 'canonical_relationships', count(*)::bigint,
            coalesce(sum(pg_column_size(candidate)), 0)::bigint
     from public.canonical_relationships candidate where organization_id = ${organizationId}::uuid
+    union all select 'source_relationship_confirmation_sets', count(*)::bigint,
+           coalesce(sum(pg_column_size(candidate)), 0)::bigint
+    from public.source_relationship_confirmation_sets candidate
+    where organization_id = ${organizationId}::uuid
+    union all select 'source_relationship_confirmations', count(*)::bigint,
+           coalesce(sum(pg_column_size(candidate)), 0)::bigint
+    from public.source_relationship_confirmations candidate
+    where organization_id = ${organizationId}::uuid
     union all select 'public_change_causes', count(*)::bigint,
            coalesce(sum(pg_column_size(candidate)), 0)::bigint
     from public.public_change_causes candidate where organization_id = ${organizationId}::uuid
@@ -699,6 +880,8 @@ async function measureCapacityRelations(
       ('canonical_entities'),
       ('canonical_revisions'),
       ('canonical_relationships'),
+      ('source_relationship_confirmation_sets'),
+      ('source_relationship_confirmations'),
       ('public_change_causes'),
       ('public_derivation_obligations'),
       ('estimated_ev_recomputation_requests'),
@@ -5095,5 +5278,717 @@ test("pause request that wins the source barrier still commits the captured page
     release.resolve();
     await independent.$disconnect();
     await runtime.close();
+  }
+});
+
+test("exact V1 pull delivery adopts a retained legacy revision without replacing its current pointer", async () => {
+  const runtime = await createRuntime("legacy-pull-confirmation-adoption");
+  try {
+    const legacy = await seedExactLegacyPull(runtime);
+    const initial = await service(runtime).importPage({
+      pins: runtime.pins,
+      adapterResult: runtime.adapterResult,
+      committedAt: await databaseNow(runtime.database),
+    });
+    assert.equal(initial.kind, "committed");
+    assert.equal(initial.counts.duplicate, 1);
+
+    const entity = await runtime.database.canonical_entities.findUniqueOrThrow({
+      where: { id: legacy.entityId },
+    });
+    assert.equal(entity.current_revision_id, legacy.revisionId);
+    assert.equal(
+      await runtime.database.canonical_revisions.count({
+        where: { entity_id: legacy.entityId },
+      }),
+      1,
+    );
+    const confirmation = await runtime.database
+      .source_relationship_confirmation_sets.findFirstOrThrow({
+        where: {
+          organization_id: runtime.organizationId,
+          source_revision_id: runtime.source.sourceRevisionId,
+          source_entity_id: legacy.entityId,
+        },
+      });
+    assert.equal(confirmation.confirmation_mode, "adopted");
+    assert.equal(confirmation.source_canonical_revision_id, legacy.revisionId);
+    assert.equal(
+      confirmation.source_canonical_content_hash,
+      legacy.pullProjection.contentFingerprint,
+    );
+    assert.equal(
+      await runtime.database.source_relationship_confirmations.count({
+        where: {
+          organization_id: runtime.organizationId,
+          confirmation_set_id: confirmation.id,
+        },
+      }),
+      legacy.pullProjection.relationships.length,
+    );
+    const confirmationItems = await runtime.database.$queryRaw<Array<{
+      canonicalRelationshipId: string;
+      confirmationPublicChangeSequence: bigint;
+      heatEffectivePublicChangeSequence: bigint | null;
+      expectedEffectivePublicChangeSequence: bigint | null;
+    }>>`
+      select item.canonical_relationship_id as "canonicalRelationshipId",
+             item.confirmation_public_change_sequence as
+               "confirmationPublicChangeSequence",
+             item.heat_effective_public_change_sequence as
+               "heatEffectivePublicChangeSequence",
+             case
+               when relationship.resolved_public_change_sequence is null
+                 then null
+               else greatest(
+                 confirmation.public_change_sequence,
+                 relationship.resolved_public_change_sequence
+               )
+             end as "expectedEffectivePublicChangeSequence"
+      from public.source_relationship_confirmations as item
+      join public.source_relationship_confirmation_sets as confirmation
+        on confirmation.id = item.confirmation_set_id
+       and confirmation.organization_id = item.organization_id
+      join public.canonical_relationships as relationship
+        on relationship.id = item.canonical_relationship_id
+       and relationship.organization_id = item.organization_id
+      where item.confirmation_set_id = ${confirmation.id}::uuid
+        and item.organization_id = ${runtime.organizationId}::uuid
+      order by item.relationship_kind collate "C"
+    `;
+    assert.equal(confirmationItems.length, legacy.pullProjection.relationships.length);
+    assert.ok(confirmationItems.every((item) =>
+      item.confirmationPublicChangeSequence ===
+        confirmation.public_change_sequence
+      && item.heatEffectivePublicChangeSequence ===
+        item.expectedEffectivePublicChangeSequence));
+    await assert.rejects(
+      runtime.database.$executeRaw`
+        update public.source_relationship_confirmations
+        set heat_effective_public_change_sequence =
+          confirmation_public_change_sequence + 1
+        where confirmation_set_id = ${confirmation.id}::uuid
+          and organization_id = ${runtime.organizationId}::uuid
+          and canonical_relationship_id =
+            ${confirmationItems[0]!.canonicalRelationshipId}::uuid
+      `,
+      /immutable|settlement is invalid/u,
+    );
+    const cause = await runtime.database.public_change_causes.findUniqueOrThrow({
+      where: {
+        organization_id_sequence: {
+          organization_id: runtime.organizationId,
+          sequence: confirmation.public_change_sequence,
+        },
+      },
+    });
+    assert.equal(cause.change_kind, "relationship_confirmation");
+    assert.equal(
+      (cause.metadata_json as Record<string, unknown>)
+        .sourceCanonicalRevisionId,
+      legacy.revisionId,
+    );
+
+    const replayInput = await capturedPageTurn(runtime, {
+      pageNumber: 2,
+      requestedValue: "cursor-a",
+      nextValue: "cursor-b",
+      outcomes: [{
+        status: "valid",
+        recordIndex: 0,
+        observation: legacy.observation,
+      }],
+    });
+    const causeCountBefore = await runtime.database.public_change_causes.count({
+      where: {
+        organization_id: runtime.organizationId,
+        change_kind: "relationship_confirmation",
+      },
+    });
+    const replay = await service(runtime).importPage(replayInput);
+    assert.equal(replay.kind, "committed");
+    assert.equal(replay.counts.duplicate, 1);
+    assert.equal(
+      await runtime.database.source_relationship_confirmation_sets.count({
+        where: {
+          organization_id: runtime.organizationId,
+          source_entity_id: legacy.entityId,
+        },
+      }),
+      1,
+    );
+    assert.equal(
+      await runtime.database.public_change_causes.count({
+        where: {
+          organization_id: runtime.organizationId,
+          change_kind: "relationship_confirmation",
+        },
+      }),
+      causeCountBefore,
+    );
+  } finally {
+    await runtime.close();
+  }
+});
+
+test("post-cutoff pull quarantine retry confirms its retained revision and coverage proof cannot disappear", async () => {
+  const runtime = await createRuntime("pull-retry-confirmation-adoption");
+  try {
+    const legacy = await seedExactLegacyPull(runtime);
+    const productionMappers =
+      createProviderObservationMapperRegistryFromManifest();
+    const pullQuarantiningResolver = {
+      resolve(input: Parameters<typeof productionMappers.resolve>[0]) {
+        const mapper = productionMappers.resolve(input);
+        return {
+          descriptor: mapper.descriptor,
+          map(mappingInput: Parameters<typeof mapper.map>[0]) {
+            if (mappingInput.observation.kind === "pull") {
+              return {
+                status: "quarantined" as const,
+                reasonCode: "mapper_input_incompatible" as const,
+                warnings: [],
+                protectedNativeEvidenceRef:
+                  mappingInput.observation.protectedNativeEvidenceRef,
+              };
+            }
+            return mapper.map(mappingInput);
+          },
+        };
+      },
+    } satisfies ProviderObservationMapperResolver;
+    const initial = await service(
+      runtime,
+      undefined,
+      pullQuarantiningResolver,
+    ).importPage({
+      pins: runtime.pins,
+      adapterResult: runtime.adapterResult,
+      committedAt: await databaseNow(runtime.database),
+    });
+    assert.equal(initial.kind, "committed");
+    const quarantine = await runtime.database.quarantine_records
+      .findFirstOrThrow({
+        where: {
+          organization_id: runtime.organizationId,
+          external_id: legacy.pullProjection.providerRecordId,
+        },
+      });
+    assert.notEqual(quarantine.delivery_occurrence_id, null);
+    assert.equal(
+      await runtime.database.source_relationship_confirmation_sets.count({
+        where: {
+          organization_id: runtime.organizationId,
+          source_entity_id: legacy.entityId,
+        },
+      }),
+      0,
+    );
+    const checkpoint = await runtime.database
+      .source_relationship_confirmation_backfills.findUniqueOrThrow({
+        where: {
+          organization_id_source_revision_id: {
+            organization_id: runtime.organizationId,
+            source_revision_id: runtime.source.sourceRevisionId,
+          },
+        },
+      });
+    const retries = new ProviderSourceQuarantineService({
+      repository: new ProviderSourceQuarantineRepository(
+        runtime.database,
+        actorKey,
+      ),
+      mappers: productionMappers,
+      actorKeyer: {
+        keyFor: ({ organizationId, operatorId }) =>
+          `actor:${organizationId}:${operatorId}`,
+      },
+      clock: { now: () => new Date("2099-01-01T00:00:00.000Z") },
+      ids: { id: randomUUID },
+    });
+    const retried = await retries.retryOne({
+      organizationId: runtime.organizationId,
+      operatorId: randomUUID(),
+      role: "data_operator",
+    }, quarantine.id);
+    assert.equal(retried.outcome, "resolved");
+    const attempt = await runtime.database.quarantine_attempts
+      .findFirstOrThrow({ where: { quarantine_id: quarantine.id } });
+    assert.ok(attempt.finished_at);
+    assert.ok(
+      attempt.finished_at!.getTime()
+        > checkpoint.retry_eligibility_cutoff_at.getTime(),
+    );
+    assert.equal(
+      (await runtime.database.source_delivery_occurrences.findUniqueOrThrow({
+        where: { id: quarantine.delivery_occurrence_id! },
+      })).disposition,
+      "quarantined",
+    );
+    const confirmation = await runtime.database
+      .source_relationship_confirmation_sets.findFirstOrThrow({
+        where: {
+          organization_id: runtime.organizationId,
+          source_entity_id: legacy.entityId,
+        },
+      });
+    assert.equal(confirmation.confirmation_mode, "adopted");
+    assert.equal(confirmation.source_canonical_revision_id, legacy.revisionId);
+
+    const readiness = await loadProviderV1RelationshipConfirmationReadiness(
+      runtime.database,
+      {
+        organizationId: runtime.organizationId,
+        providerId: runtime.providerId,
+        sourceInstanceId: runtime.source.sourceInstanceId,
+        sourceRevisionId: runtime.source.sourceRevisionId,
+      },
+    );
+    assert.equal(readiness.ready, true);
+    assert.equal(
+      (await loadProviderV1RelationshipConfirmationReadiness(
+        runtime.database,
+        {
+          organizationId: runtime.organizationId,
+          providerId: runtime.providerId,
+          sourceInstanceId: runtime.source.sourceInstanceId,
+          sourceRevisionId: randomUUID(),
+        },
+      )).ready,
+      false,
+    );
+    await assert.rejects(
+      runtime.database.source_relationship_confirmation_backfills.delete({
+        where: {
+          organization_id_source_revision_id: {
+            organization_id: runtime.organizationId,
+            source_revision_id: runtime.source.sourceRevisionId,
+          },
+        },
+      }),
+      /cannot be deleted/u,
+    );
+  } finally {
+    await runtime.close();
+  }
+});
+
+test("relationship confirmation backfill resumes at its UUID cursor and exact replay is inert", async () => {
+  const runtime = await createRuntime("relationship-confirmation-resume");
+  try {
+    const firstLegacy = await seedExactLegacyPull(runtime);
+    const secondObservation = pullObservation({
+      providerRecordIdentity: {
+        recordIdScopeKey: "pull-v1",
+        providerRecordId: "pull-backfill-second",
+      },
+      effectiveAt: "2026-08-20T12:00:02.000Z",
+      collectedAt: "2026-08-20T12:00:03.000Z",
+      protectedNativeEvidenceRef: "evidence:pull-backfill-second",
+    });
+    const secondLegacy = await seedExactLegacyPull(
+      runtime,
+      secondObservation,
+    );
+    const firstImport = await service(runtime).importPage({
+      pins: runtime.pins,
+      adapterResult: runtime.adapterResult,
+      committedAt: await databaseNow(runtime.database),
+    });
+    assert.equal(firstImport.kind, "committed");
+    const secondPage = await capturedPageTurn(runtime, {
+      pageNumber: 2,
+      requestedValue: "cursor-a",
+      nextValue: "cursor-b",
+      outcomes: [{
+        status: "valid",
+        recordIndex: 0,
+        observation: secondObservation,
+      }],
+    });
+    const secondImport = await service(runtime).importPage(secondPage);
+    assert.equal(secondImport.kind, "committed");
+
+    const target = await runtime.database.source_delivery_occurrences.aggregate({
+      where: {
+        organization_id: runtime.organizationId,
+        source_revision_id: runtime.source.sourceRevisionId,
+      },
+      _max: { id: true },
+    });
+    assert.notEqual(target._max.id, null);
+    const resetAt = await databaseNow(runtime.database);
+    await runtime.database.$transaction(async (transaction) => {
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmations disable trigger user",
+      );
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmation_sets disable trigger user",
+      );
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmation_backfills disable trigger user",
+      );
+      await transaction.source_relationship_confirmations.deleteMany({
+        where: { organization_id: runtime.organizationId },
+      });
+      await transaction.source_relationship_confirmation_sets.deleteMany({
+        where: { organization_id: runtime.organizationId },
+      });
+      await transaction.source_relationship_confirmation_backfills.update({
+        where: {
+          organization_id_source_revision_id: {
+            organization_id: runtime.organizationId,
+            source_revision_id: runtime.source.sourceRevisionId,
+          },
+        },
+        data: {
+          phase: "pending",
+          target_delivery_occurrence_id: target._max.id!,
+          retry_eligibility_cutoff_at: resetAt,
+          processed_through_source_record_id: null,
+          target_semantic_set_count: 2n,
+          confirmed_semantic_set_count: 0n,
+          failure_code: null,
+          started_at: null,
+          completed_at: null,
+          updated_at: resetAt,
+        },
+      });
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmation_backfills enable trigger user",
+      );
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmation_sets enable trigger user",
+      );
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmations enable trigger user",
+      );
+    });
+    await runtime.database.public_derivation_obligations.updateMany({
+      where: { organization_id: runtime.organizationId },
+      data: {
+        state: "succeeded",
+        outcome_classification: "success",
+        acknowledged_claim_token: randomUUID(),
+        outcome_at: resetAt,
+        updated_at: resetAt,
+      },
+    });
+    const causeBaseline = await runtime.database.public_change_causes.count({
+      where: {
+        organization_id: runtime.organizationId,
+        change_kind: "relationship_confirmation",
+      },
+    });
+
+    const controller = new AbortController();
+    const productionResolver =
+      productionRelationshipConfirmationBackfillResolver();
+    let resolutionCount = 0;
+    const interrupted = new PrismaSourceRelationshipConfirmationBackfillRepository(
+      runtime.database,
+      {
+        organizationId: runtime.organizationId,
+        actorPseudonymKey: actorKey,
+        clock: { now: () => resetAt },
+        resolver: {
+          async resolvePullProjection(candidate) {
+            const projection = await productionResolver.resolvePullProjection(
+              candidate,
+            );
+            resolutionCount += 1;
+            if (resolutionCount === 1) controller.abort();
+            return projection;
+          },
+        },
+      },
+    );
+    await assert.rejects(
+      interrupted.runToCompletion({
+        batchSize: 1,
+        signal: controller.signal,
+      }),
+      /was stopped/u,
+    );
+    const partial = await runtime.database
+      .source_relationship_confirmation_backfills.findUniqueOrThrow({
+        where: {
+          organization_id_source_revision_id: {
+            organization_id: runtime.organizationId,
+            source_revision_id: runtime.source.sourceRevisionId,
+          },
+        },
+      });
+    assert.equal(partial.phase, "running");
+    assert.equal(partial.confirmed_semantic_set_count, 1n);
+    assert.notEqual(partial.processed_through_source_record_id, null);
+    const partialSet = await runtime.database
+      .source_relationship_confirmation_sets.findFirstOrThrow({
+        where: {
+          organization_id: runtime.organizationId,
+          source_revision_id: runtime.source.sourceRevisionId,
+        },
+      });
+    assert.equal(partialSet.confirmation_mode, "adopted");
+    assert.equal(
+      partialSet.source_record_id,
+      partial.processed_through_source_record_id,
+    );
+    assert.equal(
+      await runtime.database.source_relationship_confirmations.count({
+        where: {
+          organization_id: runtime.organizationId,
+          confirmation_set_id: partialSet.id,
+        },
+      }),
+      2,
+    );
+    const partialCause = await runtime.database.public_change_causes
+      .findUniqueOrThrow({
+        where: {
+          organization_id_sequence: {
+            organization_id: runtime.organizationId,
+            sequence: partialSet.public_change_sequence,
+          },
+        },
+      });
+    assert.equal(partialCause.change_kind, "relationship_confirmation");
+    const partialWatermark = await runtime.database.settled_public_watermarks
+      .findUniqueOrThrow({ where: { organization_id: runtime.organizationId } });
+    assert.ok(
+      partialWatermark.settled_sequence >= partialSet.public_change_sequence,
+    );
+
+    const resumed = new PrismaSourceRelationshipConfirmationBackfillRepository(
+      runtime.database,
+      {
+        organizationId: runtime.organizationId,
+        actorPseudonymKey: actorKey,
+        clock: {
+          now: () => new Date(resetAt.getTime() + 1_000),
+        },
+        resolver: productionRelationshipConfirmationBackfillResolver(),
+      },
+    );
+    const completed = await resumed.runToCompletion({ batchSize: 1 });
+    assert.equal(completed.phase, "complete");
+    assert.equal(completed.targetSemanticSetCount, 2n);
+    assert.equal(completed.confirmedSemanticSetCount, 2n);
+    const sets = await runtime.database.source_relationship_confirmation_sets
+      .findMany({
+        where: {
+          organization_id: runtime.organizationId,
+          source_revision_id: runtime.source.sourceRevisionId,
+        },
+        orderBy: { source_record_id: "asc" },
+      });
+    assert.equal(sets.length, 2);
+    assert.ok(sets.every(({ confirmation_mode }) =>
+      confirmation_mode === "adopted"));
+    assert.deepEqual(
+      new Set(sets.map(({ source_canonical_revision_id }) =>
+        source_canonical_revision_id)),
+      new Set([firstLegacy.revisionId, secondLegacy.revisionId]),
+    );
+    assert.equal(
+      await runtime.database.source_relationship_confirmations.count({
+        where: { organization_id: runtime.organizationId },
+      }),
+      4,
+    );
+    assert.equal(
+      await runtime.database.public_change_causes.count({
+        where: {
+          organization_id: runtime.organizationId,
+          change_kind: "relationship_confirmation",
+        },
+      }),
+      causeBaseline + 2,
+    );
+
+    const beforeReplay = {
+      sets: await runtime.database.source_relationship_confirmation_sets.count({
+        where: { organization_id: runtime.organizationId },
+      }),
+      items: await runtime.database.source_relationship_confirmations.count({
+        where: { organization_id: runtime.organizationId },
+      }),
+      causes: await runtime.database.public_change_causes.count({
+        where: {
+          organization_id: runtime.organizationId,
+          change_kind: "relationship_confirmation",
+        },
+      }),
+      watermark: await runtime.database.settled_public_watermarks
+        .findUniqueOrThrow({
+          where: { organization_id: runtime.organizationId },
+          select: {
+            next_sequence: true,
+            settled_sequence: true,
+            source_head_sequence: true,
+          },
+        }),
+    };
+    const replayed = await new PrismaSourceRelationshipConfirmationBackfillRepository(
+      runtime.database,
+      {
+        organizationId: runtime.organizationId,
+        actorPseudonymKey: actorKey,
+        resolver: productionRelationshipConfirmationBackfillResolver(),
+      },
+    ).runToCompletion({ batchSize: 1 });
+    assert.equal(replayed.phase, "complete");
+    assert.deepEqual({
+      sets: await runtime.database.source_relationship_confirmation_sets.count({
+        where: { organization_id: runtime.organizationId },
+      }),
+      items: await runtime.database.source_relationship_confirmations.count({
+        where: { organization_id: runtime.organizationId },
+      }),
+      causes: await runtime.database.public_change_causes.count({
+        where: {
+          organization_id: runtime.organizationId,
+          change_kind: "relationship_confirmation",
+        },
+      }),
+      watermark: await runtime.database.settled_public_watermarks
+        .findUniqueOrThrow({
+          where: { organization_id: runtime.organizationId },
+          select: {
+            next_sequence: true,
+            settled_sequence: true,
+            source_head_sequence: true,
+          },
+        }),
+    }, beforeReplay);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test("relationship confirmation startup completes every pending source revision", async () => {
+  const first = await createRuntime("relationship-confirmation-multi-a");
+  try {
+    const second = await createRuntime("relationship-confirmation-multi-b", {
+      fixture: first,
+      organizationId: first.organizationId,
+      provider: "phygitals",
+    });
+    const firstLegacy = await seedExactLegacyPull(first);
+    const secondLegacy = await seedExactLegacyPull(second);
+    assert.equal((await service(first).importPage({
+      pins: first.pins,
+      adapterResult: first.adapterResult,
+      committedAt: await databaseNow(first.database),
+    })).kind, "committed");
+    assert.equal((await service(second).importPage({
+      pins: second.pins,
+      adapterResult: second.adapterResult,
+      committedAt: await databaseNow(second.database),
+    })).kind, "committed");
+
+    const revisionIds = [
+      first.source.sourceRevisionId,
+      second.source.sourceRevisionId,
+    ];
+    const targets = await first.database.source_delivery_occurrences.groupBy({
+      by: ["source_revision_id"],
+      where: {
+        organization_id: first.organizationId,
+        source_revision_id: { in: revisionIds },
+      },
+      _max: { id: true },
+    });
+    assert.equal(targets.length, 2);
+    const resetAt = await databaseNow(first.database);
+    await first.database.$transaction(async (transaction) => {
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmations disable trigger user",
+      );
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmation_sets disable trigger user",
+      );
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmation_backfills disable trigger user",
+      );
+      await transaction.source_relationship_confirmations.deleteMany({
+        where: { organization_id: first.organizationId },
+      });
+      await transaction.source_relationship_confirmation_sets.deleteMany({
+        where: { organization_id: first.organizationId },
+      });
+      for (const target of targets) {
+        assert.notEqual(target._max.id, null);
+        await transaction.source_relationship_confirmation_backfills.update({
+          where: {
+            organization_id_source_revision_id: {
+              organization_id: first.organizationId,
+              source_revision_id: target.source_revision_id,
+            },
+          },
+          data: {
+            phase: "pending",
+            target_delivery_occurrence_id: target._max.id!,
+            retry_eligibility_cutoff_at: resetAt,
+            processed_through_source_record_id: null,
+            target_semantic_set_count: 1n,
+            confirmed_semantic_set_count: 0n,
+            failure_code: null,
+            started_at: null,
+            completed_at: null,
+            updated_at: resetAt,
+          },
+        });
+      }
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmation_backfills enable trigger user",
+      );
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmation_sets enable trigger user",
+      );
+      await transaction.$executeRawUnsafe(
+        "alter table public.source_relationship_confirmations enable trigger user",
+      );
+    });
+
+    const completed = await new PrismaSourceRelationshipConfirmationBackfillRepository(
+      first.database,
+      {
+        organizationId: first.organizationId,
+        actorPseudonymKey: actorKey,
+        clock: { now: () => resetAt },
+        resolver: productionRelationshipConfirmationBackfillResolver(),
+      },
+    ).runToCompletion({ batchSize: 1 });
+    assert.equal(completed.phase, "complete");
+    const checkpoints = await first.database
+      .source_relationship_confirmation_backfills.findMany({
+        where: {
+          organization_id: first.organizationId,
+          source_revision_id: { in: revisionIds },
+        },
+        orderBy: { source_revision_id: "asc" },
+      });
+    assert.equal(checkpoints.length, 2);
+    assert.ok(checkpoints.every(({ phase }) => phase === "complete"));
+    assert.ok(checkpoints.every(({ confirmed_semantic_set_count }) =>
+      confirmed_semantic_set_count === 1n));
+    const sets = await first.database.source_relationship_confirmation_sets
+      .findMany({
+        where: {
+          organization_id: first.organizationId,
+          source_revision_id: { in: revisionIds },
+        },
+      });
+    assert.equal(sets.length, 2);
+    assert.ok(sets.every(({ confirmation_mode }) =>
+      confirmation_mode === "adopted"));
+    assert.deepEqual(
+      new Set(sets.map(({ source_canonical_revision_id }) =>
+        source_canonical_revision_id)),
+      new Set([firstLegacy.revisionId, secondLegacy.revisionId]),
+    );
+  } finally {
+    await first.close();
   }
 });

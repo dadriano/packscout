@@ -1,15 +1,10 @@
-import { createHmac, randomUUID } from "node:crypto";
 import type { ProviderConfigurationSummary } from "@packscout/contracts";
 import {
-  AesGcmProviderCredentialCipher,
-  ProviderConfigurationService,
   ProviderHealthService,
-  ProviderTransportAdapterRegistry,
   type ProviderConfigurationRepository,
   type ProviderHealthDto,
   type ProviderHealthRepository,
   type ProviderFreshnessOperationalHooks,
-  type ProviderRuntimeEnvironment,
 } from "@packscout/services";
 import type {
   ProviderAdminListItem,
@@ -17,7 +12,10 @@ import type {
   ProvidersRouterDependencies,
 } from "./routes/providers.ts";
 
-interface ProviderCatalogRepository extends ProviderConfigurationRepository {
+interface ProviderCatalogRepository extends Pick<
+  ProviderConfigurationRepository,
+  "getProvider"
+> {
   listProviders(
     organizationId: string,
   ): Promise<readonly ProviderConfigurationSummary[]>;
@@ -26,9 +24,6 @@ interface ProviderCatalogRepository extends ProviderConfigurationRepository {
 export interface ProviderAdminRuntimeInput {
   readonly repository: ProviderCatalogRepository;
   readonly healthRepository: ProviderHealthRepository;
-  readonly credentialKey: Uint8Array;
-  readonly actorPseudonymKey: Uint8Array;
-  readonly environment: ProviderRuntimeEnvironment;
   readonly operational?: ProviderFreshnessOperationalHooks;
 }
 
@@ -57,39 +52,16 @@ export function createProviderAdminRuntime(
     clock,
     input.operational,
   );
-  const configuration = new ProviderConfigurationService({
-    repository: input.repository,
-    // Provider-source routes are the only production transport boundary. The
-    // historical configuration UI stays readable, but cannot launch its old
-    // cursor transport after the clean source cutover.
-    adapters: new ProviderTransportAdapterRegistry(),
-    credentialCipher: new AesGcmProviderCredentialCipher({
-      primaryVersion: 1,
-      keys: new Map([[1, input.credentialKey]]),
-    }),
-    actorKeyer: {
-      keyFor({ organizationId, operatorId }) {
-        return `actor:v1:${createHmac(
-          "sha256",
-          Buffer.from(input.actorPseudonymKey),
-        )
-          .update(`${organizationId}\u0000${operatorId}`)
-          .digest("hex")}`;
-      },
-    },
-    clock,
-    ids: { id: randomUUID },
-    environment: input.environment,
-  });
-
   return {
-    configuration,
     health: {
       async getHealth(request) {
         return healthView(await health.getHealth(request));
       },
     },
     catalog: {
+      getProvider(organizationId, providerId) {
+        return input.repository.getProvider(organizationId, providerId);
+      },
       async listProviders(organizationId): Promise<readonly ProviderAdminListItem[]> {
         const providers = await input.repository.listProviders(organizationId);
         return Promise.all(

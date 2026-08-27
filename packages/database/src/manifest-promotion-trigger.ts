@@ -30,7 +30,11 @@ export async function loadManifestPromotionEvaluationTrigger(
     if (!eligibility) return null;
     const readiness = await loadProviderCausalReadinessInTransaction(
       transaction,
-      { organizationId, checkpoints: eligibility.checkpoints },
+      {
+        organizationId,
+        checkpoints: eligibility.checkpoints,
+        lifecycleDecisionSequence: eligibility.lifecycleDecisionSequence,
+      },
     );
     const body = canonicalJson({
       sharedConfigurationEpoch: {

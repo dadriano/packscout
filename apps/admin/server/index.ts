@@ -104,10 +104,6 @@ const sessionSecret = readRequiredSecret(
   "PACKSCOUT_SESSION_HASHING_SECRET",
   32,
 );
-const providerCredentialKey = readBase64Key(
-  process.env.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64,
-  "PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64",
-);
 const providerActorKey = readBase64Key(
   process.env.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
   "PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64",
@@ -237,9 +233,6 @@ try {
     providers: createProviderAdminRuntime({
       repository: providerRepository,
       healthRepository: new PrismaProviderHealthRepository(database),
-      credentialKey: providerCredentialKey,
-      actorPseudonymKey: providerActorKey,
-      environment: isDevelopment ? "local" : "production",
       operational,
     }),
     importOperations: createAdminImportOperationsRuntime({

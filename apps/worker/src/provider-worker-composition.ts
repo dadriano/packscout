@@ -49,6 +49,7 @@ import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
 import {
   ProviderWorkerRuntime,
   type ProviderWorkerLogger,
+  type ProviderWorkerStartupPrerequisitePort,
 } from "./provider-worker-runtime.ts";
 
 type RuntimeConfiguration = Pick<
@@ -99,6 +100,7 @@ export interface ProviderWorkerCompositionInput {
     start(): Promise<void>;
     stop(): Promise<void> | void;
   }>;
+  readonly startupPrerequisite?: ProviderWorkerStartupPrerequisitePort;
   readonly heartbeatTimer?: ProviderWorkerHeartbeatTimer;
 }
 
@@ -181,6 +183,7 @@ export function createProviderWorkerRuntime(
     actorPseudonymKey: input.configuration.actorPseudonymKey,
   });
   const runtime = new ProviderWorkerRuntime({
+    startupPrerequisite: input.startupPrerequisite,
     // Task 007 owns durable source schedule claims and execution. Keeping this
     // lane idle makes Task 006 request-only and prevents a legacy feed fallback.
     scheduler: { async runOnce() { return { kind: "idle" }; } },

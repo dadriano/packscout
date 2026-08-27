@@ -105,30 +105,38 @@ test("startup failures are stable and do not expose connection details", async (
   }
 });
 
-test("startup fails closed when the expected Prisma migration is not ready", async () => {
-  const harness = await createMigratedTestDatabase();
-  try {
-    await harness.client.$executeRaw`
-      delete from public."_prisma_migrations"
-      where migration_name = '20260825041000_raise_provider_source_raw_response_limit'
-    `;
-    const lifecycle = harness.createClientLifecycle();
+for (const migrationName of [
+  "20260826005000_source_relationship_confirmations",
+  "20260826010000_heat_relationship_causality",
+] as const) {
+  test(`startup fails closed when ${migrationName} is not ready`, async () => {
+    const harness = await createMigratedTestDatabase();
     try {
-      await assert.rejects(
-        lifecycle.start(),
-        (error: unknown) => {
-          assert.ok(error instanceof Error);
-          assert.equal(error.message, "PackScout database schema is not ready.");
-          return true;
-        },
-      );
+      await harness.client.$executeRaw`
+        delete from public."_prisma_migrations"
+        where migration_name = ${migrationName}
+      `;
+      const lifecycle = harness.createClientLifecycle();
+      try {
+        await assert.rejects(
+          lifecycle.start(),
+          (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.equal(
+              error.message,
+              "PackScout database schema is not ready.",
+            );
+            return true;
+          },
+        );
+      } finally {
+        await lifecycle.close();
+      }
     } finally {
-      await lifecycle.close();
+      await harness.close();
     }
-  } finally {
-    await harness.close();
-  }
-});
+  });
+}
 
 test("startup fails closed when the expected migration checksum is inconsistent", async () => {
   const harness = await createMigratedTestDatabase();

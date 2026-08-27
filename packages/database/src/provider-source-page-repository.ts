@@ -478,6 +478,7 @@ export class ProviderSourcePageRepository {
           projection: ProviderSourceCanonicalProjectionPlan;
           disposition: "inserted" | "revised" | "duplicate";
           becomesCurrent: boolean;
+          reuseCanonicalRevisionId?: string | null;
         }>;
         let conflictReason: "identity_kind_conflict" | "immutable_content_conflict" | null = null;
         for (const projection of outcome.mapping.projections) {
@@ -509,6 +510,17 @@ export class ProviderSourcePageRepository {
             projection,
             disposition: decision.disposition,
             becomesCurrent: decision.becomesCurrent,
+            ...(decision.disposition === "duplicate"
+              ? {
+                  reuseCanonicalRevisionId:
+                    history.find((revision) =>
+                      revision.contentFingerprint ===
+                        projection.contentFingerprint
+                      && revision.effectiveAt.getTime() ===
+                        new Date(projection.effectiveAt).getTime()
+                    )?.canonicalRevisionId ?? null,
+                }
+              : {}),
           });
         }
         if (conflictReason) {
@@ -524,10 +536,13 @@ export class ProviderSourcePageRepository {
           continue;
         }
 
-        const changes = decisions.filter(
-          (decision) => decision.disposition !== "duplicate",
-        );
-        for (const [projectionIndex, change] of changes.entries()) {
+        for (const [projectionIndex, change] of decisions.entries()) {
+          if (
+            change.disposition === "duplicate"
+            && change.projection.recordKind !== "pull"
+          ) {
+            continue;
+          }
           deferredProjectionWrites.push({
             write: {
               organizationId: input.pins.organizationId,
@@ -545,6 +560,12 @@ export class ProviderSourcePageRepository {
               becomesCurrent: change.becomesCurrent,
               acceptedAt: committedAt,
               publicChangeKind: "provider_projection",
+              ...(change.disposition === "duplicate"
+                ? {
+                    reuseCanonicalRevisionId:
+                      change.reuseCanonicalRevisionId ?? null,
+                  }
+                : {}),
             },
             projection: change.projection,
             becomesCurrent: change.becomesCurrent,
@@ -552,14 +573,17 @@ export class ProviderSourcePageRepository {
           // Mirror the batch writer's durable row for later records: the plan
           // validation pins contentFingerprint to the writer's content hash,
           // and the writer stores source_updated_at as new Date(effectiveAt).
-          const identityKey =
-            providerSourceCanonicalProjectionIdentityKey(change.projection);
-          const pending = inPageHistoryByIdentity.get(identityKey) ?? [];
-          pending.push({
-            contentFingerprint: change.projection.contentFingerprint,
-            effectiveAt: new Date(change.projection.effectiveAt),
-          });
-          inPageHistoryByIdentity.set(identityKey, pending);
+          if (change.disposition !== "duplicate") {
+            const identityKey =
+              providerSourceCanonicalProjectionIdentityKey(change.projection);
+            const pending = inPageHistoryByIdentity.get(identityKey) ?? [];
+            pending.push({
+              canonicalRevisionId: null,
+              contentFingerprint: change.projection.contentFingerprint,
+              effectiveAt: new Date(change.projection.effectiveAt),
+            });
+            inPageHistoryByIdentity.set(identityKey, pending);
+          }
         }
 
         const disposition: Exclude<SourceDeliveryDisposition, "quarantined"> =

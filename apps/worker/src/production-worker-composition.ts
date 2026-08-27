@@ -4,6 +4,7 @@ import {
   PrismaHeatPromotionManifestRepository,
   PrismaHeatPromotionRepository,
   PrismaNormalizedHeatObservationRepository,
+  PrismaNormalizedHeatRelationshipBackfillRepository,
   PrismaNormalizedHeatRetentionRepository,
   PrismaPromotionReadinessRepository,
   type PackscoutPrismaClient,
@@ -53,6 +54,8 @@ import {
 } from "./catalog-retention-worker-config.ts";
 import type { CatalogRetentionWorkerLogger } from
   "./catalog-retention-worker-runtime.ts";
+import { createSourceRelationshipConfirmationBackfillRunner } from
+  "./source-relationship-confirmation-backfill-composition.ts";
 
 export interface ProductionWorkerCompositionInput {
   readonly provider: ProviderWorkerConfiguration;
@@ -191,5 +194,22 @@ export function createProductionWorkerRuntime(
     heatPromotion,
     catalogRetention,
     sourceSupervisor,
+    startupPrerequisite: {
+      async run(signal) {
+        await createSourceRelationshipConfirmationBackfillRunner({
+          database: input.database,
+          organizationId: input.provider.publicOrganizationId,
+          actorPseudonymKey: input.provider.actorPseudonymKey,
+          clock,
+        }).runToCompletion({ signal });
+        await new PrismaNormalizedHeatRelationshipBackfillRepository(
+          input.database,
+          {
+            organizationId: input.provider.publicOrganizationId,
+            clock,
+          },
+        ).runToCompletion({ signal });
+      },
+    },
   });
 }

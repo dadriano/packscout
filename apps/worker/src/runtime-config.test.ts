@@ -5,6 +5,7 @@ import {
   ProviderSourceSupervisorConfigurationError,
   readProviderSourceSupervisorConfiguration,
   readProviderWorkerConfiguration,
+  readProviderWorkerSharedConfiguration,
   type ProviderWorkerConfigurationErrorCode,
 } from "./runtime-config.ts";
 
@@ -113,6 +114,34 @@ test("source supervisor reads only ingestion-owned secret boundaries", () => {
   assert.equal(configuration.environment, "production");
   assert.equal(configuration.sourceDiskReserveBytes, undefined);
   assert.equal(configuration.executionSlots, 4);
+});
+
+test("narrow catalog workers read only shared DB, actor, organization, and identity pins", () => {
+  const configuration = readProviderWorkerSharedConfiguration(
+    validEnvironment({
+      PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64: "unused-invalid-key",
+      PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64: "unused-invalid-key",
+      PACKSCOUT_SOURCE_DATABASE_VOLUME_PATH: "relative/unused",
+      PACKSCOUT_WORKER_MESSAGE_OUTBOX_BATCH_SIZE: "0",
+      PACKSCOUT_WORKER_ID: "clutchpacks-canary:test",
+    }),
+    "clutchpacks-canary:fallback",
+  );
+
+  assert.equal(configuration.environment, "production");
+  assert.equal(configuration.workerId, "clutchpacks-canary:test");
+  assert.equal(
+    configuration.publicOrganizationId,
+    "54000000-0000-4000-8000-000000000001",
+  );
+  assert.equal(
+    configuration.databaseUrl,
+    "postgresql://worker:password@db.test/packscout",
+  );
+  assert.deepEqual(
+    [...configuration.actorPseudonymKey],
+    [...Buffer.alloc(32, 7)],
+  );
 });
 
 test("source supervisor permits a reduced execution-slot cap only locally", () => {

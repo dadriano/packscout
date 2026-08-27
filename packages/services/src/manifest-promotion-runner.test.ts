@@ -53,6 +53,7 @@ async function providerPlan(platformKey: "alpha" | "beta") {
     configuration,
     platformKey,
     revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
   return await buildProviderCatalogReleasePublishPlan({

@@ -95,6 +95,7 @@ async function providerPlan(input: Readonly<{
     configuration,
     platformKey: input.platformKey,
     revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
   return {

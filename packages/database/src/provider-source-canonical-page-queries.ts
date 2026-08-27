@@ -13,6 +13,7 @@ export interface ProviderSourceCanonicalScope {
 }
 
 export interface ProviderSourceCanonicalHistoryRow {
+  readonly canonicalRevisionId: string | null;
   readonly contentFingerprint: string;
   readonly effectiveAt: Date;
 }
@@ -95,7 +96,8 @@ export async function loadProviderSourceCanonicalHistory(
   projection: ProviderSourceCanonicalProjectionPlan,
 ): Promise<readonly ProviderSourceCanonicalHistoryRow[]> {
   return transaction.$queryRaw<ProviderSourceCanonicalHistoryRow[]>(Prisma.sql`
-    select revision.content_hash as "contentFingerprint",
+    select revision.id as "canonicalRevisionId",
+           revision.content_hash as "contentFingerprint",
            revision.source_updated_at as "effectiveAt"
     from public.canonical_entities as entity
     join public.canonical_revisions as revision on revision.entity_id = entity.id
@@ -159,12 +161,14 @@ export async function loadProviderSourceCanonicalHistoryByIdentity(
     platformKey: string;
     recordKind: string;
     providerRecordId: string;
+    canonicalRevisionId: string;
     contentFingerprint: string;
     effectiveAt: Date;
   }>>(Prisma.sql`
     select entity.platform_key as "platformKey",
            entity.record_kind::text as "recordKind",
            entity.external_id as "providerRecordId",
+           revision.id as "canonicalRevisionId",
            revision.content_hash as "contentFingerprint",
            revision.source_updated_at as "effectiveAt"
     from public.canonical_entities as entity
@@ -179,6 +183,7 @@ export async function loadProviderSourceCanonicalHistoryByIdentity(
   `);
   for (const row of rows) {
     history.get(providerSourceCanonicalProjectionIdentityKey(row))?.push({
+      canonicalRevisionId: row.canonicalRevisionId,
       contentFingerprint: row.contentFingerprint,
       effectiveAt: row.effectiveAt,
     });

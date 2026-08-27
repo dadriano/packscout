@@ -33,7 +33,7 @@ whole-database growth plus an explicit free-space floor; see
 ## Current launch boundary
 
 DataForrest has one launch identity: source type `dataforrest-events-v1`, source
-adapter `dataforrest-events-adapter-v1`, normalized observation
+adapter `dataforrest-events-adapter-v2`, normalized observation
 `packscout.provider-observation.v1`, and provider mapper revision `1`. The live
 evidence supplies the request path, authentication shape, platform selector,
 raw page wrapper, page-size behavior, opaque cursor, reached-head signal, and

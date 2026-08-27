@@ -1,29 +1,21 @@
 {
-  "source": "provider-source integration plus operator invitations",
+  "source": "provider-source V1 relationship confirmation plus relationship-causal Heat evidence",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260825041000_raise_provider_source_raw_response_limit/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260826010000_heat_relationship_causality/migration.sql"
   },
   "expectedCounts": {
-    "tables": 84,
+    "tables": 88,
     "enums": 40,
-    "columns": 1325,
-    "indexes": 151,
-    "uniqueConstraints": 54,
-    "foreignKeys": 276,
-    "checkConstraints": 281
+    "columns": 1390,
+    "indexes": 163,
+    "uniqueConstraints": 59,
+    "foreignKeys": 290,
+    "checkConstraints": 301
   },
   "enums": {
-    "admin_alert_state": [
-      "active",
-      "acknowledged",
-      "resolved"
-    ],
-    "audit_outcome": [
-      "success",
-      "failure",
-      "blocked"
-    ],
+    "admin_alert_state": ["active", "acknowledged", "resolved"],
+    "audit_outcome": ["success", "failure", "blocked"],
     "canonical_record_kind": [
       "platform",
       "pack",
@@ -33,26 +25,10 @@
       "market_event",
       "estimated_ev"
     ],
-    "connection_profile_state": [
-      "draft",
-      "active",
-      "disabled"
-    ],
-    "connection_revision_state": [
-      "candidate",
-      "active",
-      "retired",
-      "revoked"
-    ],
-    "email_link_purpose": [
-      "operator_password_reset",
-      "operator_invitation"
-    ],
-    "email_message_attempt_outcome": [
-      "sent",
-      "skipped",
-      "failed"
-    ],
+    "connection_profile_state": ["draft", "active", "disabled"],
+    "connection_revision_state": ["candidate", "active", "retired", "revoked"],
+    "email_link_purpose": ["operator_password_reset", "operator_invitation"],
+    "email_message_attempt_outcome": ["sent", "skipped", "failed"],
     "email_message_intent_state": [
       "pending",
       "retrying",
@@ -60,10 +36,7 @@
       "skipped",
       "failed"
     ],
-    "estimated_ev_recomputation_result": [
-      "estimated",
-      "unavailable"
-    ],
+    "estimated_ev_recomputation_result": ["estimated", "unavailable"],
     "estimated_ev_recomputation_state": [
       "queued",
       "running",
@@ -77,12 +50,7 @@
       "incomplete",
       "failed"
     ],
-    "import_trigger": [
-      "scheduled",
-      "manual",
-      "recovery",
-      "continuation"
-    ],
+    "import_trigger": ["scheduled", "manual", "recovery", "continuation"],
     "operational_event_kind": [
       "run_failed",
       "run_incomplete",
@@ -103,25 +71,10 @@
       "retention_overdue",
       "machinery_recovered"
     ],
-    "operational_severity": [
-      "info",
-      "warning",
-      "critical"
-    ],
-    "operator_role": [
-      "admin",
-      "data_operator"
-    ],
-    "operator_state": [
-      "pending",
-      "active",
-      "disabled",
-      "cancelled"
-    ],
-    "provider_auth_mode": [
-      "none",
-      "bearer"
-    ],
+    "operational_severity": ["info", "warning", "critical"],
+    "operator_role": ["admin", "data_operator"],
+    "operator_state": ["pending", "active", "disabled", "cancelled"],
+    "provider_auth_mode": ["none", "bearer"],
     "provider_source_instance_state": [
       "draft",
       "paused",
@@ -129,12 +82,7 @@
       "disabled",
       "replaced"
     ],
-    "provider_state": [
-      "draft",
-      "active",
-      "disabled",
-      "archived"
-    ],
+    "provider_state": ["draft", "active", "disabled", "archived"],
     "public_change_kind": [
       "provider_projection",
       "quarantine_correction",
@@ -142,11 +90,10 @@
       "estimated_ev_outcome",
       "public_configuration",
       "provider_lifecycle",
-      "manual_correction"
+      "manual_correction",
+      "relationship_confirmation"
     ],
-    "public_derivation_kind": [
-      "estimated_ev"
-    ],
+    "public_derivation_kind": ["estimated_ev"],
     "public_derivation_outcome": [
       "success",
       "business_unavailable",
@@ -159,25 +106,10 @@
       "business_unavailable",
       "technical_failure"
     ],
-    "quarantine_attempt_state": [
-      "running",
-      "succeeded",
-      "failed"
-    ],
-    "quarantine_state": [
-      "open",
-      "resolved",
-      "expired"
-    ],
-    "retention_execution_state": [
-      "running",
-      "succeeded",
-      "failed"
-    ],
-    "source_continuation_kind": [
-      "continue",
-      "poll_after"
-    ],
+    "quarantine_attempt_state": ["running", "succeeded", "failed"],
+    "quarantine_state": ["open", "resolved", "expired"],
+    "retention_execution_state": ["running", "succeeded", "failed"],
+    "source_continuation_kind": ["continue", "poll_after"],
     "source_delivery_disposition": [
       "inserted",
       "revised",
@@ -192,25 +124,10 @@
       "page",
       "connection_episode"
     ],
-    "source_diagnostic_scope": [
-      "source",
-      "connection"
-    ],
-    "source_diagnostic_severity": [
-      "info",
-      "warning",
-      "critical"
-    ],
-    "source_record_kind": [
-      "catalog",
-      "pull",
-      "trade"
-    ],
-    "source_record_outcome": [
-      "accepted",
-      "duplicate",
-      "quarantined"
-    ],
+    "source_diagnostic_scope": ["source", "connection"],
+    "source_diagnostic_severity": ["info", "warning", "critical"],
+    "source_record_kind": ["catalog", "pull", "trade"],
+    "source_record_outcome": ["accepted", "duplicate", "quarantined"],
     "source_request_attempt_state": [
       "in_flight",
       "captured",
@@ -222,11 +139,7 @@
       "source_test",
       "page_read"
     ],
-    "source_retention_state": [
-      "running",
-      "succeeded",
-      "failed"
-    ],
+    "source_retention_state": ["running", "succeeded", "failed"],
     "source_test_job_state": [
       "queued",
       "running",
@@ -249,10 +162,7 @@
       "retention",
       "message_outbox"
     ],
-    "worker_instance_state": [
-      "running",
-      "stopped"
-    ]
+    "worker_instance_state": ["running", "stopped"]
   },
   "tables": {
     "admin_alerts": {
@@ -407,19 +317,12 @@
       },
       "indexes": {
         "admin_alerts_organization_dedupe_unique": {
-          "columns": [
-            "organization_id",
-            "dedupe_key"
-          ],
+          "columns": ["organization_id", "dedupe_key"],
           "unique": true,
           "where": null
         },
         "admin_alerts_organization_state_seen_idx": {
-          "columns": [
-            "organization_id",
-            "state",
-            "last_seen_at"
-          ],
+          "columns": ["organization_id", "state", "last_seen_at"],
           "unique": false,
           "where": null
         }
@@ -427,111 +330,65 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "admin_alerts_latest_event_id_operational_events_id_fk": {
-          "columns": [
-            "latest_event_id"
-          ],
+          "columns": ["latest_event_id"],
           "referencedTable": "operational_events",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "admin_alerts_latest_event_tenant_fk": {
-          "columns": [
-            "latest_event_id",
-            "organization_id"
-          ],
+          "columns": ["latest_event_id", "organization_id"],
           "referencedTable": "operational_events",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "admin_alerts_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "admin_alerts_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "admin_alerts_provider_tenant_fk": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "admin_alerts_quarantine_id_quarantine_records_id_fk": {
-          "columns": [
-            "quarantine_id"
-          ],
+          "columns": ["quarantine_id"],
           "referencedTable": "quarantine_records",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "admin_alerts_quarantine_tenant_fk": {
-          "columns": [
-            "quarantine_id",
-            "organization_id"
-          ],
+          "columns": ["quarantine_id", "organization_id"],
           "referencedTable": "quarantine_records",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "admin_alerts_run_id_import_runs_id_fk": {
-          "columns": [
-            "run_id"
-          ],
+          "columns": ["run_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "admin_alerts_run_tenant_fk": {
-          "columns": [
-            "run_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["run_id", "organization_id", "provider_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -622,27 +479,18 @@
       },
       "indexes": {
         "approved_public_catalog_configurations_change_idx": {
-          "columns": [
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["organization_id", "public_change_sequence"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "approved_public_catalog_configurations_hash_unique": {
-          "columns": [
-            "organization_id",
-            "configuration_hash"
-          ],
+          "columns": ["organization_id", "configuration_hash"],
           "nullsNotDistinct": false
         },
         "approved_public_catalog_configurations_key_unique": {
-          "columns": [
-            "organization_id",
-            "configuration_key"
-          ],
+          "columns": ["organization_id", "configuration_key"],
           "nullsNotDistinct": false
         },
         "approved_public_catalog_configurations_mapping_source_unique": {
@@ -654,35 +502,22 @@
           "nullsNotDistinct": false
         },
         "approved_public_catalog_configurations_revision_unique": {
-          "columns": [
-            "organization_id",
-            "revision"
-          ],
+          "columns": ["organization_id", "revision"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "approved_public_catalog_configurations_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "approved_public_catalog_configurations_public_change_fk": {
-          "columns": [
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["organization_id", "public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -773,10 +608,7 @@
       },
       "indexes": {
         "audit_events_organization_occurred_idx": {
-          "columns": [
-            "organization_id",
-            "occurred_at"
-          ],
+          "columns": ["organization_id", "occurred_at"],
           "unique": false,
           "where": null
         }
@@ -784,13 +616,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "audit_events_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -905,9 +733,7 @@
       },
       "indexes": {
         "canonical_entities_current_revision_idx": {
-          "columns": [
-            "current_revision_id"
-          ],
+          "columns": ["current_revision_id"],
           "unique": false,
           "where": null
         },
@@ -934,33 +760,22 @@
       },
       "uniqueConstraints": {
         "canonical_entities_id_organization_unique": {
-          "columns": [
-            "id",
-            "organization_id"
-          ],
+          "columns": ["id", "organization_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "canonical_entities_current_revision_id_canonical_revisions_id_f": {
-          "columns": [
-            "current_revision_id"
-          ],
+          "columns": ["current_revision_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_entities_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1085,90 +900,71 @@
           "where": null
         }
       },
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "canonical_relationships_confirmation_identity_unique": {
+          "columns": [
+            "id",
+            "organization_id",
+            "source_entity_id",
+            "relationship_kind",
+            "target_platform_key",
+            "target_record_kind",
+            "target_external_id"
+          ],
+          "nullsNotDistinct": false
+        },
+        "canonical_relationships_id_organization_unique": {
+          "columns": ["id", "organization_id"],
+          "nullsNotDistinct": false
+        }
+      },
       "foreignKeys": {
         "canonical_relationships_created_change_fk": {
-          "columns": [
-            "organization_id",
-            "created_public_change_sequence"
-          ],
+          "columns": ["organization_id", "created_public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_relationships_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_relationships_resolved_change_fk": {
-          "columns": [
-            "organization_id",
-            "resolved_public_change_sequence"
-          ],
+          "columns": ["organization_id", "resolved_public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_relationships_source_entity_id_canonical_entities_id_": {
-          "columns": [
-            "source_entity_id"
-          ],
+          "columns": ["source_entity_id"],
           "referencedTable": "canonical_entities",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_relationships_source_tenant_fk": {
-          "columns": [
-            "source_entity_id",
-            "organization_id"
-          ],
+          "columns": ["source_entity_id", "organization_id"],
           "referencedTable": "canonical_entities",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_relationships_target_entity_id_canonical_entities_id_": {
-          "columns": [
-            "target_entity_id"
-          ],
+          "columns": ["target_entity_id"],
           "referencedTable": "canonical_entities",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_relationships_target_tenant_fk": {
-          "columns": [
-            "target_entity_id",
-            "organization_id"
-          ],
+          "columns": ["target_entity_id", "organization_id"],
           "referencedTable": "canonical_entities",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1292,168 +1088,99 @@
       },
       "indexes": {
         "canonical_revisions_content_provenance_unique": {
-          "columns": [
-            "entity_id",
-            "content_hash",
-            "provenance_hash"
-          ],
+          "columns": ["entity_id", "content_hash", "provenance_hash"],
           "unique": true,
           "where": null
         },
         "canonical_revisions_entity_number_unique": {
-          "columns": [
-            "entity_id",
-            "revision_number"
-          ],
+          "columns": ["entity_id", "revision_number"],
           "unique": true,
           "where": null
         },
         "canonical_revisions_organization_accepted_idx": {
-          "columns": [
-            "organization_id",
-            "accepted_at"
-          ],
+          "columns": ["organization_id", "accepted_at"],
           "unique": false,
           "where": null
         },
         "canonical_revisions_origin_semantic_observation_idx": {
-          "columns": [
-            "organization_id",
-            "origin_semantic_observation_id"
-          ],
+          "columns": ["organization_id", "origin_semantic_observation_id"],
           "unique": false,
           "where": null
         },
         "canonical_revisions_public_change_idx": {
-          "columns": [
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["organization_id", "public_change_sequence"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "canonical_revisions_heat_source_unique": {
-          "columns": [
-            "id",
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["id", "organization_id", "public_change_sequence"],
           "nullsNotDistinct": false
         },
         "canonical_revisions_id_entity_organization_unique": {
-          "columns": [
-            "id",
-            "entity_id",
-            "organization_id"
-          ],
+          "columns": ["id", "entity_id", "organization_id"],
           "nullsNotDistinct": false
         },
         "canonical_revisions_id_organization_unique": {
-          "columns": [
-            "id",
-            "organization_id"
-          ],
+          "columns": ["id", "organization_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "canonical_revisions_entity_id_canonical_entities_id_fk": {
-          "columns": [
-            "entity_id"
-          ],
+          "columns": ["entity_id"],
           "referencedTable": "canonical_entities",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_revisions_entity_tenant_fk": {
-          "columns": [
-            "entity_id",
-            "organization_id"
-          ],
+          "columns": ["entity_id", "organization_id"],
           "referencedTable": "canonical_entities",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_revisions_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_revisions_origin_ev_recomputation_fk": {
-          "columns": [
-            "origin_ev_recomputation_request_id",
-            "organization_id"
-          ],
+          "columns": ["origin_ev_recomputation_request_id", "organization_id"],
           "referencedTable": "estimated_ev_recomputation_requests",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_revisions_origin_semantic_observation_fk": {
-          "columns": [
-            "origin_semantic_observation_id",
-            "organization_id"
-          ],
+          "columns": ["origin_semantic_observation_id", "organization_id"],
           "referencedTable": "source_semantic_observations",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_revisions_public_change_fk": {
-          "columns": [
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["organization_id", "public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_revisions_source_record_id_source_records_id_fk": {
-          "columns": [
-            "source_record_id"
-          ],
+          "columns": ["source_record_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "canonical_revisions_source_tenant_fk": {
-          "columns": [
-            "source_record_id",
-            "organization_id"
-          ],
+          "columns": ["source_record_id", "organization_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1516,13 +1243,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "catalog_manifest_lifecycle_checkpoints_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1700,15 +1423,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "catalog_promotion_bootstrap_proofs_lane_fk": {
-          "columns": [
-            "organization_id",
-            "deployment_key"
-          ],
+          "columns": ["organization_id", "deployment_key"],
           "referencedTable": "manifest_promotion_lanes",
-          "referencedColumns": [
-            "organization_id",
-            "deployment_key"
-          ],
+          "referencedColumns": ["organization_id", "deployment_key"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1962,11 +1679,7 @@
           "onUpdate": "no action"
         },
         "catalog_promotion_bootstrap_provider_proofs_parent_fk": {
-          "columns": [
-            "organization_id",
-            "deployment_key",
-            "proof_revision"
-          ],
+          "columns": ["organization_id", "deployment_key", "proof_revision"],
           "referencedTable": "catalog_promotion_bootstrap_proofs",
           "referencedColumns": [
             "organization_id",
@@ -2088,13 +1801,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "catalog_promotion_retention_barriers_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2348,25 +2057,15 @@
           "nullsNotDistinct": false
         },
         "catalog_promotion_retention_operations_scope_unique": {
-          "columns": [
-            "organization_id",
-            "deployment_key",
-            "operation_id"
-          ],
+          "columns": ["organization_id", "deployment_key", "operation_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "catalog_promotion_retention_operations_barrier_fk": {
-          "columns": [
-            "organization_id",
-            "deployment_key"
-          ],
+          "columns": ["organization_id", "deployment_key"],
           "referencedTable": "catalog_promotion_retention_barriers",
-          "referencedColumns": [
-            "organization_id",
-            "deployment_key"
-          ],
+          "referencedColumns": ["organization_id", "deployment_key"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2598,9 +2297,7 @@
       },
       "indexes": {
         "compact_source_request_attempts_lease_unique": {
-          "columns": [
-            "request_lease_id"
-          ],
+          "columns": ["request_lease_id"],
           "unique": true,
           "where": null
         },
@@ -2618,10 +2315,7 @@
           "where": null
         },
         "compact_source_request_attempts_tenant_idx": {
-          "columns": [
-            "organization_id",
-            "compacted_at"
-          ],
+          "columns": ["organization_id", "compacted_at"],
           "unique": false,
           "where": null
         }
@@ -2678,24 +2372,16 @@
           "onUpdate": "no action"
         },
         "compact_source_request_attempts_epoch_fk": {
-          "columns": [
-            "supervisor_epoch_id"
-          ],
+          "columns": ["supervisor_epoch_id"],
           "referencedTable": "source_supervisor_epochs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "compact_source_request_attempts_org_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2723,17 +2409,9 @@
           "onUpdate": "no action"
         },
         "compact_source_request_attempts_source_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2881,26 +2559,19 @@
       },
       "indexes": {
         "email_link_tokens_expiry_idx": {
-          "columns": [
-            "expires_at"
-          ],
+          "columns": ["expires_at"],
           "unique": false,
           "where": null
         },
         "email_link_tokens_outstanding_idx": {
-          "columns": [
-            "purpose",
-            "subject_id"
-          ],
+          "columns": ["purpose", "subject_id"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "email_link_tokens_selector_unique": {
-          "columns": [
-            "selector"
-          ],
+          "columns": ["selector"],
           "nullsNotDistinct": false
         }
       },
@@ -3011,31 +2682,22 @@
       },
       "indexes": {
         "email_message_attempts_attempted_idx": {
-          "columns": [
-            "attempted_at"
-          ],
+          "columns": ["attempted_at"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "email_message_attempts_intent_attempt_unique": {
-          "columns": [
-            "intent_id",
-            "attempt_number"
-          ],
+          "columns": ["intent_id", "attempt_number"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "email_message_attempts_intent_id_email_message_intents_id_fk": {
-          "columns": [
-            "intent_id"
-          ],
+          "columns": ["intent_id"],
           "referencedTable": "email_message_intents",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3202,52 +2864,34 @@
       },
       "indexes": {
         "email_message_intents_created_idx": {
-          "columns": [
-            "created_at",
-            "id"
-          ],
+          "columns": ["created_at", "id"],
           "unique": false,
           "where": null
         },
         "email_message_intents_recipient_created_idx": {
-          "columns": [
-            "recipient",
-            "created_at"
-          ],
+          "columns": ["recipient", "created_at"],
           "unique": false,
           "where": null
         },
         "email_message_intents_source_state_idx": {
-          "columns": [
-            "source",
-            "state"
-          ],
+          "columns": ["source", "state"],
           "unique": false,
           "where": null
         },
         "email_message_intents_state_due_idx": {
-          "columns": [
-            "state",
-            "due_at",
-            "id"
-          ],
+          "columns": ["state", "due_at", "id"],
           "unique": false,
           "where": null
         },
         "email_message_intents_state_finalized_idx": {
-          "columns": [
-            "state",
-            "finalized_at"
-          ],
+          "columns": ["state", "finalized_at"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "email_message_intents_idempotency_key_unique": {
-          "columns": [
-            "idempotency_key"
-          ],
+          "columns": ["idempotency_key"],
           "nullsNotDistinct": false
         }
       },
@@ -3471,27 +3115,17 @@
       },
       "indexes": {
         "estimated_ev_recomputation_claim_idx": {
-          "columns": [
-            "state",
-            "available_at",
-            "created_at",
-            "id"
-          ],
+          "columns": ["state", "available_at", "created_at", "id"],
           "unique": false,
           "where": null
         },
         "estimated_ev_recomputation_originating_change_idx": {
-          "columns": [
-            "organization_id",
-            "originating_public_change_sequence"
-          ],
+          "columns": ["organization_id", "originating_public_change_sequence"],
           "unique": false,
           "where": null
         },
         "estimated_ev_recomputation_request_key_unique": {
-          "columns": [
-            "request_key"
-          ],
+          "columns": ["request_key"],
           "unique": true,
           "where": null
         },
@@ -3509,15 +3143,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "estimated_ev_recomputation_calculation_revision_tenant_fk": {
-          "columns": [
-            "calculation_revision_id",
-            "organization_id"
-          ],
+          "columns": ["calculation_revision_id", "organization_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3528,129 +3156,77 @@
             "organization_id"
           ],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "provider_id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_input_revision_tenant_fk": {
-          "columns": [
-            "ev_input_revision_id",
-            "organization_id"
-          ],
+          "columns": ["ev_input_revision_id", "organization_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_originating_change_fk": {
-          "columns": [
-            "organization_id",
-            "originating_public_change_sequence"
-          ],
+          "columns": ["organization_id", "originating_public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_pack_revision_tenant_fk": {
-          "columns": [
-            "pack_revision_id",
-            "organization_id"
-          ],
+          "columns": ["pack_revision_id", "organization_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_provider_tenant_fk": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_requests_calculation_revision_id_can": {
-          "columns": [
-            "calculation_revision_id"
-          ],
+          "columns": ["calculation_revision_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_requests_configuration_revision_id_p": {
-          "columns": [
-            "configuration_revision_id"
-          ],
+          "columns": ["configuration_revision_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_requests_ev_input_revision_id_canoni": {
-          "columns": [
-            "ev_input_revision_id"
-          ],
+          "columns": ["ev_input_revision_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_requests_organization_id_organizatio": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_requests_pack_revision_id_canonical_": {
-          "columns": [
-            "pack_revision_id"
-          ],
+          "columns": ["pack_revision_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "estimated_ev_recomputation_requests_provider_id_provider_source": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3970,53 +3546,33 @@
       },
       "indexes": {
         "import_pages_expiry_idx": {
-          "columns": [
-            "organization_id",
-            "expires_at"
-          ],
+          "columns": ["organization_id", "expires_at"],
           "unique": false,
           "where": null
         },
         "import_pages_legacy_run_cursor_unique": {
-          "columns": [
-            "run_id",
-            "requested_cursor"
-          ],
+          "columns": ["run_id", "requested_cursor"],
           "unique": true,
           "where": "(source_instance_id IS NULL)"
         },
         "import_pages_request_attempt_unique": {
-          "columns": [
-            "request_attempt_id"
-          ],
+          "columns": ["request_attempt_id"],
           "unique": true,
           "where": "(request_attempt_id IS NOT NULL)"
         },
         "import_pages_run_number_unique": {
-          "columns": [
-            "run_id",
-            "page_number"
-          ],
+          "columns": ["run_id", "page_number"],
           "unique": true,
           "where": null
         }
       },
       "uniqueConstraints": {
         "import_pages_id_organization_provider_run_unique": {
-          "columns": [
-            "id",
-            "organization_id",
-            "provider_id",
-            "run_id"
-          ],
+          "columns": ["id", "organization_id", "provider_id", "run_id"],
           "nullsNotDistinct": false
         },
         "import_pages_id_organization_run_unique": {
-          "columns": [
-            "id",
-            "organization_id",
-            "run_id"
-          ],
+          "columns": ["id", "organization_id", "run_id"],
           "nullsNotDistinct": false
         }
       },
@@ -4041,24 +3597,16 @@
           "onUpdate": "no action"
         },
         "import_pages_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "import_pages_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4098,28 +3646,16 @@
           "onUpdate": "no action"
         },
         "import_pages_run_id_import_runs_id_fk": {
-          "columns": [
-            "run_id"
-          ],
+          "columns": ["run_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "import_pages_run_tenant_fk": {
-          "columns": [
-            "run_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["run_id", "organization_id", "provider_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4176,13 +3712,9 @@
           "onUpdate": "no action"
         },
         "import_pages_supervisor_epoch_fk": {
-          "columns": [
-            "supervisor_epoch_id"
-          ],
+          "columns": ["supervisor_epoch_id"],
           "referencedTable": "source_supervisor_epochs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4197,9 +3729,7 @@
         "import_pages_normalized_runtime_shape_check": {
           "value": "((source_instance_id IS NULL) OR ((has_more IS NULL) AND (protected_raw_response_sha256 ~ '^[0-9a-f]{64}$'::text) AND (((protected_raw_response IS NOT NULL) AND ((octet_length(protected_raw_response) >= 1) AND (octet_length(protected_raw_response) <= 8388608)) AND (payload_expired_at IS NULL)) OR ((protected_raw_response IS NULL) AND (payload_expired_at IS NOT NULL)))))"
         },
-        "import_pages_page_number_positive": {
-          "value": "(page_number > 0)"
-        },
+        "import_pages_page_number_positive": { "value": "(page_number > 0)" },
         "import_pages_source_continuation_check": {
           "value": "((source_instance_id IS NULL) OR ((continuation_kind IS NOT NULL) AND (((continuation_kind = 'continue'::source_continuation_kind) AND (minimum_delay_seconds IS NULL) AND (next_cursor IS NOT NULL) AND (next_cursor_fingerprint IS NOT NULL) AND (next_cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)) OR ((continuation_kind = 'poll_after'::source_continuation_kind) AND (minimum_delay_seconds IS NOT NULL) AND ((minimum_delay_seconds >= 0) AND (minimum_delay_seconds <= 86400))))))"
         },
@@ -4496,26 +4026,17 @@
       },
       "indexes": {
         "import_runs_organization_provider_created_idx": {
-          "columns": [
-            "organization_id",
-            "provider_id",
-            "created_at"
-          ],
+          "columns": ["organization_id", "provider_id", "created_at"],
           "unique": false,
           "where": null
         },
         "import_runs_provider_active_unique": {
-          "columns": [
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["organization_id", "provider_id"],
           "unique": true,
           "where": "(state = ANY (ARRAY['queued'::import_run_state, 'running'::import_run_state]))"
         },
         "import_runs_source_active_unique": {
-          "columns": [
-            "source_instance_id"
-          ],
+          "columns": ["source_instance_id"],
           "unique": true,
           "where": "((source_instance_id IS NOT NULL) AND (state = ANY (ARRAY['queued'::import_run_state, 'running'::import_run_state])))"
         },
@@ -4564,38 +4085,22 @@
           "nullsNotDistinct": false
         },
         "import_runs_id_organization_provider_unique": {
-          "columns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["id", "organization_id", "provider_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "import_runs_config_provider_tenant_fk": {
-          "columns": [
-            "config_revision_id",
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["config_revision_id", "provider_id", "organization_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "provider_id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "import_runs_config_revision_id_provider_config_revisions_id_fk": {
-          "columns": [
-            "config_revision_id"
-          ],
+          "columns": ["config_revision_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4619,52 +4124,30 @@
           "onUpdate": "no action"
         },
         "import_runs_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "import_runs_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "import_runs_provider_tenant_fk": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "import_runs_source_instance_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4703,9 +4186,7 @@
         }
       },
       "checkConstraints": {
-        "import_runs_attempt_nonnegative": {
-          "value": "(attempt >= 0)"
-        },
+        "import_runs_attempt_nonnegative": { "value": "(attempt >= 0)" },
         "import_runs_exactly_one_runtime_owner_check": {
           "value": "(((source_instance_id IS NULL) AND (config_revision_id IS NOT NULL) AND (current_cursor IS NULL) AND (current_cursor_fingerprint IS NULL) AND (current_cursor_key IS NULL) AND (next_page_number IS NULL)) OR ((source_instance_id IS NOT NULL) AND (config_revision_id IS NULL) AND (final_cursor IS NULL) AND ((current_cursor IS NULL) = (current_cursor_fingerprint IS NULL)) AND ((current_cursor IS NULL) OR ((octet_length(current_cursor) >= 1) AND (octet_length(current_cursor) <= 16384))) AND ((current_cursor_fingerprint IS NULL) OR (current_cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (current_cursor_key IS NOT NULL) AND (current_cursor_key = COALESCE(current_cursor_fingerprint, 'initial'::text)) AND (next_page_number IS NOT NULL) AND (next_page_number > 0)))"
         },
@@ -4869,24 +4350,14 @@
           "onUpdate": "no action"
         },
         "manifest_active_provider_selections_lane_fk": {
-          "columns": [
-            "organization_id",
-            "deployment_key"
-          ],
+          "columns": ["organization_id", "deployment_key"],
           "referencedTable": "manifest_promotion_lanes",
-          "referencedColumns": [
-            "organization_id",
-            "deployment_key"
-          ],
+          "referencedColumns": ["organization_id", "deployment_key"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
         "manifest_active_provider_selections_provider_lane_fk": {
-          "columns": [
-            "organization_id",
-            "deployment_key",
-            "platform_key"
-          ],
+          "columns": ["organization_id", "deployment_key", "platform_key"],
           "referencedTable": "provider_promotion_lanes",
           "referencedColumns": [
             "organization_id",
@@ -5118,10 +4589,7 @@
       },
       "indexes": {
         "manifest_promotion_attempts_one_active_lane": {
-          "columns": [
-            "organization_id",
-            "deployment_key"
-          ],
+          "columns": ["organization_id", "deployment_key"],
           "unique": true,
           "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
         }
@@ -5136,11 +4604,7 @@
           "nullsNotDistinct": false
         },
         "manifest_promotion_attempts_tenant_unique": {
-          "columns": [
-            "id",
-            "organization_id",
-            "deployment_key"
-          ],
+          "columns": ["id", "organization_id", "deployment_key"],
           "nullsNotDistinct": false
         }
       },
@@ -5265,25 +4729,15 @@
       "indexes": {},
       "uniqueConstraints": {
         "manifest_promotion_evaluations_cause_unique": {
-          "columns": [
-            "organization_id",
-            "deployment_key",
-            "cause_sha256"
-          ],
+          "columns": ["organization_id", "deployment_key", "cause_sha256"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "manifest_promotion_evaluations_lane_fk": {
-          "columns": [
-            "organization_id",
-            "deployment_key"
-          ],
+          "columns": ["organization_id", "deployment_key"],
           "referencedTable": "manifest_promotion_lanes",
-          "referencedColumns": [
-            "organization_id",
-            "deployment_key"
-          ],
+          "referencedColumns": ["organization_id", "deployment_key"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -5519,13 +4973,9 @@
           "onUpdate": "no action"
         },
         "manifest_promotion_lanes_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -5691,33 +5141,19 @@
       "indexes": {},
       "uniqueConstraints": {
         "manifest_promotion_operations_attempt_unique": {
-          "columns": [
-            "attempt_id"
-          ],
+          "columns": ["attempt_id"],
           "nullsNotDistinct": false
         },
         "manifest_promotion_operations_operation_unique": {
-          "columns": [
-            "organization_id",
-            "deployment_key",
-            "operation_id"
-          ],
+          "columns": ["organization_id", "deployment_key", "operation_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "manifest_promotion_operations_attempt_fk": {
-          "columns": [
-            "attempt_id",
-            "organization_id",
-            "deployment_key"
-          ],
+          "columns": ["attempt_id", "organization_id", "deployment_key"],
           "referencedTable": "manifest_promotion_attempts",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "deployment_key"
-          ],
+          "referencedColumns": ["id", "organization_id", "deployment_key"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -5813,6 +5249,13 @@
           "identity": null,
           "default": null
         },
+        "source_relationship_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "status": {
           "type": "text",
           "primaryKey": false,
@@ -5834,10 +5277,7 @@
           "where": null
         },
         "normalized_heat_observation_outcomes_retention_idx": {
-          "columns": [
-            "organization_id",
-            "retained_until"
-          ],
+          "columns": ["organization_id", "retained_until"],
           "unique": false,
           "where": null
         }
@@ -5845,15 +5285,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "normalized_heat_observation_outcomes_change_fk": {
-          "columns": [
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["organization_id", "public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -5873,55 +5307,38 @@
           "onUpdate": "no action"
         },
         "normalized_heat_observation_outcomes_mapping_change_fk": {
-          "columns": [
-            "organization_id",
-            "mapping_public_change_sequence"
-          ],
+          "columns": ["organization_id", "mapping_public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
         "normalized_heat_observation_outcomes_observation_fk": {
-          "columns": [
-            "observation_id",
-            "organization_id"
-          ],
+          "columns": ["observation_id", "organization_id"],
           "referencedTable": "normalized_heat_observations",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
         "normalized_heat_observation_outcomes_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
         "normalized_heat_observation_outcomes_revision_fk": {
-          "columns": [
-            "canonical_revision_id",
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["canonical_revision_id", "organization_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "public_change_sequence"
-          ],
-          "onDelete": "no action",
+          "referencedColumns": ["id", "organization_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observation_outcomes_source_relationship_fk": {
+          "columns": ["source_relationship_id", "organization_id"],
+          "referencedTable": "canonical_relationships",
+          "referencedColumns": ["id", "organization_id"],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -5962,6 +5379,13 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "catalog_order_sequence": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "identity": null,
           "default": null
         },
@@ -6056,6 +5480,13 @@
           "identity": null,
           "default": null
         },
+        "source_relationship_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "value_multiple_basis_points": {
           "type": "integer",
           "primaryKey": false,
@@ -6065,11 +5496,22 @@
         }
       },
       "indexes": {
-        "normalized_heat_observations_retention_idx": {
+        "normalized_heat_observations_catalog_order_backfill_idx": {
           "columns": [
             "organization_id",
-            "retained_until"
+            "public_change_sequence",
+            "observation_key"
           ],
+          "unique": false,
+          "where": "((observation_kind = 'catalog_snapshot'::text) AND (catalog_order_sequence IS NULL))"
+        },
+        "normalized_heat_observations_catalog_order_unique": {
+          "columns": ["organization_id", "catalog_order_sequence"],
+          "unique": true,
+          "where": null
+        },
+        "normalized_heat_observations_retention_idx": {
+          "columns": ["organization_id", "retained_until"],
           "unique": false,
           "where": null
         },
@@ -6086,10 +5528,7 @@
       },
       "uniqueConstraints": {
         "normalized_heat_observations_key_unique": {
-          "columns": [
-            "organization_id",
-            "observation_key"
-          ],
+          "columns": ["organization_id", "observation_key"],
           "nullsNotDistinct": false
         }
       },
@@ -6110,55 +5549,38 @@
           "onUpdate": "no action"
         },
         "normalized_heat_observations_mapping_change_fk": {
-          "columns": [
-            "organization_id",
-            "mapping_public_change_sequence"
-          ],
+          "columns": ["organization_id", "mapping_public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
         "normalized_heat_observations_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
         "normalized_heat_observations_revision_fk": {
-          "columns": [
-            "canonical_revision_id",
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["canonical_revision_id", "organization_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "public_change_sequence"
-          ],
-          "onDelete": "no action",
+          "referencedColumns": ["id", "organization_id"],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "normalized_heat_observations_source_change_fk": {
-          "columns": [
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["organization_id", "public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observations_source_relationship_fk": {
+          "columns": ["source_relationship_id", "organization_id"],
+          "referencedTable": "canonical_relationships",
+          "referencedColumns": ["id", "organization_id"],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -6168,6 +5590,9 @@
         },
         "normalized_heat_observations_catalog_bounds_check": {
           "value": "(((available_chase_count IS NULL) OR ((available_chase_count >= 0) AND (available_chase_count <= 10000))) AND normalized_heat_outcome_keys_valid(outcome_keys))"
+        },
+        "normalized_heat_observations_catalog_order_check": {
+          "value": "(((catalog_order_sequence IS NULL) OR ((catalog_order_sequence >= 1) AND (catalog_order_sequence <= 2147483647))) AND ((observation_kind = 'catalog_snapshot'::text) OR (catalog_order_sequence IS NULL)))"
         },
         "normalized_heat_observations_key_check": {
           "value": "(observation_key ~ '^[0-9a-f]{64}$'::text)"
@@ -6189,6 +5614,167 @@
         },
         "normalized_heat_observations_shape_check": {
           "value": "(((observation_kind = 'pull'::text) AND (catalog_sequence IS NULL) AND (available_chase_count IS NULL) AND (outcome_keys = ARRAY[]::text[])) OR ((observation_kind = 'catalog_snapshot'::text) AND (catalog_sequence IS NOT NULL) AND (realized_return_basis_points IS NULL) AND (value_multiple_basis_points IS NULL) AND (available_chase_count IS NOT NULL)))"
+        }
+      }
+    },
+    "normalized_heat_relationship_backfills": {
+      "columns": {
+        "catalog_observation_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "completed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "failure_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "initial_catalog_observation_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "next_catalog_order_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "1"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "phase": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'awaiting_confirmations'::text"
+        },
+        "processed_through_confirmation_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "processed_through_confirmation_set_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "processed_through_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "processed_through_relationship_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "relationship_source_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "started_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "target_catalog_observation_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "target_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_relationship_source_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "normalized_heat_relationship_backfills_organization_fk": {
+          "columns": ["organization_id"],
+          "referencedTable": "organizations",
+          "referencedColumns": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "normalized_heat_relationship_backfills_count_check": {
+          "value": "((target_relationship_source_count >= 0) AND ((relationship_source_count >= 0) AND (relationship_source_count <= target_relationship_source_count)) AND (initial_catalog_observation_count >= 0) AND ((target_catalog_observation_count IS NULL) OR (target_catalog_observation_count >= initial_catalog_observation_count)) AND (catalog_observation_count >= 0) AND ((target_catalog_observation_count IS NULL) OR (catalog_observation_count <= target_catalog_observation_count)))"
+        },
+        "normalized_heat_relationship_backfills_cursor_check": {
+          "value": "((target_public_change_sequence >= 0) AND ((processed_through_public_change_sequence >= 0) AND (processed_through_public_change_sequence <= target_public_change_sequence)) AND ((processed_through_confirmation_public_change_sequence >= 0) AND (processed_through_confirmation_public_change_sequence <= processed_through_public_change_sequence)) AND ((processed_through_public_change_sequence > 0) OR ((processed_through_confirmation_set_id IS NULL) AND (processed_through_relationship_id IS NULL))) AND ((processed_through_confirmation_public_change_sequence = 0) = (processed_through_confirmation_set_id IS NULL)) AND ((processed_through_confirmation_set_id IS NULL) = (processed_through_relationship_id IS NULL)) AND ((next_catalog_order_sequence >= 1) AND (next_catalog_order_sequence <= '2147483648'::bigint)))"
+        },
+        "normalized_heat_relationship_backfills_failure_check": {
+          "value": "(((phase = 'failed'::text) AND (failure_code ~ '^[A-Z][A-Z0-9_]{0,127}$'::text)) OR ((phase <> 'failed'::text) AND (failure_code IS NULL)))"
+        },
+        "normalized_heat_relationship_backfills_phase_check": {
+          "value": "(phase = ANY (ARRAY['awaiting_confirmations'::text, 'relationships'::text, 'catalog_order'::text, 'complete'::text, 'failed'::text]))"
+        },
+        "normalized_heat_relationship_backfills_shape_check": {
+          "value": "(((phase = 'awaiting_confirmations'::text) AND (target_public_change_sequence = 0) AND (processed_through_public_change_sequence = 0) AND (processed_through_confirmation_public_change_sequence = 0) AND (processed_through_confirmation_set_id IS NULL) AND (processed_through_relationship_id IS NULL) AND (target_relationship_source_count = 0) AND (relationship_source_count = 0) AND (target_catalog_observation_count IS NULL) AND (catalog_observation_count = 0) AND (completed_at IS NULL)) OR ((phase = 'relationships'::text) AND (target_catalog_observation_count IS NULL) AND (completed_at IS NULL)) OR ((phase = 'catalog_order'::text) AND (target_catalog_observation_count IS NOT NULL) AND (completed_at IS NULL)) OR ((phase = 'complete'::text) AND (processed_through_public_change_sequence = target_public_change_sequence) AND (relationship_source_count = target_relationship_source_count) AND (target_catalog_observation_count IS NOT NULL) AND (catalog_observation_count = target_catalog_observation_count) AND (next_catalog_order_sequence = (catalog_observation_count + 1)) AND (completed_at IS NOT NULL)) OR (phase = 'failed'::text))"
+        },
+        "normalized_heat_relationship_backfills_timestamp_check": {
+          "value": "((date_trunc('milliseconds'::text, created_at) = created_at) AND (date_trunc('milliseconds'::text, updated_at) = updated_at) AND ((started_at IS NULL) OR (date_trunc('milliseconds'::text, started_at) = started_at)) AND ((completed_at IS NULL) OR (date_trunc('milliseconds'::text, completed_at) = completed_at)))"
         }
       }
     },
@@ -6234,13 +5820,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "normalized_heat_window_checkpoints_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -6350,115 +5932,69 @@
       },
       "indexes": {
         "operational_events_organization_dedupe_idx": {
-          "columns": [
-            "organization_id",
-            "dedupe_key",
-            "occurred_at"
-          ],
+          "columns": ["organization_id", "dedupe_key", "occurred_at"],
           "unique": false,
           "where": null
         },
         "operational_events_organization_occurred_idx": {
-          "columns": [
-            "organization_id",
-            "occurred_at"
-          ],
+          "columns": ["organization_id", "occurred_at"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "operational_events_id_organization_unique": {
-          "columns": [
-            "id",
-            "organization_id"
-          ],
+          "columns": ["id", "organization_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "operational_events_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "operational_events_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "operational_events_provider_tenant_fk": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "operational_events_quarantine_id_quarantine_records_id_fk": {
-          "columns": [
-            "quarantine_id"
-          ],
+          "columns": ["quarantine_id"],
           "referencedTable": "quarantine_records",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "operational_events_quarantine_tenant_fk": {
-          "columns": [
-            "quarantine_id",
-            "organization_id"
-          ],
+          "columns": ["quarantine_id", "organization_id"],
           "referencedTable": "quarantine_records",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "operational_events_run_id_import_runs_id_fk": {
-          "columns": [
-            "run_id"
-          ],
+          "columns": ["run_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "operational_events_run_tenant_fk": {
-          "columns": [
-            "run_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["run_id", "organization_id", "provider_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -6519,42 +6055,29 @@
       },
       "indexes": {
         "operator_memberships_operator_idx": {
-          "columns": [
-            "operator_id"
-          ],
+          "columns": ["operator_id"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "operator_memberships_organization_operator_unique": {
-          "columns": [
-            "organization_id",
-            "operator_id"
-          ],
+          "columns": ["organization_id", "operator_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "operator_memberships_operator_id_operators_id_fk": {
-          "columns": [
-            "operator_id"
-          ],
+          "columns": ["operator_id"],
           "referencedTable": "operators",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "operator_memberships_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -6636,24 +6159,17 @@
       },
       "indexes": {
         "operator_sessions_active_token_idx": {
-          "columns": [
-            "token_hash"
-          ],
+          "columns": ["token_hash"],
           "unique": false,
           "where": "(revoked_at IS NULL)"
         },
         "operator_sessions_operator_idx": {
-          "columns": [
-            "operator_id",
-            "created_at"
-          ],
+          "columns": ["operator_id", "created_at"],
           "unique": false,
           "where": null
         },
         "operator_sessions_token_hash_unique": {
-          "columns": [
-            "token_hash"
-          ],
+          "columns": ["token_hash"],
           "unique": true,
           "where": null
         }
@@ -6661,37 +6177,23 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "operator_sessions_membership_fk": {
-          "columns": [
-            "organization_id",
-            "operator_id"
-          ],
+          "columns": ["organization_id", "operator_id"],
           "referencedTable": "operator_memberships",
-          "referencedColumns": [
-            "organization_id",
-            "operator_id"
-          ],
+          "referencedColumns": ["organization_id", "operator_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "operator_sessions_operator_id_operators_id_fk": {
-          "columns": [
-            "operator_id"
-          ],
+          "columns": ["operator_id"],
           "referencedTable": "operators",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "operator_sessions_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -6756,9 +6258,7 @@
       },
       "indexes": {
         "operators_email_normalized_unique": {
-          "columns": [
-            "email_normalized"
-          ],
+          "columns": ["email_normalized"],
           "unique": true,
           "where": null
         }
@@ -6811,9 +6311,7 @@
       "indexes": {},
       "uniqueConstraints": {
         "organizations_slug_unique": {
-          "columns": [
-            "slug"
-          ],
+          "columns": ["slug"],
           "nullsNotDistinct": false
         }
       },
@@ -7060,11 +6558,7 @@
           "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
         },
         "promotion_attempts_one_active_lane": {
-          "columns": [
-            "organization_id",
-            "deployment_key",
-            "lane_key"
-          ],
+          "columns": ["organization_id", "deployment_key", "lane_key"],
           "unique": true,
           "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
         }
@@ -7090,22 +6584,13 @@
           "nullsNotDistinct": false
         },
         "promotion_attempts_tenant_unique": {
-          "columns": [
-            "id",
-            "organization_id",
-            "deployment_key",
-            "lane_key"
-          ],
+          "columns": ["id", "organization_id", "deployment_key", "lane_key"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "promotion_attempts_lane_fk": {
-          "columns": [
-            "organization_id",
-            "deployment_key",
-            "lane_key"
-          ],
+          "columns": ["organization_id", "deployment_key", "lane_key"],
           "referencedTable": "promotion_lanes",
           "referencedColumns": [
             "organization_id",
@@ -7316,13 +6801,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "promotion_lanes_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -7492,27 +6973,18 @@
       },
       "indexes": {
         "promotion_operations_resume_idx": {
-          "columns": [
-            "attempt_id",
-            "operation_index"
-          ],
+          "columns": ["attempt_id", "operation_index"],
           "unique": false,
           "where": "(state <> 'acknowledged'::text)"
         }
       },
       "uniqueConstraints": {
         "promotion_operations_attempt_index_unique": {
-          "columns": [
-            "attempt_id",
-            "operation_index"
-          ],
+          "columns": ["attempt_id", "operation_index"],
           "nullsNotDistinct": false
         },
         "promotion_operations_attempt_operation_unique": {
-          "columns": [
-            "attempt_id",
-            "operation_id"
-          ],
+          "columns": ["attempt_id", "operation_id"],
           "nullsNotDistinct": false
         },
         "promotion_operations_lane_operation_unique": {
@@ -7621,26 +7093,16 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "provider_catalog_checkpoints_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_catalog_checkpoints_provider_fk": {
-          "columns": [
-            "organization_id",
-            "platform_key"
-          ],
+          "columns": ["organization_id", "platform_key"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "organization_id",
-            "platform_key"
-          ],
+          "referencedColumns": ["organization_id", "platform_key"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -7756,57 +7218,36 @@
       },
       "indexes": {
         "provider_config_revisions_provider_version_unique": {
-          "columns": [
-            "provider_id",
-            "version"
-          ],
+          "columns": ["provider_id", "version"],
           "unique": true,
           "where": null
         }
       },
       "uniqueConstraints": {
         "provider_config_revisions_id_provider_organization_unique": {
-          "columns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["id", "provider_id", "organization_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "provider_config_revisions_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_config_revisions_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_config_revisions_provider_tenant_fk": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -7916,10 +7357,7 @@
       },
       "indexes": {
         "provider_connection_tests_provider_tested_idx": {
-          "columns": [
-            "provider_id",
-            "tested_at"
-          ],
+          "columns": ["provider_id", "tested_at"],
           "unique": false,
           "where": null
         }
@@ -7927,50 +7365,30 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "provider_connection_tests_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_connection_tests_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_connection_tests_revision_id_provider_config_revisions": {
-          "columns": [
-            "revision_id"
-          ],
+          "columns": ["revision_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_connection_tests_revision_tenant_fk": {
-          "columns": [
-            "revision_id",
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["revision_id", "provider_id", "organization_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "provider_id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -8031,10 +7449,7 @@
       },
       "indexes": {
         "provider_cursor_checkpoints_organization_provider_idx": {
-          "columns": [
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["organization_id", "provider_id"],
           "unique": false,
           "where": null
         }
@@ -8042,76 +7457,44 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "provider_cursor_checkpoints_advanced_by_run_id_import_runs_id_f": {
-          "columns": [
-            "advanced_by_run_id"
-          ],
+          "columns": ["advanced_by_run_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_cursor_checkpoints_config_revision_id_provider_config_": {
-          "columns": [
-            "config_revision_id"
-          ],
+          "columns": ["config_revision_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_cursor_checkpoints_config_tenant_fk": {
-          "columns": [
-            "config_revision_id",
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["config_revision_id", "provider_id", "organization_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "provider_id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_cursor_checkpoints_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_cursor_checkpoints_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_cursor_checkpoints_run_tenant_fk": {
-          "columns": [
-            "advanced_by_run_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["advanced_by_run_id", "organization_id", "provider_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -8226,46 +7609,29 @@
       "indexes": {},
       "uniqueConstraints": {
         "provider_health_states_provider_tenant_unique": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "provider_health_states_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_health_states_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_health_states_provider_tenant_fk": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -8517,11 +7883,7 @@
           "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
         },
         "provider_promotion_attempts_one_active_lane": {
-          "columns": [
-            "organization_id",
-            "deployment_key",
-            "platform_key"
-          ],
+          "columns": ["organization_id", "deployment_key", "platform_key"],
           "unique": true,
           "where": "(state = ANY (ARRAY['assembling'::text, 'ready'::text, 'in_progress'::text, 'retry_wait'::text]))"
         }
@@ -8696,11 +8058,7 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "provider_promotion_evaluations_lane_fk": {
-          "columns": [
-            "organization_id",
-            "deployment_key",
-            "platform_key"
-          ],
+          "columns": ["organization_id", "deployment_key", "platform_key"],
           "referencedTable": "provider_promotion_lanes",
           "referencedColumns": [
             "organization_id",
@@ -8923,13 +8281,9 @@
           "onUpdate": "no action"
         },
         "provider_promotion_lanes_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -9104,27 +8458,18 @@
       },
       "indexes": {
         "provider_promotion_operations_resume_idx": {
-          "columns": [
-            "attempt_id",
-            "operation_index"
-          ],
+          "columns": ["attempt_id", "operation_index"],
           "unique": false,
           "where": "(state <> 'acknowledged'::text)"
         }
       },
       "uniqueConstraints": {
         "provider_promotion_operations_attempt_index_unique": {
-          "columns": [
-            "attempt_id",
-            "operation_index"
-          ],
+          "columns": ["attempt_id", "operation_index"],
           "nullsNotDistinct": false
         },
         "provider_promotion_operations_attempt_operation_unique": {
-          "columns": [
-            "attempt_id",
-            "operation_id"
-          ],
+          "columns": ["attempt_id", "operation_id"],
           "nullsNotDistinct": false
         },
         "provider_promotion_operations_lane_operation_unique": {
@@ -9376,109 +8721,64 @@
       },
       "indexes": {
         "provider_schedules_due_idx": {
-          "columns": [
-            "organization_id",
-            "next_due_at"
-          ],
+          "columns": ["organization_id", "next_due_at"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "provider_schedules_provider_tenant_revision_unique": {
-          "columns": [
-            "provider_id",
-            "organization_id",
-            "config_revision_id"
-          ],
+          "columns": ["provider_id", "organization_id", "config_revision_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "provider_schedules_config_revision_id_provider_config_revisions": {
-          "columns": [
-            "config_revision_id"
-          ],
+          "columns": ["config_revision_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_schedules_last_run_id_import_runs_id_fk": {
-          "columns": [
-            "last_run_id"
-          ],
+          "columns": ["last_run_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_schedules_last_run_tenant_fk": {
-          "columns": [
-            "last_run_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["last_run_id", "organization_id", "provider_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_schedules_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_schedules_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_schedules_provider_tenant_fk": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_schedules_revision_tenant_fk": {
-          "columns": [
-            "config_revision_id",
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["config_revision_id", "provider_id", "organization_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "provider_id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -9570,69 +8870,43 @@
       },
       "indexes": {
         "provider_secret_versions_provider_created_idx": {
-          "columns": [
-            "organization_id",
-            "provider_id",
-            "created_at"
-          ],
+          "columns": ["organization_id", "provider_id", "created_at"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "provider_secret_versions_revision_unique": {
-          "columns": [
-            "revision_id"
-          ],
+          "columns": ["revision_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "provider_secret_versions_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_secret_versions_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_secret_versions_revision_id_provider_config_revisions_": {
-          "columns": [
-            "revision_id"
-          ],
+          "columns": ["revision_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_secret_versions_revision_tenant_fk": {
-          "columns": [
-            "revision_id",
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["revision_id", "provider_id", "organization_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "provider_id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -9818,17 +9092,9 @@
           "onUpdate": "no action"
         },
         "provider_source_cursor_fingerprints_source_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -9931,19 +9197,12 @@
       },
       "indexes": {
         "provider_source_cursors_provider_idx": {
-          "columns": [
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["organization_id", "provider_id"],
           "unique": false,
           "where": null
         },
         "provider_source_cursors_scope_unique": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "unique": true,
           "where": null
         }
@@ -10014,17 +9273,9 @@
           "onUpdate": "no action"
         },
         "provider_source_cursors_source_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -10116,11 +9367,7 @@
       },
       "indexes": {
         "provider_source_health_states_scope_unique": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "unique": true,
           "where": null
         }
@@ -10128,17 +9375,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "provider_source_health_states_source_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -10259,35 +9498,22 @@
       },
       "indexes": {
         "provider_source_instances_current_unique": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "unique": true,
           "where": "(state = ANY (ARRAY['paused'::provider_source_instance_state, 'active'::provider_source_instance_state]))"
         },
         "provider_source_instances_pause_request_idx": {
-          "columns": [
-            "organization_id",
-            "pause_requested_at"
-          ],
+          "columns": ["organization_id", "pause_requested_at"],
           "unique": false,
           "where": "(pause_requested_at IS NOT NULL)"
         },
         "provider_source_instances_profile_idx": {
-          "columns": [
-            "organization_id",
-            "connection_profile_id",
-            "created_at"
-          ],
+          "columns": ["organization_id", "connection_profile_id", "created_at"],
           "unique": false,
           "where": null
         },
         "provider_source_instances_provider_state_idx": {
-          "columns": [
-            "organization_id",
-            "provider_id",
-            "state"
-          ],
+          "columns": ["organization_id", "provider_id", "state"],
           "unique": false,
           "where": null
         }
@@ -10318,24 +9544,14 @@
             "source_type_key"
           ],
           "referencedTable": "source_connection_profiles",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "source_type_key"
-          ],
+          "referencedColumns": ["id", "organization_id", "source_type_key"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_source_instances_provider_fk": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -10483,18 +9699,12 @@
       },
       "indexes": {
         "provider_source_revisions_configuration_unique": {
-          "columns": [
-            "source_instance_id",
-            "configuration_hash"
-          ],
+          "columns": ["source_instance_id", "configuration_hash"],
           "unique": true,
           "where": null
         },
         "provider_source_revisions_number_unique": {
-          "columns": [
-            "source_instance_id",
-            "revision_number"
-          ],
+          "columns": ["source_instance_id", "revision_number"],
           "unique": true,
           "where": null
         }
@@ -10508,11 +9718,7 @@
             "source_type_key"
           ],
           "referencedTable": "source_connection_profiles",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "source_type_key"
-          ],
+          "referencedColumns": ["id", "organization_id", "source_type_key"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -10746,19 +9952,12 @@
       },
       "indexes": {
         "provider_source_runtime_states_activity_idx": {
-          "columns": [
-            "organization_id",
-            "activity",
-            "updated_at"
-          ],
+          "columns": ["organization_id", "activity", "updated_at"],
           "unique": false,
           "where": null
         },
         "provider_source_runtime_states_epoch_idx": {
-          "columns": [
-            "supervisor_epoch_id",
-            "updated_at"
-          ],
+          "columns": ["supervisor_epoch_id", "updated_at"],
           "unique": false,
           "where": null
         }
@@ -10810,26 +10009,16 @@
           "onUpdate": "no action"
         },
         "provider_source_runtime_states_epoch_fk": {
-          "columns": [
-            "supervisor_epoch_id"
-          ],
+          "columns": ["supervisor_epoch_id"],
           "referencedTable": "source_supervisor_epochs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
         "provider_source_runtime_states_profile_fk": {
-          "columns": [
-            "connection_profile_id",
-            "organization_id"
-          ],
+          "columns": ["connection_profile_id", "organization_id"],
           "referencedTable": "source_connection_profiles",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -10874,17 +10063,9 @@
           "onUpdate": "no action"
         },
         "provider_source_runtime_states_source_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -10997,10 +10178,7 @@
       },
       "indexes": {
         "provider_source_schedule_revisions_number_unique": {
-          "columns": [
-            "source_instance_id",
-            "revision_number"
-          ],
+          "columns": ["source_instance_id", "revision_number"],
           "unique": true,
           "where": null
         }
@@ -11008,17 +10186,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "provider_source_schedule_revisions_source_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11125,19 +10295,12 @@
       },
       "indexes": {
         "provider_source_schedules_due_idx": {
-          "columns": [
-            "organization_id",
-            "next_due_at"
-          ],
+          "columns": ["organization_id", "next_due_at"],
           "unique": false,
           "where": null
         },
         "provider_source_schedules_scope_unique": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "unique": true,
           "where": null
         }
@@ -11151,11 +10314,7 @@
             "source_instance_id"
           ],
           "referencedTable": "provider_source_schedule_revisions",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "source_instance_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "source_instance_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -11177,17 +10336,9 @@
           "onUpdate": "no action"
         },
         "provider_source_schedules_source_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11346,11 +10497,7 @@
           "where": null
         },
         "provider_source_test_jobs_runtime_queue_idx": {
-          "columns": [
-            "organization_id",
-            "state",
-            "queued_at"
-          ],
+          "columns": ["organization_id", "state", "queued_at"],
           "unique": false,
           "where": null
         },
@@ -11383,13 +10530,9 @@
           "onUpdate": "no action"
         },
         "provider_source_test_jobs_epoch_fk": {
-          "columns": [
-            "supervisor_epoch_id"
-          ],
+          "columns": ["supervisor_epoch_id"],
           "referencedTable": "source_supervisor_epochs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -11560,16 +10703,12 @@
       },
       "indexes": {
         "provider_source_test_results_attempt_unique": {
-          "columns": [
-            "request_attempt_id"
-          ],
+          "columns": ["request_attempt_id"],
           "unique": true,
           "where": null
         },
         "provider_source_test_results_job_unique": {
-          "columns": [
-            "job_id"
-          ],
+          "columns": ["job_id"],
           "unique": true,
           "where": null
         },
@@ -11587,11 +10726,7 @@
           "where": null
         },
         "provider_source_test_results_source_idx": {
-          "columns": [
-            "organization_id",
-            "source_instance_id",
-            "tested_at"
-          ],
+          "columns": ["organization_id", "source_instance_id", "tested_at"],
           "unique": false,
           "where": null
         }
@@ -11630,13 +10765,9 @@
           "onUpdate": "no action"
         },
         "provider_source_test_results_epoch_fk": {
-          "columns": [
-            "supervisor_epoch_id"
-          ],
+          "columns": ["supervisor_epoch_id"],
           "referencedTable": "source_supervisor_epochs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -11743,33 +10874,22 @@
       "indexes": {},
       "uniqueConstraints": {
         "provider_sources_id_organization_unique": {
-          "columns": [
-            "id",
-            "organization_id"
-          ],
+          "columns": ["id", "organization_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "provider_sources_active_revision_id_provider_config_revisions_i": {
-          "columns": [
-            "active_revision_id"
-          ],
+          "columns": ["active_revision_id"],
           "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "provider_sources_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11872,39 +10992,23 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "public_change_catalog_impacts_cause_fk": {
-          "columns": [
-            "organization_id",
-            "cause_sequence"
-          ],
+          "columns": ["organization_id", "cause_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "public_change_catalog_impacts_lifecycle_provider_fk": {
-          "columns": [
-            "organization_id",
-            "lifecycle_platform_key"
-          ],
+          "columns": ["organization_id", "lifecycle_platform_key"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "organization_id",
-            "platform_key"
-          ],
+          "referencedColumns": ["organization_id", "platform_key"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "public_change_catalog_impacts_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11996,20 +11100,12 @@
       },
       "indexes": {
         "public_change_causes_organization_occurred_idx": {
-          "columns": [
-            "organization_id",
-            "occurred_at",
-            "sequence"
-          ],
+          "columns": ["organization_id", "occurred_at", "sequence"],
           "unique": false,
           "where": null
         },
         "public_change_causes_source_head_idx": {
-          "columns": [
-            "organization_id",
-            "source_key",
-            "sequence"
-          ],
+          "columns": ["organization_id", "source_key", "sequence"],
           "unique": false,
           "where": null
         }
@@ -12017,13 +11113,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "public_change_causes_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -12032,9 +11124,7 @@
         "public_change_causes_entity_key_bounded": {
           "value": "((length(btrim(entity_key)) >= 1) AND (length(btrim(entity_key)) <= 512))"
         },
-        "public_change_causes_sequence_positive": {
-          "value": "(sequence > 0)"
-        },
+        "public_change_causes_sequence_positive": { "value": "(sequence > 0)" },
         "public_change_causes_source_key_bounded": {
           "value": "((source_key IS NULL) OR ((length(btrim(source_key)) >= 1) AND (length(btrim(source_key)) <= 128)))"
         },
@@ -12177,11 +11267,7 @@
           "where": null
         },
         "public_derivation_obligations_derivation_idx": {
-          "columns": [
-            "organization_id",
-            "derivation_kind",
-            "derivation_key"
-          ],
+          "columns": ["organization_id", "derivation_kind", "derivation_key"],
           "unique": false,
           "where": null
         }
@@ -12189,26 +11275,16 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "public_derivation_obligations_cause_tenant_fk": {
-          "columns": [
-            "organization_id",
-            "cause_sequence"
-          ],
+          "columns": ["organization_id", "cause_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "public_derivation_obligations_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -12292,10 +11368,7 @@
       },
       "indexes": {
         "public_repack_identity_mappings_change_idx": {
-          "columns": [
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["organization_id", "public_change_sequence"],
           "unique": false,
           "where": null
         }
@@ -12310,24 +11383,15 @@
           "nullsNotDistinct": false
         },
         "public_repack_identity_mappings_public_id_unique": {
-          "columns": [
-            "organization_id",
-            "public_repack_id"
-          ],
+          "columns": ["organization_id", "public_repack_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "public_repack_identity_mappings_change_fk": {
-          "columns": [
-            "organization_id",
-            "public_change_sequence"
-          ],
+          "columns": ["organization_id", "public_change_sequence"],
           "referencedTable": "public_change_causes",
-          "referencedColumns": [
-            "organization_id",
-            "sequence"
-          ],
+          "referencedColumns": ["organization_id", "sequence"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12347,13 +11411,9 @@
           "onUpdate": "no action"
         },
         "public_repack_identity_mappings_organization_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -12468,18 +11528,12 @@
       },
       "indexes": {
         "quarantine_attempts_one_running_unique": {
-          "columns": [
-            "quarantine_id"
-          ],
+          "columns": ["quarantine_id"],
           "unique": true,
           "where": "(state = 'running'::quarantine_attempt_state)"
         },
         "quarantine_attempts_organization_quarantine_started_idx": {
-          "columns": [
-            "organization_id",
-            "quarantine_id",
-            "started_at"
-          ],
+          "columns": ["organization_id", "quarantine_id", "started_at"],
           "unique": false,
           "where": null
         }
@@ -12487,61 +11541,37 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "quarantine_attempts_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_attempts_quarantine_id_quarantine_records_id_fk": {
-          "columns": [
-            "quarantine_id"
-          ],
+          "columns": ["quarantine_id"],
           "referencedTable": "quarantine_records",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_attempts_quarantine_tenant_fk": {
-          "columns": [
-            "quarantine_id",
-            "organization_id"
-          ],
+          "columns": ["quarantine_id", "organization_id"],
           "referencedTable": "quarantine_records",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_attempts_source_record_id_source_records_id_fk": {
-          "columns": [
-            "source_record_id"
-          ],
+          "columns": ["source_record_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_attempts_source_tenant_fk": {
-          "columns": [
-            "source_record_id",
-            "organization_id"
-          ],
+          "columns": ["source_record_id", "organization_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -12710,163 +11740,98 @@
       },
       "indexes": {
         "quarantine_records_delivery_occurrence_tenant_unique": {
-          "columns": [
-            "delivery_occurrence_id",
-            "organization_id"
-          ],
+          "columns": ["delivery_occurrence_id", "organization_id"],
           "unique": true,
           "where": null
         },
         "quarantine_records_delivery_occurrence_unique": {
-          "columns": [
-            "delivery_occurrence_id"
-          ],
+          "columns": ["delivery_occurrence_id"],
           "unique": true,
           "where": null
         },
         "quarantine_records_expiry_idx": {
-          "columns": [
-            "organization_id",
-            "expires_at"
-          ],
+          "columns": ["organization_id", "expires_at"],
           "unique": false,
           "where": null
         },
         "quarantine_records_organization_state_idx": {
-          "columns": [
-            "organization_id",
-            "state",
-            "created_at"
-          ],
+          "columns": ["organization_id", "state", "created_at"],
           "unique": false,
           "where": null
         },
         "quarantine_records_page_kind_index_unique": {
-          "columns": [
-            "page_id",
-            "record_kind",
-            "record_index"
-          ],
+          "columns": ["page_id", "record_kind", "record_index"],
           "unique": true,
           "where": null
         }
       },
       "uniqueConstraints": {
         "quarantine_records_id_organization_unique": {
-          "columns": [
-            "id",
-            "organization_id"
-          ],
+          "columns": ["id", "organization_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "quarantine_records_delivery_occurrence_fk": {
-          "columns": [
-            "delivery_occurrence_id",
-            "organization_id"
-          ],
+          "columns": ["delivery_occurrence_id", "organization_id"],
           "referencedTable": "source_delivery_occurrences",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_records_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_records_page_id_import_pages_id_fk": {
-          "columns": [
-            "page_id"
-          ],
+          "columns": ["page_id"],
           "referencedTable": "import_pages",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_records_page_run_tenant_fk": {
-          "columns": [
-            "page_id",
-            "organization_id",
-            "run_id"
-          ],
+          "columns": ["page_id", "organization_id", "run_id"],
           "referencedTable": "import_pages",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "run_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "run_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_records_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_records_provider_tenant_fk": {
-          "columns": [
-            "provider_id",
-            "organization_id"
-          ],
+          "columns": ["provider_id", "organization_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_records_run_id_import_runs_id_fk": {
-          "columns": [
-            "run_id"
-          ],
+          "columns": ["run_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_records_source_record_id_source_records_id_fk": {
-          "columns": [
-            "source_record_id"
-          ],
+          "columns": ["source_record_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "quarantine_records_source_tenant_fk": {
-          "columns": [
-            "source_record_id",
-            "organization_id"
-          ],
+          "columns": ["source_record_id", "organization_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -13004,32 +11969,22 @@
       },
       "indexes": {
         "retention_executions_organization_started_idx": {
-          "columns": [
-            "organization_id",
-            "started_at"
-          ],
+          "columns": ["organization_id", "started_at"],
           "unique": false,
           "where": null
         }
       },
       "uniqueConstraints": {
         "retention_executions_id_organization_unique": {
-          "columns": [
-            "id",
-            "organization_id"
-          ],
+          "columns": ["id", "organization_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "retention_executions_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -13102,13 +12057,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "settled_public_watermarks_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -13214,18 +12165,12 @@
       },
       "indexes": {
         "source_connection_health_episodes_open_unique": {
-          "columns": [
-            "connection_profile_id"
-          ],
+          "columns": ["connection_profile_id"],
           "unique": true,
           "where": "(closed_at IS NULL)"
         },
         "source_connection_health_episodes_profile_idx": {
-          "columns": [
-            "organization_id",
-            "connection_profile_id",
-            "opened_at"
-          ],
+          "columns": ["organization_id", "connection_profile_id", "opened_at"],
           "unique": false,
           "where": null
         }
@@ -13368,20 +12313,12 @@
       },
       "indexes": {
         "source_connection_profiles_name_unique": {
-          "columns": [
-            "organization_id",
-            "source_type_key",
-            "display_name"
-          ],
+          "columns": ["organization_id", "source_type_key", "display_name"],
           "unique": true,
           "where": null
         },
         "source_connection_profiles_state_idx": {
-          "columns": [
-            "organization_id",
-            "state",
-            "created_at"
-          ],
+          "columns": ["organization_id", "state", "created_at"],
           "unique": false,
           "where": null
         }
@@ -13389,11 +12326,7 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "source_connection_profiles_active_revision_fk": {
-          "columns": [
-            "active_revision_id",
-            "organization_id",
-            "id"
-          ],
+          "columns": ["active_revision_id", "organization_id", "id"],
           "referencedTable": "source_connection_revisions",
           "referencedColumns": [
             "id",
@@ -13404,13 +12337,9 @@
           "onUpdate": "no action"
         },
         "source_connection_profiles_org_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -13562,26 +12491,17 @@
       },
       "indexes": {
         "source_connection_revisions_active_unique": {
-          "columns": [
-            "connection_profile_id"
-          ],
+          "columns": ["connection_profile_id"],
           "unique": true,
           "where": "(state = 'active'::connection_revision_state)"
         },
         "source_connection_revisions_number_unique": {
-          "columns": [
-            "connection_profile_id",
-            "revision_number"
-          ],
+          "columns": ["connection_profile_id", "revision_number"],
           "unique": true,
           "where": null
         },
         "source_connection_revisions_state_idx": {
-          "columns": [
-            "organization_id",
-            "connection_profile_id",
-            "state"
-          ],
+          "columns": ["organization_id", "connection_profile_id", "state"],
           "unique": false,
           "where": null
         }
@@ -13595,11 +12515,7 @@
             "source_type_key"
           ],
           "referencedTable": "source_connection_profiles",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "source_type_key"
-          ],
+          "referencedColumns": ["id", "organization_id", "source_type_key"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -13740,9 +12656,7 @@
       },
       "indexes": {
         "source_connection_recovery_job_active_unique": {
-          "columns": [
-            "blocking_episode_id"
-          ],
+          "columns": ["blocking_episode_id"],
           "unique": true,
           "where": "((blocking_episode_id IS NOT NULL) AND (state = ANY (ARRAY['queued'::source_test_job_state, 'running'::source_test_job_state])))"
         },
@@ -13771,11 +12685,7 @@
           "where": "(recovery_blocked_revision_id IS NOT NULL)"
         },
         "source_connection_test_jobs_runtime_queue_idx": {
-          "columns": [
-            "organization_id",
-            "state",
-            "queued_at"
-          ],
+          "columns": ["organization_id", "state", "queued_at"],
           "unique": false,
           "where": null
         }
@@ -13798,13 +12708,9 @@
           "onUpdate": "no action"
         },
         "source_connection_test_jobs_epoch_fk": {
-          "columns": [
-            "supervisor_epoch_id"
-          ],
+          "columns": ["supervisor_epoch_id"],
           "referencedTable": "source_supervisor_epochs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -13979,25 +12885,17 @@
       },
       "indexes": {
         "source_connection_test_results_attempt_unique": {
-          "columns": [
-            "request_attempt_id"
-          ],
+          "columns": ["request_attempt_id"],
           "unique": true,
           "where": null
         },
         "source_connection_test_results_job_unique": {
-          "columns": [
-            "job_id"
-          ],
+          "columns": ["job_id"],
           "unique": true,
           "where": null
         },
         "source_connection_test_results_revision_idx": {
-          "columns": [
-            "organization_id",
-            "connection_revision_id",
-            "tested_at"
-          ],
+          "columns": ["organization_id", "connection_revision_id", "tested_at"],
           "unique": false,
           "where": null
         },
@@ -14040,13 +12938,9 @@
           "onUpdate": "no action"
         },
         "source_connection_test_results_epoch_fk": {
-          "columns": [
-            "supervisor_epoch_id"
-          ],
+          "columns": ["supervisor_epoch_id"],
           "referencedTable": "source_supervisor_epochs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -14279,26 +13173,32 @@
       },
       "indexes": {
         "source_delivery_occurrences_observation_idx": {
-          "columns": [
-            "semantic_observation_id"
-          ],
+          "columns": ["semantic_observation_id"],
           "unique": false,
           "where": null
         },
         "source_delivery_occurrences_page_index_unique": {
-          "columns": [
-            "page_id",
-            "record_index"
-          ],
+          "columns": ["page_id", "record_index"],
           "unique": true,
           "where": null
         },
-        "source_delivery_occurrences_run_idx": {
+        "source_delivery_occurrences_relationship_coverage_idx": {
+          "columns": ["organization_id", "source_revision_id", "id"],
+          "unique": false,
+          "where": null
+        },
+        "source_delivery_occurrences_relationship_cursor_idx": {
           "columns": [
             "organization_id",
-            "source_instance_id",
-            "run_id"
+            "source_revision_id",
+            "source_record_id",
+            "id"
           ],
+          "unique": false,
+          "where": "((source_record_id IS NOT NULL) AND (semantic_observation_id IS NOT NULL))"
+        },
+        "source_delivery_occurrences_run_idx": {
+          "columns": ["organization_id", "source_instance_id", "run_id"],
           "unique": false,
           "where": null
         }
@@ -14412,11 +13312,7 @@
             "source_instance_id"
           ],
           "referencedTable": "source_record_identities",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "source_instance_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "source_instance_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -14749,10 +13645,7 @@
           "where": null
         },
         "source_processor_diagnostic_events_retention_idx": {
-          "columns": [
-            "organization_id",
-            "expires_at"
-          ],
+          "columns": ["organization_id", "expires_at"],
           "unique": false,
           "where": null
         },
@@ -14767,10 +13660,7 @@
           "where": null
         },
         "source_processor_diagnostic_events_tenant_unique": {
-          "columns": [
-            "id",
-            "organization_id"
-          ],
+          "columns": ["id", "organization_id"],
           "unique": true,
           "where": null
         }
@@ -14843,15 +13733,9 @@
           "onUpdate": "no action"
         },
         "source_processor_diagnostics_audit_fk": {
-          "columns": [
-            "audit_event_id",
-            "organization_id"
-          ],
+          "columns": ["audit_event_id", "organization_id"],
           "referencedTable": "audit_events",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -15167,11 +14051,7 @@
       },
       "indexes": {
         "source_record_identities_provider_idx": {
-          "columns": [
-            "organization_id",
-            "provider_id",
-            "record_kind"
-          ],
+          "columns": ["organization_id", "provider_id", "record_kind"],
           "unique": false,
           "where": null
         },
@@ -15189,17 +14069,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "source_record_identities_source_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -15257,19 +14129,12 @@
       },
       "indexes": {
         "source_record_observations_organization_run_idx": {
-          "columns": [
-            "organization_id",
-            "run_id"
-          ],
+          "columns": ["organization_id", "run_id"],
           "unique": false,
           "where": null
         },
         "source_record_observations_record_run_page_unique": {
-          "columns": [
-            "source_record_id",
-            "run_id",
-            "page_id"
-          ],
+          "columns": ["source_record_id", "run_id", "page_id"],
           "unique": true,
           "where": null
         }
@@ -15277,74 +14142,44 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "source_record_observations_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_observations_page_id_import_pages_id_fk": {
-          "columns": [
-            "page_id"
-          ],
+          "columns": ["page_id"],
           "referencedTable": "import_pages",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_observations_page_run_tenant_fk": {
-          "columns": [
-            "page_id",
-            "organization_id",
-            "run_id"
-          ],
+          "columns": ["page_id", "organization_id", "run_id"],
           "referencedTable": "import_pages",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "run_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "run_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_observations_run_id_import_runs_id_fk": {
-          "columns": [
-            "run_id"
-          ],
+          "columns": ["run_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_observations_source_record_id_source_records_id_f": {
-          "columns": [
-            "source_record_id"
-          ],
+          "columns": ["source_record_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_observations_source_tenant_fk": {
-          "columns": [
-            "source_record_id",
-            "organization_id"
-          ],
+          "columns": ["source_record_id", "organization_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -15433,19 +14268,12 @@
       },
       "indexes": {
         "source_record_outcomes_organization_run_idx": {
-          "columns": [
-            "organization_id",
-            "run_id"
-          ],
+          "columns": ["organization_id", "run_id"],
           "unique": false,
           "where": null
         },
         "source_record_outcomes_page_kind_index_unique": {
-          "columns": [
-            "page_id",
-            "record_kind",
-            "record_index"
-          ],
+          "columns": ["page_id", "record_kind", "record_index"],
           "unique": true,
           "where": null
         }
@@ -15453,74 +14281,44 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "source_record_outcomes_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_outcomes_page_id_import_pages_id_fk": {
-          "columns": [
-            "page_id"
-          ],
+          "columns": ["page_id"],
           "referencedTable": "import_pages",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_outcomes_page_run_tenant_fk": {
-          "columns": [
-            "page_id",
-            "organization_id",
-            "run_id"
-          ],
+          "columns": ["page_id", "organization_id", "run_id"],
           "referencedTable": "import_pages",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "run_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "run_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_outcomes_run_id_import_runs_id_fk": {
-          "columns": [
-            "run_id"
-          ],
+          "columns": ["run_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_outcomes_source_record_id_source_records_id_fk": {
-          "columns": [
-            "source_record_id"
-          ],
+          "columns": ["source_record_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_outcomes_source_tenant_fk": {
-          "columns": [
-            "source_record_id",
-            "organization_id"
-          ],
+          "columns": ["source_record_id", "organization_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -15571,18 +14369,12 @@
       },
       "indexes": {
         "source_record_projection_revisions_pair_unique": {
-          "columns": [
-            "source_record_id",
-            "canonical_revision_id"
-          ],
+          "columns": ["source_record_id", "canonical_revision_id"],
           "unique": true,
           "where": null
         },
         "source_record_projection_revisions_source_projection_unique": {
-          "columns": [
-            "source_record_id",
-            "projection_index"
-          ],
+          "columns": ["source_record_id", "projection_index"],
           "unique": true,
           "where": null
         }
@@ -15590,61 +14382,37 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "source_record_projection_revisions_canonical_revision_id_canoni": {
-          "columns": [
-            "canonical_revision_id"
-          ],
+          "columns": ["canonical_revision_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_projection_revisions_organization_id_organization": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_projection_revisions_revision_tenant_fk": {
-          "columns": [
-            "canonical_revision_id",
-            "organization_id"
-          ],
+          "columns": ["canonical_revision_id", "organization_id"],
           "referencedTable": "canonical_revisions",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_projection_revisions_source_record_id_source_reco": {
-          "columns": [
-            "source_record_id"
-          ],
+          "columns": ["source_record_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_record_projection_revisions_source_tenant_fk": {
-          "columns": [
-            "source_record_id",
-            "organization_id"
-          ],
+          "columns": ["source_record_id", "organization_id"],
           "referencedTable": "source_records",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -15758,10 +14526,7 @@
       },
       "indexes": {
         "source_records_expiry_idx": {
-          "columns": [
-            "organization_id",
-            "expires_at"
-          ],
+          "columns": ["organization_id", "expires_at"],
           "unique": false,
           "where": null
         },
@@ -15780,22 +14545,15 @@
       },
       "uniqueConstraints": {
         "source_records_id_organization_unique": {
-          "columns": [
-            "id",
-            "organization_id"
-          ],
+          "columns": ["id", "organization_id"],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
         "source_records_first_page_id_import_pages_id_fk": {
-          "columns": [
-            "first_page_id"
-          ],
+          "columns": ["first_page_id"],
           "referencedTable": "import_pages",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -15817,35 +14575,23 @@
           "onUpdate": "no action"
         },
         "source_records_first_run_id_import_runs_id_fk": {
-          "columns": [
-            "first_run_id"
-          ],
+          "columns": ["first_run_id"],
           "referencedTable": "import_runs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_records_organization_id_organizations_id_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "source_records_provider_id_provider_sources_id_fk": {
-          "columns": [
-            "provider_id"
-          ],
+          "columns": ["provider_id"],
           "referencedTable": "provider_sources",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -15853,6 +14599,623 @@
       "checkConstraints": {
         "source_records_external_id_not_blank": {
           "value": "(length(TRIM(BOTH FROM external_id)) > 0)"
+        }
+      }
+    },
+    "source_relationship_confirmation_backfills": {
+      "columns": {
+        "completed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "confirmed_semantic_set_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "failure_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "phase": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "processed_through_source_record_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "retry_eligibility_cutoff_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_instance_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_revision_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "started_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "target_delivery_occurrence_id": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_semantic_set_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "source_relationship_confirmation_backfills_phase_idx": {
+          "columns": ["phase", "organization_id", "source_revision_id"],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "source_relationship_confirmation_backfills_revision_fk": {
+          "columns": [
+            "source_revision_id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "referencedTable": "provider_source_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "source_relationship_confirmation_backfills_count_check": {
+          "value": "((target_delivery_occurrence_id >= 0) AND (target_semantic_set_count >= 0) AND ((confirmed_semantic_set_count >= 0) AND (confirmed_semantic_set_count <= target_semantic_set_count)))"
+        },
+        "source_relationship_confirmation_backfills_failure_check": {
+          "value": "(((phase = 'failed'::text) AND (failure_code ~ '^[A-Z][A-Z0-9_]{0,127}$'::text)) OR ((phase <> 'failed'::text) AND (failure_code IS NULL)))"
+        },
+        "source_relationship_confirmation_backfills_phase_check": {
+          "value": "(phase = ANY (ARRAY['pending'::text, 'running'::text, 'complete'::text, 'failed'::text]))"
+        },
+        "source_relationship_confirmation_backfills_shape_check": {
+          "value": "(((phase = ANY (ARRAY['pending'::text, 'running'::text])) AND (completed_at IS NULL)) OR ((phase = 'complete'::text) AND (confirmed_semantic_set_count = target_semantic_set_count) AND (completed_at IS NOT NULL)) OR (phase = 'failed'::text))"
+        },
+        "source_relationship_confirmation_backfills_timestamp_check": {
+          "value": "((date_trunc('milliseconds'::text, created_at) = created_at) AND (date_trunc('milliseconds'::text, updated_at) = updated_at) AND (date_trunc('milliseconds'::text, retry_eligibility_cutoff_at) = retry_eligibility_cutoff_at) AND ((started_at IS NULL) OR (date_trunc('milliseconds'::text, started_at) = started_at)) AND ((completed_at IS NULL) OR (date_trunc('milliseconds'::text, completed_at) = completed_at)))"
+        }
+      }
+    },
+    "source_relationship_confirmation_sets": {
+      "columns": {
+        "confirmation_mode": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "confirmed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "declaration_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "normalized_contract_version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "relationship_count": {
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "semantic_effective_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "semantic_observation_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_canonical_content_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_canonical_revision_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_entity_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_instance_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_record_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_revision_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "source_relationship_confirmation_sets_heat_latest_idx": {
+          "columns": [
+            "organization_id",
+            "source_entity_id",
+            "semantic_effective_at",
+            "public_change_sequence",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "source_relationship_confirmation_sets_latest_semantic_idx": {
+          "columns": [
+            "organization_id",
+            "source_revision_id",
+            "source_entity_id",
+            "semantic_effective_at",
+            "public_change_sequence",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "source_relationship_confirmation_sets_release_idx": {
+          "columns": [
+            "organization_id",
+            "source_revision_id",
+            "source_entity_id",
+            "public_change_sequence"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "source_relationship_confirmation_sets_semantic_unique": {
+          "columns": [
+            "organization_id",
+            "source_revision_id",
+            "semantic_observation_id"
+          ],
+          "nullsNotDistinct": false
+        },
+        "source_relationship_confirmation_sets_tenant_unique": {
+          "columns": ["id", "organization_id"],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "source_relationship_confirmation_sets_change_fk": {
+          "columns": ["organization_id", "public_change_sequence"],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": ["organization_id", "sequence"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_entity_fk": {
+          "columns": ["source_entity_id", "organization_id"],
+          "referencedTable": "canonical_entities",
+          "referencedColumns": ["id", "organization_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_organization_fk": {
+          "columns": ["organization_id"],
+          "referencedTable": "organizations",
+          "referencedColumns": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_provider_fk": {
+          "columns": ["provider_id", "organization_id"],
+          "referencedTable": "provider_sources",
+          "referencedColumns": ["id", "organization_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_record_fk": {
+          "columns": [
+            "source_record_id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "referencedTable": "source_record_identities",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_revision_fk": {
+          "columns": [
+            "source_revision_id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "referencedTable": "provider_source_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_revision_origin_fk": {
+          "columns": [
+            "source_canonical_revision_id",
+            "source_entity_id",
+            "organization_id"
+          ],
+          "referencedTable": "canonical_revisions",
+          "referencedColumns": ["id", "entity_id", "organization_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_semantic_fk": {
+          "columns": [
+            "semantic_observation_id",
+            "organization_id",
+            "source_record_id",
+            "normalized_contract_version"
+          ],
+          "referencedTable": "source_semantic_observations",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "source_record_id",
+            "normalized_contract_version"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "source_relationship_confirmation_sets_contract_check": {
+          "value": "(normalized_contract_version = 'packscout.provider-observation.v1'::text)"
+        },
+        "source_relationship_confirmation_sets_count_check": {
+          "value": "((relationship_count >= 1) AND (relationship_count <= 2))"
+        },
+        "source_relationship_confirmation_sets_hash_check": {
+          "value": "((declaration_hash ~ '^[0-9a-f]{64}$'::text) AND (source_canonical_content_hash ~ '^[0-9a-f]{64}$'::text))"
+        },
+        "source_relationship_confirmation_sets_mode_check": {
+          "value": "(confirmation_mode = ANY (ARRAY['native'::text, 'adopted'::text]))"
+        },
+        "source_relationship_confirmation_sets_timestamp_check": {
+          "value": "((date_trunc('milliseconds'::text, semantic_effective_at) = semantic_effective_at) AND (date_trunc('milliseconds'::text, confirmed_at) = confirmed_at) AND (date_trunc('milliseconds'::text, created_at) = created_at))"
+        }
+      }
+    },
+    "source_relationship_confirmations": {
+      "columns": {
+        "canonical_relationship_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "confirmation_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "confirmation_set_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "heat_effective_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "relationship_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_entity_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_external_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_platform_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_record_kind": {
+          "type": "canonical_record_kind",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "source_relationship_confirmations_effective_cursor_idx": {
+          "columns": [
+            "organization_id",
+            "heat_effective_public_change_sequence",
+            "confirmation_public_change_sequence",
+            "confirmation_set_id",
+            "canonical_relationship_id"
+          ],
+          "unique": false,
+          "where": "(heat_effective_public_change_sequence IS NOT NULL)"
+        },
+        "source_relationship_confirmations_relationship_idx": {
+          "columns": [
+            "organization_id",
+            "canonical_relationship_id",
+            "confirmation_set_id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "source_relationship_confirmations_set_kind_idx": {
+          "columns": [
+            "organization_id",
+            "confirmation_set_id",
+            "relationship_kind"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "source_relationship_confirmations_target_idx": {
+          "columns": [
+            "organization_id",
+            "target_platform_key",
+            "target_record_kind",
+            "target_external_id",
+            "confirmation_set_id"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "source_relationship_confirmations_kind_unique": {
+          "columns": [
+            "confirmation_set_id",
+            "organization_id",
+            "relationship_kind"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "source_relationship_confirmations_relationship_fk": {
+          "columns": [
+            "canonical_relationship_id",
+            "organization_id",
+            "source_entity_id",
+            "relationship_kind",
+            "target_platform_key",
+            "target_record_kind",
+            "target_external_id"
+          ],
+          "referencedTable": "canonical_relationships",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "source_entity_id",
+            "relationship_kind",
+            "target_platform_key",
+            "target_record_kind",
+            "target_external_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmations_set_fk": {
+          "columns": ["confirmation_set_id", "organization_id"],
+          "referencedTable": "source_relationship_confirmation_sets",
+          "referencedColumns": ["id", "organization_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "source_relationship_confirmations_heat_sequence_check": {
+          "value": "((confirmation_public_change_sequence > 0) AND ((heat_effective_public_change_sequence IS NULL) OR (heat_effective_public_change_sequence >= confirmation_public_change_sequence)))"
+        },
+        "source_relationship_confirmations_kind_check": {
+          "value": "(((relationship_kind = 'pack'::text) AND (target_record_kind = 'pack'::canonical_record_kind)) OR ((relationship_kind = 'card'::text) AND (target_record_kind = 'catalog_asset'::canonical_record_kind)))"
+        },
+        "source_relationship_confirmations_timestamp_check": {
+          "value": "(date_trunc('milliseconds'::text, created_at) = created_at)"
         }
       }
     },
@@ -16092,17 +15455,12 @@
       },
       "indexes": {
         "source_request_attempts_lease_unique": {
-          "columns": [
-            "request_lease_id"
-          ],
+          "columns": ["request_lease_id"],
           "unique": true,
           "where": null
         },
         "source_request_attempts_retention_idx": {
-          "columns": [
-            "organization_id",
-            "expires_at"
-          ],
+          "columns": ["organization_id", "expires_at"],
           "unique": false,
           "where": null
         },
@@ -16117,11 +15475,7 @@
           "where": null
         },
         "source_request_attempts_uncertain_idx": {
-          "columns": [
-            "state",
-            "supervisor_epoch_id",
-            "started_at"
-          ],
+          "columns": ["state", "supervisor_epoch_id", "started_at"],
           "unique": false,
           "where": null
         }
@@ -16178,13 +15532,9 @@
           "onUpdate": "no action"
         },
         "source_request_attempts_epoch_fk": {
-          "columns": [
-            "supervisor_epoch_id"
-          ],
+          "columns": ["supervisor_epoch_id"],
           "referencedTable": "source_supervisor_epochs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -16212,17 +15562,9 @@
           "onUpdate": "no action"
         },
         "source_request_attempts_source_fk": {
-          "columns": [
-            "source_instance_id",
-            "organization_id",
-            "provider_id"
-          ],
+          "columns": ["source_instance_id", "organization_id", "provider_id"],
           "referencedTable": "provider_source_instances",
-          "referencedColumns": [
-            "id",
-            "organization_id",
-            "provider_id"
-          ],
+          "referencedColumns": ["id", "organization_id", "provider_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -16412,18 +15754,12 @@
       },
       "indexes": {
         "source_retention_executions_started_idx": {
-          "columns": [
-            "organization_id",
-            "started_at"
-          ],
+          "columns": ["organization_id", "started_at"],
           "unique": false,
           "where": null
         },
         "source_retention_executions_tenant_unique": {
-          "columns": [
-            "id",
-            "organization_id"
-          ],
+          "columns": ["id", "organization_id"],
           "unique": true,
           "where": null
         }
@@ -16431,13 +15767,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "source_retention_executions_org_fk": {
-          "columns": [
-            "organization_id"
-          ],
+          "columns": ["organization_id"],
           "referencedTable": "organizations",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -16539,11 +15871,7 @@
           "where": null
         },
         "source_semantic_observations_scope_unique": {
-          "columns": [
-            "id",
-            "organization_id",
-            "source_record_id"
-          ],
+          "columns": ["id", "organization_id", "source_record_id"],
           "unique": true,
           "where": null
         }
@@ -16551,15 +15879,9 @@
       "uniqueConstraints": {},
       "foreignKeys": {
         "source_semantic_observations_record_fk": {
-          "columns": [
-            "source_record_id",
-            "organization_id"
-          ],
+          "columns": ["source_record_id", "organization_id"],
           "referencedTable": "source_record_identities",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -16708,33 +16030,22 @@
       },
       "indexes": {
         "source_supervisor_epochs_active_unique": {
-          "columns": [
-            "environment_key"
-          ],
+          "columns": ["environment_key"],
           "unique": true,
           "where": "(state = ANY (ARRAY['active'::supervisor_epoch_state, 'fenced_draining'::supervisor_epoch_state]))"
         },
         "source_supervisor_epochs_lease_token_unique": {
-          "columns": [
-            "lease_token"
-          ],
+          "columns": ["lease_token"],
           "unique": true,
           "where": null
         },
         "source_supervisor_epochs_number_unique": {
-          "columns": [
-            "environment_key",
-            "epoch_number"
-          ],
+          "columns": ["environment_key", "epoch_number"],
           "unique": true,
           "where": null
         },
         "source_supervisor_epochs_owner_idx": {
-          "columns": [
-            "environment_key",
-            "state",
-            "lease_expires_at"
-          ],
+          "columns": ["environment_key", "state", "lease_expires_at"],
           "unique": false,
           "where": null
         }
@@ -16820,11 +16131,7 @@
       },
       "indexes": {
         "source_supervisor_profile_states_profile_idx": {
-          "columns": [
-            "organization_id",
-            "connection_profile_id",
-            "updated_at"
-          ],
+          "columns": ["organization_id", "connection_profile_id", "updated_at"],
           "unique": false,
           "where": null
         }
@@ -16841,26 +16148,16 @@
       },
       "foreignKeys": {
         "source_supervisor_profile_states_epoch_fk": {
-          "columns": [
-            "supervisor_epoch_id"
-          ],
+          "columns": ["supervisor_epoch_id"],
           "referencedTable": "source_supervisor_epochs",
-          "referencedColumns": [
-            "id"
-          ],
+          "referencedColumns": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "source_supervisor_profile_states_profile_fk": {
-          "columns": [
-            "connection_profile_id",
-            "organization_id"
-          ],
+          "columns": ["connection_profile_id", "organization_id"],
           "referencedTable": "source_connection_profiles",
-          "referencedColumns": [
-            "id",
-            "organization_id"
-          ],
+          "referencedColumns": ["id", "organization_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -17016,17 +16313,12 @@
       },
       "indexes": {
         "worker_instances_heartbeat_idx": {
-          "columns": [
-            "last_heartbeat_at"
-          ],
+          "columns": ["last_heartbeat_at"],
           "unique": false,
           "where": null
         },
         "worker_instances_state_heartbeat_idx": {
-          "columns": [
-            "state",
-            "last_heartbeat_at"
-          ],
+          "columns": ["state", "last_heartbeat_at"],
           "unique": false,
           "where": null
         }
@@ -17062,33 +16354,17 @@
     "foreignKeys": {
       "canonical_entities_current_revision_scope_fk": {
         "table": "canonical_entities",
-        "columns": [
-          "current_revision_id",
-          "id",
-          "organization_id"
-        ],
+        "columns": ["current_revision_id", "id", "organization_id"],
         "referencedTable": "canonical_revisions",
-        "referencedColumns": [
-          "id",
-          "entity_id",
-          "organization_id"
-        ],
+        "referencedColumns": ["id", "entity_id", "organization_id"],
         "onDelete": "restrict",
         "onUpdate": "no action"
       },
       "provider_sources_active_revision_scope_fk": {
         "table": "provider_sources",
-        "columns": [
-          "active_revision_id",
-          "id",
-          "organization_id"
-        ],
+        "columns": ["active_revision_id", "id", "organization_id"],
         "referencedTable": "provider_config_revisions",
-        "referencedColumns": [
-          "id",
-          "provider_id",
-          "organization_id"
-        ],
+        "referencedColumns": ["id", "provider_id", "organization_id"],
         "onDelete": "restrict",
         "onUpdate": "no action"
       }

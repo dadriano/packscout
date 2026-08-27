@@ -123,17 +123,93 @@ clearing Convex. Correct the deployment configuration and repeat bootstrap.
 
 ## Initial backfill and enablement
 
+The combined production worker has two ordered, durable startup prerequisites.
+It first materializes source-native V1 relationship confirmations through each
+source revision's frozen delivery-occurrence watermark. It then repairs
+normalized Heat from every confirmation-set item through a newly frozen public
+causal watermark and assigns authoritative `catalog_order_sequence` values in
+causal order. Repeated confirmation sets over one provider pull keep one stable
+realized-pull identity; later corrections receive durable duplicate outcomes,
+while their set-scoped catalog snapshots remain independently attributable.
+Only after both prerequisites report `complete` may the source supervisor,
+import, provider/manifest promotion, Heat publication, retention, or message
+lanes start.
+
+Both repairs use bounded transactions and durable cursors. Concurrent worker
+instances serialize each step with database advisory locks; a non-runner waits
+and rechecks the same durable state. `SIGINT` or `SIGTERM` leaves the last
+committed cursor resumable and is a normal cooperative stop, not a failed
+repair. A `pending`, `running`, `failed`, missing, count-inconsistent, or
+watermark-inconsistent checkpoint fails reads, window closure, forward Heat
+writes, provider readiness, and promotion closed. Do not replay import pages,
+restart legacy ingestion, edit a cursor, or infer completion from the absence
+of rows.
+
+Checkpoint and normalized-evidence DML belongs only to the trusted combined
+worker/migration database role. Operator, reporting, and incident-query roles
+must remain read-only on these tables; ad hoc writes with application-owner
+authority are not a supported repair mechanism.
+
+Relationship repair pages advance over the materialized confirmation/effective
+sequence tuple, and catalog ordering pages advance over the remaining unordered
+partial index. Each phase takes one frozen target count and one terminal count;
+it must not repeatedly rescan the full historical source set per page.
+
+For the approved organization, retain the bounded checkpoint proof below. Do
+not include the organization UUID in the evidence bundle:
+
+```sql
+select phase, count(*)::bigint as revision_count,
+       sum(target_semantic_set_count)::bigint as target_set_count,
+       sum(confirmed_semantic_set_count)::bigint as confirmed_set_count
+from public.source_relationship_confirmation_backfills
+where organization_id = $1::uuid
+group by phase
+order by phase;
+
+select phase, target_public_change_sequence,
+       processed_through_public_change_sequence,
+       processed_through_confirmation_public_change_sequence,
+       processed_through_confirmation_set_id,
+       processed_through_relationship_id,
+       target_relationship_source_count, relationship_source_count,
+       target_catalog_observation_count, catalog_observation_count,
+       failure_code
+from public.normalized_heat_relationship_backfills
+where organization_id = $1::uuid;
+
+select count(*)::bigint as unordered_catalog_observation_count
+from public.normalized_heat_observations
+where organization_id = $1::uuid
+  and observation_kind = 'catalog_snapshot'
+  and catalog_order_sequence is null;
+```
+
+Every relationship-confirmation row must be `complete` with equal target and
+confirmed counts. The Heat row must be `complete`, have equal relationship and
+catalog target/processed counts, have no failure code, and the unordered count
+must be zero. The frozen causal and delivery watermarks and these exact counts
+are the restart proof; a newer ordinary forward write does not invalidate a
+completed historical repair.
+
 The first catalog is allowed only when all of these gates pass:
 
 1. An approved, versioned public catalog configuration and governed public
    repack mappings exist at or before the target watermark.
-2. Every enabled platform resolves to an active provider configuration revision.
-3. Every enabled revision has a successful import that reached provider head.
-4. Every causal derivation through the target is settled. Business-unavailable
+2. Every enabled platform resolves to one exact active source instance and
+   source-native revision.
+3. Every exact active source revision has a successful import that reached
+   provider head.
+4. Every source-native V1 revision has complete, count-consistent relationship
+   confirmation coverage, including exact V1 adoption of a physical edge first
+   created by the retired legacy projector.
+5. The normalized Heat relationship repair and causal catalog ordering are
+   complete and count-consistent.
+6. Every causal derivation through the target is settled. Business-unavailable
    outcomes are valid; pending, claimed, or technical-failure outcomes are not.
-5. The deterministic full rebuild passes public projection, origin, reference,
+7. The deterministic full rebuild passes public projection, origin, reference,
    record-count, byte-count, and hash checks.
-6. The authenticated bootstrap proves the complete remote provider-head graph
+8. The authenticated bootstrap proves the complete remote provider-head graph
    plus a pristine, cleared, or exact PostgreSQL-owned active manifest state.
 
 `INITIAL_BACKFILL_INCOMPLETE`, `INITIAL_PROVIDER_DELAYED`,
@@ -153,6 +229,37 @@ map. PostgreSQL rejects removal while the platform is still public or has
 dispatched recovery work, including a concurrent first dispatch. Never delete
 the provider credential to force omission; the manifest pointer is the only
 public cutover.
+
+### ClutchPacks preproduction catalog-only canary
+
+The sole approved exception to the organization-wide startup gate is the
+preproduction ClutchPacks catalog canary. All shared workers must be stopped;
+the approved configuration, enabled-platform set, and provider credential map
+must each contain exactly `clutchpacks`; its current source-native V1 import
+must have reached provider head; and the PostgreSQL organization, deployment
+key, and Convex hostname must be the reviewed preproduction targets. First run
+the read-only target-bound plan, then copy its exact opaque confirmation into
+the protected execute environment:
+
+```bash
+npm run catalog:canary:clutchpacks:preproduction -- --dry-run
+PACKSCOUT_CLUTCHPACKS_CANARY_CONFIRMATION='<plan confirmation>' \
+  npm run catalog:canary:clutchpacks:preproduction -- --execute
+```
+
+The command requires `NODE_ENV=production`, `PACKSCOUT_DATABASE_URL`,
+`PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64`, `PACKSCOUT_PUBLIC_ORGANIZATION_ID`, the
+normal Promotion V2 URL/deployment/provider/manifest credentials,
+`PACKSCOUT_RUNTIME_ENVIRONMENT=preproduction`, and
+`PACKSCOUT_CUTOVER_WORKERS_STOPPED=YES`. The target must be pristine, cleared,
+or exactly owned by the authenticated bootstrap proof. It repairs coverage
+only for ClutchPacks, reports aggregate source-revision and semantic-set counts,
+then proves durable provider completion before attempting manifest activation.
+It never constructs Heat, retention, ingestion, source-supervisor, or combined
+worker lanes; Heat must remain `NOT_PUBLISHED`. Remove this scoped entrypoint
+after the ClutchPacks preproduction certification (and before live activation).
+Normal production startup remains organization-wide and must complete both
+relationship and normalized-Heat prerequisites.
 
 ## Manifest composition trust and read bounds
 
@@ -394,13 +501,59 @@ binding, proof bodies, operation bytes, receipts, or credentials.
 
 ## Clean preproduction cutover
 
-This is a one-time, prelaunch replacement of the obsolete single-release
-catalog and pre-manifest Heat publication state. There is no dual read, dual
-write, optional-field compatibility path, or authenticated runtime purge
-endpoint. Run the reset **before** PostgreSQL migration
-`20260816030000_heat_manifest_alignment` and before deploying the
-provider-release/manifest Convex schema. That migration deliberately refuses
-old Heat attempts whose content identity has no manifest-source proof.
+There is no dual read, dual write, optional-field compatibility path, or
+authenticated runtime purge endpoint. Choose exactly one target path: prove a
+brand-new dedicated deployment empty, or reset an existing deployment that
+still contains the obsolete single-release catalog and pre-manifest Heat state.
+
+### Brand-new dedicated Convex target
+
+A newly created deployment dedicated to Packscout may receive the
+provider-release, manifest, and manifest-aligned Heat schema before PostgreSQL
+migration only while it is deliberately inert. Set
+`PACKSCOUT_RUNTIME_ENVIRONMENT=preproduction`, leave all publication authority,
+mock-seed, mock-Heat, and `PACKSCOUT_PUBLIC_ORIGIN_SET_HASH` variables absent,
+and do not connect a worker, frontend, or admin service. Deploy from the exact
+reviewed commit without a preview-run or seed command, then run:
+
+```bash
+npm run cutover:preflight:fresh-convex:preproduction -- \
+  --deployment <explicit-preproduction-selector-or-deployment-name>
+```
+
+The verifier has no execute mode. It strips ambient Convex deployment and
+deploy-key variables from child commands, supplies the explicit target to every
+read, reads only environment-variable names plus the non-secret runtime value,
+checks the closed list of every application table for any first document, and
+requires the public shell to return `RELEASE_UNAVAILABLE`. Reserved `dev`,
+`prod`, `default`, `local`, `production`, and `live` selectors are refused. Its
+canonical JSON contains only bounded counts, stable public outcomes, and
+domain-separated scope/table/proof digests; it never includes the deployment
+selector, an environment value other than `preproduction`, a row, or a secret.
+
+Require `status=passed`, `readOnly=true`, all 36 application tables empty, zero
+forbidden variables, and the expected public-shell result. Retain the sanitized
+proof and its digest with the target-creation audit record and exact deployed
+commit. This proves only that the new Convex target is empty and fail-closed; it
+does not authorize PostgreSQL migration, configuration approval, signing keys,
+worker startup, or publication. Re-run it after any schema redeploy and
+immediately before adding publication configuration. Once publication authority
+or any application row exists, this branch is no longer valid.
+
+Do not run the obsolete-state reset against a brand-new deployment. Final
+Task 014 evidence still requires independently verified target backup/provenance
+and unchanged PostgreSQL canonical, settlement, approved-configuration, and
+normalized-Heat digests; record both obsolete deletion counts as zero for the
+approved fresh-target path.
+
+### Existing obsolete target reset
+
+This is the one-time, prelaunch replacement path for obsolete single-release
+catalog and pre-manifest Heat publication state. Run the reset **before**
+PostgreSQL migration `20260816030000_heat_manifest_alignment` and before
+deploying the provider-release/manifest Convex schema. That migration
+deliberately refuses old Heat attempts whose content identity has no
+manifest-source proof.
 
 The reset command is preproduction-only and dry-run by default:
 
@@ -516,14 +669,38 @@ construct or reuse a confirmation from another run.
 6. Require the terminal reset stage `complete`, identical before/after protected
    PostgreSQL digest, expected scoped deletion counts, and the full Convex clear
    count. Do not infer success from an empty public response.
-7. Only now apply PostgreSQL migration
-   `20260816030000_heat_manifest_alignment` and subsequent migrations, then
+7. On the obsolete-target reset path, only now apply PostgreSQL migration
+   `20260816030000_heat_manifest_alignment`,
+   `20260826005000_source_relationship_confirmations`,
+   `20260826010000_heat_relationship_causality`, and subsequent migrations, then
    deploy the provider-release, global-manifest, and manifest-aligned Heat
-   Convex contracts.
-8. Before enabling claims, prove the new provider, manifest, and Heat
-   publication state is empty and let authenticated bootstrap persist the exact
-   proven-empty anchor. Start provider completion, activate the first complete
-   same-epoch manifest, and publish/read back one exactly aligned Heat frame.
+   Convex contracts. On the approved fresh-target path, keep Convex inert while
+   applying those PostgreSQL migrations, deploy the exact final Convex commit if
+   it changed, and repeat the fresh-target preflight before configuring
+   publication authority.
+8. While every worker remains stopped, open **Provider Sources** and choose **Reassert
+   promotion identity** once for every source whose current state is `active`.
+   This idempotent action appends the exact source-instance/source-revision
+   lifecycle decision required by V1 promotion without changing the cursor or
+   scheduling another run. Confirm every expected active platform appears in
+   manifest eligibility before continuing. Promotion deliberately remains
+   unavailable while an active or paused source has only legacy lifecycle
+   causality; do not bypass that fence or interpret it as a disabled provider.
+   If a source is fenced as **Action required**, repair it through **Disable →
+   Test source → Activate paused → Resume**; the final resume publishes the
+   source-native identity and must precede the eligibility confirmation.
+9. Prove the new provider, manifest, and Heat publication state is empty.
+10. Start only the new combined production worker. Its startup prerequisite
+   must complete relationship confirmation discovery/materialization first and
+   the normalized Heat relationship/catalog-order repair second. No sibling
+   lane may claim work before that ordered prerequisite returns. Retain the
+   exact complete/count-consistent SQL proof from **Initial backfill and
+   enablement**. Stop on a missing, pending, running, failed, or inconsistent
+   row; ordinary restarts resume the durable cursors and must not replay source
+   pages. After the prerequisite releases the lanes, let authenticated
+   bootstrap persist the exact proven-empty anchor, start provider completion,
+   activate the first complete same-epoch manifest, and publish/read back one
+   exactly aligned Heat frame.
 
 The Convex clears and PostgreSQL transaction cannot be atomic with each other.
 A failure before the first clear is non-destructive. Once a clear starts, the

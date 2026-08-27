@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Prisma } from "@prisma/client";
 import { IngestionPersistenceRepository } from "./ingestion-repository.ts";
 import {
   normalizedHeatRetainedUntilSql,
-  persistNormalizedHeatObservationsForCanonicalWrites,
   PrismaNormalizedHeatObservationRepository,
 } from "./normalized-heat-observation-repository.ts";
+import { persistNormalizedHeatObservationsForCanonicalWrites } from
+  "./normalized-heat-persistence.ts";
 import {
   PrismaPublicRepackIdentityMappingRepository,
   PublicRepackIdentityMappingConflictError,
@@ -31,6 +33,7 @@ const ids = {
   lateRun: "55000000-0000-4000-8000-000000000032",
   malformedRun: "55000000-0000-4000-8000-000000000033",
   missingMappingRun: "55000000-0000-4000-8000-000000000034",
+  unmappedPackRun: "55000000-0000-4000-8000-000000000040",
   mappedAfterApprovalRun: "55000000-0000-4000-8000-000000000035",
   highSequenceRun: "55000000-0000-4000-8000-000000000036",
   reparentRun: "55000000-0000-4000-8000-000000000037",
@@ -55,7 +58,7 @@ function packContent() {
   return {
     schemaVersion: "catalog-projection-v1",
     entityType: "pack",
-    availability: "active",
+    availability: "available",
     priceValueMinor: 2_500,
     priceCurrency: "USD",
     buybackPercent: 80,
@@ -66,23 +69,36 @@ function assetContent(externalId: string) {
   return {
     schemaVersion: "catalog-projection-v1",
     entityType: "catalog_asset",
-    relatedPackExternalId: "pack-1",
-    availability: "active",
+    relatedPackExternalId: null,
+    availability: "available",
     name: externalId,
   };
 }
 
-function pullContent(externalId: string, value: unknown) {
+function pullContent(value: unknown) {
   return {
     eventKind: "pull",
-    occurredAt: sourceAt.toISOString(),
-    collectedAt: collectedAt.toISOString(),
-    packExternalId: "pack-1",
-    assetExternalId: `${externalId}-asset`,
     value,
     valueSource: "provider-reported",
     actorKeys: { opener: "actor:v1:private-pseudonym" },
   };
+}
+
+function pullRelationshipEvidence(assetExternalId: string, packExternalId = "pack-1") {
+  return [
+    {
+      relationshipKind: "card",
+      targetPlatformKey: "platform-a",
+      targetRecordKind: "catalog_asset" as const,
+      targetExternalId: assetExternalId,
+    },
+    {
+      relationshipKind: "pack",
+      targetPlatformKey: "platform-a",
+      targetRecordKind: "pack" as const,
+      targetExternalId: packExternalId,
+    },
+  ];
 }
 
 function initialPage(runId: string): CommitPageInput {
@@ -128,7 +144,10 @@ function initialPage(runId: string): CommitPageInput {
             platformKey: "platform-a",
             recordKind: "catalog_asset",
             externalId: "asset-2",
-            content: assetContent("asset-2"),
+            content: {
+              ...assetContent("asset-2"),
+              availability: "unavailable",
+            },
             sourceUpdatedAt: sourceAt,
             sourceCollectedAt: collectedAt,
           },
@@ -144,10 +163,11 @@ function initialPage(runId: string): CommitPageInput {
           platformKey: "platform-a",
           recordKind: "pull",
           externalId: "pull-valued",
-          content: pullContent("pull-valued", {
+          content: pullContent({
             amountMinor: 5_000,
             currency: "USD",
           }),
+          relationships: pullRelationshipEvidence("asset-1"),
           sourceUpdatedAt: sourceAt,
           sourceCollectedAt: collectedAt,
         }],
@@ -162,7 +182,8 @@ function initialPage(runId: string): CommitPageInput {
           platformKey: "platform-a",
           recordKind: "pull",
           externalId: "pull-missing-value",
-          content: pullContent("pull-missing-value", null),
+          content: pullContent(null),
+          relationships: pullRelationshipEvidence("asset-2"),
           sourceUpdatedAt: sourceAt,
           sourceCollectedAt: collectedAt,
         }],
@@ -187,11 +208,101 @@ async function createRun(
   });
 }
 
+async function refreshPullRevisionsAfterRelationships(input: {
+  ingestion: IngestionPersistenceRepository;
+  setup: PipelineSetupRepository;
+  acceptedAt: Date;
+  pulls: readonly Readonly<{
+    externalId: string;
+    assetExternalId: string;
+    packExternalId: string;
+    occurredAt: Date;
+    value: unknown;
+  }>[];
+}): Promise<void> {
+  const runId = randomUUID();
+  await createRun(input.setup, runId, input.acceptedAt);
+  await input.ingestion.commitPage({
+    organizationId: ids.organization,
+    providerId: ids.provider,
+    configRevisionId: ids.configuration,
+    runId,
+    pageNumber: 1,
+    requestedCursor: null,
+    nextCursor: null,
+    hasMore: false,
+    payload: { fixture: "post-relationship-revision" },
+    committedAt: input.acceptedAt,
+    records: input.pulls.map((pull) => ({
+      recordKind: "pull" as const,
+      externalId: pull.externalId,
+      sourceTime: pull.occurredAt,
+      collectedAt,
+      payload: { fixture: "post-relationship-revision" },
+      projections: [{
+        platformKey: "platform-a",
+        recordKind: "pull" as const,
+        externalId: pull.externalId,
+        content: {
+          ...pullContent(pull.value),
+          fixtureRevision: runId,
+        },
+        relationships: pullRelationshipEvidence(
+          pull.assetExternalId,
+          pull.packExternalId,
+        ),
+        sourceUpdatedAt: pull.occurredAt,
+        sourceCollectedAt: collectedAt,
+      }],
+    })),
+  });
+}
+
+async function refreshAssetRevisionsAfterRelationships(input: {
+  ingestion: IngestionPersistenceRepository;
+  setup: PipelineSetupRepository;
+  acceptedAt: Date;
+}): Promise<void> {
+  const runId = randomUUID();
+  await createRun(input.setup, runId, input.acceptedAt);
+  await input.ingestion.commitPage({
+    organizationId: ids.organization,
+    providerId: ids.provider,
+    configRevisionId: ids.configuration,
+    runId,
+    pageNumber: 1,
+    requestedCursor: null,
+    nextCursor: null,
+    hasMore: false,
+    payload: { fixture: "post-relationship-assets" },
+    committedAt: input.acceptedAt,
+    records: [{
+      recordKind: "catalog",
+      externalId: `catalog-${runId}`,
+      sourceTime: committedAt,
+      collectedAt,
+      payload: { fixture: "post-relationship-assets" },
+      projections: ["asset-1", "asset-2"].map((externalId) => ({
+        platformKey: "platform-a",
+        recordKind: "catalog_asset" as const,
+        externalId,
+        content: {
+          ...assetContent(externalId),
+          fixtureRevision: runId,
+        },
+        sourceUpdatedAt: committedAt,
+        sourceCollectedAt: collectedAt,
+      })),
+    }],
+  });
+}
+
 async function commitSinglePull(input: {
   ingestion: IngestionPersistenceRepository;
   setup: PipelineSetupRepository;
   runId: string;
   externalId: string;
+  assetExternalId?: string;
   packExternalId: string;
   occurredAt: Date;
   value: unknown;
@@ -208,24 +319,58 @@ async function commitSinglePull(input: {
     hasMore: false,
     payload: { externalId: input.externalId },
     committedAt: new Date(committedAt.getTime() + 10_000),
-    records: [{
-      recordKind: "pull",
-      externalId: input.externalId,
-      sourceTime: input.occurredAt,
-      collectedAt,
-      payload: { protected: "never-normalized" },
-      projections: [{
-        platformKey: "platform-a",
+    records: [
+      {
         recordKind: "pull",
         externalId: input.externalId,
-        content: {
-          ...pullContent(input.externalId, input.value),
-          occurredAt: input.occurredAt.toISOString(),
-          packExternalId: input.packExternalId,
-        },
-        sourceUpdatedAt: input.occurredAt,
-        sourceCollectedAt: collectedAt,
-      }],
+        sourceTime: input.occurredAt,
+        collectedAt,
+        payload: { protected: "never-normalized" },
+        projections: [{
+          platformKey: "platform-a",
+          recordKind: "pull",
+          externalId: input.externalId,
+          content: {
+            ...pullContent(input.value),
+          },
+          relationships: pullRelationshipEvidence(
+            input.assetExternalId ?? "asset-1",
+            input.packExternalId,
+          ),
+          sourceUpdatedAt: input.occurredAt,
+          sourceCollectedAt: collectedAt,
+        }],
+      },
+      {
+        recordKind: "catalog",
+        externalId: `catalog-${input.runId}`,
+        sourceTime: new Date(committedAt.getTime() + 10_000),
+        collectedAt,
+        payload: { protected: "never-normalized" },
+        projections: [{
+          platformKey: "platform-a",
+          recordKind: "pack",
+          externalId: input.packExternalId,
+          content: {
+            ...packContent(),
+            fixtureRevision: input.runId,
+          },
+          sourceUpdatedAt: new Date(committedAt.getTime() + 10_000),
+          sourceCollectedAt: collectedAt,
+        }],
+      },
+    ],
+  });
+  await refreshPullRevisionsAfterRelationships({
+    ingestion: input.ingestion,
+    setup: input.setup,
+    acceptedAt: new Date(committedAt.getTime() + 10_001),
+    pulls: [{
+      externalId: input.externalId,
+      assetExternalId: input.assetExternalId ?? "asset-1",
+      packExternalId: input.packExternalId,
+      occurredAt: input.occurredAt,
+      value: input.value,
     }],
   });
 }
@@ -235,7 +380,7 @@ async function commitCatalogAssetChange(input: {
   setup: PipelineSetupRepository;
   runId: string;
   occurredAt: Date;
-  relatedPackExternalId: string | null;
+  availability: "available" | "unavailable";
 }): Promise<void> {
   await createRun(input.setup, input.runId, input.occurredAt);
   await input.ingestion.commitPage({
@@ -255,30 +400,20 @@ async function commitCatalogAssetChange(input: {
       sourceTime: input.occurredAt,
       collectedAt: input.occurredAt,
       payload: { protected: "never-normalized" },
-      projections: [
-        ...(input.relatedPackExternalId === "unmapped-pack" ? [{
-          platformKey: "platform-a",
-          recordKind: "pack" as const,
-          externalId: "unmapped-pack",
-          content: packContent(),
-          sourceUpdatedAt: new Date(input.occurredAt.getTime() - 1),
-          sourceCollectedAt: input.occurredAt,
-        }] : []),
-        {
-          platformKey: "platform-a",
-          recordKind: "catalog_asset",
-          externalId: "asset-2",
-          content: {
-            schemaVersion: "catalog-projection-v1",
-            entityType: "catalog_asset",
-            relatedPackExternalId: input.relatedPackExternalId,
-            availability: "active",
-            name: "asset-2",
-          },
-          sourceUpdatedAt: input.occurredAt,
-          sourceCollectedAt: input.occurredAt,
+      projections: [{
+        platformKey: "platform-a",
+        recordKind: "catalog_asset",
+        externalId: "asset-2",
+        content: {
+          schemaVersion: "catalog-projection-v1",
+          entityType: "catalog_asset",
+          relatedPackExternalId: null,
+          availability: input.availability,
+          name: `asset-2-${input.runId}`,
         },
-      ],
+        sourceUpdatedAt: input.occurredAt,
+        sourceCollectedAt: input.occurredAt,
+      }],
     }],
   });
 }
@@ -331,17 +466,32 @@ async function commitExactArithmeticEvidence(input: {
           recordKind: "pull",
           externalId: "pull-exact-arithmetic",
           content: {
-            ...pullContent("pull-exact-arithmetic", {
+            ...pullContent({
               amountMinor: 5_505_323_021_837_267,
               currency: "USD",
             }),
-            occurredAt: input.occurredAt.toISOString(),
           },
+          relationships: pullRelationshipEvidence("asset-1"),
           sourceUpdatedAt: input.occurredAt,
           sourceCollectedAt: input.occurredAt,
         }],
       },
     ],
+  });
+  await refreshPullRevisionsAfterRelationships({
+    ingestion: input.ingestion,
+    setup: input.setup,
+    acceptedAt: new Date(input.occurredAt.getTime() + 1),
+    pulls: [{
+      externalId: "pull-exact-arithmetic",
+      assetExternalId: "asset-1",
+      packExternalId: "pack-1",
+      occurredAt: input.occurredAt,
+      value: {
+        amountMinor: 5_505_323_021_837_267,
+        currency: "USD",
+      },
+    }],
   });
 }
 
@@ -503,6 +653,49 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     });
     const first = await ingestion.commitPage(initialPage(ids.firstRun));
     assert.equal(first.newCanonicalRevisions, 5);
+    await refreshPullRevisionsAfterRelationships({
+      ingestion,
+      setup,
+      acceptedAt: new Date(committedAt.getTime() + 1),
+      pulls: [
+        {
+          externalId: "pull-valued",
+          assetExternalId: "asset-1",
+          packExternalId: "pack-1",
+          occurredAt: sourceAt,
+          value: { amountMinor: 5_000, currency: "USD" },
+        },
+        {
+          externalId: "pull-missing-value",
+          assetExternalId: "asset-2",
+          packExternalId: "pack-1",
+          occurredAt: sourceAt,
+          value: null,
+        },
+      ],
+    });
+    await refreshAssetRevisionsAfterRelationships({
+      ingestion,
+      setup,
+      acceptedAt: new Date(committedAt.getTime() + 2),
+    });
+    const sourceWatermark = (await harness.client.public_change_causes.aggregate({
+      where: { organization_id: ids.organization },
+      _max: { sequence: true },
+    }))._max.sequence!;
+    const initialAssetRefreshSequences = (await harness.client.$queryRaw<
+      Array<{ sequence: bigint }>
+    >`
+      select revision.public_change_sequence as sequence
+      from public.canonical_revisions as revision
+      join public.canonical_entities as entity
+        on entity.id = revision.entity_id
+       and entity.organization_id = revision.organization_id
+      where revision.organization_id = ${ids.organization}::uuid
+        and entity.record_kind = 'catalog_asset'
+        and revision.content_json ? 'fixtureRevision'
+      order by revision.public_change_sequence
+    `).map(({ sequence }) => sequence);
     assert.equal(await harness.client.normalized_heat_observations.count(), 5);
     assert.equal(
       await harness.client.normalized_heat_observation_outcomes.count({
@@ -689,7 +882,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       organizationId: ids.organization,
       publicRepackIds: [ids.publicRepack],
       occurredAtGte: sourceAt.toISOString(),
-      occurredAtLt: new Date(sourceAt.getTime() + 1).toISOString(),
+      occurredAtLt: new Date(committedAt.getTime() + 1).toISOString(),
       causalSequenceLte: 1n,
       limit: 100,
     });
@@ -699,8 +892,8 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         organizationId: ids.organization,
         publicRepackIds: [ids.publicRepack],
         occurredAtGte: sourceAt.toISOString(),
-        occurredAtLt: new Date(sourceAt.getTime() + 1).toISOString(),
-        causalSequenceLte: 6n,
+        occurredAtLt: new Date(committedAt.getTime() + 1).toISOString(),
+        causalSequenceLte: sourceWatermark,
         limit: 100,
       }),
       /beyond settlement/,
@@ -723,14 +916,14 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         settledAt,
       });
     });
-    assert.equal(checkpoint.settledSequence, 6n);
+    assert.equal(checkpoint.settledSequence, sourceWatermark);
 
     const settled = await reader.listSettledNormalizedHeatObservations({
       organizationId: ids.organization,
       publicRepackIds: [ids.publicRepack],
       occurredAtGte: sourceAt.toISOString(),
-      occurredAtLt: new Date(sourceAt.getTime() + 1).toISOString(),
-      causalSequenceLte: 6n,
+      occurredAtLt: new Date(committedAt.getTime() + 1).toISOString(),
+      causalSequenceLte: sourceWatermark,
       limit: 100,
     });
     assert.equal(settled.truncated, false);
@@ -746,7 +939,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     );
     assert.deepEqual(
       catalogs.map(({ causalSequence }) => causalSequence),
-      [2n, 3n, 4n],
+      [2n, ...initialAssetRefreshSequences],
     );
     assert.deepEqual(
       catalogs.map(({ catalogSequence }) => catalogSequence),
@@ -796,8 +989,8 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       organizationId: ids.organization,
       publicRepackIds: [ids.publicRepack],
       occurredAtGte: sourceAt.toISOString(),
-      occurredAtLt: new Date(sourceAt.getTime() + 1).toISOString(),
-      causalSequenceLte: 6n,
+      occurredAtLt: new Date(committedAt.getTime() + 1).toISOString(),
+      causalSequenceLte: sourceWatermark,
       limit: 100,
     });
     assert.deepEqual(repeatRead, settled);
@@ -805,8 +998,8 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       organizationId: ids.organization,
       publicRepackIds: [ids.publicRepack],
       occurredAtGte: sourceAt.toISOString(),
-      occurredAtLt: new Date(sourceAt.getTime() + 1).toISOString(),
-      causalSequenceLte: 6n,
+      occurredAtLt: new Date(committedAt.getTime() + 1).toISOString(),
+      causalSequenceLte: sourceWatermark,
       limit: 1,
     });
     assert.deepEqual(overflow, {
@@ -819,8 +1012,8 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         organizationId: ids.otherOrganization,
         publicRepackIds: [ids.publicRepack],
         occurredAtGte: sourceAt.toISOString(),
-        occurredAtLt: new Date(sourceAt.getTime() + 1).toISOString(),
-        causalSequenceLte: 6n,
+        occurredAtLt: new Date(committedAt.getTime() + 1).toISOString(),
+        causalSequenceLte: sourceWatermark,
         limit: 100,
       }),
       /not approved/,
@@ -899,9 +1092,13 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     assert.equal(originalMapping.approved_configuration_key, "catalog-config-v1");
     assert.equal(originalMapping.public_change_sequence, 1n);
 
+    const settledBeforeLate =
+      await harness.client.settled_public_watermarks.findUniqueOrThrow({
+        where: { organization_id: ids.organization },
+      });
     await reader.closeSettledWindow({
       closedBefore: new Date(sourceAt.getTime() + 1),
-      throughSettledSequence: 7n,
+      throughSettledSequence: settledBeforeLate.settled_sequence,
       updatedAt: new Date(settledAt.getTime() + 1_000),
     });
     await commitSinglePull({
@@ -922,6 +1119,34 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       occurredAt: new Date(sourceAt.getTime() + 1),
       value: { amountMinor: "not-an-integer", currency: "USD" },
     });
+    await createRun(setup, ids.unmappedPackRun);
+    await ingestion.commitPage({
+      organizationId: ids.organization,
+      providerId: ids.provider,
+      configRevisionId: ids.configuration,
+      runId: ids.unmappedPackRun,
+      pageNumber: 1,
+      requestedCursor: null,
+      nextCursor: null,
+      hasMore: false,
+      payload: { protected: "unmapped-pack" },
+      committedAt: new Date(committedAt.getTime() + 10_000),
+      records: [{
+        recordKind: "catalog",
+        externalId: "catalog-unmapped-pack",
+        sourceTime: new Date(sourceAt.getTime() + 2),
+        collectedAt,
+        payload: { protected: "unmapped-pack" },
+        projections: [{
+          platformKey: "platform-a",
+          recordKind: "pack",
+          externalId: "unmapped-pack",
+          content: packContent(),
+          sourceUpdatedAt: new Date(sourceAt.getTime() + 2),
+          sourceCollectedAt: collectedAt,
+        }],
+      }],
+    });
     await commitSinglePull({
       ingestion,
       setup,
@@ -931,20 +1156,47 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       occurredAt: new Date(sourceAt.getTime() + 2),
       value: null,
     });
-    assert.equal(await harness.client.normalized_heat_observations.count(), 5);
+    assert.equal(
+      await harness.client.normalized_heat_observations.count(),
+      7,
+      "relationship catalog causes remain independent of closed/malformed pull evidence",
+    );
     assert.deepEqual(
-      (
+      [...new Set(
         await harness.client.normalized_heat_observation_outcomes.findMany({
           where: { status: { in: ["rejected", "deferred"] } },
           orderBy: { public_change_sequence: "asc" },
           select: { status: true, reason_code: true },
-        })
-      ).map(({ status, reason_code }) => [status, reason_code]),
+        }).then((rows) => rows.map(({ status, reason_code }) =>
+          `${status}\u0000${reason_code}`)),
+      )].map((value) => value.split("\u0000")),
       [
         ["rejected", "WINDOW_CLOSED"],
         ["rejected", "EVIDENCE_MALFORMED"],
         ["deferred", "MAPPING_MISSING"],
       ],
+    );
+    const settledAfterLate = await harness.client.$transaction(
+      async (transaction) => {
+        const lateSettledAt = new Date(settledAt.getTime() + 10_001);
+        await transaction.public_derivation_obligations.updateMany({
+          where: {
+            organization_id: ids.organization,
+            state: { in: ["pending", "claimed"] },
+          },
+          data: {
+            state: "succeeded",
+            outcome_classification: "success",
+            acknowledged_claim_token: "55000000-0000-4000-8000-000000000098",
+            outcome_at: lateSettledAt,
+            updated_at: lateSettledAt,
+          },
+        });
+        return advanceSettledPublicWatermark(transaction, {
+          organizationId: ids.organization,
+          settledAt: lateSettledAt,
+        });
+      },
     );
     const unrelatedUnmappedCoverage =
       await reader.listSettledNormalizedHeatObservations({
@@ -952,7 +1204,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         publicRepackIds: [ids.publicRepack],
         occurredAtGte: new Date(sourceAt.getTime() + 2).toISOString(),
         occurredAtLt: new Date(sourceAt.getTime() + 3).toISOString(),
-        causalSequenceLte: 10n,
+        causalSequenceLte: settledAfterLate.settledSequence,
         limit: 100,
       });
     assert.equal(unrelatedUnmappedCoverage.sourceCoverageComplete, true);
@@ -963,7 +1215,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         publicRepackIds: [ids.publicRepack],
         occurredAtGte: new Date(sourceAt.getTime() + 1).toISOString(),
         occurredAtLt: new Date(sourceAt.getTime() + 2).toISOString(),
-        causalSequenceLte: 10n,
+        causalSequenceLte: settledAfterLate.settledSequence,
         limit: 100,
       });
     assert.equal(mappedMalformedCoverage.sourceCoverageComplete, false);
@@ -973,12 +1225,16 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         publicRepackIds: [ids.publicRepack],
         occurredAtGte: sourceAt.toISOString(),
         occurredAtLt: new Date(sourceAt.getTime() + 3).toISOString(),
-        causalSequenceLte: 10n,
+        causalSequenceLte: settledAfterLate.settledSequence,
         limit: 100,
       });
     assert.equal(incompleteCoverage.truncated, false);
     assert.equal(incompleteCoverage.sourceCoverageComplete, false);
-    assert.equal(incompleteCoverage.observations.length, 5);
+    assert.deepEqual(
+      incompleteCoverage.observations.map(({ kind }) => kind),
+      ["catalog_snapshot", "pull", "pull"],
+      "relationship-origin catalog snapshots occur at their causal edge time, outside this source-time slice",
+    );
 
     await harness.client.$transaction(async (transaction) => {
       const causes = await allocatePublicChangeCauses(transaction, {
@@ -1039,65 +1295,92 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       setup,
       runId: ids.mappedAfterApprovalRun,
       externalId: "pull-after-mapping",
+      assetExternalId: "asset-2",
       packExternalId: "unmapped-pack",
       occurredAt: new Date(sourceAt.getTime() + 3),
       value: null,
     });
-    assert.equal(await harness.client.normalized_heat_observations.count(), 6);
+    assert.equal(
+      await harness.client.normalized_heat_observations.count(),
+      9,
+      "a newly mapped pull contributes both pull and completed catalog relationship evidence",
+    );
+    const mappedAfterApprovalSettled = await harness.client.$transaction(
+      async (transaction) => {
+        const mappedSettledAt = new Date(settledAt.getTime() + 20_000);
+        await transaction.public_derivation_obligations.updateMany({
+          where: {
+            organization_id: ids.organization,
+            state: { in: ["pending", "claimed"] },
+          },
+          data: {
+            state: "succeeded",
+            outcome_classification: "success",
+            acknowledged_claim_token: "55000000-0000-4000-8000-000000000097",
+            outcome_at: mappedSettledAt,
+            updated_at: mappedSettledAt,
+          },
+        });
+        return advanceSettledPublicWatermark(transaction, {
+          organizationId: ids.organization,
+          settledAt: mappedSettledAt,
+        });
+      },
+    );
     const newlyMapped = await reader.listSettledNormalizedHeatObservations({
       organizationId: ids.organization,
       publicRepackIds: [ids.secondPublicRepack],
       occurredAtGte: new Date(sourceAt.getTime() + 3).toISOString(),
       occurredAtLt: new Date(sourceAt.getTime() + 4).toISOString(),
-      causalSequenceLte: 12n,
+      causalSequenceLte: mappedAfterApprovalSettled.settledSequence,
       limit: 100,
     });
     assert.equal(newlyMapped.observations.length, 1);
     assert.equal(newlyMapped.observations[0]?.kind, "pull");
 
-    const reparentAt = new Date(sourceAt.getTime() + 5);
+    const multiPackUpdateAt = new Date(sourceAt.getTime() + 5);
     await commitCatalogAssetChange({
       ingestion,
       setup,
       runId: ids.reparentRun,
-      occurredAt: reparentAt,
-      relatedPackExternalId: "unmapped-pack",
+      occurredAt: multiPackUpdateAt,
+      availability: "available",
     });
-    const reparentSnapshots =
+    const multiPackSnapshots =
       await harness.client.normalized_heat_observations.findMany({
         where: {
           organization_id: ids.organization,
-          occurred_at: reparentAt,
+          occurred_at: multiPackUpdateAt,
           observation_kind: "catalog_snapshot",
         },
         orderBy: { catalog_sequence: "asc" },
       });
     assert.equal(
-      reparentSnapshots.length,
+      multiPackSnapshots.length,
       2,
-      JSON.stringify(reparentSnapshots.map((row) => ({
+      JSON.stringify(multiPackSnapshots.map((row) => ({
         repack: row.public_repack_id,
         count: row.available_chase_count,
         sequence: row.catalog_sequence,
       }))),
     );
     assert.deepEqual(
-      reparentSnapshots.map(({ public_repack_id }) => public_repack_id).sort(),
+      multiPackSnapshots.map(({ public_repack_id }) => public_repack_id).sort(),
       [ids.publicRepack, ids.secondPublicRepack].sort(),
     );
     assert.equal(
-      reparentSnapshots[1]!.catalog_sequence,
-      reparentSnapshots[0]!.catalog_sequence! + 1,
+      multiPackSnapshots[1]!.catalog_sequence,
+      multiPackSnapshots[0]!.catalog_sequence! + 1,
     );
     assert.deepEqual(
-      reparentSnapshots.map(({ available_chase_count }) =>
+      multiPackSnapshots.map(({ available_chase_count }) =>
         available_chase_count).sort(),
-      [1, 1],
-      "the old pack loses the moved asset while the new pack gains it",
+      [2, 2],
+      "one catalog asset revision fans out to each canonically associated pack",
     );
     assert.notEqual(
-      reparentSnapshots[0]!.observation_key,
-      reparentSnapshots[1]!.observation_key,
+      multiPackSnapshots[0]!.observation_key,
+      multiPackSnapshots[1]!.observation_key,
     );
 
     const removalAt = new Date(sourceAt.getTime() + 6);
@@ -1106,19 +1389,24 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       setup,
       runId: ids.removalRun,
       occurredAt: removalAt,
-      relatedPackExternalId: null,
+      availability: "unavailable",
     });
-    const removalSnapshot =
-      await harness.client.normalized_heat_observations.findFirstOrThrow({
+    const removalSnapshots =
+      await harness.client.normalized_heat_observations.findMany({
         where: {
           organization_id: ids.organization,
           occurred_at: removalAt,
           observation_kind: "catalog_snapshot",
         },
+        orderBy: { public_repack_id: "asc" },
       });
-    assert.equal(removalSnapshot.public_repack_id, ids.secondPublicRepack);
-    assert.equal(removalSnapshot.available_chase_count, 0);
-    assert.deepEqual(removalSnapshot.outcome_keys, []);
+    assert.deepEqual(
+      removalSnapshots.map(({ public_repack_id }) => public_repack_id).sort(),
+      [ids.publicRepack, ids.secondPublicRepack].sort(),
+    );
+    assert.ok(removalSnapshots.every(({ available_chase_count }) =>
+      available_chase_count === 1));
+    assert.ok(removalSnapshots.every(({ outcome_keys }) => outcome_keys.length === 1));
 
     const exactArithmeticAt = new Date(sourceAt.getTime() + 7);
     await commitExactArithmeticEvidence({
@@ -1160,21 +1448,50 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     });
     const highObservation =
       await harness.client.normalized_heat_observations.findFirstOrThrow({
-        where: { public_change_sequence: highSequence },
+        where: {
+          occurred_at: new Date(sourceAt.getTime() + 4),
+          observation_kind: "pull",
+        },
       });
     assert.equal(highObservation.observation_kind, "pull");
+    assert.ok(highObservation.public_change_sequence >= highSequence);
     assert.equal(highObservation.catalog_sequence, null);
+    const highSequenceSettled = await harness.client.$transaction(
+      async (transaction) => {
+        const highSettledAt = new Date(settledAt.getTime() + 30_000);
+        await transaction.public_derivation_obligations.updateMany({
+          where: {
+            organization_id: ids.organization,
+            state: { in: ["pending", "claimed"] },
+          },
+          data: {
+            state: "succeeded",
+            outcome_classification: "success",
+            acknowledged_claim_token: "55000000-0000-4000-8000-000000000096",
+            outcome_at: highSettledAt,
+            updated_at: highSettledAt,
+          },
+        });
+        return advanceSettledPublicWatermark(transaction, {
+          organizationId: ids.organization,
+          settledAt: highSettledAt,
+        });
+      },
+    );
     const highSequenceRead =
       await reader.listSettledNormalizedHeatObservations({
         organizationId: ids.organization,
         publicRepackIds: [ids.publicRepack],
         occurredAtGte: new Date(sourceAt.getTime() + 4).toISOString(),
         occurredAtLt: new Date(sourceAt.getTime() + 5).toISOString(),
-        causalSequenceLte: highSequence,
+        causalSequenceLte: highSequenceSettled.settledSequence,
         limit: 100,
       });
     assert.equal(highSequenceRead.observations.length, 1);
-    assert.equal(highSequenceRead.observations[0]?.causalSequence, highSequence);
+    assert.equal(
+      highSequenceRead.observations[0]?.causalSequence,
+      highObservation.public_change_sequence,
+    );
 
     const [springForwardRetention] = await harness.client.$transaction(
       async (transaction) => {
@@ -1195,7 +1512,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       orderBy: [{ public_change_sequence: "asc" }],
       select: { observation_key: true, retained_until: true, occurred_at: true },
     });
-    assert.equal(immutableHistory.length, 13);
+    assert.equal(immutableHistory.length, 17);
     assert.ok(immutableHistory.every(({ retained_until, occurred_at }) =>
       retained_until.getTime() - occurred_at.getTime() === 7 * 24 * 60 * 60 * 1_000));
   } finally {

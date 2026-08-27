@@ -1,6 +1,6 @@
 {
   "version": "provider-source-capacity-measurement-v1",
-  "measuredAt": "2026-08-26T13:47:50.365Z",
+  "measuredAt": "2026-08-27T04:49:13.692Z",
   "reproduction": {
     "generatorCommand": "node --import tsx scripts/local/generate-provider-source-capacity-artifact.mts",
     "storageCommand": "PACKSCOUT_PRINT_PROVIDER_SOURCE_CAPACITY=1 node --import tsx --test --test-name-pattern='representative mixed commit measures' packages/services/src/provider-source-atomic-page.integration.test.ts",
@@ -26,7 +26,7 @@
   "storageMeasurement": {
     "environment": {
       "postgresVersionMajor": 16,
-      "schemaMigration": "20260825041000_raise_provider_source_raw_response_limit"
+      "schemaMigration": "20260826010000_heat_relationship_causality"
     },
     "sample": {
       "inputRecords": 288,
@@ -36,10 +36,10 @@
       "windows": 3,
       "pagesPerWindow": 24
     },
-    "pageDurationMilliseconds": 122.238,
+    "pageDurationMilliseconds": 249.552,
     "pageStatementCount": 160,
     "allocationPageBytes": 8192,
-    "structuredPhysicalBytesPerRecord": 11776,
+    "structuredPhysicalBytesPerRecord": 14422,
     "normalizedPayloadPhysicalBytesPerRecord": 2640,
     "importPagePhysicalBytes": 15020,
     "quarantinePhysicalBytes": 6145,
@@ -51,8 +51,8 @@
       {
         "window": 1,
         "inputRecords": 96,
-        "structuredPhysicalBytes": 1056768,
-        "structuredPhysicalBytesPerRecord": 11008,
+        "structuredPhysicalBytes": 1294336,
+        "structuredPhysicalBytesPerRecord": 13483,
         "normalizedPayloadPhysicalBytesPerRecord": 1444,
         "importPagePhysicalBytes": 14678,
         "quarantinePhysicalBytes": 5803,
@@ -64,8 +64,8 @@
       {
         "window": 2,
         "inputRecords": 96,
-        "structuredPhysicalBytes": 688128,
-        "structuredPhysicalBytesPerRecord": 7168,
+        "structuredPhysicalBytes": 843776,
+        "structuredPhysicalBytesPerRecord": 8790,
         "normalizedPayloadPhysicalBytesPerRecord": 1615,
         "importPagePhysicalBytes": 11094,
         "quarantinePhysicalBytes": 3243,
@@ -77,8 +77,8 @@
       {
         "window": 3,
         "inputRecords": 96,
-        "structuredPhysicalBytes": 753664,
-        "structuredPhysicalBytesPerRecord": 7851,
+        "structuredPhysicalBytes": 876544,
+        "structuredPhysicalBytesPerRecord": 9131,
         "normalizedPayloadPhysicalBytesPerRecord": 2554,
         "importPagePhysicalBytes": 10354,
         "quarantinePhysicalBytes": 2390,
@@ -93,19 +93,19 @@
         "relation": "import_pages",
         "rows": 72,
         "logicalRowBytes": 88038,
-        "tableBytes": 294912,
-        "indexBytes": 188416,
-        "toastAndAuxiliaryBytes": 155648,
-        "totalBytes": 638976
+        "tableBytes": 98304,
+        "indexBytes": 172032,
+        "toastAndAuxiliaryBytes": 0,
+        "totalBytes": 270336
       },
       {
         "relation": "source_record_identities",
         "rows": 216,
         "logicalRowBytes": 30504,
         "tableBytes": 32768,
-        "indexBytes": 114688,
+        "indexBytes": 147456,
         "toastAndAuxiliaryBytes": 24576,
-        "totalBytes": 172032
+        "totalBytes": 204800
       },
       {
         "relation": "source_semantic_observations",
@@ -121,18 +121,18 @@
         "rows": 288,
         "logicalRowBytes": 137632,
         "tableBytes": 147456,
-        "indexBytes": 81920,
+        "indexBytes": 212992,
         "toastAndAuxiliaryBytes": 24576,
-        "totalBytes": 253952
+        "totalBytes": 385024
       },
       {
         "relation": "canonical_entities",
         "rows": 288,
         "logicalRowBytes": 36797,
-        "tableBytes": 73728,
-        "indexBytes": 221184,
+        "tableBytes": 49152,
+        "indexBytes": 196608,
         "toastAndAuxiliaryBytes": 24576,
-        "totalBytes": 319488
+        "totalBytes": 270336
       },
       {
         "relation": "canonical_revisions",
@@ -148,18 +148,36 @@
         "rows": 288,
         "logicalRowBytes": 40888,
         "tableBytes": 49152,
-        "indexBytes": 57344,
+        "indexBytes": 147456,
         "toastAndAuxiliaryBytes": 24576,
-        "totalBytes": 131072
+        "totalBytes": 221184
+      },
+      {
+        "relation": "source_relationship_confirmation_sets",
+        "rows": 72,
+        "logicalRowBytes": 27648,
+        "tableBytes": 32768,
+        "indexBytes": 49152,
+        "toastAndAuxiliaryBytes": 24576,
+        "totalBytes": 106496
+      },
+      {
+        "relation": "source_relationship_confirmations",
+        "rows": 144,
+        "logicalRowBytes": 21888,
+        "tableBytes": 24576,
+        "indexBytes": 98304,
+        "toastAndAuxiliaryBytes": 24576,
+        "totalBytes": 147456
       },
       {
         "relation": "public_change_causes",
         "rows": 576,
-        "logicalRowBytes": 142848,
-        "tableBytes": 147456,
+        "logicalRowBytes": 195840,
+        "tableBytes": 204800,
         "indexBytes": 114688,
         "toastAndAuxiliaryBytes": 24576,
-        "totalBytes": 286720
+        "totalBytes": 344064
       },
       {
         "relation": "public_derivation_obligations",
@@ -183,10 +201,10 @@
         "relation": "quarantine_records",
         "rows": 72,
         "logicalRowBytes": 17856,
-        "tableBytes": 49152,
+        "tableBytes": 24576,
         "indexBytes": 57344,
         "toastAndAuxiliaryBytes": 0,
-        "totalBytes": 106496
+        "totalBytes": 81920
       },
       {
         "relation": "source_processor_diagnostic_events",
@@ -219,14 +237,14 @@
   },
   "memoryMeasurement": {
     "version": "provider-source-page-memory-v1",
-    "measuredAt": "2026-08-26T19:14:14.286Z",
+    "measuredAt": "2026-08-27T04:49:13.678Z",
     "environment": {
       "node": "v22.22.3",
       "platform": "darwin",
       "architecture": "arm64"
     },
     "path": "authentic-capture-terminalize-interpret-complete-import-plan",
-    "sourceAdapterVersion": "dataforrest-events-adapter-v1",
+    "sourceAdapterVersion": "dataforrest-events-adapter-v2",
     "warmupPageCount": 10,
     "trialCount": 5,
     "pagesPerTrial": 20,
@@ -236,21 +254,21 @@
     "jsonNodesPerPage": 239504,
     "emptyObjectFactsPerRecord": 945,
     "totalRecordsProcessed": 25000,
-    "elapsedMilliseconds": 33334.005,
-    "idleRssBytes": 274857984,
-    "peakRssBytes": 335413248,
-    "peakDeltaBytes": 60555264,
+    "elapsedMilliseconds": 34078.398,
+    "idleRssBytes": 292192256,
+    "peakRssBytes": 334594048,
+    "peakDeltaBytes": 42401792,
     "settledManagedBytes": [
-      64053527,
-      64225367,
-      64176663,
-      64182783,
-      64149823,
-      64301791
+      66379183,
+      66557775,
+      66532415,
+      66603679,
+      66487303,
+      66620879
     ],
     "retainedMetric": "theil-sen-managed-bytes-per-page",
-    "theilSenBytesPerPage": 1203.7,
-    "retainedGrowthBytes": 120370,
+    "theilSenBytesPerPage": 1351.5,
+    "retainedGrowthBytes": 135150,
     "limits": {
       "peakDeltaBytes": 67108864,
       "retainedGrowthBytes": 8388608
@@ -266,7 +284,7 @@
     "operationalRetentionDays": 30,
     "incrementalGrowthDays": 365,
     "incrementalRecordsPerPollAttempt": 250,
-    "measuredStructuredPhysicalBytesPerRecord": 11776,
+    "measuredStructuredPhysicalBytesPerRecord": 14422,
     "conservativeRawHistoryBytes": 98700000000,
     "measuredAverageRawPageBytes": 642434,
     "measuredAverageRawRecordBytes": 2570,
@@ -292,9 +310,9 @@
     "incrementalRecordCount": 525600000,
     "sevenDayIncrementalRecordCount": 10080000,
     "thirtyDayIncrementalRecordCount": 43200000,
-    "structuredBytesPerRecord": 11776,
+    "structuredBytesPerRecord": 14422,
     "projectedBytes": {
-      "structuredAndCanonical": 6360534103552,
+      "structuredAndCanonical": 7789709820094,
       "conservativeRawHistory": 98700000000,
       "retainedSteadyPollRaw": 25902938880,
       "retainedPreExpiryNormalizedPagePayload": 64962155280,
@@ -303,17 +321,17 @@
       "pageDiagnostics": 473130492,
       "terminalRequestAttempts": 946030076,
       "permanentCompactAttemptLineage": 14013054888,
-      "total": 6723754676592
+      "total": 8152930393134
     },
-    "requiredFreeBytesWithHeadroom": 8965006235456,
-    "task010MinimumAvailableBytes": 8965006235456,
+    "requiredFreeBytesWithHeadroom": 10870573857512,
+    "task010MinimumAvailableBytes": 10870573857512,
     "abortThresholdBasisPoints": 8000,
     "nonterminalAttemptBytesEach": 4097
   },
   "task010AdmissionPreflight": {
     "input": {
       "volumeCapacityBytes": 994662584320,
-      "volumeAvailableBytes": 120935391232,
+      "volumeAvailableBytes": 105466777600,
       "unreconciledNonterminalAttemptCount": 0
     },
     "decision": {
@@ -324,11 +342,11 @@
         "volume_above_abort_threshold",
         "projected_abort_threshold_exceeded"
       ],
-      "volumeUsedBytes": 873727193088,
-      "projectedAdditionalBytes": 6723754676592,
-      "projectedVolumeUsedBytes": 7597481869680,
+      "volumeUsedBytes": 889195806720,
+      "projectedAdditionalBytes": 8152930393134,
+      "projectedVolumeUsedBytes": 9042126199854,
       "abortAtUsedBytes": 795730067456,
-      "requiredAvailableBytes": 8965006235456
+      "requiredAvailableBytes": 10870573857512
     }
   }
 }

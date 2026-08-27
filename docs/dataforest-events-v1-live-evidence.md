@@ -141,30 +141,29 @@ stable `dataforrest-<platform>-records-v1` provider identity namespace. Changing
 that namespace or its evidenced record-ID scopes requires a separately designed
 identity migration.
 
-The sole current V1 adapter copies the two timestamps, outer relationships,
-event code, amount, currency, payment method, and tri-state availability into
-`packscout.provider-observation.v1`.
+The current adapter is `dataforrest-events-adapter-v2`; the provider endpoint
+and normalized contract remain V1. It copies the two timestamps, outer
+relationships, event code, amount, currency, payment method, and tri-state
+availability into `packscout.provider-observation.v1`.
 
 Local capture evidence reviewed on 2026-08-24 showed catalog pack names at
 `data.name` for Collector Crypt, Phygitals, and ClutchPacks. Their pack records
-therefore read exactly `data.name`; Courtyard packs and every non-pack kind read
-exactly `data.provider_label`. There is no cross-field fallback: a missing,
-null, or malformed declared field remains absent or malformed even when the
-other field is present. Every other nested key stays protected provenance. The
-mapper never receives the native object, and this provider-local extraction
-does not add provider-specific canonical rules to the generic mapper.
+therefore read exactly `data.name`; Courtyard packs and non-ClutchPacks card
+kinds read exactly their declared provider label. Adapter v2 reads ClutchPacks
+catalog-card display facts from the exact `data.asset` allowlist documented in
+[`ingestion-pipelines/dataforrest-clutchpacks-card-v2.md`](ingestion-pipelines/dataforrest-clutchpacks-card-v2.md).
+Every other nested key stays protected provenance. The generic mapper never
+receives the native object.
 
 V1 also accepts evidenced one-sided pulls: `pack_id` and `card_id` are each
 nullable, at least one must be present, and relationships remain ordered pack
 before card. A canonical pull receives only the authoritative edge or edges in
 the source record; PackScout never fabricates the missing identity.
 
-Only the V1 adapter, observation, and mapper tuple is registered. Connection
-revisions, source revisions, and import runs continue to expose their immutable
-current pins for diagnostics, but there is no compatibility reader, adapter
-upgrade, or source-replacement path. An early-development database containing a
-historical tuple must be cleared with the guarded full local reset and reimported
-from Feed start.
+Adapter v1 remains registered only for exact connection and source revisions
+already pinned to it. Adapter v2 is the sole version advertised for new
+revisions. The registry resolves both versions explicitly; neither version is a
+fallback for the other.
 
 ## Failure contract
 

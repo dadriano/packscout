@@ -10,6 +10,11 @@ import { ProviderSourceDiagnosticRepository } from
   "./provider-source-diagnostic-repository.ts";
 import { ProviderSourceLifecycleRepository } from "./provider-source-lifecycle-repository.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
+import {
+  advanceSettledPublicWatermark,
+  allocatePublicChangeCauses,
+  providerPublicEntityKey,
+} from "./public-change-settlement-repository.ts";
 
 export class ProviderSourceAdminLifecycleRepository
   extends ProviderSourceAdminReadRepository {
@@ -432,6 +437,17 @@ export class ProviderSourceAdminLifecycleRepository
     command: "resume" | "disable",
   ): Promise<void> {
     await this.database.$transaction(async (transaction) => {
+      const provider = await transaction.$queryRaw<Array<{
+        platformKey: string;
+      }>>(Prisma.sql`
+        select platform_key as "platformKey"
+        from public.provider_sources
+        where id = cast(${input.providerId} as uuid)
+          and organization_id = cast(${input.organizationId} as uuid)
+          and state = 'active'::public.provider_state
+        for update
+      `);
+      if (!provider[0]) this.#fenced("Provider lifecycle changed.");
       const source = await this.#lockSource(transaction, input);
       const occurredAt = input.resumedAt ?? input.disabledAt;
       if (!source || !occurredAt) this.#fenced("Source lifecycle changed.");
@@ -454,6 +470,11 @@ export class ProviderSourceAdminLifecycleRepository
         source.pauseRequestedAt === null
       ) {
         await this.#audit(transaction, input, "provider_source.resume_coalesced");
+        await this.#publishProviderLifecycle(transaction, {
+          source: { ...source, platformKey: provider[0].platformKey },
+          state: "active",
+          occurredAt,
+        });
         return;
       }
       if (command === "disable" && source.state === "disabled") {
@@ -538,7 +559,92 @@ export class ProviderSourceAdminLifecycleRepository
         safeCode: command === "resume" ? "SOURCE_RESUMED" : "SOURCE_DISABLED",
         lifecycleState: command === "resume" ? "active" : "disabled",
       });
+      await this.#publishProviderLifecycle(transaction, {
+        source: { ...source, platformKey: provider[0].platformKey },
+        state: command === "resume" ? "active" : "disabled",
+        occurredAt,
+      });
     }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
+  async #publishProviderLifecycle(
+    transaction: Prisma.TransactionClient,
+    input: Readonly<{
+      source: Readonly<{
+        id: string;
+        organizationId: string;
+        providerId: string;
+        sourceRevisionId: string;
+        platformKey: string;
+        state: "draft" | "paused" | "active" | "disabled" | "replaced";
+      }>;
+      state: "active" | "disabled";
+      occurredAt: Date;
+    }>,
+  ): Promise<void> {
+    const latest = (await transaction.$queryRaw<Array<{
+      state: "active" | "disabled" | "archived";
+      sourceInstanceId: string | null;
+      sourceRevisionId: string | null;
+    }>>(Prisma.sql`
+      select impact.lifecycle_state::text as state,
+             cause.metadata_json->>'sourceInstanceId' as "sourceInstanceId",
+             cause.metadata_json->>'sourceRevisionId' as "sourceRevisionId"
+      from public.public_change_catalog_impacts as impact
+      join public.public_change_causes as cause
+        on cause.organization_id = impact.organization_id
+       and cause.sequence = impact.cause_sequence
+      where impact.organization_id = cast(${input.source.organizationId} as uuid)
+        and impact.lifecycle_platform_key = ${input.source.platformKey}
+      order by impact.cause_sequence desc
+      limit 1
+    `))[0];
+    const sameSource = latest?.sourceInstanceId === input.source.id &&
+      latest.sourceRevisionId === input.source.sourceRevisionId;
+    const currentUnattributedLegacySource =
+      ["active", "paused"].includes(input.source.state) &&
+      latest?.sourceInstanceId === null && latest.sourceRevisionId === null;
+    if (input.state === "active" && latest?.state === "active" && sameSource) {
+      return;
+    }
+    if (input.state === "disabled" &&
+        (latest?.state !== "active" ||
+          (!sameSource && !currentUnattributedLegacySource))) {
+      return;
+    }
+    await allocatePublicChangeCauses(transaction, {
+      organizationId: input.source.organizationId,
+      changes: [{
+        changeKind: input.state === "active" && latest?.state === "active"
+          ? "public_configuration"
+          : "provider_lifecycle",
+        entityKey: providerPublicEntityKey(input.source.providerId),
+        sourceKey: input.source.platformKey,
+        sourceRevisionKey: input.source.sourceRevisionId,
+        metadata: {
+          providerId: input.source.providerId,
+          platformKey: input.source.platformKey,
+          state: input.state,
+          sourceInstanceId: input.source.id,
+          sourceRevisionId: input.source.sourceRevisionId,
+        },
+        occurredAt: input.occurredAt,
+        catalogImpact: {
+          kind: "catalog",
+          providerPlatformKeys: input.state === "active"
+            ? [input.source.platformKey]
+            : [],
+          manifestLifecycle: {
+            platformKey: input.source.platformKey,
+            state: input.state,
+          },
+        },
+      }],
+    });
+    await advanceSettledPublicWatermark(transaction, {
+      organizationId: input.source.organizationId,
+      settledAt: input.occurredAt,
+    });
   }
 
   async #lockSource(

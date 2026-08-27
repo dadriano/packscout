@@ -418,9 +418,14 @@ export function ProviderSourceLedger({
                       onClick={() => onCommand("resume", source)}>Resume from {source.cursor.resumeLabel}</button>
                   ) : null}
                   {source.state === "active" ? (
-                    <button type="button" className="admin-button admin-button-secondary"
-                      disabled={pendingKey !== null || source.pauseRequested}
-                      onClick={() => onCommand("pause", source)}>Pause after page</button>
+                    <>
+                      <button type="button" className="admin-button admin-button-secondary"
+                        disabled={pendingKey !== null || source.pauseRequested}
+                        onClick={() => onCommand("resume", source)}>Reassert promotion identity</button>
+                      <button type="button" className="admin-button admin-button-secondary"
+                        disabled={pendingKey !== null || source.pauseRequested}
+                        onClick={() => onCommand("pause", source)}>Pause after page</button>
+                    </>
                   ) : null}
                   {!(["disabled", "replaced"].includes(source.state)) ? (
                     <button type="button" className="admin-button admin-button-danger"

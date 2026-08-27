@@ -9,6 +9,7 @@ import {
   ACCEPTANCE_SOURCE_TYPE_KEY,
   activateAcceptanceRuntime,
   createAcceptanceProviderSource,
+  createAcceptanceSourceInstance,
   createPinnedSourceRun,
   createProviderSourceAcceptanceFixture,
   type AcceptanceSource,
@@ -22,6 +23,10 @@ import { ProviderSourceImportRunRepository } from "./provider-source-import-run-
 import { ProviderSourceRequestRepository } from "./provider-source-request-repository.ts";
 import { ProviderSourceSupervisorRepository } from "./provider-source-supervisor-repository.ts";
 import { ProviderSourceTestResultRepository } from "./provider-source-test-result-repository.ts";
+import {
+  advanceSettledPublicWatermark,
+  allocatePublicChangeCauses,
+} from "./public-change-settlement-repository.ts";
 import { SourceConnectionAdminRepository } from "./source-connection-admin-repository.ts";
 
 let fixture: ProviderSourceAcceptanceFixture;
@@ -469,14 +474,20 @@ test("timing revisions allow draft, paused, and active sources but reject disabl
     actorKey: "operator-admin",
     effectiveAt: new Date("2026-08-21T12:01:00.000Z"),
   });
-  await fixture.database.provider_source_instances.update({
-    where: { id: source.sourceInstanceId },
-    data: {
-      state: "paused",
-      activated_at: ACCEPTANCE_CREATED_AT,
-      paused_at: ACCEPTANCE_CREATED_AT,
-    },
-  });
+  await fixture.database.$transaction([
+    fixture.database.provider_sources.update({
+      where: { id: source.providerId },
+      data: { state: "active", updated_at: ACCEPTANCE_CREATED_AT },
+    }),
+    fixture.database.provider_source_instances.update({
+      where: { id: source.sourceInstanceId },
+      data: {
+        state: "paused",
+        activated_at: ACCEPTANCE_CREATED_AT,
+        paused_at: ACCEPTANCE_CREATED_AT,
+      },
+    }),
+  ]);
   const paused = await repository.reviseInterval({
     organizationId: fixture.organizationId,
     providerId: source.providerId,
@@ -683,6 +694,269 @@ test("repeat pause and resume commands coalesce with DB-time lifecycle diagnosti
     assert.equal(runtime.retry_not_before, null);
   } finally {
     await isolated.close();
+  }
+});
+
+test("coalesced resume upgrades legacy lifecycle causality once", async () => {
+  const isolated = await createProviderSourceAcceptanceFixture(
+    "resume-causality-upgrade",
+  );
+  try {
+    const isolatedSource = await createAcceptanceProviderSource(isolated, {
+      platformKey: "courtyard",
+      displayName: "Courtyard causality upgrade",
+      mapperKey: "courtyard-provider-observation",
+      identityNamespaceKey: "courtyard-v1",
+      intervalSeconds: 60,
+      hashCharacter: "d",
+    });
+    await activateAcceptanceRuntime(
+      isolated.database,
+      isolated,
+      isolatedSource,
+      ACCEPTANCE_CREATED_AT,
+    );
+    await isolated.database.$transaction(async (transaction) => {
+      await allocatePublicChangeCauses(transaction, {
+        organizationId: isolated.organizationId,
+        changes: [{
+          changeKind: "provider_lifecycle",
+          entityKey: `provider:legacy:${isolatedSource.providerId}`,
+          sourceKey: isolatedSource.platformKey,
+          sourceRevisionKey: isolatedSource.configRevisionId,
+          metadata: {
+            providerId: isolatedSource.providerId,
+            platformKey: isolatedSource.platformKey,
+            state: "active",
+            configurationRevisionId: isolatedSource.configRevisionId,
+          },
+          occurredAt: new Date("2026-08-21T13:10:00.000Z"),
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: [isolatedSource.platformKey],
+            manifestLifecycle: {
+              platformKey: isolatedSource.platformKey,
+              state: "active",
+            },
+          },
+        }],
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: isolated.organizationId,
+        settledAt: new Date("2026-08-21T13:10:00.000Z"),
+      });
+    });
+    const repository = new ProviderSourceAdminLifecycleRepository(
+      isolated.database,
+    );
+    const input = {
+      organizationId: isolated.organizationId,
+      providerId: isolatedSource.providerId,
+      sourceInstanceId: isolatedSource.sourceInstanceId,
+      expectedSourceRevisionId: isolatedSource.sourceRevisionId,
+      actorKey: "operator-admin",
+      resumedAt: new Date("2026-08-21T13:11:00.000Z"),
+    };
+    await repository.resume(input);
+    const afterUpgrade = await isolated.database.public_change_causes.findMany({
+      where: {
+        organization_id: isolated.organizationId,
+        source_key: isolatedSource.platformKey,
+        change_kind: { in: ["provider_lifecycle", "public_configuration"] },
+      },
+      orderBy: { sequence: "asc" },
+      select: {
+        sequence: true,
+        change_kind: true,
+        source_revision_key: true,
+        metadata_json: true,
+      },
+    });
+    assert.equal(afterUpgrade.length, 2);
+    assert.equal(afterUpgrade[1]!.change_kind, "public_configuration");
+    assert.equal(
+      afterUpgrade[1]!.source_revision_key,
+      isolatedSource.sourceRevisionId,
+    );
+    assert.deepEqual(afterUpgrade[1]!.metadata_json, {
+      providerId: isolatedSource.providerId,
+      platformKey: isolatedSource.platformKey,
+      state: "active",
+      sourceInstanceId: isolatedSource.sourceInstanceId,
+      sourceRevisionId: isolatedSource.sourceRevisionId,
+    });
+    await repository.resume(input);
+    assert.equal(await isolated.database.public_change_causes.count({
+      where: {
+        organization_id: isolated.organizationId,
+        source_key: isolatedSource.platformKey,
+        change_kind: { in: ["provider_lifecycle", "public_configuration"] },
+      },
+    }), afterUpgrade.length);
+  } finally {
+    await isolated.close();
+  }
+});
+
+test("direct disable attributes a legacy active cause only to the current source", async () => {
+  const currentHarness = await createProviderSourceAcceptanceFixture(
+    "disable-causality-upgrade",
+  );
+  try {
+    const current = await createAcceptanceProviderSource(currentHarness, {
+      platformKey: "courtyard",
+      displayName: "Courtyard disable upgrade",
+      mapperKey: "courtyard-provider-observation",
+      identityNamespaceKey: "courtyard-v1",
+      intervalSeconds: 60,
+      hashCharacter: "e",
+    });
+    await activateAcceptanceRuntime(
+      currentHarness.database,
+      currentHarness,
+      current,
+      ACCEPTANCE_CREATED_AT,
+    );
+    await currentHarness.database.$transaction(async (transaction) => {
+      await allocatePublicChangeCauses(transaction, {
+        organizationId: currentHarness.organizationId,
+        changes: [{
+          changeKind: "provider_lifecycle",
+          entityKey: `provider:v1:${current.providerId}`,
+          sourceKey: current.platformKey,
+          sourceRevisionKey: current.configRevisionId,
+          metadata: {
+            providerId: current.providerId,
+            platformKey: current.platformKey,
+            state: "active",
+            configurationRevisionId: current.configRevisionId,
+          },
+          occurredAt: new Date("2026-08-21T13:20:00.000Z"),
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: [current.platformKey],
+            manifestLifecycle: {
+              platformKey: current.platformKey,
+              state: "active",
+            },
+          },
+        }],
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: currentHarness.organizationId,
+        settledAt: new Date("2026-08-21T13:20:00.000Z"),
+      });
+    });
+    await new ProviderSourceAdminLifecycleRepository(
+      currentHarness.database,
+    ).disable({
+      organizationId: currentHarness.organizationId,
+      providerId: current.providerId,
+      sourceInstanceId: current.sourceInstanceId,
+      expectedSourceRevisionId: current.sourceRevisionId,
+      actorKey: "operator-admin",
+      disabledAt: new Date("2026-08-21T13:21:00.000Z"),
+    });
+    const latest = await currentHarness.database.public_change_causes
+      .findFirstOrThrow({
+        where: {
+          organization_id: currentHarness.organizationId,
+          source_key: current.platformKey,
+          change_kind: "provider_lifecycle",
+        },
+        orderBy: { sequence: "desc" },
+      });
+    assert.deepEqual(latest.metadata_json, {
+      providerId: current.providerId,
+      platformKey: current.platformKey,
+      state: "disabled",
+      sourceInstanceId: current.sourceInstanceId,
+      sourceRevisionId: current.sourceRevisionId,
+    });
+  } finally {
+    await currentHarness.close();
+  }
+
+  const siblingHarness = await createProviderSourceAcceptanceFixture(
+    "disable-draft-sibling",
+  );
+  try {
+    const current = await createAcceptanceProviderSource(siblingHarness, {
+      platformKey: "courtyard",
+      displayName: "Courtyard current source",
+      mapperKey: "courtyard-provider-observation",
+      identityNamespaceKey: "courtyard-v1",
+      intervalSeconds: 60,
+      hashCharacter: "f",
+    });
+    await activateAcceptanceRuntime(
+      siblingHarness.database,
+      siblingHarness,
+      current,
+      ACCEPTANCE_CREATED_AT,
+    );
+    const sibling = await createAcceptanceSourceInstance(siblingHarness, {
+      providerId: current.providerId,
+      definition: {
+        platformKey: "courtyard",
+        displayName: "Courtyard draft sibling",
+        mapperKey: "courtyard-provider-observation",
+        identityNamespaceKey: "courtyard-v1-draft",
+        intervalSeconds: 60,
+        hashCharacter: "1",
+      },
+    });
+    await siblingHarness.database.$transaction(async (transaction) => {
+      await allocatePublicChangeCauses(transaction, {
+        organizationId: siblingHarness.organizationId,
+        changes: [{
+          changeKind: "provider_lifecycle",
+          entityKey: `provider:v1:${current.providerId}`,
+          sourceKey: current.platformKey,
+          sourceRevisionKey: current.configRevisionId,
+          metadata: {
+            providerId: current.providerId,
+            platformKey: current.platformKey,
+            state: "active",
+            configurationRevisionId: current.configRevisionId,
+          },
+          occurredAt: new Date("2026-08-21T13:30:00.000Z"),
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: [current.platformKey],
+            manifestLifecycle: {
+              platformKey: current.platformKey,
+              state: "active",
+            },
+          },
+        }],
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: siblingHarness.organizationId,
+        settledAt: new Date("2026-08-21T13:30:00.000Z"),
+      });
+    });
+    const before = await siblingHarness.database.public_change_causes.count({
+      where: { organization_id: siblingHarness.organizationId },
+    });
+    await new ProviderSourceAdminLifecycleRepository(
+      siblingHarness.database,
+    ).disable({
+      organizationId: siblingHarness.organizationId,
+      providerId: current.providerId,
+      sourceInstanceId: sibling.sourceInstanceId,
+      expectedSourceRevisionId: sibling.sourceRevisionId,
+      actorKey: "operator-admin",
+      disabledAt: new Date("2026-08-21T13:31:00.000Z"),
+    });
+    assert.equal(await siblingHarness.database.public_change_causes.count({
+      where: { organization_id: siblingHarness.organizationId },
+    }), before);
+    assert.equal((await siblingHarness.database.provider_source_instances
+      .findUniqueOrThrow({ where: { id: current.sourceInstanceId } })).state,
+    "active");
+  } finally {
+    await siblingHarness.close();
   }
 });
 
