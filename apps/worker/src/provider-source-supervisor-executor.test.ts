@@ -22,6 +22,7 @@ import {
   SourceSupervisorStaleWorkError,
   SourceAdapterRegistry,
   SourceRequestLeaseAuthority,
+  type UnboundSourceAdapterRequestResult,
   type SourceAdapterCaptureInvocation,
   type SourceAdapterOperation,
   type SourceSupervisorExecutionContext,
@@ -121,8 +122,9 @@ function pageWork(): ClaimedPageReadWork {
 
 class RecordingAdapter extends AlternateBookmarkSourceAdapter {
   throwOnCapture = false;
-  constructor(private readonly events: string[]) {
-    super();
+  failRequest = false;
+  constructor(private readonly events: string[], payload?: unknown) {
+    super(payload);
   }
 
   override async captureUnboundRequest(
@@ -131,6 +133,16 @@ class RecordingAdapter extends AlternateBookmarkSourceAdapter {
   ) {
     this.events.push("capture");
     if (this.throwOnCapture) throw new Error("unknown capture state");
+    if (this.failRequest) {
+      invocation.consume(operation);
+      this.captureCount += 1;
+      return {
+        ok: false,
+        failure: { disposition: "retryable", code: "request_timeout" },
+        measurements: { durationMilliseconds: 10_000, responseBytes: 0 },
+        diagnostics: [],
+      } satisfies UnboundSourceAdapterRequestResult;
+    }
     return super.captureUnboundRequest(operation, invocation);
   }
 }
@@ -151,9 +163,10 @@ function fixture(overrides: Readonly<{
   recordDiagnostic?: () => Promise<void>;
   resolveMapper?: () => void;
   importPage?: () => Promise<never>;
+  adapterPayload?: unknown;
 }> = {}): ExecutorFixture {
   const events: string[] = [];
-  const adapter = new RecordingAdapter(events);
+  const adapter = new RecordingAdapter(events, overrides.adapterPayload);
   const coordinator = new ConnectionPermitCoordinator();
   coordinator.configureProfile({
     organizationId: "organization-1",
@@ -347,6 +360,35 @@ test("JSONB roundtrip preserves the canonical record-scope sequence", async () =
   assert.deepEqual(result, { kind: "test_terminal" });
   assert.equal(subject.adapter.captureCount, 1);
   assert.ok(subject.events.includes("source-test-result"));
+  subject.releaseRetained();
+});
+
+test("a failed source request publishes one terminal test result", async () => {
+  const subject = fixture();
+  subject.adapter.failRequest = true;
+
+  const result = await subject.executor.execute(sourceWork(), subject.context);
+
+  assert.deepEqual(result, { kind: "test_terminal" });
+  assert.equal(subject.events.filter((event) => event === "terminalize").length, 1);
+  assert.equal(
+    subject.events.filter((event) => event === "source-test-result").length,
+    1,
+  );
+  subject.releaseRetained();
+});
+
+test("a failed source interpretation publishes one terminal test result", async () => {
+  const subject = fixture({ adapterPayload: null });
+
+  const result = await subject.executor.execute(sourceWork(), subject.context);
+
+  assert.deepEqual(result, { kind: "test_terminal" });
+  assert.equal(subject.events.filter((event) => event === "terminalize").length, 1);
+  assert.equal(
+    subject.events.filter((event) => event === "source-test-result").length,
+    1,
+  );
   subject.releaseRetained();
 });
 
