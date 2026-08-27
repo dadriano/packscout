@@ -167,8 +167,8 @@ function dataforrestEventsSourceAdapterManifest(
       maximumResponseBytes: providerSourceLaunchBounds.maximumResponseBytes,
       timeoutMilliseconds: providerSourceLaunchBounds.requestTimeoutMilliseconds,
     },
-    maximumConnectionRequestCap:
-      providerSourceLaunchBounds.stableProfileRequestCap,
+    maximumPlatformRequestCap:
+      providerSourceLaunchBounds.stablePlatformRequestCap,
     capabilities: {
       connectionTest: true,
       sourceTest: true,

@@ -3,12 +3,34 @@ import { test } from "node:test";
 import { providerSourceLaunchBounds } from "@packscout/contracts";
 import type { PackscoutPrismaClient } from "@packscout/database";
 import {
+  buildProviderSourceCapacityForecast,
+} from "@packscout/services";
+import {
   createProviderSourceCapacityAdmissionHook,
   evaluateProviderSourceOngoingCapacity,
   loadCommittedProviderSourceCapacityArtifact,
   ProviderSourceCapacityAdmissionConfigurationError,
+  parseProviderSourceCapacityArtifact,
   providerSourceMaximumPageCommitBytes,
 } from "./provider-source-capacity-admission.ts";
+
+test("capacity evidence must match the active launch page target", () => {
+  const current = loadCommittedProviderSourceCapacityArtifact();
+  const staleInput = {
+    ...current.forecastInput,
+    pageRecordLimit: providerSourceLaunchBounds.fallbackPageTargetRecords,
+  };
+  assert.throws(
+    () => parseProviderSourceCapacityArtifact({
+      version: "provider-source-capacity-measurement-v1",
+      forecastInput: staleInput,
+      forecast: buildProviderSourceCapacityForecast(staleInput),
+    }),
+    (error: unknown) =>
+      error instanceof ProviderSourceCapacityAdmissionConfigurationError &&
+      error.code === "CAPACITY_ARTIFACT_INVALID",
+  );
+});
 
 test("committed capacity evidence remains admitted after one planned page", () => {
   const artifact = loadCommittedProviderSourceCapacityArtifact();

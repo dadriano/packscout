@@ -59,11 +59,11 @@ And no adapter input contains a mapper key, mapper descriptor, or canonical inst
 
 Coverage: Manual gap — implementation has not started. Compile-time and runtime discriminated-union, correlation-scope, and mapper-independence coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/007` and must replace this gap before completion.
 
-## Scenario: A source test releases request capacity before validation
+## Scenario: A source test releases platform-lane capacity before validation
 
-Given one source test captures a bounded protected page while another source operation on the same stable profile waits for capacity
+Given one source test captures a bounded protected page while another operation for the same provider waits in that platform's permit lane
 When the request boundary terminalizes the source-test attempt
-Then the permit wakes the next eligible operation before source-test page validation begins
+Then that platform-lane permit wakes the next eligible operation before source-test page validation begins
 And the source test retains exactly one generic execution slot through bounded validation and its terminal or fenced result
 And validation continues under the test job and later persists one immutable result by referencing the terminal attempt and current job, supervisor, health, and source pins
 And a request-boundary blocking test failure instead stores terminal attempt, failed result, and episode once before wake
@@ -211,37 +211,39 @@ Coverage: Manual gap — implementation has not started. Automated mapper-manife
 
 ## Scenario: Platform processors run concurrently while each cursor stays sequential
 
-Given four due platform sources, two execution slots, and two approved DataForrest permits
+Given four due platform sources, four execution slots, and one independent permit lane per platform operated at one request
 When the local supervisor claims work
-Then two different providers have overlapping requests
+Then all four providers can have one overlapping page request
 And no provider starts its next page until its prior page commits the next opaque cursor
+And no platform lane exceeds its operating limit of one
 
 Coverage: Manual gap — implementation has not started. Automated overlap, capacity, and cursor-sequencing coverage is owned by tasks `dataforest-source-integration/003` and `dataforest-source-integration/007` and must replace this gap before completion.
 
-## Scenario: Request capacity belongs to the connection profile
+## Scenario: Request capacity belongs to the exact platform or connection-test lane
 
-Given four DataForrest sources share one profile capped at two requests and a test-only source uses another profile capped at one
-When source reads and operational tests are due under both profiles
-Then no more than two DataForrest operations overlap and no more than one alternate-profile operation overlaps
-And credential revisions, providers, source instances, and tests cannot create a second permit pool for the same profile
+Given four DataForrest sources share one profile, each platform lane is operated at one request, and the profile has a separate provider-free connection-test lane operated at one request
+When page reads, source tests, and connection tests are due
+Then every platform operation consumes only its provider's lane and every connection test consumes only the connection-test lane
+And all four platforms may overlap while no individual platform lane or the connection-test lane exceeds one and the provider hard maximum remains two per platform
+And credential revisions, source revisions, and source instances cannot create a second permit pool for the same profile and provider
 
-Coverage: Manual gap — implementation has not started. Automated stable-profile capacity, cross-revision sharing, adapter-operation, and independent-profile coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/007` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated platform-lane capacity, cross-revision sharing, separate connection-test-lane, adapter-operation, and independent-lane coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/007` and must replace this gap before completion.
 
-## Scenario: A saturated profile cannot occupy another profile's execution capacity
+## Scenario: A saturated platform lane cannot occupy another platform's execution capacity
 
-Given four operations wait on a slow profile capped at one request, one operation is due on an independent profile, and two execution slots are free
+Given several operations wait on a slow Courtyard platform lane capped at one in a generic fixture, one Collector Crypt operation is due on another lane under the same shared profile, and two execution slots are free
 When the generic runtime admits eligible work
-Then one operation from each profile atomically receives one execution slot and its own profile permit
-And the remaining slow-profile waiters hold neither resource while queued
-And releasing either resource wakes the oldest work eligible for both without starving the independent profile
+Then one operation from each platform atomically receives one execution slot and its own lane permit
+And the remaining Courtyard waiters hold neither resource while queued
+And releasing either resource wakes the oldest work eligible for both without starving the independent Collector Crypt lane
 
-Coverage: Manual gap — implementation has not started. Automated paired-admission, saturated-profile isolation, and cross-profile fairness coverage is owned by tasks `dataforest-source-integration/002` and `dataforest-source-integration/007` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated paired-admission, saturated-platform-lane isolation, and cross-platform fairness coverage is owned by tasks `dataforest-source-integration/002` and `dataforest-source-integration/007` and must replace this gap before completion.
 
 ## Scenario: Backlog fairness prevents one platform from monopolizing capacity
 
 Given Courtyard has committed `continue` and three other sources are due
 When Courtyard captures its bounded upstream response body, normalizes it, and later commits that page
-Then its connection-profile permit becomes available immediately after response-body capture while its execution slot remains held through normalization and the page attempt
+Then its platform-lane permit becomes available immediately after response-body capture while its execution slot remains held through normalization and the page attempt
 And after commit it yields the execution slot with a continuation from the committed cursor, while each released resource goes to its oldest eligible waiter before Courtyard can jump an unserved due source
 
 Coverage: Manual gap — implementation has not started. Automated continuation, fairness, and capacity coverage is owned by task `dataforest-source-integration/007` and must replace this gap before completion.
@@ -257,13 +259,13 @@ Coverage: Manual gap — implementation has not started. Automated failure-isola
 
 ## Scenario: Shared authentication failure fences queued bound work
 
-Given four DataForrest sources share a capacity-one connection revision, a second bound page is queued, and an alternate test source uses another profile
+Given four DataForrest sources share one connection revision, a second bound page is queued in one platform lane, and an alternate test source uses another profile
 When the first DataForrest request returns an authentication failure
 Then one connection-revision action-required episode advances its health generation and the queued page makes zero upstream calls
-And the failed request does not wake the profile permit until that blocking transition is durable
+And the failed request does not wake its platform-lane permit until that blocking transition is durable
 And all four DataForrest lanes wait while every platform cursor and source-local health detail remains unchanged
 And the alternate profile, supervisor, and authorized admin operations remain available
-And at most one explicitly correlated recovery connection test may be pending or running without source state, receives the only request lease permitted under that open episode, and may call upstream while normal connection tests, source tests, and page reads make zero calls
+And at most one explicitly correlated recovery connection test may be pending or running without source state, receives a request lease through the separate connection-test lane under that open episode, and may call upstream while normal connection tests, source tests, and page reads make zero calls
 And duplicate recovery requests coalesce, while a failed immutable attempt leaves the episode open for a later explicit attempt
 And same-revision recovery resumes eligible work while a tested replacement revision creates new pinned runs from committed cursors without mutating old runs
 
@@ -271,18 +273,18 @@ Coverage: Manual gap — implementation has not started. Automated connection-he
 
 ## Scenario: Simultaneous blocking outcomes create one connection episode
 
-Given two capacity-two requests hold current detecting leases for the same connection revision and health generation
+Given two requests in different platform lanes hold current detecting leases for the same connection revision and health generation
 When both return a blocking authentication outcome
 Then one request-lease-fenced compare-and-transition advances the health generation and stores one episode
-And the sibling outcome coalesces without another generation advance or duplicate episode before either permit wakes bound work
+And the sibling outcome coalesces without another generation advance or duplicate episode before either lane permit wakes bound work
 And a late outcome whose supervisor epoch or job or run claim is stale cannot mutate connection health
 
-Coverage: Manual gap — implementation has not started. Automated cap-two blocking outcomes, detecting-lease CAS, single generation, episode coalescing, stale-owner rejection, and permit-wake ordering coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/007` and must replace this gap before completion.
+Coverage: Manual gap — implementation has not started. Automated cross-platform blocking outcomes, detecting-lease CAS, single generation, episode coalescing, stale-owner rejection, and lane-permit-wake ordering coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/007` and must replace this gap before completion.
 
 ## Scenario: Failed request terminalization becomes an honest recoverable state
 
 Given a sanitized durable request attempt is in flight, another profile has an active request, and its terminal-outcome or blocking-episode transaction repeatedly fails
-When three transaction attempts with 100 and 400 ms backoff, 750 ms attempt timeouts, and a three-second hard limit are exhausted
+When three transaction attempts with 100 and 400 ms backoff, five-second attempt timeouts, and a 16-second hard limit are exhausted
 Then the supervisor self-fences locally, stops every claim, new call, and new persistence transaction, and attempts to move its durable epoch from active to fenced-draining while aborting request leases across all profiles
 And a successful durable fence orders every page or test transaction before it or rejects it after it
 And if the durable fence is temporarily unavailable, only a transaction already submitted under the predecessor epoch may resolve before expiry, and takeover reconciles that durable outcome instead of assuming zero results
@@ -294,7 +296,7 @@ Coverage: Manual gap — implementation has not started. Automated durable reque
 
 ## Scenario: A pre-call request-attempt insert fails closed
 
-Given paired execution and profile capacity was granted and the post-grant guard is current
+Given paired execution and exact request-lane capacity was granted and the post-grant guard is current
 When the durable in-flight request-attempt insert exhausts the shared control-plane retry policy
 Then the unused request lease closes, both reserved resources release, and the source adapter receives zero calls
 And the supervisor enters the same whole-owner self-fencing path without inventing a request-attempt row or success diagnostic
@@ -322,18 +324,18 @@ Coverage: Manual gap — implementation has not started. Automated singleton own
 
 ## Scenario: A stale permit grant cannot invoke a source adapter
 
-Given a supervisor is waiting cancelably for a connection-profile permit under its current singleton epoch
+Given a supervisor is waiting cancelably for an exact platform or connection-test lane permit under its current singleton epoch
 When the permit is granted after that epoch can no longer be renewed or validated
-Then the reserved execution slot and profile permit are atomically released without a source-adapter call, request attempt, request lease, cursor change, or false provider failure
+Then the reserved execution slot and lane permit are atomically released without a source-adapter call, request attempt, request lease, cursor change, or false provider failure
 And only a current owner may receive a fenced request lease and make one bounded upstream request
 
 Coverage: Manual gap — implementation has not started. Automated cancelable-wait, FIFO-grant, post-grant epoch validation, zero-call release, request-lease fencing, and single-request coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, and `dataforest-source-integration/007` and must replace this gap before completion.
 
 ## Scenario: Revoked or stale work cannot call upstream after waiting
 
-Given a page read or operational test is waiting for its connection-profile permit
+Given a page read or operational test is waiting for its exact platform or connection-test lane permit
 When its run or job lease expires, profile revision is revoked, source is disabled or replaced, or cursor generation changes before the permit is granted
-Then the post-grant guard rejects the stale operation and atomically releases its reserved execution slot and profile permit
+Then the post-grant guard rejects the stale operation and atomically releases its reserved execution slot and lane permit
 And the source adapter receives zero calls and no cursor, page, test result, or diagnostic success is committed
 
 Coverage: Manual gap — implementation has not started. Automated post-wait run/job, profile-revocation, source-lifecycle, cursor-generation, zero-call, and permit-release coverage is owned by tasks `dataforest-source-integration/002`, `dataforest-source-integration/003`, `dataforest-source-integration/004`, and `dataforest-source-integration/007` and must replace this gap before completion.

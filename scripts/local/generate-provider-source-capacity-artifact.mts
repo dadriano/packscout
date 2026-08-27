@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile, statfs } from "node:fs/promises";
 import { promisify } from "node:util";
+import { providerSourceLaunchBounds } from "@packscout/contracts";
 import {
   buildProviderSourceCapacityForecast,
   evaluateProviderSourceCapacityPreflight,
@@ -150,17 +151,18 @@ const memoryMeasurement = JSON.parse(
 
 const forecastInput = {
   baselineRecordCount: 14_526_877,
-  pageRecordLimit: 250,
+  pageRecordLimit: providerSourceLaunchBounds.pageTargetRecords,
   sourceCount: 4,
   pollIntervalSeconds: 60,
   rawRetentionDays: 7,
   operationalRetentionDays: 30,
   incrementalGrowthDays: 365,
   // No observed steady-state delivery rate is available yet. Fail closed by
-  // budgeting a full 250-record page on every possible 60-second poll for the
+  // budgeting a full launch-bound page on every possible 60-second poll for the
   // complete one-year growth horizon; Task 010 may replace this only with new
   // reviewed evidence and a versioned artifact.
-  incrementalRecordsPerPollAttempt: 250,
+  incrementalRecordsPerPollAttempt:
+    providerSourceLaunchBounds.pageTargetRecords,
   measuredStructuredPhysicalBytesPerRecord:
     storageMeasurement.structuredPhysicalBytesPerRecord as number,
   conservativeRawHistoryBytes: 98_700_000_000,
@@ -219,13 +221,14 @@ const artifact = {
       horizonDays: forecastInput.incrementalGrowthDays,
       recordsPerPollAttempt: forecastInput.incrementalRecordsPerPollAttempt,
       basis:
-        "fail-closed maximum: every source returns the full 250-record launch page on every 60-second poll",
+        `fail-closed maximum: every source returns the full ${providerSourceLaunchBounds.pageTargetRecords}-record launch page on every 60-second poll`,
     },
   },
   storageMeasurement: {
     environment: {
       postgresVersionMajor: 16,
-      schemaMigration: "20260826010000_heat_relationship_causality",
+      schemaMigration:
+        "20260827010000_provider_source_platform_request_lanes",
     },
     ...storageMeasurement,
   },

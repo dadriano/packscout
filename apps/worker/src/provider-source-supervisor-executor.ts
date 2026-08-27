@@ -219,10 +219,34 @@ export class ProviderSourceSupervisorWorkExecutor
     this.#clock = dependencies.clock ?? { now: () => new Date() };
   }
 
-  registeredProfileRequestLimit(
+  registeredRequestPermitLane(
     work: ProviderSourceSupervisorClaimedWork,
-  ): number {
-    return this.#adapterFor(work).manifest.maximumConnectionRequestCap;
+  ) {
+    const maximumPlatformRequestCap =
+      this.#adapterFor(work).manifest.maximumPlatformRequestCap;
+    if (
+      !Number.isSafeInteger(work.platformRequestLimit) ||
+      work.platformRequestLimit < 1 ||
+      work.platformRequestLimit > maximumPlatformRequestCap
+    ) {
+      throw new TypeError("Provider request limit exceeds its adapter manifest.");
+    }
+    const approvedRequestCap = Math.min(
+      work.platformRequestLimit,
+      providerSourceLaunchBounds.requestConcurrencyPerLane,
+    );
+    const profile = {
+      organizationId: work.organizationId,
+      connectionProfileId: work.connectionProfileId,
+      approvedRequestCap,
+    } as const;
+    return work.kind === "connection_test"
+      ? { ...profile, scope: "connection_test" as const, providerId: null }
+      : {
+          ...profile,
+          scope: "platform" as const,
+          providerId: work.providerId,
+        };
   }
 
   async execute(
@@ -231,6 +255,20 @@ export class ProviderSourceSupervisorWorkExecutor
   ): Promise<SourceSupervisorExecutionResult> {
     context.runtimeFence.assertActive();
     const adapter = this.#adapterFor(work);
+    const pageLimit = work.kind === "page_read"
+      ? work.retryAttempt === 0
+        ? adapter.manifest.requestBounds.pageLimit
+        : Math.min(
+            adapter.manifest.requestBounds.pageLimit,
+            providerSourceLaunchBounds.fallbackPageTargetRecords,
+          )
+      : null;
+    const operationRequestBounds = pageLimit === null
+      ? adapter.manifest.requestBounds
+      : Object.freeze({
+          ...adapter.manifest.requestBounds,
+          pageLimit,
+        });
     const requestAttemptId = this.#ids.id();
     const requestLeaseId = this.#ids.id();
     const pageId = work.kind === "page_read" ? this.#ids.id() : null;
@@ -281,6 +319,7 @@ export class ProviderSourceSupervisorWorkExecutor
             connectionProfileId: work.connectionProfileId,
             connectionProfileRevisionId: work.connectionRevisionId,
             connectionHealthGeneration,
+            providerId: work.providerId,
             provider: work.provider,
             sourceInstanceId: work.sourceInstanceId,
             sourceRevisionId: work.sourceRevisionId,
@@ -300,6 +339,7 @@ export class ProviderSourceSupervisorWorkExecutor
             connectionProfileId: work.connectionProfileId,
             connectionProfileRevisionId: work.connectionRevisionId,
             connectionHealthGeneration,
+            providerId: work.providerId,
             provider: work.provider,
             sourceInstanceId: work.sourceInstanceId,
             sourceRevisionId: work.sourceRevisionId,
@@ -309,7 +349,7 @@ export class ProviderSourceSupervisorWorkExecutor
             runClaimLeaseId: work.claimLeaseId,
             pageAttemptId: pageId!,
             pageNumber: work.pageNumber,
-            pageLimit: providerSourceLaunchBounds.pageTargetRecords,
+            pageLimit: pageLimit!,
             cursorGeneration: cursor!.cursorGeneration,
             requestedCursorFingerprint: work.requestedCursorFingerprint,
           };
@@ -319,11 +359,25 @@ export class ProviderSourceSupervisorWorkExecutor
       context.signal,
       admissionController.signal,
     ]);
-    const admissionProfile = {
-      organizationId: work.organizationId,
-      connectionProfileId: work.connectionProfileId,
-    } as const;
-    const waitReason = context.requestLeases.admissionWaitReason(admissionProfile);
+    const registeredRequestPermitLane = this.registeredRequestPermitLane(work);
+    const requestPermitLane = registeredRequestPermitLane.scope === "platform"
+      ? {
+          organizationId: registeredRequestPermitLane.organizationId,
+          connectionProfileId:
+            registeredRequestPermitLane.connectionProfileId,
+          scope: "platform" as const,
+          providerId: registeredRequestPermitLane.providerId,
+        }
+      : {
+          organizationId: registeredRequestPermitLane.organizationId,
+          connectionProfileId:
+            registeredRequestPermitLane.connectionProfileId,
+          scope: "connection_test" as const,
+          providerId: null,
+        };
+    const waitReason = context.requestLeases.admissionWaitReason(
+      requestPermitLane,
+    );
     const pendingLease = leasePins.operationKind === "page_read"
       ? context.requestLeases.admit({
           pins: leasePins,
@@ -342,6 +396,11 @@ export class ProviderSourceSupervisorWorkExecutor
             return !admissionSignal.aborted;
           },
         });
+    // Admission can be cancelled by the owner fence while the durable
+    // wait-state write below is still pending. Attach a rejection
+    // handler immediately so that expected cancellation cannot become an
+    // unhandled process-level rejection before this turn awaits the lease.
+    void pendingLease.catch(() => undefined);
     try {
       // Register with the in-process FIFO before the durable wait-state write.
       // A slow database write must never let newer work jump this operation.
@@ -522,7 +581,7 @@ export class ProviderSourceSupervisorWorkExecutor
             connectionProfileRevisionId: work.connectionRevisionId,
             connectionConfiguration: validatedConnection!.value,
             requestLease: lease,
-            bounds: adapter.manifest.requestBounds,
+            bounds: operationRequestBounds,
             correlation: {
               singletonFencingEpoch,
               connectionHealthGeneration,
@@ -541,7 +600,8 @@ export class ProviderSourceSupervisorWorkExecutor
               connectionProfileRevisionId: work.connectionRevisionId,
               connectionConfiguration: validatedConnection!.value,
               requestLease: lease,
-              bounds: adapter.manifest.requestBounds,
+              bounds: operationRequestBounds,
+              providerId: work.providerId,
               provider: work.provider,
               sourceInstanceId: work.sourceInstanceId,
               sourceRevisionId: work.sourceRevisionId,
@@ -565,7 +625,8 @@ export class ProviderSourceSupervisorWorkExecutor
               connectionProfileRevisionId: work.connectionRevisionId,
               connectionConfiguration: validatedConnection!.value,
               requestLease: lease,
-              bounds: adapter.manifest.requestBounds,
+              bounds: operationRequestBounds,
+              providerId: work.providerId,
               provider: work.provider,
               sourceInstanceId: work.sourceInstanceId,
               sourceRevisionId: work.sourceRevisionId,
@@ -584,7 +645,7 @@ export class ProviderSourceSupervisorWorkExecutor
                 requestedCursorFingerprint:
                   work.requestedCursorFingerprint,
                 requestedCursor: cursor!,
-                pageLimit: providerSourceLaunchBounds.pageTargetRecords,
+                pageLimit: pageLimit!,
               },
             });
       try {
@@ -808,10 +869,7 @@ export class ProviderSourceSupervisorWorkExecutor
         return dispositionForFailure(operationResult.failure);
       }
       return work.kind === "source_test"
-        ? {
-            kind: "source_action_required",
-            safeCode: failureSafeCode(operationResult.failure),
-          }
+        ? { kind: "test_terminal" }
         : work.kind === "connection_test"
           ? { kind: "test_terminal" }
           : dispositionForFailure(operationResult.failure);
@@ -845,12 +903,7 @@ export class ProviderSourceSupervisorWorkExecutor
         interpretation,
       );
       await this.#completeTestResult(work, context, requestAttemptId, result);
-      return result.ok
-        ? { kind: "test_terminal" }
-        : {
-            kind: "source_action_required",
-            safeCode: failureSafeCode(result.failure),
-          };
+      return { kind: "test_terminal" };
     }
     if (work.kind !== "page_read" || operation.operationKind !== "page_read") {
       return { kind: "source_action_required", safeCode: "WORK_KIND_MISMATCH" };

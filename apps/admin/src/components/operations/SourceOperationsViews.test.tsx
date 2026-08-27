@@ -158,7 +158,7 @@ test("source-neutral overview renders shared capacity and the exact supplied reg
   );
   assert.match(html, /Execution slots/);
   assert.match(html, /2 \/ 4/);
-  assert.match(html, /Request permits/);
+  assert.match(html, /Platform request permits/);
   assert.match(html, /1 waiting/);
   for (const displayName of sources.map((source) => source.displayName)) {
     assert.match(html, new RegExp(displayName));
@@ -193,7 +193,7 @@ test("bounded operational labels cover worker, capacity, recovery, retry, pause,
     ["Running", baseSource],
     ["Paused", { ...baseSource, processor: { ...baseSource.processor!, activity: "paused" } }],
     ["Action required", { ...baseSource, processor: { ...baseSource.processor!, activity: "action_required" } }],
-    ["Waiting for capacity", { ...baseSource, processor: { ...baseSource.processor!, activity: "waiting", waitReason: "profile_capacity" } }],
+    ["Waiting for capacity", { ...baseSource, processor: { ...baseSource.processor!, activity: "waiting", waitReason: "request_lane_capacity" } }],
     ["Failed", { ...baseSource, processor: { ...baseSource.processor!, activity: "inactive" }, activeRun: null, latestRun: { ...baseSource.activeRun!, state: "failed", finishedAt: now, failureCode: "SOURCE_FAILED" } }],
     ["Reached head", { ...baseSource, processor: { ...baseSource.processor!, activity: "inactive", phase: "reached_head" }, activeRun: null }],
   ];

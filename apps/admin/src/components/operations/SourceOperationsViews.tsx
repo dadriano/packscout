@@ -60,7 +60,7 @@ export function sourceOperationalLabel(
   if (source.processor.activity === "paused") return "Paused";
   if (source.processor.activity === "action_required") return "Action required";
   if (
-    source.processor.waitReason === "profile_capacity" ||
+    source.processor.waitReason === "request_lane_capacity" ||
     source.processor.waitReason === "execution_capacity" ||
     source.processor.waitReason === "capacity_blocked"
   ) return "Waiting for capacity";
@@ -132,7 +132,7 @@ export function ConnectionOperationsSummary({
         <div><dt>Health generation</dt><dd>{connection.health.generation}{connection.health.blocking ? ` · ${connection.health.blocking.safeCode}` : " · clear"}</dd></div>
         <div><dt>Supervisor renewal</dt><dd>{dateTime(connection.supervisor.lastRenewedAt)}</dd></div>
         <div><dt>Execution slots</dt><dd>{connection.capacity.executionSlots.used} / {connection.capacity.executionSlots.maximum}<progress aria-label="Execution slots used" value={connection.capacity.executionSlots.used} max={connection.capacity.executionSlots.maximum} /></dd></div>
-        <div><dt>Request permits</dt><dd>{connection.capacity.requestPermits.used} / {connection.capacity.requestPermits.maximum}<progress aria-label="Request permits used" value={connection.capacity.requestPermits.used} max={connection.capacity.requestPermits.maximum} /></dd></div>
+        <div><dt>Platform request permits</dt><dd>{connection.capacity.requestPermits.used} / {connection.capacity.requestPermits.maximum}<progress aria-label="Platform request permits used" value={connection.capacity.requestPermits.used} max={connection.capacity.requestPermits.maximum} /></dd></div>
         <div><dt>Capacity queue</dt><dd>{connection.capacity.requestPermits.waiting} waiting · {humanize(connection.capacity.state)}</dd></div>
       </dl>
       {connection.health.blocking ? (

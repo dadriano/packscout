@@ -14,6 +14,7 @@ import { dataforestEventsV1EvidenceFixture } from
   "@packscout/contracts/test-fixtures/dataforrest-events-v1";
 import {
   PipelineSetupRepository,
+  ProviderSourceAdminLifecycleRepository,
   ProviderSourceDiagnosticRepository,
   ProviderSourceImportRunRepository,
   ProviderSourceLifecycleRepository,
@@ -299,7 +300,7 @@ async function createDataforrestFixture(input: Readonly<{
       dataforrestEventsV1SourceAdapterManifest.compatibleConnectionTypeKey,
     displayName: "Shared DataForrest fixture",
     requestLimit:
-      dataforrestEventsV1SourceAdapterManifest.maximumConnectionRequestCap,
+      dataforrestEventsV1SourceAdapterManifest.maximumPlatformRequestCap,
     sourceAdapterVersion: dataforrestEventsV1SourceAdapterManifest.adapterVersion,
     encryptedConfiguration: encrypted,
     configurationFingerprint: createHash("sha256")
@@ -450,7 +451,7 @@ async function createAlternateFixture(
     sourceTypeKey: alternateBookmarkSourceManifest.sourceTypeKey,
     connectionTypeKey: alternateBookmarkSourceManifest.compatibleConnectionTypeKey,
     displayName: "Alternate bookmark fixture",
-    requestLimit: alternateBookmarkSourceManifest.maximumConnectionRequestCap,
+    requestLimit: alternateBookmarkSourceManifest.maximumPlatformRequestCap,
     sourceAdapterVersion: alternateBookmarkSourceManifest.adapterVersion,
     encryptedConfiguration: encrypted,
     configurationFingerprint: createHash("sha256")
@@ -566,8 +567,8 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
       provider,
       Math.max(maximumByProvider.get(provider) ?? 0, providerActive),
     );
-    if (calls === 2) firstWaveStarted.resolve();
-    if (calls <= 2) await releaseFirstWave.promise;
+    if (calls === 4) firstWaveStarted.resolve();
+    if (calls <= 4) await releaseFirstWave.promise;
     const cursor = url.searchParams.get("cursor");
     const pages = dataforestEventsV1EvidenceFixture[provider];
     const body = cursor === null
@@ -606,10 +607,10 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
         select: { id: true, state: true, failure_code: true },
         orderBy: { created_at: "asc" },
       });
-      assert.ok(calls >= 2, JSON.stringify(runs));
+      assert.ok(calls >= 4, JSON.stringify(runs));
     }, 3_000);
     await firstWaveStarted.promise;
-    assert.equal(maximumActive, 2);
+    assert.equal(maximumActive, 4);
     releaseFirstWave.resolve();
     await waitFor(async () => {
       const [pageCount, runs] = await Promise.all([
@@ -644,7 +645,7 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
       }), 4);
     });
     assert.equal(calls, 12);
-    assert.equal(maximumActive, 2);
+    assert.equal(maximumActive, 4);
     assert.deepEqual(
       Object.fromEntries(maximumByProvider),
       {
@@ -768,6 +769,96 @@ test("test-only alternate adapter uses the unchanged supervisor and durable page
     await supervisor.runCycle();
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
     assert.equal(adapter.captureCount, 1);
+  } finally {
+    await supervisor?.stop().catch(() => undefined);
+    await fixture.close();
+  }
+});
+
+test("a failed disabled-source test terminalizes once without fencing the supervisor", async () => {
+  const fixture = await createMigratedTestDatabase();
+  let supervisor: ProviderSourceSupervisor<ProviderSourceSupervisorClaimedWork>
+    | null = null;
+  try {
+    const setup = await createAlternateFixture(fixture.database);
+    const lifecycle = new ProviderSourceAdminLifecycleRepository(fixture.database);
+    const disabledAt = await databaseNow(fixture.database);
+    await lifecycle.disable({
+      organizationId: setup.organizationId,
+      providerId: setup.providerId,
+      sourceInstanceId: setup.source.sourceInstanceId,
+      expectedSourceRevisionId: setup.source.sourceRevisionId,
+      actorKey: actor,
+      disabledAt,
+    });
+    const job = await lifecycle.requestSourceTest({
+      organizationId: setup.organizationId,
+      providerId: setup.providerId,
+      sourceInstanceId: setup.source.sourceInstanceId,
+      sourceRevisionId: setup.source.sourceRevisionId,
+      connectionProfileId: setup.profileId,
+      connectionRevisionId: setup.revisionId,
+      requestedByActorKey: actor,
+      requestedAt: await databaseNow(fixture.database),
+    });
+    const adapter = new AlternateBookmarkSourceAdapter(null);
+    supervisor = createRealSupervisor({
+      database: fixture.database,
+      cipher: setup.cipher,
+      sourceAdapters: new SourceAdapterRegistry([adapter]),
+      environmentKey: "runtime-e2e-failed-source-test",
+    });
+    await supervisor.initialize();
+    await supervisor.runCycle();
+    await waitFor(async () => {
+      assert.equal((await fixture.database.provider_source_test_jobs
+        .findUniqueOrThrow({ where: { id: job.jobId } })).state, "failed");
+      assert.equal(await fixture.database.provider_source_test_results.count({
+        where: { job_id: job.jobId, outcome: "failure" },
+      }), 1);
+    });
+    await supervisor.runCycle();
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+    const [runtime, result, attempts, terminalEvents, openEpisodes, epochs] =
+      await Promise.all([
+        fixture.database.provider_source_runtime_states.findUniqueOrThrow({
+          where: { source_instance_id: setup.source.sourceInstanceId },
+        }),
+        fixture.database.provider_source_test_results.findUniqueOrThrow({
+          where: { job_id: job.jobId },
+        }),
+        fixture.database.compact_source_request_attempts.findMany({
+          where: { source_test_job_id: job.jobId },
+        }),
+        fixture.database.source_processor_diagnostic_events.findMany({
+          where: {
+            source_test_job_id: job.jobId,
+            correlation_kind: "source_test",
+            phase: "terminal",
+          },
+        }),
+        fixture.database.source_connection_health_episodes.count({
+          where: { connection_profile_id: setup.profileId, closed_at: null },
+        }),
+        fixture.database.source_supervisor_epochs.findMany(),
+      ]);
+    assert.equal(supervisor.state, "active");
+    assert.equal(adapter.captureCount, 1);
+    assert.equal(result.outcome, "failure");
+    assert.equal(result.safe_code, "invalid_response");
+    assert.equal(runtime.phase, "terminal");
+    assert.equal(runtime.activity, "inactive");
+    assert.equal(runtime.action_required_code, null);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0]!.terminal_state, "captured");
+    assert.equal(terminalEvents.length, 1);
+    assert.equal(terminalEvents[0]!.severity, "warning");
+    assert.equal(terminalEvents[0]!.safe_code, "INVALID_RESPONSE");
+    assert.equal(terminalEvents[0]!.request_attempt_id, result.request_attempt_id);
+    assert.equal(openEpisodes, 0);
+    assert.equal(epochs.length, 1);
+    assert.equal(epochs[0]!.state, "active");
   } finally {
     await supervisor?.stop().catch(() => undefined);
     await fixture.close();

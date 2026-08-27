@@ -32,15 +32,15 @@ The first pass runs locally through one long-lived supervisor process. It owns f
 |                                                                    |
 |  Per source: adapter revision/config, opaque cursor, schedule, |
 |              runs, lease, health, and diagnostic feed              |
-|  Per profile: adapter type, encrypted config, tests, request limit |
+|  Per profile: adapter type, encrypted config, tests, platform cap |
 +---------------------------------+----------------------------------+
                                   |
                                   v
 +--------------------------------------------------------------------+
 |                 ONE FENCED LOCAL SUPERVISOR                        |
 |                                                                    |
-|  Four concurrent provider lanes --> generic source runtime         |
-|                                      + source-adapter registry     |
+|  Four platform permit lanes ----> generic source runtime           |
+|  cap 2 each + 4 execution slots    + source-adapter registry       |
 +---------------------------------+----------------------------------+
                                   |
                  +----------------+----------------+
@@ -67,7 +67,7 @@ A provider identity never contains a source-instance, source-adapter, or connect
 ## Resolved Decisions: Source Model
 
 - Courtyard, Collector Crypt, Phygitals, and ClutchPacks are the only first-pass providers, using exact filters `courtyard`, `collector_crypt`, `phygitals`, and `clutchpacks`.
-- One shared DataForrest connection profile owns the HTTPS endpoint, encrypted bearer credential revisions, request bounds, and supported aggregate request concurrency.
+- One shared DataForrest connection profile owns the HTTPS endpoint, encrypted bearer credential revisions, request bounds, and the provider-approved hard cap of two requests per platform; PackScout operates one request per platform lane and does not impose one aggregate permit cap across providers.
 - Each provider owns one active source instance with an immutable platform filter and independent opaque cursor, 60-second default interval, run history, health, and processor log feed.
 - A provider source is replaceable; canonical business identity remains organization plus stable provider plus canonical kind plus provider record identity, while identity namespace is a compatibility gate on the source revision.
 - GameStop, Beezie, Trove, and Stadium Vault remain compiled reference mappings but are not registered or configurable as DataForrest launch sources.
@@ -75,7 +75,7 @@ A provider identity never contains a source-instance, source-adapter, or connect
 ## Resolved Decisions: Source Adapter Boundary
 
 - `sourceTypeKey` identifies one compile-time source-adapter registration; generic scheduling, lifecycle, imports, persistence, and admin operations use that key and never branch on DataForrest, platform names, endpoints, SDKs, or vendor page fields.
-- A source adapter owns its configuration validation, credentials, upstream client or library, connection and source tests, pagination translation, cancellation, and safe failure classification; it declares capacity needs but cannot acquire or bypass connection permits itself.
+- A source adapter owns its configuration validation, credentials, upstream client or library, connection and source tests, pagination translation, cancellation, and safe failure classification; it declares capacity needs but cannot acquire or bypass request-permit lanes itself.
 - Every adapter returns the same normalized provider-observation page: stable provider and record identities plus evidence-backed record-ID scope, ordered record outcomes, an adapter-owned opaque cursor, either `{ kind: continue }` or `{ kind: poll_after, minimumDelaySeconds }`, bounded measurements, and sanitized diagnostics.
 - Every source revision separately pins a `mapperKey` and version compatible with its stable provider, normalized contract, and identity namespace; mappers consume normalized observations and never import DataForrest types or choose behavior by source type.
 - Production registers only `dataforrest-events-v1`; test composition registers one alternate adapter that proves the generic runtime and importer do not depend on DataForrest.
@@ -91,7 +91,7 @@ A provider identity never contains a source-instance, source-adapter, or connect
 ## Resolved Decisions: Contract Authority
 
 - One versioned provider-source contract is the sole authority for adapter capabilities, normalized observations, opaque cursors, continuation, identity, lifecycle, failure, and diagnostic semantics.
-- One versioned DataForrest adapter contract is the authority for its filters, raw page wrapper, event vocabulary, pagination hints, request bounds, and connection-scoped concurrency.
+- One versioned DataForrest adapter contract is the authority for its filters, raw page wrapper, event vocabulary, pagination hints, request bounds, and per-platform concurrency.
 - Generic worker, server, admin, migration, and test consumers use only the provider-source contract; only the DataForrest adapter and its evidence fixtures consume the vendor contract.
 - Source, profile, run, page, diagnostic, and completion evidence pins both applicable contract revisions rather than copying their defaults.
 - A live-evidence contradiction creates a reviewed DataForrest adapter-contract revision; it cannot create a vendor or provider branch in generic code.
@@ -99,9 +99,9 @@ A provider identity never contains a source-instance, source-adapter, or connect
 ## Resolved Decisions: Processing
 
 - One page may contain catalog, pulls, and trades for one platform; its opaque cursor belongs only to that source instance and adapter revision.
-- The local supervisor exposes four concurrent platform lanes and holds one durable singleton lease; a second process fails before claiming work or invoking a source adapter. One source may have one active run and one in-flight page request, while different providers may run together.
+- The local supervisor exposes four generic execution slots and four independent platform request-permit lanes operated at one request each, and it holds one durable singleton lease; a second process fails before claiming work or invoking a source adapter. One source may have one active run and one in-flight page request, so useful page-read concurrency is at most four, one per provider. Connection tests use their own one-request permit lane. DataForrest's hard maximum remains two per platform.
 - A slow, backlogged, paused, or failed provider cannot block another provider's scheduling, fetch, mapping, commit, retry, or health transition.
-- A generic process-local coordinator admits reads and tests only when both an execution slot and the stable profile's cancelable FIFO permit are grantable, so no operation holds one while waiting for the other. After paired grant, one authoritative guard revalidates active singleton, job or run, profile/revocation/health, source/lifecycle, and cursor-generation fences before issuing a one-use request lease; stale work releases both resources and makes zero calls. Bounded response capture or normalized request-failure classification closes the lease before page normalization, but a typed connection-blocking outcome must persist its episode and health generation before waking another waiter. Task 001 must prove at least two safe concurrent requests.
+- A generic process-local coordinator admits reads and tests only when both an execution slot and the operation's exact cancelable FIFO permit lane are grantable, so no operation holds one while waiting for the other. Source tests and page reads use the lane identified by organization, connection profile, platform scope, and provider; connection tests use the same profile's separate connection-test lane. After paired grant, one authoritative guard revalidates active singleton, job or run, profile/revocation/health, source/lifecycle, and cursor-generation fences before issuing a one-use request lease; stale work releases both resources and makes zero calls. Bounded response capture or normalized request-failure classification closes the lease before page normalization, but a typed connection-blocking outcome must persist its episode and health generation before waking another waiter. Task 001's historical capture proves safe cross-platform overlap, while the authoritative DataForrest limit fixes each platform lane at two.
 - Each page atomically commits evidence, outcomes, canonical and EV changes, normalized continuation, and next cursor only after a generic source-generation guard rejects any previously committed `continue` cursor fingerprint.
 
 ## Resolved Decisions: Scheduling and Recovery
@@ -138,7 +138,7 @@ A provider identity never contains a source-instance, source-adapter, or connect
 ## Resolved Decisions: Failure Ownership
 
 - Shared credential, authorization, endpoint, TLS, destination, or profile-configuration failure advances a connection health generation and is stored once as a blocking connection-revision episode; queued and uncompleted bound operations are fenced, at most one recovery attempt is pending or running with duplicate coalescing and retry after failure, each source preserves its cursor, and source-local failures remain isolated.
-- Every upstream call has a sanitized durable pre-call attempt that must terminalize before permit wake or downstream work. A pre-call insert failure releases paired resources, makes zero calls, and self-fences. The versioned contract allows three transaction attempts with 100/400 ms backoff, 750 ms per-attempt timeout, and a three-second hard limit. Exhaustion self-fences locally and attempts an `active` to `fenced_draining` database CAS; after a successful CAS no captured page or test result may commit, while an unavailable CAS stops renewal and persistence and leaves takeover to reconcile any transaction already submitted under the predecessor epoch. The next owner atomically terminalizes nonterminal attempts from any released, superseded, or expired-through-grace predecessor as uncertain and opens or coalesces one blocking episode before any new call.
+- Every upstream call has a sanitized durable pre-call attempt that must terminalize before permit wake or downstream work. A pre-call insert failure releases paired resources, makes zero calls, and self-fences. The versioned contract allows three transaction attempts with 100/400 ms backoff, a five-second per-attempt timeout, and a 16-second hard limit. Exhaustion self-fences locally and attempts an `active` to `fenced_draining` database CAS; after a successful CAS no captured page or test result may commit, while an unavailable CAS stops renewal and persistence and leaves takeover to reconcile any transaction already submitted under the predecessor epoch. The next owner atomically terminalizes nonterminal attempts from any released, superseded, or expired-through-grace predecessor as uncertain and opens or coalesces one blocking episode before any new call.
 
 ## Resolved Decisions: Retention and Safety
 
@@ -159,7 +159,7 @@ A provider identity never contains a source-instance, source-adapter, or connect
 ## Abstraction Success
 
 - Compile-time boundary checks prevent generic lifecycle, scheduler, importer, persistence, mapper-selection, and admin-domain code from importing DataForrest wrappers, cursor fields, polling fields, clients, or SDK types.
-- A test-only alternate Courtyard adapter with different raw pagination passes connection test, source test, continuation, resume, mapping, atomic import, and profile-capacity coverage through the unchanged generic runtime.
+- A test-only alternate Courtyard adapter with different raw pagination passes connection test, source test, continuation, resume, mapping, atomic import, and request-lane capacity coverage through the unchanged generic runtime.
 - Production and admin registries expose only `dataforrest-events-v1`; dynamic plugins, cursor translation, dual-source cutover, and incompatible-ID reconciliation remain out of scope.
 
 ## First-Pass Success
@@ -189,7 +189,7 @@ A provider identity never contains a source-instance, source-adapter, or connect
 ## External Dependencies
 
 - An authorized DataForrest bearer credential must be supplied through an ignored local secret and then bootstrapped into the existing encrypted credential workflow.
-- DataForrest must continue supporting the documented platform-filtered cursor contract and at least two safe concurrent requests.
+- DataForrest must continue supporting the documented platform-filtered cursor contract and its authoritative limit of two concurrent requests per platform.
 - The local PostgreSQL environment must have approved capacity for the measured full-history forecast before task 010 starts the real backfill.
 - The production canonical-to-public publisher is a separate unimplemented prerequisite for live DataForrest availability; this feature supplies its versioned availability contract and verified public UI readiness without claiming live publication.
 

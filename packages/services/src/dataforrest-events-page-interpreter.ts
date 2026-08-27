@@ -51,12 +51,12 @@ const timestampFields = new Set([
 const maximumJsonNestingDepth = 64;
 // The transport manifest caps raw responses at no more than 8 MiB.
 // Data-rich catalog records can contain hundreds of bounded native facts, so
-// a full 250-record page needs a higher aggregate traversal allowance while
+// a full 500-record page needs a higher aggregate traversal allowance while
 // the independent depth, object-key, and array-item limits remain enforced.
 // The cap is above both observed 183,215- and 214,914-node Phygitals pages and
-// the reviewed 250 x 945 native-fact page while keeping the heaviest accepted
+// the reviewed 500 x 945 native-fact page while keeping the heaviest accepted
 // object graph inside the unchanged single-page memory gate.
-const maximumJsonNodeCount = 240_000;
+const maximumJsonNodeCount = 480_000;
 const maximumJsonObjectKeys = 256;
 const maximumJsonArrayItems = 5_000;
 const jsonParserInputChunkBytes = 64 * 1024;

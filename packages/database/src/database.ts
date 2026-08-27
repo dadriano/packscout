@@ -72,6 +72,10 @@ const EXPECTED_MIGRATIONS = Object.freeze([
     name: "20260826010000_heat_relationship_causality",
     checksum: "fd8fd289035cbd918f199d4929c5b0c9cae580d170c06729d168eb48c68222ab",
   }),
+  Object.freeze({
+    name: "20260827010000_provider_source_platform_request_lanes",
+    checksum: "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+  }),
 ]);
 const EXPECTED_TABLE_COUNT = 88;
 

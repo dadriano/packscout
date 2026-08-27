@@ -3,6 +3,10 @@ import type { PackscoutPrismaClient } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
 import {
+  lockProviderSourceSupervisorEnvironmentExclusive,
+  lockProviderSourceSupervisorEpochEnvironmentExclusive,
+} from "./provider-source-supervisor-environment-lock.ts";
+import {
   PROVIDER_SOURCE_CONTROL_PLANE_TRANSACTION,
   PROVIDER_SOURCE_SUPERVISOR_TIMING,
 } from "./provider-source-persistence-types.ts";
@@ -26,9 +30,10 @@ export class ProviderSourceSupervisorRepository {
       throw new TypeError("Supervisor environment and owner keys must not be blank.");
     }
     return this.database.$transaction(async (transaction) => {
-      await transaction.$executeRaw(Prisma.sql`
-        select pg_advisory_xact_lock(hashtextextended(${input.environmentKey}, 0))
-      `);
+      await lockProviderSourceSupervisorEnvironmentExclusive(
+        transaction,
+        input.environmentKey,
+      );
       const databaseNow = await providerSourceTransactionTime(transaction);
       const current = await transaction.source_supervisor_epochs.findFirst({
         where: {
@@ -44,18 +49,32 @@ export class ProviderSourceSupervisorRepository {
         );
       }
       if (current) {
-        await transaction.source_supervisor_epochs.update({
-          where: { id: current.id },
-          data: { state: "expired", released_at: databaseNow },
-        });
+        const expired = await transaction.$executeRaw(Prisma.sql`
+          update public.source_supervisor_epochs
+          set state = 'expired'::public.supervisor_epoch_state,
+              released_at = clock_timestamp()
+          where id = cast(${current.id} as uuid)
+            and state in (
+              'active'::public.supervisor_epoch_state,
+              'fenced_draining'::public.supervisor_epoch_state
+            )
+            and takeover_not_before <= clock_timestamp()
+        `);
+        if (expired !== 1) {
+          throw new PersistenceError(
+            "SUPERVISOR_OWNERSHIP_LOST",
+            "Another supervisor still owns this environment.",
+          );
+        }
       }
       const latest = await transaction.source_supervisor_epochs.findFirst({
         where: { environment_key: input.environmentKey },
         orderBy: { epoch_number: "desc" },
         select: { epoch_number: true },
       });
+      const acquiredAt = await providerSourceTransactionTime(transaction);
       const leaseExpiresAt = addSeconds(
-        databaseNow,
+        acquiredAt,
         PROVIDER_SOURCE_SUPERVISOR_TIMING.leaseSeconds,
       );
       const epoch = await transaction.source_supervisor_epochs.create({
@@ -64,8 +83,8 @@ export class ProviderSourceSupervisorRepository {
           epoch_number: (latest?.epoch_number ?? 0n) + 1n,
           owner_key: input.ownerKey,
           lease_token: input.leaseToken,
-          acquired_at: databaseNow,
-          last_renewed_at: databaseNow,
+          acquired_at: acquiredAt,
+          last_renewed_at: acquiredAt,
           lease_expires_at: leaseExpiresAt,
           takeover_not_before: addSeconds(
             leaseExpiresAt,
@@ -119,6 +138,10 @@ export class ProviderSourceSupervisorRepository {
       throw new TypeError("Supervisor reason code is invalid.");
     }
     await this.database.$transaction(async (transaction) => {
+      await lockProviderSourceSupervisorEpochEnvironmentExclusive(
+        transaction,
+        input.epochId,
+      );
       const fenced = await transaction.$executeRaw(Prisma.sql`
         update public.source_supervisor_epochs
         set state = 'fenced_draining'::public.supervisor_epoch_state,
@@ -158,6 +181,10 @@ export class ProviderSourceSupervisorRepository {
     releasedAt: Date;
   }>): Promise<void> {
     await this.database.$transaction(async (transaction) => {
+      await lockProviderSourceSupervisorEpochEnvironmentExclusive(
+        transaction,
+        input.epochId,
+      );
       const alreadyReleased = await transaction.source_supervisor_epochs
         .findFirst({
           where: {

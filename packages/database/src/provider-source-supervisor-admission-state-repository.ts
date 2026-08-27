@@ -8,7 +8,7 @@ import type {
 } from "./provider-source-supervisor-work-repository.ts";
 
 export type ProviderSourceAdmissionWaitReason =
-  | "profile_capacity"
+  | "request_lane_capacity"
   | "execution_capacity";
 
 export interface ProviderSourceAdmissionStateInput

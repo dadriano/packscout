@@ -185,16 +185,29 @@ migrated schema, current capacity with application relations present, bootstrap
 receipt, and four-source backfill topology. Any failed recheck stops before the
 supervisor can claim work.
 
-The backfill start requires exactly one active tested profile at cap 2. Every
-connection revision must use DataForrest adapter v1, and exactly four tested,
+The backfill start requires exactly one active tested profile whose approved
+per-platform hard cap is no greater than two. PackScout's runtime operates each
+platform lane at one request. Every connection revision must use DataForrest
+adapter v1, and exactly four tested,
 paused-or-active sources must have only the adapter-v1, observation-v1,
 mapper-v1 tuple across every revision. Any v2, v3, unknown, or mixed tuple
 fails closed before the supervisor starts. In Operations, select **Resume** for
 all four sources; Resume makes each lane due immediately.
-The dedicated Task 010 runner forces `PACKSCOUT_SOURCE_EXECUTION_SLOTS=1` for
-the current v1 8 MiB memory boundary, even if its private environment file
-omits or attempts to change that value. Verify each individual cursor remains
-sequential and the four source lanes continue taking turns without starvation.
+The dedicated Task 010 runner forces `PACKSCOUT_SOURCE_EXECUTION_SLOTS=4`, even
+if its private environment file omits or attempts to change that value. These
+are four fair source lanes beneath exactly one singleton supervisor process and
+epoch, not four worker processes. Each platform has an independent
+request-permit lane operated at one request, and connection tests use a separate
+one-request lane. One
+source still owns one sequential page cursor, so useful page-read concurrency is at
+most four, one request for each provider; one platform never waits for another
+platform's request-lane capacity. The safety fixture proves the forced setting,
+and the database-backed in-process runtime fixture proves four sequential per-
+source cursors with up to four cross-platform page reads. A live four-lane soak
+is still pending. During that soak, verify one active supervisor epoch, a four-
+slot snapshot, four platform-lane snapshots showing an operating maximum of one each, the
+separate connection-test lane when present, sequential cursors for every
+provider, and progress without starvation across all four lanes.
 
 After multiple sources have committed pages, stop Terminal B with `Ctrl-C`.
 Restart the same backfill command and verify each source resumes from its own

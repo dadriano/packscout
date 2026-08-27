@@ -83,6 +83,7 @@ const sourceOperationKeys = [
   "identityNamespaceKey",
   "normalizedContractVersion",
   "provider",
+  "providerId",
   "recordIdScopes",
   "sourceConfiguration",
   "sourceInstanceId",
@@ -198,6 +199,7 @@ export interface ConnectionOperationBase {
 }
 
 export interface SourceOperationBase extends ConnectionOperationBase {
+  readonly providerId: string;
   readonly provider: LaunchProviderKey;
   readonly sourceInstanceId: string;
   readonly sourceRevisionId: string;
@@ -440,6 +442,7 @@ export function sourceAdapterOperationScopeOf(
   }
   const source = {
     ...common,
+    providerId: operation.providerId,
     provider: operation.provider,
     sourceInstanceId: operation.sourceInstanceId,
     sourceRevisionId: operation.sourceRevisionId,
@@ -910,7 +913,7 @@ function assertDurableTerminalizationReceipt(
 /**
  * Generic request owner: consumes the exact operation lease, captures once,
  * waits for durable request-attempt terminalization, binds the result to that
- * operation, and only then releases the profile request permit.
+ * operation, and only then releases the exact request-lane permit.
  */
 export async function captureAndTerminalizeSourceAdapterRequest(
   requestLeaseAuthority: SourceRequestLeaseAuthority,

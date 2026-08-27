@@ -4,6 +4,7 @@ import {
   PROVIDER_SOURCE_SUPERVISOR_SNAPSHOT_VERSION,
   providerSourceRunBounds,
   providerSourceSupervisorSnapshotSchema,
+  providerSourceSupervisorWaitReasons,
   providerSourceTransientRetryPolicy,
 } from "./provider-source-supervisor-v1.ts";
 
@@ -18,6 +19,19 @@ test("supervisor launch and source retry bounds are frozen", () => {
   });
   assert.equal(Object.isFrozen(providerSourceRunBounds), true);
   assert.equal(Object.isFrozen(providerSourceTransientRetryPolicy), true);
+  assert.deepEqual(providerSourceSupervisorWaitReasons, [
+    "not_due",
+    "request_lane_capacity",
+    "execution_capacity",
+    "capacity_blocked",
+    "connection_blocked",
+    "paused",
+    "retry_backoff",
+    "action_required",
+    "supervisor_offline",
+    "graceful_shutdown",
+    "source_lane_busy",
+  ]);
 });
 
 test("the durable snapshot contract rejects inferred or inconsistent lane state", () => {
@@ -40,7 +54,26 @@ test("the durable snapshot contract rejects inferred or inconsistent lane state"
       safeCode: null,
       checkedAt: null,
       executionSlots: { used: 0, maximum: 4 },
-      profiles: [],
+      requestPermitLanes: [
+        {
+          scope: "platform",
+          organizationId: "54000000-0000-4000-8000-000000000001",
+          connectionProfileId: "54000000-0000-4000-8000-000000000005",
+          providerId: "54000000-0000-4000-8000-000000000002",
+          used: 0,
+          maximum: 2,
+          waiting: 0,
+        },
+        {
+          scope: "connection_test",
+          organizationId: "54000000-0000-4000-8000-000000000001",
+          connectionProfileId: "54000000-0000-4000-8000-000000000005",
+          providerId: null,
+          used: 0,
+          maximum: 2,
+          waiting: 0,
+        },
+      ],
     },
     sources: [{
       organizationId: "54000000-0000-4000-8000-000000000001",
@@ -79,6 +112,71 @@ test("the durable snapshot contract rejects inferred or inconsistent lane state"
   } as const;
 
   assert.equal(providerSourceSupervisorSnapshotSchema.safeParse(base).success, true);
+  assert.equal(
+    providerSourceSupervisorSnapshotSchema.safeParse({
+      ...base,
+      capacity: {
+        ...base.capacity,
+        requestPermitLanes: [{
+          ...base.capacity.requestPermitLanes[0],
+          providerId: null,
+        }],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    providerSourceSupervisorSnapshotSchema.safeParse({
+      ...base,
+      capacity: {
+        ...base.capacity,
+        requestPermitLanes: [{
+          ...base.capacity.requestPermitLanes[0],
+          maximum: 3,
+        }],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    providerSourceSupervisorSnapshotSchema.safeParse({
+      ...base,
+      capacity: {
+        ...base.capacity,
+        requestPermitLanes: [{
+          ...base.capacity.requestPermitLanes[0],
+          profileCapacity: 2,
+        }],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    providerSourceSupervisorSnapshotSchema.safeParse({
+      ...base,
+      capacity: {
+        ...base.capacity,
+        requestPermitLanes: [{
+          ...base.capacity.requestPermitLanes[1],
+          providerId: "54000000-0000-4000-8000-000000000002",
+        }],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    providerSourceSupervisorSnapshotSchema.safeParse({
+      ...base,
+      capacity: {
+        ...base.capacity,
+        requestPermitLanes: [{
+          ...base.capacity.requestPermitLanes[0],
+          used: 3,
+        }],
+      },
+    }).success,
+    false,
+  );
   assert.equal(
     providerSourceSupervisorSnapshotSchema.safeParse({
       ...base,

@@ -28,7 +28,7 @@ First-pass admin creates only registered DataForrest connections and sources. Th
 ### Shared connection lifecycle
 
 - Let an administrator create one inactive DataForrest-compatible profile, store one encrypted credential revision scoped to organization, profile, and revision rather than provider, request a bounded connectivity test, and expose only source type, endpoint host, masked secret, and test state.
-- Represent connection tests as bounded operational jobs that use task 003's source adapter and stable-profile request limit; this task owns validated requests, pending state, immutable results, and activation policy, while task 007 owns live execution.
+- Represent connection tests as bounded operational jobs that use task 003's source adapter and the separate provider-free connection-test lane for their profile; this task owns validated requests, pending state, immutable results, and activation policy, while task 007 owns live execution.
 - Let a tested same-endpoint credential rotation apply only to runs created after rotation; existing queued, running, and historical runs retain their pinned revision and source cursor.
 - Let emergency revocation fence work pinned to the revoked revision before another fetch or commit while preserving the last committed source cursor.
 - Treat an endpoint or source type change as a new profile and source replacement; an opaque cursor cannot move to a different profile or adapter.

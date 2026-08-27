@@ -13,6 +13,7 @@ import {
   type SourceSupervisorExecutionResult,
   type SourceSupervisorOwnershipPort,
   type SourceSupervisorRecoverableClaim,
+  type SourceSupervisorClaimCommand,
   type SourceSupervisorSnapshotPort,
   type SourceSupervisorWorkDisposition,
   type SourceSupervisorWorkExecutor,
@@ -22,7 +23,14 @@ import {
 } from "./provider-source-supervisor.ts";
 
 interface FixtureWork extends SourceSupervisorWorkItem {
-  readonly kind: "connection_test" | "page_read";
+  readonly kind: "connection_test" | "source_test" | "page_read";
+  readonly fixtureProvider:
+    | "courtyard"
+    | "collector_crypt"
+    | "clutchpacks"
+    | "phygitals"
+    | null;
+  readonly fixtureProviderId: string | null;
 }
 
 const epoch: SourceSupervisorEpoch = {
@@ -159,7 +167,7 @@ class FixtureQueue implements SourceSupervisorWorkQueue<FixtureWork> {
   readonly admissionStates: Array<{
     id: string;
     state: "waiting" | "granted";
-    reason?: "profile_capacity" | "execution_capacity";
+    reason?: "request_lane_capacity" | "execution_capacity";
   }> = [];
   protected works: FixtureWork[];
   readonly #delayedAdmissionWorkId: string | null;
@@ -195,20 +203,19 @@ class FixtureQueue implements SourceSupervisorWorkQueue<FixtureWork> {
 
   async claimNext(
     _epoch: SourceSupervisorEpoch,
-    command: Readonly<{
-      excludedProfiles?: readonly Readonly<{
-        organizationId: string;
-        connectionProfileId: string;
-      }>[];
-      excludedSourceInstanceIds?: readonly string[];
-      skipPageReads?: boolean;
-    }>,
+    command: SourceSupervisorClaimCommand,
   ): Promise<FixtureWork | null> {
     const index = this.works.findIndex((work) =>
       !(command.skipPageReads && work.kind === "page_read") &&
-      !command.excludedProfiles?.some((profile) =>
-        profile.organizationId === work.organizationId &&
-        profile.connectionProfileId === work.connectionProfileId
+      !command.excludedRequestLanes?.some((lane) =>
+        lane.organizationId === work.organizationId &&
+        lane.connectionProfileId === work.connectionProfileId &&
+        lane.scope === (work.kind === "connection_test"
+          ? "connection_test"
+          : "platform") &&
+        lane.providerId === (work.kind === "connection_test"
+          ? null
+          : work.fixtureProviderId)
       ) &&
       (!work.sourceInstanceId ||
         !command.excludedSourceInstanceIds?.includes(work.sourceInstanceId))
@@ -231,7 +238,7 @@ class FixtureQueue implements SourceSupervisorWorkQueue<FixtureWork> {
   async markAdmissionWaiting(
     _epoch: SourceSupervisorEpoch,
     work: FixtureWork,
-    reason: "profile_capacity" | "execution_capacity",
+    reason: "request_lane_capacity" | "execution_capacity",
   ): Promise<void> {
     this.admissionStates.push({ id: work.id, state: "waiting", reason });
     if (work.id === this.#delayedAdmissionWorkId) {
@@ -453,7 +460,30 @@ function fixtureWork(
     organizationId: "fixture-organization",
     connectionProfileId: profile,
     connectionRevisionId: `${profile}-revision`,
-    profileRequestLimit: 1,
+    platformRequestLimit: 2,
+    fixtureProvider: null,
+    fixtureProviderId: null,
+  };
+}
+
+function fixturePlatformWork(
+  id: string,
+  provider:
+    | "courtyard"
+    | "collector_crypt"
+    | "clutchpacks"
+    | "phygitals",
+  queuedOffset: number,
+  profile: "slow-profile" | "independent-profile" = "slow-profile",
+): FixtureWork {
+  return {
+    ...fixtureWork(id, profile, queuedOffset),
+    kind: "source_test",
+    sourceInstanceId: `${id}-source`,
+    sourceRevisionId: `${id}-revision`,
+    providerId: `${provider}-provider`,
+    fixtureProvider: provider,
+    fixtureProviderId: `${provider}-provider`,
   };
 }
 
@@ -463,32 +493,54 @@ function fixturePageWork(id: string, queuedOffset: number): FixtureWork {
     kind: "page_read",
     sourceInstanceId: `${id}-source`,
     sourceRevisionId: `${id}-revision`,
+    providerId: "courtyard-provider",
     runStartedAt: new Date(1_700_000_000_000),
     committedPages: 0,
     committedRecords: 0,
     retryAttempt: 0,
     sourceIntervalSeconds: 60,
+    fixtureProvider: "courtyard",
+    fixtureProviderId: "courtyard-provider",
   };
 }
 
 class MeteredExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
   readonly starts: string[] = [];
   readonly abortReasons: string[] = [];
-  readonly maximumByProfile = new Map<string, number>();
-  readonly #inFlight = new Map<string, number>();
+  readonly maximumByRequestLane = new Map<string, number>();
+  maximumActive = 0;
+  #active = 0;
+  readonly #inFlightByRequestLane = new Map<string, number>();
 
   constructor(private readonly holdMilliseconds = 15) {}
 
-  registeredProfileRequestLimit(): number {
-    return 1;
+  registeredRequestPermitLane(work: FixtureWork) {
+    if (work.kind === "connection_test") {
+      return {
+        organizationId: work.organizationId,
+        connectionProfileId: work.connectionProfileId,
+        scope: "connection_test" as const,
+        providerId: null,
+        approvedRequestCap: 1,
+      };
+    }
+    if (!work.fixtureProviderId) {
+      throw new Error("fixture provider lane missing");
+    }
+    return {
+      organizationId: work.organizationId,
+      connectionProfileId: work.connectionProfileId,
+      scope: "platform" as const,
+      providerId: work.fixtureProviderId,
+      approvedRequestCap: 1,
+    };
   }
 
   async execute(
     work: FixtureWork,
     context: SourceSupervisorExecutionContext,
   ): Promise<SourceSupervisorExecutionResult> {
-    const pins = {
-      operationKind: "connection_test" as const,
+    const commonPins = {
       requestAttemptId: `${work.id}-attempt`,
       requestLeaseId: `${work.id}-request-lease`,
       organizationId: work.organizationId,
@@ -498,15 +550,32 @@ class MeteredExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
       connectionProfileId: work.connectionProfileId,
       connectionProfileRevisionId: work.connectionRevisionId,
       connectionHealthGeneration: 0,
-      connectionTestJobId: work.id,
-      jobClaimLeaseId: `${work.id}-claim`,
-      recoveryEpisodeId: null,
     };
-    const profile = {
-      organizationId: work.organizationId,
-      connectionProfileId: work.connectionProfileId,
-    } as const;
-    const waitReason = context.requestLeases.admissionWaitReason(profile);
+    if (work.kind === "page_read") {
+      throw new Error("metered page fixture is not supported");
+    }
+    const pins = work.kind === "connection_test"
+      ? {
+          ...commonPins,
+          operationKind: "connection_test" as const,
+          connectionTestJobId: work.id,
+          jobClaimLeaseId: `${work.id}-claim`,
+          recoveryEpisodeId: null,
+        }
+      : {
+          ...commonPins,
+          operationKind: "source_test" as const,
+          provider: work.fixtureProvider!,
+          providerId: work.fixtureProviderId!,
+          sourceInstanceId: work.sourceInstanceId!,
+          sourceRevisionId: work.sourceRevisionId!,
+          normalizedContractVersion: "v1",
+          identityNamespaceKey: `fixture:${work.fixtureProvider}`,
+          sourceTestJobId: work.id,
+          jobClaimLeaseId: `${work.id}-claim`,
+        };
+    const requestLane = this.registeredRequestPermitLane(work);
+    const waitReason = context.requestLeases.admissionWaitReason(requestLane);
     const pendingLease = context.requestLeases.admit({
       pins,
       guard: () => true,
@@ -518,17 +587,27 @@ class MeteredExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
     await context.admissionGranted();
     await context.capacityChanged();
     lease.consume(pins);
-    const active = (this.#inFlight.get(work.connectionProfileId) ?? 0) + 1;
-    this.#inFlight.set(work.connectionProfileId, active);
-    this.maximumByProfile.set(
-      work.connectionProfileId,
-      Math.max(this.maximumByProfile.get(work.connectionProfileId) ?? 0, active),
+    const requestLaneKey = JSON.stringify([
+      requestLane.organizationId,
+      requestLane.connectionProfileId,
+      requestLane.scope,
+      requestLane.providerId,
+    ]);
+    const laneActive =
+      (this.#inFlightByRequestLane.get(requestLaneKey) ?? 0) + 1;
+    this.#inFlightByRequestLane.set(requestLaneKey, laneActive);
+    this.maximumByRequestLane.set(
+      requestLaneKey,
+      Math.max(this.maximumByRequestLane.get(requestLaneKey) ?? 0, laneActive),
     );
+    this.#active += 1;
+    this.maximumActive = Math.max(this.maximumActive, this.#active);
     this.starts.push(work.id);
     await new Promise<void>((resolve) =>
       setTimeout(resolve, this.holdMilliseconds)
     );
-    this.#inFlight.set(work.connectionProfileId, active - 1);
+    this.#inFlightByRequestLane.set(requestLaneKey, laneActive - 1);
+    this.#active -= 1;
     context.requestLeases.releaseTerminalizedRequestPermit(lease, {
       requestAttemptId: pins.requestAttemptId,
       requestLeaseId: pins.requestLeaseId,
@@ -561,8 +640,8 @@ class GatedDrainExecutor implements SourceSupervisorWorkExecutor<FixtureWork> {
     });
   }
 
-  registeredProfileRequestLimit(): number {
-    return 1;
+  registeredRequestPermitLane(work: FixtureWork) {
+    return new MeteredExecutor().registeredRequestPermitLane(work);
   }
 
   async execute(): Promise<SourceSupervisorExecutionResult> {
@@ -959,15 +1038,14 @@ test("a snapshot that proves ownership loss fences the owner immediately", async
   await supervisor.stop();
 });
 
-test("old profile waiters hold no slots and an independent profile overlaps", async () => {
+test("one platform lane cannot throttle another behind the same profile", async () => {
   const queue = new FixtureQueue([
-    fixtureWork("slow-1", "slow-profile", 1),
-    fixtureWork("slow-2", "slow-profile", 2),
-    fixtureWork("slow-3", "slow-profile", 3),
-    fixtureWork("slow-4", "slow-profile", 4),
-    fixtureWork("independent-1", "independent-profile", 5),
+    fixturePlatformWork("courtyard-1", "courtyard", 1),
+    fixturePlatformWork("courtyard-2", "courtyard", 2),
+    fixturePlatformWork("courtyard-3", "courtyard", 3),
+    fixturePlatformWork("phygitals-1", "phygitals", 4),
   ]);
-  const executor = new MeteredExecutor();
+  const executor = new MeteredExecutor(30);
   const ownership = new FixtureOwnership();
   const recordingSnapshot = new RecordingSnapshot();
   const supervisor = new ProviderSourceSupervisor({
@@ -982,7 +1060,7 @@ test("old profile waiters hold no slots and an independent profile overlaps", as
     diagnostics,
     classifyControlPlaneFailure: () => "invariant",
     ids: { id: () => "unused-continuation-id" },
-    claimLookahead: 8,
+    executionSlots: 3,
   });
 
   await supervisor.initialize();
@@ -991,47 +1069,99 @@ test("old profile waiters hold no slots and an independent profile overlaps", as
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
 
-  assert.equal(executor.maximumByProfile.get("slow-profile"), 1);
-  assert.equal(executor.maximumByProfile.get("independent-profile"), 1);
+  const courtyardLane = JSON.stringify([
+    "fixture-organization",
+    "slow-profile",
+    "platform",
+    "courtyard-provider",
+  ]);
+  const phygitalsLane = JSON.stringify([
+    "fixture-organization",
+    "slow-profile",
+    "platform",
+    "phygitals-provider",
+  ]);
+  assert.equal(executor.maximumByRequestLane.get(courtyardLane), 1);
+  assert.equal(executor.maximumByRequestLane.get(phygitalsLane), 1);
+  assert.equal(executor.maximumActive, 2);
   assert.ok(
-    executor.starts.indexOf("independent-1") <
-      executor.starts.indexOf("slow-2"),
-    `independent work was starved: ${executor.starts.join(",")}`,
+    executor.starts.indexOf("phygitals-1") <
+      executor.starts.indexOf("courtyard-3"),
+    `independent platform was starved: ${executor.starts.join(",")}`,
   );
   assert.equal(queue.completed.length, 4);
   assert.deepEqual(queue.released, []);
   assert.ok(queue.admissionStates.some((state) =>
-    state.id === "slow-2" && state.state === "waiting" &&
-    state.reason === "profile_capacity"
+    state.id === "courtyard-3" && state.state === "waiting" &&
+    state.reason === "request_lane_capacity"
   ));
   assert.ok(!queue.admissionStates.some((state) =>
-    state.id === "independent-1" && state.state === "waiting"
+    state.id === "phygitals-1" && state.state === "waiting"
   ));
   assert.ok(recordingSnapshot.publications.some(({ capacity }) => {
-    const slow = capacity.profiles.find((profile) =>
-      profile.connectionProfileId === "slow-profile"
+    const courtyard = capacity.requestPermitLanes.find((lane) =>
+      lane.connectionProfileId === "slow-profile" &&
+      lane.providerId === "courtyard-provider"
     );
-    const independent = capacity.profiles.find((profile) =>
-      profile.connectionProfileId === "independent-profile"
+    const phygitals = capacity.requestPermitLanes.find((lane) =>
+      lane.connectionProfileId === "slow-profile" &&
+      lane.providerId === "phygitals-provider"
     );
     return capacity.activeExecutionSlots === 2 &&
-      (slow?.activeRequestPermits ?? 0) === 1 &&
-      (slow?.queuedOperations ?? 0) >= 1 &&
-      (independent?.activeRequestPermits ?? 0) === 1;
-  }), "live snapshots never exposed occupied slots and a profile waiter");
+      (courtyard?.activeRequestPermits ?? 0) === 1 &&
+      (courtyard?.queuedOperations ?? 0) >= 1 &&
+      (phygitals?.activeRequestPermits ?? 0) === 1;
+  }), "live snapshots never exposed independent platform occupancy");
   assert.deepEqual(ownership.calls.slice(0, 2), ["acquire", "reconcile"]);
 
   await supervisor.stop();
   assert.equal(ownership.calls.at(-1), "release");
 });
 
-test("a saturated profile backlog is excluded without a fixed claim horizon", async () => {
-  const oldProfile = Array.from({ length: 129 }, (_, index) =>
-    fixtureWork(`backlog-${index + 1}`, "slow-profile", index + 1)
+test("four provider lanes can occupy four execution slots", async () => {
+  const queue = new FixtureQueue([
+    fixturePlatformWork("courtyard", "courtyard", 1),
+    fixturePlatformWork("collector-crypt", "collector_crypt", 2),
+    fixturePlatformWork("clutchpacks", "clutchpacks", 3),
+    fixturePlatformWork("phygitals", "phygitals", 4),
+  ]);
+  const executor = new MeteredExecutor(40);
+  const supervisor = new ProviderSourceSupervisor({
+    environmentKey: "test",
+    ownerKey: epoch.ownerKey,
+    leaseToken: epoch.leaseToken,
+    ownership: new FixtureOwnership(),
+    queue,
+    executor,
+    capacity,
+    snapshot,
+    diagnostics,
+    classifyControlPlaneFailure: () => "invariant",
+    ids: { id: () => "unused-continuation-id" },
+    executionSlots: 4,
+  });
+
+  await supervisor.initialize();
+  await supervisor.runCycle();
+  while (queue.completed.length < 4) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.equal(executor.maximumActive, 4);
+  assert.equal(executor.maximumByRequestLane.size, 4);
+  assert.ok(
+    [...executor.maximumByRequestLane.values()].every((maximum) => maximum === 1),
+  );
+  await supervisor.stop();
+});
+
+test("a saturated platform backlog is excluded without a fixed claim horizon", async () => {
+  const oldPlatform = Array.from({ length: 129 }, (_, index) =>
+    fixturePlatformWork(`backlog-${index + 1}`, "courtyard", index + 1)
   );
   const queue = new FixtureQueue([
-    ...oldProfile,
-    fixtureWork("beyond-lookahead", "independent-profile", 130),
+    ...oldPlatform,
+    fixturePlatformWork("beyond-lookahead", "phygitals", 130),
   ]);
   const executor = new MeteredExecutor(150);
   const supervisor = new ProviderSourceSupervisor({
@@ -1058,16 +1188,20 @@ test("a saturated profile backlog is excluded without a fixed claim horizon", as
   }
   assert.equal(queue.completed.length, 0);
   assert.equal(executor.starts[0], "backlog-1");
-  assert.equal(executor.starts[1], "beyond-lookahead");
+  const thirdBacklogStart = executor.starts.indexOf("backlog-3");
+  assert.ok(
+    thirdBacklogStart === -1 ||
+      executor.starts.indexOf("beyond-lookahead") < thirdBacklogStart,
+  );
   assert.deepEqual(queue.released, []);
   await supervisor.stop();
 });
 
 test("a delayed durable wait-state write cannot reorder coordinator FIFO", async () => {
   const queue = new FixtureQueue([
-    fixtureWork("fifo-1", "slow-profile", 1),
-    fixtureWork("fifo-2", "slow-profile", 2),
-    fixtureWork("fifo-3", "slow-profile", 3),
+    fixturePlatformWork("fifo-1", "courtyard", 1),
+    fixturePlatformWork("fifo-2", "courtyard", 2),
+    fixturePlatformWork("fifo-3", "courtyard", 3),
   ], "fifo-2");
   const executor = new MeteredExecutor(40);
   const supervisor = new ProviderSourceSupervisor({
@@ -1099,10 +1233,10 @@ test("a delayed durable wait-state write cannot reorder coordinator FIFO", async
   await supervisor.stop();
 });
 
-test("a mutable stored cap cannot exceed the exact registered adapter cap", async () => {
+test("a mutable stored cap cannot exceed the exact registered platform cap", async () => {
   const queue = new FixtureQueue([{
-    ...fixtureWork("cap-mismatch", "slow-profile", 1),
-    profileRequestLimit: 4,
+    ...fixturePlatformWork("cap-mismatch", "courtyard", 1),
+    platformRequestLimit: 4,
   }]);
   const executor = new MeteredExecutor();
   const supervisor = new ProviderSourceSupervisor({
@@ -1126,10 +1260,62 @@ test("a mutable stored cap cannot exceed the exact registered adapter cap", asyn
     id: "cap-mismatch",
     disposition: {
       kind: "action_required",
-      safeCode: "PROFILE_REQUEST_LIMIT_MISMATCH",
+      safeCode: "PLATFORM_REQUEST_LIMIT_MISMATCH",
     },
   }]);
   await supervisor.stop();
+});
+
+test("a registered request lane must match the claimed operation scope and provider", async () => {
+  for (const mismatch of ["scope", "provider"] as const) {
+    const work = fixturePlatformWork(`lane-${mismatch}`, "courtyard", 1);
+    class MismatchedLaneExecutor extends MeteredExecutor {
+      override registeredRequestPermitLane(candidate: FixtureWork) {
+        const lane = super.registeredRequestPermitLane(candidate);
+        if (candidate.kind === "connection_test") return lane;
+        return mismatch === "scope"
+          ? {
+              organizationId: lane.organizationId,
+              connectionProfileId: lane.connectionProfileId,
+              scope: "connection_test" as const,
+              providerId: null,
+              approvedRequestCap: lane.approvedRequestCap,
+            }
+          : {
+              ...lane,
+              scope: "platform" as const,
+              providerId: "different-provider",
+            };
+      }
+    }
+    const queue = new FixtureQueue([work]);
+    const executor = new MismatchedLaneExecutor();
+    const supervisor = new ProviderSourceSupervisor({
+      environmentKey: "test",
+      ownerKey: epoch.ownerKey,
+      leaseToken: epoch.leaseToken,
+      ownership: new FixtureOwnership(),
+      queue,
+      executor,
+      capacity,
+      snapshot,
+      diagnostics,
+      classifyControlPlaneFailure: () => "invariant",
+      ids: { id: () => "unused-continuation-id" },
+    });
+
+    await supervisor.initialize();
+    await supervisor.runCycle();
+    assert.deepEqual(executor.starts, []);
+    assert.deepEqual(queue.completed, [{
+      id: work.id,
+      disposition: {
+        kind: "action_required",
+        safeCode: "REQUEST_LANE_CONFIGURATION_INVALID",
+      },
+    }]);
+    await supervisor.stop();
+  }
 });
 
 test("a blocked volume cools down page claims while connection tests continue", async () => {

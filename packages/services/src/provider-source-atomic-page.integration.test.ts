@@ -35,6 +35,7 @@ import {
   ProviderSourceRequestRepository,
   ProviderSourceRetentionRepository,
   ProviderSourceSupervisorRepository,
+  ProviderSourceSupervisorSnapshotRepository,
   ProviderSourceTestResultRepository,
   SourceConnectionRecoveryRepository,
   hashJson,
@@ -104,6 +105,26 @@ async function assertPending(promise: Promise<unknown>): Promise<void> {
   assert.equal(state, "pending");
 }
 
+async function settleWithin<T>(
+  promise: Promise<T>,
+  milliseconds = 3_000,
+): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("operation did not settle within the bound")),
+          milliseconds,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function databaseNow(database: PackscoutPrismaClient): Promise<Date> {
   const rows = await database.$queryRaw<Array<{ now: Date }>>`
     select clock_timestamp() as "now"
@@ -161,7 +182,7 @@ async function createRuntime(
     sourceTypeKey: manifest.sourceTypeKey,
     connectionTypeKey: manifest.compatibleConnectionTypeKey,
     displayName: `DataForrest atomic ${testKey}`,
-    requestLimit: providerSourceLaunchBounds.stableProfileRequestCap,
+    requestLimit: providerSourceLaunchBounds.stablePlatformRequestCap,
     sourceAdapterVersion: manifest.adapterVersion,
     revisionNumber: 1,
     configurationCiphertext: new Uint8Array(32).fill(1),
@@ -439,6 +460,7 @@ async function createRuntime(
     connectionProfileId: connection.profileId,
     connectionProfileRevisionId: activeConnectionRevisionId,
     connectionHealthGeneration: 0,
+    providerId,
     provider,
     sourceInstanceId: source.sourceInstanceId,
     sourceRevisionId: source.sourceRevisionId,
@@ -1543,6 +1565,7 @@ async function capturedPageTurn(
         connectionHealthGeneration: Number(
           runtime.pins.connectionHealthGeneration,
         ),
+        providerId: runtime.providerId,
         provider: runtime.pins.provider,
         sourceInstanceId: runtime.source.sourceInstanceId,
         sourceRevisionId: runtime.source.sourceRevisionId,
@@ -1599,6 +1622,7 @@ async function completeAlternatePageRead(
         connectionProfileId: pins.connectionProfileId,
         connectionProfileRevisionId: pins.connectionRevisionId,
         connectionHealthGeneration: Number(pins.connectionHealthGeneration),
+        providerId: pins.providerId,
         provider: pins.provider,
         sourceInstanceId: pins.sourceInstanceId,
         sourceRevisionId: pins.sourceRevisionId,
@@ -3788,6 +3812,7 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
           connectionHealthGeneration: Number(
             runtime.pins.connectionHealthGeneration,
           ),
+          providerId: runtime.providerId,
           provider: runtime.pins.provider,
           sourceInstanceId: foreignSourceInstanceId,
           sourceRevisionId: runtime.pins.sourceRevisionId,
@@ -3851,6 +3876,7 @@ test("alternate source pins commit null-to-bookmark resume and reject adapter or
           connectionHealthGeneration: Number(
             runtime.pins.connectionHealthGeneration,
           ),
+          providerId: runtime.providerId,
           provider: runtime.pins.provider,
           sourceInstanceId: runtime.pins.sourceInstanceId,
           sourceRevisionId: runtime.pins.sourceRevisionId,
@@ -4636,6 +4662,7 @@ test("exact replay rejects changed normalized effects or protected retry evidenc
       connectionProfileId: runtime.pins.connectionProfileId,
       connectionProfileRevisionId: runtime.pins.connectionRevisionId,
       connectionHealthGeneration: Number(runtime.pins.connectionHealthGeneration),
+      providerId: runtime.providerId,
       provider: runtime.pins.provider,
       sourceInstanceId: runtime.pins.sourceInstanceId,
       sourceRevisionId: runtime.pins.sourceRevisionId,
@@ -4786,6 +4813,71 @@ test("pause requested during the captured page lets that page finish and pauses 
   }
 });
 
+test("atomic page persistence does not block supervisor heartbeat writes", async () => {
+  const runtime = await createRuntime("page-heartbeat-writes");
+  const pageBlocked = deferred();
+  const releasePage = deferred();
+  let importing: ReturnType<ProviderSourcePageImportService["importPage"]>
+    | null = null;
+  try {
+    importing = new ProviderSourcePageImportService(
+      new ProviderSourcePagePlanner(
+        createProviderObservationMapperRegistryFromManifest(),
+      ),
+      runtime.guard,
+      new ProviderSourcePageRepository(runtime.database, {
+        actorPseudonymKey: actorKey,
+        beforeCursorAdvance: async () => {
+          pageBlocked.resolve();
+          await releasePage.promise;
+        },
+      }),
+    ).importPage({
+      pins: runtime.pins,
+      adapterResult: runtime.adapterResult,
+      committedAt: await databaseNow(runtime.database),
+    });
+    await pageBlocked.promise;
+
+    const supervisors = new ProviderSourceSupervisorRepository(
+      runtime.database,
+    );
+    const snapshots = new ProviderSourceSupervisorSnapshotRepository(
+      runtime.database,
+    );
+    await settleWithin(Promise.all([
+      supervisors.renew({
+        epochId: runtime.pins.supervisorEpochId,
+        ownerKey: runtime.pins.supervisorOwnerKey,
+        leaseToken: runtime.pins.supervisorLeaseToken,
+        now: new Date(0),
+      }),
+      snapshots.publish({
+        epochId: runtime.pins.supervisorEpochId,
+        ownerKey: runtime.pins.supervisorOwnerKey,
+        leaseToken: runtime.pins.supervisorLeaseToken,
+        capacity: {
+          maximumExecutionSlots: 4,
+          activeExecutionSlots: 4,
+          requestPermitLanes: [],
+        },
+        admission: { state: "available", safeCode: null },
+      }),
+    ]));
+    assert.equal((await runtime.database.source_supervisor_epochs
+      .findUniqueOrThrow({
+        where: { id: runtime.pins.supervisorEpochId },
+      })).maximum_execution_slots, 4);
+
+    releasePage.resolve();
+    assert.equal((await importing).kind, "committed");
+  } finally {
+    releasePage.resolve();
+    if (importing) await Promise.allSettled([importing]);
+    await runtime.close();
+  }
+});
+
 test("epoch fencing that wins the DB barrier rejects the captured page atomically", async () => {
   const runtime = await createRuntime("epoch-barrier");
   const independent = await runtime.createIndependentClient();
@@ -4793,6 +4885,11 @@ test("epoch fencing that wins the DB barrier rejects the captured page atomicall
   const release = deferred();
   try {
     const fencing = independent.$transaction(async (transaction) => {
+      await transaction.$executeRaw`
+        select pg_advisory_xact_lock(hashtextextended(environment_key, 0))
+        from public.source_supervisor_epochs
+        where id = ${runtime.pins.supervisorEpochId}::uuid
+      `;
       await transaction.$queryRaw`
         select id from public.source_supervisor_epochs
         where id = ${runtime.pins.supervisorEpochId}::uuid
