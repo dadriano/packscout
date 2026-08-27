@@ -17,9 +17,12 @@ import type { PackScoutAuthStatus } from "@/components/auth/AuthContext.client";
  *   nothing about which one is happening.
  * - A signed-in visitor is never offered a second sign-in. They get a
  *   navigation into the product instead, where the root route decides what
- *   their access actually is. The same applies to a session the product
- *   could not verify — signing in again cannot repair an established but
- *   unverifiable session, so the way out is the account menu inside.
+ *   their access actually is, and `automatic` says the surface may take that
+ *   navigation for them. The same applies to a session the product could not
+ *   verify — except that one is not automatic: the backend already refused
+ *   that token, so the gate would refuse it too and drop the visitor back
+ *   here, spending the hand-off and hiding the note that tells them to sign
+ *   out from the account menu in the header.
  * - When authentication is not configured at all, the action says so plainly
  *   instead of dangling a dead button.
  *
@@ -30,7 +33,14 @@ import type { PackScoutAuthStatus } from "@/components/auth/AuthContext.client";
 export type LandingAccessAction =
   | Readonly<{ kind: "sign_in"; label: string; note?: undefined }>
   | Readonly<{ kind: "busy"; label: string; note: string }>
-  | Readonly<{ kind: "enter"; label: string; href: "/"; note: string }>
+  | Readonly<{
+    kind: "enter";
+    label: string;
+    href: "/";
+    note: string;
+    /** Whether the surface may navigate without waiting for a click. */
+    automatic: boolean;
+  }>
   | Readonly<{ kind: "unavailable"; label: string; note: string }>;
 
 export function presentLandingAccessAction(
@@ -53,6 +63,7 @@ export function presentLandingAccessAction(
         kind: "enter",
         label: "Continue to PackScout",
         href: "/",
+        automatic: true,
         note:
           "You are already signed in — no second sign-in needed. Continue " +
           "to see where things stand.",
@@ -62,6 +73,7 @@ export function presentLandingAccessAction(
         kind: "enter",
         label: "Continue to PackScout",
         href: "/",
+        automatic: false,
         note:
           "Your session could not be verified. Continue and use the account " +
           "menu to sign out, then try signing in again.",

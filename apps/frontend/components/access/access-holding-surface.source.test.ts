@@ -68,12 +68,55 @@ test("the surface asks the boundary to establish the server-verified session, wi
 
 test("sign-out and switch-identity are wired through the existing session context", () => {
   assert.match(surfaceSource, /await auth\.logout\(\);/);
-  // Sign out lands on the landing page the server now serves; switching
-  // identity signs out and asks for a fresh sign-in from right here.
-  assert.match(surfaceSource, /router\.replace\("\/"\);/);
-  assert.match(surfaceSource, /auth\.login\(\);/);
+  // Both destinations run the one shared follow-up: sign out leaves for the
+  // landing page the server now serves, switching identity asks for a fresh
+  // sign-in from right here. Which is which is decided in
+  // components/auth/sign-out-handoff, not duplicated in this component.
+  assert.match(
+    surfaceSource,
+    /runSignOutFollowUp\(signOutFollowUp\(settled\), browserSignOutEffects\(auth\.login\)\)/,
+  );
+  assert.equal(surfaceSource.match(/runSignOutFollowUp\(/g)?.length, 1);
   assert.match(surfaceSource, /signOutThen\("landing"\)/);
   assert.match(surfaceSource, /signOutThen\("sign_in"\)/);
+});
+
+test("leaving after a sign-out replaces the document instead of the route", () => {
+  // The router this surface holds is for the approval redirect only. Sending
+  // a sign-out through it keeps the document, and with it the client
+  // router's per-document cache of every segment this tab rendered; a
+  // back/forward traversal reads that cache with staleness checks bypassed,
+  // so one Back press restores an admitted page with no request and no gate.
+  const signOutAt = surfaceSource.indexOf("async function signOutThen(");
+  assert.notEqual(signOutAt, -1);
+  assert.equal(surfaceSource.includes('router.replace("/")'), false);
+  assert.equal(surfaceSource.includes("router.refresh"), false);
+  assert.equal(surfaceSource.includes("window.location"), false);
+  // The only router call left is the approval redirect, and it is above the
+  // sign-out handler.
+  const routerCalls = surfaceSource.match(/router\.(replace|push|refresh)\(/g);
+  assert.deepEqual(routerCalls, ["router.replace("]);
+  assert.ok(surfaceSource.indexOf("router.replace(") < signOutAt);
+});
+
+test("a failed sign-out settles as failed and still reaches the follow-up", () => {
+  // Sign-out clears the server-readable credential in a `finally`, so a
+  // failed provider call has still signed this person out server-side.
+  // Returning early from the catch left them on a page rendered for a
+  // session that no longer exists; the follow-up decides what each
+  // destination does with a failure.
+  assert.match(
+    surfaceSource,
+    /\} catch \{[\s\S]*?settled = \{ type: "failed", next \};\s*\}/,
+  );
+  const catchAt = surfaceSource.indexOf("} catch {");
+  const followUpAt = surfaceSource.indexOf("runSignOutFollowUp(");
+  assert.ok(catchAt !== -1);
+  assert.ok(followUpAt > catchAt);
+  assert.equal(
+    /\breturn;/.test(surfaceSource.slice(catchAt, followUpAt)),
+    false,
+  );
 });
 
 test("a fresh sign-in is offered only once the session has actually ended", () => {

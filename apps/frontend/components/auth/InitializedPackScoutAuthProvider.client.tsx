@@ -143,13 +143,25 @@ function PackScoutAuthBridge({
   ]);
 
   const logout = useCallback(async () => {
-    await logoutAndClearReturningSessionHint(
-      privyLogout,
-      browserAuthSessionHintStorage(),
-    );
-    // The server-readable credential dies with the session, so the very next
-    // server-rendered request reads as signed out (closed-beta-access/007).
-    clearBrowserIdentityCookie();
+    try {
+      await logoutAndClearReturningSessionHint(
+        privyLogout,
+        browserAuthSessionHintStorage(),
+      );
+    } finally {
+      // The server-readable credential dies with the sign-out attempt, not
+      // with its success, so the very next server-rendered request reads as
+      // signed out (closed-beta-access/007). A provider failure must not
+      // leave the gate admitting someone who asked to leave; the cookie is
+      // transport only, so the sync writes it back on its next pass if the
+      // session really did survive.
+      //
+      // "The attempt" includes one that never answers: the awaited call
+      // bounds the provider itself at SIGN_OUT_CEILING_MS, so this block is
+      // reached even then, and it is reached before the surface is told
+      // anything and leaves.
+      clearBrowserIdentityCookie();
+    }
   }, [privyLogout]);
   const status: PackScoutAuthValue["status"] = error
     ? "error"

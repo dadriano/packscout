@@ -18,8 +18,11 @@
  * its lifetime is derived from the token's own expiry so the cookie dies no
  * later than the credential inside it.
  *
- * Pure string-building lives here so it can be tested without a browser; the
- * one place that touches `document.cookie` is the client sync component.
+ * Pure string-building and every decision taken on the cookie live here, so
+ * they can be tested without a browser. Writing the cookie stays with the
+ * client sync component; the one read of `document.cookie` here is guarded on
+ * `document` existing, and this module imports nothing from the provider SDK
+ * so the landing surface can depend on it without booting authentication.
  */
 
 export const ACCESS_IDENTITY_COOKIE = "packscout-identity";
@@ -136,18 +139,205 @@ export function buildIdentityCookieValue(input: Readonly<{
 }
 
 /**
- * Whether this document currently carries the server-readable identity
- * cookie.
- *
- * Signing in establishes the provider session in the browser first; the
- * cookie that lets server rendering see it is written moments later. Any
- * navigation taken in between renders as a signed-out visitor, so callers
- * that want the server to route a freshly signed-in person wait for this to
- * become true before navigating.
+ * Whether a `document.cookie` assignment stores a credential rather than
+ * removing one. {@link buildIdentityCookieValue} answers a malformed or
+ * already-expired token with the clearing string, so the caller cannot tell
+ * "wrote the token" from "dropped it" by looking at its input.
  */
-export function browserHasIdentityCookie(): boolean {
-  if (typeof document === "undefined") return false;
-  return document.cookie
-    .split(";")
-    .some((entry) => entry.trim().startsWith(`${ACCESS_IDENTITY_COOKIE}=`));
+export function identityCookieAssignmentStores(
+  assignment: string,
+  secure: boolean,
+): boolean {
+  return assignment !== clearIdentityCookieValue(secure);
+}
+
+/**
+ * The identity cookie's current value in this document, or null when none is
+ * present.
+ *
+ * Presence alone proves nothing. The server renders the landing page for a
+ * visitor whose cookie it *refused* — a revoked token, an expired one, a
+ * value that is not even token-shaped — and that refused cookie is still
+ * sitting here afterwards. Callers that route on the cookie need its value,
+ * so they can tell the credential the gate already rejected from the one this
+ * session has since written.
+ */
+export function readBrowserIdentityCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const prefix = `${ACCESS_IDENTITY_COOKIE}=`;
+  for (const entry of document.cookie.split(";")) {
+    const trimmed = entry.trim();
+    if (trimmed.startsWith(prefix)) return trimmed.slice(prefix.length);
+  }
+  return null;
+}
+
+// --- The hand-off log -------------------------------------------------------
+
+/**
+ * One completed assignment to the identity cookie in this document.
+ *
+ * The cookie is written asynchronously — the provider hands out a token, the
+ * sync stores it — so anything that wants to act on "the browser now carries
+ * a credential from *this* session" needs to know when the value changed, not
+ * merely that some value exists. This log is that signal, and it lives here
+ * rather than beside the sync component because the landing surface reads it
+ * and must not pull the provider SDK into its bundle.
+ *
+ * The token is kept only so a reader can recognise the same credential twice.
+ * It never leaves the page, it is the same value `document.cookie` already
+ * exposes to every script here, and a clear drops it.
+ */
+export type IdentityCookieWrite = Readonly<{
+  kind: "written" | "cleared";
+  token: string | null;
+  atMs: number;
+  /** Monotonic per-document counter, so "later than what I saw" is decidable. */
+  seq: number;
+}>;
+
+let lastIdentityCookieWrite: IdentityCookieWrite | null = null;
+let identityCookieWriteCount = 0;
+const identityCookieWriteListeners = new Set<() => void>();
+
+/** Records an assignment and wakes every subscriber. */
+export function recordIdentityCookieWrite(
+  input: Readonly<{ kind: "written" | "cleared"; token: string | null; atMs: number }>,
+): IdentityCookieWrite {
+  identityCookieWriteCount += 1;
+  const stored = input.kind === "written" ? input.token : null;
+  lastIdentityCookieWrite = Object.freeze({
+    kind: stored === null ? ("cleared" as const) : ("written" as const),
+    token: stored,
+    atMs: input.atMs,
+    seq: identityCookieWriteCount,
+  });
+  for (const listener of identityCookieWriteListeners) listener();
+  return lastIdentityCookieWrite;
+}
+
+/** The most recent assignment, or null when this document wrote none. */
+export function readLastIdentityCookieWrite(): IdentityCookieWrite | null {
+  return lastIdentityCookieWrite;
+}
+
+/** Subscribes to assignments. Shaped for `useSyncExternalStore`. */
+export function subscribeToIdentityCookieWrites(
+  listener: () => void,
+): () => void {
+  identityCookieWriteListeners.add(listener);
+  return () => {
+    identityCookieWriteListeners.delete(listener);
+  };
+}
+
+/**
+ * Whether a clear landed while an in-flight token fetch was outstanding.
+ *
+ * Signing out clears the cookie synchronously, but a refresh started moments
+ * earlier is still awaiting its token and would write a live credential back
+ * over the clear. The visitor would be told they signed out while the server
+ * kept admitting them until the cookie's own lifetime ran out.
+ */
+export function identityWriteSupersededByClear(
+  input: Readonly<{ seenSeq: number; latest: IdentityCookieWrite | null }>,
+): boolean {
+  return (
+    input.latest !== null &&
+    input.latest.seq > input.seenSeq &&
+    input.latest.kind === "cleared"
+  );
+}
+
+// --- The sign-in hand-off decision ------------------------------------------
+
+/** How long the automatic hand-off waits once a session is established. */
+export const IDENTITY_HANDOFF_TIMEOUT_MS = 6_000;
+
+/**
+ * How many times the hand-off may be attempted for one visit. A fresh
+ * credential re-arms it, so this only bounds a pathological rewrite cycle.
+ */
+export const IDENTITY_HANDOFF_MAX_ATTEMPTS = 3;
+
+export type IdentityHandoffDecision =
+  | Readonly<{ kind: "wait" }>
+  | Readonly<{ kind: "hand_off"; token: string }>
+  | Readonly<{ kind: "give_up" }>;
+
+const WAIT_FOR_IDENTITY: IdentityHandoffDecision = Object.freeze({
+  kind: "wait",
+});
+const GIVE_UP_ON_IDENTITY: IdentityHandoffDecision = Object.freeze({
+  kind: "give_up",
+});
+
+function handoffCredential(input: Readonly<{
+  cookieToken: string | null;
+  lastWrite: IdentityCookieWrite | null;
+  mountedAtMs: number;
+  attemptedTokens: readonly string[];
+}>): string | null {
+  const write = input.lastWrite;
+  // Nothing this document wrote, or a clear: there is no current-session
+  // credential to travel with.
+  if (write === null || write.kind !== "written" || write.token === null) {
+    return null;
+  }
+  // The credential must post-date the page. The server rendered this surface
+  // from whatever cookie the browser held at the time — possibly one it
+  // refused — so only a value written afterwards is one the gate has not
+  // already seen and rejected.
+  if (write.atMs < input.mountedAtMs) return null;
+  // And it must be what the browser will actually send. A write the cookie
+  // jar did not keep, or one something else has since replaced, is not a
+  // credential this navigation would carry.
+  const cookieToken = input.cookieToken;
+  if (cookieToken === null || cookieToken !== write.token) return null;
+  // The same shape check the gate applies before it spends a round trip.
+  if (!identityTokenShapeValid(cookieToken)) return null;
+  // Never resubmit a credential this hand-off already travelled with; that is
+  // the loop protection, and keying it on the value rather than on a flag is
+  // what lets a genuinely newer credential try again.
+  if (input.attemptedTokens.includes(cookieToken)) return null;
+  return cookieToken;
+}
+
+/**
+ * Whether a freshly signed-in visitor may be handed to the server-side gate.
+ *
+ * The landing page is what a visitor sees when the gate refused their
+ * credential, and that refused cookie is still in the browser while the page
+ * renders. Navigating on its mere presence resubmits exactly the credential
+ * that produced this page, so the gate refuses it again and the visitor lands
+ * back here — with the one-shot guard already spent. This decides on the
+ * value instead: hand off only with a credential this document wrote after
+ * the page rendered, that the cookie jar actually carries, and that no
+ * earlier attempt already used.
+ *
+ * The wait is bounded from `armedAtMs`, the moment the session became
+ * established. Past that deadline nothing navigates on its own and the
+ * surface's visible link is the way in, so a credential that arrives minutes
+ * later never yanks someone mid-read.
+ */
+export function decideIdentityHandoff(input: Readonly<{
+  cookieToken: string | null;
+  lastWrite: IdentityCookieWrite | null;
+  mountedAtMs: number;
+  armedAtMs: number;
+  nowMs: number;
+  timeoutMs: number;
+  attemptedTokens: readonly string[];
+  maxAttempts: number;
+}>): IdentityHandoffDecision {
+  if (input.attemptedTokens.length >= input.maxAttempts) {
+    return GIVE_UP_ON_IDENTITY;
+  }
+  if (input.nowMs - input.armedAtMs >= input.timeoutMs) {
+    return GIVE_UP_ON_IDENTITY;
+  }
+  const token = handoffCredential(input);
+  return token === null
+    ? WAIT_FOR_IDENTITY
+    : Object.freeze({ kind: "hand_off", token });
 }

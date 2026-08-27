@@ -14,10 +14,19 @@ import styles from "./Landing.module.css";
  * authentication context and preserves the intent-based provider boot.
  *
  * The surface is self-contained: closed-beta-access/007 renders it from the
- * root route for visitors who are not admitted, and `app/welcome/page.tsx`
- * keeps it addressable on its own. It brings no navigation, saved-item
- * affordances, or account controls of its own, so nothing on it points a
- * signed-out visitor at a surface they cannot use.
+ * root route for visitors who are not admitted, and the root is its only
+ * address — the standalone welcome route it once had is retired, so no
+ * second indexable copy competes with it. It brings no navigation,
+ * saved-item affordances, or catalog links of its own, so nothing on it
+ * points a signed-out visitor at a surface they cannot use; the shell's
+ * account control sits outside it in the header, where signing in and
+ * signing out stay reachable from every state.
+ *
+ * It is also where a sign-out lands, because signing out replaces the
+ * document rather than navigating the client router — and it greets that
+ * arrival with nothing in particular, which is the point. The surface has no
+ * client state of its own to say anything about a sign-out that already
+ * happened one document ago.
  */
 export function LandingPage() {
   return (
