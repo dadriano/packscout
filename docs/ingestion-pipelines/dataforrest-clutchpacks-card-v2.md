@@ -94,36 +94,39 @@ The command copies the active ClutchPacks DataForrest connection only inside
 the process: it decrypts the source revision under its original tenant scope,
 validates it, and encrypts a new adapter-v2 revision under the canary tenant
 scope. It never prints the bearer credential or plaintext configuration. It
-also creates only the ClutchPacks provider root, a draft v2 source with cursor
+also creates only the active identity-only ClutchPacks provider root (with no
+legacy provider configuration revision), a draft v2 source with cursor
 generation 1 at Feed start, and a profile with the governed DataForrest
 `requestLimit: 2`. Replay still runs with one supervisor execution slot, so the
 canary issues at most one provider request at a time. It uses a
 programmatic system actor and creates no administrator or password. It does not
 queue a test, call DataForrest, pause either database, activate the source, or
-start replay. No bootstrap execution, pause, activation, or replay has been run
-as part of this change.
+start replay.
 
-Before any later target replay:
+Qualify and run the target through the guarded driver and its dedicated
+[operator runbook](./clutchpacks-v2-local-canary-runbook.md). The required order
+is:
 
-1. Test and activate the target connection, then test and activate the target
-   source in `paused` state through the existing lifecycle service. A separate
-   guarded activation/replay driver is intentionally not included in this
-   staging change.
-2. Pause the original ClutchPacks source at a completed page boundary and prove
+1. Pause the original ClutchPacks source at a completed page boundary and prove
    it has zero queued or running import runs. Collector Crypt, Courtyard, and
    Phygitals may remain active: the integrated request lanes enforce DataForrest's
    cap of two requests per platform, not one aggregate cap per credential.
-3. Re-run the bootstrap dry-run and require
+2. Re-run the bootstrap dry-run and require
    `replayCapacityReady: true`. Cross-database permits and supervisor advisory
    locks are database-local; do not treat them as coordination between source
    and target.
-4. Start exactly one worker built from the integrated code line and pointed only
-   at the target database, then resume its single ClutchPacks v2 source from Feed
-   start. The original database's ordinary worker may keep serving the other
-   three platform lanes while original Clutch remains paused.
+3. Start exactly one source supervisor built from the integrated code line,
+   pointed only at the target database, with exactly one execution slot.
+4. Use one digest-confirmed driver transition at a time to test and activate the
+   target connection, test and activate the target source in `paused` state, and
+   finally resume that source from Feed start. The original database's ordinary
+   worker may keep serving the other three platform lanes while original Clutch
+   remains paused.
 5. Run until the exact v2 source revision reports a successful run at provider
    head. Reconcile provider head, exact external-ID set equality, nonblank card
-   names, and release-assembly dry-run before publication.
+   names, and release-assembly dry-run before publication. Stop the target
+   supervisor and pause the target source before generating the immutable public
+   catalog candidate.
 6. Bind canary approval and Clutch-only promotion to the target organization
    through `PACKSCOUT_PUBLIC_ORGANIZATION_ID`. Do not select the original
    organization or include any other provider in the release source set.

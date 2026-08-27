@@ -2,9 +2,8 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Prisma } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
-  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
 } from "@packscout/contracts";
@@ -26,7 +25,11 @@ import {
   SourceMapperDescriptorRegistry,
 } from "@packscout/services";
 import {
+  CLUTCHPACKS_V2_CANARY_SOURCE_PINS,
+  assertClutchpacksV2ActiveSourceMigrationReadiness,
   type ClutchpacksV2CanaryBootstrapEnvironment,
+  type ClutchpacksV2MigrationEvidence,
+  readClutchpacksV2ActiveSourceMigrationEvidence,
   readClutchpacksV2CanaryBootstrapEnvironment,
 } from "./bootstrap-clutchpacks-v2-canary-tenant.mts";
 import { assertConnectedLocalDatabaseIdentity } from
@@ -38,6 +41,8 @@ const TARGET_SLUG = "packscout-clutchpacks-v2-canary";
 const TARGET_NAME = "PackScout ClutchPacks V2 Canary";
 const ADVANCE_CONFIRMATION_PREFIX = "ADVANCE CLUTCHPACKS V2 LOCAL";
 const PAUSE_CONFIRMATION_PREFIX = "PAUSE ORIGINAL CLUTCHPACKS V1 LOCAL";
+const PAUSE_TARGET_CONFIRMATION_PREFIX =
+  "PAUSE CLUTCHPACKS V2 TARGET LOCAL";
 const RESUME_CONFIRMATION_PREFIX = "RESUME CLUTCHPACKS V2 LOCAL";
 
 export class ClutchpacksV2CanaryDriverError extends Error {
@@ -55,6 +60,7 @@ function refuse(code: string): never {
 export interface ClutchpacksV2CanaryDriverConfirmations {
   readonly advance: string;
   readonly pauseOriginal: string;
+  readonly pauseTarget: string;
   readonly resume: string;
 }
 
@@ -65,6 +71,7 @@ export function clutchpacksV2CanaryDriverConfirmations(
   return Object.freeze({
     advance: `${ADVANCE_CONFIRMATION_PREFIX} ${binding}`,
     pauseOriginal: `${PAUSE_CONFIRMATION_PREFIX} ${binding}`,
+    pauseTarget: `${PAUSE_TARGET_CONFIRMATION_PREFIX} ${binding}`,
     resume: `${RESUME_CONFIRMATION_PREFIX} ${binding}`,
   });
 }
@@ -77,7 +84,7 @@ export type ClutchpacksV2CanaryDriverCommand = Readonly<
       expectedStage: string;
     }
   | {
-      action: "pause_original" | "resume";
+      action: "pause_original" | "pause_target" | "resume";
       confirmation: string;
     }
 >;
@@ -93,7 +100,7 @@ export function parseClutchpacksV2CanaryDriverCommand(
     return Object.freeze({ action: "plan", confirmation: null });
   }
   const declared = new Map<string, Readonly<{
-    action: "advance" | "pause_original" | "resume";
+    action: "advance" | "pause_original" | "pause_target" | "resume";
     confirmation: string;
   }>>([
     ["--advance", Object.freeze({
@@ -103,6 +110,10 @@ export function parseClutchpacksV2CanaryDriverCommand(
     ["--pause-original", Object.freeze({
       action: "pause_original" as const,
       confirmation: confirmations.pauseOriginal,
+    })],
+    ["--pause-target", Object.freeze({
+      action: "pause_target" as const,
+      confirmation: confirmations.pauseTarget,
     })],
     ["--resume", Object.freeze({
       action: "resume" as const,
@@ -181,6 +192,16 @@ export function assertOriginalClutchpacksV1PausedAndDrained(
   }
 }
 
+export async function assertOriginalClutchpacksV1DatabaseReady(
+  readEvidence: () => Promise<readonly ClutchpacksV2MigrationEvidence[]>,
+): Promise<void> {
+  try {
+    assertClutchpacksV2ActiveSourceMigrationReadiness(await readEvidence());
+  } catch {
+    refuse("ORIGINAL_DATABASE_SCHEMA_NOT_READY");
+  }
+}
+
 export interface CanaryTestEvidence {
   readonly state: string;
   readonly hasSuccessfulResult: boolean;
@@ -225,6 +246,7 @@ export interface ClutchpacksV2CanaryTargetEvidence {
     profileId: string;
     sourceTypeKey: string;
     state: string;
+    pauseRequested: boolean;
     activeRevisionId: string | null;
   }>[];
   readonly sourceRevisions: readonly Readonly<{
@@ -235,6 +257,11 @@ export interface ClutchpacksV2CanaryTargetEvidence {
     profileId: string;
     sourceTypeKey: string;
     adapterVersion: string;
+    normalizedContractVersion: string;
+    mapperKey: string;
+    mapperVersion: string;
+    identityNamespaceKey: string;
+    cursorCodecVersion: string;
     configuration: unknown;
   }>[];
   readonly cursors: readonly Readonly<{
@@ -253,9 +280,34 @@ export interface ClutchpacksV2CanaryTargetEvidence {
   readonly semanticObservationCount: number;
   readonly deliveryOccurrenceCount: number;
   readonly canonicalEntityCount: number;
+  readonly quarantineRecordCount: number;
+  readonly warningErrorCriticalDiagnosticCount: number;
   readonly legacyProviderConfigRevisionCount: number;
   readonly legacyProviderSecretVersionCount: number;
   readonly legacyProviderCursorCheckpointCount: number;
+  readonly queuedOrRunningRunCount: number;
+  readonly latestRun: Readonly<{
+    id: string;
+    organizationId: string;
+    providerId: string;
+    sourceInstanceId: string | null;
+    sourceRevisionId: string | null;
+    sourceTypeKey: string | null;
+    adapterVersion: string | null;
+    normalizedContractVersion: string | null;
+    mapperKey: string | null;
+    mapperVersion: string | null;
+    identityNamespaceKey: string | null;
+    connectionProfileId: string | null;
+    connectionRevisionId: string | null;
+    cursorCodecVersion: string | null;
+    cursorGeneration: bigint | null;
+    configRevisionId: string | null;
+    state: string;
+    reachedProviderHead: boolean;
+    finishedAt: Date | null;
+    failureCode: string | null;
+  }> | null;
   readonly connectionTest: CanaryTestEvidence | null;
   readonly sourceTest: CanaryTestEvidence | null;
 }
@@ -301,7 +353,7 @@ export function assertClutchpacksV2CanaryTargetIsExact(
     !profile ||
     profile.id !== environment.profileId ||
     profile.organizationId !== environment.targetOrganizationId ||
-    profile.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY ||
+    profile.sourceTypeKey !== CLUTCHPACKS_V2_CANARY_SOURCE_PINS.sourceTypeKey ||
     !["draft", "active"].includes(profile.state) ||
     profile.requestLimit !== 2 ||
     snapshot.connectionRevisions.length !== 1 ||
@@ -309,9 +361,10 @@ export function assertClutchpacksV2CanaryTargetIsExact(
     connectionRevision.id !== environment.connectionRevisionId ||
     connectionRevision.organizationId !== environment.targetOrganizationId ||
     connectionRevision.profileId !== profile.id ||
-    connectionRevision.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY ||
+    connectionRevision.sourceTypeKey !==
+      CLUTCHPACKS_V2_CANARY_SOURCE_PINS.sourceTypeKey ||
     connectionRevision.adapterVersion !==
-      DATAFORREST_EVENTS_V1_ADAPTER_VERSION ||
+      CLUTCHPACKS_V2_CANARY_SOURCE_PINS.adapterVersion ||
     !["candidate", "active"].includes(connectionRevision.state) ||
     connectionRevision.healthGeneration < 0n ||
     snapshot.sources.length !== 1 ||
@@ -319,16 +372,28 @@ export function assertClutchpacksV2CanaryTargetIsExact(
     source.organizationId !== environment.targetOrganizationId ||
     source.providerId !== provider.id ||
     source.profileId !== profile.id ||
-    source.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY ||
+    source.sourceTypeKey !== CLUTCHPACKS_V2_CANARY_SOURCE_PINS.sourceTypeKey ||
     !["draft", "paused", "active"].includes(source.state) ||
+    (source.state !== "active" && source.pauseRequested) ||
     snapshot.sourceRevisions.length !== 1 ||
     !sourceRevision ||
     sourceRevision.organizationId !== environment.targetOrganizationId ||
     sourceRevision.providerId !== provider.id ||
     sourceRevision.sourceInstanceId !== source.id ||
     sourceRevision.profileId !== profile.id ||
-    sourceRevision.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY ||
-    sourceRevision.adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION ||
+    sourceRevision.sourceTypeKey !==
+      CLUTCHPACKS_V2_CANARY_SOURCE_PINS.sourceTypeKey ||
+    sourceRevision.adapterVersion !==
+      CLUTCHPACKS_V2_CANARY_SOURCE_PINS.adapterVersion ||
+    sourceRevision.normalizedContractVersion !==
+      CLUTCHPACKS_V2_CANARY_SOURCE_PINS.normalizedContractVersion ||
+    sourceRevision.mapperKey !== CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperKey ||
+    sourceRevision.mapperVersion !==
+      CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperVersion ||
+    sourceRevision.identityNamespaceKey !==
+      CLUTCHPACKS_V2_CANARY_SOURCE_PINS.identityNamespaceKey ||
+    sourceRevision.cursorCodecVersion !==
+      CLUTCHPACKS_V2_CANARY_SOURCE_PINS.cursorCodecVersion ||
     !isClutchpacksConfiguration(sourceRevision.configuration) ||
     source.activeRevisionId !== sourceRevision.id ||
     snapshot.cursors.length !== 1 ||
@@ -336,7 +401,11 @@ export function assertClutchpacksV2CanaryTargetIsExact(
     cursor.sourceInstanceId !== source.id ||
     cursor.sourceRevisionId !== sourceRevision.id ||
     cursor.generation !== 1n ||
-    cursor.adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION ||
+    cursor.adapterVersion !== CLUTCHPACKS_V2_CANARY_SOURCE_PINS.adapterVersion ||
+    !Number.isSafeInteger(snapshot.quarantineRecordCount) ||
+    snapshot.quarantineRecordCount < 0 ||
+    !Number.isSafeInteger(snapshot.warningErrorCriticalDiagnosticCount) ||
+    snapshot.warningErrorCriticalDiagnosticCount < 0 ||
     snapshot.legacyProviderConfigRevisionCount !== 0 ||
     snapshot.legacyProviderSecretVersionCount !== 0 ||
     snapshot.legacyProviderCursorCheckpointCount !== 0
@@ -364,6 +433,19 @@ export function clutchpacksV2CanaryLineageCount(
     snapshot.canonicalEntityCount;
 }
 
+export function clutchpacksV2CanaryTargetWideSafetyEvidence(
+  snapshot: ClutchpacksV2CanaryTargetEvidence,
+) {
+  return Object.freeze({
+    quarantineRecords: snapshot.quarantineRecordCount,
+    warningErrorCriticalDiagnostics:
+      snapshot.warningErrorCriticalDiagnosticCount,
+    targetWideEvidenceClean:
+      snapshot.quarantineRecordCount === 0 &&
+      snapshot.warningErrorCriticalDiagnosticCount === 0,
+  });
+}
+
 export function assertClutchpacksV2CanaryTargetIsPristine(
   snapshot: ClutchpacksV2CanaryTargetEvidence,
 ): void {
@@ -377,8 +459,79 @@ export function assertClutchpacksV2CanaryTargetIsPristine(
   ) refuse("TARGET_NOT_PRISTINE_FOR_RESUME");
 }
 
+export function clutchpacksV2CanaryHasExactSucceededHeadRun(
+  snapshot: ClutchpacksV2CanaryTargetEvidence,
+): boolean {
+  const provider = snapshot.providers[0];
+  const profile = snapshot.profiles[0];
+  const connectionRevision = snapshot.connectionRevisions[0];
+  const source = snapshot.sources[0];
+  const sourceRevision = snapshot.sourceRevisions[0];
+  const run = snapshot.latestRun;
+  return Boolean(
+    provider &&
+      profile &&
+      connectionRevision &&
+      source &&
+      sourceRevision &&
+      run &&
+      sourceRevision.sourceTypeKey ===
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.sourceTypeKey &&
+      sourceRevision.adapterVersion ===
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.adapterVersion &&
+      sourceRevision.normalizedContractVersion ===
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.normalizedContractVersion &&
+      sourceRevision.mapperKey ===
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperKey &&
+      sourceRevision.mapperVersion ===
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperVersion &&
+      sourceRevision.identityNamespaceKey ===
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.identityNamespaceKey &&
+      sourceRevision.cursorCodecVersion ===
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.cursorCodecVersion &&
+      run.organizationId === source.organizationId &&
+      run.providerId === provider.id &&
+      run.sourceInstanceId === source.id &&
+      run.sourceRevisionId === sourceRevision.id &&
+      run.sourceTypeKey === sourceRevision.sourceTypeKey &&
+      run.adapterVersion === sourceRevision.adapterVersion &&
+      run.normalizedContractVersion ===
+        sourceRevision.normalizedContractVersion &&
+      run.mapperKey === sourceRevision.mapperKey &&
+      run.mapperVersion === sourceRevision.mapperVersion &&
+      run.identityNamespaceKey === sourceRevision.identityNamespaceKey &&
+      run.connectionProfileId === profile.id &&
+      run.connectionRevisionId === connectionRevision.id &&
+      run.cursorCodecVersion === sourceRevision.cursorCodecVersion &&
+      run.cursorGeneration === 1n &&
+      run.configRevisionId === null &&
+      run.state === "succeeded" &&
+      run.reachedProviderHead &&
+      run.finishedAt !== null &&
+      run.failureCode === null,
+  );
+}
+
+export function assertClutchpacksV2CanaryTargetCanPause(
+  snapshot: ClutchpacksV2CanaryTargetEvidence,
+): void {
+  if (!clutchpacksV2CanaryHasExactSucceededHeadRun(snapshot)) {
+    refuse("TARGET_SUCCEEDED_HEAD_RUN_REQUIRED");
+  }
+  if (snapshot.queuedOrRunningRunCount !== 0) {
+    refuse("TARGET_RUNS_NOT_DRAINED");
+  }
+  if (snapshot.quarantineRecordCount !== 0) {
+    refuse("TARGET_QUARANTINE_NOT_EMPTY");
+  }
+  if (snapshot.warningErrorCriticalDiagnosticCount !== 0) {
+    refuse("TARGET_WARNING_ERROR_CRITICAL_DIAGNOSTICS_PRESENT");
+  }
+}
+
 export interface ClutchpacksV2CanarySupervisorEvidence {
   readonly liveEpochCount: number;
+  readonly epochState: string | null;
   readonly maximumExecutionSlots: number | null;
   readonly capacityState: string | null;
   readonly snapshotPublished: boolean;
@@ -389,10 +542,19 @@ export function assertClutchpacksV2CanaryOneSlotSupervisor(
 ): void {
   if (
     evidence.liveEpochCount !== 1 ||
+    evidence.epochState !== "active" ||
     evidence.maximumExecutionSlots !== 1 ||
     evidence.capacityState !== "available" ||
     !evidence.snapshotPublished
   ) refuse("TARGET_ONE_SLOT_SUPERVISOR_REQUIRED");
+}
+
+export function assertClutchpacksV2CanarySupervisorStopped(
+  evidence: ClutchpacksV2CanarySupervisorEvidence,
+): void {
+  if (evidence.liveEpochCount !== 0) {
+    refuse("TARGET_SUPERVISOR_MUST_BE_STOPPED");
+  }
 }
 
 export type ClutchpacksV2CanaryQualificationStage =
@@ -405,7 +567,8 @@ export type ClutchpacksV2CanaryQualificationStage =
   | "source_test_failed"
   | "activate_source_paused"
   | "ready_to_resume"
-  | "replay_active";
+  | "replay_active"
+  | "replay_paused";
 
 function testStage(
   evidence: CanaryTestEvidence | null,
@@ -434,6 +597,9 @@ export function determineClutchpacksV2CanaryQualificationStage(
   if (!profile || !source) refuse("TARGET_V2_TOPOLOGY_NOT_EXACT");
   if (source.state === "active") return "replay_active";
   if (source.state === "paused") {
+    if (clutchpacksV2CanaryHasExactSucceededHeadRun(snapshot)) {
+      return "replay_paused";
+    }
     if (
       profile.state !== "active" ||
       snapshot.connectionTest?.hasSuccessfulResult !== true ||
@@ -616,9 +782,13 @@ async function readTargetEvidence(
       semanticObservationCount,
       deliveryOccurrenceCount,
       canonicalEntityCount,
+      quarantineRecordCount,
+      warningErrorCriticalDiagnosticRows,
       legacyProviderConfigRevisionCount,
       legacyProviderSecretVersionCount,
       legacyProviderCursorCheckpointCount,
+      queuedOrRunningRunCount,
+      latestRun,
       liveEpochs,
     ] = await Promise.all([
       transaction.organizations.count(),
@@ -665,6 +835,7 @@ async function readTargetEvidence(
           connection_profile_id: true,
           source_type_key: true,
           state: true,
+          pause_requested_at: true,
           active_revision_id: true,
         },
       }),
@@ -677,6 +848,11 @@ async function readTargetEvidence(
           connection_profile_id: true,
           source_type_key: true,
           source_adapter_version: true,
+          normalized_contract_version: true,
+          mapper_key: true,
+          mapper_version: true,
+          identity_namespace_key: true,
+          cursor_codec_version: true,
           configuration_json: true,
         },
       }),
@@ -700,19 +876,59 @@ async function readTargetEvidence(
       transaction.source_semantic_observations.count(),
       transaction.source_delivery_occurrences.count(),
       transaction.canonical_entities.count(),
+      transaction.quarantine_records.count(),
+      transaction.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+        select count(*)::integer as "count"
+        from public.source_processor_diagnostic_events
+        where severity::text <> 'info'
+      `),
       transaction.provider_config_revisions.count(),
       transaction.provider_secret_versions.count(),
       transaction.provider_cursor_checkpoints.count(),
+      transaction.import_runs.count({
+        where: {
+          organization_id: environment.targetOrganizationId,
+          state: { in: ["queued", "running"] },
+        },
+      }),
+      transaction.import_runs.findFirst({
+        where: { organization_id: environment.targetOrganizationId },
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
+        select: {
+          id: true,
+          organization_id: true,
+          provider_id: true,
+          source_instance_id: true,
+          source_revision_id: true,
+          source_type_key: true,
+          source_adapter_version: true,
+          normalized_contract_version: true,
+          mapper_key: true,
+          mapper_version: true,
+          identity_namespace_key: true,
+          connection_profile_id: true,
+          connection_revision_id: true,
+          cursor_codec_version: true,
+          cursor_generation: true,
+          config_revision_id: true,
+          state: true,
+          reached_provider_head: true,
+          finished_at: true,
+          failure_code: true,
+        },
+      }),
       transaction.$queryRaw<Array<{
+        epochState: string;
         maximumExecutionSlots: number;
         capacityState: string;
         snapshotUpdatedAt: Date | null;
       }>>(Prisma.sql`
-        select maximum_execution_slots as "maximumExecutionSlots",
+        select state::text as "epochState",
+               maximum_execution_slots as "maximumExecutionSlots",
                capacity_state as "capacityState",
                snapshot_updated_at as "snapshotUpdatedAt"
         from public.source_supervisor_epochs
-        where state = 'active'
+        where state in ('active', 'fenced_draining')
           and lease_expires_at > clock_timestamp()
         order by epoch_number desc
       `),
@@ -720,6 +936,13 @@ async function readTargetEvidence(
     const source = sources[0];
     const sourceRevision = sourceRevisions[0];
     const connectionRevision = connectionRevisions[0];
+    const warningErrorCriticalDiagnosticCount =
+      warningErrorCriticalDiagnosticRows[0]?.count;
+    if (
+      warningErrorCriticalDiagnosticCount === undefined ||
+      !Number.isSafeInteger(warningErrorCriticalDiagnosticCount) ||
+      warningErrorCriticalDiagnosticCount < 0
+    ) refuse("TARGET_DIAGNOSTIC_EVIDENCE_INVALID");
     const [connectionTest, sourceTest] = await Promise.all([
       latestConnectionTest(
         transaction as unknown as PackscoutPrismaClient,
@@ -778,6 +1001,7 @@ async function readTargetEvidence(
           profileId: candidate.connection_profile_id,
           sourceTypeKey: candidate.source_type_key,
           state: candidate.state,
+          pauseRequested: candidate.pause_requested_at !== null,
           activeRevisionId: candidate.active_revision_id,
         })),
         sourceRevisions: sourceRevisions.map((revision) => Object.freeze({
@@ -788,6 +1012,11 @@ async function readTargetEvidence(
           profileId: revision.connection_profile_id,
           sourceTypeKey: revision.source_type_key,
           adapterVersion: revision.source_adapter_version,
+          normalizedContractVersion: revision.normalized_contract_version,
+          mapperKey: revision.mapper_key,
+          mapperVersion: revision.mapper_version,
+          identityNamespaceKey: revision.identity_namespace_key,
+          cursorCodecVersion: revision.cursor_codec_version,
           configuration: revision.configuration_json,
         })),
         cursors: cursors.map((cursor) => Object.freeze({
@@ -806,14 +1035,43 @@ async function readTargetEvidence(
         semanticObservationCount,
         deliveryOccurrenceCount,
         canonicalEntityCount,
+        quarantineRecordCount,
+        warningErrorCriticalDiagnosticCount,
         legacyProviderConfigRevisionCount,
         legacyProviderSecretVersionCount,
         legacyProviderCursorCheckpointCount,
+        queuedOrRunningRunCount,
+        latestRun: latestRun
+          ? Object.freeze({
+              id: latestRun.id,
+              organizationId: latestRun.organization_id,
+              providerId: latestRun.provider_id,
+              sourceInstanceId: latestRun.source_instance_id,
+              sourceRevisionId: latestRun.source_revision_id,
+              sourceTypeKey: latestRun.source_type_key,
+              adapterVersion: latestRun.source_adapter_version,
+              normalizedContractVersion:
+                latestRun.normalized_contract_version,
+              mapperKey: latestRun.mapper_key,
+              mapperVersion: latestRun.mapper_version,
+              identityNamespaceKey: latestRun.identity_namespace_key,
+              connectionProfileId: latestRun.connection_profile_id,
+              connectionRevisionId: latestRun.connection_revision_id,
+              cursorCodecVersion: latestRun.cursor_codec_version,
+              cursorGeneration: latestRun.cursor_generation,
+              configRevisionId: latestRun.config_revision_id,
+              state: latestRun.state,
+              reachedProviderHead: latestRun.reached_provider_head,
+              finishedAt: latestRun.finished_at,
+              failureCode: latestRun.failure_code,
+            })
+          : null,
         connectionTest,
         sourceTest,
       }),
       supervisor: Object.freeze({
         liveEpochCount: liveEpochs.length,
+        epochState: epoch?.epochState ?? null,
         maximumExecutionSlots: epoch?.maximumExecutionSlots ?? null,
         capacityState: epoch?.capacityState ?? null,
         snapshotPublished: epoch?.snapshotUpdatedAt !== null &&
@@ -874,6 +1132,7 @@ function publicStatus(
   supervisor: ClutchpacksV2CanarySupervisorEvidence,
 ) {
   const stage = determineClutchpacksV2CanaryQualificationStage(target);
+  const targetWideSafety = clutchpacksV2CanaryTargetWideSafetyEvidence(target);
   const source = target.sources[0]!;
   let originalReady = true;
   try {
@@ -911,10 +1170,18 @@ function publicStatus(
       cursorGeneration: target.cursors[0]!.generation.toString(),
       cursorAtFeedStart: target.cursors[0]!.fingerprint === null,
       lineageRows: clutchpacksV2CanaryLineageCount(target),
+      latestRunState: target.latestRun?.state ?? null,
+      latestRunReachedProviderHead:
+        target.latestRun?.reachedProviderHead ?? false,
+      latestRunExactSucceededHead:
+        clutchpacksV2CanaryHasExactSucceededHeadRun(target),
+      queuedOrRunningRuns: target.queuedOrRunningRunCount,
+      ...targetWideSafety,
     }),
     supervisor: Object.freeze({
       ready: supervisorReady,
       liveEpochCount: supervisor.liveEpochCount,
+      epochState: supervisor.epochState,
       executionSlots: supervisor.maximumExecutionSlots,
       capacityState: supervisor.capacityState,
     }),
@@ -969,6 +1236,100 @@ async function pauseOriginal(
   });
 }
 
+export interface ClutchpacksV2CanaryTargetPauseDependencies {
+  readonly pauseSource: (input: Readonly<{
+    organizationId: string;
+    providerId: string;
+    sourceInstanceId: string;
+    sourceRevisionId: string;
+  }>) => Promise<void>;
+  readonly readTarget: () => Promise<Readonly<{
+    snapshot: ClutchpacksV2CanaryTargetEvidence;
+    supervisor: ClutchpacksV2CanarySupervisorEvidence;
+  }>>;
+}
+
+export async function pauseClutchpacksV2CanaryTarget(
+  database: PackscoutPrismaClient,
+  environment: ClutchpacksV2CanaryBootstrapEnvironment,
+  before: ClutchpacksV2CanaryTargetEvidence,
+  supervisorBefore: ClutchpacksV2CanarySupervisorEvidence,
+  providedDependencies?: ClutchpacksV2CanaryTargetPauseDependencies,
+): Promise<Readonly<Record<string, unknown>>> {
+  assertClutchpacksV2CanaryTargetCanPause(before);
+  assertClutchpacksV2CanarySupervisorStopped(supervisorBefore);
+  const provider = before.providers[0]!;
+  const source = before.sources[0]!;
+  const sourceRevision = before.sourceRevisions[0]!;
+  if (
+    !["active", "paused"].includes(source.state) ||
+    source.pauseRequested
+  ) refuse("TARGET_PAUSE_STATE_INVALID");
+  const alreadyPaused = source.state === "paused";
+  const dependencies = providedDependencies ?? Object.freeze({
+    pauseSource: async (input: Readonly<{
+      organizationId: string;
+      providerId: string;
+      sourceInstanceId: string;
+      sourceRevisionId: string;
+    }>) => {
+      await sourceServices(database, environment).lifecycle.pause(
+        { organizationId: input.organizationId, actorKey: ACTOR_KEY },
+        input.providerId,
+        input.sourceInstanceId,
+        { expectedSourceRevisionId: input.sourceRevisionId },
+      );
+    },
+    readTarget: () => readTargetEvidence(database, environment),
+  });
+  try {
+    await dependencies.pauseSource({
+      organizationId: environment.targetOrganizationId,
+      providerId: provider.id,
+      sourceInstanceId: source.id,
+      sourceRevisionId: sourceRevision.id,
+    });
+  } catch {
+    refuse("TARGET_PAUSE_FAILED");
+  }
+  const after = await dependencies.readTarget().catch(() =>
+    refuse("TARGET_PAUSE_EVIDENCE_READ_FAILED")
+  );
+  assertClutchpacksV2CanaryTargetIsExact(after.snapshot, environment);
+  assertClutchpacksV2CanaryTargetCanPause(after.snapshot);
+  assertClutchpacksV2CanarySupervisorStopped(after.supervisor);
+  const pausedSource = after.snapshot.sources[0];
+  if (
+    pausedSource?.state !== "paused" ||
+    pausedSource.pauseRequested ||
+    after.snapshot.queuedOrRunningRunCount !== 0
+  ) refuse("TARGET_PAUSE_PROOF_FAILED");
+  const targetWideSafety = clutchpacksV2CanaryTargetWideSafetyEvidence(
+    after.snapshot,
+  );
+  return Object.freeze({
+    ok: true,
+    operation: WORKFLOW,
+    mode: "pause_target",
+    outcome: alreadyPaused ? "already_paused" : "paused",
+    sourceDatabase: environment.sourceDatabaseName,
+    targetDatabase: environment.targetDatabaseName,
+    targetDigest: environment.targetDigest,
+    target: Object.freeze({
+      state: pausedSource.state,
+      queuedOrRunningRuns: after.snapshot.queuedOrRunningRunCount,
+      latestRunState: after.snapshot.latestRun?.state ?? null,
+      latestRunReachedProviderHead:
+        after.snapshot.latestRun?.reachedProviderHead ?? false,
+      latestRunExactSucceededHead:
+        clutchpacksV2CanaryHasExactSucceededHeadRun(after.snapshot),
+      ...targetWideSafety,
+    }),
+    supervisorLiveEpochCount: after.supervisor.liveEpochCount,
+    providerCallMadeDirectly: false,
+  });
+}
+
 async function advanceOneStep(
   database: PackscoutPrismaClient,
   environment: ClutchpacksV2CanaryBootstrapEnvironment,
@@ -983,7 +1344,8 @@ async function advanceOneStep(
     stage === "wait_connection_test" ||
     stage === "wait_source_test" ||
     stage === "ready_to_resume" ||
-    stage === "replay_active"
+    stage === "replay_active" ||
+    stage === "replay_paused"
   ) {
     return Object.freeze({ outcome: "no_change" as const, previousStage: stage });
   }
@@ -1090,15 +1452,24 @@ export function clutchpacksV2CanaryDriverUsage(): string {
   npm run advance:clutchpacks-v2-canary:local -- \\
     --resume --confirmation "${RESUME_CONFIRMATION_PREFIX} <digest>"
 
+  npm run advance:clutchpacks-v2-canary:local -- \\
+    --pause-target \\
+    --confirmation "${PAUSE_TARGET_CONFIRMATION_PREFIX} <digest>"
+
 This driver requires the protected local bootstrap environment. It never starts
 a worker and never calls DataForrest directly. Start the target-only supervisor
 separately with PACKSCOUT_SOURCE_EXECUTION_SLOTS=1. The target profile retains
 the governed requestLimit of 2, while the one execution slot keeps the canary at
-one provider request at a time. Status and plan are read-only. Each --advance
+one provider request at a time. Every action first proves the exact 84-table
+active-source migration subset. Status and plan are read-only. Each --advance
 invocation performs at most one transition and queues tests for that supervisor.
 The required expected stage fences a retry after a transition already committed.
 Every advance and resume fails closed until the original adapter-v1 ClutchPacks
-source is paused and has no queued or running import runs.`;
+source is paused and has no queued or running import runs. Stop the target
+supervisor after a succeeded provider-head run and before --pause-target; that
+command requires no live target supervisor, zero target-wide quarantine or
+warning/error/critical diagnostics, and proves the canary paused and drained
+after the service transition.`;
 }
 
 async function connectedIdentity(
@@ -1123,8 +1494,7 @@ async function main(): Promise<void> {
     return;
   }
   const environment = readClutchpacksV2CanaryBootstrapEnvironment(process.env);
-  let sourceDatabase: ReturnType<typeof createPrismaClientLifecycle> | null =
-    null;
+  let sourceDatabase: PrismaClient | null = null;
   let targetDatabase: ReturnType<typeof createPrismaClientLifecycle> | null =
     null;
   try {
@@ -1132,15 +1502,24 @@ async function main(): Promise<void> {
       argv,
       clutchpacksV2CanaryDriverConfirmations(environment.targetDigest),
     );
-    sourceDatabase = createPrismaClientLifecycle({
-      databaseUrl: environment.sourceDatabaseUrl,
+    sourceDatabase = new PrismaClient({
+      datasources: { db: { url: environment.sourceDatabaseUrl } },
     });
     targetDatabase = createPrismaClientLifecycle({
       databaseUrl: environment.targetDatabaseUrl,
     });
-    await Promise.all([sourceDatabase.start(), targetDatabase.start()]);
+    const [sourceStart, targetStart] = await Promise.allSettled([
+      sourceDatabase.$connect(),
+      targetDatabase.start(),
+    ]);
+    if (sourceStart.status === "rejected") {
+      refuse("ORIGINAL_DATABASE_START_FAILED");
+    }
+    if (targetStart.status === "rejected") {
+      refuse("TARGET_DATABASE_START_FAILED");
+    }
     const [sourceIdentity, targetIdentity] = await Promise.all([
-      connectedIdentity(sourceDatabase.client),
+      connectedIdentity(sourceDatabase),
       connectedIdentity(targetDatabase.client),
     ]);
     try {
@@ -1155,19 +1534,30 @@ async function main(): Promise<void> {
     } catch {
       refuse("CONNECTED_DATABASE_IDENTITY_NOT_LOCAL");
     }
-    const [originalRows, targetRead] = await Promise.all([
+    await assertOriginalClutchpacksV1DatabaseReady(() =>
+      readClutchpacksV2ActiveSourceMigrationEvidence(sourceDatabase!)
+    );
+    const [originalResult, targetResult] = await Promise.allSettled([
       readOriginalEvidence(
-        sourceDatabase.client,
+        sourceDatabase,
         environment.sourceOrganizationId,
       ),
       readTargetEvidence(targetDatabase.client, environment),
     ]);
+    if (originalResult.status === "rejected") {
+      refuse("ORIGINAL_EVIDENCE_READ_FAILED");
+    }
+    if (targetResult.status === "rejected") {
+      refuse("TARGET_EVIDENCE_READ_FAILED");
+    }
+    const originalRows = originalResult.value;
+    const targetRead = targetResult.value;
     const original = assertOriginalClutchpacksV1IsExact(originalRows);
     assertClutchpacksV2CanaryTargetIsExact(targetRead.snapshot, environment);
     const stage = determineClutchpacksV2CanaryQualificationStage(
       targetRead.snapshot,
     );
-    if (stage !== "replay_active") {
+    if (stage !== "replay_active" && stage !== "replay_paused") {
       assertClutchpacksV2CanaryTargetIsPristine(targetRead.snapshot);
     }
     if (command.action === "status" || command.action === "plan") {
@@ -1182,9 +1572,20 @@ async function main(): Promise<void> {
     }
     if (command.action === "pause_original") {
       process.stdout.write(`${JSON.stringify(await pauseOriginal(
-        sourceDatabase.client,
+        sourceDatabase,
         environment,
         original,
+      ))}\n`);
+      return;
+    }
+    if (command.action === "pause_target") {
+      assertClutchpacksV2CanaryTargetCanPause(targetRead.snapshot);
+      assertClutchpacksV2CanarySupervisorStopped(targetRead.supervisor);
+      process.stdout.write(`${JSON.stringify(await pauseClutchpacksV2CanaryTarget(
+        targetDatabase.client,
+        environment,
+        targetRead.snapshot,
+        targetRead.supervisor,
       ))}\n`);
       return;
     }
@@ -1224,16 +1625,19 @@ async function main(): Promise<void> {
     );
     const after = await readTargetEvidence(targetDatabase.client, environment);
     assertClutchpacksV2CanaryTargetIsExact(after.snapshot, environment);
-    assertClutchpacksV2CanaryTargetIsPristine(after.snapshot);
+    const afterStage = determineClutchpacksV2CanaryQualificationStage(
+      after.snapshot,
+    );
+    if (afterStage !== "replay_active" && afterStage !== "replay_paused") {
+      assertClutchpacksV2CanaryTargetIsPristine(after.snapshot);
+    }
     process.stdout.write(`${JSON.stringify({
       ok: true,
       operation: WORKFLOW,
       mode: "advance",
       outcome: advanced.outcome,
       previousStage: advanced.previousStage,
-      targetStage: determineClutchpacksV2CanaryQualificationStage(
-        after.snapshot,
-      ),
+      targetStage: afterStage,
       sourceDatabase: environment.sourceDatabaseName,
       targetDatabase: environment.targetDatabaseName,
       targetDigest: environment.targetDigest,
@@ -1242,7 +1646,7 @@ async function main(): Promise<void> {
   } finally {
     environment.connectionKey.fill(0);
     await Promise.all([
-      sourceDatabase?.close().catch(() => undefined),
+      sourceDatabase?.$disconnect().catch(() => undefined),
       targetDatabase?.close().catch(() => undefined),
     ]);
   }

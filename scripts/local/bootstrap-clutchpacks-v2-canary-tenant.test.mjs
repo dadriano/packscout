@@ -5,10 +5,11 @@ import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 
 const {
+  CLUTCHPACKS_V2_CANARY_SOURCE_PINS,
   ClutchpacksV2CanaryBootstrapError,
   assessClutchpacksV2ReplayCapacity,
+  assertClutchpacksV2ActiveSourceMigrationReadiness,
   assertClutchpacksV2CanaryTargetIsSafe,
-  assertClutchpacksV2PlatformLaneMigration,
   assertClutchpacksV2TargetCompositeMigrations,
   parseClutchpacksV2CanaryBootstrapCommand,
   readClutchpacksV2CanaryBootstrapEnvironment,
@@ -58,6 +59,10 @@ function emptySnapshot(overrides = {}) {
     importRunCount: 0,
     importPageCount: 0,
     canonicalEntityCount: 0,
+    legacyProviderConfigurationCount: 0,
+    legacyProviderSecretCount: 0,
+    legacyProviderConnectionTestCount: 0,
+    legacyProviderCursorCount: 0,
     ...overrides,
   };
 }
@@ -202,25 +207,30 @@ test("replay capacity requires only the original Clutch lane paused and drained"
   );
 });
 
-test("the source requires the exact integrated platform-lane migration", () => {
+test("the active source requires the exact 84-table migration subset", () => {
   const valid = Object.freeze({
     migrationName: "20260827010000_provider_source_platform_request_lanes",
     checksum:
       "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
     finishedAt: new Date("2026-08-27T08:00:00.000Z"),
     rolledBackAt: null,
+    tableCount: 84,
   });
-  assert.doesNotThrow(() => assertClutchpacksV2PlatformLaneMigration([valid]));
+  assert.doesNotThrow(() =>
+    assertClutchpacksV2ActiveSourceMigrationReadiness([valid])
+  );
   for (const evidence of [
     [],
     [{ ...valid, checksum: "0".repeat(64) }],
     [{ ...valid, finishedAt: null }],
     [{ ...valid, rolledBackAt: new Date("2026-08-27T09:00:00.000Z") }],
+    [{ ...valid, tableCount: 83 }],
+    [{ ...valid, tableCount: 88 }],
     [valid, valid],
   ]) {
     assert.throws(
-      () => assertClutchpacksV2PlatformLaneMigration(evidence),
-      hasCode("PLATFORM_REQUEST_LANES_MIGRATION_REQUIRED"),
+      () => assertClutchpacksV2ActiveSourceMigrationReadiness(evidence),
+      hasCode("ACTIVE_SOURCE_MIGRATION_READINESS_REQUIRED"),
     );
   }
 });
@@ -271,6 +281,15 @@ test("the target requires all composite migrations and 88 application tables", (
 });
 
 test("target guard permits only empty or exact v2-only Clutch topology", () => {
+  assert.deepEqual(CLUTCHPACKS_V2_CANARY_SOURCE_PINS, {
+    sourceTypeKey: "dataforrest-events-v1",
+    adapterVersion: "dataforrest-events-adapter-v2",
+    normalizedContractVersion: "packscout.provider-observation.v1",
+    mapperKey: "clutchpacks-provider-observation",
+    mapperVersion: "1",
+    identityNamespaceKey: "dataforrest-clutchpacks-records-v1",
+    cursorCodecVersion: "dataforrest-cursor-v1",
+  });
   const environment = readClutchpacksV2CanaryBootstrapEnvironment(
     validEnvironment,
   );
@@ -285,7 +304,13 @@ test("target guard permits only empty or exact v2-only Clutch topology", () => {
       slug: "packscout-clutchpacks-v2-canary",
       name: "PackScout ClutchPacks V2 Canary",
     },
-    providers: [{ id: environment.providerId, platformKey: "clutchpacks" }],
+    providers: [{
+      id: environment.providerId,
+      platformKey: "clutchpacks",
+      state: "active",
+      activeRevisionId: null,
+      nextRunAt: null,
+    }],
     profiles: [{
       id: environment.profileId,
       sourceTypeKey: "dataforrest-events-v1",
@@ -306,7 +331,15 @@ test("target guard permits only empty or exact v2-only Clutch topology", () => {
     }],
     sourceRevisions: [{
       sourceInstanceId: sourceId,
-      adapterVersion: "dataforrest-events-adapter-v2",
+      adapterVersion: CLUTCHPACKS_V2_CANARY_SOURCE_PINS.adapterVersion,
+      normalizedContractVersion:
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.normalizedContractVersion,
+      mapperKey: CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperKey,
+      mapperVersion: CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperVersion,
+      identityNamespaceKey:
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.identityNamespaceKey,
+      cursorCodecVersion:
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.cursorCodecVersion,
     }],
     cursors: [{ sourceInstanceId: sourceId, generation: 1n, fingerprint: null }],
   });
@@ -322,8 +355,22 @@ test("target guard permits only empty or exact v2-only Clutch topology", () => {
     } }, "FRESH_TARGET_DATABASE_REQUIRED"],
     [{ ...staged, providers: [
       ...staged.providers,
-      { id: sourceOrganizationId, platformKey: "courtyard" },
+      {
+        id: sourceOrganizationId,
+        platformKey: "courtyard",
+        state: "active",
+        activeRevisionId: null,
+        nextRunAt: null,
+      },
     ] }, "TARGET_TOPOLOGY_INVALID"],
+    [{ ...staged, providers: [{
+      ...staged.providers[0],
+      state: "disabled",
+    }] }, "TARGET_TOPOLOGY_INVALID"],
+    [{ ...staged, providers: [{
+      ...staged.providers[0],
+      activeRevisionId: sourceOrganizationId,
+    }] }, "TARGET_TOPOLOGY_INVALID"],
     [{ ...staged, profiles: [{
       ...staged.profiles[0],
       requestLimit: 1,
@@ -333,8 +380,28 @@ test("target guard permits only empty or exact v2-only Clutch topology", () => {
       adapterVersion: "dataforrest-events-adapter-v1",
     }] }, "TARGET_TOPOLOGY_INVALID"],
     [{ ...staged, sourceRevisions: [{
-      sourceInstanceId: sourceId,
+      ...staged.sourceRevisions[0],
       adapterVersion: "dataforrest-events-adapter-v1",
+    }] }, "TARGET_TOPOLOGY_INVALID"],
+    [{ ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      normalizedContractVersion: "packscout.provider-observation.v0",
+    }] }, "TARGET_TOPOLOGY_INVALID"],
+    [{ ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      mapperKey: "courtyard-provider-observation",
+    }] }, "TARGET_TOPOLOGY_INVALID"],
+    [{ ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      mapperVersion: "2",
+    }] }, "TARGET_TOPOLOGY_INVALID"],
+    [{ ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      identityNamespaceKey: "dataforrest-clutchpacks-records-v0",
+    }] }, "TARGET_TOPOLOGY_INVALID"],
+    [{ ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      cursorCodecVersion: "dataforrest-cursor-v0",
     }] }, "TARGET_TOPOLOGY_INVALID"],
     [{ ...staged, cursors: [{
       sourceInstanceId: sourceId,
@@ -344,6 +411,14 @@ test("target guard permits only empty or exact v2-only Clutch topology", () => {
     [{ ...staged, importRunCount: 1 }, "TARGET_ALREADY_CONTAINS_LINEAGE"],
     [{ ...staged, importPageCount: 1 }, "TARGET_ALREADY_CONTAINS_LINEAGE"],
     [{ ...staged, canonicalEntityCount: 1 }, "TARGET_ALREADY_CONTAINS_LINEAGE"],
+    [{ ...staged, legacyProviderConfigurationCount: 1 },
+      "TARGET_ALREADY_CONTAINS_LINEAGE"],
+    [{ ...staged, legacyProviderSecretCount: 1 },
+      "TARGET_ALREADY_CONTAINS_LINEAGE"],
+    [{ ...staged, legacyProviderConnectionTestCount: 1 },
+      "TARGET_ALREADY_CONTAINS_LINEAGE"],
+    [{ ...staged, legacyProviderCursorCount: 1 },
+      "TARGET_ALREADY_CONTAINS_LINEAGE"],
   ]) {
     assert.throws(
       () => assertClutchpacksV2CanaryTargetIsSafe(snapshot, environment),
@@ -370,8 +445,10 @@ test("safe failures and help never expose credentials or require an admin", () =
   assert.match(result.stdout, /--dry-run/u);
   assert.match(result.stdout, /PACKSCOUT_CLUTCHPACKS_V1_DATABASE_URL/u);
   assert.match(result.stdout, /PACKSCOUT_DATABASE_URL/u);
-  assert.match(result.stdout, /fresh, fully migrated local database/u);
-  assert.match(result.stdout, /does not queue tests, call DataForrest/u);
+  assert.match(result.stdout, /84-table active-source migration subset/u);
+  assert.match(result.stdout, /88-table composite schema/u);
+  assert.match(result.stdout, /does not queue tests,/u);
+  assert.match(result.stdout, /call DataForrest/u);
   assert.doesNotMatch(
     result.stdout,
     /source-db-secret|target-db-secret|bearer-secret|admin|password/iu,

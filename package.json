@@ -82,6 +82,7 @@
     "bootstrap:provider-source-task010-target:local": "node --import tsx scripts/local/bootstrap-provider-source-task010-target.mts",
     "bootstrap:clutchpacks-v2-canary:local": "node --import tsx scripts/local/bootstrap-clutchpacks-v2-canary-tenant.mts",
     "advance:clutchpacks-v2-canary:local": "node --import tsx scripts/local/advance-clutchpacks-v2-canary.mts",
+    "generate:catalog-candidate:clutchpacks:local": "node --import tsx scripts/local/generate-clutchpacks-v2-public-catalog-candidate.mts",
     "start:provider-source-task010-configuration:local": "PACKSCOUT_TASK010_SUPERVISOR_PHASE=configuration node --import tsx scripts/local/start-provider-source-task010-supervisor.mts",
     "start:provider-source-task010-backfill:local": "PACKSCOUT_TASK010_SUPERVISOR_PHASE=backfill node --import tsx scripts/local/start-provider-source-task010-supervisor.mts",
     "start:provider-source-task010-admin:local": "node --import tsx scripts/local/start-provider-source-task010-admin.mts",

@@ -6,9 +6,12 @@ import { fileURLToPath } from "node:url";
 import { Prisma, PrismaClient } from "@prisma/client";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  dataforrestIdentityNamespaceByProvider,
   dataforrestEventsConnectionConfigurationV1Schema,
 } from "@packscout/contracts";
 import {
@@ -67,6 +70,7 @@ const TARGET_COMPOSITE_MIGRATIONS = Object.freeze([
     checksum: PLATFORM_REQUEST_LANES_MIGRATION_CHECKSUM,
   }),
 ]);
+const ACTIVE_SOURCE_APPLICATION_TABLE_COUNT = 84;
 const TARGET_APPLICATION_TABLE_COUNT = 88;
 
 export class ClutchpacksV2CanaryBootstrapError extends Error {
@@ -80,6 +84,21 @@ export class ClutchpacksV2CanaryBootstrapError extends Error {
 function refuse(code: string): never {
   throw new ClutchpacksV2CanaryBootstrapError(code);
 }
+
+const clutchpacksMapperDescriptor = launchSourceMapperDescriptors.find(
+  (descriptor) => descriptor.provider === "clutchpacks",
+);
+if (!clutchpacksMapperDescriptor) refuse("CLUTCHPACKS_MAPPER_PINS_MISSING");
+
+export const CLUTCHPACKS_V2_CANARY_SOURCE_PINS = Object.freeze({
+  sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+  adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  mapperKey: clutchpacksMapperDescriptor.mapperKey,
+  mapperVersion: clutchpacksMapperDescriptor.mapperVersion,
+  identityNamespaceKey: dataforrestIdentityNamespaceByProvider.clutchpacks,
+  cursorCodecVersion: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
+});
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
   const value = environment[name]?.trim();
@@ -203,7 +222,13 @@ export function readClutchpacksV2CanaryBootstrapEnvironment(
     sourceOrganizationId,
     targetOrganizationId,
     TARGET_SLUG,
-    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    CLUTCHPACKS_V2_CANARY_SOURCE_PINS.sourceTypeKey,
+    CLUTCHPACKS_V2_CANARY_SOURCE_PINS.adapterVersion,
+    CLUTCHPACKS_V2_CANARY_SOURCE_PINS.normalizedContractVersion,
+    CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperKey,
+    CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperVersion,
+    CLUTCHPACKS_V2_CANARY_SOURCE_PINS.identityNamespaceKey,
+    CLUTCHPACKS_V2_CANARY_SOURCE_PINS.cursorCodecVersion,
   ].join("\n")).digest("hex");
   return Object.freeze({
     sourceDatabaseUrl: sourceDatabase.url,
@@ -268,32 +293,29 @@ export function assessClutchpacksV2ReplayCapacity(
   return Object.freeze({ ready: true, reason: "ready" });
 }
 
-export interface ClutchpacksV2PlatformLaneMigrationEvidence {
+export interface ClutchpacksV2MigrationEvidence {
   readonly migrationName: string;
   readonly checksum: string;
   readonly finishedAt: Date | null;
   readonly rolledBackAt: Date | null;
-}
-
-export interface ClutchpacksV2TargetMigrationEvidence
-  extends ClutchpacksV2PlatformLaneMigrationEvidence {
   readonly tableCount: number;
 }
 
-export function assertClutchpacksV2PlatformLaneMigration(
-  evidence: readonly ClutchpacksV2PlatformLaneMigrationEvidence[],
+export function assertClutchpacksV2ActiveSourceMigrationReadiness(
+  evidence: readonly ClutchpacksV2MigrationEvidence[],
 ): void {
   if (
     evidence.length !== 1 ||
     evidence[0]?.migrationName !== PLATFORM_REQUEST_LANES_MIGRATION ||
     evidence[0]?.checksum !== PLATFORM_REQUEST_LANES_MIGRATION_CHECKSUM ||
     evidence[0]?.finishedAt === null ||
-    evidence[0]?.rolledBackAt !== null
-  ) refuse("PLATFORM_REQUEST_LANES_MIGRATION_REQUIRED");
+    evidence[0]?.rolledBackAt !== null ||
+    evidence[0]?.tableCount !== ACTIVE_SOURCE_APPLICATION_TABLE_COUNT
+  ) refuse("ACTIVE_SOURCE_MIGRATION_READINESS_REQUIRED");
 }
 
 export function assertClutchpacksV2TargetCompositeMigrations(
-  evidence: readonly ClutchpacksV2TargetMigrationEvidence[],
+  evidence: readonly ClutchpacksV2MigrationEvidence[],
 ): void {
   if (evidence.length !== TARGET_COMPOSITE_MIGRATIONS.length) {
     refuse("TARGET_COMPOSITE_MIGRATIONS_REQUIRED");
@@ -322,6 +344,9 @@ export interface ClutchpacksV2CanaryTargetSnapshot {
   readonly providers: readonly Readonly<{
     id: string;
     platformKey: string;
+    state: string;
+    activeRevisionId: string | null;
+    nextRunAt: Date | null;
   }>[];
   readonly profiles: readonly Readonly<{
     id: string;
@@ -344,6 +369,11 @@ export interface ClutchpacksV2CanaryTargetSnapshot {
   readonly sourceRevisions: readonly Readonly<{
     sourceInstanceId: string;
     adapterVersion: string;
+    normalizedContractVersion: string;
+    mapperKey: string;
+    mapperVersion: string;
+    identityNamespaceKey: string;
+    cursorCodecVersion: string;
   }>[];
   readonly cursors: readonly Readonly<{
     sourceInstanceId: string;
@@ -353,6 +383,10 @@ export interface ClutchpacksV2CanaryTargetSnapshot {
   readonly importRunCount: number;
   readonly importPageCount: number;
   readonly canonicalEntityCount: number;
+  readonly legacyProviderConfigurationCount: number;
+  readonly legacyProviderSecretCount: number;
+  readonly legacyProviderConnectionTestCount: number;
+  readonly legacyProviderCursorCount: number;
 }
 
 export function assertClutchpacksV2CanaryTargetIsSafe(
@@ -381,7 +415,10 @@ export function assertClutchpacksV2CanaryTargetIsSafe(
     snapshot.providers.length > 1 ||
     snapshot.providers.some((provider) =>
       provider.id !== environment.providerId ||
-      provider.platformKey !== "clutchpacks"
+      provider.platformKey !== "clutchpacks" ||
+      !["draft", "active"].includes(provider.state) ||
+      provider.activeRevisionId !== null ||
+      provider.nextRunAt !== null
     ) ||
     snapshot.profiles.length > 1 ||
     snapshot.profiles.some((profile) =>
@@ -405,7 +442,17 @@ export function assertClutchpacksV2CanaryTargetIsSafe(
     ) ||
     snapshot.sourceRevisions.length > 1 ||
     snapshot.sourceRevisions.some((revision) =>
-      revision.adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+      revision.adapterVersion !==
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.adapterVersion ||
+      revision.normalizedContractVersion !==
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.normalizedContractVersion ||
+      revision.mapperKey !== CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperKey ||
+      revision.mapperVersion !==
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperVersion ||
+      revision.identityNamespaceKey !==
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.identityNamespaceKey ||
+      revision.cursorCodecVersion !==
+        CLUTCHPACKS_V2_CANARY_SOURCE_PINS.cursorCodecVersion
     )
   ) refuse("TARGET_TOPOLOGY_INVALID");
   const sourceId = snapshot.sources[0]?.id;
@@ -423,7 +470,11 @@ export function assertClutchpacksV2CanaryTargetIsSafe(
   if (
     snapshot.importRunCount !== 0 ||
     snapshot.importPageCount !== 0 ||
-    snapshot.canonicalEntityCount !== 0
+    snapshot.canonicalEntityCount !== 0 ||
+    snapshot.legacyProviderConfigurationCount !== 0 ||
+    snapshot.legacyProviderSecretCount !== 0 ||
+    snapshot.legacyProviderConnectionTestCount !== 0 ||
+    snapshot.legacyProviderCursorCount !== 0
   ) refuse("TARGET_ALREADY_CONTAINS_LINEAGE");
 }
 
@@ -545,8 +596,8 @@ async function readOriginalConnectionEvidence(
 async function readMigrationEvidence(
   database: PrismaClient,
   migrationNames: readonly string[],
-): Promise<readonly ClutchpacksV2TargetMigrationEvidence[]> {
-  return database.$queryRaw<ClutchpacksV2TargetMigrationEvidence[]>(
+): Promise<readonly ClutchpacksV2MigrationEvidence[]> {
+  return database.$queryRaw<ClutchpacksV2MigrationEvidence[]>(
     Prisma.sql`
       select migration_name as "migrationName",
              checksum,
@@ -567,6 +618,12 @@ async function readMigrationEvidence(
   );
 }
 
+export function readClutchpacksV2ActiveSourceMigrationEvidence(
+  database: PrismaClient,
+): Promise<readonly ClutchpacksV2MigrationEvidence[]> {
+  return readMigrationEvidence(database, [PLATFORM_REQUEST_LANES_MIGRATION]);
+}
+
 async function readTargetSnapshot(
   database: PackscoutPrismaClient,
   environment: ClutchpacksV2CanaryBootstrapEnvironment,
@@ -583,6 +640,10 @@ async function readTargetSnapshot(
     importRunCount,
     importPageCount,
     canonicalEntityCount,
+    legacyProviderConfigurationCount,
+    legacyProviderSecretCount,
+    legacyProviderConnectionTestCount,
+    legacyProviderCursorCount,
   ] = await Promise.all([
     database.organizations.count(),
     database.organizations.findUnique({
@@ -590,7 +651,13 @@ async function readTargetSnapshot(
       select: { id: true, slug: true, name: true },
     }),
     database.provider_sources.findMany({
-      select: { id: true, platform_key: true },
+      select: {
+        id: true,
+        platform_key: true,
+        state: true,
+        active_revision_id: true,
+        next_run_at: true,
+      },
     }),
     database.source_connection_profiles.findMany({
       select: {
@@ -617,7 +684,15 @@ async function readTargetSnapshot(
       },
     }),
     database.provider_source_revisions.findMany({
-      select: { source_instance_id: true, source_adapter_version: true },
+      select: {
+        source_instance_id: true,
+        source_adapter_version: true,
+        normalized_contract_version: true,
+        mapper_key: true,
+        mapper_version: true,
+        identity_namespace_key: true,
+        cursor_codec_version: true,
+      },
     }),
     database.provider_source_cursors.findMany({
       select: {
@@ -629,6 +704,10 @@ async function readTargetSnapshot(
     database.import_runs.count(),
     database.import_pages.count(),
     database.canonical_entities.count(),
+    database.provider_config_revisions.count(),
+    database.provider_secret_versions.count(),
+    database.provider_connection_tests.count(),
+    database.provider_cursor_checkpoints.count(),
   ]);
   return {
     organizationCount,
@@ -636,6 +715,9 @@ async function readTargetSnapshot(
     providers: providers.map((provider) => ({
       id: provider.id,
       platformKey: provider.platform_key,
+      state: provider.state,
+      activeRevisionId: provider.active_revision_id,
+      nextRunAt: provider.next_run_at,
     })),
     profiles: profiles.map((profile) => ({
       id: profile.id,
@@ -658,6 +740,11 @@ async function readTargetSnapshot(
     sourceRevisions: sourceRevisions.map((revision) => ({
       sourceInstanceId: revision.source_instance_id,
       adapterVersion: revision.source_adapter_version,
+      normalizedContractVersion: revision.normalized_contract_version,
+      mapperKey: revision.mapper_key,
+      mapperVersion: revision.mapper_version,
+      identityNamespaceKey: revision.identity_namespace_key,
+      cursorCodecVersion: revision.cursor_codec_version,
     })),
     cursors: cursors.map((cursor) => ({
       sourceInstanceId: cursor.source_instance_id,
@@ -667,6 +754,10 @@ async function readTargetSnapshot(
     importRunCount,
     importPageCount,
     canonicalEntityCount,
+    legacyProviderConfigurationCount,
+    legacyProviderSecretCount,
+    legacyProviderConnectionTestCount,
+    legacyProviderCursorCount,
   };
 }
 
@@ -744,8 +835,34 @@ async function executeBootstrap(
         organizationId: environment.targetOrganizationId,
         platformKey: "clutchpacks",
         displayName: PROVIDER_DISPLAY_NAME,
+        state: "active",
       });
     } catch {
+      refuse("TARGET_PROVIDER_STAGE_FAILED");
+    }
+  } else if (before.providers[0]?.state === "draft") {
+    try {
+      const promoted = await database.$executeRaw(Prisma.sql`
+        update public.provider_sources as provider
+        set state = 'active'::public.provider_state,
+            updated_at = ${new Date()}
+        where provider.id = ${environment.providerId}::uuid
+          and provider.organization_id =
+            ${environment.targetOrganizationId}::uuid
+          and provider.platform_key = 'clutchpacks'
+          and provider.state = 'draft'::public.provider_state
+          and provider.active_revision_id is null
+          and provider.next_run_at is null
+          and not exists (
+            select 1
+            from public.provider_config_revisions as revision
+            where revision.organization_id = provider.organization_id
+              and revision.provider_id = provider.id
+          )
+      `);
+      if (promoted !== 1) refuse("TARGET_PROVIDER_STAGE_FAILED");
+    } catch (error) {
+      if (error instanceof ClutchpacksV2CanaryBootstrapError) throw error;
       refuse("TARGET_PROVIDER_STAGE_FAILED");
     }
   }
@@ -767,10 +884,6 @@ async function executeBootstrap(
     }
   }
   if (before.sources.length === 0) {
-    const mapper = launchSourceMapperDescriptors.find(
-      (descriptor) => descriptor.provider === "clutchpacks",
-    );
-    if (!mapper) refuse("TARGET_TOPOLOGY_INVALID");
     try {
       await services.sourceLifecycle.createSource(
         { organizationId: environment.targetOrganizationId, actorKey: ACTOR_KEY },
@@ -778,8 +891,8 @@ async function executeBootstrap(
           providerId: environment.providerId,
           connectionProfileId: environment.profileId,
           sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-          mapperKey: mapper.mapperKey,
-          mapperVersion: mapper.mapperVersion,
+          mapperKey: CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperKey,
+          mapperVersion: CLUTCHPACKS_V2_CANARY_SOURCE_PINS.mapperVersion,
           intervalSeconds: 60,
         },
       );
@@ -787,8 +900,8 @@ async function executeBootstrap(
       refuse("TARGET_SOURCE_STAGE_FAILED");
     }
   }
-  return before.organization && before.profiles.length === 1 &&
-      before.sources.length === 1
+  return before.organization && before.providers[0]?.state === "active" &&
+      before.profiles.length === 1 && before.sources.length === 1
     ? "already_staged"
     : "created";
 }
@@ -821,11 +934,11 @@ Required protected environment:
   PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64
   PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION
 
-The source database is read in a read-only transaction. The target must be a
-different, fresh, fully migrated local database containing the platform-request-
-lane migration. Execute stages one ClutchPacks adapter-v2 draft at Feed start;
-it does not queue tests, call DataForrest, pause the original source, activate
-anything, or start replay.`;
+The source database is read in a read-only transaction and must prove the exact
+84-table active-source migration subset. The target must be a different, fresh,
+fully migrated local database containing the 88-table composite schema. Execute
+stages one ClutchPacks adapter-v2 draft at Feed start; it does not queue tests,
+call DataForrest, pause the original source, activate anything, or start replay.`;
 }
 
 async function main(): Promise<void> {
@@ -877,13 +990,13 @@ async function main(): Promise<void> {
       refuse("CONNECTED_DATABASE_IDENTITY_NOT_LOCAL");
     }
     const [sourceMigration, targetMigration] = await Promise.all([
-      readMigrationEvidence(sourceDatabase, [PLATFORM_REQUEST_LANES_MIGRATION]),
+      readClutchpacksV2ActiveSourceMigrationEvidence(sourceDatabase),
       readMigrationEvidence(
         targetLifecycle.client,
         TARGET_COMPOSITE_MIGRATIONS.map(({ name }) => name),
       ),
     ]);
-    assertClutchpacksV2PlatformLaneMigration(sourceMigration);
+    assertClutchpacksV2ActiveSourceMigrationReadiness(sourceMigration);
     assertClutchpacksV2TargetCompositeMigrations(targetMigration);
     const original = await readOriginalConnectionEvidence(
       sourceDatabase,
@@ -920,6 +1033,9 @@ async function main(): Promise<void> {
     if (
       !after.organization ||
       after.providers.length !== 1 ||
+      after.providers[0]?.state !== "active" ||
+      after.providers[0]?.activeRevisionId !== null ||
+      after.providers[0]?.nextRunAt !== null ||
       after.profiles.length !== 1 ||
       after.connectionRevisions.length !== 1 ||
       after.sources.length !== 1 ||

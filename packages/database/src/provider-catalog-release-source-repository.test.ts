@@ -41,6 +41,8 @@ import {
   hashNormalizedObservationSemanticContent,
   ProviderSourceObservationRepository,
 } from "./provider-source-observation-repository.ts";
+import { providerV1ConfirmedRelationshipCtes } from
+  "./source-relationship-confirmation-repository.ts";
 import {
   prismaApprovedPublicRepackIdentityMaterializer as identityMaterializer,
 } from "./public-repack-identity-mapping-repository.ts";
@@ -60,6 +62,28 @@ const categoryId = "8a000000-0000-5000-8000-000000000030";
 const observedAt = new Date("2026-08-16T10:10:00.000Z");
 const lifecycleAt = new Date("2026-08-16T10:20:00.000Z");
 const settledAt = new Date("2026-08-16T10:40:00.000Z");
+
+test("provider V1 confirmation-set inlining is explicit and opt-in", () => {
+  const render = (materialization: "default" | "not_materialized") =>
+    providerV1ConfirmedRelationshipCtes({
+      organizationId,
+      sourceRevisionId: "8a000000-0000-4000-8000-000000000020",
+      throughSequence: 1n,
+      materialization,
+    }).strings.join("?").replaceAll(/\s+/gu, " ");
+
+  const defaultSql = render("default");
+  const optimizedSql = render("not_materialized");
+  assert.match(
+    defaultSql,
+    /confirmed_provider_v1_pull_relationship_sets as \(/u,
+  );
+  assert.doesNotMatch(defaultSql, /not materialized/u);
+  assert.match(
+    optimizedSql,
+    /confirmed_provider_v1_pull_relationship_sets as not materialized \(/u,
+  );
+});
 
 const repackIds = {
   alphaDash: "8a000000-0000-5000-8000-000000000040",
@@ -2250,6 +2274,49 @@ test("resolved one-sided V1 pulls remain valid while only complete pairs associa
     assert.equal(snapshot.assetPackAssociations.some(({ sourceEntityId }) =>
       sourceEntityId === cardOnly.sourceEntityId ||
       sourceEntityId === packOnly.sourceEntityId), false);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("multiple latest V1 pulls stay paired within their confirmation sets", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const fixture = await seedProviderRelease(harness);
+    const dash = await harness.client.$transaction((transaction) =>
+      addWriterPullAssetPackAssociation(transaction, fixture, {
+        associationKey: "grouped-dash",
+        packExternalId: "a-1",
+        relationshipAt: new Date("2026-08-16T11:41:00.000Z"),
+      }));
+    const underscore = await harness.client.$transaction((transaction) =>
+      addWriterPullAssetPackAssociation(transaction, fixture, {
+        associationKey: "grouped-underscore",
+        packExternalId: "a_1",
+        relationshipAt: new Date("2026-08-16T11:42:00.000Z"),
+      }));
+
+    const snapshot = await fixture.alphaRepository.loadProviderSnapshot({
+      checkpoint: await currentAlphaCheckpoint(harness),
+    });
+    assert.deepEqual(snapshot.assetPackAssociations, [
+      {
+        sourceEntityId: dash.sourceEntityId,
+        platformKey: "alpha",
+        assetExternalId: "asset-grouped-dash",
+        packExternalId: "a-1",
+        associatedAt: dash.associatedAt,
+        publicChangeSequence: dash.publicChangeSequence,
+      },
+      {
+        sourceEntityId: underscore.sourceEntityId,
+        platformKey: "alpha",
+        assetExternalId: "asset-grouped-underscore",
+        packExternalId: "a_1",
+        associatedAt: underscore.associatedAt,
+        publicChangeSequence: underscore.publicChangeSequence,
+      },
+    ]);
   } finally {
     await harness.close();
   }

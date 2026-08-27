@@ -11,13 +11,25 @@ database, or stop the Collector Crypt, Courtyard, or Phygitals lanes.
 
 - `PACKSCOUT_CLUTCHPACKS_V1_DATABASE_URL` identifies the active local V1
   database, while `PACKSCOUT_DATABASE_URL` identifies the separate canary.
+- Both guarded database URLs must be canonical database-root URLs without a
+  query string (for example, omit a normal `?schema=public` client suffix).
+  This keeps the digest and connected-database identity bound to one exact
+  local database rather than to client-specific URL options.
 - Both URLs must resolve to different, explicitly named local databases.
+- Before every driver action, the active V1 source database must prove the
+  exact platform-request-lanes migration checksum and its intentional
+  84-application-table subset. The target independently proves the current
+  88-table composite schema through its full lifecycle startup.
 - The target contains exactly one organization, one active ClutchPacks provider
   root, one DataForrest connection profile, and one ClutchPacks source.
 - The provider root is identity-only: it has no legacy active revision, next
   run, config revision, secret version, or cursor checkpoint.
 - The target connection and source revisions use
-  `dataforrest-events-adapter-v2` only.
+  `dataforrest-events-adapter-v2` only. The source revision must also exactly
+  pin normalized contract `packscout.provider-observation.v1`, mapper
+  `clutchpacks-provider-observation@1`, identity namespace
+  `dataforrest-clutchpacks-records-v1`, and cursor codec
+  `dataforrest-cursor-v1`.
 - The connection profile keeps the governed per-platform `requestLimit: 2`.
 - The target supervisor runs with exactly one execution slot. Therefore this
   canary makes at most one provider request at a time even though the governed
@@ -27,6 +39,11 @@ database, or stop the Collector Crypt, Courtyard, or Phygitals lanes.
   have zero queued or running import runs.
 - Before resume, the target cursor must still be generation 1 at Feed start,
   with no cursor fingerprint and no import lineage.
+- Final target pause is allowed only after the actual latest, fully pinned V2
+  run succeeded at provider head and the target has no queued or running runs.
+  The whole target must also contain zero quarantine records and zero
+  warning/error/critical source diagnostics. The target supervisor must be
+  stopped before that pause.
 
 The driver never starts a worker and never calls DataForrest directly. It uses
 the source lifecycle services to pause, queue tests, activate tested revisions,
@@ -56,7 +73,7 @@ history, logs, tickets, or this runbook.
 
 ## Run the workflow
 
-1. Inspect the read-only status. Save the three exact confirmation strings from
+1. Inspect the read-only status. Save the four exact confirmation strings from
    its JSON output.
 
    ```bash
@@ -131,14 +148,56 @@ history, logs, tickets, or this runbook.
    reads. The already-running one-slot supervisor performs the replay. The
    driver itself performs no provider request.
 
+6. Let replay continue until `--status` reports all of the following exact
+   evidence:
+
+   ```text
+   target.latestRunState: succeeded
+   target.latestRunReachedProviderHead: true
+   target.latestRunExactSucceededHead: true
+   target.queuedOrRunningRuns: 0
+   target.quarantineRecords: 0
+   target.warningErrorCriticalDiagnostics: 0
+   target.targetWideEvidenceClean: true
+   ```
+
+   Then stop the target supervisor with `Ctrl-C` and wait for it to exit. Run
+   `--status` again and require `supervisor.liveEpochCount: 0`. The normal
+   supervisor release is part of the proof; do not delete or rewrite its epoch.
+
+   Pause only the V2 canary with the printed `pauseTarget` confirmation:
+
+   ```bash
+   npm run advance:clutchpacks-v2-canary:local -- \
+     --pause-target \
+     --confirmation "PAUSE CLUTCHPACKS V2 TARGET LOCAL <digest>"
+   ```
+
+   This command uses `ProviderSourceLifecycleService.pause`, then re-reads the
+   target and proves the exact head run is still latest, no target run is queued
+   or running, target-wide quarantine and warning/error/critical diagnostic
+   counts remain zero, the supervisor remains stopped, and the canary source is
+   paused without a pending pause request. A safe retry returns
+   `already_paused` and the status stage becomes `replay_paused`.
+
+7. Generate and approve the complete public identity candidate by following
+   [ClutchPacks V2 public catalog candidate](./clutchpacks-v2-public-catalog-candidate-runbook.md).
+   That workflow independently re-reads the frozen replay and does not use the
+   active V1 database or Neon.
+
 ## Stop conditions
 
 Stop and inspect before making another mutation when the driver reports any of
 these categories:
 
-- original V1 source is not exact, paused, or drained;
+- original V1 database is not the exact 84-table/checksum subset, or its source
+  is not exact, paused, or drained;
 - target topology, lifecycle pins, cursor, or pristine lineage is not exact;
-- the target supervisor is absent, stale, capacity-blocked, or not one slot;
+- during qualification or replay start, the target supervisor is absent,
+  stale, capacity-blocked, or not one slot;
+- during final target pause, any target supervisor is still live or the latest
+  target run is not an exact succeeded provider-head run, any quarantine record
+  exists, or any warning/error/critical source diagnostic exists;
 - a connection or source test failed, was cancelled, or was fenced;
 - a qualification or resume service transition was fenced.
 

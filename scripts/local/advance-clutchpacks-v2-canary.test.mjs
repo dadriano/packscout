@@ -8,15 +8,21 @@ const {
   ClutchpacksV2CanaryDriverError,
   assertClutchpacksV2CanaryOneSlotSupervisor,
   assertClutchpacksV2CanaryExpectedStage,
+  assertClutchpacksV2CanarySupervisorStopped,
+  assertClutchpacksV2CanaryTargetCanPause,
   assertClutchpacksV2CanaryTargetIsExact,
   assertClutchpacksV2CanaryTargetIsPristine,
+  assertOriginalClutchpacksV1DatabaseReady,
   assertOriginalClutchpacksV1IsExact,
   assertOriginalClutchpacksV1PausedAndDrained,
   clutchpacksV2CanaryDriverConfirmations,
   clutchpacksV2CanaryDriverUsage,
+  clutchpacksV2CanaryHasExactSucceededHeadRun,
   clutchpacksV2CanaryLineageCount,
+  clutchpacksV2CanaryTargetWideSafetyEvidence,
   determineClutchpacksV2CanaryQualificationStage,
   parseClutchpacksV2CanaryDriverCommand,
+  pauseClutchpacksV2CanaryTarget,
   safeClutchpacksV2CanaryDriverFailure,
 } = await tsImport(
   "./advance-clutchpacks-v2-canary.mts",
@@ -89,6 +95,7 @@ function targetSnapshot(overrides = {}) {
       profileId,
       sourceTypeKey: "dataforrest-events-v1",
       state: "draft",
+      pauseRequested: false,
       activeRevisionId: sourceRevisionId,
     }],
     sourceRevisions: [{
@@ -99,6 +106,11 @@ function targetSnapshot(overrides = {}) {
       profileId,
       sourceTypeKey: "dataforrest-events-v1",
       adapterVersion: "dataforrest-events-adapter-v2",
+      normalizedContractVersion: "packscout.provider-observation.v1",
+      mapperKey: "clutchpacks-provider-observation",
+      mapperVersion: "1",
+      identityNamespaceKey: "dataforrest-clutchpacks-records-v1",
+      cursorCodecVersion: "dataforrest-cursor-v1",
       configuration: { platform: "clutchpacks" },
     }],
     cursors: [{
@@ -117,9 +129,13 @@ function targetSnapshot(overrides = {}) {
     semanticObservationCount: 0,
     deliveryOccurrenceCount: 0,
     canonicalEntityCount: 0,
+    quarantineRecordCount: 0,
+    warningErrorCriticalDiagnosticCount: 0,
     legacyProviderConfigRevisionCount: 0,
     legacyProviderSecretVersionCount: 0,
     legacyProviderCursorCheckpointCount: 0,
+    queuedOrRunningRunCount: 0,
+    latestRun: null,
     connectionTest: null,
     sourceTest: null,
     ...overrides,
@@ -143,12 +159,49 @@ function activeProfile(snapshot, overrides = {}) {
   };
 }
 
+function completedReplay(snapshot = targetSnapshot(), overrides = {}) {
+  const active = activeProfile(snapshot, {
+    sources: [{ ...snapshot.sources[0], state: "active" }],
+    sourceTest: successfulTest(),
+  });
+  const source = active.sources[0];
+  const revision = active.sourceRevisions[0];
+  return {
+    ...active,
+    importRunCount: 1,
+    latestRun: {
+      id: "88888888-8888-4888-8888-888888888888",
+      organizationId,
+      providerId,
+      sourceInstanceId: source.id,
+      sourceRevisionId: revision.id,
+      sourceTypeKey: revision.sourceTypeKey,
+      adapterVersion: revision.adapterVersion,
+      normalizedContractVersion: revision.normalizedContractVersion,
+      mapperKey: revision.mapperKey,
+      mapperVersion: revision.mapperVersion,
+      identityNamespaceKey: revision.identityNamespaceKey,
+      connectionProfileId: profileId,
+      connectionRevisionId,
+      cursorCodecVersion: revision.cursorCodecVersion,
+      cursorGeneration: 1n,
+      configRevisionId: null,
+      state: "succeeded",
+      reachedProviderHead: true,
+      finishedAt: new Date("2026-08-27T14:00:00.000Z"),
+      failureCode: null,
+    },
+    ...overrides,
+  };
+}
+
 test("commands require action-specific digest-bound confirmations", () => {
   const digest = "a".repeat(64);
   const confirmations = clutchpacksV2CanaryDriverConfirmations(digest);
   assert.deepEqual(confirmations, {
     advance: "ADVANCE CLUTCHPACKS V2 LOCAL aaaaaaaaaaaaaaaa",
     pauseOriginal: "PAUSE ORIGINAL CLUTCHPACKS V1 LOCAL aaaaaaaaaaaaaaaa",
+    pauseTarget: "PAUSE CLUTCHPACKS V2 TARGET LOCAL aaaaaaaaaaaaaaaa",
     resume: "RESUME CLUTCHPACKS V2 LOCAL aaaaaaaaaaaaaaaa",
   });
   assert.deepEqual(parseClutchpacksV2CanaryDriverCommand([], confirmations), {
@@ -175,6 +228,7 @@ test("commands require action-specific digest-bound confirmations", () => {
   });
   for (const [flag, action, confirmation] of [
     ["--pause-original", "pause_original", confirmations.pauseOriginal],
+    ["--pause-target", "pause_target", confirmations.pauseTarget],
     ["--resume", "resume", confirmations.resume],
   ]) {
     assert.deepEqual(parseClutchpacksV2CanaryDriverCommand(
@@ -200,6 +254,7 @@ test("commands require action-specific digest-bound confirmations", () => {
       confirmations.resume,
     ],
     ["--resume", "--confirmation", "RESUME CLUTCHPACKS V2 LOCAL wrong"],
+    ["--pause-target", "--confirmation", confirmations.pauseOriginal],
     ["--status", "--confirmation", confirmations.advance],
   ]) {
     assert.throws(
@@ -252,6 +307,32 @@ test("the original proof selects one exact active adapter-v1 Clutch source", () 
   }
 });
 
+test("every driver action requires the exact active-source migration subset", async () => {
+  const valid = Object.freeze({
+    migrationName: "20260827010000_provider_source_platform_request_lanes",
+    checksum:
+      "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+    finishedAt: new Date("2026-08-27T08:00:00.000Z"),
+    rolledBackAt: null,
+    tableCount: 84,
+  });
+  await assert.doesNotReject(
+    assertOriginalClutchpacksV1DatabaseReady(async () => [valid]),
+  );
+  for (const readEvidence of [
+    async () => [{ ...valid, checksum: "0".repeat(64) }],
+    async () => [{ ...valid, tableCount: 88 }],
+    async () => {
+      throw new Error("database details must remain private");
+    },
+  ]) {
+    await assert.rejects(
+      assertOriginalClutchpacksV1DatabaseReady(readEvidence),
+      hasCode("ORIGINAL_DATABASE_SCHEMA_NOT_READY"),
+    );
+  }
+});
+
 test("the target guard requires the exact one-tenant adapter-v2 topology", () => {
   const staged = targetSnapshot();
   assert.doesNotThrow(() =>
@@ -284,10 +365,35 @@ test("the target guard requires the exact one-tenant adapter-v2 topology", () =>
       ...staged.sourceRevisions[0],
       configuration: { platform: "courtyard" },
     }] },
+    { ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      normalizedContractVersion: "packscout.provider-observation.v0",
+    }] },
+    { ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      mapperKey: "courtyard-provider-observation",
+    }] },
+    { ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      mapperVersion: "2",
+    }] },
+    { ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      identityNamespaceKey: "dataforrest-clutchpacks-records-v0",
+    }] },
+    { ...staged, sourceRevisions: [{
+      ...staged.sourceRevisions[0],
+      cursorCodecVersion: "dataforrest-cursor-v0",
+    }] },
     { ...staged, cursors: [{ ...staged.cursors[0], generation: 2n }] },
     { ...staged, legacyProviderConfigRevisionCount: 1 },
     { ...staged, legacyProviderSecretVersionCount: 1 },
     { ...staged, legacyProviderCursorCheckpointCount: 1 },
+    { ...staged, sources: [{
+      ...staged.sources[0],
+      state: "paused",
+      pauseRequested: true,
+    }] },
   ];
   for (const candidate of invalid) {
     assert.throws(
@@ -364,6 +470,11 @@ test("qualification advances exactly one explicit lifecycle transition", () => {
     ...paused,
     sources: [{ ...paused.sources[0], state: "active" }],
   };
+  const replayAtHead = completedReplay();
+  const replayPaused = {
+    ...replayAtHead,
+    sources: [{ ...replayAtHead.sources[0], state: "paused" }],
+  };
   for (const [snapshot, stage] of [
     [initial, "queue_connection_test"],
     [connectionQueued, "wait_connection_test"],
@@ -375,6 +486,8 @@ test("qualification advances exactly one explicit lifecycle transition", () => {
     [sourceSucceeded, "activate_source_paused"],
     [paused, "ready_to_resume"],
     [active, "replay_active"],
+    [replayAtHead, "replay_active"],
+    [replayPaused, "replay_paused"],
     [{
       ...initial,
       connectionTest: { state: "failed", hasSuccessfulResult: false },
@@ -418,6 +531,7 @@ test("qualification advances exactly one explicit lifecycle transition", () => {
 test("provider-capable commands require one live, available execution slot", () => {
   const ready = Object.freeze({
     liveEpochCount: 1,
+    epochState: "active",
     maximumExecutionSlots: 1,
     capacityState: "available",
     snapshotPublished: true,
@@ -427,6 +541,7 @@ test("provider-capable commands require one live, available execution slot", () 
   );
   for (const evidence of [
     { ...ready, liveEpochCount: 0 },
+    { ...ready, epochState: "fenced_draining" },
     { ...ready, maximumExecutionSlots: 2 },
     { ...ready, capacityState: "unavailable" },
     { ...ready, snapshotPublished: false },
@@ -436,6 +551,212 @@ test("provider-capable commands require one live, available execution slot", () 
       hasCode("TARGET_ONE_SLOT_SUPERVISOR_REQUIRED"),
     );
   }
+});
+
+test("target pause requires the exact latest succeeded head run and a stopped supervisor", () => {
+  const complete = completedReplay();
+  assert.deepEqual(clutchpacksV2CanaryTargetWideSafetyEvidence(complete), {
+    quarantineRecords: 0,
+    warningErrorCriticalDiagnostics: 0,
+    targetWideEvidenceClean: true,
+  });
+  assert.deepEqual(clutchpacksV2CanaryTargetWideSafetyEvidence({
+    ...complete,
+    quarantineRecordCount: 1,
+    warningErrorCriticalDiagnosticCount: 2,
+  }), {
+    quarantineRecords: 1,
+    warningErrorCriticalDiagnostics: 2,
+    targetWideEvidenceClean: false,
+  });
+  assert.equal(clutchpacksV2CanaryHasExactSucceededHeadRun(complete), true);
+  assert.doesNotThrow(() => assertClutchpacksV2CanaryTargetCanPause(complete));
+  const alreadyPaused = {
+    ...complete,
+    sources: [{ ...complete.sources[0], state: "paused" }],
+  };
+  assert.doesNotThrow(() =>
+    assertClutchpacksV2CanaryTargetCanPause(alreadyPaused)
+  );
+  for (const candidate of [
+    { ...complete, latestRun: null },
+    { ...complete, latestRun: { ...complete.latestRun, state: "running" } },
+    { ...complete, latestRun: {
+      ...complete.latestRun,
+      reachedProviderHead: false,
+    } },
+    { ...complete, latestRun: {
+      ...complete.latestRun,
+      sourceRevisionId: "99999999-9999-4999-8999-999999999999",
+    } },
+    { ...complete, latestRun: {
+      ...complete.latestRun,
+      adapterVersion: "dataforrest-events-adapter-v1",
+    } },
+    { ...complete, latestRun: {
+      ...complete.latestRun,
+      mapperVersion: "2",
+    } },
+    { ...complete, latestRun: {
+      ...complete.latestRun,
+      connectionRevisionId: "99999999-9999-4999-8999-999999999999",
+    } },
+    { ...complete, latestRun: {
+      ...complete.latestRun,
+      cursorGeneration: 2n,
+    } },
+    { ...complete, latestRun: {
+      ...complete.latestRun,
+      configRevisionId: "99999999-9999-4999-8999-999999999999",
+    } },
+    { ...complete, latestRun: { ...complete.latestRun, finishedAt: null } },
+    { ...complete, latestRun: {
+      ...complete.latestRun,
+      failureCode: "SOURCE_UPSTREAM_UNAVAILABLE",
+    } },
+  ]) {
+    assert.equal(clutchpacksV2CanaryHasExactSucceededHeadRun(candidate), false);
+    assert.throws(
+      () => assertClutchpacksV2CanaryTargetCanPause(candidate),
+      hasCode("TARGET_SUCCEEDED_HEAD_RUN_REQUIRED"),
+    );
+  }
+  assert.throws(
+    () => assertClutchpacksV2CanaryTargetCanPause({
+      ...complete,
+      queuedOrRunningRunCount: 1,
+    }),
+    hasCode("TARGET_RUNS_NOT_DRAINED"),
+  );
+  assert.throws(
+    () => assertClutchpacksV2CanaryTargetCanPause({
+      ...complete,
+      quarantineRecordCount: 1,
+    }),
+    hasCode("TARGET_QUARANTINE_NOT_EMPTY"),
+  );
+  assert.throws(
+    () => assertClutchpacksV2CanaryTargetCanPause({
+      ...complete,
+      warningErrorCriticalDiagnosticCount: 1,
+    }),
+    hasCode("TARGET_WARNING_ERROR_CRITICAL_DIAGNOSTICS_PRESENT"),
+  );
+
+  const stopped = Object.freeze({
+    liveEpochCount: 0,
+    epochState: null,
+    maximumExecutionSlots: null,
+    capacityState: null,
+    snapshotPublished: false,
+  });
+  assert.doesNotThrow(() =>
+    assertClutchpacksV2CanarySupervisorStopped(stopped)
+  );
+  assert.throws(
+    () => assertClutchpacksV2CanarySupervisorStopped({
+      ...stopped,
+      liveEpochCount: 1,
+    }),
+    hasCode("TARGET_SUPERVISOR_MUST_BE_STOPPED"),
+  );
+});
+
+test("target pause delegates exact pins and proves the service transition idempotently", async () => {
+  const complete = completedReplay();
+  const paused = {
+    ...complete,
+    sources: [{ ...complete.sources[0], state: "paused" }],
+  };
+  const stopped = {
+    liveEpochCount: 0,
+    epochState: null,
+    maximumExecutionSlots: null,
+    capacityState: null,
+    snapshotPublished: false,
+  };
+  const driverEnvironment = {
+    ...environment,
+    sourceDatabaseName: "packscout_dev",
+    targetDatabaseName: "packscout_clutch_v2",
+    targetDigest: "a".repeat(64),
+  };
+  let pauseInput = null;
+  const dependencies = {
+    async pauseSource(input) {
+      pauseInput = input;
+    },
+    async readTarget() {
+      return { snapshot: paused, supervisor: stopped };
+    },
+  };
+  const result = await pauseClutchpacksV2CanaryTarget(
+    null,
+    driverEnvironment,
+    complete,
+    stopped,
+    dependencies,
+  );
+  assert.deepEqual(pauseInput, {
+    organizationId,
+    providerId,
+    sourceInstanceId: sourceId,
+    sourceRevisionId,
+  });
+  assert.equal(result.outcome, "paused");
+  assert.deepEqual(result.target, {
+    state: "paused",
+    queuedOrRunningRuns: 0,
+    latestRunState: "succeeded",
+    latestRunReachedProviderHead: true,
+    latestRunExactSucceededHead: true,
+    quarantineRecords: 0,
+    warningErrorCriticalDiagnostics: 0,
+    targetWideEvidenceClean: true,
+  });
+  assert.equal(result.supervisorLiveEpochCount, 0);
+  assert.equal(result.providerCallMadeDirectly, false);
+
+  const retried = await pauseClutchpacksV2CanaryTarget(
+    null,
+    driverEnvironment,
+    paused,
+    stopped,
+    dependencies,
+  );
+  assert.equal(retried.outcome, "already_paused");
+  await assert.rejects(
+    pauseClutchpacksV2CanaryTarget(
+      null,
+      driverEnvironment,
+      complete,
+      stopped,
+      {
+        async pauseSource() {
+          throw new Error("secret service failure");
+        },
+        async readTarget() {
+          throw new Error("must not read");
+        },
+      },
+    ),
+    hasCode("TARGET_PAUSE_FAILED"),
+  );
+  await assert.rejects(
+    pauseClutchpacksV2CanaryTarget(
+      null,
+      driverEnvironment,
+      complete,
+      stopped,
+      {
+        async pauseSource() {},
+        async readTarget() {
+          return { snapshot: complete, supervisor: stopped };
+        },
+      },
+    ),
+    hasCode("TARGET_PAUSE_PROOF_FAILED"),
+  );
 });
 
 test("failures and help output are stable and credential-free", () => {
@@ -468,6 +789,7 @@ test("failures and help output are stable and credential-free", () => {
   assert.equal(help.status, 0, help.stderr);
   assert.equal(help.stderr, "");
   assert.match(help.stdout, /--pause-original/u);
+  assert.match(help.stdout, /--pause-target/u);
   assert.match(help.stdout, /--resume/u);
   assert.doesNotMatch(help.stdout, /postgresql:\/\//u);
 });

@@ -572,6 +572,7 @@ export class PrismaProviderCatalogReleaseSourceRepository
         organizationId: this.#organizationId,
         sourceRevisionId,
         throughSequence,
+        materialization: "not_materialized",
       })},
       latest_v1_pull_sets as (
         select distinct on (source_entity_id)
@@ -590,45 +591,89 @@ export class PrismaProviderCatalogReleaseSourceRepository
           on latest.confirmation_set_id = relationship.confirmation_set_id
          and latest.source_entity_id = relationship.source_entity_id
       ),
+      -- Keep card/pack pairing to one grouped scan. This avoids the previous
+      -- self-join whose cardinality cliff made assembly quadratic at scale.
+      latest_v1_pull_pairs as (
+        select relationship.confirmation_set_id,
+               relationship.organization_id,
+               relationship.source_entity_id,
+               (array_agg(relationship.target_entity_id)
+                 filter (where relationship.relationship_kind = 'card'))[1]
+                 as card_target_entity_id,
+               max(relationship.target_external_id)
+                 filter (where relationship.relationship_kind = 'card')
+                 as card_target_external_id,
+               max(relationship.resolved_public_change_sequence)
+                 filter (where relationship.relationship_kind = 'card')
+                 as card_resolved_public_change_sequence,
+               max(relationship.effective_public_change_sequence)
+                 filter (where relationship.relationship_kind = 'card')
+                 as card_effective_public_change_sequence,
+               max(relationship.effective_at)
+                 filter (where relationship.relationship_kind = 'card')
+                 as card_effective_at,
+               (array_agg(relationship.target_entity_id)
+                 filter (where relationship.relationship_kind = 'pack'))[1]
+                 as pack_target_entity_id,
+               max(relationship.target_external_id)
+                 filter (where relationship.relationship_kind = 'pack')
+                 as pack_target_external_id,
+               max(relationship.resolved_public_change_sequence)
+                 filter (where relationship.relationship_kind = 'pack')
+                 as pack_resolved_public_change_sequence,
+               max(relationship.effective_public_change_sequence)
+                 filter (where relationship.relationship_kind = 'pack')
+                 as pack_effective_public_change_sequence,
+               max(relationship.effective_at)
+                 filter (where relationship.relationship_kind = 'pack')
+                 as pack_effective_at
+        from latest_v1_pull_relationships as relationship
+        where relationship.target_platform_key = ${this.#platformKey}
+          and relationship.target_entity_id is not null
+          and relationship.effective_public_change_sequence is not null
+          and (
+            relationship.relationship_kind = 'card'
+              and relationship.target_record_kind = 'catalog_asset'
+            or relationship.relationship_kind = 'pack'
+              and relationship.target_record_kind = 'pack'
+          )
+        group by relationship.confirmation_set_id,
+                 relationship.organization_id,
+                 relationship.source_entity_id
+        having count(*) filter (
+                 where relationship.relationship_kind = 'card'
+               ) = 1
+           and count(*) filter (
+                 where relationship.relationship_kind = 'pack'
+               ) = 1
+      ),
       complete_v1_pairs as (
         select source.id::text as "sourceEntityId",
                source.platform_key as "platformKey",
                card_target.external_id as "assetExternalId",
                pack_target.external_id as "packExternalId",
-               greatest(card.effective_at, pack.effective_at) as "associatedAt",
+               greatest(pair.card_effective_at, pair.pack_effective_at)
+                 as "associatedAt",
                greatest(
-                 card.effective_public_change_sequence,
-                 pack.effective_public_change_sequence
+                 pair.card_effective_public_change_sequence,
+                 pair.pack_effective_public_change_sequence
                ) as "publicChangeSequence"
         from public.canonical_entities as source
-        join latest_v1_pull_relationships as card
-          on card.organization_id = source.organization_id
-         and card.source_entity_id = source.id
-         and card.relationship_kind = 'card'
-         and card.target_platform_key = source.platform_key
-         and card.target_record_kind = 'catalog_asset'
-         and card.target_entity_id is not null
-         and card.effective_public_change_sequence is not null
+        join latest_v1_pull_pairs as pair
+          on pair.organization_id = source.organization_id
+         and pair.source_entity_id = source.id
         join public.canonical_entities as card_target
-          on card_target.organization_id = card.organization_id
-         and card_target.id = card.target_entity_id
-         and card_target.platform_key = card.target_platform_key
-         and card_target.record_kind = card.target_record_kind
-         and card_target.external_id = card.target_external_id
-        join latest_v1_pull_relationships as pack
-          on pack.organization_id = source.organization_id
-         and pack.source_entity_id = source.id
-         and pack.relationship_kind = 'pack'
-         and pack.target_platform_key = source.platform_key
-         and pack.target_record_kind = 'pack'
-         and pack.target_entity_id is not null
-         and pack.effective_public_change_sequence is not null
+          on card_target.organization_id = pair.organization_id
+         and card_target.id = pair.card_target_entity_id
+         and card_target.platform_key = source.platform_key
+         and card_target.record_kind = 'catalog_asset'
+         and card_target.external_id = pair.card_target_external_id
         join public.canonical_entities as pack_target
-          on pack_target.organization_id = pack.organization_id
-         and pack_target.id = pack.target_entity_id
-         and pack_target.platform_key = pack.target_platform_key
-         and pack_target.record_kind = pack.target_record_kind
-         and pack_target.external_id = pack.target_external_id
+          on pack_target.organization_id = pair.organization_id
+         and pack_target.id = pair.pack_target_entity_id
+         and pack_target.platform_key = source.platform_key
+         and pack_target.record_kind = 'pack'
+         and pack_target.external_id = pair.pack_target_external_id
         where source.organization_id = ${uuid(this.#organizationId)}
           and source.platform_key = ${this.#platformKey}
           and source.record_kind = 'pull'
@@ -641,7 +686,7 @@ export class PrismaProviderCatalogReleaseSourceRepository
             where revision.organization_id = card_target.organization_id
               and revision.entity_id = card_target.id
               and revision.public_change_sequence <=
-                card.resolved_public_change_sequence
+                pair.card_resolved_public_change_sequence
               and ${this.#platformKey} = any(impact.provider_platform_keys)
           )
           and exists (
@@ -653,23 +698,23 @@ export class PrismaProviderCatalogReleaseSourceRepository
             where revision.organization_id = pack_target.organization_id
               and revision.entity_id = pack_target.id
               and revision.public_change_sequence <=
-                pack.resolved_public_change_sequence
+                pair.pack_resolved_public_change_sequence
               and ${this.#platformKey} = any(impact.provider_platform_keys)
           )
           and exists (
             select 1
             from public.public_change_catalog_impacts as impact
-            where impact.organization_id = card.organization_id
+            where impact.organization_id = pair.organization_id
               and impact.cause_sequence =
-                card.effective_public_change_sequence
+                pair.card_effective_public_change_sequence
               and ${this.#platformKey} = any(impact.provider_platform_keys)
           )
           and exists (
             select 1
             from public.public_change_catalog_impacts as impact
-            where impact.organization_id = pack.organization_id
+            where impact.organization_id = pair.organization_id
               and impact.cause_sequence =
-                pack.effective_public_change_sequence
+                pair.pack_effective_public_change_sequence
               and ${this.#platformKey} = any(impact.provider_platform_keys)
           )
       )
@@ -727,6 +772,7 @@ export class PrismaProviderCatalogReleaseSourceRepository
           organizationId: this.#organizationId,
           sourceRevisionId,
           throughSequence,
+          materialization: "not_materialized",
         })},
         latest_v1_pull_sets as (
           select distinct on (source_entity_id) *
@@ -742,6 +788,16 @@ export class PrismaProviderCatalogReleaseSourceRepository
           join latest_v1_pull_sets as latest
             on latest.confirmation_set_id = relationship.confirmation_set_id
            and latest.source_entity_id = relationship.source_entity_id
+        ),
+        -- Complete-source validation needs the two cardinalities for every
+        -- latest set. Compute them once rather than rescanning the materialized
+        -- relationship CTE in two correlated subqueries per pull.
+        latest_v1_pull_relationship_counts as (
+          select confirmation_set_id,
+                 count(*) as relationship_count,
+                 count(distinct relationship_kind) as relationship_kind_count
+          from latest_v1_pull_relationships
+          group by confirmation_set_id
         )
         select exists (
           select 1
@@ -895,6 +951,8 @@ export class PrismaProviderCatalogReleaseSourceRepository
           join public.canonical_entities as pull
             on pull.organization_id = latest.organization_id
            and pull.id = latest.source_entity_id
+          left join latest_v1_pull_relationship_counts as present
+            on present.confirmation_set_id = latest.confirmation_set_id
           where pull.platform_key <> ${this.#platformKey}
              or pull.record_kind <> 'pull'
              or latest.relationship_count not between 1 and 2
@@ -908,16 +966,10 @@ export class PrismaProviderCatalogReleaseSourceRepository
                  and source_revision.public_change_sequence <=
                    latest.confirmation_public_change_sequence
              )
-             or latest.relationship_count <> (
-               select count(*)
-               from latest_v1_pull_relationships as present
-               where present.confirmation_set_id = latest.confirmation_set_id
-             )
-             or (
-               select count(distinct present.relationship_kind)
-               from latest_v1_pull_relationships as present
-               where present.confirmation_set_id = latest.confirmation_set_id
-             ) <> latest.relationship_count
+             or latest.relationship_count <>
+               coalesce(present.relationship_count, 0)
+             or coalesce(present.relationship_kind_count, 0) <>
+               latest.relationship_count
         ) as invalid
       `,
     );

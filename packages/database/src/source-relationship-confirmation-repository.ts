@@ -715,9 +715,15 @@ export function providerV1ConfirmedRelationshipCtes(input: {
   organizationId: string;
   sourceRevisionId: string;
   throughSequence: bigint;
+  materialization?: "default" | "not_materialized";
 }): Prisma.Sql {
+  const confirmationSetMaterialization = input.materialization ===
+      "not_materialized"
+    ? Prisma.sql`not materialized`
+    : Prisma.empty;
   return Prisma.sql`
-    confirmed_provider_v1_pull_relationship_sets as (
+    confirmed_provider_v1_pull_relationship_sets as
+      ${confirmationSetMaterialization} (
       select confirmation.id as confirmation_set_id,
              confirmation.organization_id,
              confirmation.provider_id,
