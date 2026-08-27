@@ -95,7 +95,9 @@ the process: it decrypts the source revision under its original tenant scope,
 validates it, and encrypts a new adapter-v2 revision under the canary tenant
 scope. It never prints the bearer credential or plaintext configuration. It
 also creates only the ClutchPacks provider root, a draft v2 source with cursor
-generation 1 at Feed start, and a profile with `requestLimit: 1`. It uses a
+generation 1 at Feed start, and a profile with the governed DataForrest
+`requestLimit: 2`. Replay still runs with one supervisor execution slot, so the
+canary issues at most one provider request at a time. It uses a
 programmatic system actor and creates no administrator or password. It does not
 queue a test, call DataForrest, pause either database, activate the source, or
 start replay. No bootstrap execution, pause, activation, or replay has been run

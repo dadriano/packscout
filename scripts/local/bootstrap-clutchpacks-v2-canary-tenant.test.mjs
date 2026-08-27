@@ -290,7 +290,7 @@ test("target guard permits only empty or exact v2-only Clutch topology", () => {
       id: environment.profileId,
       sourceTypeKey: "dataforrest-events-v1",
       state: "draft",
-      requestLimit: 1,
+      requestLimit: 2,
     }],
     connectionRevisions: [{
       id: environment.connectionRevisionId,
@@ -326,7 +326,7 @@ test("target guard permits only empty or exact v2-only Clutch topology", () => {
     ] }, "TARGET_TOPOLOGY_INVALID"],
     [{ ...staged, profiles: [{
       ...staged.profiles[0],
-      requestLimit: 2,
+      requestLimit: 1,
     }] }, "TARGET_TOPOLOGY_INVALID"],
     [{ ...staged, connectionRevisions: [{
       ...staged.connectionRevisions[0],

@@ -105,17 +105,27 @@ test("local first-admin admission requires an exact development loopback target"
 });
 
 test("connected database identity independently proves the actual server is loopback", () => {
-  assert.doesNotThrow(() =>
-    assertConnectedLocalDatabaseIdentity(
-      { databaseName: "packscout_dev", serverAddress: "127.0.0.1" },
-      "packscout_dev",
-    ),
-  );
+  for (const serverAddress of [
+    "127.0.0.1",
+    "127.0.0.1/32",
+    "::1",
+    "::1/128",
+    "0:0:0:0:0:0:0:1/128",
+  ]) {
+    assert.doesNotThrow(() =>
+      assertConnectedLocalDatabaseIdentity(
+        { databaseName: "packscout_dev", serverAddress },
+        "packscout_dev",
+      ),
+    );
+  }
   for (const identity of [
     undefined,
     { databaseName: "other", serverAddress: "127.0.0.1" },
     { databaseName: "packscout_dev", serverAddress: null },
     { databaseName: "packscout_dev", serverAddress: "10.0.0.8" },
+    { databaseName: "packscout_dev", serverAddress: "127.0.0.1/24" },
+    { databaseName: "packscout_dev", serverAddress: "::1/64" },
   ]) {
     assert.throws(
       () => assertConnectedLocalDatabaseIdentity(identity, "packscout_dev"),

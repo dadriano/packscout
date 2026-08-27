@@ -387,7 +387,7 @@ export function assertClutchpacksV2CanaryTargetIsSafe(
     snapshot.profiles.some((profile) =>
       profile.id !== environment.profileId ||
       profile.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY ||
-      profile.requestLimit !== 1 ||
+      profile.requestLimit !== 2 ||
       !["draft", "active"].includes(profile.state)
     ) ||
     snapshot.connectionRevisions.length > 1 ||
@@ -727,49 +727,65 @@ async function executeBootstrap(
 ): Promise<"created" | "already_staged"> {
   const setup = new PipelineSetupRepository(database);
   if (!before.organization) {
-    await setup.createOrganization({
-      id: environment.targetOrganizationId,
-      slug: TARGET_SLUG,
-      name: TARGET_NAME,
-    });
+    try {
+      await setup.createOrganization({
+        id: environment.targetOrganizationId,
+        slug: TARGET_SLUG,
+        name: TARGET_NAME,
+      });
+    } catch {
+      refuse("TARGET_ORGANIZATION_STAGE_FAILED");
+    }
   }
   if (before.providers.length === 0) {
-    await setup.createProviderSource({
-      id: environment.providerId,
-      organizationId: environment.targetOrganizationId,
-      platformKey: "clutchpacks",
-      displayName: PROVIDER_DISPLAY_NAME,
-    });
+    try {
+      await setup.createProviderSource({
+        id: environment.providerId,
+        organizationId: environment.targetOrganizationId,
+        platformKey: "clutchpacks",
+        displayName: PROVIDER_DISPLAY_NAME,
+      });
+    } catch {
+      refuse("TARGET_PROVIDER_STAGE_FAILED");
+    }
   }
   const services = targetSourceServices(database, environment);
   if (before.profiles.length === 0) {
-    await services.connectionConfigurations.createProfile(
-      { organizationId: environment.targetOrganizationId, actorKey: ACTOR_KEY },
-      {
-        sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-        displayName: PROFILE_DISPLAY_NAME,
-        endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
-        bearerCredential: sourceConfiguration.bearerToken,
-        requestLimit: 1,
-      },
-    );
+    try {
+      await services.connectionConfigurations.createProfile(
+        { organizationId: environment.targetOrganizationId, actorKey: ACTOR_KEY },
+        {
+          sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+          displayName: PROFILE_DISPLAY_NAME,
+          endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+          bearerCredential: sourceConfiguration.bearerToken,
+          requestLimit: 2,
+        },
+      );
+    } catch {
+      refuse("TARGET_CONNECTION_PROFILE_STAGE_FAILED");
+    }
   }
   if (before.sources.length === 0) {
     const mapper = launchSourceMapperDescriptors.find(
       (descriptor) => descriptor.provider === "clutchpacks",
     );
     if (!mapper) refuse("TARGET_TOPOLOGY_INVALID");
-    await services.sourceLifecycle.createSource(
-      { organizationId: environment.targetOrganizationId, actorKey: ACTOR_KEY },
-      {
-        providerId: environment.providerId,
-        connectionProfileId: environment.profileId,
-        sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-        mapperKey: mapper.mapperKey,
-        mapperVersion: mapper.mapperVersion,
-        intervalSeconds: 60,
-      },
-    );
+    try {
+      await services.sourceLifecycle.createSource(
+        { organizationId: environment.targetOrganizationId, actorKey: ACTOR_KEY },
+        {
+          providerId: environment.providerId,
+          connectionProfileId: environment.profileId,
+          sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+          mapperKey: mapper.mapperKey,
+          mapperVersion: mapper.mapperVersion,
+          intervalSeconds: 60,
+        },
+      );
+    } catch {
+      refuse("TARGET_SOURCE_STAGE_FAILED");
+    }
   }
   return before.organization && before.profiles.length === 1 &&
       before.sources.length === 1
