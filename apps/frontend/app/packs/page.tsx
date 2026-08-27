@@ -10,9 +10,13 @@ import {
   resolveGatedRoute,
   resolveVisitorAccess,
 } from "@/lib/access-gate.server";
-import { CatalogRouteRecovery, EmptyCatalog } from "@/components/catalog-state";
+import { CatalogResultRecovery, EmptyCatalog } from "@/components/catalog-state";
 import { parseAllRepacksRouteQuery, type NextSearchParams } from "@/lib/catalog-route-state.server";
-import { parseCatalogViewLayout } from "@/lib/catalog-query-state.client";
+import {
+  catalogQueryAfterReadError,
+  parseCatalogViewLayout,
+  serializeCatalogViewState,
+} from "@/lib/catalog-query-state.client";
 import { toUrlSearchParams } from "@/lib/catalog-route-state.server";
 import { readPublicRepacks } from "@/lib/public-repacks.server";
 import { dataReleaseStatusFromMetadata } from "@/lib/public-release-status";
@@ -53,25 +57,30 @@ export default async function AllRepacksPage({
     );
   }
 
-  const result = await readPublicRepacks(parsed.query);
-  if (!result.ok) {
-    return (
-      <>
-        <ShellSurfaceReporter mode="product" />
-        <DataReleaseStatusReporter status={{ state: "unavailable" }} />
-        <DashboardPageHeader activeView="all-repacks" />
-        <CatalogRouteRecovery />
-      </>
-    );
-  }
-
-  const status = dataReleaseStatusFromMetadata(result.data.metadata);
   const layout = parseCatalogViewLayout(
     toUrlSearchParams(resolvedSearchParams).get("view"),
   );
   if (layout === null) {
     throw new Error("A validated catalog view must resolve to a layout.");
   }
+
+  const result = await readPublicRepacks(parsed.query);
+  if (!result.ok) {
+    const recoveryHref = serializeCatalogViewState(
+      catalogQueryAfterReadError(parsed.query, result.code),
+      layout,
+    );
+    return (
+      <>
+        <ShellSurfaceReporter mode="product" />
+        <DataReleaseStatusReporter status={{ state: "unavailable" }} />
+        <DashboardPageHeader activeView="all-repacks" />
+        <CatalogResultRecovery error={result} recoveryHref={recoveryHref} />
+      </>
+    );
+  }
+
+  const status = dataReleaseStatusFromMetadata(result.data.metadata);
 
   return (
     <>

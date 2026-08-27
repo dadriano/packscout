@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canonicalJson, type ProviderCatalogReleasePublishPlanV1 } from "@packscout/contracts";
+import {
+  canonicalJson,
+  type ProviderCatalogReleasePublishPlanV1,
+  type PublicCollectibleDisplay,
+} from "@packscout/contracts";
 import {
   CatalogManifestCompositionError,
   composeGlobalCatalogManifest,
@@ -67,6 +71,64 @@ function rejectsWith(code: CatalogManifestCompositionError["code"]) {
     error instanceof CatalogManifestCompositionError && error.code === code;
 }
 
+function swapProjectionCategoryIds(
+  projection: ProviderCatalogPublicProjection,
+): ProviderCatalogPublicProjection {
+  const parentId = projection.categories.find(({ depth }) => depth === 0)
+    ?.publicCategoryId;
+  const childId = projection.categories.find(({ depth }) => depth === 1)
+    ?.publicCategoryId;
+  assert.ok(parentId);
+  assert.ok(childId);
+  const swap = (publicCategoryId: string) =>
+    publicCategoryId === parentId
+      ? childId
+      : publicCategoryId === childId
+        ? parentId
+        : publicCategoryId;
+  const canonicalIds = (values: readonly string[]) =>
+    values.map(swap).sort();
+  const collectibleDisplay = (
+    collectible: PublicCollectibleDisplay,
+  ): PublicCollectibleDisplay => ({
+    ...collectible,
+    publicCategoryIds: canonicalIds(collectible.publicCategoryIds),
+  });
+  return {
+    ...projection,
+    categories: projection.categories.map((category) => ({
+      ...category,
+      publicCategoryId: swap(category.publicCategoryId),
+      parentPublicCategoryId: category.parentPublicCategoryId === null
+        ? null
+        : swap(category.parentPublicCategoryId),
+      pathPublicCategoryIds: category.pathPublicCategoryIds.map(swap),
+    })),
+    collectibles: projection.collectibles.map((collectible) => ({
+      ...collectible,
+      publicCategoryIds: canonicalIds(collectible.publicCategoryIds),
+    })),
+    repacks: projection.repacks.map((repack) => ({
+      ...repack,
+      categories: repack.categories.map((category) => ({
+        ...category,
+        publicCategoryId: swap(category.publicCategoryId),
+      })).sort((left, right) =>
+        left.publicCategoryId < right.publicCategoryId ? -1 : 1),
+      topChase: repack.topChase === null
+        ? null
+        : {
+            ...repack.topChase,
+            collectible: collectibleDisplay(repack.topChase.collectible),
+          },
+    })),
+    repackChases: projection.repackChases.map((chase) => ({
+      ...chase,
+      collectible: collectibleDisplay(chase.collectible),
+    })),
+  };
+}
+
 test("composes two verified providers and byte-deduplicates shared records", async () => {
   const providerPlans = await plans();
   const manifest = await compose(providerPlans);
@@ -84,6 +146,31 @@ test("composes two verified providers and byte-deduplicates shared records", asy
       providerPlans[1]!.counts.collectibles,
   );
   assert.equal(manifest.dataSource, "canonical");
+});
+
+test("validates dependency-ordered provider categories through a canonical graph view", async () => {
+  const plan = await providerPlan("alpha", swapProjectionCategoryIds);
+  const transportCategories = plan.batches.flatMap((batch) =>
+    batch.kind === "categories" ? batch.records : []);
+  const parent = transportCategories.find(({ depth }) => depth === 0);
+  const child = transportCategories.find(({ depth }) => depth === 1);
+  assert.ok(parent);
+  assert.ok(child);
+  assert.ok(child.publicCategoryId < parent.publicCategoryId);
+  assert.ok(transportCategories.indexOf(parent) < transportCategories.indexOf(child));
+  const transportBeforeComposition = canonicalJson(plan.batches);
+
+  const manifest = await composeGlobalCatalogManifest({
+    enabledPlatformKeys: ["alpha"],
+    providerPlans: [plan],
+    approvedConfiguration: {
+      sharedConfigurationEpoch: epoch(plan),
+      confidencePolicyVersion: "confidence-v1",
+    },
+  });
+
+  assert.equal(manifest.counts.categories, transportCategories.length);
+  assert.equal(canonicalJson(plan.batches), transportBeforeComposition);
 });
 
 test("rejects omitted enabled providers, included disabled providers, and mixed epochs", async () => {

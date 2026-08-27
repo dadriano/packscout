@@ -4,6 +4,11 @@ import type {
   CanonicalProviderRow,
   CanonicalProviderSummary,
   ComparisonScope,
+  PublishedActiveRelease,
+  PublishedInspectableEntityKind,
+  PublishedProviderChaseReconciliation,
+  PublishedProviderDocument,
+  PublishedProviderEntityPage,
 } from "@packscout/contracts";
 import { requestJson, type Fetcher } from "./client";
 
@@ -83,4 +88,93 @@ export function readCanonicalEntity(
     encodeURIComponent(input.externalId),
   ].join("/");
   return requestJson<CanonicalEntityDetail>(path, { signal }, fetcher);
+}
+
+export function getPublishedActiveRelease(
+  platformKey: string,
+  signal?: AbortSignal,
+  fetcher?: Fetcher,
+) {
+  return requestJson<PublishedActiveRelease>(
+    `/data-inspection/published/providers/${encodeURIComponent(platformKey)}/active-release`,
+    { signal },
+    fetcher,
+  );
+}
+
+export function listPublishedEntities(
+  input: {
+    platformKey: string;
+    publicProviderReleaseId: string;
+    entityKind: PublishedInspectableEntityKind;
+    limit?: number;
+    cursor?: string | null;
+  },
+  signal?: AbortSignal,
+  fetcher?: Fetcher,
+) {
+  const query = new URLSearchParams({
+    entityKind: input.entityKind,
+    expectedPublicProviderReleaseId: input.publicProviderReleaseId,
+  });
+  if (input.limit !== undefined) query.set("limit", String(input.limit));
+  if (input.cursor) query.set("cursor", input.cursor);
+  return requestJson<PublishedProviderEntityPage>(
+    `/data-inspection/published/providers/${encodeURIComponent(input.platformKey)}/entities?${query}`,
+    { signal },
+    fetcher,
+  );
+}
+
+export function readPublishedDocument(
+  input: {
+    platformKey: string;
+    publicProviderReleaseId: string;
+    entityKind: PublishedInspectableEntityKind;
+    publicEntityId: string;
+  },
+  signal?: AbortSignal,
+  fetcher?: Fetcher,
+) {
+  const path = [
+    "/data-inspection/published/providers",
+    encodeURIComponent(input.platformKey),
+    "entities",
+    encodeURIComponent(input.entityKind),
+    encodeURIComponent(input.publicEntityId),
+  ].join("/");
+  const query = new URLSearchParams({
+    expectedPublicProviderReleaseId: input.publicProviderReleaseId,
+  });
+  return requestJson<PublishedProviderDocument>(
+    `${path}?${query}`,
+    { signal },
+    fetcher,
+  );
+}
+
+export function readPublishedChaseReconciliation(
+  input: {
+    platformKey: string;
+    publicProviderReleaseId: string;
+    publicRepackId: string;
+  },
+  signal?: AbortSignal,
+  fetcher?: Fetcher,
+) {
+  const path = [
+    "/data-inspection/published/providers",
+    encodeURIComponent(input.platformKey),
+    "repacks",
+    encodeURIComponent(input.publicRepackId),
+    "chase-reconciliation",
+  ].join("/");
+  const query = new URLSearchParams({
+    expectedPublicProviderReleaseId: input.publicProviderReleaseId,
+  });
+  return requestJson<PublishedProviderChaseReconciliation>(
+    `${path}?${query}`,
+    { signal },
+    fetcher,
+  );
 }

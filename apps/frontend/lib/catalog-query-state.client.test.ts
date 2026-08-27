@@ -3,6 +3,8 @@ import { test } from "node:test";
 import {
   DEFAULT_CATALOG_QUERY,
   catalogHrefForSummary,
+  catalogQueryAfterReadError,
+  catalogQueryForPageNavigation,
   catalogSheetInspectorInitiallyOpen,
   clearCatalogRepackSelection,
   nextCatalogPage,
@@ -251,6 +253,96 @@ test("cursor navigation keeps a bounded stack of prior non-initial page starts",
   const backToOne = previousCatalogPage(backToTwo, fingerprint);
   assert.equal(backToOne.cursor, null);
   assert.equal(backToOne.cursorStack, null);
+});
+
+test("public read errors produce code-specific truthful catalog query recovery", () => {
+  const paged = {
+    ...nextCatalogPage(
+      nextCatalogPage(DEFAULT_CATALOG_QUERY, "page-two", "a".repeat(64)),
+      "page-three",
+      "a".repeat(64),
+    ),
+    desiredPublicCollectibleId: COLLECTIBLE_ID,
+    selectedPublicRepackId: REPACK_ID,
+  };
+
+  const expired = catalogQueryAfterReadError(paged, "CURSOR_EXPIRED");
+  assert.equal(expired.cursor, null);
+  assert.equal(expired.cursorStack, null);
+  assert.equal(expired.queryFingerprint, null);
+  assert.equal(expired.desiredPublicCollectibleId, COLLECTIBLE_ID);
+  assert.equal(expired.selectedPublicRepackId, null);
+
+  const missingCollectible = catalogQueryAfterReadError(
+    paged,
+    "COLLECTIBLE_NOT_FOUND",
+  );
+  assert.equal(missingCollectible.desiredPublicCollectibleId, null);
+  assert.equal(missingCollectible.cursor, null);
+  assert.equal(missingCollectible.cursorStack, null);
+
+  const missingRepack = catalogQueryAfterReadError(paged, "REPACK_NOT_FOUND");
+  assert.equal(missingRepack.selectedPublicRepackId, null);
+  assert.equal(missingRepack.cursor, paged.cursor);
+  assert.equal(missingRepack.cursorStack, paged.cursorStack);
+
+  assert.deepEqual(
+    catalogQueryAfterReadError(paged, "INVALID_QUERY"),
+    DEFAULT_CATALOG_QUERY,
+  );
+  assert.equal(
+    catalogQueryAfterReadError(paged, "RELEASE_UNAVAILABLE"),
+    paged,
+  );
+});
+
+test("release-changed pagination starts Next from the server-normalized first page", () => {
+  const oldFingerprint = "b".repeat(64);
+  const newFingerprint = "c".repeat(64);
+  const oldPageThree = {
+    ...nextCatalogPage(
+      nextCatalogPage(DEFAULT_CATALOG_QUERY, "old-page-two", oldFingerprint),
+      "old-page-three",
+      oldFingerprint,
+    ),
+    selectedPublicRepackId: REPACK_ID,
+  };
+  const normalized = catalogQueryForPageNavigation(oldPageThree, {
+    activeQuery: {
+      search: "normalized search",
+      filters: {
+        ...DEFAULT_CATALOG_QUERY.filters,
+        vendors: ["courtyard"],
+      },
+      sort: "repack",
+      direction: "asc",
+      pageSize: 12,
+      desiredPublicCollectibleId: null,
+    },
+    paginationReset: "release_changed",
+    queryFingerprint: newFingerprint,
+    rows: [{ publicRepackId: REPACK_ID }],
+  });
+
+  assert.equal(normalized.search, "normalized search");
+  assert.deepEqual(normalized.filters.vendors, ["courtyard"]);
+  assert.equal(normalized.cursor, null);
+  assert.equal(normalized.cursorStack, null);
+  assert.equal(normalized.queryFingerprint, newFingerprint);
+  assert.equal(normalized.selectedPublicRepackId, REPACK_ID);
+
+  const next = nextCatalogPage(normalized, "new-page-two", newFingerprint);
+  assert.equal(next.cursor, "new-page-two");
+  assert.equal(next.cursorStack, null);
+  assert.equal(next.queryFingerprint, newFingerprint);
+
+  const withoutEligibleSelection = catalogQueryForPageNavigation(oldPageThree, {
+    activeQuery: normalized,
+    paginationReset: "release_changed",
+    queryFingerprint: newFingerprint,
+    rows: [],
+  });
+  assert.equal(withoutEligibleSelection.selectedPublicRepackId, null);
 });
 
 test("Overview serializes only compatible accepted filters", () => {

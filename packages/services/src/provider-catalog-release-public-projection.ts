@@ -23,6 +23,7 @@ import type {
   CanonicalEstimatedEvProjectionContent,
 } from "./estimated-ev-projection-contracts.ts";
 import { publicConfidenceLimitationsFromPipeline } from "./public-confidence-projection.ts";
+import { configuredPublicRepackLink } from "./public-repack-link.ts";
 import {
   ProviderCatalogProjectionAssemblyError,
   assertProviderCatalogEstimateDependencies as assertEstimateDependencies,
@@ -771,8 +772,10 @@ export function projectProviderCatalogRelease(input: {
       },
     );
     repackChases.push(...chases);
-    const categoryIds = [...categoryIdsFor(platform, content.category)]
-      .sort(compareProviderCatalogCodeUnits);
+    const categoryIds = [...new Set([
+      ...categoryIdsFor(platform, content.category),
+      ...chases.flatMap(({ collectible }) => collectible.publicCategoryIds),
+    ])].sort(compareProviderCatalogCodeUnits);
     if (categoryIds.some((categoryId) => !categoryById.has(categoryId))) {
       invalid("PUBLIC_REFERENCE_INVALID");
     }
@@ -805,6 +808,11 @@ export function projectProviderCatalogRelease(input: {
     const promo = availability === "available"
       ? platform.vendor.publicPromo ?? undefined
       : undefined;
+    const repackLink = configuredPublicRepackLink({
+      identity: configuredIdentity,
+      platform,
+      available: availability === "available",
+    }) ?? undefined;
     const packScout = packScoutEv({
       estimate: estimateEntry?.content ?? null,
       evInput,
@@ -871,10 +879,16 @@ export function projectProviderCatalogRelease(input: {
         evidenceCompleteness: evInput?.evidenceCompleteness ?? "unknown",
         probabilityCoverageBasisPoints,
       },
-      actionAvailability: { promo: promo !== undefined, repackLink: false },
+      actionAvailability: {
+        promo: promo !== undefined,
+        repackLink: repackLink !== undefined,
+      },
       sourceUpdatedAt: iso(revision.sourceUpdatedAt),
       description: content.description?.trim() || null,
-      actions: promo === undefined ? {} : { promo },
+      actions: {
+        ...(promo === undefined ? {} : { promo }),
+        ...(repackLink === undefined ? {} : { repackLink }),
+      },
     });
     markContributingRevision(revision);
     if (evInputEntry !== null) {

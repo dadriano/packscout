@@ -7,7 +7,10 @@ import {
   formatCollectibleDescriptor,
   formatCollectibleIdentity,
 } from "@/lib/collectible-identity";
-import { shouldApplyDesiredCollectibleSearchResults } from "@/lib/desired-collectible-search-ui";
+import {
+  desiredCollectibleSearchStatusCopy,
+  shouldApplyDesiredCollectibleSearchResults,
+} from "@/lib/desired-collectible-search-ui";
 import styles from "./DesiredCollectibleSearch.module.css";
 
 type CollectibleOption = Pick<
@@ -212,19 +215,13 @@ export function DesiredCollectibleSearch({
     onSelect(option.publicCollectibleId);
   }
 
-  const statusCopy = !searchable && !selected
-    ? "Type at least 2 characters, then choose an exact collectible."
-    : status === "loading"
-    ? "Searching collectibles…"
-    : status === "failed"
-      ? "Collectible search is temporarily unavailable."
-      : status === "ready" && options.length === 0
-        ? "No collectible matches found."
-        : exactSelectedName && selected
-          ? `Selected desired chase: ${selectedIdentity}.`
-          : selected
-            ? `Current desired chase remains ${selectedIdentity} until you choose a replacement or clear it.`
-          : "Choose an exact collectible from the results.";
+  const statusCopy = desiredCollectibleSearchStatusCopy({
+    exactSelectedName,
+    optionCount: options.length,
+    searchable,
+    selectedIdentity,
+    status,
+  });
 
   return (
     <div className={styles.root} data-variant={variant} ref={rootRef}>

@@ -8,6 +8,7 @@ import type {
 import {
   presentCatalogSummaries,
   presentDashboardKpis,
+  presentOpportunityEmptyState,
   presentOpportunities,
   resolveOverviewSelection,
 } from "./overview-presentation";
@@ -102,6 +103,7 @@ function opportunity(
 test("always presents four overview KPIs with PackScout EV meaning", () => {
   const kpis: DashboardKpis = {
     totalRepacks: 1_248,
+    evaluatedEvRepacks: 900,
     positiveEvRepacks: 612,
     medianPackScoutEvPercent: { status: "available", basisPoints: 180 },
     highestChaseValueUsdMinor: null,
@@ -119,9 +121,57 @@ test("always presents four overview KPIs with PackScout EV meaning", () => {
     ["1,248", "612", "+1.80%", "Unavailable"],
   );
   assert.equal(presentation[1]?.helper, "Repacks with positive EV");
+  assert.equal(
+    presentation[1]?.accessibleLabel,
+    "612 of 900 active evaluated repacks have positive EV.",
+  );
   assert.equal(presentation[2]?.helper, "Median EV · 500 high confidence");
   assert.equal(presentation[2]?.accessibleLabel, "EV %: +1.80%. Positive.");
   assert.equal(presentation[3]?.reasonCopy, "Collectible value unavailable.");
+});
+
+test("presents positive EV as unavailable when no matching repack was evaluated", () => {
+  const presentation = presentDashboardKpis({
+    totalRepacks: 17,
+    evaluatedEvRepacks: 0,
+    positiveEvRepacks: 0,
+    medianPackScoutEvPercent: {
+      status: "unavailable",
+      basisPoints: null,
+      reason: "ESTIMATE_UNAVAILABLE",
+    },
+    highestChaseValueUsdMinor: 3_453_000,
+    highConfidenceRepacks: 0,
+  });
+
+  assert.deepEqual(
+    {
+      value: presentation[1]?.value,
+      state: presentation[1]?.state,
+      stateLabel: presentation[1]?.stateLabel,
+      reasonCopy: presentation[1]?.reasonCopy,
+      accessibleLabel: presentation[1]?.accessibleLabel,
+    },
+    {
+      value: "Unavailable",
+      state: "unavailable",
+      stateLabel: "Unavailable",
+      reasonCopy: "Estimate unavailable.",
+      accessibleLabel: "Positive EV: Unavailable. Estimate unavailable.",
+    },
+  );
+});
+
+test("explains an empty opportunity ranking as missing EV evidence", () => {
+  assert.deepEqual(presentOpportunityEmptyState(0), {
+    message:
+      "PackScout EV estimates are not available for the repacks matching these filters yet.",
+    actionLabel: "View matching repacks",
+  });
+  assert.deepEqual(presentOpportunityEmptyState(1), {
+    message: "No ranked opportunities are available for these filters.",
+    actionLabel: "View matching repacks",
+  });
 });
 
 test("preserves PackScout-ranked opportunity order and exposes confidence", () => {

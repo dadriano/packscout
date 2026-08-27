@@ -208,7 +208,7 @@ test("catalog advertises the current adapter tuple while retaining masked connec
   assert.equal(JSON.stringify(catalog).includes("/v1/events"), false);
 });
 
-test("catalog advertises v2 while retaining a visible source pinned to adapter v1", async () => {
+test("catalog advertises v3 while retaining a visible source pinned to adapter v1", async () => {
   const records = repository(
     DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
     DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,

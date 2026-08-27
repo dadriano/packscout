@@ -1,4 +1,22 @@
+import {
+  publishedActiveReleaseSchema,
+  publishedProviderChaseReconciliationSchema,
+  publishedProviderDocumentSchemaForKind,
+  publishedProviderEntityPageSchemaForKind,
+  publishedProviderIdPageSchemaForKind,
+  type PublishedActiveRelease,
+  type PublishedInspectableEntityKind,
+  type PublishedProviderChaseReconciliation,
+  type PublishedProviderDocument,
+  type PublishedProviderEntityPage,
+  type PublishedProviderIdPage,
+} from "@packscout/contracts";
 import type { ProductUserDirectoryConfig } from "./runtime-config.ts";
+
+export type {
+  PublishedActiveRelease,
+  PublishedReleaseFacts,
+} from "@packscout/contracts";
 
 /**
  * The admin's server-to-server reader for published provider catalog data.
@@ -40,99 +58,30 @@ export class PublishedCatalogError extends Error {
   }
 }
 
-/** What the active manifest serves for one platform, or why it serves nothing. */
-export type PublishedActiveRelease =
-  | { readonly status: "no_active_manifest" }
-  | {
-      readonly status: "platform_not_referenced";
-      readonly manifestPublicReleaseId: string;
-    }
-  | {
-      readonly status: "release_missing";
-      readonly manifestPublicReleaseId: string;
-      readonly publicProviderReleaseId: string;
-    }
-  | {
-      readonly status: "active";
-      readonly manifestPublicReleaseId: string;
-      readonly referenceFingerprint: string;
-      readonly release: PublishedReleaseFacts;
-    };
-
-export interface PublishedReleaseFacts {
-  readonly publicProviderReleaseId: string;
-  readonly platformKey: string;
-  readonly lifecycle: "staging" | "complete" | "failed" | "retired";
-  readonly dataAsOf: string;
-  readonly providerReleaseFingerprint: string;
-  readonly contentHash: string;
-  readonly entityHashes: Record<string, string>;
-  readonly counts: Record<string, number>;
-  readonly batchCount: number;
-  readonly batchChainHash: string;
-  readonly createdAt: string;
-  readonly completedAt: string | null;
-  readonly completionOperationId: string | null;
-}
-
-export type PublishedEntityPage =
-  | { readonly status: "release_unknown" }
-  | {
-      readonly status: "ok";
-      readonly items: readonly {
-        readonly publicEntityId: string;
-        readonly detail: unknown;
-      }[];
-      readonly isDone: boolean;
-      readonly continueCursor: string;
-    };
-
-export type PublishedIdPage =
-  | { readonly status: "release_unknown" }
-  | {
-      readonly status: "ok";
-      readonly publicEntityIds: readonly string[];
-      readonly isDone: boolean;
-      readonly continueCursor: string;
-    };
-
-export type PublishedDocument =
-  | { readonly status: "release_unknown" }
-  | { readonly status: "not_present" }
-  | {
-      readonly status: "ok";
-      readonly publicEntityId: string;
-      readonly detail: unknown;
-    };
-
+/** Compatibility names for the server-only integration boundary. */
+export type PublishedEntityPage = PublishedProviderEntityPage;
+export type PublishedIdPage = PublishedProviderIdPage;
+export type PublishedDocument = PublishedProviderDocument;
 export type PublishedChaseReconciliation =
-  | { readonly status: "release_unknown" }
-  | { readonly status: "not_present" }
-  | {
-      readonly status: "ok";
-      readonly publicRepackId: string;
-      readonly expectedChaseCount: number;
-      readonly acceptedChaseCount: number;
-      readonly complete: boolean;
-    };
+  PublishedProviderChaseReconciliation;
 
 export interface PublishedCatalogReader {
   activeRelease(platformKey: string): Promise<PublishedActiveRelease>;
   listEntities(input: {
     publicProviderReleaseId: string;
-    entityKind: string;
+    entityKind: PublishedInspectableEntityKind;
     numItems: number;
     cursor: string | null;
   }): Promise<PublishedEntityPage>;
   listEntityIds(input: {
     publicProviderReleaseId: string;
-    entityKind: string;
+    entityKind: PublishedInspectableEntityKind;
     numItems: number;
     cursor: string | null;
   }): Promise<PublishedIdPage>;
   readDocument(input: {
     publicProviderReleaseId: string;
-    entityKind: string;
+    entityKind: PublishedInspectableEntityKind;
     publicEntityId: string;
   }): Promise<PublishedDocument>;
   readChaseReconciliation(input: {
@@ -147,7 +96,15 @@ export function createPublishedCatalogReader(input: {
   fetchImplementation?: typeof fetch;
 }): PublishedCatalogReader {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const call = async <T>(path: string, body: unknown): Promise<T> => {
+  const call = async <T>(
+    path: string,
+    body: unknown,
+    schema: {
+      safeParse(value: unknown):
+        | { success: true; data: T }
+        | { success: false };
+    },
+  ): Promise<T> => {
     if (!input.config) {
       throw new PublishedCatalogError(
         "PUBLISHED_CATALOG_UNCONFIGURED",
@@ -205,33 +162,53 @@ export function createPublishedCatalogReader(input: {
       );
     }
     try {
-      return (await response.json()) as T;
+      const parsed = schema.safeParse(await response.json());
+      if (parsed.success) return parsed.data;
     } catch {
-      throw new PublishedCatalogError(
-        "PUBLISHED_CATALOG_UNAVAILABLE",
-        "The published catalog returned an unreadable response.",
-        503,
-      );
+      // Fall through to the same stable refusal as a schema mismatch. Neither
+      // raw JSON nor validator detail may cross this server boundary.
     }
+    throw new PublishedCatalogError(
+      "PUBLISHED_CATALOG_UNAVAILABLE",
+      "The published catalog returned an unreadable response.",
+      503,
+    );
   };
 
   return {
     activeRelease: (platformKey) =>
-      call<PublishedActiveRelease>(ACTIVE_RELEASE_PATH, { platformKey }),
+      call(ACTIVE_RELEASE_PATH, { platformKey }, publishedActiveReleaseSchema),
     listEntities: ({ publicProviderReleaseId, entityKind, numItems, cursor }) =>
-      call<PublishedEntityPage>(ENTITIES_PATH, {
-        publicProviderReleaseId,
-        entityKind,
-        paginationOpts: { numItems, cursor },
-      }),
+      call(
+        ENTITIES_PATH,
+        {
+          publicProviderReleaseId,
+          entityKind,
+          paginationOpts: { numItems, cursor },
+        },
+        publishedProviderEntityPageSchemaForKind(entityKind),
+      ),
     listEntityIds: ({ publicProviderReleaseId, entityKind, numItems, cursor }) =>
-      call<PublishedIdPage>(ENTITY_IDS_PATH, {
-        publicProviderReleaseId,
-        entityKind,
-        paginationOpts: { numItems, cursor },
-      }),
-    readDocument: (request) => call<PublishedDocument>(DOCUMENT_PATH, request),
+      call(
+        ENTITY_IDS_PATH,
+        {
+          publicProviderReleaseId,
+          entityKind,
+          paginationOpts: { numItems, cursor },
+        },
+        publishedProviderIdPageSchemaForKind(entityKind),
+      ),
+    readDocument: (request) =>
+      call(
+        DOCUMENT_PATH,
+        request,
+        publishedProviderDocumentSchemaForKind(request.entityKind),
+      ),
     readChaseReconciliation: (request) =>
-      call<PublishedChaseReconciliation>(CHASE_RECONCILIATION_PATH, request),
+      call(
+        CHASE_RECONCILIATION_PATH,
+        request,
+        publishedProviderChaseReconciliationSchema,
+      ),
   };
 }

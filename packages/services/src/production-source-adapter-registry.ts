@@ -3,6 +3,7 @@ import {
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV1V2SourceAdapterManifest,
 } from "@packscout/contracts";
 import {
   DataforrestEventsSourceAdapter,
@@ -14,6 +15,7 @@ import { SourceAdapterRegistry } from "./source-adapter-registry.ts";
 
 const registeredProductionSourceAdapterManifests = Object.freeze([
   dataforrestEventsV1LegacySourceAdapterManifest,
+  dataforrestEventsV1V2SourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
 ]);
 
@@ -30,6 +32,10 @@ export function createProductionSourceAdapterRegistry(
       new DataforrestEventsSourceAdapter(
         dependencies,
         dataforrestEventsV1LegacySourceAdapterManifest,
+      ),
+      new DataforrestEventsSourceAdapter(
+        dependencies,
+        dataforrestEventsV1V2SourceAdapterManifest,
       ),
       new DataforrestEventsSourceAdapter(
         dependencies,

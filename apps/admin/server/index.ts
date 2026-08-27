@@ -196,6 +196,9 @@ try {
   const canonicalInspection = new CanonicalInspectionService(
     new PrismaCanonicalInspectionRepository(database),
   );
+  const publishedCatalog = createPublishedCatalogReader({
+    config: productUserDirectoryConfig,
+  });
   const providerRepository = new PrismaProviderConfigurationRepository(database);
   const operational = createAdminOperationalRuntime({
     database,
@@ -246,15 +249,14 @@ try {
     }),
     workerFleet: createAdminWorkerFleetRuntime({ database }),
     canonical: canonicalInspection,
+    published: publishedCatalog,
     // Both halves must be configured: without the deployment key the admin
     // cannot know which promotion lane is this deployment's, and reading the
     // wrong one would produce confident, wrong verdicts.
     parity: catalogDeploymentKey === null ? undefined : createParityRuntime({
       canonical: canonicalInspection,
       promotion: new PrismaProviderPromotionFactsRepository(database),
-      published: createPublishedCatalogReader({
-        config: productUserDirectoryConfig,
-      }),
+      published: publishedCatalog,
       deploymentKey: catalogDeploymentKey,
     }),
     productUsers: {

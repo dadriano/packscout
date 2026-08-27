@@ -6,7 +6,7 @@ import { open, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
 } from "../../packages/contracts/src/dataforrest-events-v1.ts";
 import {
@@ -396,7 +396,7 @@ export function assertClutchpacksCatalogCandidateTargetQualified(
     evidence.sourcePauseRequested !== false ||
     evidence.sourceRevisionCount !== 1 ||
     !evidence.sourceRevisionId ||
-    evidence.sourceAdapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION ||
+    evidence.sourceAdapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION ||
     evidence.normalizedContractVersion !== PROVIDER_OBSERVATION_CONTRACT_VERSION ||
     evidence.mapperKey !== mapper.mapperKey ||
     evidence.mapperVersion !== mapper.mapperVersion ||
@@ -409,7 +409,7 @@ export function assertClutchpacksCatalogCandidateTargetQualified(
     !evidence.latestRunFinished ||
     evidence.latestRunFailureCode !== null ||
     evidence.latestRunSourceRevisionId !== evidence.sourceRevisionId ||
-    evidence.latestRunAdapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION ||
+    evidence.latestRunAdapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION ||
     evidence.latestRunNormalizedContractVersion !==
       PROVIDER_OBSERVATION_CONTRACT_VERSION ||
     evidence.latestRunMapperKey !== mapper.mapperKey ||
@@ -680,7 +680,7 @@ async function readQualificationEvidence(
         where: {
           organization_id: organizationId,
           OR: [
-            { source_adapter_version: { not: DATAFORREST_EVENTS_V1_ADAPTER_VERSION } },
+            { source_adapter_version: { not: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION } },
             { normalized_contract_version: { not: PROVIDER_OBSERVATION_CONTRACT_VERSION } },
           ],
         },
@@ -1051,10 +1051,10 @@ export async function runClutchpacksCatalogCandidate(input: Readonly<{
 
 export function clutchpacksCatalogCandidateUsage(): string {
   return `Usage:
-  npm run generate:catalog-candidate:clutchpacks:local -- \\
+  npm run generate:catalog-candidate:clutchpacks-v2:local -- \\
     --output /absolute/private/path/clutchpacks-v2-catalog.json
 
-  npm run generate:catalog-candidate:clutchpacks:local -- \\
+  npm run generate:catalog-candidate:clutchpacks-v2:local -- \\
     --execute --output /absolute/private/path/clutchpacks-v2-catalog.json \\
     --confirmation "${CONFIRMATION_PREFIX} <16hex>"
 

@@ -1,12 +1,12 @@
 # DataForrest ClutchPacks card adapter v2
 
-Status: current contract and bounded adapter-version migration
+Status: retained adapter-v2 contract; superseded for new revisions by adapter v3
 
 Owner: PackScout data platform
 
 ## Corrected V1 source semantics
 
-DataForrest's endpoint and raw record envelope remain V1. New source revisions
+DataForrest's endpoint and raw record envelope remain V1. Adapter-v2 revisions
 use `dataforrest-events-adapter-v2`, normalized observation
 `packscout.provider-observation.v1`, and ClutchPacks mapper revision `1`.
 
@@ -32,13 +32,17 @@ Adapter v1 read ClutchPacks card display names only from top-level
 `data.provider_label`; it did not expose `data.asset`. Existing connection,
 source, cursor, run, and page rows pin that exact interpretation, so the
 production registry retains adapter v1 rather than silently changing its
-meaning. Adapter v2 is the only version advertised when creating a revision.
+meaning. Adapter v3 is now the only version advertised when creating a
+revision; adapters v1 and v2 remain registered for their exact pinned history.
 There is no fallback, dual write, or generic provider branch.
 
-The legacy registration may be removed only after no active, paused, queued,
-running, or recoverable connection/source work is pinned to adapter v1 and the
-data-platform owner confirms historical operations no longer need to interpret
-adapter-v1 evidence.
+The adapter-v1 registration may be removed only after no active, paused,
+queued, running, or recoverable connection/source work is pinned to adapter v1
+and the data-platform owner confirms historical operations no longer need to
+interpret adapter-v1 evidence. The adapter-v2 registration has the same removal
+gate for adapter-v2 work and evidence; it must remain until every such pin is
+gone and the data-platform owner explicitly retires that historical
+interpretation.
 
 ## ClutchPacks replay
 

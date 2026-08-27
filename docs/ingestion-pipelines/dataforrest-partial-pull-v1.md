@@ -17,7 +17,7 @@ relationship, so PackScout must not infer or fabricate one.
 
 New DataForrest revisions use this exact tuple:
 
-- source adapter `dataforrest-events-adapter-v2`;
+- source adapter `dataforrest-events-adapter-v3`;
 - normalized observation `packscout.provider-observation.v1`; and
 - mapper revision `1` for the provider's registered mapper.
 
@@ -33,9 +33,9 @@ A pack-only pull retains its pack relationship but has no card attribution.
 Downstream behavior uses only present edges until the provider supplies an
 authoritative missing identity.
 
-Unknown tuples fail closed. Adapter v1 remains registered for immutable source
-revisions created before the adapter-v2 ClutchPacks card normalization; it
-retains its original partial-pull behavior and is never used as a fallback.
+Unknown tuples fail closed. Adapters v1 and v2 remain registered for immutable
+source revisions created before the current pack normalization; each retains
+its original partial-pull behavior and is never used as a fallback.
 
 ## Clean-slate reset and reimport
 

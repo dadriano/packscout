@@ -18,8 +18,8 @@ import {
   emptyNormalizedProviderFacts,
   type NormalizedProviderFacts,
 } from "./provider-source-facts-v1.ts";
-import { clutchpacksCardProviderFacts } from
-  "./dataforrest-clutchpacks-card-v2.ts";
+import { readDataforrestProviderFacts } from
+  "./dataforrest-provider-facts-registry.ts";
 import {
   normalizedProviderObservationSchema,
   type NormalizedProviderObservation,
@@ -29,8 +29,10 @@ export const DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY =
   "dataforrest-events-v1" as const;
 export const DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION =
   "dataforrest-events-adapter-v1" as const;
-export const DATAFORREST_EVENTS_V1_ADAPTER_VERSION =
+export const DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION =
   "dataforrest-events-adapter-v2" as const;
+export const DATAFORREST_EVENTS_V1_ADAPTER_VERSION =
+  "dataforrest-events-adapter-v3" as const;
 export const DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY =
   "dataforrest-events-connection-v1" as const;
 export const DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY =
@@ -152,6 +154,7 @@ const dataforrestProviderDeclarations = launchProviderKeys.map((provider) => ({
 function dataforrestEventsSourceAdapterManifest(
   adapterVersion:
     | typeof DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION
+    | typeof DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
 ) {
   return sourceAdapterManifestV1Schema.parse({
@@ -185,11 +188,18 @@ export const dataforrestEventsV1LegacySourceAdapterManifest =
     DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   );
 
+/** Retained only so adapter-v2 source revisions remain reproducible. */
+export const dataforrestEventsV1V2SourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+  );
+
 export const dataforrestEventsV1SourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(DATAFORREST_EVENTS_V1_ADAPTER_VERSION);
 
 export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestEventsV1LegacySourceAdapterManifest,
+  dataforrestEventsV1V2SourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
 ]);
 
@@ -235,13 +245,13 @@ function dataforrestProviderFacts(
   nativeData: Readonly<Record<string, unknown>>,
   adapterVersion: string,
 ): NormalizedProviderFacts {
-  if (
-    adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
-    provider === "clutchpacks" &&
-    kind === "card"
-  ) {
-    return clutchpacksCardProviderFacts(nativeData);
-  }
+  const adapted = readDataforrestProviderFacts(
+    adapterVersion,
+    provider,
+    kind,
+    nativeData,
+  );
+  if (adapted) return adapted;
   const empty = emptyNormalizedProviderFacts(kind);
   const displayNameField = dataforrestDisplayNameFieldByProvider[provider][kind];
   const providerDisplayName = nativeData[displayNameField];
@@ -272,6 +282,7 @@ export function normalizeDataforrestEventRecordForAdapter(
 ): NormalizedProviderObservation {
   if (
     adapterVersion !== DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION &&
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION
   ) {
     throw new RangeError("dataforrest_events.adapter_version_unsupported");

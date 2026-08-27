@@ -13,6 +13,7 @@ import {
   providerFixtureApprovedConfiguration,
   providerFixtureCheckpoint,
   providerFixtureSnapshot,
+  fixtureIds,
 } from "./provider-catalog-release-fixture.test-support.ts";
 import type { ProviderCatalogReleaseSourceSnapshot } from "./provider-catalog-release-types.ts";
 
@@ -347,6 +348,157 @@ test("provider projection excludes unreferenced shared categories", () => {
     projection.categories.some(({ categoryKey }) => categoryKey === "unrelated"),
     false,
   );
+});
+
+test("repack categories use the exact governed union for focused and mixed chases", () => {
+  const focusedSnapshot = providerFixtureSnapshot();
+  const focusedBase = providerFixtureApprovedConfiguration();
+  const focused = projectProviderCatalogRelease({
+    configuration: focusedBase,
+    platformKey: "alpha",
+    revisions: focusedSnapshot.revisions,
+    assetPackAssociations: focusedSnapshot.assetPackAssociations,
+    repackIdentities: focusedSnapshot.repackIdentities,
+  });
+  assert.equal(focused.repacks[0]?.contentMode, "focused");
+  assert.deepEqual(
+    focused.repacks[0]?.categories.map(({ publicCategoryId }) =>
+      publicCategoryId),
+    [fixtureIds.rootCategory, fixtureIds.childCategory],
+  );
+
+  const tradingCardGamesId = "13333333-3333-5333-8333-333333333333";
+  const marvelId = "14444444-4444-5444-8444-444444444444";
+  const allCategoryIds = [
+    fixtureIds.rootCategory,
+    fixtureIds.childCategory,
+    tradingCardGamesId,
+    marvelId,
+  ];
+  const mixedCategories = [
+    {
+      ...focusedBase.categories[0]!,
+      categoryKey: "sports",
+      name: "Sports",
+    },
+    {
+      ...focusedBase.categories[1]!,
+      categoryKey: "multi-sport",
+      name: "Multi-sport",
+      kind: "other" as const,
+    },
+    {
+      publicCategoryId: tradingCardGamesId,
+      parentPublicCategoryId: null,
+      categoryKey: "trading-card-games",
+      name: "Trading card games",
+      kind: "vertical" as const,
+      depth: 0,
+      pathPublicCategoryIds: [tradingCardGamesId],
+      displayOrder: 20,
+    },
+    {
+      publicCategoryId: marvelId,
+      parentPublicCategoryId: tradingCardGamesId,
+      categoryKey: "marvel",
+      name: "Marvel",
+      kind: "franchise" as const,
+      depth: 1,
+      pathPublicCategoryIds: [tradingCardGamesId, marvelId],
+      displayOrder: 21,
+    },
+  ];
+  const marvelExternalId = "liftoff-marvel-card";
+  const marvelPublicId = "45555555-5555-5555-8555-555555555555";
+  const mixedConfiguration = {
+    ...focusedBase,
+    categories: mixedCategories,
+    platforms: focusedBase.platforms.map((platform) => ({
+      ...platform,
+      defaultPublicCategoryIds: [],
+      categoryMappings: [{
+        sourceValue: "Multisport",
+        publicCategoryIds: [
+          fixtureIds.rootCategory,
+          fixtureIds.childCategory,
+        ],
+      }],
+    })),
+    collectibles: [
+      {
+        ...focusedBase.collectibles[0]!,
+        publicCategoryIds: [
+          fixtureIds.rootCategory,
+          fixtureIds.childCategory,
+        ],
+      },
+      {
+        ...focusedBase.collectibles[0]!,
+        externalId: marvelExternalId,
+        publicCollectibleId: marvelPublicId,
+        aliases: [],
+        publicCategoryIds: [tradingCardGamesId, marvelId],
+        probabilityBucketId: null,
+      },
+    ],
+  };
+  const baseAsset = focusedSnapshot.revisions.find(
+    ({ recordKind }) => recordKind === "catalog_asset",
+  )!;
+  const revisions = focusedSnapshot.revisions.map((revision) =>
+    revision.recordKind === "pack"
+      ? {
+          ...revision,
+          content: {
+            ...(revision.content as Record<string, unknown>),
+            name: "Liftoff",
+            category: "Multisport",
+          },
+        }
+      : revision.recordKind === "catalog_asset"
+        ? {
+            ...revision,
+            content: {
+              ...(revision.content as Record<string, unknown>),
+              category: "Multisport",
+            },
+          }
+        : revision
+  );
+  const marvelAsset = {
+    ...baseAsset,
+    entityId: "alpha-catalog-asset-liftoff-marvel-card",
+    revisionId: "alpha-liftoff-marvel-card-revision",
+    externalId: marvelExternalId,
+    content: {
+      ...(baseAsset.content as Record<string, unknown>),
+      name: "Marvel Chase",
+      category: "Marvel",
+    },
+  };
+  const mixedInput = {
+    configuration: mixedConfiguration,
+    platformKey: "alpha",
+    revisions: [...revisions, marvelAsset],
+    assetPackAssociations: [
+      ...focusedSnapshot.assetPackAssociations,
+      {
+        ...focusedSnapshot.assetPackAssociations[0]!,
+        sourceEntityId: "alpha-pull-liftoff-marvel-card",
+        assetExternalId: marvelExternalId,
+      },
+    ],
+    repackIdentities: focusedSnapshot.repackIdentities,
+  };
+  const mixed = projectProviderCatalogRelease(mixedInput);
+  assert.equal(mixed.repacks[0]?.name, "Liftoff");
+  assert.equal(mixed.repacks[0]?.contentMode, "mixed");
+  assert.deepEqual(
+    mixed.repacks[0]?.categories.map(({ publicCategoryId }) =>
+      publicCategoryId),
+    allCategoryIds,
+  );
+  assert.equal(mixed.repackChases.length, 2);
 });
 
 test("provider projection refuses a foreign platform row", () => {

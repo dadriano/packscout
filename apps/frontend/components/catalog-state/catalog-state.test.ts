@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { publicReadError } from "@packscout/contracts";
 import {
   CATALOG_STATE_COPY,
+  catalogResultRecoveryPresentation,
   catalogUpdateMessage,
   recoveryMessage,
   reduceRecoverableActionState,
@@ -84,4 +86,27 @@ test("summarizes only visible non-blank catalog constraints", () => {
       { label: "Platform", value: "Collector Crypt" },
     ],
   );
+});
+
+test("only release unavailability retries; stable query errors navigate to recovery", () => {
+  assert.deepEqual(
+    catalogResultRecoveryPresentation(publicReadError("RELEASE_UNAVAILABLE")),
+    { kind: "retry" },
+  );
+
+  const expectedActions = {
+    INVALID_QUERY: "Reset repack catalog",
+    CURSOR_EXPIRED: "Return to first page",
+    COLLECTIBLE_NOT_FOUND: "Clear desired chase",
+    REPACK_NOT_FOUND: "Clear repack selection",
+  } as const;
+  for (const [code, actionLabel] of Object.entries(expectedActions)) {
+    const recovery = catalogResultRecoveryPresentation(
+      publicReadError(code as keyof typeof expectedActions),
+    );
+    assert.equal(recovery.kind, "navigate", code);
+    if (recovery.kind === "navigate") {
+      assert.equal(recovery.actionLabel, actionLabel, code);
+    }
+  }
 });

@@ -5,6 +5,10 @@ import express from "express";
 import { AuthServiceError, type AuthenticatedActor } from "@packscout/services";
 import { createSessionCookiePolicy } from "../auth/cookies.ts";
 import { CanonicalInspectionError } from "@packscout/services";
+import {
+  PublishedCatalogError,
+  type PublishedCatalogReader,
+} from "../published-catalog-reader.ts";
 import { createDataInspectionRouter } from "./data-inspection.ts";
 
 const organizationId = "00000000-0000-4000-8000-000000000010";
@@ -28,12 +32,14 @@ async function withServer(
   permissions: string[],
   run: (baseUrl: string) => Promise<void>,
   canonical?: Parameters<typeof createDataInspectionRouter>[0]["canonical"],
+  published?: Parameters<typeof createDataInspectionRouter>[0]["published"],
 ) {
   const app = express();
   app.use(
     "/api/data-inspection",
     createDataInspectionRouter({
       canonical,
+      published,
       auth: {
         async resolveSession({ sessionToken }) {
           if (!sessionToken) {
@@ -131,6 +137,7 @@ function canonicalStub(overrides: Record<string, unknown> = {}) {
       seenOrganizations.push(organizationId);
       return [
         { platformKey: "courtyard", displayName: "Courtyard", state: "active" },
+        { platformKey: "clutchpacks", displayName: "ClutchPacks", state: "active" },
       ];
     },
     async summarizeProvider(input: { organizationId: string }) {
@@ -151,6 +158,94 @@ function canonicalStub(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   };
+}
+
+const publishedReleaseId = "10000000-0000-5000-8000-000000000001";
+const nextPublishedReleaseId = "10000000-0000-5000-8000-000000000003";
+const publishedManifestId = "10000000-0000-5000-8000-000000000002";
+const publishedVendorId = "00000000-0000-5000-8000-000000000001";
+const publishedRepackId = "00000000-0000-5000-8000-000000000301";
+const publishedHash = "a".repeat(64);
+
+function activePublishedRelease() {
+  return {
+    status: "active" as const,
+    manifestPublicReleaseId: publishedManifestId,
+    referenceFingerprint: publishedHash,
+    release: {
+      publicProviderReleaseId: publishedReleaseId,
+      platformKey: "clutchpacks",
+      lifecycle: "complete" as const,
+      dataAsOf: "2026-08-27T10:00:00.000Z",
+      providerReleaseFingerprint: publishedHash,
+      contentHash: publishedHash,
+      entityHashes: {
+        vendors: publishedHash,
+        categories: publishedHash,
+        collectibles: publishedHash,
+        repacks: publishedHash,
+        repack_chases: publishedHash,
+        search_shards: publishedHash,
+      },
+      counts: {
+        vendors: 1 as const,
+        categories: 0,
+        collectibles: 0,
+        repacks: 1,
+        repackChases: 0,
+        searchShards: 0,
+      },
+      batchCount: 2,
+      batchChainHash: publishedHash,
+      createdAt: "2026-08-27T10:00:00.000Z",
+      completedAt: "2026-08-27T10:01:00.000Z",
+      completionOperationId: "clutchpacks.finalize.1",
+    },
+  };
+}
+
+function publishedStub(overrides: Partial<PublishedCatalogReader> = {}) {
+  const calls: Array<{ operation: string; input: unknown }> = [];
+  const reader: PublishedCatalogReader = {
+    async activeRelease(platformKey) {
+      calls.push({ operation: "activeRelease", input: platformKey });
+      return activePublishedRelease();
+    },
+    async listEntities(input) {
+      calls.push({ operation: "listEntities", input });
+      return {
+        status: "ok",
+        items: [],
+        isDone: true,
+        continueCursor: "",
+      };
+    },
+    async listEntityIds(input) {
+      calls.push({ operation: "listEntityIds", input });
+      return {
+        status: "ok",
+        publicEntityIds: [],
+        isDone: true,
+        continueCursor: "",
+      };
+    },
+    async readDocument(input) {
+      calls.push({ operation: "readDocument", input });
+      return { status: "not_present" };
+    },
+    async readChaseReconciliation(input) {
+      calls.push({ operation: "readChaseReconciliation", input });
+      return {
+        status: "ok",
+        publicRepackId: publishedRepackId,
+        expectedChaseCount: 0,
+        acceptedChaseCount: 0,
+        complete: true,
+      };
+    },
+    ...overrides,
+  };
+  return { calls, reader };
 }
 
 test("canonical reads are scoped to the caller's own organization", async () => {
@@ -220,5 +315,269 @@ test("canonical reads are refused without the permission", async () => {
       assert.equal(response.status, 403);
     },
     canonicalStub() as never,
+  );
+});
+
+test("published reads require permission and remain non-cacheable on refusal", async () => {
+  const published = publishedStub();
+  await withServer(
+    ["providers:view"],
+    async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/active-release`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal(published.calls.length, 0);
+    },
+    canonicalStub() as never,
+    published.reader,
+  );
+});
+
+test("published routes derive the active release and expose only bounded reads", async () => {
+  const published = publishedStub();
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const headers = { cookie: "packscout_session=operator-session" };
+      const active = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/active-release`,
+        { headers },
+      );
+      assert.equal(active.status, 200);
+      assert.equal(active.headers.get("cache-control"), "no-store");
+      assert.equal((await active.json() as { status: string }).status, "active");
+
+      const page = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/entities?entityKind=vendors&expectedPublicProviderReleaseId=${publishedReleaseId}&limit=25&cursor=next`,
+        { headers },
+      );
+      assert.equal(page.status, 200);
+      assert.equal((await page.json() as { status: string }).status, "ok");
+
+      const document = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/entities/vendors/${publishedVendorId}?expectedPublicProviderReleaseId=${publishedReleaseId}`,
+        { headers },
+      );
+      assert.equal(document.status, 200);
+      assert.equal(
+        (await document.json() as { status: string }).status,
+        "not_present",
+      );
+
+      const chase = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/repacks/${publishedRepackId}/chase-reconciliation?expectedPublicProviderReleaseId=${publishedReleaseId}`,
+        { headers },
+      );
+      assert.equal(chase.status, 200);
+      assert.equal((await chase.json() as { status: string }).status, "ok");
+    },
+    canonicalStub() as never,
+    published.reader,
+  );
+
+  const entityCall = published.calls.find(
+    ({ operation }) => operation === "listEntities",
+  );
+  assert.deepEqual(entityCall?.input, {
+    publicProviderReleaseId: publishedReleaseId,
+    entityKind: "vendors",
+    numItems: 25,
+    cursor: "next",
+  });
+  assert.equal(
+    published.calls.filter(({ operation }) => operation === "activeRelease")
+      .length,
+    4,
+  );
+});
+
+test("a provider outside the actor organization is rejected before any published read", async () => {
+  const published = publishedStub();
+  const canonical = canonicalStub({
+    async listProviders(requestOrganizationId: string) {
+      assert.equal(requestOrganizationId, organizationId);
+      return [
+        { platformKey: "courtyard", displayName: "Courtyard", state: "active" },
+      ];
+    },
+  });
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/active-release`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 404);
+      assert.equal(
+        (await response.json() as { code: string }).code,
+        "CANONICAL_PROVIDER_UNKNOWN",
+      );
+      assert.equal(published.calls.length, 0);
+    },
+    canonical as never,
+    published.reader,
+  );
+});
+
+test("published inputs are strict and reject unverified release selectors", async () => {
+  const published = publishedStub();
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const headers = { cookie: "packscout_session=operator-session" };
+      for (const path of [
+        "/published/providers/ClutchPacks/active-release",
+        "/published/providers/clutchpacks/entities?entityKind=vendors",
+        "/published/providers/clutchpacks/entities?entityKind=repack_chases",
+        "/published/providers/clutchpacks/entities?entityKind=vendors&limit=201",
+        `/published/providers/clutchpacks/entities/vendors/${publishedVendorId}?publicProviderReleaseId=${publishedManifestId}`,
+        `/published/providers/clutchpacks/repacks/not-a-public-id/chase-reconciliation`,
+      ]) {
+        const response = await fetch(
+          `${baseUrl}/api/data-inspection${path}`,
+          { headers },
+        );
+        assert.equal(response.status, 400, path);
+        assert.equal(
+          (await response.json() as { code: string }).code,
+          "PUBLISHED_CATALOG_REQUEST_INVALID",
+        );
+      }
+      assert.equal(published.calls.length, 0);
+    },
+    canonicalStub() as never,
+    published.reader,
+  );
+});
+
+test("a manifest change is represented without reading an arbitrary release", async () => {
+  const published = publishedStub({
+    async activeRelease() {
+      return { status: "no_active_manifest" };
+    },
+  });
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/entities?entityKind=repacks&expectedPublicProviderReleaseId=${publishedReleaseId}`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { status: "release_unknown" });
+      assert.equal(
+        published.calls.some(({ operation }) => operation === "listEntities"),
+        false,
+      );
+    },
+    canonicalStub() as never,
+    published.reader,
+  );
+});
+
+test("a manifest flip cannot mix a new release into displayed release facts", async () => {
+  let activeReads = 0;
+  let entityReads = 0;
+  const published = publishedStub({
+    async activeRelease() {
+      activeReads += 1;
+      const active = activePublishedRelease();
+      if (activeReads === 1) return active;
+      return {
+        ...active,
+        release: {
+          ...active.release,
+          publicProviderReleaseId: nextPublishedReleaseId,
+        },
+      };
+    },
+    async listEntities() {
+      entityReads += 1;
+      return {
+        status: "ok",
+        items: [],
+        isDone: true,
+        continueCursor: "",
+      };
+    },
+  });
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const headers = { cookie: "packscout_session=operator-session" };
+      const active = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/active-release`,
+        { headers },
+      );
+      assert.equal(active.status, 200);
+      assert.equal(
+        ((await active.json()) as ReturnType<typeof activePublishedRelease>)
+          .release.publicProviderReleaseId,
+        publishedReleaseId,
+      );
+
+      const page = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/entities?entityKind=repacks&expectedPublicProviderReleaseId=${publishedReleaseId}`,
+        { headers },
+      );
+      assert.equal(page.status, 200);
+      assert.deepEqual(await page.json(), { status: "release_unknown" });
+      assert.equal(entityReads, 0);
+    },
+    canonicalStub() as never,
+    published.reader,
+  );
+});
+
+test("classified and unclassified published failures remain stable and redacted", async () => {
+  const classified = publishedStub({
+    async activeRelease() {
+      throw new PublishedCatalogError(
+        "PUBLISHED_CATALOG_UNAUTHORIZED",
+        "The published catalog integration is not authorized.",
+        502,
+      );
+    },
+  });
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/active-release`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 502);
+      assert.equal(
+        (await response.json() as { code: string }).code,
+        "PUBLISHED_CATALOG_UNAUTHORIZED",
+      );
+    },
+    canonicalStub() as never,
+    classified.reader,
+  );
+
+  const unclassified = publishedStub({
+    async activeRelease() {
+      throw new Error("secret.internal:3210");
+    },
+  });
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/active-release`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 503);
+      const body = await response.text();
+      assert.match(body, /PUBLISHED_CATALOG_UNAVAILABLE/);
+      assert.doesNotMatch(body, /secret\.internal|3210/);
+    },
+    canonicalStub() as never,
+    unclassified.reader,
   );
 });

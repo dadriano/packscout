@@ -6,6 +6,8 @@ import {
   encodePublicCursorStack,
   listPublicRepacksInputSchema,
   type ListPublicRepacksInput,
+  type ListPublicRepacksPage,
+  type PublicReadErrorCode,
   type PublicRepackFilters,
   type PublicRepackSort,
 } from "@packscout/contracts";
@@ -320,6 +322,59 @@ export function resetCatalogPagination(
     cursorStack: null,
     queryFingerprint: null,
     selectedPublicRepackId: null,
+  });
+}
+
+export function catalogQueryAfterReadError(
+  query: ListPublicRepacksInput,
+  code: PublicReadErrorCode,
+): ListPublicRepacksInput {
+  switch (code) {
+    case "INVALID_QUERY":
+      return DEFAULT_CATALOG_QUERY;
+    case "CURSOR_EXPIRED":
+      return resetCatalogPagination(query, {});
+    case "COLLECTIBLE_NOT_FOUND":
+      return resetCatalogPagination(query, {
+        desiredPublicCollectibleId: null,
+      });
+    case "REPACK_NOT_FOUND":
+      return clearCatalogRepackSelection(query);
+    case "RELEASE_UNAVAILABLE":
+      return query;
+  }
+}
+
+export function catalogQueryForPageNavigation(
+  query: ListPublicRepacksInput,
+  page: Pick<
+    ListPublicRepacksPage,
+    "activeQuery" | "paginationReset" | "queryFingerprint"
+  > &
+    Readonly<{
+      rows: ReadonlyArray<
+        Pick<ListPublicRepacksPage["rows"][number], "publicRepackId">
+      >;
+    }>,
+): ListPublicRepacksInput {
+  const releaseChanged = page.paginationReset === "release_changed";
+  const selectedPublicRepackId =
+    releaseChanged && query.selectedPublicRepackId !== null
+      ? page.rows.some(
+          ({ publicRepackId }) =>
+            publicRepackId === query.selectedPublicRepackId,
+        )
+        ? query.selectedPublicRepackId
+        : null
+      : query.selectedPublicRepackId;
+
+  return listPublicRepacksInputSchema.parse({
+    ...query,
+    ...page.activeQuery,
+    cursor: releaseChanged ? null : query.cursor,
+    cursorStack: releaseChanged ? null : query.cursorStack,
+    queryFingerprint: page.queryFingerprint,
+    selectedPublicRepackId,
   });
 }
 

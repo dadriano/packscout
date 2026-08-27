@@ -11,6 +11,10 @@ import { CatalogFilters } from "@/components/catalog/CatalogFilters.client";
 import { OverviewDashboard } from "@/components/catalog/OverviewDashboard.client";
 import type { InspectorActionOutcome } from "@/components/catalog/PackInspector.client";
 import {
+  NoMatches,
+  type CatalogConstraint,
+} from "@/components/catalog-state";
+import {
   serializeDashboardFilters,
 } from "@/lib/catalog-query-state.client";
 import { useNarrowCatalogInspector } from "@/lib/catalog-viewport.client";
@@ -44,11 +48,46 @@ function actionMessage(outcome: InspectorActionOutcome): string {
 
 function activeFilterCount(
   filters: PublicRepackFilters,
-): 0 | 1 | 2 | 3 | 4 {
+): 0 | 1 | 2 | 3 | 4 | 5 {
   return (Number(filters.vendors.length > 0) +
     Number(filters.categories.length > 0) +
     Number(filters.collectibleTypes.length > 0) +
-    Number(filters.price.mode === "narrowed")) as 0 | 1 | 2 | 3 | 4;
+    Number(filters.price.mode === "narrowed") +
+    Number(filters.availability === "all")) as 0 | 1 | 2 | 3 | 4 | 5;
+}
+
+function activeConstraints(
+  filters: PublicRepackFilters,
+): readonly CatalogConstraint[] {
+  const constraints: CatalogConstraint[] = [];
+  if (filters.vendors.length > 0) {
+    constraints.push({ label: "Vendors", value: filters.vendors.join(", ") });
+  }
+  if (filters.categories.length > 0) {
+    constraints.push({
+      label: "Categories",
+      value: filters.categories.join(", "),
+    });
+  }
+  if (filters.collectibleTypes.length > 0) {
+    constraints.push({
+      label: "Collectible types",
+      value: filters.collectibleTypes.join(", "),
+    });
+  }
+  if (filters.availability === "all") {
+    constraints.push({
+      label: "Availability",
+      value: "Including unavailable, unknown, and sold-out packs",
+    });
+  }
+  if (filters.price.mode === "narrowed") {
+    constraints.push({
+      label: "Repack Price",
+      value: `$${filters.price.minMinor / 100}–$${filters.price.maxMinor / 100}`,
+    });
+  }
+  return constraints;
 }
 
 export function DashboardOverviewClient({
@@ -85,6 +124,10 @@ export function DashboardOverviewClient({
     startTransition(() =>
       router.push(serializeDashboardFilters(filters, provider ?? undefined)),
     );
+  }
+
+  function resetFilters() {
+    startTransition(() => router.push(dashboardHrefFor(provider)));
   }
 
   useEffect(() => {
@@ -133,22 +176,34 @@ export function DashboardOverviewClient({
     );
   }
 
+  const filterControls = (
+    <CatalogFilters
+      accepted={bundle.activeFilters}
+      facets={bundle.facets}
+      onApply={navigate}
+      onReset={resetFilters}
+      pending={pending}
+      showAvailabilityToggle={false}
+    />
+  );
+
+  if (bundle.kpis.totalRepacks === 0) {
+    return (
+      <div className={styles.root}>
+        {filterControls}
+        <NoMatches
+          constraints={activeConstraints(bundle.activeFilters)}
+          onClearFilters={resetFilters}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={styles.root}>
       <OverviewDashboard
         bundle={selectedBundle}
-        controls={
-          <CatalogFilters
-            accepted={bundle.activeFilters}
-            facets={bundle.facets}
-            onApply={navigate}
-            onReset={() =>
-              startTransition(() => router.push(dashboardHrefFor(provider)))
-            }
-            pending={pending}
-            showAvailabilityToggle={false}
-          />
-        }
+        controls={filterControls}
         inspectorOpen={narrowInspector ? sheetOpen : !sideInspectorDismissed}
         inspectorPlacement={narrowInspector ? "sheet" : "side"}
         inspectorReturnFocusRef={selectionTriggerRef}

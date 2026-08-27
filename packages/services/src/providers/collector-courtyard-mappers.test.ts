@@ -13,6 +13,8 @@ import {
   type CanonicalObservationPackCandidate,
   type CanonicalPullCandidate,
 } from "../provider-observation-mapper.ts";
+import { canonicalProviderObservationContent } from
+  "../provider-observation-canonical-content.ts";
 import { createProviderObservationMapperRegistryFromManifest } from "./provider-mapper-manifest.ts";
 import {
   cardObservation,
@@ -124,6 +126,93 @@ test("ClutchPacks native pack name reaches an accepted canonical pack", () => {
     outcome.candidate.identity.providerRecordId,
     "clutchpacks-pack-native-name",
   );
+});
+
+test("ClutchPacks v3 pack facts reach proven vendor EV and ready odds without invented buyback", () => {
+  const observation = normalizeDataforrestEventRecord(
+    dataforrestEventRecordV1Schema.parse({
+      platform: "clutchpacks",
+      stream: "catalog",
+      entity: "pack",
+      record_id: "clutchpacks-pack-rich-v3",
+      occurred_at: "2026-08-01T00:00:00.000Z",
+      collected_at: "2026-08-01T00:00:01.000Z",
+      first_seen_at: "2026-08-01T00:00:00.000Z",
+      available: true,
+      data: {
+        name: "Champions Only",
+        description: "One graded card per pack.",
+        category: { name: "Sports" },
+        price: {
+          currency: { code: "USD", decimals: 2 },
+          price_amount: "250",
+        },
+        series: { description: "Champions Only" },
+        average_value: "999",
+        image_url: "https://images.example.invalid/champions.jpg",
+        sold_out: false,
+        price_bucket_odds: [
+          {
+            bucket_id: "high",
+            name: "High",
+            min_price: "$250",
+            max_price: "$1,000",
+            drawable_count: 1,
+          },
+          {
+            bucket_id: "base",
+            name: "Base",
+            min_price: "$100",
+            max_price: "$249.99",
+            drawable_count: 3,
+          },
+        ],
+      },
+    }),
+    "clutchpacks",
+    "page_record:0",
+  );
+  const outcome = mapped(mapperInput("clutchpacks", observation));
+  assert.equal(outcome.candidate.candidateKind, "pack");
+  if (outcome.candidate.candidateKind !== "pack") {
+    assert.fail("expected canonical pack candidate");
+  }
+  assert.deepEqual(outcome.candidate.price, { amount: 250, currency: "USD" });
+  assert.equal(outcome.candidate.category, "Sports");
+  assert.equal(outcome.candidate.description, "One graded card per pack.");
+  assert.deepEqual(outcome.candidate.imageReferences, [
+    "https://images.example.invalid/champions.jpg",
+  ]);
+  assert.deepEqual(outcome.candidate.providerReportedEv, {
+    amount: 999,
+    currency: "USD",
+  });
+  assert.equal(outcome.candidate.buybackPercent, null);
+  assert.equal(outcome.candidate.drawCount, 1);
+  assert.equal(outcome.candidate.availability, "available");
+  assert.equal(outcome.evInputStatus, "ready");
+  assert.equal(outcome.evInputCandidate?.buybackPercent, null);
+  assert.deepEqual(
+    outcome.evInputCandidate?.buckets.map(({ bucketId, probability, quantity }) =>
+      ({ bucketId, probability, quantity })
+    ),
+    [
+      { bucketId: "base", probability: 0.75, quantity: 3 },
+      { bucketId: "high", probability: 0.25, quantity: 1 },
+    ],
+  );
+  const canonicalEvInput = canonicalProviderObservationContent(
+    outcome.evInputCandidate!,
+  );
+  assert.equal(canonicalEvInput.buybackPercent, null);
+  assert.deepEqual(canonicalEvInput.readiness, {
+    status: "ready",
+    reasons: [],
+  });
+  const canonicalPack = canonicalProviderObservationContent(outcome.candidate);
+  assert.equal(canonicalPack.providerReportedEvValueMinor, 99_900);
+  assert.equal(canonicalPack.providerReportedEvCurrency, "USD");
+  assert.equal(outcome.warnings.length, 0);
 });
 
 test("ClutchPacks V1 asset facts reach a publishable canonical catalog asset", () => {

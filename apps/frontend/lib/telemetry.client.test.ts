@@ -47,16 +47,25 @@ test("creates bounded product outcomes without raw search or browser identity", 
   assert.match(event.occurredAt, /Z$/);
 });
 
-test("fails closed instead of constructing unbounded bucket events", () => {
+test("supports all five filters and fails closed above the bounded range", () => {
   assert.equal(queryLengthBucket(0), null);
   assert.equal(queryLengthBucket(121), null);
   assert.equal(resultCountBucket(-1), null);
-  assert.equal(
+  assert.ok(
     createFiltersAppliedEvent({
       publicReleaseId: "20000000-0000-4000-8000-000000000002",
       surface: "overview",
       outcome: "results",
       activeFilterCount: 5,
+      resultCount: 10,
+    }),
+  );
+  assert.equal(
+    createFiltersAppliedEvent({
+      publicReleaseId: "20000000-0000-4000-8000-000000000002",
+      surface: "overview",
+      outcome: "results",
+      activeFilterCount: 6,
       resultCount: 10,
     }),
     null,

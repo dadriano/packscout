@@ -167,6 +167,7 @@ const nullableMetricSchema = z.discriminatedUnion("status", [
 export const dashboardKpisSchema = z
   .object({
     totalRepacks: z.number().int().safe().min(0),
+    evaluatedEvRepacks: z.number().int().safe().min(0),
     positiveEvRepacks: z.number().int().safe().min(0),
     medianPackScoutEvPercent: nullableMetricSchema,
     highestChaseValueUsdMinor: z.number().int().safe().min(0).nullable(),
@@ -174,8 +175,15 @@ export const dashboardKpisSchema = z
   })
   .strict()
   .refine(
-    ({ totalRepacks, positiveEvRepacks, highConfidenceRepacks }) =>
-      positiveEvRepacks <= totalRepacks && highConfidenceRepacks <= totalRepacks,
+    ({
+      totalRepacks,
+      evaluatedEvRepacks,
+      positiveEvRepacks,
+      highConfidenceRepacks,
+    }) =>
+      positiveEvRepacks <= evaluatedEvRepacks &&
+      evaluatedEvRepacks <= totalRepacks &&
+      highConfidenceRepacks <= totalRepacks,
     { message: "public_dashboard.count_invalid" },
   );
 

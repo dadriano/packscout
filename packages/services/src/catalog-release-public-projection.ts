@@ -19,6 +19,7 @@ import type {
 } from "./catalog-projection-contracts.ts";
 import type { CanonicalEstimatedEvProjectionContent } from "./estimated-ev-projection-contracts.ts";
 import { publicConfidenceLimitationsFromPipeline } from "./public-confidence-projection.ts";
+import { configuredPublicRepackLink } from "./public-repack-link.ts";
 import type {
   CatalogCanonicalRevisionSnapshot,
   GovernedPublicRepackIdentity,
@@ -423,7 +424,13 @@ export function projectCatalogRelease(input: {
       };
     });
     repackChases.push(...chases);
-    const categoryIds = [...categoryIdsFor(platform, content.category)].sort();
+    const categoryIds = [...new Set([
+      ...categoryIdsFor(platform, content.category),
+      ...chases.flatMap(({ collectible }) => collectible.publicCategoryIds),
+    ])].sort();
+    if (categoryIds.some((categoryId) => !categoryById.has(categoryId))) {
+      throw new CatalogProjectionAssemblyError("CANONICAL_PROJECTION_INVALID");
+    }
     const collectibleTypes = [...new Set(chases.map(({ collectible }) => collectible.collectibleType))].sort();
     const categoryBranches = categoryIds.filter((candidate) =>
       !categoryIds.some((other) => other !== candidate && categoryById.get(other)?.pathPublicCategoryIds.includes(candidate))).length;
@@ -436,6 +443,11 @@ export function projectCatalogRelease(input: {
     const promo = content.availability === "available"
       ? platform.vendor.publicPromo ?? undefined
       : undefined;
+    const repackLink = configuredPublicRepackLink({
+      identity: configuredIdentity,
+      platform,
+      available: content.availability === "available",
+    }) ?? undefined;
     const packScout = packScoutEv({
       estimate: estimates.get(key(revision.platformKey, revision.externalId)) ?? null,
       evInput,
@@ -473,10 +485,16 @@ export function projectCatalogRelease(input: {
         probabilityCoverageBasisPoints: evInput === null ? null
           : Math.round(evInput.coverage.calculatedCoverage * 10_000),
       },
-      actionAvailability: { promo: promo !== undefined, repackLink: false },
+      actionAvailability: {
+        promo: promo !== undefined,
+        repackLink: repackLink !== undefined,
+      },
       sourceUpdatedAt: iso(revision.sourceUpdatedAt),
       description: content.description?.trim() || null,
-      actions: promo === undefined ? {} : { promo },
+      actions: {
+        ...(promo === undefined ? {} : { promo }),
+        ...(repackLink === undefined ? {} : { repackLink }),
+      },
     });
   }
   repacks.sort((left, right) => left.publicRepackId.localeCompare(right.publicRepackId));

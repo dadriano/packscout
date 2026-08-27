@@ -1,5 +1,12 @@
-import { Router, type Response } from "express";
-import { comparisonScope } from "@packscout/contracts";
+import { Router, type RequestHandler, type Response } from "express";
+import {
+  comparisonScope,
+  providerCatalogPlatformKeyV1Schema,
+  publishedInspectableEntityKindSchema,
+  publishedPublicEntityIdSchemaForKind,
+  publicProviderReleaseIdV1Schema,
+  publicRepackIdSchema,
+} from "@packscout/contracts";
 import {
   CanonicalInspectionError,
   type AuthService,
@@ -7,6 +14,10 @@ import {
 } from "@packscout/services";
 import type { SessionCookiePolicy } from "../auth/cookies.ts";
 import type { ParityRuntime } from "../parity-runtime.ts";
+import {
+  PublishedCatalogError,
+  type PublishedCatalogReader,
+} from "../published-catalog-reader.ts";
 import {
   createRequireSession,
   getAuthenticatedActor,
@@ -31,6 +42,14 @@ export interface DataInspectionRouterDependencies {
     CanonicalInspectionService,
     "listProviders" | "summarizeProvider" | "listEntities" | "readEntity"
   >;
+  /** Server-only reader for the product backend's protected inspection API. */
+  readonly published?: Pick<
+    PublishedCatalogReader,
+    | "activeRelease"
+    | "listEntities"
+    | "readDocument"
+    | "readChaseReconciliation"
+  >;
   /** Absent until the published-catalog integration is configured. */
   readonly parity?: ParityRuntime;
 }
@@ -52,6 +71,82 @@ function sendFailure(response: Response, reason: unknown): void {
     error: "Canonical data is temporarily unavailable.",
     code: "CANONICAL_STORE_UNAVAILABLE",
   });
+}
+
+function sendPublishedFailure(response: Response, reason: unknown): void {
+  if (reason instanceof CanonicalInspectionError) {
+    sendFailure(response, reason);
+    return;
+  }
+  if (reason instanceof PublishedCatalogError) {
+    response.status(reason.status).json({
+      error: reason.message,
+      code: reason.code,
+    });
+    return;
+  }
+  response.status(503).json({
+    error: "Published data is temporarily unavailable.",
+    code: "PUBLISHED_CATALOG_UNAVAILABLE",
+  });
+}
+
+function invalidPublishedRequest(response: Response): void {
+  sendPublishedFailure(
+    response,
+    new PublishedCatalogError(
+      "PUBLISHED_CATALOG_REQUEST_INVALID",
+      "That published catalog request was not valid.",
+      400,
+    ),
+  );
+}
+
+function readPublishedLimit(raw: unknown): number | null {
+  if (raw === undefined) return 50;
+  if (typeof raw !== "string" || !/^[1-9][0-9]*$/u.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value <= 200 ? value : null;
+}
+
+function readPublishedCursor(raw: unknown): string | null | undefined {
+  if (raw === undefined) return null;
+  return typeof raw === "string" && raw.length <= 4_096 ? raw : undefined;
+}
+
+function hasOnlyQueryKeys(
+  query: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+): boolean {
+  return Object.keys(query).every((key) => allowed.has(key));
+}
+
+async function assertPublishedProviderBelongsToOrganization(input: {
+  canonical: NonNullable<DataInspectionRouterDependencies["canonical"]>;
+  organizationId: string;
+  platformKey: string;
+}): Promise<void> {
+  const providers = await input.canonical.listProviders(input.organizationId);
+  if (!providers.some(({ platformKey }) => platformKey === input.platformKey)) {
+    throw new CanonicalInspectionError(
+      "CANONICAL_PROVIDER_UNKNOWN",
+      "That provider is not configured in this workspace.",
+      404,
+    );
+  }
+}
+
+async function activePublishedReleaseMatches(input: {
+  published: NonNullable<DataInspectionRouterDependencies["published"]>;
+  platformKey: string;
+  expectedPublicProviderReleaseId: string;
+}): Promise<boolean> {
+  const active = await input.published.activeRelease(input.platformKey);
+  return (
+    active.status === "active" &&
+    active.release.publicProviderReleaseId ===
+      input.expectedPublicProviderReleaseId
+  );
 }
 
 /** A single positive integer from a query string, or undefined. */
@@ -77,6 +172,10 @@ export function createDataInspectionRouter(
     dependencies.cookiePolicy,
     { permission: DATA_INSPECTION_PERMISSION },
   );
+  const noStore: RequestHandler = (_request, response, next) => {
+    response.setHeader("Cache-Control", "no-store");
+    next();
+  };
 
   /**
    * Which canonical kinds have a published counterpart and which are
@@ -125,6 +224,261 @@ export function createDataInspectionRouter(
         );
       } catch (reason) {
         sendFailure(response, reason);
+      }
+    },
+  );
+
+  router.get(
+    "/published/providers/:platformKey/active-release",
+    noStore,
+    read,
+    async (request, response) => {
+      const platform = providerCatalogPlatformKeyV1Schema.safeParse(
+        request.params.platformKey,
+      );
+      if (
+        !platform.success ||
+        !hasOnlyQueryKeys(request.query, new Set())
+      ) {
+        return invalidPublishedRequest(response);
+      }
+      const canonical = dependencies.canonical;
+      const published = dependencies.published;
+      if (!canonical) return sendFailure(response, new Error("unconfigured"));
+      if (!published) {
+        return sendPublishedFailure(
+          response,
+          new PublishedCatalogError(
+            "PUBLISHED_CATALOG_UNCONFIGURED",
+            "Published catalog reads are not configured on this deployment.",
+            503,
+          ),
+        );
+      }
+      try {
+        const actor = getAuthenticatedActor(response);
+        await assertPublishedProviderBelongsToOrganization({
+          canonical,
+          organizationId: actor.organizationId,
+          platformKey: platform.data,
+        });
+        response.status(200).json(await published.activeRelease(platform.data));
+      } catch (reason) {
+        sendPublishedFailure(response, reason);
+      }
+    },
+  );
+
+  router.get(
+    "/published/providers/:platformKey/entities",
+    noStore,
+    read,
+    async (request, response) => {
+      const platform = providerCatalogPlatformKeyV1Schema.safeParse(
+        request.params.platformKey,
+      );
+      const entityKind = publishedInspectableEntityKindSchema.safeParse(
+        request.query.entityKind,
+      );
+      const expectedRelease = publicProviderReleaseIdV1Schema.safeParse(
+        request.query.expectedPublicProviderReleaseId,
+      );
+      const numItems = readPublishedLimit(request.query.limit);
+      const cursor = readPublishedCursor(request.query.cursor);
+      if (
+        !platform.success ||
+        !entityKind.success ||
+        !expectedRelease.success ||
+        numItems === null ||
+        cursor === undefined ||
+        !hasOnlyQueryKeys(
+          request.query,
+          new Set([
+            "entityKind",
+            "expectedPublicProviderReleaseId",
+            "limit",
+            "cursor",
+          ]),
+        )
+      ) {
+        return invalidPublishedRequest(response);
+      }
+      const canonical = dependencies.canonical;
+      const published = dependencies.published;
+      if (!canonical) return sendFailure(response, new Error("unconfigured"));
+      if (!published) {
+        return sendPublishedFailure(
+          response,
+          new PublishedCatalogError(
+            "PUBLISHED_CATALOG_UNCONFIGURED",
+            "Published catalog reads are not configured on this deployment.",
+            503,
+          ),
+        );
+      }
+      try {
+        const actor = getAuthenticatedActor(response);
+        await assertPublishedProviderBelongsToOrganization({
+          canonical,
+          organizationId: actor.organizationId,
+          platformKey: platform.data,
+        });
+        const releaseMatches = await activePublishedReleaseMatches({
+          published,
+          platformKey: platform.data,
+          expectedPublicProviderReleaseId: expectedRelease.data,
+        });
+        if (!releaseMatches) {
+          response.status(200).json({ status: "release_unknown" });
+          return;
+        }
+        response.status(200).json(
+          await published.listEntities({
+            publicProviderReleaseId: expectedRelease.data,
+            entityKind: entityKind.data,
+            numItems,
+            cursor,
+          }),
+        );
+      } catch (reason) {
+        sendPublishedFailure(response, reason);
+      }
+    },
+  );
+
+  router.get(
+    "/published/providers/:platformKey/entities/:entityKind/:publicEntityId",
+    noStore,
+    read,
+    async (request, response) => {
+      const platform = providerCatalogPlatformKeyV1Schema.safeParse(
+        request.params.platformKey,
+      );
+      const entityKind = publishedInspectableEntityKindSchema.safeParse(
+        request.params.entityKind,
+      );
+      const expectedRelease = publicProviderReleaseIdV1Schema.safeParse(
+        request.query.expectedPublicProviderReleaseId,
+      );
+      if (
+        !platform.success ||
+        !entityKind.success ||
+        !expectedRelease.success ||
+        !hasOnlyQueryKeys(
+          request.query,
+          new Set(["expectedPublicProviderReleaseId"]),
+        )
+      ) {
+        return invalidPublishedRequest(response);
+      }
+      const publicEntityId = publishedPublicEntityIdSchemaForKind(
+        entityKind.data,
+      ).safeParse(request.params.publicEntityId);
+      if (!publicEntityId.success) return invalidPublishedRequest(response);
+      const canonical = dependencies.canonical;
+      const published = dependencies.published;
+      if (!canonical) return sendFailure(response, new Error("unconfigured"));
+      if (!published) {
+        return sendPublishedFailure(
+          response,
+          new PublishedCatalogError(
+            "PUBLISHED_CATALOG_UNCONFIGURED",
+            "Published catalog reads are not configured on this deployment.",
+            503,
+          ),
+        );
+      }
+      try {
+        const actor = getAuthenticatedActor(response);
+        await assertPublishedProviderBelongsToOrganization({
+          canonical,
+          organizationId: actor.organizationId,
+          platformKey: platform.data,
+        });
+        const releaseMatches = await activePublishedReleaseMatches({
+          published,
+          platformKey: platform.data,
+          expectedPublicProviderReleaseId: expectedRelease.data,
+        });
+        if (!releaseMatches) {
+          response.status(200).json({ status: "release_unknown" });
+          return;
+        }
+        response.status(200).json(
+          await published.readDocument({
+            publicProviderReleaseId: expectedRelease.data,
+            entityKind: entityKind.data,
+            publicEntityId: publicEntityId.data,
+          }),
+        );
+      } catch (reason) {
+        sendPublishedFailure(response, reason);
+      }
+    },
+  );
+
+  router.get(
+    "/published/providers/:platformKey/repacks/:publicRepackId/chase-reconciliation",
+    noStore,
+    read,
+    async (request, response) => {
+      const platform = providerCatalogPlatformKeyV1Schema.safeParse(
+        request.params.platformKey,
+      );
+      const publicRepackId = publicRepackIdSchema.safeParse(
+        request.params.publicRepackId,
+      );
+      const expectedRelease = publicProviderReleaseIdV1Schema.safeParse(
+        request.query.expectedPublicProviderReleaseId,
+      );
+      if (
+        !platform.success ||
+        !publicRepackId.success ||
+        !expectedRelease.success ||
+        !hasOnlyQueryKeys(
+          request.query,
+          new Set(["expectedPublicProviderReleaseId"]),
+        )
+      ) {
+        return invalidPublishedRequest(response);
+      }
+      const canonical = dependencies.canonical;
+      const published = dependencies.published;
+      if (!canonical) return sendFailure(response, new Error("unconfigured"));
+      if (!published) {
+        return sendPublishedFailure(
+          response,
+          new PublishedCatalogError(
+            "PUBLISHED_CATALOG_UNCONFIGURED",
+            "Published catalog reads are not configured on this deployment.",
+            503,
+          ),
+        );
+      }
+      try {
+        const actor = getAuthenticatedActor(response);
+        await assertPublishedProviderBelongsToOrganization({
+          canonical,
+          organizationId: actor.organizationId,
+          platformKey: platform.data,
+        });
+        const releaseMatches = await activePublishedReleaseMatches({
+          published,
+          platformKey: platform.data,
+          expectedPublicProviderReleaseId: expectedRelease.data,
+        });
+        if (!releaseMatches) {
+          response.status(200).json({ status: "release_unknown" });
+          return;
+        }
+        response.status(200).json(
+          await published.readChaseReconciliation({
+            publicProviderReleaseId: expectedRelease.data,
+            publicRepackId: publicRepackId.data,
+          }),
+        );
+      } catch (reason) {
+        sendPublishedFailure(response, reason);
       }
     },
   );

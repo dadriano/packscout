@@ -120,7 +120,7 @@ export interface CanonicalEvInputCandidate extends CanonicalCandidateBase {
   readonly currency: string;
   readonly unitBasis: "per_draw" | "per_pack";
   readonly drawCount: number;
-  readonly buybackPercent: number;
+  readonly buybackPercent: number | null;
   readonly totalQuantity: number;
   readonly buckets: readonly {
     readonly bucketId: string;
@@ -330,9 +330,8 @@ function evInputFromFacts(
     evidence.unitBasis !== null &&
     Number.isSafeInteger(evidence.drawCount) &&
     (evidence.drawCount ?? 0) > 0 &&
-    evidence.buybackPercent !== null &&
-    evidence.buybackPercent >= 0 &&
-    evidence.buybackPercent <= 100 &&
+    (evidence.buybackPercent === null ||
+      (evidence.buybackPercent >= 0 && evidence.buybackPercent <= 100)) &&
     Number.isSafeInteger(evidence.totalQuantity) &&
     (evidence.totalQuantity ?? 0) > 0 &&
     evidence.buckets.length > 0 &&
@@ -387,7 +386,7 @@ function evInputFromFacts(
     currency: evidence.currency!,
     unitBasis: evidence.unitBasis!,
     drawCount: evidence.drawCount!,
-    buybackPercent: evidence.buybackPercent!,
+    buybackPercent: evidence.buybackPercent,
     totalQuantity: evidence.totalQuantity!,
     buckets: Object.freeze(
       evidence.buckets

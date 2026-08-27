@@ -146,7 +146,7 @@ stable `dataforrest-<platform>-records-v1` provider identity namespace. Changing
 that namespace or its evidenced record-ID scopes requires a separately designed
 identity migration.
 
-The current adapter is `dataforrest-events-adapter-v2`; the provider endpoint
+The current adapter is `dataforrest-events-adapter-v3`; the provider endpoint
 and normalized contract remain V1. It copies the two timestamps, outer
 relationships, event code, amount, currency, payment method, and tri-state
 availability into `packscout.provider-observation.v1`.
@@ -157,6 +157,9 @@ therefore read exactly `data.name`; Courtyard packs and non-ClutchPacks card
 kinds read exactly their declared provider label. Adapter v2 reads ClutchPacks
 catalog-card display facts from the exact `data.asset` allowlist documented in
 [`ingestion-pipelines/dataforrest-clutchpacks-card-v2.md`](ingestion-pipelines/dataforrest-clutchpacks-card-v2.md).
+Adapter v3 retains those card semantics and adds the exact ClutchPacks pack
+allowlist documented in
+[`ingestion-pipelines/dataforrest-clutchpacks-pack-v3.md`](ingestion-pipelines/dataforrest-clutchpacks-pack-v3.md).
 Every other nested key stays protected provenance. The generic mapper never
 receives the native object.
 
@@ -196,7 +199,7 @@ independent 24-page windows: 288 input records, 216 accepted records, and 72
 quarantined records. Every retained component uses a PostgreSQL physical
 table/index/TOAST slope. The committed bound adds one measured 8 KiB allocation
 page per affected relation instead of an arbitrary multiplier. This produces
-11,776 structured/canonical bytes per input record, 3,322 bytes per record for
+14,763 structured/canonical bytes per input record, 4,346 bytes per record for
 the seven-day normalized payload, 15,020 bytes per committed page before raw
 payload expiry, and separately measured quarantine lineage/evidence. The complete
 machine-readable artifact is
@@ -224,26 +227,26 @@ twice. It projects:
 
 | Component | Projected bytes |
 | --- | ---: |
-| Structured and canonical data | 12,549,999,703,552 |
+| Structured and canonical data | 15,733,325,885,151 |
 | Conservative raw full history | 98,700,000,000 |
 | Seven-day steady-poll raw pages | 25,902,938,880 |
-| Seven-day normalized page payload | 115,229,805,394 |
+| Seven-day normalized page payload | 150,749,167,442 |
 | Permanent expired page lineage | 32,014,439,080 |
 | Quarantine lineage and evidence | 219,894,433,264 |
 | Page diagnostics | 413,598,846 |
 | Terminal request attempts | 826,995,838 |
 | Permanent compact attempt lineage | 13,824,610,644 |
-| **Total** | **13,056,806,525,498** |
+| **Total** | **16,275,652,069,145** |
 
 At a 60-second interval, four sources create 172,800 poll attempts in 30 days;
 including the 29,054 initial pages gives 201,854 first-window attempts. Leaving
 25% of the target volume free after the projected import requires
-**17,409,075,367,331 available bytes** before Task 010 may start. The 200 GB
+**21,700,869,425,527 available bytes** before Task 010 may start. The 200 GB
 provisional floor is therefore superseded by this measured requirement. The
 80%-used abort threshold remains independently enforced.
 
 The refreshed committed host measurement reported 994,662,584,320 bytes of capacity and
-only 107,882,696,704 available bytes. Admission was rejected for insufficient
+only 148,425,744,384 available bytes. Admission was rejected for insufficient
 free bytes, an already-exceeded 80% threshold, and a projected threshold
 breach. Task 010 must not start a real backfill on this host. This does not block
 contract, adapter, mapper, importer, scheduler, admin, or UI implementation.
@@ -257,9 +260,9 @@ and otherwise retain JSON last-write semantics. The committed 8 MiB V1
 measurement on 2026-08-27 processed all 50,000 records across 100 pages in
 four-page concurrent waves. Every page carried 479,004 JSON values, including
 945 high-overhead empty-object facts per record, to exercise the 500-record,
-maximum-byte, and near-maximum-node boundaries together. Three independent
-fresh-process runs passed the four-page aggregate gates; the worst peak delta
-was 175,751,168 bytes and the worst retained growth was 21,947 bytes, beneath
+maximum-byte, and near-maximum-node boundaries together. The five-trial
+measurement passed the four-page aggregate gates; the peak delta was
+131,088,384 bytes and retained growth was 37,920 bytes, beneath
 the 256 MiB peak-delta and 32 MiB retained-growth limits. The dedicated Task 010 runner now
 pins four source execution slots beneath one singleton supervisor. Its four
 platform request-permit lanes are independently operated at one request, and connection

@@ -161,6 +161,7 @@ test("dashboard and errors expose repack vocabulary with no partial data", () =>
       metadata: release.metadata,
       kpis: {
         totalRepacks: 2,
+        evaluatedEvRepacks: 1,
         positiveEvRepacks: 1,
         medianPackScoutEvPercent: {
           status: "available" as const,
@@ -179,6 +180,19 @@ test("dashboard and errors expose repack vocabulary with no partial data", () =>
     },
   };
   assert.equal(getDashboardBundleResultSchema.safeParse(result).success, true);
+  assert.equal(
+    getDashboardBundleResultSchema.safeParse({
+      ...result,
+      data: {
+        ...result.data,
+        kpis: {
+          ...result.data.kpis,
+          evaluatedEvRepacks: 0,
+        },
+      },
+    }).success,
+    false,
+  );
 
   for (const code of [
     "INVALID_QUERY",

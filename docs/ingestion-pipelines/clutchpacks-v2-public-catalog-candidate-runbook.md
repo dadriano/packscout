@@ -64,7 +64,7 @@ directory.
 1. Run the read-only plan with the final absolute output path:
 
    ```bash
-   npm run generate:catalog-candidate:clutchpacks:local -- \
+   npm run generate:catalog-candidate:clutchpacks-v2:local -- \
      --output /absolute/private/path/clutchpacks-v2-catalog.json
    ```
 
@@ -76,7 +76,7 @@ directory.
    output path.
 
    ```bash
-   npm run generate:catalog-candidate:clutchpacks:local -- \
+   npm run generate:catalog-candidate:clutchpacks-v2:local -- \
      --execute \
      --output /absolute/private/path/clutchpacks-v2-catalog.json \
      --confirmation "WRITE CLUTCHPACKS V2 CATALOG LOCAL <16hex>"

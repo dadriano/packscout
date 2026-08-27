@@ -590,7 +590,7 @@ test("request shapes are operation-specific and preserve an opaque cursor exactl
   }
 });
 
-test("a legacy adapter instance refuses the current v2 interpretation pin", async () => {
+test("a legacy adapter instance refuses the current v3 interpretation pin", async () => {
   const httpClient = async () =>
     jsonResponse(dataforestEventsV1EvidenceFixture.collector_crypt.initial);
   const v1 = adapterWithClient(

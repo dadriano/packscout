@@ -1,10 +1,15 @@
 "use client";
 
-import type { PublicRepackViewSummary } from "@packscout/contracts";
+import Link from "next/link";
+import type {
+  DashboardKpis,
+  PublicRepackViewSummary,
+} from "@packscout/contracts";
 import type { MetricValuePresentation } from "@/lib/metric-presentation";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { CatalogImage } from "./CatalogImage.client";
 import {
+  presentOpportunityEmptyState,
   presentOpportunities,
   type DisplayField,
 } from "./overview-presentation";
@@ -17,6 +22,8 @@ export type OpportunitySelectionHandler = (
 
 type OpportunityTableProps = Readonly<{
   opportunities: readonly PublicRepackViewSummary[];
+  evaluatedEvRepacks: DashboardKpis["evaluatedEvRepacks"];
+  repacksHref: string;
   selectedPublicRepackId: string | null;
   onSelectOpportunity: OpportunitySelectionHandler;
 }>;
@@ -84,10 +91,13 @@ function ColumnLabel({
 
 export function OpportunityTable({
   opportunities,
+  evaluatedEvRepacks,
+  repacksHref,
   selectedPublicRepackId,
   onSelectOpportunity,
 }: OpportunityTableProps) {
   const rows = presentOpportunities(opportunities);
+  const emptyState = presentOpportunityEmptyState(evaluatedEvRepacks);
 
   return (
     <section aria-labelledby="top-opportunities-heading" className={styles.section}>
@@ -103,113 +113,127 @@ export function OpportunityTable({
         </span>
       </div>
 
-      <div
-        aria-label="Top opportunities comparison"
-        className={styles.scrollRegion}
-        role="region"
-        tabIndex={0}
-      >
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th scope="col">#</th>
-              <th scope="col">
-                <ColumnLabel field="repack">Repack</ColumnLabel>
-              </th>
-              <th scope="col">
-                <ColumnLabel field="vendor">Vendor</ColumnLabel>
-              </th>
-              <th scope="col">
-                <ColumnLabel field="category">Category</ColumnLabel>
-              </th>
-              <th scope="col">
-                <ColumnLabel field="repackPrice">Repack price</ColumnLabel>
-              </th>
-              <th scope="col">
-                <ColumnLabel field="evPercent">EV %</ColumnLabel>
-              </th>
-              <th scope="col">
-                <ColumnLabel field="buybackPercent">Buyback %</ColumnLabel>
-              </th>
-              <th scope="col">
-                <ColumnLabel align="end" field="topChaseValue">
-                  Top chase value
-                </ColumnLabel>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const selected = row.publicRepackId === selectedPublicRepackId;
-              return (
-                <tr data-selected={selected ? "true" : "false"} key={row.publicRepackId}>
-                  <td className={styles.rank}>{row.rank}</td>
-                  <td className={styles.packCell}>
-                    <button
-                      aria-label={`Inspect ${row.name}${selected ? ", selected" : ""}`}
-                      aria-pressed={selected}
-                      className={styles.selectPack}
-                      onClick={(event) =>
-                        onSelectOpportunity(row.publicRepackId, event.currentTarget)
-                      }
-                      type="button"
-                    >
-                      <CatalogImage
-                        fallbackAlt={row.name}
-                        image={row.primaryImage}
-                        variant="thumbnail"
-                      />
-                      <span className={styles.packName}>{row.name}</span>
-                      {selected ? (
-                        <span aria-hidden="true" className={styles.selectedLabel}>
-                          Selected
-                        </span>
-                      ) : null}
-                    </button>
-                  </td>
-                  <td>
-                    <span className={styles.vendor}>
-                      {row.vendorLogoUrl ? (
+      {rows.length > 0 ? (
+        <div
+          aria-label="Top opportunities comparison"
+          className={styles.scrollRegion}
+          role="region"
+          tabIndex={0}
+        >
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">
+                  <ColumnLabel field="repack">Repack</ColumnLabel>
+                </th>
+                <th scope="col">
+                  <ColumnLabel field="vendor">Vendor</ColumnLabel>
+                </th>
+                <th scope="col">
+                  <ColumnLabel field="category">Category</ColumnLabel>
+                </th>
+                <th scope="col">
+                  <ColumnLabel field="repackPrice">Repack price</ColumnLabel>
+                </th>
+                <th scope="col">
+                  <ColumnLabel field="evPercent">EV %</ColumnLabel>
+                </th>
+                <th scope="col">
+                  <ColumnLabel field="buybackPercent">Buyback %</ColumnLabel>
+                </th>
+                <th scope="col">
+                  <ColumnLabel align="end" field="topChaseValue">
+                    Top chase value
+                  </ColumnLabel>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const selected = row.publicRepackId === selectedPublicRepackId;
+                return (
+                  <tr
+                    data-selected={selected ? "true" : "false"}
+                    key={row.publicRepackId}
+                  >
+                    <td className={styles.rank}>{row.rank}</td>
+                    <td className={styles.packCell}>
+                      <button
+                        aria-label={`Inspect ${row.name}${selected ? ", selected" : ""}`}
+                        aria-pressed={selected}
+                        className={styles.selectPack}
+                        onClick={(event) =>
+                          onSelectOpportunity(
+                            row.publicRepackId,
+                            event.currentTarget,
+                          )
+                        }
+                        type="button"
+                      >
                         <CatalogImage
-                          decorative
-                          fallback="none"
-                          fallbackAlt={`${row.vendorDisplayName} logo`}
-                          image={{
-                            url: row.vendorLogoUrl,
-                            alt: `${row.vendorDisplayName} logo`,
-                          }}
-                          variant="vendor"
+                          fallbackAlt={row.name}
+                          image={row.primaryImage}
+                          variant="thumbnail"
                         />
-                      ) : null}
-                      <span>{row.vendorDisplayName}</span>
-                    </span>
-                  </td>
-                  <td>{row.category}</td>
-                  <td>
-                    <PriceCell price={row.repackPrice} />
-                  </td>
-                  <td>
-                    <MetricCell metric={row.packScoutEvPercent} />
-                    <span className={styles.unavailableReason}>
-                      Confidence: {row.packScoutConfidence.displayValue}
-                    </span>
-                  </td>
-                  <td>
-                    <MetricCell metric={row.buyback} />
-                  </td>
-                  <td>
-                    <MetricCell metric={row.topChaseValue} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {rows.length === 0 ? (
-        <p className={styles.emptyState}>No estimated opportunities match these filters.</p>
-      ) : null}
+                        <span className={styles.packName}>{row.name}</span>
+                        {selected ? (
+                          <span
+                            aria-hidden="true"
+                            className={styles.selectedLabel}
+                          >
+                            Selected
+                          </span>
+                        ) : null}
+                      </button>
+                    </td>
+                    <td>
+                      <span className={styles.vendor}>
+                        {row.vendorLogoUrl ? (
+                          <CatalogImage
+                            decorative
+                            fallback="none"
+                            fallbackAlt={`${row.vendorDisplayName} logo`}
+                            image={{
+                              url: row.vendorLogoUrl,
+                              alt: `${row.vendorDisplayName} logo`,
+                            }}
+                            variant="vendor"
+                          />
+                        ) : null}
+                        <span>{row.vendorDisplayName}</span>
+                      </span>
+                    </td>
+                    <td>{row.category}</td>
+                    <td>
+                      <PriceCell price={row.repackPrice} />
+                    </td>
+                    <td>
+                      <MetricCell metric={row.packScoutEvPercent} />
+                      <span className={styles.unavailableReason}>
+                        Confidence: {row.packScoutConfidence.displayValue}
+                      </span>
+                    </td>
+                    <td>
+                      <MetricCell metric={row.buyback} />
+                    </td>
+                    <td>
+                      <MetricCell metric={row.topChaseValue} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className={styles.emptyState}>
+          <p role="status">{emptyState.message}</p>
+          <Link className={styles.emptyAction} href={repacksHref}>
+            {emptyState.actionLabel}
+          </Link>
+        </div>
+      )}
     </section>
   );
 }

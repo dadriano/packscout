@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CatalogRouteRecovery, EmptyCatalog } from "@/components/catalog-state";
+import { CatalogResultRecovery, EmptyCatalog } from "@/components/catalog-state";
 import { ProviderBanner } from "@/components/dashboard/ProviderBanner";
 import { LandingPage } from "@/components/landing/LandingPage";
 import { DashboardDisclaimer } from "@/components/shell/DashboardDisclaimer";
@@ -87,7 +87,11 @@ export default async function DashboardOverviewPage({
         <DataReleaseStatusReporter status={{ state: "unavailable" }} />
         {providerBanner}
         <DashboardPageHeader activeView="overview" overviewHref={dashboardHref} />
-        <CatalogRouteRecovery />
+        <CatalogResultRecovery
+          error={result}
+          recoveryActionLabel="Reset Dashboard"
+          recoveryHref={dashboardHref}
+        />
       </>
     );
   }

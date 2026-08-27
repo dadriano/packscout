@@ -11,7 +11,7 @@ owns only the guarded Task010 target, configuration, first backfill, and final
 reconciliation procedure.
 
 DataForrest has one production identity: source type
-`dataforrest-events-v1`, adapter `dataforrest-events-adapter-v2`, normalized
+`dataforrest-events-v1`, adapter `dataforrest-events-adapter-v3`, normalized
 observation `packscout.provider-observation.v1`, and mapper revision `1`.
 Historical adapter, observation, and mapper revisions are not upgrade inputs.
 Any local database that contains a v2 or v3 pin must be rebuilt before this

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { tsImport } from "tsx/esm/api";
 
 const {
-  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   providerIdentityNamespaceByLaunchProvider,
@@ -70,7 +70,7 @@ function evidence(overrides = {}) {
     sourcePauseRequested: false,
     sourceRevisionCount: 1,
     sourceRevisionId,
-    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     mapperKey: mapper.mapperKey,
     mapperVersion: mapper.mapperVersion,
@@ -83,7 +83,7 @@ function evidence(overrides = {}) {
     latestRunFinished: true,
     latestRunFailureCode: null,
     latestRunSourceRevisionId: sourceRevisionId,
-    latestRunAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    latestRunAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
     latestRunNormalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     latestRunMapperKey: mapper.mapperKey,
     latestRunMapperVersion: mapper.mapperVersion,

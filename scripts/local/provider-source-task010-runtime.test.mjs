@@ -9,6 +9,7 @@ const {
   assertTask010ProviderSourceRevisionPins,
 } = await tsImport("./provider-source-task010-runtime.mts", import.meta.url);
 const {
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
 } = await tsImport("@packscout/contracts", import.meta.url);
@@ -59,9 +60,10 @@ test("Task010 topology accepts only the current active connection adapter", () =
   for (const revisions of [
     [],
     [{ sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION }],
-    [{ sourceAdapterVersion: "dataforrest-events-adapter-v3" }],
+    [{ sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION }],
+    [{ sourceAdapterVersion: "dataforrest-events-adapter-v4" }],
     [
-      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION },
+      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION },
       { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION },
     ],
   ]) {
@@ -82,9 +84,10 @@ test("Task010 topology rejects historical connection revision contamination", ()
   );
   for (const revisions of [
     [{ sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION }],
-    [{ sourceAdapterVersion: "dataforrest-events-adapter-v3" }],
+    [{ sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION }],
+    [{ sourceAdapterVersion: "dataforrest-events-adapter-v4" }],
     [
-      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION },
+      { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION },
       { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION },
     ],
   ]) {
@@ -99,7 +102,7 @@ test("Task010 configuration topology permits no source revisions yet", () => {
   assert.doesNotThrow(() => assertTask010ProviderSourceRevisionPins([]));
 });
 
-test("Task010 topology accepts only the current adapter-v2 observation-v1 mapper-v1 tuple", () => {
+test("Task010 topology accepts only the current adapter-v3 observation-v1 mapper-v1 tuple", () => {
   assert.doesNotThrow(() =>
     assertTask010ProviderSourceRevisionPins(currentSourcePins),
   );
@@ -115,7 +118,8 @@ test("Task010 topology rejects legacy and mixed provider source tuples", () => {
       normalizedContractVersion: "packscout.provider-observation.v2",
     },
     { sourceAdapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION },
-    { sourceAdapterVersion: "dataforrest-events-adapter-v3" },
+    { sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION },
+    { sourceAdapterVersion: "dataforrest-events-adapter-v4" },
     { mapperVersion: "2" },
     { normalizedContractVersion: "packscout.provider-observation.v2" },
   ]) {

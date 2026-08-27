@@ -55,7 +55,7 @@ export function OverviewDashboard({
       : null;
 
   const showSideInspector =
-    inspectorOpen && inspectorPlacement === "side";
+    inspectorOpen && inspectorPlacement === "side" && selectedRepack !== null;
   const showSheetInspector =
     inspectorOpen && inspectorPlacement === "sheet" && selectedRepack;
   const repacksHref = serializeCatalogQueryState({
@@ -73,8 +73,10 @@ export function OverviewDashboard({
         <OverviewKpis kpis={bundle.kpis} repacksHref={repacksHref} />
         {controls ? <div className={styles.controls}>{controls}</div> : null}
         <OpportunityTable
+          evaluatedEvRepacks={bundle.kpis.evaluatedEvRepacks}
           onSelectOpportunity={onSelectOpportunity}
           opportunities={bundle.opportunities}
+          repacksHref={repacksHref}
           selectedPublicRepackId={selectedId}
         />
         <div className={styles.summaryGrid}>
@@ -93,26 +95,16 @@ export function OverviewDashboard({
 
       {showSideInspector ? (
         <div className={styles.inspectorColumn}>
-          {selectedRepack ? (
-            <RepackInspector
-              clipboardWriter={clipboardWriter}
-              key={selectedRepack.publicRepackId}
-              metadata={bundle.metadata}
-              onActionOutcome={onInspectorAction}
-              onClose={onCloseInspector}
-              repack={selectedRepack}
-              placement={inspectorPlacement}
-              returnFocusRef={inspectorReturnFocusRef}
-            />
-          ) : (
-            <aside aria-label="Repack details" className={styles.pendingInspector}>
-              <p>
-                {selectedId
-                  ? "Updating selected repack details…"
-                  : "Select an opportunity to inspect its current evidence."}
-              </p>
-            </aside>
-          )}
+          <RepackInspector
+            clipboardWriter={clipboardWriter}
+            key={selectedRepack.publicRepackId}
+            metadata={bundle.metadata}
+            onActionOutcome={onInspectorAction}
+            onClose={onCloseInspector}
+            repack={selectedRepack}
+            placement={inspectorPlacement}
+            returnFocusRef={inspectorReturnFocusRef}
+          />
         </div>
       ) : null}
 

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Prisma, PrismaClient } from "@prisma/client";
 import {
-  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -92,7 +92,7 @@ if (!clutchpacksMapperDescriptor) refuse("CLUTCHPACKS_MAPPER_PINS_MISSING");
 
 export const CLUTCHPACKS_V2_CANARY_SOURCE_PINS = Object.freeze({
   sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-  adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
   mapperKey: clutchpacksMapperDescriptor.mapperKey,
   mapperVersion: clutchpacksMapperDescriptor.mapperVersion,
@@ -431,7 +431,7 @@ export function assertClutchpacksV2CanaryTargetIsSafe(
     snapshot.connectionRevisions.some((revision) =>
       revision.id !== environment.connectionRevisionId ||
       revision.profileId !== environment.profileId ||
-      revision.adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+      revision.adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION
     ) ||
     snapshot.sources.length > 1 ||
     snapshot.sources.some((source) =>
@@ -1050,7 +1050,7 @@ async function main(): Promise<void> {
       sourceDatabase: environment.sourceDatabaseName,
       targetDatabase: environment.targetDatabaseName,
       targetDigest: environment.targetDigest,
-      sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+      sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
       cursor: "Feed start",
       state: "draft",
       replayCapacityReady: capacity.ready,

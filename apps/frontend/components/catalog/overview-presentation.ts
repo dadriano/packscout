@@ -69,6 +69,11 @@ export type CatalogSummaryPresentation = Readonly<{
   accessibleLabel: string;
 }>;
 
+export type OpportunityEmptyStatePresentation = Readonly<{
+  message: string;
+  actionLabel: string;
+}>;
+
 function countLabel(count: number): string {
   return COUNT_FORMATTER.format(count);
 }
@@ -112,6 +117,21 @@ export function presentDashboardKpis(
   kpis: DashboardKpis,
 ): readonly KpiPresentation[] {
   const median = presentSummaryEvPercent(kpis.medianPackScoutEvPercent);
+  const positiveEvUnavailable = kpis.evaluatedEvRepacks === 0;
+  const positiveEvReason = positiveEvUnavailable
+    ? getPublicReasonCopy("ESTIMATE_UNAVAILABLE")
+    : undefined;
+  const positiveEvState: KpiPresentation["state"] = positiveEvUnavailable
+    ? "unavailable"
+    : kpis.positiveEvRepacks > 0
+      ? "positive"
+      : "neutral";
+  const positiveEvStateLabel: NonNullable<KpiPresentation["stateLabel"]> =
+    positiveEvUnavailable
+      ? "Unavailable"
+      : kpis.positiveEvRepacks > 0
+        ? "Positive"
+        : "Neutral";
   const highestValue = kpis.highestChaseValueUsdMinor === null
     ? "Unavailable"
     : formatMoneyMinorUnits({
@@ -134,11 +154,16 @@ export function presentDashboardKpis(
     {
       id: "positiveEv",
       label: "Positive EV",
-      value: countLabel(kpis.positiveEvRepacks),
+      value: positiveEvUnavailable
+        ? "Unavailable"
+        : countLabel(kpis.positiveEvRepacks),
       helper: "Repacks with positive EV",
-      accessibleLabel: `${countLabel(kpis.positiveEvRepacks)} active repacks have positive EV.`,
-      state: "positive",
-      stateLabel: "Positive",
+      accessibleLabel: positiveEvUnavailable
+        ? `Positive EV: Unavailable. ${positiveEvReason}`
+        : `${countLabel(kpis.positiveEvRepacks)} of ${countLabel(kpis.evaluatedEvRepacks)} active evaluated repacks have positive EV.`,
+      state: positiveEvState,
+      stateLabel: positiveEvStateLabel,
+      ...(positiveEvReason ? { reasonCopy: positiveEvReason } : {}),
     },
     {
       id: "medianEv",
@@ -166,6 +191,21 @@ export function presentDashboardKpis(
         : {}),
     },
   ] satisfies readonly KpiPresentation[]);
+}
+
+export function presentOpportunityEmptyState(
+  evaluatedEvRepacks: DashboardKpis["evaluatedEvRepacks"],
+): OpportunityEmptyStatePresentation {
+  return evaluatedEvRepacks === 0
+    ? {
+        message:
+          "PackScout EV estimates are not available for the repacks matching these filters yet.",
+        actionLabel: "View matching repacks",
+      }
+    : {
+        message: "No ranked opportunities are available for these filters.",
+        actionLabel: "View matching repacks",
+      };
 }
 
 export function presentRepackPrice(price: PublicPrice): DisplayField {

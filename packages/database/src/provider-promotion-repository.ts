@@ -209,6 +209,9 @@ export class PrismaProviderPromotionRepository {
       const lane = lanes[0]!;
       const previous = lane.latestCheckpointBody === null
         ? null : parseProviderCheckpointIdentityBody(lane.latestCheckpointBody);
+      const configurationEpochAdvanced = previous !== null &&
+        input.checkpoint.sharedConfigurationEpoch.publicChangeSequence >
+          previous.sharedConfigurationEpoch.publicChangeSequence;
       if (
         input.checkpoint.settledSequence < lane.settledCheckpoint ||
         input.checkpoint.sourceHeadSequence < lane.sourceHeadCheckpoint ||
@@ -233,7 +236,8 @@ export class PrismaProviderPromotionRepository {
           input.checkpoint.lastSuccessfulObservationAt <
             previous.lastSuccessfulObservationAt ||
           (input.checkpoint.lastSuccessfulObservationAt.getTime() ===
-              previous.lastSuccessfulObservationAt.getTime() && (
+              previous.lastSuccessfulObservationAt.getTime() &&
+            !configurationEpochAdvanced && (
             input.checkpoint.staleAt.getTime() !== previous.staleAt.getTime() ||
             input.checkpoint.freshness !== previous.freshness
           ))

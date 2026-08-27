@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   launchProviderKeys,
@@ -13,7 +14,7 @@ import {
 } from "./production-source-adapter-registry.ts";
 import { SourceAdapterRegistryError } from "./source-adapter-registry.ts";
 
-test("production registry preserves legacy pins and advertises only adapter v2", () => {
+test("production registry preserves v1 and v2 pins and advertises only adapter v3", () => {
   const registry = createProductionSourceAdapterRegistry();
   assert.deepEqual(registry.keys(), [DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY]);
   assert.deepEqual(
@@ -30,9 +31,17 @@ test("production registry preserves legacy pins and advertises only adapter v2",
     DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
     provider,
   ));
+  const v2 = launchProviderKeys.map((provider) => registry.resolve(
+    DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+    DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+    provider,
+  ));
   assert.equal(new Set(current).size, 1);
   assert.equal(new Set(legacy).size, 1);
+  assert.equal(new Set(v2).size, 1);
   assert.notEqual(current[0], legacy[0]);
+  assert.notEqual(current[0], v2[0]);
+  assert.notEqual(v2[0], legacy[0]);
   assert.deepEqual(
     current[0]?.manifest.supportedProviders.map(({ provider }) => provider),
     [...launchProviderKeys],
@@ -44,7 +53,7 @@ test("production registry preserves legacy pins and advertises only adapter v2",
   assert.throws(
     () => registry.resolve(
       DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-      "dataforrest-events-adapter-v3",
+      "dataforrest-events-adapter-v4",
       "courtyard",
     ),
     (error) =>
