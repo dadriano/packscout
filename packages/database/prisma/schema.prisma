@@ -1210,7 +1210,8 @@ model promotion_operations {
   @@unique([organization_id, deployment_key, lane_key, operation_id], map: "promotion_operations_lane_operation_unique")
 }
 
-/// Stable, organization-scoped connection capacity shared by every source using one credential.
+/// Stable, organization-scoped credential shared by source lanes. request_limit
+/// is enforced independently per platform and for the connection-test lane.
 /// Conditional and tenant-preserving foreign keys are defined in the forward migration.
 model source_connection_profiles {
   id                   String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -1564,19 +1565,23 @@ model source_supervisor_epochs {
   @@index([environment_key, state, lease_expires_at], map: "source_supervisor_epochs_owner_idx")
 }
 
-/// Durable source-neutral request-capacity snapshot for the owning epoch.
-model source_supervisor_profile_states {
+/// Durable per-platform and connection-test request-capacity snapshot for the
+/// owning epoch. Platform lanes share a credential without sharing permits.
+model source_supervisor_request_lane_states {
   id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   supervisor_epoch_id    String   @db.Uuid
   organization_id        String   @db.Uuid
   connection_profile_id  String   @db.Uuid
+  request_scope          String
+  provider_id            String?  @db.Uuid
+  lane_key               String
   approved_request_limit Int
   active_request_permits Int      @default(0)
   waiting_operations     Int      @default(0)
   updated_at             DateTime @db.Timestamptz(6)
 
-  @@unique([supervisor_epoch_id, organization_id, connection_profile_id], map: "source_supervisor_profile_states_scope_unique")
-  @@index([organization_id, connection_profile_id, updated_at], map: "source_supervisor_profile_states_profile_idx")
+  @@unique([supervisor_epoch_id, organization_id, connection_profile_id, lane_key], map: "source_supervisor_request_lane_states_scope_unique")
+  @@index([organization_id, connection_profile_id, lane_key, updated_at], map: "source_supervisor_request_lane_states_profile_idx")
 }
 
 /// Durable supervisor-owned lane state. Admin reads this snapshot instead of
@@ -1616,7 +1621,7 @@ model provider_source_runtime_states {
   @@index([supervisor_epoch_id, updated_at], map: "provider_source_runtime_states_epoch_idx")
 }
 
-/// Sanitized pre-call record. It is terminalized before its profile permit wakes another waiter.
+/// Sanitized pre-call record. It is terminalized before its exact request-lane permit wakes another waiter.
 model source_request_attempts {
   id                                      String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organization_id                         String                        @db.Uuid

@@ -63,12 +63,12 @@ Atomic importer ----------- evidence + canonical data + EV work + cursor
 
 ## Interpreting the storage estimate
 
-Do not use the 8.76 TB maximum-throughput scenario as a prediction for a local
-backfill. It assumes four new 250-record pages every minute for 365 days. The
+Do not use the 13.06 TB maximum-throughput scenario as a prediction for a local
+backfill. The current stress artifact assumes four new 500-record pages every minute for 365 days. The
 first live `packscout_dev` sample instead measured 7,024 marginal bytes per
 committed record and 8,123 bytes per record including fixed database overhead.
 At the dated 14,526,877-record provider baseline, that is a provisional
-136.1–157.3 GB planning range with 25% free headroom, not 8.76 TB. See the
+136.1–157.3 GB planning range with 25% free headroom, not 13.06 TB. See the
 [live capacity observation](../provider-source-live-capacity-observation-2026-08-24.md)
 for the samples, assumptions, and remeasurement points.
 

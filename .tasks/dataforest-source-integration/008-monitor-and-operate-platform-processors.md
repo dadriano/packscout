@@ -25,9 +25,9 @@ The UI must distinguish shared connection impact from source-local state. It mus
 
 ### Overview
 
-- Show one DataForrest connection summary with endpoint host, masked credential status, last or recovery test, shared health generation and blocking episode, live supervisor state, execution slots used and maximum, and request permits used and maximum.
+- Show one DataForrest connection summary with endpoint host, masked credential status, last or recovery test, shared health generation and blocking episode, and live supervisor state. Show execution slots used and maximum plus separate request-permit snapshots for all four platform lanes and the connection-test lane when present; never present one aggregate profile cap.
 - Show one row each for Courtyard, Collector Crypt, Phygitals, and ClutchPacks with source type, source and mapper revisions, lifecycle, processor activity, normalized continuation, sync phase, freshness, quality, interval, next due time, last progress, and head time.
-- Show pages, records by source stream, dispositions, throughput, elapsed time, retry count, open quarantine, active run, lease age, and an explicit wait reason.
+- Show pages, records by source stream, dispositions, throughput, elapsed time, retry count, open quarantine, active run, lease age, and an explicit wait reason. A platform-lane wait reports `request_lane_capacity`, distinct from execution or disk capacity and connection recovery.
 - Present percent complete or ETA only when a provider-specific total is defensible; otherwise show `Total unknown` with records, throughput, and elapsed time.
 - Make a shared connection failure visible once at connection level and on affected rows without replacing each provider's local cursor, quality, or lifecycle state.
 
@@ -81,7 +81,7 @@ An operator can answer four questions from the overview: which processors are ru
 
 ## Interface Contract
 
-The admin boundary consumes registered source-type summaries, masked connection state, supervisor presence and profile-grouped capacity, provider source and mapper revisions, normalized continuation, run and page progress, health, quarantine summaries, ordered diagnostics, and safe audit receipts.
+The admin boundary consumes registered source-type summaries, masked connection state, supervisor presence, global execution capacity, exact platform and connection-test permit-lane capacity, provider source and mapper revisions, normalized continuation, run and page progress, health, quarantine summaries, ordered diagnostics, and safe audit receipts.
 
 Every command returns the current masked provider state plus one stable outcome. No browser response contains a credential, authorization header, full cursor or vendor cursor, provider payload, personal identifier, transaction identity, stack trace, or another tenant's internal identifier.
 
@@ -89,7 +89,7 @@ Every command returns the current masked provider state plus one stable outcome.
 
 ### Monitoring proof
 
-- [x] The overview accurately distinguishes shared connection, supervisor, execution-capacity, request-capacity, and four independent source states.
+- [x] The overview accurately distinguishes shared connection, supervisor, four-slot execution capacity, four independent one-request platform lanes, the separate one-request connection-test lane, the provider hard maximum of two per platform, and four independent source states.
 - [x] Provider progress shows truthful records, pages, throughput, elapsed time, next due time, and either a defensible ETA or `Total unknown`.
 - [x] A selected provider feed contains its own ordered events plus labeled shared events and never another provider's local diagnostics.
 - [x] Diagnostic refresh, pause-display, filters, pagination, empty state, expiry gap, and failure recovery are bounded and accessible.

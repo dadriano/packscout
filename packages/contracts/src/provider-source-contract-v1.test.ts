@@ -29,10 +29,12 @@ import {
 
 test("launch source constants retain the evidence-backed operating envelope", () => {
   assert.deepEqual(providerSourceLaunchBounds, {
-    pageTargetRecords: 250,
+    pageTargetRecords: 500,
+    fallbackPageTargetRecords: 250,
     maximumResponseBytes: 8_388_608,
     requestTimeoutMilliseconds: 10_000,
-    stableProfileRequestCap: 2,
+    requestConcurrencyPerLane: 1,
+    stablePlatformRequestCap: 2,
     genericExecutionSlots: 4,
     sourceIntervalSeconds: { minimum: 60, default: 60, maximum: 86_400 },
     freshnessGraceSeconds: 900,
@@ -155,6 +157,7 @@ test("adapter failure codes cannot cross their durable disposition boundary", ()
   for (const valid of [
     { disposition: "cancelled", code: "lost_ownership" },
     { disposition: "retryable", code: "request_timeout", safeStatus: 408 },
+    { disposition: "retryable", code: "response_too_large" },
     {
       disposition: "retryable",
       code: "rate_limited",
@@ -301,11 +304,18 @@ test("the adapter manifest is credential-free, strict, and uses the launch bound
   );
   assert.equal(parsedV1.sourceTypeKey, "dataforrest-events-v1");
   assert.deepEqual(parsedV1.requestBounds, {
-    pageLimit: 250,
+    pageLimit: 500,
     maximumResponseBytes: 8_388_608,
     timeoutMilliseconds: 10_000,
   });
-  assert.equal(parsedV1.maximumConnectionRequestCap, 2);
+  assert.equal(parsedV1.maximumPlatformRequestCap, 2);
+  assert.equal(
+    sourceAdapterManifestV1Schema.safeParse({
+      ...parsedV1,
+      maximumConnectionRequestCap: 2,
+    }).success,
+    false,
+  );
   assert.deepEqual(
     parsedV1.supportedProviders.map(({ provider }) => provider),
     ["courtyard", "collector_crypt", "phygitals", "clutchpacks"],

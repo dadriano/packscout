@@ -120,7 +120,7 @@ export function operationSource(
     processor: {
       activity: index === 0 ? "running" : index === 1 ? "waiting" : index === 2 ? "paused" : "action_required",
       phase: index === 0 ? "requesting" : index === 1 ? "waiting" : index === 2 ? "paused" : "action_required",
-      waitReason: index === 1 ? "profile_capacity" : index === 2 ? "paused" : index === 3 ? "action_required" : null,
+      waitReason: index === 1 ? "request_lane_capacity" : index === 2 ? "paused" : index === 3 ? "action_required" : null,
       actionRequiredCode: index === 3 ? "SOURCE_ACTION_REQUIRED" : null,
       continuation: { kind: "continue" },
       retryCount: index === 0 ? 1 : 0,

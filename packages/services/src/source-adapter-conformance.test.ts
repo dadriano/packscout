@@ -54,10 +54,20 @@ interface OperationBuilderInput {
 
 function operationBuilders(input: OperationBuilderInput) {
   const coordinator = new ConnectionPermitCoordinator();
-  coordinator.configureProfile({
+  const providerId = "provider-conformance";
+  coordinator.configureRequestPermitLane({
     organizationId: "organization-conformance",
     connectionProfileId: "profile-conformance",
-    approvedAggregateRequestCap: 2,
+    scope: "connection_test",
+    providerId: null,
+    approvedRequestCap: 2,
+  });
+  coordinator.configureRequestPermitLane({
+    organizationId: "organization-conformance",
+    connectionProfileId: "profile-conformance",
+    scope: "platform",
+    providerId,
+    approvedRequestCap: 2,
   });
   const authority = new SourceRequestLeaseAuthority(coordinator);
   const commonPins = {
@@ -84,6 +94,7 @@ function operationBuilders(input: OperationBuilderInput) {
   } as const;
   const sourcePins = {
     provider: "courtyard" as const,
+    providerId,
     sourceInstanceId: "source-conformance",
     sourceRevisionId: "source-revision-conformance",
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,

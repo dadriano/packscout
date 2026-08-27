@@ -1,17 +1,17 @@
 {
-  "source": "provider-source integration plus operator invitations",
+  "source": "provider-source integration plus platform request lanes",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260825041000_raise_provider_source_raw_response_limit/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260827010000_provider_source_platform_request_lanes/migration.sql"
   },
   "expectedCounts": {
     "tables": 84,
     "enums": 40,
-    "columns": 1325,
+    "columns": 1328,
     "indexes": 151,
     "uniqueConstraints": 54,
-    "foreignKeys": 276,
-    "checkConstraints": 281
+    "foreignKeys": 277,
+    "checkConstraints": 282
   },
   "enums": {
     "admin_alert_state": [
@@ -10915,7 +10915,7 @@
           "value": "(phase = ANY (ARRAY['idle'::text, 'due'::text, 'queued'::text, 'claimed'::text, 'requesting'::text, 'validating'::text, 'committing'::text, 'retry_wait'::text, 'waiting'::text, 'paused'::text, 'action_required'::text, 'reached_head'::text, 'terminal'::text]))"
         },
         "provider_source_runtime_states_wait_reason_check": {
-          "value": "((wait_reason IS NULL) OR (wait_reason = ANY (ARRAY['not_due'::text, 'profile_capacity'::text, 'execution_capacity'::text, 'capacity_blocked'::text, 'connection_blocked'::text, 'paused'::text, 'retry_backoff'::text, 'action_required'::text, 'supervisor_offline'::text, 'graceful_shutdown'::text, 'source_lane_busy'::text])))"
+          "value": "((wait_reason IS NULL) OR (wait_reason = ANY (ARRAY['not_due'::text, 'request_lane_capacity'::text, 'execution_capacity'::text, 'capacity_blocked'::text, 'connection_blocked'::text, 'paused'::text, 'retry_backoff'::text, 'action_required'::text, 'supervisor_offline'::text, 'graceful_shutdown'::text, 'source_lane_busy'::text])))"
         },
         "provider_source_runtime_states_wait_shape_check": {
           "value": "(((activity = 'waiting'::text) AND (wait_reason IS NOT NULL)) OR ((activity <> 'waiting'::text) AND (wait_reason IS NULL)))"
@@ -16759,7 +16759,7 @@
         }
       }
     },
-    "source_supervisor_profile_states": {
+    "source_supervisor_request_lane_states": {
       "columns": {
         "active_request_permits": {
           "type": "integer",
@@ -16789,8 +16789,29 @@
           "identity": null,
           "default": "gen_random_uuid()"
         },
+        "lane_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "organization_id": {
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "request_scope": {
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
@@ -16819,10 +16840,11 @@
         }
       },
       "indexes": {
-        "source_supervisor_profile_states_profile_idx": {
+        "source_supervisor_request_lane_states_profile_idx": {
           "columns": [
             "organization_id",
             "connection_profile_id",
+            "lane_key",
             "updated_at"
           ],
           "unique": false,
@@ -16830,17 +16852,18 @@
         }
       },
       "uniqueConstraints": {
-        "source_supervisor_profile_states_scope_unique": {
+        "source_supervisor_request_lane_states_scope_unique": {
           "columns": [
             "supervisor_epoch_id",
             "organization_id",
-            "connection_profile_id"
+            "connection_profile_id",
+            "lane_key"
           ],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
-        "source_supervisor_profile_states_epoch_fk": {
+        "source_supervisor_request_lane_states_epoch_fk": {
           "columns": [
             "supervisor_epoch_id"
           ],
@@ -16851,7 +16874,7 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "source_supervisor_profile_states_profile_fk": {
+        "source_supervisor_request_lane_states_profile_fk": {
           "columns": [
             "connection_profile_id",
             "organization_id"
@@ -16863,11 +16886,27 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "source_supervisor_request_lane_states_provider_fk": {
+          "columns": [
+            "provider_id",
+            "organization_id"
+          ],
+          "referencedTable": "provider_sources",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "checkConstraints": {
-        "source_supervisor_profile_states_capacity_check": {
-          "value": "(((approved_request_limit >= 1) AND (approved_request_limit <= 64)) AND ((active_request_permits >= 0) AND (active_request_permits <= approved_request_limit)) AND ((waiting_operations >= 0) AND (waiting_operations <= 2147483647)))"
+        "source_supervisor_request_lane_states_capacity_check": {
+          "value": "(((approved_request_limit >= 1) AND (approved_request_limit <= 2)) AND ((active_request_permits >= 0) AND (active_request_permits <= approved_request_limit)) AND ((waiting_operations >= 0) AND (waiting_operations <= 2147483647)))"
+        },
+        "source_supervisor_request_lane_states_identity_check": {
+          "value": "(((request_scope = 'platform'::text) AND (provider_id IS NOT NULL) AND (lane_key = (provider_id)::text)) OR ((request_scope = 'connection_test'::text) AND (provider_id IS NULL) AND (lane_key = 'connection_test'::text)))"
         }
       }
     },

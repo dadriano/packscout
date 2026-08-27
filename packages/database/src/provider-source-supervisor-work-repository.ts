@@ -253,10 +253,20 @@ export class ProviderSourceSupervisorWorkRepository {
     claimOwner: string;
     claimToken: string;
     claimLeaseId: string;
-    excludedProfiles?: readonly Readonly<{
-      organizationId: string;
-      connectionProfileId: string;
-    }>[];
+    excludedRequestLanes?: readonly (
+      | Readonly<{
+          organizationId: string;
+          connectionProfileId: string;
+          scope: "platform";
+          providerId: string;
+        }>
+      | Readonly<{
+          organizationId: string;
+          connectionProfileId: string;
+          scope: "connection_test";
+          providerId: null;
+        }>
+    )[];
     excludedSourceInstanceIds?: readonly string[];
     skipPageReads?: boolean;
   }>): Promise<ProviderSourceSupervisorClaimedWork | null> {
@@ -298,22 +308,47 @@ export class ProviderSourceSupervisorWorkRepository {
       // row is claimed and fenced below, then selection continues, so it can
       // never starve later independent work. Temporary retry/action/pause
       // boundaries remain ineligible rather than being misclassified stale.
-      const excludedProfiles = input.excludedProfiles ?? [];
+      const excludedRequestLanes = input.excludedRequestLanes ?? [];
+      const excludedConnectionTestLanes = excludedRequestLanes.filter(
+        (lane) => lane.scope === "connection_test",
+      );
+      const excludedPlatformLanes = excludedRequestLanes.filter(
+        (lane) => lane.scope === "platform",
+      );
+      if (
+        excludedRequestLanes.some((lane) =>
+          lane.scope === "platform"
+            ? typeof lane.providerId !== "string" || !lane.providerId
+            : lane.providerId !== null
+        )
+      ) {
+        throw new TypeError("Excluded request-permit lane is invalid.");
+      }
       const excludedSources = input.excludedSourceInstanceIds ?? [];
-      const excludeTestProfiles = excludedProfiles.length === 0
+      const excludeConnectionTestLanes = excludedConnectionTestLanes.length === 0
         ? Prisma.empty
-        : Prisma.sql`and not (${Prisma.join(excludedProfiles.map((profile) =>
+        : Prisma.sql`and not (${Prisma.join(excludedConnectionTestLanes.map((lane) =>
             Prisma.sql`(
-              job.organization_id = cast(${profile.organizationId} as uuid)
-              and job.connection_profile_id = cast(${profile.connectionProfileId} as uuid)
+              job.organization_id = cast(${lane.organizationId} as uuid)
+              and job.connection_profile_id = cast(${lane.connectionProfileId} as uuid)
             )`
           ), " or ")})`;
-      const excludeRunProfiles = excludedProfiles.length === 0
+      const excludeSourceTestLanes = excludedPlatformLanes.length === 0
         ? Prisma.empty
-        : Prisma.sql`and not (${Prisma.join(excludedProfiles.map((profile) =>
+        : Prisma.sql`and not (${Prisma.join(excludedPlatformLanes.map((lane) =>
             Prisma.sql`(
-              run.organization_id = cast(${profile.organizationId} as uuid)
-              and run.connection_profile_id = cast(${profile.connectionProfileId} as uuid)
+              job.organization_id = cast(${lane.organizationId} as uuid)
+              and job.connection_profile_id = cast(${lane.connectionProfileId} as uuid)
+              and job.provider_id = cast(${lane.providerId} as uuid)
+            )`
+          ), " or ")})`;
+      const excludeRunLanes = excludedPlatformLanes.length === 0
+        ? Prisma.empty
+        : Prisma.sql`and not (${Prisma.join(excludedPlatformLanes.map((lane) =>
+            Prisma.sql`(
+              run.organization_id = cast(${lane.organizationId} as uuid)
+              and run.connection_profile_id = cast(${lane.connectionProfileId} as uuid)
+              and run.provider_id = cast(${lane.providerId} as uuid)
             )`
           ), " or ")})`;
       const excludeTestSources = excludedSources.length === 0
@@ -340,14 +375,14 @@ export class ProviderSourceSupervisorWorkRepository {
                  job.queued_at as "queuedAt"
           from public.source_connection_test_jobs as job
           where job.state = 'queued'::public.source_test_job_state
-            ${excludeTestProfiles}
+            ${excludeConnectionTestLanes}
           union all
           select 'source_test'::text as kind,
                  job.id,
                  job.queued_at as "queuedAt"
           from public.provider_source_test_jobs as job
           where job.state = 'queued'::public.source_test_job_state
-            ${excludeTestProfiles}
+            ${excludeSourceTestLanes}
             ${excludeTestSources}
           union all
           select 'page_read'::text as kind,
@@ -367,7 +402,7 @@ export class ProviderSourceSupervisorWorkRepository {
               or runtime.retry_not_before <= ${databaseNow})
             and coalesce(runtime.activity, 'inactive') <> 'action_required'
             and (source.id is null or source.pause_requested_at is null)
-            ${excludeRunProfiles}
+            ${excludeRunLanes}
             ${excludeRunSources}
         ) as candidate
         order by candidate."queuedAt", candidate.kind, candidate.id

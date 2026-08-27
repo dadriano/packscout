@@ -1,21 +1,36 @@
 import { providerSourceLaunchBounds } from "@packscout/contracts";
 
-export interface ConnectionProfilePermitIdentity {
+export interface ConnectionProfileIdentity {
   readonly organizationId: string;
   readonly connectionProfileId: string;
 }
 
+export type ConnectionPermitLaneIdentity =
+  | Readonly<
+      ConnectionProfileIdentity & {
+        scope: "platform";
+        providerId: string;
+      }
+    >
+  | Readonly<
+      ConnectionProfileIdentity & {
+        scope: "connection_test";
+        providerId: null;
+      }
+    >;
+
 export type ConnectionPermitWaitReason =
-  | "profile_capacity"
+  | "request_lane_capacity"
   | "execution_capacity";
 
-export interface ConnectionProfilePermitConfiguration
-  extends ConnectionProfilePermitIdentity {
-  readonly approvedAggregateRequestCap: number;
-}
+export type ConnectionPermitLaneConfiguration = Readonly<
+  ConnectionPermitLaneIdentity & {
+    approvedRequestCap: number;
+  }
+>;
 
 export interface ConnectionPermitAcquireInput {
-  readonly profile: ConnectionProfilePermitIdentity;
+  readonly requestPermitLane: ConnectionPermitLaneIdentity;
   readonly signal?: AbortSignal;
 }
 
@@ -23,9 +38,10 @@ export type ConnectionPermitCoordinatorErrorCode =
   | "cancelled"
   | "invalid_execution_slots"
   | "invalid_profile_identity"
-  | "invalid_profile_request_cap"
-  | "profile_cap_change_while_in_use"
-  | "profile_not_configured"
+  | "invalid_request_lane_identity"
+  | "invalid_request_cap"
+  | "request_cap_change_while_in_use"
+  | "request_lane_not_configured"
   | "request_permit_still_held"
   | "admission_stopped";
 
@@ -40,7 +56,7 @@ export class ConnectionPermitCoordinatorError extends Error {
 }
 
 export interface PairedConnectionPermit {
-  readonly profile: ConnectionProfilePermitIdentity;
+  readonly requestPermitLane: ConnectionPermitLaneIdentity;
   readonly requestPermitHeld: boolean;
   readonly executionSlotHeld: boolean;
   releaseRequestPermit(): void;
@@ -48,42 +64,48 @@ export interface PairedConnectionPermit {
   releaseAll(): void;
 }
 
+export type ConnectionPermitLaneSnapshot = Readonly<
+  ConnectionPermitLaneIdentity & {
+    approvedRequestCap: number;
+    activeRequestPermits: number;
+    queuedOperations: number;
+  }
+>;
+
 export interface ConnectionPermitCoordinatorSnapshot {
   readonly maximumExecutionSlots: number;
   readonly activeExecutionSlots: number;
   readonly queuedOperations: number;
-  readonly profiles: readonly Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    approvedAggregateRequestCap: number;
-    activeRequestPermits: number;
-    queuedOperations: number;
-  }>[];
+  readonly requestPermitLanes: readonly ConnectionPermitLaneSnapshot[];
 }
 
-interface ProfileState {
-  readonly identity: ConnectionProfilePermitIdentity;
-  approvedAggregateRequestCap: number;
+interface RequestPermitLaneState {
+  readonly identity: ConnectionPermitLaneIdentity;
+  approvedRequestCap: number;
   activeRequestPermits: number;
 }
 
 interface PermitWaiter {
   readonly sequence: number;
-  readonly profileKey: string;
+  readonly requestPermitLaneKey: string;
   readonly signal: AbortSignal | undefined;
   readonly resolve: (permit: PairedConnectionPermit) => void;
   readonly reject: (error: ConnectionPermitCoordinatorError) => void;
   onAbort: (() => void) | undefined;
 }
 
-function validateIdentity(
-  identity: ConnectionProfilePermitIdentity,
-): ConnectionProfilePermitIdentity {
+function isNonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function validateProfileIdentity(
+  identity: ConnectionProfileIdentity,
+): ConnectionProfileIdentity {
   if (
-    typeof identity.organizationId !== "string" ||
-    identity.organizationId.trim().length === 0 ||
-    typeof identity.connectionProfileId !== "string" ||
-    identity.connectionProfileId.trim().length === 0
+    typeof identity !== "object" ||
+    identity === null ||
+    !isNonBlankString(identity.organizationId) ||
+    !isNonBlankString(identity.connectionProfileId)
   ) {
     throw new ConnectionPermitCoordinatorError("invalid_profile_identity");
   }
@@ -93,25 +115,55 @@ function validateIdentity(
   });
 }
 
-function profileKey(identity: ConnectionProfilePermitIdentity): string {
+function validateRequestPermitLaneIdentity(
+  identity: ConnectionPermitLaneIdentity,
+): ConnectionPermitLaneIdentity {
+  const profile = validateProfileIdentity(identity);
+  if (identity.scope === "platform" && isNonBlankString(identity.providerId)) {
+    return Object.freeze({
+      ...profile,
+      scope: "platform",
+      providerId: identity.providerId,
+    });
+  }
+  if (identity.scope === "connection_test" && identity.providerId === null) {
+    return Object.freeze({
+      ...profile,
+      scope: "connection_test",
+      providerId: null,
+    });
+  }
+  throw new ConnectionPermitCoordinatorError("invalid_request_lane_identity");
+}
+
+function profileKey(identity: ConnectionProfileIdentity): string {
   return JSON.stringify([identity.organizationId, identity.connectionProfileId]);
 }
 
+function requestPermitLaneKey(identity: ConnectionPermitLaneIdentity): string {
+  return JSON.stringify([
+    identity.organizationId,
+    identity.connectionProfileId,
+    identity.scope,
+    identity.providerId,
+  ]);
+}
+
 class GrantedPairedConnectionPermit implements PairedConnectionPermit {
-  readonly profile: ConnectionProfilePermitIdentity;
+  readonly requestPermitLane: ConnectionPermitLaneIdentity;
   #coordinator: ConnectionPermitCoordinator;
-  #profileKey: string;
+  #requestPermitLaneKey: string;
   #requestPermitHeld = true;
   #executionSlotHeld = true;
 
   constructor(
     coordinator: ConnectionPermitCoordinator,
     key: string,
-    profile: ConnectionProfilePermitIdentity,
+    requestPermitLane: ConnectionPermitLaneIdentity,
   ) {
     this.#coordinator = coordinator;
-    this.#profileKey = key;
-    this.profile = profile;
+    this.#requestPermitLaneKey = key;
+    this.requestPermitLane = requestPermitLane;
   }
 
   get requestPermitHeld(): boolean {
@@ -123,21 +175,15 @@ class GrantedPairedConnectionPermit implements PairedConnectionPermit {
   }
 
   releaseRequestPermit(): void {
-    if (!this.#requestPermitHeld) {
-      return;
-    }
+    if (!this.#requestPermitHeld) return;
     this.#requestPermitHeld = false;
-    this.#coordinator.releaseRequestPermit(this.#profileKey);
+    this.#coordinator.releaseRequestPermit(this.#requestPermitLaneKey);
   }
 
   releaseExecutionSlot(): void {
-    if (!this.#executionSlotHeld) {
-      return;
-    }
+    if (!this.#executionSlotHeld) return;
     if (this.#requestPermitHeld) {
-      throw new ConnectionPermitCoordinatorError(
-        "request_permit_still_held",
-      );
+      throw new ConnectionPermitCoordinatorError("request_permit_still_held");
     }
     this.#executionSlotHeld = false;
     this.#coordinator.releaseExecutionSlot();
@@ -151,36 +197,17 @@ class GrantedPairedConnectionPermit implements PairedConnectionPermit {
 
 /**
  * The runtime owns one instance of this process-local coordinator. A queued
- * operation owns no capacity: the profile permit and generic execution slot
- * are reserved together only when the operation becomes eligible.
+ * operation owns no capacity: its request-lane permit and generic execution
+ * slot are reserved together only when the operation becomes eligible.
  */
 export class ConnectionPermitCoordinator {
   readonly #maximumExecutionSlots: number;
-  readonly #profiles = new Map<string, ProfileState>();
+  readonly #requestPermitLanes = new Map<string, RequestPermitLaneState>();
   readonly #waiters: PermitWaiter[] = [];
   #activeExecutionSlots = 0;
   #nextSequence = 0;
   #draining = false;
   #admissionStopped = false;
-
-  get admissionStopped(): boolean {
-    return this.#admissionStopped;
-  }
-
-  waitReasonFor(
-    profile: ConnectionProfilePermitIdentity,
-  ): ConnectionPermitWaitReason | null {
-    const key = profileKey(profile);
-    const state = this.#profiles.get(key);
-    if (!state) throw new ConnectionPermitCoordinatorError("profile_not_configured");
-    if (state.activeRequestPermits >= state.approvedAggregateRequestCap) {
-      return "profile_capacity";
-    }
-    if (this.#activeExecutionSlots >= this.#maximumExecutionSlots) {
-      return "execution_capacity";
-    }
-    return null;
-  }
 
   constructor(
     maximumExecutionSlots: number =
@@ -196,40 +223,63 @@ export class ConnectionPermitCoordinator {
     this.#maximumExecutionSlots = maximumExecutionSlots;
   }
 
-  configureProfile(configuration: ConnectionProfilePermitConfiguration): void {
-    const identity = validateIdentity(configuration);
-    const cap = configuration.approvedAggregateRequestCap;
+  get admissionStopped(): boolean {
+    return this.#admissionStopped;
+  }
+
+  waitReasonFor(
+    requestPermitLane: ConnectionPermitLaneIdentity,
+  ): ConnectionPermitWaitReason | null {
+    const key = requestPermitLaneKey(
+      validateRequestPermitLaneIdentity(requestPermitLane),
+    );
+    const state = this.#requestPermitLanes.get(key);
+    if (!state) {
+      throw new ConnectionPermitCoordinatorError("request_lane_not_configured");
+    }
+    if (state.activeRequestPermits >= state.approvedRequestCap) {
+      return "request_lane_capacity";
+    }
+    if (this.#activeExecutionSlots >= this.#maximumExecutionSlots) {
+      return "execution_capacity";
+    }
+    return null;
+  }
+
+  configureRequestPermitLane(
+    configuration: ConnectionPermitLaneConfiguration,
+  ): void {
+    const identity = validateRequestPermitLaneIdentity(configuration);
+    const cap = configuration.approvedRequestCap;
     if (
       !Number.isSafeInteger(cap) ||
       cap < 1 ||
-      cap > providerSourceLaunchBounds.stableProfileRequestCap
+      cap > providerSourceLaunchBounds.stablePlatformRequestCap
     ) {
-      throw new ConnectionPermitCoordinatorError("invalid_profile_request_cap");
+      throw new ConnectionPermitCoordinatorError("invalid_request_cap");
     }
 
-    const key = profileKey(identity);
-    const current = this.#profiles.get(key);
+    const key = requestPermitLaneKey(identity);
+    const current = this.#requestPermitLanes.get(key);
     if (current === undefined) {
-      this.#profiles.set(key, {
+      this.#requestPermitLanes.set(key, {
         identity,
-        approvedAggregateRequestCap: cap,
+        approvedRequestCap: cap,
         activeRequestPermits: 0,
       });
       this.#drain();
       return;
     }
-    if (current.approvedAggregateRequestCap === cap) {
-      return;
-    }
+    if (current.approvedRequestCap === cap) return;
     if (
       current.activeRequestPermits > 0 ||
-      this.#waiters.some((waiter) => waiter.profileKey === key)
+      this.#waiters.some((waiter) => waiter.requestPermitLaneKey === key)
     ) {
       throw new ConnectionPermitCoordinatorError(
-        "profile_cap_change_while_in_use",
+        "request_cap_change_while_in_use",
       );
     }
-    current.approvedAggregateRequestCap = cap;
+    current.approvedRequestCap = cap;
     this.#drain();
   }
 
@@ -239,16 +289,16 @@ export class ConnectionPermitCoordinator {
         new ConnectionPermitCoordinatorError("admission_stopped"),
       );
     }
-    let identity: ConnectionProfilePermitIdentity;
+    let identity: ConnectionPermitLaneIdentity;
     try {
-      identity = validateIdentity(input.profile);
+      identity = validateRequestPermitLaneIdentity(input.requestPermitLane);
     } catch (error) {
       return Promise.reject(error);
     }
-    const key = profileKey(identity);
-    if (!this.#profiles.has(key)) {
+    const key = requestPermitLaneKey(identity);
+    if (!this.#requestPermitLanes.has(key)) {
       return Promise.reject(
-        new ConnectionPermitCoordinatorError("profile_not_configured"),
+        new ConnectionPermitCoordinatorError("request_lane_not_configured"),
       );
     }
     if (input.signal?.aborted === true) {
@@ -258,7 +308,7 @@ export class ConnectionPermitCoordinator {
     return new Promise<PairedConnectionPermit>((resolve, reject) => {
       const waiter: PermitWaiter = {
         sequence: this.#nextSequence,
-        profileKey: key,
+        requestPermitLaneKey: key,
         signal: input.signal,
         resolve,
         reject,
@@ -267,9 +317,7 @@ export class ConnectionPermitCoordinator {
       this.#nextSequence += 1;
       waiter.onAbort = () => {
         const index = this.#waiters.indexOf(waiter);
-        if (index === -1) {
-          return;
-        }
+        if (index === -1) return;
         this.#waiters.splice(index, 1);
         waiter.signal?.removeEventListener("abort", waiter.onAbort!);
         reject(new ConnectionPermitCoordinatorError("cancelled"));
@@ -286,12 +334,13 @@ export class ConnectionPermitCoordinator {
       maximumExecutionSlots: this.#maximumExecutionSlots,
       activeExecutionSlots: this.#activeExecutionSlots,
       queuedOperations: this.#waiters.length,
-      profiles: [...this.#profiles.values()].map((state) => ({
+      requestPermitLanes: [...this.#requestPermitLanes.values()].map((state) => ({
         ...state.identity,
-        approvedAggregateRequestCap: state.approvedAggregateRequestCap,
+        approvedRequestCap: state.approvedRequestCap,
         activeRequestPermits: state.activeRequestPermits,
         queuedOperations: this.#waiters.filter(
-          (waiter) => waiter.profileKey === profileKey(state.identity),
+          (waiter) =>
+            waiter.requestPermitLaneKey === requestPermitLaneKey(state.identity),
         ).length,
       })),
     };
@@ -306,12 +355,13 @@ export class ConnectionPermitCoordinator {
     }
   }
 
-  /** Cancels queued work for one exact tenant/profile blocking episode. */
-  cancelQueuedForProfile(identity: ConnectionProfilePermitIdentity): void {
-    const key = profileKey(validateIdentity(identity));
-    const cancelled = this.#waiters.filter(
-      (waiter) => waiter.profileKey === key,
-    );
+  /** Cancels queued work across every request lane for one exact profile. */
+  cancelQueuedForProfile(identity: ConnectionProfileIdentity): void {
+    const exactProfileKey = profileKey(validateProfileIdentity(identity));
+    const cancelled = this.#waiters.filter((waiter) => {
+      const lane = this.#requestPermitLanes.get(waiter.requestPermitLaneKey);
+      return lane !== undefined && profileKey(lane.identity) === exactProfileKey;
+    });
     for (const waiter of cancelled) {
       const index = this.#waiters.indexOf(waiter);
       if (index === -1) continue;
@@ -330,11 +380,11 @@ export class ConnectionPermitCoordinator {
   }
 
   releaseRequestPermit(key: string): void {
-    const profile = this.#profiles.get(key);
-    if (profile === undefined || profile.activeRequestPermits < 1) {
+    const lane = this.#requestPermitLanes.get(key);
+    if (lane === undefined || lane.activeRequestPermits < 1) {
       throw new Error("connection_permit.release_request_invariant");
     }
-    profile.activeRequestPermits -= 1;
+    lane.activeRequestPermits -= 1;
     this.#drain();
   }
 
@@ -347,45 +397,38 @@ export class ConnectionPermitCoordinator {
   }
 
   #drain(): void {
-    if (this.#draining) {
-      return;
-    }
+    if (this.#draining) return;
     this.#draining = true;
     try {
       while (this.#activeExecutionSlots < this.#maximumExecutionSlots) {
         if (this.#admissionStopped) return;
         const nextIndex = this.#waiters.findIndex((waiter) => {
-          const profile = this.#profiles.get(waiter.profileKey);
-          return profile !== undefined &&
-            profile.activeRequestPermits <
-              profile.approvedAggregateRequestCap;
+          const lane = this.#requestPermitLanes.get(waiter.requestPermitLaneKey);
+          return lane !== undefined &&
+            lane.activeRequestPermits < lane.approvedRequestCap;
         });
-        if (nextIndex === -1) {
-          return;
-        }
+        if (nextIndex === -1) return;
         const [waiter] = this.#waiters.splice(nextIndex, 1);
-        if (waiter === undefined) {
-          return;
-        }
+        if (waiter === undefined) return;
         waiter.signal?.removeEventListener("abort", waiter.onAbort!);
         if (waiter.signal?.aborted === true) {
           waiter.reject(new ConnectionPermitCoordinatorError("cancelled"));
           continue;
         }
-        const profile = this.#profiles.get(waiter.profileKey);
-        if (profile === undefined) {
+        const lane = this.#requestPermitLanes.get(waiter.requestPermitLaneKey);
+        if (lane === undefined) {
           waiter.reject(
-            new ConnectionPermitCoordinatorError("profile_not_configured"),
+            new ConnectionPermitCoordinatorError("request_lane_not_configured"),
           );
           continue;
         }
-        profile.activeRequestPermits += 1;
+        lane.activeRequestPermits += 1;
         this.#activeExecutionSlots += 1;
         waiter.resolve(
           new GrantedPairedConnectionPermit(
             this,
-            waiter.profileKey,
-            profile.identity,
+            waiter.requestPermitLaneKey,
+            lane.identity,
           ),
         );
       }

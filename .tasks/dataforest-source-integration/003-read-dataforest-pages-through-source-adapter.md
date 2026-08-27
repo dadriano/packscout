@@ -21,7 +21,7 @@ Each DataForrest source instance supplies an immutable platform filter and its o
 
 The adapter decodes and validates transport data into task 002's normalized observation page. It does not select a platform mapper, create canonical candidates, commit cursors, schedule runs, or publish public records.
 
-First-pass request limiting is process-local because exactly one supervisor process is supported. Task 002 defines a generic stable-profile coordinator and task 007 owns its runtime sequencing. The DataForrest adapter receives a fenced request lease from that coordinator and cannot acquire capacity or call upstream without it.
+First-pass request limiting is process-local because exactly one supervisor process is supported. Task 002 defines a generic exact-lane coordinator and task 007 owns its runtime sequencing. Source tests and page reads use the profile-plus-platform lane; provider-free connection tests use their separate profile lane. The DataForrest adapter receives a fenced request lease from that coordinator and cannot acquire capacity or call upstream without it.
 
 ## Requirements
 
@@ -41,7 +41,7 @@ First-pass request limiting is process-local because exactly one supervisor proc
 ### DataForrest request behavior
 
 - Execute task 001's exact bounded profile-only connection probe under one generic execution slot retained through its terminal or fenced test result, using connection configuration and no provider, platform filter, cursor, source, run, or page state; if DataForrest cannot support that shape, task 001 blocks this adapter rather than fabricating source context.
-- Execute a source test with its immutable platform filter, null ephemeral cursor, bounded test limit, and one generic execution slot retained through its complete attempt; capture and terminalize the request attempt, release the profile permit, then validate and discard its protected page and returned cursor under that slot and test job without advancing durable source state.
+- Execute a source test with its immutable platform filter, null ephemeral cursor, bounded test limit, and one generic execution slot retained through its complete attempt; capture and terminalize the request attempt, release its exact request-lane permit, then validate and discard its protected page and returned cursor under that slot and test job without advancing durable source state.
 - Execute a page read with its immutable platform filter, bounded page limit, and requested opaque cursor, omitting cursor only at that source generation's start.
 - Pass a page read's returned cursor back byte-for-byte with the same source filter without parsing, synthesizing, truncating, or logging it outside the adapter.
 
@@ -50,7 +50,7 @@ First-pass request limiting is process-local because exactly one supervisor proc
 - Apply the task-001 timeout, response-size, redirect, destination, TLS, and page-limit bounds before exposing protected data.
 - Bind every invocation to immutable connection-profile context, bind source tests and page reads to immutable source-revision context, and return only the operation's safe correlation data for diagnostics.
 
-### Connection-profile request control
+### Exact request-lane control
 
 - Require a current task-002 request lease matching the operation kind, correlation, singleton epoch, job or run lease, connection revision, revocation and connection-health generation, applicable source revision and lifecycle, applicable cursor generation, connection profile, and abort signal before a DataForrest client call; while a blocking episode is open, accept only the single recovery connection-test lease explicitly correlated to that episode and reject normal connection tests, source tests, and page reads.
 - Make exactly one bounded DataForrest request under that lease and prohibit nested, reused, wrong-profile, wrong-epoch, or unmetered subrequests.
@@ -121,7 +121,7 @@ Output is either:
 - [x] Fatal page defects and record-local invalid results remain distinct and deterministic.
 - [x] Two or more source reads overlap up to the approved cap without sharing filters, cursors, revisions, results, or diagnostics.
 - [x] Connection tests, source tests, and imports require the same request-lease contract and make zero calls for absent, stale, cancelled, reused, or mismatched leases.
-- [x] Concurrent typed connection failures use detecting-request-lease CAS so one advances health, siblings coalesce, stale detectors cannot mutate it, and no profile permit wakes bound work before the durable result; exhausted persistence under the shared retry policy fences and drains the whole supervisor.
+- [x] Concurrent typed connection failures use detecting-request-lease CAS so one advances health, siblings coalesce, stale detectors cannot mutate it, and no request-lane permit wakes bound work before the durable result; exhausted persistence under the shared retry policy fences and drains the whole supervisor.
 
 ### Operation-shape proof
 

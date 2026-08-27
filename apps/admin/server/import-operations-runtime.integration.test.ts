@@ -229,7 +229,7 @@ async function createHarness() {
     sourceTypeKey: sourceManifest.sourceTypeKey,
     connectionTypeKey: sourceManifest.compatibleConnectionTypeKey,
     displayName: "DataForrest admin runtime",
-    requestLimit: providerSourceLaunchBounds.stableProfileRequestCap,
+    requestLimit: providerSourceLaunchBounds.stablePlatformRequestCap,
     sourceAdapterVersion: sourceManifest.adapterVersion,
     revisionNumber: 1,
     configurationCiphertext: new Uint8Array(32).fill(1),
