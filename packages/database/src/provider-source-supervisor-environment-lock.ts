@@ -1,6 +1,18 @@
 import { Prisma } from "@prisma/client";
 import type { PackscoutTransactionClient } from "./database.ts";
 
+export interface ProviderSourceSupervisorActiveEpochFence {
+  readonly epochId: string;
+  readonly ownerKey: string;
+  readonly leaseToken: string;
+}
+
+export interface ProviderSourceSupervisorActiveEpoch {
+  readonly id: string;
+  readonly environmentKey: string;
+  readonly epochNumber: bigint;
+}
+
 async function environmentKeyForEpoch(
   transaction: PackscoutTransactionClient,
   epochId: string,
@@ -49,4 +61,37 @@ export async function lockProviderSourceSupervisorEpochEnvironmentShared(
     )
   `);
   return true;
+}
+
+/**
+ * Holds the environment's shared transition barrier, then revalidates the
+ * exact active epoch without locking its row. Heartbeat and snapshot writers
+ * may therefore update the epoch while bounded work transactions are waiting
+ * on provider/source rows. Acquire, fence, and release still take the matching
+ * exclusive advisory lock, so no epoch transition can pass this guard.
+ */
+export async function lockProviderSourceSupervisorActiveEpoch(
+  transaction: PackscoutTransactionClient,
+  input: ProviderSourceSupervisorActiveEpochFence,
+): Promise<ProviderSourceSupervisorActiveEpoch | null> {
+  const environmentLocked =
+    await lockProviderSourceSupervisorEpochEnvironmentShared(
+      transaction,
+      input.epochId,
+    );
+  if (!environmentLocked) return null;
+  const rows = await transaction.$queryRaw<
+    ProviderSourceSupervisorActiveEpoch[]
+  >(Prisma.sql`
+    select id,
+           environment_key as "environmentKey",
+           epoch_number as "epochNumber"
+    from public.source_supervisor_epochs
+    where id = cast(${input.epochId} as uuid)
+      and owner_key = ${input.ownerKey}
+      and lease_token = cast(${input.leaseToken} as uuid)
+      and state = 'active'::public.supervisor_epoch_state
+      and lease_expires_at > clock_timestamp()
+  `);
+  return rows[0] ?? null;
 }
