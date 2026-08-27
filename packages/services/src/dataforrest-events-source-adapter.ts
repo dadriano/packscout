@@ -364,7 +364,9 @@ function mapTransportFailure(
             "connection_action_required",
             "profile_configuration_invalid",
           )
-        : stableFailure("source_action_required", "invalid_response");
+        : operation.operationKind === "page_read"
+          ? stableFailure("retryable", "response_too_large")
+          : stableFailure("source_action_required", "invalid_response");
     case "http_status":
       return mapHttpStatus(operation, error.safeStatus ?? 500);
   }

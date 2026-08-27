@@ -21,13 +21,18 @@ import type { ProviderSourceSupervisorEpochFence } from
 export interface ProviderSourceSupervisorProcessCapacitySnapshot {
   readonly maximumExecutionSlots: number;
   readonly activeExecutionSlots: number;
-  readonly profiles: readonly Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-    approvedAggregateRequestCap: number;
-    activeRequestPermits: number;
-    queuedOperations: number;
-  }>[];
+  readonly requestPermitLanes: readonly (
+    Readonly<{
+      organizationId: string;
+      connectionProfileId: string;
+      approvedRequestCap: number;
+      activeRequestPermits: number;
+      queuedOperations: number;
+    }> & (
+      | Readonly<{ scope: "platform"; providerId: string }>
+      | Readonly<{ scope: "connection_test"; providerId: null }>
+    )
+  )[];
 }
 
 export interface ProviderSourceCapacityState {
@@ -126,39 +131,60 @@ export class ProviderSourceSupervisorSnapshotRepository {
           "Supervisor snapshot epoch was lost.",
         );
       }
-      for (const profile of input.capacity.profiles) {
+      // This table is only the current epoch's materialized capacity view.
+      // Replacing it in the same transaction prevents a removed or disabled
+      // platform from leaving a stale permit lane in the admin snapshot.
+      await transaction.source_supervisor_request_lane_states.deleteMany({
+        where: { supervisor_epoch_id: input.epochId },
+      });
+      for (const lane of input.capacity.requestPermitLanes) {
         if (
-          !Number.isSafeInteger(profile.approvedAggregateRequestCap) ||
-          profile.approvedAggregateRequestCap < 1 ||
-          !Number.isSafeInteger(profile.activeRequestPermits) ||
-          profile.activeRequestPermits < 0 ||
-          profile.activeRequestPermits > profile.approvedAggregateRequestCap ||
-          !Number.isSafeInteger(profile.queuedOperations) ||
-          profile.queuedOperations < 0
+          (lane.scope === "platform"
+            ? typeof lane.providerId !== "string" || !lane.providerId
+            : lane.providerId !== null) ||
+          !Number.isSafeInteger(lane.approvedRequestCap) ||
+          lane.approvedRequestCap < 1 ||
+          lane.approvedRequestCap >
+            providerSourceLaunchBounds.stablePlatformRequestCap ||
+          !Number.isSafeInteger(lane.activeRequestPermits) ||
+          lane.activeRequestPermits < 0 ||
+          lane.activeRequestPermits > lane.approvedRequestCap ||
+          !Number.isSafeInteger(lane.queuedOperations) ||
+          lane.queuedOperations < 0 ||
+          lane.queuedOperations > 2_147_483_647
         ) {
-          throw new TypeError("Supervisor profile snapshot is invalid.");
+          throw new TypeError("Supervisor request-permit lane is invalid.");
         }
-        await transaction.source_supervisor_profile_states.upsert({
+        const laneKey = lane.scope === "platform"
+          ? lane.providerId
+          : "connection_test";
+        await transaction.source_supervisor_request_lane_states.upsert({
           where: {
-            supervisor_epoch_id_organization_id_connection_profile_id: {
+            supervisor_epoch_id_organization_id_connection_profile_id_lane_key: {
               supervisor_epoch_id: input.epochId,
-              organization_id: profile.organizationId,
-              connection_profile_id: profile.connectionProfileId,
+              organization_id: lane.organizationId,
+              connection_profile_id: lane.connectionProfileId,
+              lane_key: laneKey,
             },
           },
           create: {
             supervisor_epoch_id: input.epochId,
-            organization_id: profile.organizationId,
-            connection_profile_id: profile.connectionProfileId,
-            approved_request_limit: profile.approvedAggregateRequestCap,
-            active_request_permits: profile.activeRequestPermits,
-            waiting_operations: profile.queuedOperations,
+            organization_id: lane.organizationId,
+            connection_profile_id: lane.connectionProfileId,
+            request_scope: lane.scope,
+            provider_id: lane.providerId,
+            lane_key: laneKey,
+            approved_request_limit: lane.approvedRequestCap,
+            active_request_permits: lane.activeRequestPermits,
+            waiting_operations: lane.queuedOperations,
             updated_at: databaseNow,
           },
           update: {
-            approved_request_limit: profile.approvedAggregateRequestCap,
-            active_request_permits: profile.activeRequestPermits,
-            waiting_operations: profile.queuedOperations,
+            request_scope: lane.scope,
+            provider_id: lane.providerId,
+            approved_request_limit: lane.approvedRequestCap,
+            active_request_permits: lane.activeRequestPermits,
+            waiting_operations: lane.queuedOperations,
             updated_at: databaseNow,
           },
         });
@@ -183,8 +209,8 @@ export class ProviderSourceSupervisorSnapshotRepository {
         orderBy: { epoch_number: "desc" },
       });
       const live = epoch !== null && epoch.lease_expires_at > databaseTime;
-      const profiles = epoch
-        ? await transaction.source_supervisor_profile_states.findMany({
+      const requestPermitLanes = epoch
+        ? await transaction.source_supervisor_request_lane_states.findMany({
             where: {
               supervisor_epoch_id: epoch.id,
               ...(input.organizationId
@@ -194,6 +220,7 @@ export class ProviderSourceSupervisorSnapshotRepository {
             orderBy: [
               { organization_id: "asc" },
               { connection_profile_id: "asc" },
+              { lane_key: "asc" },
             ],
           })
         : [];
@@ -284,12 +311,14 @@ export class ProviderSourceSupervisorSnapshotRepository {
             maximum: epoch?.maximum_execution_slots
               ?? providerSourceLaunchBounds.genericExecutionSlots,
           },
-          profiles: profiles.map((profile) => ({
-            organizationId: profile.organization_id,
-            connectionProfileId: profile.connection_profile_id,
-            used: live ? profile.active_request_permits : 0,
-            maximum: profile.approved_request_limit,
-            waiting: live ? profile.waiting_operations : 0,
+          requestPermitLanes: requestPermitLanes.map((lane) => ({
+            scope: lane.request_scope,
+            organizationId: lane.organization_id,
+            connectionProfileId: lane.connection_profile_id,
+            providerId: lane.provider_id,
+            used: live ? lane.active_request_permits : 0,
+            maximum: lane.approved_request_limit,
+            waiting: live ? lane.waiting_operations : 0,
           })),
         },
         sources: lanes.map((lane) => {

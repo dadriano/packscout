@@ -19,12 +19,13 @@ import {
 } from "./provider-source-capacity-preflight.ts";
 
 interface MemoryMeasurement {
-  readonly version: "provider-source-page-memory-v1";
+  readonly version: "provider-source-page-memory-v2";
   readonly path: "authentic-capture-terminalize-interpret-complete-import-plan";
   readonly sourceAdapterVersion: typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION;
   readonly trialCount: number;
   readonly pagesPerTrial: number;
   readonly pageCount: number;
+  readonly concurrentPages: 4;
   readonly recordsPerPage: number;
   readonly responseBytesPerPage: number;
   readonly jsonNodesPerPage: number;
@@ -194,15 +195,15 @@ test("capacity artifact is derived from measured relations and exact retention v
     artifact.forecastInput.incrementalRecordsPerPollAttempt,
     artifact.forecastInput.pageRecordLimit,
   );
-  assert.equal(artifact.forecast.initialPageCount, 58_108);
+  assert.equal(artifact.forecast.initialPageCount, 29_054);
   assert.equal(artifact.forecast.thirtyDayPollAttempts, 172_800);
-  assert.equal(artifact.forecast.firstWindowAttempts, 230_908);
+  assert.equal(artifact.forecast.firstWindowAttempts, 201_854);
   assert.equal(artifact.forecast.incrementalPollAttempts, 2_102_400);
-  assert.equal(artifact.forecast.incrementalRecordCount, 525_600_000);
-  assert.equal(artifact.forecast.sevenDayIncrementalRecordCount, 10_080_000);
+  assert.equal(artifact.forecast.incrementalRecordCount, 1_051_200_000);
+  assert.equal(artifact.forecast.sevenDayIncrementalRecordCount, 20_160_000);
   assert.equal(
     artifact.forecast.thirtyDayIncrementalRecordCount,
-    43_200_000,
+    86_400_000,
   );
   assert.equal(
     artifact.forecast.projectedBytes.structuredAndCanonical,
@@ -212,11 +213,11 @@ test("capacity artifact is derived from measured relations and exact retention v
   );
 });
 
-test("fresh authentic 100-page import planning stays within measured memory limits", async () => {
+test("fresh four-concurrent-page authentic 100-page import planning stays within measured memory limits", async () => {
   const { memoryMeasurement: memory } = await capacityArtifact();
   const fresh = await freshMemoryMeasurement();
   assert.ok(memory.pageCount >= 100);
-  assert.equal(memory.version, "provider-source-page-memory-v1");
+  assert.equal(memory.version, "provider-source-page-memory-v2");
   assert.equal(
     memory.path,
     "authentic-capture-terminalize-interpret-complete-import-plan",
@@ -228,16 +229,27 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   assert.equal(memory.retainedMetric, "theil-sen-managed-bytes-per-page");
   assert.ok(memory.trialCount >= 3);
   assert.equal(memory.trialCount * memory.pagesPerTrial, memory.pageCount);
-  assert.equal(memory.recordsPerPage, 250);
+  assert.equal(memory.concurrentPages, 4);
+  assert.equal(memory.pagesPerTrial % memory.concurrentPages, 0);
+  assert.equal(memory.pageCount % memory.concurrentPages, 0);
+  assert.equal(memory.recordsPerPage, 500);
   assert.equal(
     memory.responseBytesPerPage,
     dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes,
   );
-  assert.equal(memory.jsonNodesPerPage, 239_504);
+  assert.equal(memory.jsonNodesPerPage, 479_004);
   assert.equal(memory.emptyObjectFactsPerRecord, 945);
   assert.equal(
     memory.totalRecordsProcessed,
     memory.pageCount * memory.recordsPerPage,
+  );
+  assert.equal(
+    memory.limits.peakDeltaBytes,
+    memory.concurrentPages * 64 * 1024 * 1024,
+  );
+  assert.equal(
+    memory.limits.retainedGrowthBytes,
+    memory.concurrentPages * 8 * 1024 * 1024,
   );
   assert.ok(memory.peakDeltaBytes <= memory.limits.peakDeltaBytes);
   assert.ok(memory.retainedGrowthBytes <= memory.limits.retainedGrowthBytes);
@@ -246,6 +258,7 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   assert.equal(fresh.path, memory.path);
   assert.equal(fresh.sourceAdapterVersion, memory.sourceAdapterVersion);
   assert.equal(fresh.pageCount, memory.pageCount);
+  assert.equal(fresh.concurrentPages, memory.concurrentPages);
   assert.equal(fresh.recordsPerPage, memory.recordsPerPage);
   assert.equal(fresh.responseBytesPerPage, memory.responseBytesPerPage);
   assert.equal(fresh.jsonNodesPerPage, memory.jsonNodesPerPage);

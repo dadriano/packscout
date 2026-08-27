@@ -401,7 +401,7 @@ test("paired-capacity wait and grant are durable exact-claim lane states", async
       ownerKey,
       leaseToken,
       work: claimed,
-      reason: "profile_capacity",
+      reason: "request_lane_capacity",
     });
     let runtime = await fixture.database.provider_source_runtime_states
       .findUniqueOrThrow({
@@ -409,7 +409,7 @@ test("paired-capacity wait and grant are durable exact-claim lane states", async
       });
     assert.equal(runtime.phase, "waiting");
     assert.equal(runtime.activity, "waiting");
-    assert.equal(runtime.wait_reason, "profile_capacity");
+    assert.equal(runtime.wait_reason, "request_lane_capacity");
     assert.equal(runtime.current_run_id, claimed.runId);
     assert.equal(runtime.connection_profile_id, claimed.connectionProfileId);
     assert.equal(runtime.connection_revision_id, claimed.connectionRevisionId);

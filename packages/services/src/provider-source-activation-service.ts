@@ -148,7 +148,7 @@ export interface ActivatedProviderSourceContract {
   readonly identityNamespaceKey: string;
   readonly cursorCodecVersion: string;
   readonly requestBounds: ProviderSourceRequestBounds;
-  readonly approvedAggregateRequestCap: number;
+  readonly approvedPlatformRequestCap: number;
 }
 
 export interface ProviderSourceActivationServiceDependencies {
@@ -354,8 +354,9 @@ export class ProviderSourceActivationService {
       || !persistedScopes
       || !sameSequence(persistedScopes, manifestScopes)
       || !Number.isInteger(candidate.connectionProfile.requestLimit)
-      || candidate.connectionProfile.requestLimit !==
-        adapter.manifest.maximumConnectionRequestCap
+      || candidate.connectionProfile.requestLimit < 1
+      || candidate.connectionProfile.requestLimit >
+        adapter.manifest.maximumPlatformRequestCap
     ) refuse("adapter_manifest_mismatch");
     requireRequestBoundsWithinLaunchEnvelope(adapter.manifest.requestBounds);
     requireActivationCursor(candidate);
@@ -437,7 +438,7 @@ export class ProviderSourceActivationService {
       identityNamespaceKey: revision.identityNamespaceKey,
       cursorCodecVersion: revision.cursorCodecVersion,
       requestBounds: adapter.manifest.requestBounds,
-      approvedAggregateRequestCap: candidate.connectionProfile.requestLimit,
+      approvedPlatformRequestCap: candidate.connectionProfile.requestLimit,
     });
   }
 }

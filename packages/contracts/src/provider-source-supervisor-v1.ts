@@ -47,7 +47,7 @@ export const providerSourceSupervisorActivities = [
 
 export const providerSourceSupervisorWaitReasons = [
   "not_due",
-  "profile_capacity",
+  "request_lane_capacity",
   "execution_capacity",
   "capacity_blocked",
   "connection_blocked",
@@ -96,17 +96,43 @@ export const providerSourceSupervisorPresenceSchema = z
   })
   .strict();
 
-export const providerSourceSupervisorProfileCapacitySchema = z
-  .object({
-    organizationId: uuidSchema,
-    connectionProfileId: uuidSchema,
-    used: z.number().int().min(0),
-    maximum: z.number().int().min(1),
-    waiting: z.number().int().min(0),
-  })
-  .strict()
-  .refine((value) => value.used <= value.maximum, {
-    message: "provider_source.supervisor_profile_capacity_invalid",
+export const providerSourceSupervisorRequestPermitLaneSchema =
+  z.discriminatedUnion("scope", [
+    z
+      .object({
+        scope: z.literal("platform"),
+        organizationId: uuidSchema,
+        connectionProfileId: uuidSchema,
+        providerId: uuidSchema,
+        used: z.number().int().min(0),
+        maximum: z.number().int().min(1).max(
+          providerSourceLaunchBounds.stablePlatformRequestCap,
+        ),
+        waiting: z.number().int().min(0),
+      })
+      .strict(),
+    z
+      .object({
+        scope: z.literal("connection_test"),
+        organizationId: uuidSchema,
+        connectionProfileId: uuidSchema,
+        providerId: z.null(),
+        used: z.number().int().min(0),
+        maximum: z.number().int().min(1).max(
+          providerSourceLaunchBounds.stablePlatformRequestCap,
+        ),
+        waiting: z.number().int().min(0),
+      })
+      .strict(),
+  ]).superRefine((value, context) => {
+    if (value.used > value.maximum) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "provider_source.supervisor_request_permit_lane_capacity_invalid",
+        path: ["used"],
+      });
+    }
   });
 
 export const providerSourceSupervisorCapacitySchema = z
@@ -120,7 +146,9 @@ export const providerSourceSupervisorCapacitySchema = z
         maximum: z.number().int().min(1).max(64),
       })
       .strict(),
-    profiles: z.array(providerSourceSupervisorProfileCapacitySchema),
+    requestPermitLanes: z.array(
+      providerSourceSupervisorRequestPermitLaneSchema,
+    ),
   })
   .strict()
   .refine(

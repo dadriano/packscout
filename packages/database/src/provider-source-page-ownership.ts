@@ -5,6 +5,8 @@ import type { PackscoutTransactionClient } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
 import type { ProviderSourceAtomicPagePersistenceInput } from "./provider-source-page-validation.ts";
+import { lockProviderSourceSupervisorEpochEnvironmentShared } from
+  "./provider-source-supervisor-environment-lock.ts";
 
 function fenced(message: string): never {
   throw new PersistenceError("SOURCE_FENCED", message);
@@ -12,26 +14,35 @@ function fenced(message: string): never {
 
 /**
  * Locks every mutable page authority in global order:
- * epoch -> provider -> source -> profile -> source revision -> connection
- * revision -> run -> cursor. Episode creators serialize on the profile.
+ * epoch environment -> provider -> source -> profile -> source revision ->
+ * connection revision -> run -> cursor. Episode creators serialize on the
+ * profile. The epoch environment uses a shared advisory lock so heartbeat and
+ * snapshot row updates can continue while an admitted page commits; epoch
+ * transitions take the matching exclusive lock.
  */
 export async function lockProviderSourcePageOwnership(
   transaction: PackscoutTransactionClient,
   input: ProviderSourceAtomicPagePersistenceInput,
 ): Promise<Date> {
   const { pins } = input;
+  const epochEnvironmentLocked =
+    await lockProviderSourceSupervisorEpochEnvironmentShared(
+      transaction,
+      pins.supervisorEpochId,
+    );
+  if (!epochEnvironmentLocked) {
+    fenced("Atomic page supervisor epoch is no longer available.");
+  }
   const epochs = await transaction.$queryRaw<Array<{
     id: string;
-    leaseExpiresAt: Date;
   }>>(Prisma.sql`
-    select id, lease_expires_at as "leaseExpiresAt"
+    select id
     from public.source_supervisor_epochs
     where id = ${pins.supervisorEpochId}::uuid
       and epoch_number = ${BigInt(pins.singletonFencingEpoch)}
       and owner_key = ${pins.supervisorOwnerKey}
       and lease_token = ${pins.supervisorLeaseToken}::uuid
       and state = 'active'::public.supervisor_epoch_state
-    for share
   `);
   if (!epochs[0]) fenced("Atomic page supervisor epoch is no longer active.");
 
@@ -234,9 +245,21 @@ export async function lockProviderSourcePageOwnership(
   });
   if (openEpisodes !== 0) fenced("Atomic page connection revision is blocked.");
 
+  const currentEpochs = await transaction.$queryRaw<Array<{
+    leaseExpiresAt: Date;
+  }>>(Prisma.sql`
+    select lease_expires_at as "leaseExpiresAt"
+    from public.source_supervisor_epochs
+    where id = ${pins.supervisorEpochId}::uuid
+      and epoch_number = ${BigInt(pins.singletonFencingEpoch)}
+      and owner_key = ${pins.supervisorOwnerKey}
+      and lease_token = ${pins.supervisorLeaseToken}::uuid
+      and state = 'active'::public.supervisor_epoch_state
+  `);
   const databaseNow = await providerSourceTransactionTime(transaction);
   if (
-    epochs[0]!.leaseExpiresAt <= databaseNow ||
+    !currentEpochs[0] ||
+    currentEpochs[0].leaseExpiresAt <= databaseNow ||
     runs[0]!.leaseExpiresAt <= databaseNow
   ) {
     fenced("Atomic page supervisor or run lease expired before commit.");

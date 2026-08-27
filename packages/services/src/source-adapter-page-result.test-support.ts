@@ -166,10 +166,12 @@ export async function completeAuthenticPageReadForTest(
   adapter: SourceAdapter,
 ): Promise<SourceAdapterOperationResult<CapturedSourcePageV1>> {
   const coordinator = new ConnectionPermitCoordinator();
-  coordinator.configureProfile({
+  coordinator.configureRequestPermitLane({
     organizationId: fixture.pins.organizationId,
     connectionProfileId: fixture.pins.connectionProfileId,
-    approvedAggregateRequestCap: 1,
+    scope: "platform",
+    providerId: fixture.pins.providerId,
+    approvedRequestCap: 1,
   });
   const authority = new SourceRequestLeaseAuthority(coordinator);
   const requestLease = await authority.admit({
@@ -192,6 +194,7 @@ export async function completeAuthenticPageReadForTest(
     bounds: fixture.manifest.requestBounds,
     operationKind: "page_read",
     provider: fixture.pins.provider,
+    providerId: fixture.pins.providerId,
     sourceInstanceId: fixture.pins.sourceInstanceId,
     sourceRevisionId: fixture.pins.sourceRevisionId,
     normalizedContractVersion: fixture.pins.normalizedContractVersion,

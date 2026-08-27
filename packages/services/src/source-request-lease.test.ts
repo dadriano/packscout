@@ -36,6 +36,7 @@ const sourceTestPins: SourceTestRequestPins = {
   requestLeaseId: "request-lease-source",
   operationKind: "source_test",
   provider: "courtyard",
+  providerId: "courtyard-provider-fixture",
   sourceInstanceId: "source-fixture",
   sourceRevisionId: "source-revision-fixture",
   normalizedContractVersion: "packscout.provider-observation.v1",
@@ -50,6 +51,7 @@ const pageReadPins: PageReadRequestPins = {
   requestLeaseId: "request-lease-page",
   operationKind: "page_read",
   provider: "courtyard",
+  providerId: "courtyard-provider-fixture",
   sourceInstanceId: "source-fixture",
   sourceRevisionId: "source-revision-fixture",
   normalizedContractVersion: "packscout.provider-observation.v1",
@@ -78,10 +80,19 @@ function setup(): Readonly<{
   authority: SourceRequestLeaseAuthority;
 }> {
   const coordinator = new ConnectionPermitCoordinator();
-  coordinator.configureProfile({
+  coordinator.configureRequestPermitLane({
     organizationId: commonPins.organizationId,
     connectionProfileId: commonPins.connectionProfileId,
-    approvedAggregateRequestCap: 2,
+    scope: "platform",
+    providerId: sourceTestPins.providerId,
+    approvedRequestCap: 2,
+  });
+  coordinator.configureRequestPermitLane({
+    organizationId: commonPins.organizationId,
+    connectionProfileId: commonPins.connectionProfileId,
+    scope: "connection_test",
+    providerId: null,
+    approvedRequestCap: 2,
   });
   return {
     coordinator,
@@ -112,7 +123,7 @@ test("paired grant precedes the authoritative guard and exactly one request", as
     guard: () => {
       const snapshot = coordinator.snapshot();
       assert.equal(snapshot.activeExecutionSlots, 1);
-      assert.equal(snapshot.profiles[0]?.activeRequestPermits, 1);
+      assert.equal(snapshot.requestPermitLanes[0]?.activeRequestPermits, 1);
       order.push("guard-after-paired-grant");
       return true;
     },
@@ -159,7 +170,7 @@ test("lost ownership after paired grant releases both and makes no request", asy
   assert.equal(upstreamCalls, 0);
   assert.equal(coordinator.snapshot().activeExecutionSlots, 0);
   assert.equal(
-    coordinator.snapshot().profiles[0]?.activeRequestPermits,
+    coordinator.snapshot().requestPermitLanes[0]?.activeRequestPermits,
     0,
   );
 });
@@ -180,7 +191,7 @@ test("a guard error releases both resources and exposes only a stable error", as
   );
   assert.equal(coordinator.snapshot().activeExecutionSlots, 0);
   assert.equal(
-    coordinator.snapshot().profiles[0]?.activeRequestPermits,
+    coordinator.snapshot().requestPermitLanes[0]?.activeRequestPermits,
     0,
   );
 });
@@ -220,7 +231,7 @@ test("cancellation during the post-grant guard releases both and makes no reques
   assert.equal(upstreamCalls, 0);
   assert.equal(coordinator.snapshot().activeExecutionSlots, 0);
   assert.equal(
-    coordinator.snapshot().profiles[0]?.activeRequestPermits,
+    coordinator.snapshot().requestPermitLanes[0]?.activeRequestPermits,
     0,
   );
 });
@@ -411,6 +422,59 @@ test("each explicit operation scope can be admitted and consumed", async () => {
   pageLease.close();
 });
 
+test("request leases derive platform and connection-test permit lanes from durable pins", async () => {
+  const { authority, coordinator } = setup();
+  const pageLease = await authority.admit({
+    pins: pageReadPins,
+    requestedCursor: pageRequestedCursor,
+    guard: () => true,
+  });
+  const connectionLease = await authority.admit({
+    pins: connectionTestPins,
+    guard: () => true,
+  });
+
+  assert.deepEqual(
+    coordinator.snapshot().requestPermitLanes.map((lane) => ({
+      scope: lane.scope,
+      providerId: lane.providerId,
+      activeRequestPermits: lane.activeRequestPermits,
+    })),
+    [
+      {
+        scope: "platform",
+        providerId: pageReadPins.providerId,
+        activeRequestPermits: 1,
+      },
+      {
+        scope: "connection_test",
+        providerId: null,
+        activeRequestPermits: 1,
+      },
+    ],
+  );
+
+  pageLease.cancel();
+  connectionLease.cancel();
+});
+
+test("source-scoped pins require a durable provider id", async () => {
+  const { authority, coordinator } = setup();
+  await assert.rejects(
+    authority.admit({
+      pins: {
+        ...sourceTestPins,
+        providerId: undefined,
+      } as unknown as SourceTestRequestPins,
+      guard: () => true,
+    }),
+    (error) =>
+      error instanceof SourceRequestLeaseError &&
+      error.code === "invalid_pins",
+  );
+  assert.equal(coordinator.snapshot().activeExecutionSlots, 0);
+});
+
 test("pin equality is value-based but remains scope-sensitive", () => {
   assert.equal(
     sourceRequestOperationPinsEqual(pageReadPins, { ...pageReadPins }),
@@ -420,6 +484,13 @@ test("pin equality is value-based but remains scope-sensitive", () => {
     sourceRequestOperationPinsEqual(pageReadPins, {
       ...pageReadPins,
       cursorGeneration: pageReadPins.cursorGeneration + 1,
+    }),
+    false,
+  );
+  assert.equal(
+    sourceRequestOperationPinsEqual(pageReadPins, {
+      ...pageReadPins,
+      providerId: "different-durable-provider",
     }),
     false,
   );

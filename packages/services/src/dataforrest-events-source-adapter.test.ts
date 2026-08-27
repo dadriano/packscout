@@ -72,11 +72,24 @@ const requestLeaseAuthorityByOperation = new WeakMap<
 
 function runtime(cap = 2): TestRuntime {
   const coordinator = new ConnectionPermitCoordinator();
-  coordinator.configureProfile({
+  coordinator.configureRequestPermitLane({
     organizationId: "organization-1",
     connectionProfileId: "profile-1",
-    approvedAggregateRequestCap: cap,
+    scope: "connection_test",
+    providerId: null,
+    approvedRequestCap: cap,
   });
+  for (const provider of Object.keys(
+    dataforrestIdentityNamespaceByProvider,
+  ) as LaunchProviderKey[]) {
+    coordinator.configureRequestPermitLane({
+      organizationId: "organization-1",
+      connectionProfileId: "profile-1",
+      scope: "platform",
+      providerId: `provider-${provider}`,
+      approvedRequestCap: cap,
+    });
+  }
   return {
     coordinator,
     authority: new SourceRequestLeaseAuthority(coordinator),
@@ -176,6 +189,7 @@ async function sourceOperation(
     ...requestIdentity,
     operationKind: "source_test",
     provider,
+    providerId: `provider-${provider}`,
     sourceInstanceId: `source-${provider}`,
     sourceRevisionId: `source-revision-${provider}`,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
@@ -191,6 +205,7 @@ async function sourceOperation(
     ...commonOperationFields,
     operationKind: "source_test",
     provider,
+    providerId: pins.providerId,
     sourceInstanceId: pins.sourceInstanceId,
     sourceRevisionId: pins.sourceRevisionId,
     normalizedContractVersion: pins.normalizedContractVersion,
@@ -236,6 +251,7 @@ async function pageOperation(
     ...requestIdentity,
     operationKind: "page_read",
     provider,
+    providerId: `provider-${provider}`,
     sourceInstanceId: requestedCursor.sourceInstanceId,
     sourceRevisionId: requestedCursor.sourceRevisionId,
     normalizedContractVersion: adapterIdentity.normalizedContractVersion,
@@ -258,6 +274,7 @@ async function pageOperation(
     adapterVersion: adapterIdentity.adapterVersion,
     operationKind: "page_read",
     provider,
+    providerId: pins.providerId,
     sourceInstanceId: pins.sourceInstanceId,
     sourceRevisionId: pins.sourceRevisionId,
     normalizedContractVersion: pins.normalizedContractVersion,
@@ -1126,6 +1143,7 @@ test("deep sub-2MiB JSON fails as one sanitized operation-appropriate result", a
 
 test("adversarial structural limits reject before materializing the provider tree", async () => {
   const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const currentBounds = dataforrestEventsV1SourceAdapterManifest.requestBounds;
   const placeholder = "packscout-raw-json-placeholder";
   const rawPageWithData = (rawData: string) =>
     JSON.stringify({
@@ -1137,7 +1155,7 @@ test("adversarial structural limits reject before materializing the provider tre
     rawPageWithData(`{"nested":${"[".repeat(100_000)}0${"]".repeat(100_000)}}`),
     rawPageWithData(`{"native_facts":[${"0,".repeat(5_000)}0]}`),
     JSON.stringify({
-      records: Array.from({ length: 250 }, (_, recordIndex) => ({
+      records: Array.from({ length: 500 }, (_, recordIndex) => ({
         ...base,
         record_id: `node-limit-card-${recordIndex}`,
         data: {
@@ -1151,11 +1169,16 @@ test("adversarial structural limits reject before materializing the provider tre
   ];
   for (const [index, rawPage] of adversarialPages.entries()) {
     assert.equal(
-      Buffer.byteLength(rawPage, "utf8") < bounds.maximumResponseBytes,
+      Buffer.byteLength(rawPage, "utf8") < currentBounds.maximumResponseBytes,
       true,
     );
     const adapter = adapterWithClient(async () => new Response(rawPage));
-    const operation = await pageOperation(runtime(), "courtyard", null);
+    const operation = await pageOperation(
+      runtime(),
+      "courtyard",
+      null,
+      currentBounds,
+    );
     const capture = await successfulCapture(adapter, operation);
     const result = await interpretSourceAdapterPage(adapter, operation, capture);
     assert.equal(result.ok, false, `adversarial page ${index}`);
@@ -1287,10 +1310,10 @@ test("sanitized 5,672,975-byte page covers the second observed Phygitals node sh
   operation.requestLease.close();
 });
 
-test("the 240,000-node boundary is accepted and one additional node is rejected", async () => {
+test("the 480,000-node boundary is accepted and one additional node is rejected", async () => {
   const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
   const page = (additionalFirstRecordNodes: number) => ({
-    records: Array.from({ length: 250 }, (_, recordIndex) => ({
+    records: Array.from({ length: 500 }, (_, recordIndex) => ({
       ...base,
       record_id: `node-boundary-card-${recordIndex}`,
       data: {
@@ -1307,12 +1330,12 @@ test("the 240,000-node boundary is accepted and one additional node is rejected"
     next_cursor: "node-boundary-next",
     poll_after_seconds: 0,
   });
-  const acceptedPage = page(496);
-  const rejectedPage = page(497);
-  assert.equal(jsonNodeCount(acceptedPage), 240_000);
-  assert.equal(jsonNodeCount(rejectedPage), 240_001);
-  assert.equal(isBoundedDataforrestEventsPageV1(acceptedPage, 250), true);
-  assert.equal(isBoundedDataforrestEventsPageV1(rejectedPage, 250), false);
+  const acceptedPage = page(996);
+  const rejectedPage = page(997);
+  assert.equal(jsonNodeCount(acceptedPage), 480_000);
+  assert.equal(jsonNodeCount(rejectedPage), 480_001);
+  assert.equal(isBoundedDataforrestEventsPageV1(acceptedPage, 500), true);
+  assert.equal(isBoundedDataforrestEventsPageV1(rejectedPage, 500), false);
 
   for (const [candidate, expected] of [
     [acceptedPage, true],
@@ -1324,12 +1347,17 @@ test("the 240,000-node boundary is accepted and one additional node is rejected"
       true,
     );
     const adapter = adapterWithClient(async () => new Response(rawPage));
-    const operation = await pageOperation(runtime(), "courtyard", null);
+    const operation = await pageOperation(
+      runtime(),
+      "courtyard",
+      null,
+      dataforrestEventsV1SourceAdapterManifest.requestBounds,
+    );
     const capture = await successfulCapture(adapter, operation);
     const result = await interpretSourceAdapterPage(adapter, operation, capture);
     assert.equal(result.ok, expected);
     if (result.ok) {
-      assert.equal(result.value.normalizedPage.outcomes.length, 250);
+      assert.equal(result.value.normalizedPage.outcomes.length, 500);
     } else {
       assert.deepEqual(result.failure, {
         disposition: "source_action_required",
@@ -1410,8 +1438,8 @@ test("the sole v1 adapter captures valid pages above 4 MiB and rejects pages abo
   assert.equal(rejected.ok, false);
   if (!rejected.ok) {
     assert.deepEqual(rejected.failure, {
-      disposition: "source_action_required",
-      code: "invalid_response",
+      disposition: "retryable",
+      code: "response_too_large",
     });
     assert.equal(rejected.diagnostics[0]?.code, "response_too_large");
   }

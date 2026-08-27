@@ -26,7 +26,7 @@ The existing pipeline already separates transport and platform mapping adapters,
 ### Versioned launch contract
 
 - Publish one versioned provider-source contract as the sole authority for adapter capabilities, normalized observations, cursor envelopes, continuation, identity, failure, lifecycle, schedule bounds, freshness grace, retention, singleton lease timing, and control-plane retry policy.
-- Publish a separate versioned DataForrest adapter contract as the authority for its filters, raw wrapper, event codes, pagination hints, request bounds, and connection-scoped concurrency.
+- Publish a separate versioned DataForrest adapter contract as the authority for its filters, raw wrapper, event codes, pagination hints, request bounds, and per-platform concurrency.
 - Bind both applicable contract revisions to connection profiles, source revisions, runs, diagnostics, and local completion evidence wherever those values affect interpretation.
 - Require worker, server, admin, migration, and test consumers to read the shared values instead of carrying independent defaults.
 - Expose only safe effective settings and revision identity to operators; the contract never contains a credential or protected payload.
@@ -34,7 +34,7 @@ The existing pipeline already separates transport and platform mapping adapters,
 ### Source adapter contract
 
 - Give every compile-time registered source type a stable `sourceTypeKey` and adapter version, normalized-record contract version, compatible connection type, supported providers, per-provider replacement identity-namespace key, evidence-backed record-ID scope declarations, capabilities, validated configuration contracts, and safe operator label; never reuse this identity as a mapper key.
-- Require the adapter boundary to test a connection, test a source, execute or cancel one bounded request under a runtime-granted connection permit, classify failures, and report measurements without moving a cursor itself.
+- Require the adapter boundary to test a connection, test a source, execute or cancel one bounded request under a runtime-granted request-lane permit, classify failures, and report measurements without moving a cursor itself.
 - Normalize every successful page to one provider key, ordered observation outcomes, an adapter-owned cursor envelope, and exactly `{ kind: continue }` or `{ kind: poll_after, minimumDelaySeconds }`, where the delay is a required integer from 0 through 86,400.
 - Normalize each valid observation to `providerRecordIdentity = { recordIdScopeKey, providerRecordId }`, catalog/pull/trade kind, effective and collection times, scope-qualified relationship identities, approved event, money, payment, and availability facts, strict source-neutral display/value/EV provider facts, plus a protected native-evidence reference.
 - Keep mapping-relevant provider facts in one closed, versioned semantic schema and include them in the semantic observation hash. Protected native evidence remains provenance/quarantine input only and can neither reach a mapper nor override normalized facts; authoritative sold out remains distinct from ordinary unavailable.
@@ -50,8 +50,8 @@ The existing pipeline already separates transport and platform mapping adapters,
 ### Durable test-result guard
 
 - Bind every connection- or source-test attempt to its job claim lease, request-time singleton fencing epoch, connection revision and expected pre-test health generation, and for a source test its source revision.
-- Hold one generic execution slot for each complete connection- or source-test attempt. After the request boundary terminalizes capture and releases its profile permit, retain that slot through bounded validation and one compare-and-transition transaction that references the terminal attempt and test pins, persists the immutable validated result, retains or closes the applicable blocking episode, and stores both pre-test and resulting health generations; release the slot only when the result is terminal or fenced, and let only an unrelated concurrent generation change fence it.
-- For a request-boundary blocking test failure only, combine request-attempt terminalization, immutable failed result, and episode transition before the permit wakes another waiter; do not terminalize the same attempt again later.
+- Hold one generic execution slot for each complete connection- or source-test attempt. After the request boundary terminalizes capture and releases its exact lane permit, retain that slot through bounded validation and one compare-and-transition transaction that references the terminal attempt and test pins, persists the immutable validated result, retains or closes the applicable blocking episode, and stores both pre-test and resulting health generations; release the slot only when the result is terminal or fenced, and let only an unrelated concurrent generation change fence it.
+- For a request-boundary blocking test failure only, combine request-attempt terminalization, immutable failed result, and episode transition before the lane permit wakes another waiter; do not terminalize the same attempt again later.
 
 ### Mapper compatibility descriptors
 
@@ -60,18 +60,19 @@ The existing pipeline already separates transport and platform mapping adapters,
 - Let activation validate descriptor compatibility from this manifest before mapper implementations exist; unregistered, provider-mismatched, contract-mismatched, or namespace-mismatched descriptors fail closed.
 - Require task 005 mapper implementations to satisfy these exact descriptors and task 006 production composition to prove every pin resolves once.
 
-### Connection permit contract
+### Request permit-lane contract
 
-- Give the generic runtime one process-local, tenant-safe permit coordinator keyed by stable connection-profile identity and configured from that profile's approved aggregate cap.
-- Make every connection test, source test, and page read wait cancelably in one FIFO profile queue; a pending operation holds neither an execution slot nor a request permit until the generic runtime can admit it with both resources, and adapter code cannot acquire a separate permit pool.
+- Give the generic runtime one process-local, tenant-safe permit coordinator keyed by the exact lane identity: organization, stable connection profile, lane scope, and provider when the scope is `platform`.
+- Give every platform lane an operating limit of one concurrent request beneath the connection profile's provider-approved maximum of two. Credential revisions, source revisions, and source instances for the same profile and provider reuse that lane; they cannot create extra permit pools. Give connection tests a separate `connection_test` lane operated at one request with no provider identity.
+- Make every source test and page read wait cancelably in its provider's FIFO platform lane, and every connection test in the separate FIFO connection-test lane. A pending operation holds neither an execution slot nor a request permit until the generic runtime can admit it with both resources, and adapter code cannot acquire a separate permit pool.
 - After paired grant and immediately before invocation, require one authoritative operation-specific guard to validate that the singleton epoch is active, the job or run claim lease, profile and pinned connection revision plus revocation and connection-health generation, applicable source revision and lifecycle, and for page reads the requested cursor and generation; failed validation atomically releases both reserved resources without creating a request attempt or calling the adapter.
-- Issue one nontransferable request lease bound to every applicable validated pin and permit exactly one bounded upstream request. Reject nested, reused, stale-job, stale-run, disabled-source, revoked-profile, stale-health-generation, wrong-cursor, wrong-generation, wrong-profile, wrong-epoch, or unmetered requests, and reject every operation under a blocking connection episode except the one current pending or running recovery connection-test job explicitly bound to that episode, its open health generation, and one nonrevoked same or candidate target revision.
+- Issue one nontransferable request lease bound to the exact permit-lane identity and every applicable validated pin, and permit exactly one bounded upstream request. Reject nested, reused, wrong-lane, stale-job, stale-run, disabled-source, revoked-profile, stale-health-generation, wrong-cursor, wrong-generation, wrong-profile, wrong-epoch, or unmetered requests, and reject every operation under a blocking connection episode except the one current pending or running recovery connection-test job explicitly bound to that episode, its open health generation, and one nonrevoked same or candidate target revision.
 - Persist the durable `in_flight` request attempt after paired admission and guard validation but before invoking the adapter. If that pre-call insert cannot commit under the exact shared control-plane retry policy, close the unused one-use lease, release both reserved resources, make zero upstream calls, and enter the same full-supervisor self-fencing path; no synthetic attempt row or success diagnostic is invented.
-- Before auto-closing the request lease or waking the profile permit, terminalize the durable request attempt for every bounded response capture or normalized request failure. For a typed connection-blocking failure, combine terminalization with compare-and-transition on the detecting lease's active singleton epoch, job or run claim, connection revision, and expected health generation; one current detector opens the episode, simultaneous detectors coalesce, and stale detectors cannot mutate health. Include the immutable failed result only when this is a blocking test attempt. Apply the exact shared control-plane retry policy; exhaustion starts full supervisor fencing and leaves the attempt nonterminal. Page normalization or source-test validation begins only after successful boundary terminalization.
+- Before auto-closing the request lease or waking its permit lane, terminalize the durable request attempt for every bounded response capture or normalized request failure. For a typed connection-blocking failure, combine terminalization with compare-and-transition on the detecting lease's active singleton epoch, job or run claim, connection revision, and expected health generation; one current detector opens the episode, simultaneous detectors coalesce, and stale detectors cannot mutate health. Include the immutable failed result only when this is a blocking test attempt. Apply the exact shared control-plane retry policy; exhaustion starts full supervisor fencing and leaves the attempt nonterminal. Page normalization or source-test validation begins only after successful boundary terminalization.
 
 ### Control-plane retry and owner fencing
 
-- Freeze one shared retry policy in the versioned contract: at most three transaction attempts, the first immediately and then after 100 ms and 400 ms, each with a 750 ms database timeout and a hard three-second wall-clock limit.
+- Freeze one shared retry policy in the versioned contract: at most three transaction attempts, the first immediately and then after 100 ms and 400 ms, each with a five-second database timeout and a hard 16-second wall-clock limit.
 - Retry only transient connection, timeout, serialization, or deadlock failures; an invariant, stale-fence, cancellation, or lost-ownership result does not retry, and every retry revalidates the same request attempt and active owner epoch.
 - On exhaustion, irreversibly self-fence the runtime in memory before attempting the durable compare-and-transition from `active` to `fenced_draining`; after the local fence, issue no new adapter call or persistence transaction. A successful durable transition is the hard database fence: page commits and test-result transactions lock and require the same `active` epoch, so they either commit before that transition or fail after it. If the state write is unavailable, stop renewal, abort outstanding work, keep retrying only the fence transition, and exit without resuming persistence; an already-submitted transaction may have committed only under the still-active predecessor epoch before the fence became durable, and takeover must reconcile that durable outcome after expiry plus grace rather than claim an impossible zero-result guarantee.
 
@@ -93,7 +94,7 @@ The existing pipeline already separates transport and platform mapping adapters,
 ### Ownership model
 
 - Keep stable organization-scoped provider identity separate from connection profiles, source types, and source instances.
-- Make each connection profile belong to one registered source type and own adapter-validated encrypted configuration, tested state, and one stable-profile request limit shared by its credential revisions, source reads, connection tests, and source tests.
+- Make each connection profile belong to one registered source type and own adapter-validated encrypted configuration, tested state, and an approved per-platform request limit. Apply that limit independently to each provider lane across credential and source revisions; source tests and page reads share their provider's lane, while connection tests use the separate connection-test lane.
 - Make each source instance own one provider, one registered `sourceTypeKey`, a compatible profile, adapter-validated immutable configuration, a separate mapper key and version, identity namespace, lifecycle state, schedule, cursor, runs, leases, health, and processor diagnostic feed.
 - Enforce at most one active source instance per provider while retaining inactive historical source instances for audit and future source replacement.
 - Scope opaque cursors and processor state to source instances while keeping canonical business identity independent of source-instance and connection-profile identities.
@@ -195,7 +196,8 @@ None directly. Tasks 004 and 008 expose the masked lifecycle, progress, and log-
 |---|---|
 | Provider | Stable organization-scoped platform identity |
 | Source-adapter manifest | Adapter and normalized-contract versions, compatible profile type, capabilities, providers, and identity namespaces |
-| Connection profile | Adapter-compatible encrypted configuration, stable-profile request cap, revisions, tests, health generation, and optional blocking episode |
+| Connection profile | Adapter-compatible encrypted configuration, approved per-platform request cap, revisions, tests, health generation, and optional blocking episode |
+| Request permit lane | Organization, connection profile, `platform` plus provider or provider-free `connection_test` scope, active/maximum permits, and FIFO wait state |
 | Source instance | Provider binding, adapter and config revisions, immutable configuration, lifecycle, schedule, cursor envelope, health, and logs |
 
 ### Runtime boundaries
@@ -224,7 +226,7 @@ None directly. Tasks 004 and 008 expose the masked lifecycle, progress, and log-
 
 - [x] DataForrest and alternate-source contract fixtures map to the same normalized record, cursor, continuation, failure, and diagnostic contract without vendor fields reaching generic consumers; task 003 owns the executable adapters.
 - [x] Generic code may bound, compare, store, and fingerprint opaque cursor text but cannot parse, convert, or transfer it between sources or adapters.
-- [x] All revisions, tests, and reads under one connection profile share one cancelable FIFO request cap, while a different profile has independent capacity.
+- [x] All credential and source revisions for one profile/provider share one cancelable FIFO platform lane operated at one request, while other providers on the same profile have independent lanes and connection tests use their own provider-free one-request lane; the provider hard maximum remains two per platform.
 - [x] Every run retains its adapter, normalized-contract, connection, source, identity-namespace, cursor-codec, and generation pins; every delivery occurrence traces those applicable pins, while a semantic observation retains only its stable source record and contract/hash identity.
 
 ### Identity compatibility proof
