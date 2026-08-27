@@ -8,6 +8,8 @@ import { ProviderSourceDiagnosticRepository } from
   "./provider-source-diagnostic-repository.ts";
 import { ProviderSourceImportRunRepository } from
   "./provider-source-import-run-repository.ts";
+import { lockProviderSourceSupervisorActiveEpoch } from
+  "./provider-source-supervisor-environment-lock.ts";
 import { PROVIDER_SOURCE_CONTROL_PLANE_TRANSACTION } from
   "./provider-source-persistence-types.ts";
 import { ProviderSourceSupervisorRecoveryRepository } from
@@ -145,17 +147,11 @@ export class ProviderSourceSupervisorClaimRecoveryRepository {
     transaction: PackscoutTransactionClient,
     input: ProviderSourceSupervisorEpochFence,
   ): Promise<Date> {
-    const epochs = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      select id
-      from public.source_supervisor_epochs
-      where id = cast(${input.epochId} as uuid)
-        and owner_key = ${input.ownerKey}
-        and lease_token = cast(${input.leaseToken} as uuid)
-        and state = 'active'::public.supervisor_epoch_state
-        and lease_expires_at > clock_timestamp()
-      for share
-    `);
-    if (!epochs[0]) {
+    const epoch = await lockProviderSourceSupervisorActiveEpoch(
+      transaction,
+      input,
+    );
+    if (!epoch) {
       throw new PersistenceError(
         "SUPERVISOR_OWNERSHIP_LOST",
         "Supervisor epoch is not active.",

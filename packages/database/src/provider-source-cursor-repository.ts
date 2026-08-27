@@ -8,6 +8,8 @@ import {
 import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
 import type { OpaqueCursor } from "./provider-source-persistence-types.ts";
+import { lockProviderSourceSupervisorActiveEpoch } from
+  "./provider-source-supervisor-environment-lock.ts";
 
 function validateOpaqueCursor(
   cursor: string | null,
@@ -116,17 +118,15 @@ export class ProviderSourceCursorRepository {
     if (input.continuation.kind === "continue" && nextFingerprint === null) {
       throw new TypeError("Continue requires a nonnull cursor.");
     }
-    const epochs = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      select id
-      from public.source_supervisor_epochs
-      where id = cast(${input.supervisorEpochId} as uuid)
-        and owner_key = ${input.supervisorOwnerKey}
-        and lease_token = cast(${input.supervisorLeaseToken} as uuid)
-        and state = 'active'
-        and lease_expires_at > clock_timestamp()
-      for share
-    `);
-    if (!epochs[0]) {
+    const epoch = await lockProviderSourceSupervisorActiveEpoch(
+      transaction,
+      {
+        epochId: input.supervisorEpochId,
+        ownerKey: input.supervisorOwnerKey,
+        leaseToken: input.supervisorLeaseToken,
+      },
+    );
+    if (!epoch) {
       throw new PersistenceError(
         "SUPERVISOR_OWNERSHIP_LOST",
         "Cursor commit epoch is no longer active.",

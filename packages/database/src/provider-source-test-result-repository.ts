@@ -8,6 +8,8 @@ import { SourceConnectionRecoveryRepository } from
   "./source-connection-recovery-repository.ts";
 import { ProviderSourceDiagnosticRepository } from
   "./provider-source-diagnostic-repository.ts";
+import { lockProviderSourceSupervisorActiveEpoch } from
+  "./provider-source-supervisor-environment-lock.ts";
 import { providerSourceSupervisorTransitionDiagnosticId } from
   "./provider-source-supervisor-work-diagnostic.ts";
 
@@ -89,17 +91,15 @@ export class ProviderSourceTestResultRepository {
     const responseStatus = safeResponseStatus(input.responseStatus);
     const latencyMs = safeLatency(input.latencyMs);
     return this.database.$transaction(async (transaction) => {
-      const epochs = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        select id
-        from public.source_supervisor_epochs
-        where id = cast(${input.supervisorEpochId} as uuid)
-          and owner_key = ${input.supervisorOwnerKey}
-          and lease_token = cast(${input.supervisorLeaseToken} as uuid)
-          and state = 'active'
-          and lease_expires_at > clock_timestamp()
-        for share
-      `);
-      if (!epochs[0]) {
+      const epoch = await lockProviderSourceSupervisorActiveEpoch(
+        transaction,
+        {
+          epochId: input.supervisorEpochId,
+          ownerKey: input.supervisorOwnerKey,
+          leaseToken: input.supervisorLeaseToken,
+        },
+      );
+      if (!epoch) {
         throw new PersistenceError("SUPERVISOR_OWNERSHIP_LOST", "Connection-test epoch was lost.");
       }
       const jobScope = await transaction.source_connection_test_jobs.findFirst({
@@ -384,17 +384,15 @@ export class ProviderSourceTestResultRepository {
   async completeSourceTest(input: CompleteTestFence): Promise<{ resultId: string }> {
     const resultCode = safeCode(input.safeCode);
     return this.database.$transaction(async (transaction) => {
-      const epochs = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        select id
-        from public.source_supervisor_epochs
-        where id = cast(${input.supervisorEpochId} as uuid)
-          and owner_key = ${input.supervisorOwnerKey}
-          and lease_token = cast(${input.supervisorLeaseToken} as uuid)
-          and state = 'active'
-          and lease_expires_at > clock_timestamp()
-        for share
-      `);
-      if (!epochs[0]) {
+      const epoch = await lockProviderSourceSupervisorActiveEpoch(
+        transaction,
+        {
+          epochId: input.supervisorEpochId,
+          ownerKey: input.supervisorOwnerKey,
+          leaseToken: input.supervisorLeaseToken,
+        },
+      );
+      if (!epoch) {
         throw new PersistenceError("SUPERVISOR_OWNERSHIP_LOST", "Source-test epoch was lost.");
       }
       const jobScope = await transaction.provider_source_test_jobs.findFirst({
