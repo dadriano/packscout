@@ -1,10 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { usePackScoutAuth } from "@/components/auth/AuthContext.client";
-import { browserHasIdentityCookie } from "@/lib/identity-cookie";
+import {
+  decideIdentityHandoff,
+  IDENTITY_HANDOFF_MAX_ATTEMPTS,
+  IDENTITY_HANDOFF_TIMEOUT_MS,
+  readBrowserIdentityCookie,
+  readLastIdentityCookieWrite,
+  subscribeToIdentityCookieWrites,
+} from "@/lib/identity-cookie";
 import { presentLandingAccessAction } from "./landing-presentation";
 import styles from "./Landing.module.css";
 
@@ -20,44 +27,74 @@ import styles from "./Landing.module.css";
  * so the provider's arrival causes no layout shift. The note is a polite live
  * region, so the state change is announced without stealing focus.
  */
-/** How long to wait for the identity cookie before falling back to the link. */
-const IDENTITY_HANDOFF_TIMEOUT_MS = 6_000;
-const IDENTITY_HANDOFF_POLL_MS = 120;
+
+/** No identity cookie has been written during a server render. */
+const noIdentityCookieWrite = () => null;
 
 export function LandingAccessCta() {
   const auth = usePackScoutAuth();
   const router = useRouter();
   const action = presentLandingAccessAction(auth.status);
-  const entered = useRef(false);
+  // A verified session may be handed off without a click; an unverifiable one
+  // may not, because the gate refuses the same token this page was already
+  // refused for.
+  const automatic = action.kind === "enter" && action.automatic;
+  const destination = action.kind === "enter" ? action.href : null;
+  // Cookie writes are asynchronous and cause no render of their own, so the
+  // hand-off subscribes to them rather than polling for a value it cannot
+  // interpret anyway.
+  const lastWrite = useSyncExternalStore(
+    subscribeToIdentityCookieWrites,
+    readLastIdentityCookieWrite,
+    noIdentityCookieWrite,
+  );
+  const mountedAtMs = useRef(0);
+  const armedAtMs = useRef(0);
+  const attempted = useRef<readonly string[]>([]);
+  const surrendered = useRef(false);
+
+  // The page was server-rendered from whatever cookie the browser held before
+  // this commit, so that moment is the line between "a credential the gate
+  // may already have refused" and "a credential this session has since
+  // written".
+  useEffect(() => {
+    if (mountedAtMs.current === 0) mountedAtMs.current = Date.now();
+  }, []);
 
   // Completing sign-in should land the visitor where they belong without a
   // second click. Only the server knows where that is — the product for an
   // admitted account, the holding surface for one still in review — so this
   // navigates to the root and lets the gate decide.
   //
-  // It waits for the identity cookie first. The provider establishes the
-  // session in the browser before that cookie exists, and navigating in the
-  // gap renders as a signed-out visitor: the landing page again. If the
-  // cookie never arrives, the effect gives up and leaves the visible link as
-  // a working manual fallback rather than trapping anyone in a retry loop.
+  // Which credential travels is the whole question. The landing page is also
+  // what a visitor sees when the gate *refused* their cookie, and that
+  // refused value is still in the jar; navigating on its presence resubmits
+  // it and bounces straight back. decideIdentityHandoff answers on the value
+  // instead, bounds the wait, and keeps the visible link as the manual
+  // fallback rather than trapping anyone in a retry loop. Recording which
+  // credential was used — rather than a spent boolean — is what lets a newer
+  // one that arrives after a failed attempt try again.
   useEffect(() => {
-    if (action.kind !== "enter" || entered.current) return;
-    let timer = 0;
-    let waited = 0;
-    const attempt = () => {
-      if (entered.current) return;
-      if (browserHasIdentityCookie()) {
-        entered.current = true;
-        router.replace(action.href);
-        return;
-      }
-      waited += IDENTITY_HANDOFF_POLL_MS;
-      if (waited >= IDENTITY_HANDOFF_TIMEOUT_MS) return;
-      timer = window.setTimeout(attempt, IDENTITY_HANDOFF_POLL_MS);
-    };
-    attempt();
-    return () => window.clearTimeout(timer);
-  }, [action, router]);
+    if (!automatic || destination === null || surrendered.current) return;
+    if (armedAtMs.current === 0) armedAtMs.current = Date.now();
+    const decision = decideIdentityHandoff({
+      cookieToken: readBrowserIdentityCookie(),
+      lastWrite,
+      mountedAtMs: mountedAtMs.current,
+      armedAtMs: armedAtMs.current,
+      nowMs: Date.now(),
+      timeoutMs: IDENTITY_HANDOFF_TIMEOUT_MS,
+      attemptedTokens: attempted.current,
+      maxAttempts: IDENTITY_HANDOFF_MAX_ATTEMPTS,
+    });
+    if (decision.kind === "give_up") {
+      surrendered.current = true;
+      return;
+    }
+    if (decision.kind !== "hand_off") return;
+    attempted.current = [...attempted.current, decision.token];
+    router.replace(destination);
+  }, [automatic, destination, lastWrite, router]);
 
   return (
     <div className={styles.ctaSlot}>

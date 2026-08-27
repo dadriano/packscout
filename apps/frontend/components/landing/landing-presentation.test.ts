@@ -79,3 +79,17 @@ test("only a signed-out visitor is ever asked to sign in", () => {
     }
   }
 });
+
+test("only a verified session is handed off without a click", () => {
+  const verified = presentLandingAccessAction("signed_in");
+  assert.equal(verified.kind === "enter" && verified.automatic, true);
+  // An established session the product could not verify must not navigate on
+  // its own: the gate refuses the same token, so it would bounce straight
+  // back here and hide the note that says how to recover.
+  const unverifiable = presentLandingAccessAction("error");
+  assert.equal(unverifiable.kind, "enter");
+  assert.equal(unverifiable.kind === "enter" && unverifiable.automatic, false);
+  // The note it leaves standing points at the account menu, which the shell
+  // renders on this surface too.
+  assert.match(unverifiable.note ?? "", /account menu/i);
+});
