@@ -71,6 +71,8 @@ export interface AdminAuthHttpDependencies {
 
 export interface AdminAppDependencies {
   trustedProxies?: readonly string[];
+  /** Adapter-owned hop count for platforms that overwrite forwarded headers. */
+  trustedProxyHops?: number;
   auth?: AdminAuthHttpDependencies;
   providers?: Omit<
     ProvidersRouterDependencies,
@@ -179,7 +181,9 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
   const app = express();
 
   app.disable("x-powered-by");
-  if (dependencies.trustedProxies?.length) {
+  if (dependencies.trustedProxyHops !== undefined) {
+    app.set("trust proxy", dependencies.trustedProxyHops);
+  } else if (dependencies.trustedProxies?.length) {
     app.set("trust proxy", [...dependencies.trustedProxies]);
   }
   app.use((request, response, next) => {

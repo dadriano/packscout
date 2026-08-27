@@ -80,4 +80,5 @@ test("admin app trusts forwarded addresses only from configured proxy ranges", (
     createAdminApp({ trustedProxies: ["10.0.0.0/24"] }).get("trust proxy"),
     ["10.0.0.0/24"],
   );
+  assert.equal(createAdminApp({ trustedProxyHops: 1 }).get("trust proxy"), 1);
 });

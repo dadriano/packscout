@@ -24,3 +24,5 @@ coverage/
 .tmp/
 .vercel/
 .convex/
+apps/admin/public/index.html
+apps/admin/public/assets/
