@@ -808,10 +808,7 @@ export class ProviderSourceSupervisorWorkExecutor
         return dispositionForFailure(operationResult.failure);
       }
       return work.kind === "source_test"
-        ? {
-            kind: "source_action_required",
-            safeCode: failureSafeCode(operationResult.failure),
-          }
+        ? { kind: "test_terminal" }
         : work.kind === "connection_test"
           ? { kind: "test_terminal" }
           : dispositionForFailure(operationResult.failure);
@@ -845,12 +842,7 @@ export class ProviderSourceSupervisorWorkExecutor
         interpretation,
       );
       await this.#completeTestResult(work, context, requestAttemptId, result);
-      return result.ok
-        ? { kind: "test_terminal" }
-        : {
-            kind: "source_action_required",
-            safeCode: failureSafeCode(result.failure),
-          };
+      return { kind: "test_terminal" };
     }
     if (work.kind !== "page_read" || operation.operationKind !== "page_read") {
       return { kind: "source_action_required", safeCode: "WORK_KIND_MISMATCH" };
