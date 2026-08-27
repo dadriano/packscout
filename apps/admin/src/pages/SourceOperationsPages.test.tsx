@@ -430,6 +430,104 @@ test("provider detail preserves safe state through refresh and action failures w
   assert.match(pageText(routed), /Saved\. Applies to the next import run\./u);
 });
 
+test("provider detail ignores a pre-save detail response after the request size revision is saved", async (context) => {
+  const initialDetail = operationsDetail();
+  const staleDetailResponse = deferred<Response>();
+  const postSaveDetailResponse = deferred<Response>();
+  const firstSaveResponse = deferred<Response>();
+  const recordsPerRequestBodies: unknown[] = [];
+  let detailRequestCount = 0;
+
+  stubFetch(context, ({ input, init }) => {
+    const path = String(input);
+    if (path.includes("/diagnostics")) {
+      return jsonResponse(diagnosticHistory());
+    }
+    if (path === `/api/provider-source-operations/providers/${operationsFixtureIds.providers[0]}`) {
+      detailRequestCount += 1;
+      if (detailRequestCount === 1) return jsonResponse(initialDetail);
+      if (detailRequestCount === 2) return staleDetailResponse.promise;
+      if (detailRequestCount === 3) return postSaveDetailResponse.promise;
+      return jsonResponse(initialDetail);
+    }
+    if (path.endsWith("/records-per-request")) {
+      recordsPerRequestBodies.push(JSON.parse(String(init?.body)));
+      if (recordsPerRequestBodies.length === 1) return firstSaveResponse.promise;
+      return jsonResponse({
+        scheduleRevisionId: operationsFixtureIds.schedules[3],
+        audit: { outcome: "success" },
+      });
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+
+  const routed = await renderPage(
+    <ToastProvider>
+      <SessionProvider initialSession={operationsSession()}>
+        <MemoryRouter initialEntries={[`/providers/${operationsFixtureIds.providers[0]}`]}>
+          <Routes><Route path="/providers/:providerId" element={<ProviderDetailPage />} /></Routes>
+        </MemoryRouter>
+      </SessionProvider>
+    </ToastProvider>,
+  );
+  cleanupPage(context, routed);
+  await settlePage();
+
+  await act(async () => findButton(routed, "Pause display").click());
+  await act(async () => {
+    findButton(routed, "Resume display").click();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  assert.equal(detailRequestCount, 2);
+
+  await act(async () => {
+    changeControl(routed, "provider-source-records-per-request", "1250");
+    const form = findButton(routed, "Save request size").closest("form");
+    assert.ok(form);
+    form.dispatchEvent(new routed.dom.window.Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  assert.equal(recordsPerRequestBodies.length, 1);
+
+  await act(async () => {
+    firstSaveResponse.resolve(jsonResponse({
+      scheduleRevisionId: operationsFixtureIds.schedules[2],
+      audit: { outcome: "success" },
+    }));
+    staleDetailResponse.resolve(jsonResponse(initialDetail));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+
+  assert.match(pageText(routed), /Saved\. Applies to the next import run\./u);
+  assert.equal(detailRequestCount, 3);
+  assert.equal(
+    routed.container.querySelector<HTMLInputElement>(
+      "#provider-source-records-per-request",
+    )?.value,
+    "1250",
+  );
+
+  await act(async () => {
+    const form = findButton(routed, "Save request size").closest("form");
+    assert.ok(form);
+    form.dispatchEvent(new routed.dom.window.Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+
+  assert.deepEqual(recordsPerRequestBodies[1], {
+    expectedSourceRevisionId: operationsFixtureIds.revisions[0],
+    expectedScheduleRevisionId: operationsFixtureIds.schedules[2],
+    recordsPerRequest: 1_250,
+  });
+});
+
 test("paused action-required provider detail blocks false retries and names the tested lifecycle recovery", async (context) => {
   const baseDetail = operationsDetail(3);
   const detail = {

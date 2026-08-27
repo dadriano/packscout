@@ -11,6 +11,8 @@ import {
 import { PersistenceError } from "./persistence-error.ts";
 import type { CommitPageInput } from "./pipeline-types.ts";
 import { ProtectedEvidenceRepository } from "./protected-evidence.ts";
+import { relationshipPublicEntityKey } from
+  "./public-change-settlement-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
@@ -418,6 +420,92 @@ test("independent clients serialize competing revisions for one canonical identi
     assert.equal(
       new Set(revisions.map(({ content }) => content.priceCents)).size,
       2,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a relationship resolves once when its target is beyond the 500-projection chunk", async (context) => {
+  const harness = await createPipelineHarness();
+  try {
+    const recordCount = 501;
+    const targetIndex = recordCount - 1;
+    const targetExternalId = `cross-chunk-asset-${targetIndex}`;
+    const page = initialPage({
+      payload: { kind: "cross-chunk-forward-target", recordCount },
+      records: Array.from({ length: recordCount }, (_, index) => ({
+        recordKind: "catalog" as const,
+        externalId: `cross-chunk-source-${index}`,
+        sourceTime,
+        collectedAt,
+        payload: { id: `cross-chunk-source-${index}` },
+        projections: [{
+          platformKey: "beezie",
+          recordKind: "catalog_asset" as const,
+          externalId: `cross-chunk-asset-${index}`,
+          content: { name: `Cross-chunk asset ${index}` },
+          sourceUpdatedAt: sourceTime,
+          sourceCollectedAt: collectedAt,
+          relationships: index === 0
+            ? [{
+                relationshipKind: "cross_chunk_forward_target",
+                targetPlatformKey: "beezie",
+                targetRecordKind: "catalog_asset" as const,
+                targetExternalId,
+              }]
+            : [],
+        }],
+      })),
+      quarantines: [],
+    });
+
+    harness.statementCounter.reset();
+    const committed = await harness.ingestion.commitPage(page);
+    context.diagnostic(
+      `501-record forward-target page commit issued ${harness.statementCounter.count} SQL statements`,
+    );
+    assert.equal(committed.newCanonicalRevisions, recordCount);
+
+    const relationships = await harness.database.$queryRaw<Array<{
+      sourceEntityId: string;
+      targetEntityId: string | null;
+      createdSequence: bigint;
+      resolvedSequence: bigint | null;
+    }>>`
+      select relationship.source_entity_id as "sourceEntityId",
+             relationship.target_entity_id as "targetEntityId",
+             relationship.created_public_change_sequence as "createdSequence",
+             relationship.resolved_public_change_sequence as "resolvedSequence"
+      from public.canonical_relationships as relationship
+      join public.canonical_entities as source
+        on source.id = relationship.source_entity_id
+       and source.organization_id = relationship.organization_id
+      where relationship.organization_id = ${ids.organization}::uuid
+        and source.external_id = 'cross-chunk-asset-0'
+        and relationship.relationship_kind = 'cross_chunk_forward_target'
+    `;
+    assert.equal(relationships.length, 1);
+    const relationship = relationships[0]!;
+    assert.ok(relationship.targetEntityId);
+    assert.equal(relationship.resolvedSequence, relationship.createdSequence);
+
+    const entityKey = relationshipPublicEntityKey({
+      sourceEntityId: relationship.sourceEntityId,
+      relationshipKind: "cross_chunk_forward_target",
+      targetPlatformKey: "beezie",
+      targetRecordKind: "catalog_asset",
+      targetExternalId,
+    });
+    assert.equal(
+      await harness.database.public_change_causes.count({
+        where: {
+          organization_id: ids.organization,
+          change_kind: "relationship_resolution",
+          entity_key: entityKey,
+        },
+      }),
+      1,
     );
   } finally {
     await harness.close();

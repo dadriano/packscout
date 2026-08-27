@@ -6,10 +6,12 @@
 
 **Reviewer:** PackScout engineering (automated structural capture plus manual contract review)
 
-**Historical verdict:** PASS for tasks 002–009. The original Task 010 gate
-rejected this host using an 8,759,332,238,475-byte maximum-throughput stress
-ceiling. That ceiling is not an operational storage forecast. The later live
-local observation and free-space-floor policy are documented in
+**Verdict:** PASS for tasks 002–009; the real local backfill remains
+capacity-blocked. The current fail-closed Task 010 admission requirement is
+171,395,460,957,504 available bytes, and this host is explicitly rejected.
+That maximum-configured-throughput ceiling is not an operational storage
+forecast. The later live local observation and free-space-floor policy are
+documented in
 [`provider-source-live-capacity-observation-2026-08-24.md`](./provider-source-live-capacity-observation-2026-08-24.md).
 
 ## Safety boundary
@@ -194,22 +196,23 @@ independent 24-page windows: 288 input records, 216 accepted records, and 72
 quarantined records. Every retained component uses a PostgreSQL physical
 table/index/TOAST slope. The committed bound adds one measured 8 KiB allocation
 page per affected relation instead of an arbitrary multiplier. This produces
-11,776 structured/canonical bytes per input record, 2,640 bytes per record for
+11,947 structured/canonical bytes per input record, 3,237 bytes per record for
 the seven-day normalized payload, 15,020 bytes per committed page before raw
 payload expiry, and separately measured quarantine lineage/evidence. The complete
 machine-readable artifact is
 [`provider-source-capacity-measurement-v1.json`](./provider-source-capacity-measurement-v1.json).
 
 No observed steady-state delivery rate was available for this evidence window.
-The historical stress ceiling therefore failed closed at the transport
-maximum: every one of the four sources returns a
-full 250-record page on every 60-second poll throughout the 365-day growth
-horizon. That budgets 525,600,000 incremental records permanently, plus
-10,080,000 incremental records in the rolling seven-day payload window and
-43,200,000 in the rolling 30-day quarantine window. This is a stress upper
-bound, not a prediction of likely provider volume or current-backfill storage.
-The 2026-08-24 operational reassessment uses measured whole-database growth and
-an actual free-space floor instead.
+The current stress ceiling therefore uses a split bound: the dated initial
+backfill remains 58,108 pages at the live-evidenced 250 records per page, while
+every one of the four sources is assumed to return a full 5,000-record page on
+every 60-second poll throughout the 365-day growth horizon. The independent
+8 MiB response ceiling still applies. This budgets 10,512,000,000 incremental
+records permanently, plus 201,600,000 incremental records in the rolling
+seven-day payload window and 864,000,000 in the rolling 30-day quarantine
+window. This is a stress upper bound, not a prediction of likely provider
+volume or current-backfill storage. The 2026-08-24 operational reassessment
+uses measured whole-database growth and an actual free-space floor instead.
 
 The forecast retains one conservative full-history raw copy, seven days of
 steady-poll raw pages, seven-day normalized payload, permanent expired page
@@ -222,53 +225,51 @@ twice. It projects:
 
 | Component | Projected bytes |
 | --- | ---: |
-| Structured and canonical data | 6,360,534,103,552 |
+| Structured and canonical data | 125,760,416,599,519 |
 | Conservative raw full history | 98,700,000,000 |
 | Seven-day steady-poll raw pages | 25,902,938,880 |
-| Seven-day normalized page payload | 64,962,155,280 |
+| Seven-day normalized page payload | 699,602,700,849 |
 | Permanent expired page lineage | 32,450,830,160 |
-| Quarantine lineage and evidence | 125,772,433,264 |
+| Quarantine lineage and evidence | 1,914,090,433,264 |
 | Page diagnostics | 473,130,492 |
 | Terminal request attempts | 946,030,076 |
 | Permanent compact attempt lineage | 14,013,054,888 |
-| **Total** | **6,723,754,676,592** |
+| **Total** | **128,546,595,718,128** |
 
 At a 60-second interval, four sources create 172,800 poll attempts in 30 days;
 including the 58,108 initial pages gives 230,908 first-window attempts. Leaving
 25% of the target volume free after the projected import requires
-**8,965,006,235,456 available bytes** before Task 010 may start. The 200 GB
+**171,395,460,957,504 available bytes** before Task 010 may start. The 200 GB
 provisional floor is therefore superseded by this measured requirement. The
 80%-used abort threshold remains independently enforced.
 
-The refreshed committed host measurement reported 994,662,584,320 bytes of capacity and
-only 120,935,391,232 available bytes. Admission was rejected for insufficient
-free bytes, an already-exceeded 80% threshold, and a projected threshold
-breach. Task 010 must not start a real backfill on this host. This does not block
-contract, adapter, mapper, importer, scheduler, admin, or UI implementation.
+The refreshed committed host measurement reported 994,662,584,320 bytes of
+capacity and only 108,201,979,904 available bytes. Admission was rejected for
+insufficient free bytes, an already-exceeded 80% threshold, and a projected
+threshold breach. Task 010 must not start a real backfill on this host. This
+does not block contract, adapter, mapper, importer, scheduler, admin, or UI
+implementation.
 
 The current parser preserves the exact malformed-UTF-8, lone-surrogate,
 reserved-key, depth, and transport rejection boundaries without retaining an
 additional decoded copy of the complete response. It rejects more than 64
-container levels, 200,000 JSON values, 5,000 array items, or 256 syntactic
+container levels, 240,000 JSON values, 5,000 array items, or 256 syntactic
 member occurrences in one object; duplicate names count toward the work bound
 and otherwise retain JSON last-write semantics. The committed 8 MiB V1
-measurement on 2026-08-26 processed all 25,000 records across 100 pages. Every
-page also carried 199,504 JSON values, including 785 high-overhead empty-object
-facts per record, to exercise the maximum-byte and near-maximum-node boundaries
-together. Its peak delta was 49,364,992 bytes and retained growth was 122,341
-bytes, passing the unchanged 64 MiB peak-delta and 8 MiB retained-growth gates.
-
-Eight independent fresh-process repetitions of that combined worst-shape
-measurement all passed; 59,129,856 bytes was the worst peak delta and 215,387
-bytes was the largest retained-growth result. The dedicated Task 010 runner
-still begins at one execution slot.
+measurement on 2026-08-26 processed all 500,000 records across 100 pages. Every
+page carried exactly 5,000 records and 235,004 JSON values, including 34
+high-overhead empty-object facts per record, to exercise the maximum-byte and
+near-maximum-node boundaries together. Its peak delta was 8,404,992 bytes and
+retained growth was 56,660 bytes, passing the unchanged 64 MiB peak-delta and
+8 MiB retained-growth gates. The dedicated Task 010 runner still begins at one
+execution slot.
 Restoring more than one slot requires a separately reviewed concurrency
 measurement rather than extrapolation from the single-slot result.
 
-The storage submeasurement remains the reviewed August 22 measurement because
-the current contract changes admissible values, not the persisted row shape.
-The current 8 MiB memory measurement carries its own August 26 timestamp and is
-the passing launch-gate result.
+The storage submeasurement and capacity forecast were regenerated on August 26
+against migration `20260826010000_provider_source_records_per_request`. The
+current 5,000-record / 8 MiB memory measurement carries its own August 26
+timestamp and is the passing launch-gate result.
 
 Reproduction and drift checks are executable from the repository root:
 

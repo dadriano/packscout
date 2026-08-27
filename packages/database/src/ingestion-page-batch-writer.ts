@@ -496,13 +496,9 @@ async function loadRelationshipTargets(
   return targets;
 }
 
-export async function writeCanonicalProjectionBatch(
-  database: PackscoutTransactionClient,
-  policy: RawEvidencePolicy,
+function assertCanonicalProjectionBatchScope(
   inputs: readonly CanonicalProjectionWriteInput[],
-): Promise<CanonicalProjectionWriteResult[]> {
-  assertCanonicalWriteTransaction(database);
-  if (inputs.length === 0) return [];
+): CanonicalProjectionWriteInput {
   const scope = inputs[0]!;
   if (
     inputs.some(
@@ -520,13 +516,14 @@ export async function writeCanonicalProjectionBatch(
       "Canonical projection batches cannot span tenant, provider, source origin, or commit scopes.",
     );
   }
-  if (inputs.length > maximumRowsPerWrite) {
-    const results: CanonicalProjectionWriteResult[] = [];
-    for (const batch of batches(inputs)) {
-      results.push(...await writeCanonicalProjectionBatch(database, policy, batch));
-    }
-    return results;
-  }
+  return scope;
+}
+
+async function validateCanonicalProjectionProviderScope(
+  database: PackscoutTransactionClient,
+  scope: CanonicalProjectionWriteInput,
+  inputs: readonly CanonicalProjectionWriteInput[],
+): Promise<void> {
   const providerRows = await database.$queryRaw<Array<{ platformKey: string }>>(
     Prisma.sql`
       select platform_key as "platformKey"
@@ -554,36 +551,38 @@ export async function writeCanonicalProjectionBatch(
       ),
     ),
   ].sort();
-  if (relationshipPlatformKeys.length > 0) {
+  if (relationshipPlatformKeys.length === 0) return;
+
+  const registeredTargetKeys = new Set<string>();
+  for (const batch of batches(relationshipPlatformKeys)) {
     const registeredTargets = await database.$queryRaw<
       Array<{ platformKey: string }>
     >(Prisma.sql`
       select platform_key as "platformKey"
       from public.provider_sources
       where organization_id = ${uuid(scope.organizationId)}
-        and platform_key in (${Prisma.join(relationshipPlatformKeys)})
-      order by platform_key collate "C"
+        and platform_key in (${Prisma.join(batch)})
       for share
     `);
-    if (
-      registeredTargets.length !== relationshipPlatformKeys.length ||
-      registeredTargets.some(
-        ({ platformKey }, index) =>
-          platformKey !== relationshipPlatformKeys[index],
-      )
-    ) {
-      throw new Error("Canonical relationship provider scope is invalid.");
+    for (const { platformKey } of registeredTargets) {
+      registeredTargetKeys.add(platformKey);
     }
   }
-  for (const input of inputs) {
-    assertCanonicalActorDataSafe(input.projection.content);
+  if (
+    registeredTargetKeys.size !== relationshipPlatformKeys.length ||
+    relationshipPlatformKeys.some((key) => !registeredTargetKeys.has(key))
+  ) {
+    throw new Error("Canonical relationship provider scope is invalid.");
   }
-  const entitiesByIdentity = await loadCanonicalEntities(
-    database,
-    scope.organizationId,
-    inputs.map(({ projection }) => projection),
-    scope.acceptedAt,
-  );
+}
+
+async function writeCanonicalProjectionChunk(
+  database: PackscoutTransactionClient,
+  policy: RawEvidencePolicy,
+  inputs: readonly CanonicalProjectionWriteInput[],
+  entitiesByIdentity: Map<string, CanonicalEntityRecord>,
+): Promise<CanonicalProjectionWriteResult[]> {
+  const scope = inputs[0]!;
   const prepared: PreparedCanonicalProjection[] = inputs.map((input) => {
     const entity = entitiesByIdentity.get(canonicalIdentityKey(input.projection));
     if (!entity) throw new Error("Canonical entity insert returned no identity.");
@@ -957,7 +956,16 @@ export async function writeCanonicalProjectionBatch(
     `);
   }
 
-  for (const batch of batches([...entitiesByIdentity.values()])) {
+  const readyEntitiesByIdentity = new Map<string, CanonicalEntityRecord>();
+  for (const { projection } of prepared) {
+    const identityKey = canonicalIdentityKey(projection);
+    const entity = entitiesByIdentity.get(identityKey);
+    if (!entity) throw new Error("Canonical relationship target is missing.");
+    if (entity.publicChangeSequence !== null) {
+      readyEntitiesByIdentity.set(identityKey, entity);
+    }
+  }
+  for (const batch of batches([...readyEntitiesByIdentity.values()])) {
     const rows = batch.map((entity) => {
       if (entity.publicChangeSequence === null) {
         throw new Error("Canonical relationship target cause is missing.");
@@ -1063,6 +1071,37 @@ export async function writeCanonicalProjectionBatch(
       };
     }),
   });
+  return results;
+}
+
+export async function writeCanonicalProjectionBatch(
+  database: PackscoutTransactionClient,
+  policy: RawEvidencePolicy,
+  inputs: readonly CanonicalProjectionWriteInput[],
+): Promise<CanonicalProjectionWriteResult[]> {
+  assertCanonicalWriteTransaction(database);
+  if (inputs.length === 0) return [];
+  const scope = assertCanonicalProjectionBatchScope(inputs);
+  await validateCanonicalProjectionProviderScope(database, scope, inputs);
+  for (const input of inputs) {
+    assertCanonicalActorDataSafe(input.projection.content);
+  }
+  const entitiesByIdentity = await loadCanonicalEntities(
+    database,
+    scope.organizationId,
+    inputs.map(({ projection }) => projection),
+    scope.acceptedAt,
+  );
+
+  const results: CanonicalProjectionWriteResult[] = [];
+  for (const batch of batches(inputs)) {
+    results.push(...await writeCanonicalProjectionChunk(
+      database,
+      policy,
+      batch,
+      entitiesByIdentity,
+    ));
+  }
   return results;
 }
 

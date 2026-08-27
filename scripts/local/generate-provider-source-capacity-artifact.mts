@@ -159,9 +159,9 @@ const forecastInput = {
   rawRetentionDays: 7,
   operationalRetentionDays: 30,
   incrementalGrowthDays: 365,
-  // No observed steady-state delivery rate is available yet. Fail closed by
-  // Ongoing capacity must independently cover the largest legal configured
-  // page on every possible 60-second poll for the complete one-year horizon.
+  // No observed steady-state delivery rate is available yet. Ongoing capacity
+  // must cover the largest legal configured page on every possible 60-second
+  // poll for the complete one-year horizon.
   incrementalRecordsPerPollAttempt: providerSourceRecordsPerRequest.maximum,
   measuredStructuredPhysicalBytesPerRecord:
     storageMeasurement.structuredPhysicalBytesPerRecord as number,

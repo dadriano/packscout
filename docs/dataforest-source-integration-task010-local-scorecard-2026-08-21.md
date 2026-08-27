@@ -1,6 +1,6 @@
 # DataForrest Task 010 local completion scorecard — 2026-08-21
 
-**Last read-only admission audit:** 2026-08-22.
+**Last read-only admission audit:** 2026-08-26.
 
 **Overall status: BLOCKED — not complete.** No real DataForrest backfill was
 started. No DataForrest credential was read or used.
@@ -10,15 +10,15 @@ started. No DataForrest credential was read or used.
 | Evidence                                    | Result                                                                                    |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Capacity artifact                           | `provider-source-capacity-measurement-v1`                                                 |
-| Required available bytes                    | 8,759,332,238,475                                                                         |
+| Required available bytes                    | 171,395,460,957,504                                                                       |
 | Recorded host capacity                      | 994,662,584,320 bytes                                                                     |
-| Recorded host available                     | 104,786,628,608 bytes                                                                     |
-| Current read-only preflight available       | 102,168,420,352 bytes on 2026-08-22                                                       |
-| Current read-only filesystem utilization    | 89.72%, above the independent 80% abort fence                                             |
-| Current capacity deficit                    | 8,657,163,818,123 bytes                                                                   |
+| Recorded host available                     | 108,201,979,904 bytes                                                                     |
+| Current read-only preflight available       | 108,201,979,904 bytes on 2026-08-26                                                       |
+| Current read-only filesystem utilization    | 89.12%, above the independent 80% abort fence                                             |
+| Current capacity deficit                    | 171,287,258,977,600 bytes                                                                 |
 | Admission                                   | Rejected: insufficient available bytes, already over 80% used, projected threshold breach |
 | Exact backfill DB fingerprint/OID/system ID | `null` — target not provisioned because admission is rejected                             |
-| Historical required migration               | `20260821040000_provider_source_page_plan_digest`                                         |
+| Required migration                          | `20260826010000_provider_source_records_per_request`                                      |
 | Organization / administrator receipt        | `not_run`                                                                                 |
 | Shared DataForrest profile and key revision | `not_run`                                                                                 |
 | Four source/mapper revision pins            | `not_run`                                                                                 |
@@ -61,10 +61,10 @@ unresolved or launch-blocking count is zero.
 | Actual relation/index size and remaining capacity | `null`; blocker: backfill not run                |
 | Actual elapsed duration / records per second      | `null` / `null`; blocker: backfill not run       |
 
-Planning evidence only: the authentic bounded page-path benchmark measured a
-36,290,560-byte peak RSS increase and a 187,134-byte Theil–Sen retained trend
-over 100 measured pages. This is not substituted for the missing live Task 010
-resource evidence.
+Planning evidence only: the authentic bounded page-path benchmark measured an
+8,404,992-byte peak RSS increase and a 56,660-byte Theil–Sen retained trend over
+100 measured 5,000-record, 8 MiB pages. This is not substituted for the missing
+live Task 010 resource evidence.
 
 ## Safe tooling and verification completed
 
@@ -91,7 +91,7 @@ resource evidence.
 ## External blockers and completion decision
 
 1. Provision an exact local PostgreSQL backing volume with at least
-   8,759,332,238,475 available bytes and less than 80% used, then obtain an
+   171,395,460,957,504 available bytes and less than 80% used, then obtain an
    approved target-bound capacity receipt.
 2. Obtain an authorized DataForrest bearer through the administrator's encrypted
    UI workflow; never place it in environment, argv, output, or documentation.

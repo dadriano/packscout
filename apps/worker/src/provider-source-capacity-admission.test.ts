@@ -15,8 +15,9 @@ import {
 
 test("committed capacity evidence remains admitted after one planned page", () => {
   const artifact = loadCommittedProviderSourceCapacityArtifact();
-  const capacity = 10_000_000_000_000;
   const initiallyAvailable = artifact.forecast.task010MinimumAvailableBytes;
+  const capacity = initiallyAvailable * 2;
+  assert.ok(Number.isSafeInteger(capacity));
   const initial = evaluateProviderSourceOngoingCapacity({
     artifact,
     volumeCapacityBytes: capacity,
@@ -123,6 +124,8 @@ test("local disk reserve projects remaining free bytes instead of host utilizati
 
 test("capacity hook uses the validated volume and fails closed", async () => {
   const artifact = loadCommittedProviderSourceCapacityArtifact();
+  const capacity = artifact.forecast.task010MinimumAvailableBytes * 2;
+  assert.ok(Number.isSafeInteger(capacity));
   const decisions: Array<"approved" | "blocked"> = [];
   const hook = createProviderSourceCapacityAdmissionHook({
     database: {} as PackscoutPrismaClient,
@@ -138,7 +141,7 @@ test("capacity hook uses the validated volume and fails closed", async () => {
       decisions.push(blocked ? "blocked" : "approved");
       return {
         bsize: 1n,
-        blocks: 10_000_000_000_000n,
+        blocks: BigInt(capacity),
         bavail: blocked
           ? 2_000_000_000_000n
           : BigInt(artifact.forecast.task010MinimumAvailableBytes),

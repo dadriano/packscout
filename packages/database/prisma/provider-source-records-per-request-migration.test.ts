@@ -39,10 +39,20 @@ let databaseSequence = 0;
 const ids = {
   organization: "56000000-0000-4000-8000-000000000001",
   provider: "56000000-0000-4000-8000-000000000010",
+  runningProvider: "56000000-0000-4000-8000-000000000011",
+  providerConfigRevision: "56000000-0000-4000-8000-000000000012",
   connectionProfile: "56000000-0000-4000-8000-000000000020",
+  connectionRevision: "56000000-0000-4000-8000-000000000021",
   source: "56000000-0000-4000-8000-000000000030",
+  runningSource: "56000000-0000-4000-8000-000000000031",
+  sourceRevision: "56000000-0000-4000-8000-000000000032",
+  runningSourceRevision: "56000000-0000-4000-8000-000000000033",
   legacyScheduleRevision: "56000000-0000-4000-8000-000000000040",
   newScheduleRevision: "56000000-0000-4000-8000-000000000041",
+  sourceTestJob: "56000000-0000-4000-8000-000000000050",
+  queuedSourceRun: "56000000-0000-4000-8000-000000000060",
+  runningSourceRun: "56000000-0000-4000-8000-000000000061",
+  configOwnedRun: "56000000-0000-4000-8000-000000000062",
 } as const;
 
 function migrationUrl(migrationName: string): URL {
@@ -97,15 +107,30 @@ async function createPreRecordsPerRequestDatabase(): Promise<{
   };
 }
 
-async function seedLegacyScheduleRevision(database: Pool): Promise<void> {
+async function seedPreMigrationPins(database: Pool): Promise<void> {
   await database.query(`
     insert into public.organizations (id, slug, name)
     values ('${ids.organization}', 'records-per-request', 'Records Per Request');
 
     insert into public.provider_sources (
       id, organization_id, platform_key, display_name
+    ) values
+      (
+        '${ids.provider}', '${ids.organization}', 'migration-test',
+        'Migration Test'
+      ),
+      (
+        '${ids.runningProvider}', '${ids.organization}', 'migration-running',
+        'Migration Running'
+      );
+
+    insert into public.provider_config_revisions (
+      id, organization_id, provider_id, version, adapter_key, endpoint_url,
+      auth_mode, created_by_actor_key
     ) values (
-      '${ids.provider}', '${ids.organization}', 'migration-test', 'Migration Test'
+      '${ids.providerConfigRevision}', '${ids.organization}', '${ids.provider}',
+      1, 'http-cursor-v1', 'https://legacy.example.test/feed', 'none',
+      'operator:test'
     );
 
     insert into public.source_connection_profiles (
@@ -116,13 +141,55 @@ async function seedLegacyScheduleRevision(database: Pool): Promise<void> {
       'http-bearer-v1', 'Migration Test Connection', 1, 'operator:test'
     );
 
+    insert into public.source_connection_revisions (
+      id, organization_id, connection_profile_id, revision_number,
+      source_type_key, source_adapter_version, configuration_ciphertext,
+      configuration_nonce, configuration_auth_tag, encryption_key_version,
+      configuration_fingerprint, created_by_actor_key
+    ) values (
+      '${ids.connectionRevision}', '${ids.organization}',
+      '${ids.connectionProfile}', 1, 'http-feed-v1', 'http-feed-adapter-v1',
+      '\\x01', '\\x02', '\\x03', 1, repeat('a', 64), 'operator:test'
+    );
+
     insert into public.provider_source_instances (
       id, organization_id, provider_id, source_type_key,
       connection_profile_id, created_by_actor_key
-    ) values (
-      '${ids.source}', '${ids.organization}', '${ids.provider}', 'http-feed-v1',
-      '${ids.connectionProfile}', 'operator:test'
-    );
+    ) values
+      (
+        '${ids.source}', '${ids.organization}', '${ids.provider}',
+        'http-feed-v1', '${ids.connectionProfile}', 'operator:test'
+      ),
+      (
+        '${ids.runningSource}', '${ids.organization}', '${ids.runningProvider}',
+        'http-feed-v1', '${ids.connectionProfile}', 'operator:test'
+      );
+
+    insert into public.provider_source_revisions (
+      id, organization_id, provider_id, source_instance_id,
+      connection_profile_id, revision_number, source_type_key,
+      source_adapter_version, normalized_contract_version, mapper_key,
+      mapper_version, identity_namespace_key, cursor_codec_version,
+      configuration_json, configuration_hash, record_id_scopes_json,
+      created_by_actor_key
+    ) values
+      (
+        '${ids.sourceRevision}', '${ids.organization}', '${ids.provider}',
+        '${ids.source}', '${ids.connectionProfile}', 1, 'http-feed-v1',
+        'http-feed-adapter-v1', 'packscout.provider-observation.v1',
+        'migration-mapper', '1', 'migration-provider', 'http-cursor-v1',
+        '{"provider":"migration-test"}', repeat('b', 64),
+        '["catalog-pack-v1"]', 'operator:test'
+      ),
+      (
+        '${ids.runningSourceRevision}', '${ids.organization}',
+        '${ids.runningProvider}', '${ids.runningSource}',
+        '${ids.connectionProfile}', 1, 'http-feed-v1',
+        'http-feed-adapter-v1', 'packscout.provider-observation.v1',
+        'migration-running-mapper', '1', 'migration-running-provider',
+        'http-cursor-v1', '{"provider":"migration-running"}',
+        repeat('c', 64), '["catalog-pack-v1"]', 'operator:test'
+      );
 
     insert into public.provider_source_schedule_revisions (
       id, organization_id, provider_id, source_instance_id, revision_number,
@@ -131,16 +198,61 @@ async function seedLegacyScheduleRevision(database: Pool): Promise<void> {
       '${ids.legacyScheduleRevision}', '${ids.organization}', '${ids.provider}',
       '${ids.source}', 1, 'operator:test', '2026-08-26T08:00:00.000Z'
     );
+
+    insert into public.provider_source_test_jobs (
+      id, organization_id, provider_id, source_instance_id,
+      source_revision_id, connection_profile_id, connection_revision_id,
+      expected_health_generation, requested_by_actor_key
+    ) values (
+      '${ids.sourceTestJob}', '${ids.organization}', '${ids.provider}',
+      '${ids.source}', '${ids.sourceRevision}', '${ids.connectionProfile}',
+      '${ids.connectionRevision}', 0, 'operator:test'
+    );
+
+    insert into public.import_runs (
+      id, organization_id, provider_id, config_revision_id, trigger, state,
+      started_at, finished_at, source_instance_id, source_revision_id,
+      source_type_key, source_adapter_version, normalized_contract_version,
+      mapper_key, mapper_version, identity_namespace_key,
+      connection_profile_id, connection_revision_id, cursor_codec_version,
+      cursor_generation, requested_cursor_key, current_cursor_key,
+      next_page_number
+    ) values
+      (
+        '${ids.queuedSourceRun}', '${ids.organization}', '${ids.provider}', null,
+        'scheduled', 'queued', null, null, '${ids.source}',
+        '${ids.sourceRevision}', 'http-feed-v1', 'http-feed-adapter-v1',
+        'packscout.provider-observation.v1', 'migration-mapper', '1',
+        'migration-provider', '${ids.connectionProfile}',
+        '${ids.connectionRevision}', 'http-cursor-v1', 1, 'initial', 'initial', 1
+      ),
+      (
+        '${ids.runningSourceRun}', '${ids.organization}',
+        '${ids.runningProvider}', null, 'scheduled', 'running',
+        '2026-08-26T08:05:00.000Z', null, '${ids.runningSource}',
+        '${ids.runningSourceRevision}', 'http-feed-v1',
+        'http-feed-adapter-v1', 'packscout.provider-observation.v1',
+        'migration-running-mapper', '1', 'migration-running-provider',
+        '${ids.connectionProfile}', '${ids.connectionRevision}',
+        'http-cursor-v1', 1, 'initial', 'initial', 1
+      ),
+      (
+        '${ids.configOwnedRun}', '${ids.organization}', '${ids.provider}',
+        '${ids.providerConfigRevision}', 'scheduled', 'succeeded',
+        '2026-08-26T07:00:00.000Z', '2026-08-26T07:01:00.000Z',
+        null, null, null, null, null, null, null, null, null, null, null,
+        null, null, null, null
+      );
   `);
 }
 
 test(
-  "records-per-request migration preserves the legacy 250 limit and defaults new schedules to 500",
+  "records-per-request migration backfills legacy execution pins without pinning config-owned runs",
   { concurrency: false },
   async () => {
     const supported = await createPreRecordsPerRequestDatabase();
     try {
-      await seedLegacyScheduleRevision(supported.database);
+      await seedPreMigrationPins(supported.database);
       await applyMigration(supported.database, recordsPerRequestMigrationName);
 
       await supported.database.query(`
@@ -166,6 +278,118 @@ test(
       assert.deepEqual(scheduleRevisions.rows, [
         { id: ids.legacyScheduleRevision, recordsPerRequest: 250 },
         { id: ids.newScheduleRevision, recordsPerRequest: 500 },
+      ]);
+
+      const sourceTest = await supported.database.query<{
+        id: string;
+        recordsPerRequest: number;
+      }>(`
+        select id::text, records_per_request as "recordsPerRequest"
+        from public.provider_source_test_jobs
+        where id = '${ids.sourceTestJob}'
+      `);
+      assert.deepEqual(sourceTest.rows, [
+        { id: ids.sourceTestJob, recordsPerRequest: 250 },
+      ]);
+
+      const importRuns = await supported.database.query<{
+        id: string;
+        state: string;
+        sourceInstanceId: string | null;
+        recordsPerRequest: number | null;
+      }>(`
+        select
+          id::text,
+          state::text,
+          source_instance_id::text as "sourceInstanceId",
+          records_per_request as "recordsPerRequest"
+        from public.import_runs
+        where id in (
+          '${ids.queuedSourceRun}',
+          '${ids.runningSourceRun}',
+          '${ids.configOwnedRun}'
+        )
+        order by id
+      `);
+      assert.deepEqual(importRuns.rows, [
+        {
+          id: ids.queuedSourceRun,
+          state: "queued",
+          sourceInstanceId: ids.source,
+          recordsPerRequest: 250,
+        },
+        {
+          id: ids.runningSourceRun,
+          state: "running",
+          sourceInstanceId: ids.runningSource,
+          recordsPerRequest: 250,
+        },
+        {
+          id: ids.configOwnedRun,
+          state: "succeeded",
+          sourceInstanceId: null,
+          recordsPerRequest: null,
+        },
+      ]);
+
+      await assert.rejects(
+        supported.database.query(`
+          update public.provider_source_test_jobs
+          set records_per_request = 251
+          where id = '${ids.sourceTestJob}'
+        `),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(
+            error.message,
+            /source-test records-per-request pin is immutable/u,
+          );
+          assert.equal((error as { code?: unknown }).code, "23514");
+          assert.equal(
+            (error as { constraint?: unknown }).constraint,
+            "provider_source_test_jobs_records_per_request_immutable_guard",
+          );
+          return true;
+        },
+      );
+      for (const runId of [ids.queuedSourceRun, ids.runningSourceRun]) {
+        await assert.rejects(
+          supported.database.query(`
+            update public.import_runs
+            set records_per_request = 251
+            where id = '${runId}'
+          `),
+          (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.match(error.message, /source-owned import run pins are immutable/u);
+            assert.equal((error as { code?: unknown }).code, "23514");
+            assert.equal(
+              (error as { constraint?: unknown }).constraint,
+              "import_runs_source_pins_immutable_guard",
+            );
+            return true;
+          },
+        );
+      }
+
+      const preservedPins = await supported.database.query<{
+        sourceTest: number;
+        queuedRun: number;
+        runningRun: number;
+      }>(`
+        select
+          (select records_per_request
+           from public.provider_source_test_jobs
+           where id = '${ids.sourceTestJob}') as "sourceTest",
+          (select records_per_request
+           from public.import_runs
+           where id = '${ids.queuedSourceRun}') as "queuedRun",
+          (select records_per_request
+           from public.import_runs
+           where id = '${ids.runningSourceRun}') as "runningRun"
+      `);
+      assert.deepEqual(preservedPins.rows, [
+        { sourceTest: 250, queuedRun: 250, runningRun: 250 },
       ]);
     } finally {
       await supported.close();

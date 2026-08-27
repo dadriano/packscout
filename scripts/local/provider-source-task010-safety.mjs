@@ -17,8 +17,8 @@ export const TASK010_PAGE_RECORD_COUNT_SQL = `
   coalesce((record_counts_json->>'adapterInvalid')::bigint, 0)
 `;
 export const TASK010_REQUIRED_MIGRATION = Object.freeze({
-  name: "20260825041000_raise_provider_source_raw_response_limit",
-  checksum: "25899178e7256a15fc4d86c158f560e597b9fa0e8c949caa696aa55439cc57c8",
+  name: "20260826010000_provider_source_records_per_request",
+  checksum: "c80c4ebdb52d950dc8a1972f056339f436394ce33280ed30ba0d5cb5b5f1a5cf",
   tableCount: 84,
 });
 

@@ -34,14 +34,18 @@ inspect, migrate, and bootstrap below with a new one-time administrator
 password. Cursor reset, adapter upgrade, source replacement, and selective
 table deletion are not clean-slate substitutes.
 
-**Historical Task 010 admission state (2026-08-22): BLOCKED.** That isolated
-bootstrap procedure used an 8,759,332,238,475-byte maximum-throughput stress
-ceiling and an 80%-used volume fence. The stress ceiling is not the operational
-estimate for the current `packscout_dev` import. For early local development,
-use the normal ingestion guide's explicit free-space floor and the
+**Current Task 010 admission state (2026-08-26): BLOCKED.** The regenerated
+artifact found 108,201,979,904 available bytes, a deficit of
+171,287,258,977,600 bytes against Task 010's required 171,395,460,957,504
+available bytes. The filesystem is 89.12% used, beyond the independently
+enforced 80% fence. This split stress ceiling keeps the dated initial backfill
+at 250 records per page and reserves the configurable 5,000-record maximum for
+every ongoing poll; it is not the operational estimate for the current
+`packscout_dev` import. For early local development, use the normal ingestion
+guide's explicit free-space floor and the
 [2026-08-24 live capacity observation](provider-source-live-capacity-observation-2026-08-24.md).
 This runbook still must not be used to bypass the isolated Task 010 target's
-own historical receipt checks.
+own receipt checks.
 
 ## 1. Install and create the private configuration file
 
@@ -147,7 +151,8 @@ In Source configuration:
    supervisor shown below. Wait for the test result, reload Source
    configuration, then select **Activate revision**.
 3. For each stable provider root, save one inactive source with its matching
-   provider/mapper choice, the shared profile, and interval `60`. Select
+   provider/mapper choice, the shared profile, interval `60`, and **Maximum
+   records per request** `250` to match the dated live backfill evidence. Select
    **Test**, wait for success, reload Source configuration, then **Activate
    paused**.
 

@@ -26,9 +26,11 @@ live-evidenced page target remains 250 records. Each source can now pin a
 request size from 1 through 5,000 (default 500), while every request remains
 subject to the same 8 MiB hard cap and rejects a response that exceeds its
 pinned record count. Later 250-record pages crossed the earlier transport
-bounds; a protected replay measured the failing page at 4,730,013 bytes. The historical
-8,759,332,238,475-byte Task 010 result is a maximum-throughput stress ceiling,
-not the operational local estimate. Current local operation uses measured
+bounds; a protected replay measured the failing page at 4,730,013 bytes. The
+current fail-closed Task 010 stress bound keeps the dated initial backfill at
+250 records per page but reserves 5,000 records for every later poll. It
+requires 171,395,460,957,504 available bytes and is not an operational local
+estimate. Current local operation uses measured
 whole-database growth plus an explicit free-space floor; see
 [`provider-source-live-capacity-observation-2026-08-24.md`](./provider-source-live-capacity-observation-2026-08-24.md).
 
@@ -53,7 +55,7 @@ upgrade, or source replacement is registered.
 | Catalog, partial pull, and trade normalization under the exact V1 tuple | Contract and mapper tests | PASS |
 | Sole adapter/observation/mapper runtime registration | Production registries and Task 010 fail-closed topology gate | PASS |
 | Historical database-pin handling | Guarded full local reset and reimport; no in-place upgrade path | REQUIRED |
-| 8 MiB maximum-page bounded-memory proof | Committed 100-page measurement and eight independent fresh-process repetitions passed unchanged gates | PASS |
+| 8 MiB / 5,000-record maximum-page bounded-memory proof | Committed authentic 100-page measurement passed unchanged gates | PASS |
 | Full-history provider-head reconciliation | Requires the controlled local backfill | PENDING |
 
 Everything below under the aggregate V1 fixture scorecard is retained as

@@ -150,6 +150,7 @@ export function ProviderDetailPage() {
   const recordsPerRequestOriginRevision = useRef<string | null>(null);
   const recordsPerRequestDirty = useRef(false);
   const recordsPerRequestReloadInFlight = useRef(false);
+  const detailRequestGeneration = useRef(0);
   const diagnosticGeneration = useRef(0);
   useDocumentTitle(detail?.source.displayName ?? "Provider Processor");
 
@@ -159,9 +160,12 @@ export function ProviderDetailPage() {
 
   useEffect(() => {
     let active = true;
+    const requestGeneration = ++detailRequestGeneration.current;
+    const isCurrentRequest = () => active &&
+      requestGeneration === detailRequestGeneration.current;
     void getProviderSourceOperationsDetail(providerId)
       .then((result) => {
-        if (!active) return;
+        if (!isCurrentRequest()) return;
         const nextState = sourceOperationalLabel(result.source);
         if (priorOperationalState.current && priorOperationalState.current !== nextState) {
           setAnnouncement(`${result.source.displayName} changed from ${priorOperationalState.current} to ${nextState}.`);
@@ -200,7 +204,7 @@ export function ProviderDetailPage() {
         setDetailFailure(null);
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (isCurrentRequest()) {
           setDetailFailure(readError(error, "detail"));
           if (recordsPerRequestReloadInFlight.current) {
             recordsPerRequestReloadInFlight.current = false;
@@ -209,7 +213,7 @@ export function ProviderDetailPage() {
         }
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (isCurrentRequest()) setLoading(false);
       });
     return () => { active = false; };
   }, [providerId, refreshIndex]);
@@ -415,6 +419,10 @@ export function ProviderDetailPage() {
           recordsPerRequest,
         },
       );
+      // A detail read begun before this acknowledgment cannot know about the
+      // new schedule revision. Invalidate it synchronously before React runs
+      // the refresh effect so it cannot restore the old value or origin.
+      detailRequestGeneration.current += 1;
       recordsPerRequestOriginRevision.current = revised.scheduleRevisionId;
       recordsPerRequestDirty.current = false;
       setAnnouncement(RECORDS_PER_REQUEST_SAVED);
