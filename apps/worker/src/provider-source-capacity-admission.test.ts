@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { providerSourceLaunchBounds } from "@packscout/contracts";
+import {
+  providerSourceLaunchBounds,
+  providerSourceRecordsPerRequest,
+} from "@packscout/contracts";
 import type { PackscoutPrismaClient } from "@packscout/database";
 import {
   createProviderSourceCapacityAdmissionHook,
@@ -61,9 +64,14 @@ test("ongoing capacity reserves four commits and blocks at the default 80 percen
 test("one maximum commit reserves independent raw and protected-evidence copies", () => {
   const artifact = loadCommittedProviderSourceCapacityArtifact();
   const model = artifact.forecastInput;
+  const maximumPageRecords = Math.max(
+    model.pageRecordLimit,
+    model.incrementalRecordsPerPollAttempt,
+    providerSourceRecordsPerRequest.maximum,
+  );
   const bytesWithoutProtectedNativeEvidence =
     providerSourceLaunchBounds.maximumResponseBytes +
-    model.pageRecordLimit * (
+    maximumPageRecords * (
       model.measuredStructuredPhysicalBytesPerRecord +
       model.measuredPreExpiryNormalizedPayloadPhysicalBytesPerRecord +
       model.measuredQuarantinePhysicalBytes
@@ -76,7 +84,13 @@ test("one maximum commit reserves independent raw and protected-evidence copies"
   assert.equal(
     providerSourceMaximumPageCommitBytes(artifact) -
       bytesWithoutProtectedNativeEvidence,
-    providerSourceLaunchBounds.maximumResponseBytes,
+    Math.max(
+      providerSourceLaunchBounds.maximumResponseBytes,
+      maximumPageRecords * Math.max(
+        model.measuredAverageRawRecordBytes,
+        model.measuredQuarantineEvidencePhysicalBytes,
+      ),
+    ),
   );
 });
 

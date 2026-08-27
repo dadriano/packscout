@@ -520,6 +520,13 @@ export async function writeCanonicalProjectionBatch(
       "Canonical projection batches cannot span tenant, provider, source origin, or commit scopes.",
     );
   }
+  if (inputs.length > maximumRowsPerWrite) {
+    const results: CanonicalProjectionWriteResult[] = [];
+    for (const batch of batches(inputs)) {
+      results.push(...await writeCanonicalProjectionBatch(database, policy, batch));
+    }
+    return results;
+  }
   const providerRows = await database.$queryRaw<Array<{ platformKey: string }>>(
     Prisma.sql`
       select platform_key as "platformKey"

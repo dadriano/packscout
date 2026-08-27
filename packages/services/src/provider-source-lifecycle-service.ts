@@ -4,6 +4,7 @@ import {
   previewProviderSourceCursorResetRequestSchema,
   providerSourceRevisionCommandSchema,
   reviseProviderSourceIntervalRequestSchema,
+  reviseProviderSourceRecordsPerRequestRequestSchema,
   type CreateProviderSourceRequest,
   type ProviderSourceAdminAuditReceipt,
   type ProviderSourceCursorResetPreview,
@@ -151,6 +152,7 @@ export class ProviderSourceLifecycleService {
       configurationHash: hashProviderSourceConfiguration(validated.value),
       recordIdScopes,
       intervalSeconds: parsed.data.intervalSeconds,
+      recordsPerRequest: parsed.data.recordsPerRequest,
       actorKey: context.actorKey,
       createdAt,
     });
@@ -255,6 +257,39 @@ export class ProviderSourceLifecycleService {
       scheduleRevisionId: revised.scheduleRevisionId,
       audit: commandReceipt(
         "source_interval_revised",
+        sourceInstanceId,
+        parsed.data.expectedSourceRevisionId,
+        effectiveAt,
+      ),
+    });
+  }
+
+  async reviseRecordsPerRequest(
+    context: ProviderSourceAdminCommandContext,
+    providerId: string,
+    sourceInstanceId: string,
+    request: unknown,
+  ) {
+    requireProviderSourceAdminContext(context);
+    const parsed = reviseProviderSourceRecordsPerRequestRequestSchema.safeParse(
+      request,
+    );
+    if (!parsed.success) this.#invalid();
+    const effectiveAt = this.#clock.now();
+    const revised = await this.#repository.reviseRecordsPerRequest({
+      organizationId: context.organizationId,
+      providerId,
+      sourceInstanceId,
+      expectedSourceRevisionId: parsed.data.expectedSourceRevisionId,
+      expectedScheduleRevisionId: parsed.data.expectedScheduleRevisionId,
+      recordsPerRequest: parsed.data.recordsPerRequest,
+      actorKey: context.actorKey,
+      effectiveAt,
+    });
+    return Object.freeze({
+      scheduleRevisionId: revised.scheduleRevisionId,
+      audit: commandReceipt(
+        "source_records_per_request_revised",
         sourceInstanceId,
         parsed.data.expectedSourceRevisionId,
         effectiveAt,

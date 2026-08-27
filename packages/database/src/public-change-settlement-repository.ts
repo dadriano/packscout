@@ -113,6 +113,7 @@ interface WatermarkRow {
 const boundedKeyPattern = /^\S(?:.{0,510}\S)?$/s;
 const sourceKeyPattern = /^\S(?:.{0,126}\S)?$/s;
 const derivationKeyPattern = /^\S(?:.{0,254}\S)?$/s;
+const maximumObligationRowsPerWrite = 500;
 
 function uuid(value: string): Prisma.Sql {
   return Prisma.sql`cast(${value} as uuid)`;
@@ -254,14 +255,59 @@ export async function createPublicDerivationObligations(
     createdAt: Date;
   },
 ): Promise<void> {
+  await createPublicDerivationObligationBatch(database, {
+    organizationId: input.organizationId,
+    obligations: [input],
+  });
+}
+
+export interface PublicDerivationObligationBatchInput {
+  readonly causeSequences: readonly bigint[];
+  readonly derivationKind: PublicDerivationKind;
+  readonly derivationKey: string;
+  readonly createdAt: Date;
+}
+
+/**
+ * Persists many derivation obligations with one settlement fence and bounded
+ * inserts. Every obligation remains in the caller's existing transaction.
+ */
+export async function createPublicDerivationObligationBatch(
+  database: PackscoutTransactionClient,
+  input: {
+    organizationId: string;
+    obligations: readonly PublicDerivationObligationBatchInput[];
+  },
+): Promise<void> {
   assertCatalogSettlementTransaction(database);
-  if (input.causeSequences.length === 0) return;
-  requirePattern(
-    input.derivationKey,
-    derivationKeyPattern,
-    "Public derivation key",
-  );
-  const uniqueSequences = [...new Set(input.causeSequences)].sort((left, right) =>
+  const prepared = input.obligations.flatMap((obligation) => {
+    if (obligation.causeSequences.length === 0) return [];
+    requirePattern(
+      obligation.derivationKey,
+      derivationKeyPattern,
+      "Public derivation key",
+    );
+    return [...new Set(obligation.causeSequences)].map((causeSequence) => ({
+      causeSequence,
+      derivationKind: obligation.derivationKind,
+      derivationKey: obligation.derivationKey,
+      createdAt: obligation.createdAt,
+    }));
+  });
+  const uniqueByKey = new Map<string, (typeof prepared)[number]>();
+  for (const obligation of prepared) {
+    const key = JSON.stringify([
+      obligation.causeSequence.toString(),
+      obligation.derivationKind,
+      obligation.derivationKey,
+    ]);
+    if (!uniqueByKey.has(key)) uniqueByKey.set(key, obligation);
+  }
+  const uniqueObligations = [...uniqueByKey.values()];
+  if (uniqueObligations.length === 0) return;
+  const uniqueSequences = [
+    ...new Set(uniqueObligations.map(({ causeSequence }) => causeSequence)),
+  ].sort((left, right) =>
     left < right ? -1 : left > right ? 1 : 0,
   );
   const watermarks = await database.$queryRaw<
@@ -283,20 +329,29 @@ export async function createPublicDerivationObligations(
     organizationId: input.organizationId,
     causeSequences: uniqueSequences,
   });
-  const rows = uniqueSequences.map((sequence) => Prisma.sql`(
-    ${uuid(input.organizationId)}, ${sequence},
-    cast(${input.derivationKind} as public.public_derivation_kind),
-    ${input.derivationKey}, ${input.createdAt}, ${input.createdAt}
-  )`);
-  await database.$executeRaw(Prisma.sql`
-    insert into public.public_derivation_obligations (
-      organization_id, cause_sequence, derivation_kind, derivation_key,
-      created_at, updated_at
-    ) values ${Prisma.join(rows)}
-    on conflict (
-      organization_id, cause_sequence, derivation_kind, derivation_key
-    ) do nothing
-  `);
+  for (
+    let index = 0;
+    index < uniqueObligations.length;
+    index += maximumObligationRowsPerWrite
+  ) {
+    const rows = uniqueObligations
+      .slice(index, index + maximumObligationRowsPerWrite)
+      .map((obligation) => Prisma.sql`(
+        ${uuid(input.organizationId)}, ${obligation.causeSequence},
+        cast(${obligation.derivationKind} as public.public_derivation_kind),
+        ${obligation.derivationKey}, ${obligation.createdAt},
+        ${obligation.createdAt}
+      )`);
+    await database.$executeRaw(Prisma.sql`
+      insert into public.public_derivation_obligations (
+        organization_id, cause_sequence, derivation_kind, derivation_key,
+        created_at, updated_at
+      ) values ${Prisma.join(rows)}
+      on conflict (
+        organization_id, cause_sequence, derivation_kind, derivation_key
+      ) do nothing
+    `);
+  }
 }
 
 export async function advanceSettledPublicWatermark(

@@ -20,8 +20,16 @@ if (!Number.isInteger(port) || port < 1_024 || port > 65_535) {
 type FixtureMode = "admin" | "operator" | "viewer" | "forbidden";
 let mode: FixtureMode = "admin";
 let manualRequests = 0;
+let nextScheduleRevision = 100;
 const pauseRequested = new Set<string>();
 const intervalSeconds = new Map<string, number>();
+const recordsPerRequest = new Map<string, number>();
+const scheduleRevisionIds = new Map<string, string>();
+
+function newScheduleRevisionId(): string {
+  const suffix = String(nextScheduleRevision++).padStart(12, "0");
+  return `00000000-0000-4000-8000-${suffix}`;
+}
 
 function headers(response: ServerResponse): void {
   response.setHeader("Access-Control-Allow-Origin", browserOrigin);
@@ -62,12 +70,20 @@ function currentOverview() {
     sources: overview.sources.map((source) => {
       const requested = pauseRequested.has(source.providerId);
       const revisedInterval = intervalSeconds.get(source.providerId);
+      const revisedRecords = recordsPerRequest.get(source.providerId);
       return {
         ...source,
-        source: source.source ? { ...source.source, pauseRequested: requested } : null,
+        source: source.source ? {
+          ...source.source,
+          pauseRequested: requested,
+          recordsPerRequest: revisedRecords ?? source.source.recordsPerRequest,
+        } : null,
         schedule: source.schedule ? {
           ...source.schedule,
           intervalSeconds: revisedInterval ?? source.schedule.intervalSeconds,
+          scheduleRevisionId:
+            scheduleRevisionIds.get(source.providerId) ??
+            source.schedule.scheduleRevisionId,
         } : null,
       };
     }),
@@ -198,8 +214,34 @@ const server = createServer(async (request, response) => {
             ...source,
             pauseRequested: pauseRequested.has(source.providerId),
             intervalSeconds: intervalSeconds.get(source.providerId) ?? source.intervalSeconds,
+            recordsPerRequest:
+              recordsPerRequest.get(source.providerId) ?? source.recordsPerRequest,
+            scheduleRevisionId:
+              scheduleRevisionIds.get(source.providerId) ??
+              source.scheduleRevisionId,
           })),
         },
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/provider-sources/sources") {
+      const body = await requestBody(request) as { recordsPerRequest?: unknown };
+      if (
+        typeof body.recordsPerRequest !== "number" ||
+        !Number.isInteger(body.recordsPerRequest) ||
+        body.recordsPerRequest < 1 ||
+        body.recordsPerRequest > 5_000
+      ) {
+        json(response, 422, {
+          error: "Invalid request size",
+          code: "INVALID_SOURCE_CONFIGURATION",
+        });
+        return;
+      }
+      json(response, 201, {
+        sourceInstanceId: operationsFixtureIds.sources[0],
+        sourceRevisionId: operationsFixtureIds.revisions[0],
+        audit: fixtureAudit("source_created"),
       });
       return;
     }
@@ -229,7 +271,7 @@ const server = createServer(async (request, response) => {
       return;
     }
     const sourceCommand = url.pathname.match(
-      /^\/api\/provider-sources\/providers\/([^/]+)\/sources\/([^/]+)\/(pause|resume|test|interval|cursor-reset-preview)$/u,
+      /^\/api\/provider-sources\/providers\/([^/]+)\/sources\/([^/]+)\/(pause|resume|test|interval|records-per-request|cursor-reset-preview)$/u,
     );
     if (request.method === "POST" && sourceCommand) {
       const providerId = sourceCommand[1]!;
@@ -270,6 +312,32 @@ const server = createServer(async (request, response) => {
         json(response, 200, {
           scheduleRevisionId: operationsFixtureIds.schedules[index],
           audit: fixtureAudit("source_interval_revised"),
+        });
+        return;
+      }
+      if (action === "records-per-request") {
+        const body = await requestBody(request) as {
+          recordsPerRequest?: unknown;
+        };
+        const next = body.recordsPerRequest;
+        if (
+          typeof next !== "number" ||
+          !Number.isInteger(next) ||
+          next < 1 ||
+          next > 5_000
+        ) {
+          json(response, 422, {
+            error: "Invalid request size",
+            code: "INVALID_SOURCE_CONFIGURATION",
+          });
+          return;
+        }
+        const scheduleRevisionId = newScheduleRevisionId();
+        recordsPerRequest.set(providerId, next);
+        scheduleRevisionIds.set(providerId, scheduleRevisionId);
+        json(response, 200, {
+          scheduleRevisionId,
+          audit: fixtureAudit("source_records_per_request_revised"),
         });
         return;
       }

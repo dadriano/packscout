@@ -201,6 +201,7 @@ test("diagnostic request attempts cannot borrow another test job or blocking epi
         connection_profile_id: fixture.profileId,
         connection_revision_id: fixture.revisionId,
         expected_health_generation: 0n,
+        records_per_request: 250,
         state: "running",
         requested_by_actor_key: "operator-admin",
         claim_owner: ownerKey,
@@ -220,6 +221,7 @@ test("diagnostic request attempts cannot borrow another test job or blocking epi
           connection_profile_id: fixture.profileId,
           connection_revision_id: fixture.revisionId,
           expected_health_generation: 0n,
+          records_per_request: 250,
           requested_by_actor_key: "operator-admin",
         },
       });

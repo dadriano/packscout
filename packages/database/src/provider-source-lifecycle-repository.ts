@@ -5,6 +5,7 @@ import {
 } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import {
+  PROVIDER_SOURCE_RECORDS_PER_REQUEST_BOUNDS,
   PROVIDER_SOURCE_SCHEDULE_BOUNDS,
   type ProviderSourceRevisionPins,
 } from "./provider-source-persistence-types.ts";
@@ -227,6 +228,7 @@ export class ProviderSourceLifecycleRepository {
     revisionNumber: number;
     scheduleRevisionNumber?: number;
     intervalSeconds?: number;
+    recordsPerRequest?: number;
     configuration: Readonly<Record<string, unknown>>;
     configurationHash: string;
     recordIdScopes: readonly string[];
@@ -235,12 +237,23 @@ export class ProviderSourceLifecycleRepository {
   }>): Promise<{ sourceInstanceId: string; sourceRevisionId: string }> {
     const intervalSeconds = input.intervalSeconds
       ?? PROVIDER_SOURCE_SCHEDULE_BOUNDS.defaultIntervalSeconds;
+    const recordsPerRequest = input.recordsPerRequest
+      ?? PROVIDER_SOURCE_RECORDS_PER_REQUEST_BOUNDS.default;
     if (
       !Number.isInteger(intervalSeconds)
       || intervalSeconds < PROVIDER_SOURCE_SCHEDULE_BOUNDS.minimumIntervalSeconds
       || intervalSeconds > PROVIDER_SOURCE_SCHEDULE_BOUNDS.maximumIntervalSeconds
     ) {
       throw new TypeError("Source interval must be an integer from 60 through 86400 seconds.");
+    }
+    if (
+      !Number.isInteger(recordsPerRequest)
+      || recordsPerRequest < PROVIDER_SOURCE_RECORDS_PER_REQUEST_BOUNDS.minimum
+      || recordsPerRequest > PROVIDER_SOURCE_RECORDS_PER_REQUEST_BOUNDS.maximum
+    ) {
+      throw new TypeError(
+        "Source records per request must be an integer from 1 through 5000.",
+      );
     }
     if (
       input.recordIdScopes.length === 0
@@ -369,6 +382,7 @@ export class ProviderSourceLifecycleRepository {
           revision_number: input.scheduleRevisionNumber ?? 1,
           interval_seconds: intervalSeconds,
           freshness_grace_seconds: PROVIDER_SOURCE_SCHEDULE_BOUNDS.freshnessGraceSeconds,
+          records_per_request: recordsPerRequest,
           created_by_actor_key: input.actorKey,
           effective_at: input.createdAt,
           created_at: input.createdAt,

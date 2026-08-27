@@ -14,7 +14,7 @@ import {
   type PackscoutTransactionClient,
 } from "./database.ts";
 import {
-  enqueueSourceEstimatedEvRecomputationInTransaction,
+  enqueueSourceEstimatedEvRecomputationsInTransaction,
 } from "./estimated-ev-recomputation-repository.ts";
 import {
   writeCanonicalProjectionBatch,
@@ -41,8 +41,8 @@ import {
 import { lockProviderSourcePageOwnership } from "./provider-source-page-ownership.ts";
 import {
   countProviderSourceUnresolvedRelationshipsByTuple,
-  hasProviderSourceCanonicalKindConflict,
-  loadCompleteProviderSourceEvInput,
+  findProviderSourceCanonicalKindConflictSourceRecordIds,
+  loadCompleteProviderSourceEvInputs,
   loadProviderSourceCanonicalHistoryByIdentity,
   lockProviderSourceCanonicalProjectionIdentities,
   providerSourceCanonicalProjectionIdentityKey,
@@ -53,6 +53,7 @@ import {
 import { advanceSettledPublicWatermark } from "./public-change-settlement-repository.ts";
 
 const MILLISECONDS_PER_DAY = 86_400_000;
+const MAXIMUM_ROWS_PER_WRITE = 500;
 
 export {
   ProviderSourceAtomicPagePersistenceError,
@@ -118,6 +119,39 @@ type CommitCounts = ProviderSourceAtomicPageCommitResult["counts"];
 type MutableCommitCounts = {
   -readonly [Key in keyof CommitCounts]: CommitCounts[Key];
 };
+
+interface ProviderSourceQuarantineDecision {
+  readonly sourceRecordId: string | null;
+  readonly semanticObservationId: string | null;
+  readonly recordKind: "catalog" | "pull" | "trade" | null;
+  readonly externalId: string | null;
+  readonly collectedAt: Date;
+  readonly reasonCode: string;
+}
+
+interface PreparedProviderSourceQuarantineRow {
+  readonly organization_id: string;
+  readonly provider_id: string;
+  readonly source_record_id: null;
+  readonly record_kind: "catalog" | "pull" | "trade" | null;
+  readonly external_id: string | null;
+  readonly reason_code: string;
+  readonly sanitized_summary: string;
+  readonly payload_json: Prisma.InputJsonValue;
+  readonly expires_at: Date;
+  readonly run_id: string;
+  readonly page_id: string;
+  readonly record_index: number;
+  readonly created_at: Date;
+}
+
+function batches<T>(values: readonly T[]): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += MAXIMUM_ROWS_PER_WRITE) {
+    result.push(values.slice(index, index + MAXIMUM_ROWS_PER_WRITE));
+  }
+  return result;
+}
 
 function invalidPlan(): never {
   throw new ProviderSourceAtomicPagePersistenceError("invalid_page_plan");
@@ -364,6 +398,54 @@ export class ProviderSourcePageRepository {
       const counts = emptyCounts(input.plan.counts.warnings);
       const evCauses = new Map<string, bigint[]>();
 
+      const semanticOutcomes = input.plan.outcomes.filter(
+        (outcome): outcome is Extract<
+          ProviderSourcePlannedOutcome,
+          { kind: "semantic" }
+        > => outcome.kind === "semantic",
+      );
+      const semanticResults =
+        await this.#observations.upsertSemanticObservationsInTransaction(
+          transaction,
+          semanticOutcomes.map((outcome) => {
+            const identity = outcome.semanticContent.providerRecordIdentity;
+            return {
+              organizationId: input.pins.organizationId,
+              providerId: input.pins.providerId,
+              sourceInstanceId: input.pins.sourceInstanceId,
+              sourceRevisionId: input.pins.sourceRevisionId,
+              recordIdScopeKey: identity.recordIdScopeKey,
+              providerRecordId: identity.providerRecordId,
+              effectiveSourceTime: new Date(outcome.semanticContent.effectiveAt),
+              ...observationVersionPins,
+              normalizedContentHash: outcome.normalizedContentHash,
+              normalizedContent: outcome.semanticContent,
+              ...resolveLaunchSourceRecordMeaning(identity.recordIdScopeKey),
+            };
+          }),
+        );
+      const semanticByRecordIndex = new Map(
+        semanticOutcomes.map((outcome, index) => [
+          outcome.recordIndex,
+          semanticResults[index]!,
+        ]),
+      );
+      const canonicalKindConflicts =
+        await findProviderSourceCanonicalKindConflictSourceRecordIds(
+          transaction,
+          input.pins.organizationId,
+          semanticOutcomes.flatMap((outcome) => {
+            const semantic = semanticByRecordIndex.get(outcome.recordIndex);
+            return semantic?.kind === "ready" &&
+                outcome.mapping.status === "mapped"
+              ? [{
+                  sourceRecordId: semantic.sourceRecordId,
+                  projections: outcome.mapping.projections,
+                }]
+              : [];
+          }),
+        );
+
       // The advisory locks above serialize every mapped identity, so the
       // committed history cannot change for the rest of this transaction
       // except through this page's own writes. Those writes are deferred into
@@ -385,14 +467,29 @@ export class ProviderSourcePageRepository {
         becomesCurrent: boolean;
       }> = [];
       const deferredDeliveryOccurrences: RecordDeliveryOccurrenceInput[] = [];
+      const deferredQuarantines: PreparedProviderSourceQuarantineRow[] = [];
       const deliveredProjectionPlans: Array<
         readonly ProviderSourceCanonicalProjectionPlan[]
       > = [];
-      let sourceRevisionFenceVerified = false;
+      const queueQuarantine = (
+        outcome: ProviderSourcePlannedOutcome,
+        decision: ProviderSourceQuarantineDecision,
+      ) => {
+        const prepared = this.prepareQuarantine(
+          input,
+          outcome,
+          evidence,
+          committedAt,
+          decision,
+        );
+        deferredDeliveryOccurrences.push(prepared.occurrence);
+        deferredQuarantines.push(prepared.row);
+        counts.quarantined += 1;
+      };
 
       for (const outcome of input.plan.outcomes) {
         if (outcome.kind === "adapter_invalid") {
-          await this.recordQuarantine(transaction, input, outcome, evidence, committedAt, {
+          queueQuarantine(outcome, {
             sourceRecordId: null,
             semanticObservationId: null,
             recordKind: null,
@@ -400,37 +497,16 @@ export class ProviderSourcePageRepository {
             collectedAt: committedAt,
             reasonCode: outcome.reasonCode,
           });
-          counts.quarantined += 1;
           continue;
         }
 
         const identity = outcome.semanticContent.providerRecordIdentity;
-        const meaning = resolveLaunchSourceRecordMeaning(
-          identity.recordIdScopeKey,
-        );
-        const semantic =
-          await this.#observations.upsertSemanticObservationInTransaction(
-            transaction,
-            {
-              organizationId: input.pins.organizationId,
-              providerId: input.pins.providerId,
-              sourceInstanceId: input.pins.sourceInstanceId,
-              sourceRevisionId: input.pins.sourceRevisionId,
-              recordIdScopeKey: identity.recordIdScopeKey,
-              providerRecordId: identity.providerRecordId,
-              effectiveSourceTime: new Date(outcome.semanticContent.effectiveAt),
-              ...observationVersionPins,
-              normalizedContentHash: outcome.normalizedContentHash,
-              normalizedContent: outcome.semanticContent,
-              ...meaning,
-            },
-            // The fence fields are page-constant pins, so the first record's
-            // check inside this transaction covers every later record.
-            { skipSourceRevisionFenceCheck: sourceRevisionFenceVerified },
-          );
-        sourceRevisionFenceVerified = true;
+        const semantic = semanticByRecordIndex.get(outcome.recordIndex);
+        if (!semantic) {
+          throw new Error("Semantic observation batch returned no outcome.");
+        }
         if (semantic.kind === "identity_conflict") {
-          await this.recordQuarantine(transaction, input, outcome, evidence, committedAt, {
+          queueQuarantine(outcome, {
             sourceRecordId: semantic.sourceRecordId,
             semanticObservationId: null,
             recordKind: sourceRecordKind(outcome),
@@ -438,11 +514,10 @@ export class ProviderSourcePageRepository {
             collectedAt: new Date(outcome.observation.collectedAt),
             reasonCode: semantic.reasonCode,
           });
-          counts.quarantined += 1;
           continue;
         }
         if (outcome.mapping.status === "quarantined") {
-          await this.recordQuarantine(transaction, input, outcome, evidence, committedAt, {
+          queueQuarantine(outcome, {
             sourceRecordId: semantic.sourceRecordId,
             semanticObservationId: semantic.semanticObservationId,
             recordKind: sourceRecordKind(outcome),
@@ -450,19 +525,11 @@ export class ProviderSourcePageRepository {
             collectedAt: new Date(outcome.observation.collectedAt),
             reasonCode: outcome.mapping.reasonCode,
           });
-          counts.quarantined += 1;
           continue;
         }
 
-        if (
-          await hasProviderSourceCanonicalKindConflict(
-            transaction,
-            input.pins.organizationId,
-            semantic.sourceRecordId,
-            outcome.mapping.projections,
-          )
-        ) {
-          await this.recordQuarantine(transaction, input, outcome, evidence, committedAt, {
+        if (canonicalKindConflicts.has(semantic.sourceRecordId)) {
+          queueQuarantine(outcome, {
             sourceRecordId: semantic.sourceRecordId,
             semanticObservationId: semantic.semanticObservationId,
             recordKind: sourceRecordKind(outcome),
@@ -470,7 +537,6 @@ export class ProviderSourcePageRepository {
             collectedAt: new Date(outcome.observation.collectedAt),
             reasonCode: "identity_kind_conflict",
           });
-          counts.quarantined += 1;
           continue;
         }
 
@@ -512,7 +578,7 @@ export class ProviderSourcePageRepository {
           });
         }
         if (conflictReason) {
-          await this.recordQuarantine(transaction, input, outcome, evidence, committedAt, {
+          queueQuarantine(outcome, {
             sourceRecordId: semantic.sourceRecordId,
             semanticObservationId: semantic.semanticObservationId,
             recordKind: sourceRecordKind(outcome),
@@ -520,7 +586,6 @@ export class ProviderSourcePageRepository {
             collectedAt: new Date(outcome.observation.collectedAt),
             reasonCode: conflictReason,
           });
-          counts.quarantined += 1;
           continue;
         }
 
@@ -604,10 +669,33 @@ export class ProviderSourcePageRepository {
           }
         }
       }
-      await this.#observations.recordDeliveryOccurrencesInTransaction(
-        transaction,
-        deferredDeliveryOccurrences,
+      const recordedOccurrences =
+        await this.#observations.recordDeliveryOccurrencesWithIdsInTransaction(
+          transaction,
+          deferredDeliveryOccurrences,
+        );
+      const occurrenceIdByRecordIndex = new Map(
+        recordedOccurrences.map(({ recordIndex, occurrenceId }) => [
+          recordIndex,
+          occurrenceId,
+        ]),
       );
+      for (const batch of batches(deferredQuarantines)) {
+        await transaction.quarantine_records.createMany({
+          data: batch.map((row) => {
+            const deliveryOccurrenceId = occurrenceIdByRecordIndex.get(
+              row.record_index,
+            );
+            if (deliveryOccurrenceId === undefined) {
+              throw new Error("Quarantine delivery occurrence is missing.");
+            }
+            return {
+              ...row,
+              delivery_occurrence_id: deliveryOccurrenceId,
+            };
+          }),
+        });
+      }
       if (deliveredProjectionPlans.length > 0) {
         const unresolvedCounts =
           await countProviderSourceUnresolvedRelationshipsByTuple(
@@ -631,34 +719,37 @@ export class ProviderSourcePageRepository {
         }
       }
 
-      for (const [packExternalId, causeSequences] of evCauses) {
-        const current = await loadCompleteProviderSourceEvInput(
+      const completeEvInputs = await loadCompleteProviderSourceEvInputs(
+        transaction,
+        {
+          organizationId: input.pins.organizationId,
+          provider: input.pins.provider,
+        },
+        [...evCauses.keys()],
+      );
+      const evRequests =
+        await enqueueSourceEstimatedEvRecomputationsInTransaction(
           transaction,
-          {
-            organizationId: input.pins.organizationId,
-            provider: input.pins.provider,
-          },
-          packExternalId,
+          [...evCauses].flatMap(([packExternalId, causeSequences]) => {
+            const current = completeEvInputs.get(packExternalId);
+            return current
+              ? [{
+                  organizationId: input.pins.organizationId,
+                  providerId: input.pins.providerId,
+                  sourceInstanceId: input.pins.sourceInstanceId,
+                  sourceRevisionId: input.pins.sourceRevisionId,
+                  platformKey: input.pins.provider,
+                  packExternalId,
+                  evInputExternalId: current.evInputExternalId,
+                  packRevisionId: current.packRevisionId,
+                  evInputRevisionId: current.evInputRevisionId,
+                  causeSequences: [...new Set(causeSequences)],
+                  createdAt: committedAt,
+                }]
+              : [];
+          }),
         );
-        if (!current) continue;
-        const request = await enqueueSourceEstimatedEvRecomputationInTransaction(
-          transaction,
-          {
-            organizationId: input.pins.organizationId,
-            providerId: input.pins.providerId,
-            sourceInstanceId: input.pins.sourceInstanceId,
-            sourceRevisionId: input.pins.sourceRevisionId,
-            platformKey: input.pins.provider,
-            packExternalId,
-            evInputExternalId: current.evInputExternalId,
-            packRevisionId: current.packRevisionId,
-            evInputRevisionId: current.evInputRevisionId,
-            causeSequences: [...new Set(causeSequences)],
-            createdAt: committedAt,
-          },
-        );
-        if (request.created) counts.evRequests += 1;
-      }
+      counts.evRequests += evRequests.filter(({ created }) => created).length;
 
       await transaction.import_pages.update({
         where: { id: input.pins.pageId },
@@ -778,40 +869,31 @@ export class ProviderSourcePageRepository {
     } as const;
   }
 
-  private async recordQuarantine(
-    transaction: PackscoutTransactionClient,
+  private prepareQuarantine(
     input: ProviderSourceAtomicPagePersistenceInput,
     outcome: ProviderSourcePlannedOutcome,
     evidence: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
     committedAt: Date,
-    decision: Readonly<{
-      sourceRecordId: string | null;
-      semanticObservationId: string | null;
-      recordKind: "catalog" | "pull" | "trade" | null;
-      externalId: string | null;
-      collectedAt: Date;
-      reasonCode: string;
-    }>,
-  ): Promise<void> {
-    const occurrence =
-      await this.#observations.recordDeliveryOccurrenceInTransaction(
-        transaction,
-        {
-          ...this.occurrencePins(input),
-          recordIndex: outcome.recordIndex,
-          sourceRecordId: decision.sourceRecordId,
-          semanticObservationId: decision.semanticObservationId,
-          collectedAt: decision.collectedAt,
-          nativeEvidenceReference: outcome.protectedNativeEvidenceRef,
-          disposition: "quarantined",
-          reasonCode: decision.reasonCode,
-        },
-      );
+    decision: ProviderSourceQuarantineDecision,
+  ): Readonly<{
+    occurrence: RecordDeliveryOccurrenceInput;
+    row: PreparedProviderSourceQuarantineRow;
+  }> {
     const transactionReference = outcome.kind === "semantic"
       ? outcome.protectedTransactionEvidenceRef
       : null;
-    await transaction.quarantine_records.create({
-      data: {
+    return {
+      occurrence: {
+        ...this.occurrencePins(input),
+        recordIndex: outcome.recordIndex,
+        sourceRecordId: decision.sourceRecordId,
+        semanticObservationId: decision.semanticObservationId,
+        collectedAt: decision.collectedAt,
+        nativeEvidenceReference: outcome.protectedNativeEvidenceRef,
+        disposition: "quarantined",
+        reasonCode: decision.reasonCode,
+      },
+      row: {
         organization_id: input.pins.organizationId,
         provider_id: input.pins.providerId,
         source_record_id: null,
@@ -830,10 +912,9 @@ export class ProviderSourcePageRepository {
         run_id: input.pins.runId,
         page_id: input.pins.pageId,
         record_index: outcome.recordIndex,
-        delivery_occurrence_id: occurrence.occurrenceId,
         created_at: committedAt,
       },
-    });
+    };
   }
 
   private async updateRunCounters(

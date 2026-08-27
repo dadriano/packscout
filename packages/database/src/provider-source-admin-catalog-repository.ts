@@ -183,7 +183,7 @@ export class ProviderSourceAdminCatalogRepository {
       orderBy: [{ created_at: "asc" }, { id: "asc" }],
     });
     return Promise.all(sources.map(async (source) => {
-      const [provider, revision, profile, schedule, cursor, job] =
+      const [provider, revision, profile, schedule, cursor, job, activeRun] =
         await Promise.all([
           this.database.provider_sources.findFirst({
             where: { id: source.provider_id, organization_id: organizationId },
@@ -212,6 +212,15 @@ export class ProviderSourceAdminCatalogRepository {
           this.database.provider_source_test_jobs.findFirst({
             where: { source_instance_id: source.id, organization_id: organizationId },
             orderBy: [{ created_at: "desc" }, { id: "desc" }],
+          }),
+          this.database.import_runs.findFirst({
+            where: {
+              source_instance_id: source.id,
+              organization_id: organizationId,
+              state: { in: ["queued", "running"] },
+            },
+            orderBy: [{ created_at: "asc" }, { id: "asc" }],
+            select: { records_per_request: true },
           }),
         ]);
       if (!provider || !revision || !schedule || !cursor) return null;
@@ -258,6 +267,9 @@ export class ProviderSourceAdminCatalogRepository {
         identityNamespaceKey: revision.identity_namespace_key,
         recordIdScopes: strings(revision.record_id_scopes_json),
         intervalSeconds: scheduleRevision.interval_seconds,
+        recordsPerRequest: scheduleRevision.records_per_request,
+        activeRunRecordsPerRequest:
+          activeRun?.records_per_request ?? null,
         freshnessGraceSeconds: scheduleRevision.freshness_grace_seconds,
         scheduleRevisionId: scheduleRevision.id,
         cursorGeneration: cursor.cursor_generation,

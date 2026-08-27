@@ -87,6 +87,8 @@ export interface ProviderSourceAdminSourceRecord {
   readonly identityNamespaceKey: string;
   readonly recordIdScopes: readonly string[];
   readonly intervalSeconds: number;
+  readonly recordsPerRequest: number;
+  readonly activeRunRecordsPerRequest: number | null;
   readonly freshnessGraceSeconds: number;
   readonly scheduleRevisionId: string;
   readonly cursorGeneration: bigint;
@@ -396,6 +398,8 @@ export class ProviderSourceAdminCatalogService {
         identityNamespaceKey: record.identityNamespaceKey,
         recordIdScopes: record.recordIdScopes,
         intervalSeconds: record.intervalSeconds,
+        recordsPerRequest: record.recordsPerRequest,
+        activeRunRecordsPerRequest: record.activeRunRecordsPerRequest,
         freshnessGraceSeconds: record.freshnessGraceSeconds,
         scheduleRevisionId: record.scheduleRevisionId,
         cursor: {

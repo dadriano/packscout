@@ -4,7 +4,7 @@ import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
   providerIdentityNamespaceByLaunchProvider,
-  providerSourceLaunchBounds,
+  providerSourceRecordsPerRequest,
   type ProviderSourcePageCommitPins,
 } from "@packscout/contracts";
 import {
@@ -27,10 +27,15 @@ const warmupPageCount = 10;
 const trialCount = 5;
 const pagesPerTrial = 20;
 const pageCount = trialCount * pagesPerTrial;
-const recordsPerPage = providerSourceLaunchBounds.pageTargetRecords;
+// Exercise the largest legal per-source request pin at the adapter's current
+// byte ceiling. The live-evidenced 250-row target remains the backfill model.
+const recordsPerPage = providerSourceRecordsPerRequest.maximum;
 const maximumResponseBytes =
   dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes;
-const emptyObjectFactsPerRecord = 945;
+// Each fixture record contributes 13 non-fact JSON nodes. Thirty-four empty
+// facts per record keeps the 5,000-row page at 235,004 nodes, immediately below
+// the interpreter's independent 240,000-node ceiling.
+const emptyObjectFactsPerRecord = 34;
 const mebibyte = 1024 * 1024;
 
 function median(values: readonly number[]): number {

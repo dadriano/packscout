@@ -2,7 +2,11 @@ import { z } from "zod";
 import {
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
 } from "./dataforrest-events-v1.ts";
-import { launchProviderKeySchema } from "./provider-source-contract-v1.ts";
+import {
+  launchProviderKeySchema,
+  providerSourceRecordsPerRequest,
+  providerSourceRecordsPerRequestSchema,
+} from "./provider-source-contract-v1.ts";
 
 export const productionProviderSourceTypeKeys = [
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
@@ -54,6 +58,9 @@ export const providerSourceIntervalSecondsSchema = z.coerce
   .min(60)
   .max(86_400);
 
+export const providerSourceAdminRecordsPerRequestSchema =
+  providerSourceRecordsPerRequestSchema;
+
 export const providerSourceAdminErrorCodes = [
   "AUTH_REQUIRED",
   "FORBIDDEN",
@@ -90,6 +97,7 @@ const providerSourceAdminAuditReceiptBaseSchema = z
       "source_resumed",
       "source_disabled",
       "source_interval_revised",
+      "source_records_per_request_revised",
       "source_cursor_reset",
     ]),
     subjectType: z.enum(["source_connection_profile", "provider_source"]),
@@ -197,6 +205,8 @@ export const providerSourceAdminSummarySchema = z
     identityNamespaceKey: registrationKeySchema,
     recordIdScopes: z.array(registrationKeySchema).min(1).max(32),
     intervalSeconds: providerSourceIntervalSecondsSchema,
+    recordsPerRequest: providerSourceRecordsPerRequestSchema,
+    activeRunRecordsPerRequest: providerSourceRecordsPerRequestSchema.nullable(),
     freshnessGraceSeconds: z.literal(900),
     scheduleRevisionId: uuidSchema,
     cursor: z
@@ -306,6 +316,9 @@ const sourcePinInputSchema = z
     mapperKey: registrationKeySchema,
     mapperVersion: registrationKeySchema,
     intervalSeconds: providerSourceIntervalSecondsSchema.default(60),
+    recordsPerRequest: providerSourceAdminRecordsPerRequestSchema.default(
+      providerSourceRecordsPerRequest.default,
+    ),
   })
   .strict();
 
@@ -323,6 +336,14 @@ export const reviseProviderSourceIntervalRequestSchema = z
     expectedSourceRevisionId: uuidSchema,
     expectedScheduleRevisionId: uuidSchema,
     intervalSeconds: providerSourceIntervalSecondsSchema,
+  })
+  .strict();
+
+export const reviseProviderSourceRecordsPerRequestRequestSchema = z
+  .object({
+    expectedSourceRevisionId: uuidSchema,
+    expectedScheduleRevisionId: uuidSchema,
+    recordsPerRequest: providerSourceAdminRecordsPerRequestSchema,
   })
   .strict();
 
@@ -384,6 +405,9 @@ export type ProviderSourceRevisionCommand = z.input<
 >;
 export type ReviseProviderSourceIntervalRequest = z.input<
   typeof reviseProviderSourceIntervalRequestSchema
+>;
+export type ReviseProviderSourceRecordsPerRequestRequest = z.input<
+  typeof reviseProviderSourceRecordsPerRequestRequestSchema
 >;
 export type ConfirmProviderSourceCursorResetRequest = z.input<
   typeof confirmProviderSourceCursorResetRequestSchema

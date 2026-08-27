@@ -109,6 +109,7 @@ function createRealSupervisor(input: Readonly<{
   environmentKey: string;
   pageFailures?: unknown[];
   beforePageImport?: () => Promise<void>;
+  importedSourceInstanceIds?: string[];
 }>) {
   const ownerKey = `runtime-e2e-${input.environmentKey}`;
   const leaseToken = randomUUID();
@@ -129,6 +130,7 @@ function createRealSupervisor(input: Readonly<{
   pageImports.importPage = async (page) => {
     try {
       await input.beforePageImport?.();
+      input.importedSourceInstanceIds?.push(page.pins.sourceInstanceId);
       return await importPage(page);
     } catch (error) {
       input.pageFailures?.push(error);
@@ -269,6 +271,7 @@ async function createDataforrestFixture(input: Readonly<{
   testKey: string;
   intervals: readonly number[];
   providers?: readonly LaunchProviderKey[];
+  recordsPerRequest?: readonly number[];
 }>) {
   const setup = new PipelineSetupRepository(input.database);
   const lifecycle = new ProviderSourceLifecycleRepository(input.database);
@@ -316,12 +319,16 @@ async function createDataforrestFixture(input: Readonly<{
     "clutchpacks",
   ] as const;
   assert.equal(input.intervals.length, providers.length);
+  if (input.recordsPerRequest) {
+    assert.equal(input.recordsPerRequest.length, providers.length);
+  }
   const sources = [] as Array<Readonly<{
     provider: LaunchProviderKey;
     providerId: string;
     sourceInstanceId: string;
     sourceRevisionId: string;
     intervalSeconds: number;
+    recordsPerRequest: number;
   }>>;
   for (const [index, provider] of providers.entries()) {
     const createdAt = await databaseNow(input.database);
@@ -358,6 +365,7 @@ async function createDataforrestFixture(input: Readonly<{
         dataforrestEventsV1SourceAdapterManifest.cursorCodecKey,
       revisionNumber: 1,
       intervalSeconds: input.intervals[index]!,
+      recordsPerRequest: input.recordsPerRequest?.[index] ?? 500,
       configuration: { platform: provider },
       configurationHash: String(index + 1).repeat(64),
       recordIdScopes: launchRecordIdScopeDeclarations.map(
@@ -371,6 +379,7 @@ async function createDataforrestFixture(input: Readonly<{
       providerId,
       ...source,
       intervalSeconds: input.intervals[index]!,
+      recordsPerRequest: input.recordsPerRequest?.[index] ?? 500,
     });
   }
   const activatedAt = await databaseNow(input.database);
@@ -708,6 +717,102 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
     await supervisor.runCycle();
     await new Promise<void>((resolve) => setTimeout(resolve, 30));
     assert.equal(calls, 12, "frequent DB polling made an early upstream call");
+  } finally {
+    await supervisor?.stop().catch(() => undefined);
+    await fixture.close();
+  }
+});
+
+test("an over-pin provider page fails before import while a sibling lane continues", async () => {
+  const fixture = await createMigratedTestDatabase();
+  const requestedLimits = new Map<LaunchProviderKey, string | null>();
+  const importedSourceInstanceIds: string[] = [];
+  const pageFailures: unknown[] = [];
+  const httpClient: PinnedProviderHttpClient = async (url) => {
+    const provider = url.searchParams.get("platform") as LaunchProviderKey;
+    requestedLimits.set(provider, url.searchParams.get("limit"));
+    return jsonResponse(dataforestEventsV1EvidenceFixture[provider].initial);
+  };
+  let supervisor: ProviderSourceSupervisor<ProviderSourceSupervisorClaimedWork>
+    | null = null;
+  try {
+    const setup = await createDataforrestFixture({
+      database: fixture.database,
+      testKey: "records-per-request-over-pin",
+      intervals: [60, 60],
+      providers: ["courtyard", "collector_crypt"],
+      recordsPerRequest: [1, 500],
+    });
+    const target = setup.sources[0]!;
+    const sibling = setup.sources[1]!;
+    supervisor = createRealSupervisor({
+      database: fixture.database,
+      cipher: setup.cipher,
+      sourceAdapters: new SourceAdapterRegistry([
+        new DataforrestEventsSourceAdapter({
+          httpClient,
+          resolveHost: async () => ["198.204.245.26"],
+        }),
+      ]),
+      environmentKey: "runtime-e2e-records-per-request-over-pin",
+      pageFailures,
+      importedSourceInstanceIds,
+    });
+    await supervisor.initialize();
+    await supervisor.runCycle();
+    await waitFor(async () => {
+      const [targetRun, siblingPages] = await Promise.all([
+        fixture.database.import_runs.findFirstOrThrow({
+          where: { source_instance_id: target.sourceInstanceId },
+          orderBy: { created_at: "desc" },
+        }),
+        fixture.database.import_pages.count({
+          where: { source_instance_id: sibling.sourceInstanceId },
+        }),
+      ]);
+      assert.equal(targetRun.state, "failed");
+      assert.equal(targetRun.failure_code, "INVALID_RESPONSE");
+      assert.equal(siblingPages, 1);
+    });
+
+    const [targetPages, targetIdentities, targetDeliveries, targetEvRequests,
+      targetCursor, targetRuntime, siblingRuntime] = await Promise.all([
+      fixture.database.import_pages.count({
+        where: { source_instance_id: target.sourceInstanceId },
+      }),
+      fixture.database.source_record_identities.count({
+        where: { source_instance_id: target.sourceInstanceId },
+      }),
+      fixture.database.source_delivery_occurrences.count({
+        where: { source_instance_id: target.sourceInstanceId },
+      }),
+      fixture.database.estimated_ev_recomputation_requests.count({
+        where: { source_instance_id: target.sourceInstanceId },
+      }),
+      fixture.database.provider_source_cursors.findUniqueOrThrow({
+        where: { source_instance_id: target.sourceInstanceId },
+      }),
+      fixture.database.provider_source_runtime_states.findUniqueOrThrow({
+        where: { source_instance_id: target.sourceInstanceId },
+      }),
+      fixture.database.provider_source_runtime_states.findUniqueOrThrow({
+        where: { source_instance_id: sibling.sourceInstanceId },
+      }),
+    ]);
+    assert.equal(requestedLimits.get("courtyard"), "1");
+    assert.equal(requestedLimits.get("collector_crypt"), "500");
+    assert.equal(targetPages, 0);
+    assert.equal(targetIdentities, 0);
+    assert.equal(targetDeliveries, 0);
+    assert.equal(targetEvRequests, 0);
+    assert.equal(targetCursor.cursor, null);
+    assert.equal(targetRuntime.activity, "action_required");
+    assert.equal(targetRuntime.action_required_code, "INVALID_RESPONSE");
+    assert.notEqual(siblingRuntime.activity, "action_required");
+    assert.equal(importedSourceInstanceIds.includes(target.sourceInstanceId), false);
+    assert.equal(importedSourceInstanceIds.includes(sibling.sourceInstanceId), true);
+    assert.deepEqual(pageFailures, []);
+    assert.equal(supervisor.state, "active");
   } finally {
     await supervisor?.stop().catch(() => undefined);
     await fixture.close();

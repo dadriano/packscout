@@ -2,6 +2,10 @@ import { execFile } from "node:child_process";
 import { readFile, statfs } from "node:fs/promises";
 import { promisify } from "node:util";
 import {
+  providerSourceLaunchBounds,
+  providerSourceRecordsPerRequest,
+} from "@packscout/contracts";
+import {
   buildProviderSourceCapacityForecast,
   evaluateProviderSourceCapacityPreflight,
 } from "../../packages/services/src/provider-source-capacity-preflight.ts";
@@ -148,17 +152,17 @@ const memoryMeasurement = JSON.parse(
 
 const forecastInput = {
   baselineRecordCount: 14_526_877,
-  pageRecordLimit: 250,
+  // The dated full-history evidence was collected at 250 records per page.
+  pageRecordLimit: providerSourceLaunchBounds.pageTargetRecords,
   sourceCount: 4,
   pollIntervalSeconds: 60,
   rawRetentionDays: 7,
   operationalRetentionDays: 30,
   incrementalGrowthDays: 365,
   // No observed steady-state delivery rate is available yet. Fail closed by
-  // budgeting a full 250-record page on every possible 60-second poll for the
-  // complete one-year growth horizon; Task 010 may replace this only with new
-  // reviewed evidence and a versioned artifact.
-  incrementalRecordsPerPollAttempt: 250,
+  // Ongoing capacity must independently cover the largest legal configured
+  // page on every possible 60-second poll for the complete one-year horizon.
+  incrementalRecordsPerPollAttempt: providerSourceRecordsPerRequest.maximum,
   measuredStructuredPhysicalBytesPerRecord:
     storageMeasurement.structuredPhysicalBytesPerRecord as number,
   conservativeRawHistoryBytes: 98_700_000_000,
@@ -217,13 +221,13 @@ const artifact = {
       horizonDays: forecastInput.incrementalGrowthDays,
       recordsPerPollAttempt: forecastInput.incrementalRecordsPerPollAttempt,
       basis:
-        "fail-closed maximum: every source returns the full 250-record launch page on every 60-second poll",
+        "split bound: the dated initial backfill uses 250-record pages; ongoing growth assumes every source returns the full 5,000-record configured page on every 60-second poll",
     },
   },
   storageMeasurement: {
     environment: {
       postgresVersionMajor: 16,
-      schemaMigration: "20260825041000_raise_provider_source_raw_response_limit",
+      schemaMigration: "20260826010000_provider_source_records_per_request",
     },
     ...storageMeasurement,
   },

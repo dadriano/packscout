@@ -71,6 +71,13 @@ test("provider-source history and diagnostic retention are enforced by PostgreSQ
       /append-only/u,
     );
     await assert.rejects(
+      fixture.database.provider_source_schedule_revisions.update({
+        where: { id: scheduleRevision.id },
+        data: { records_per_request: scheduleRevision.records_per_request + 1 },
+      }),
+      /append-only/u,
+    );
+    await assert.rejects(
       fixture.database.provider_source_schedule_revisions.delete({
         where: { id: scheduleRevision.id },
       }),

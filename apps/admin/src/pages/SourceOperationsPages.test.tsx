@@ -143,9 +143,13 @@ test("provider admin lists canonical provider-source lanes without the legacy pr
 
 test("provider detail preserves safe state through refresh and action failures while filtering bounded history", async (context) => {
   const detail = operationsDetail();
+  let servedDetail = detail;
   let diagnosticsFail = false;
   let intervalFails = false;
   let intervalBody: unknown = null;
+  let recordsPerRequestBody: unknown = null;
+  let recordsPerRequestFails = false;
+  let heldDetailResponse: Promise<Response> | null = null;
   const requests = stubFetch(context, ({ input, init }) => {
     const path = String(input);
     if (path.includes("/diagnostics")) {
@@ -174,7 +178,12 @@ test("provider detail preserves safe state through refresh and action failures w
       }));
     }
     if (path === `/api/provider-source-operations/providers/${operationsFixtureIds.providers[0]}`) {
-      return jsonResponse(detail);
+      if (heldDetailResponse) {
+        const response = heldDetailResponse;
+        heldDetailResponse = null;
+        return response;
+      }
+      return jsonResponse(servedDetail);
     }
     if (path.endsWith("/interval")) {
       intervalBody = JSON.parse(String(init?.body));
@@ -182,6 +191,16 @@ test("provider detail preserves safe state through refresh and action failures w
         return jsonResponse({ error: "Conflict", code: "SOURCE_CONFLICT" }, 409);
       }
       return jsonResponse({ scheduleRevisionId: operationsFixtureIds.schedules[0], audit: { outcome: "succeeded" } });
+    }
+    if (path.endsWith("/records-per-request")) {
+      recordsPerRequestBody = JSON.parse(String(init?.body));
+      if (recordsPerRequestFails) {
+        return jsonResponse({ error: "Conflict", code: "SOURCE_CONFLICT" }, 409);
+      }
+      return jsonResponse({
+        scheduleRevisionId: operationsFixtureIds.schedules[2],
+        audit: { outcome: "success" },
+      });
     }
     throw new Error(`Unexpected request: ${path}`);
   });
@@ -202,6 +221,11 @@ test("provider detail preserves safe state through refresh and action failures w
   assert.match(pageText(routed), /Safe fingerprint/);
   assert.match(pageText(routed), /Page committed/);
   assert.match(pageText(routed), /Shared connection/);
+  assert.match(pageText(routed), /Current run: 500\. Next run: 1,000\./u);
+  assert.match(
+    pageText(routed),
+    /Smaller values use less memory\. Larger values can finish backfills faster\. The source may return fewer\./u,
+  );
 
   assert.equal(
     [...routed.container.querySelectorAll("button")]
@@ -280,6 +304,130 @@ test("provider detail preserves safe state through refresh and action failures w
   assert.match(pageText(routed), /changed in another session/iu);
   assert.equal(routed.container.querySelector<HTMLInputElement>("#provider-source-interval")?.value, "777");
   assert.match(pageText(routed), /Source contract/);
+
+  await act(async () => {
+    changeControl(routed, "provider-source-records-per-request", "5001");
+    const input = routed.container.querySelector<HTMLInputElement>(
+      "#provider-source-records-per-request",
+    );
+    assert.ok(input);
+    input.dispatchEvent(new routed.dom.window.Event("invalid", {
+      cancelable: true,
+    }));
+    const form = findButton(routed, "Save request size").closest("form");
+    assert.ok(form);
+    form.dispatchEvent(new routed.dom.window.Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  assert.equal(recordsPerRequestBody, null);
+  assert.match(pageText(routed), /Enter a whole number from 1 to 5,000\./u);
+  assert.equal(
+    routed.container.querySelector<HTMLInputElement>(
+      "#provider-source-records-per-request",
+    )?.getAttribute("aria-invalid"),
+    "true",
+  );
+
+  await act(async () => {
+    changeControl(routed, "provider-source-records-per-request", "1250");
+  });
+  servedDetail = {
+    ...detail,
+    source: {
+      ...detail.source,
+      source: {
+        ...detail.source.source!,
+        recordsPerRequest: 2_000,
+      },
+      schedule: {
+        ...detail.source.schedule!,
+        scheduleRevisionId: operationsFixtureIds.schedules[1],
+      },
+    },
+  };
+  await act(async () => findButton(routed, "Pause display").click());
+  await act(async () => {
+    findButton(routed, "Resume display").click();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+  assert.equal(
+    routed.container.querySelector<HTMLInputElement>(
+      "#provider-source-records-per-request",
+    )?.value,
+    "1250",
+  );
+
+  recordsPerRequestFails = true;
+  await act(async () => {
+    const form = findButton(routed, "Save request size").closest("form");
+    assert.ok(form);
+    form.dispatchEvent(new routed.dom.window.Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+  assert.deepEqual(recordsPerRequestBody, {
+    expectedSourceRevisionId: operationsFixtureIds.revisions[0],
+    expectedScheduleRevisionId: operationsFixtureIds.schedules[0],
+    recordsPerRequest: 1_250,
+  });
+  assert.match(pageText(routed), /changed in another session/iu);
+  assert.equal(
+    routed.container.querySelector<HTMLInputElement>(
+      "#provider-source-records-per-request",
+    )?.value,
+    "1250",
+  );
+
+  const heldReload = deferred<Response>();
+  heldDetailResponse = heldReload.promise;
+  await act(async () => {
+    findButton(routed, "Reload current value").click();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  assert.equal(
+    routed.container.querySelector<HTMLInputElement>(
+      "#provider-source-records-per-request",
+    )?.disabled,
+    true,
+  );
+  assert.equal(findButton(routed, "Reloading…").disabled, true);
+  await act(async () => {
+    heldReload.resolve(jsonResponse(servedDetail));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+  assert.equal(
+    routed.container.querySelector<HTMLInputElement>(
+      "#provider-source-records-per-request",
+    )?.value,
+    "2000",
+  );
+
+  recordsPerRequestFails = false;
+  await act(async () => {
+    changeControl(routed, "provider-source-records-per-request", "1250");
+    const form = findButton(routed, "Save request size").closest("form");
+    assert.ok(form);
+    form.dispatchEvent(new routed.dom.window.Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+  assert.deepEqual(recordsPerRequestBody, {
+    expectedSourceRevisionId: operationsFixtureIds.revisions[0],
+    expectedScheduleRevisionId: operationsFixtureIds.schedules[1],
+    recordsPerRequest: 1_250,
+  });
+  assert.match(pageText(routed), /Saved\. Applies to the next import run\./u);
 });
 
 test("paused action-required provider detail blocks false retries and names the tested lifecycle recovery", async (context) => {
@@ -465,6 +613,11 @@ test("forbidden overview exposes no evidence and read-only provider detail hides
   cleanupPage(context, readOnly);
   await settlePage();
   assert.match(pageText(readOnly), /Read-only access/);
-  assert.doesNotMatch(pageText(readOnly), /Test source|Save timing/);
+  assert.match(pageText(readOnly), /Current run: 500\. Next run: 1,000\./u);
+  assert.doesNotMatch(pageText(readOnly), /Test source|Save timing|Save request size/);
+  assert.equal(
+    readOnly.container.querySelector("#provider-source-records-per-request"),
+    null,
+  );
   assert.equal([...readOnly.container.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Run now"), false);
 });

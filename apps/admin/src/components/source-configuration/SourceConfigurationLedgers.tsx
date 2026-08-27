@@ -8,6 +8,13 @@ import {
   type SourceConnectionProfileAdminSummary,
 } from "@packscout/contracts";
 import { StatusBadge, type StatusTone } from "../StatusBadge";
+import {
+  DEFAULT_RECORDS_PER_REQUEST,
+  RECORDS_PER_REQUEST_ERROR,
+  RECORDS_PER_REQUEST_HELP,
+  parseRecordsPerRequest,
+  recordsPerRequestDisplay,
+} from "./records-per-request";
 
 function label(value: string): string {
   return value.replaceAll("_", " ").replace(/^./u, (letter) => letter.toUpperCase());
@@ -287,12 +294,24 @@ export function ProviderSourceLedger({
   const [providerId, setProviderId] = useState("");
   const [profileId, setProfileId] = useState("");
   const [intervalSeconds, setIntervalSeconds] = useState("60");
+  const [recordsPerRequest, setRecordsPerRequest] = useState(
+    String(DEFAULT_RECORDS_PER_REQUEST),
+  );
+  const [recordsPerRequestError, setRecordsPerRequestError] = useState<
+    string | null
+  >(null);
   const provider = catalog.providers.find((item) => item.id === providerId);
   const profile = catalog.connections.find((item) => item.id === profileId);
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!provider || !profile) return;
+    const parsedRecordsPerRequest = parseRecordsPerRequest(recordsPerRequest);
+    if (parsedRecordsPerRequest === null) {
+      setRecordsPerRequestError(RECORDS_PER_REQUEST_ERROR);
+      return;
+    }
+    setRecordsPerRequestError(null);
     const base: CreateProviderSourceRequest = {
       providerId: provider.id,
       connectionProfileId: profile.id,
@@ -300,12 +319,14 @@ export function ProviderSourceLedger({
       mapperKey: provider.sourceRegistration.mapperKey,
       mapperVersion: provider.sourceRegistration.mapperVersion,
       intervalSeconds: Number(intervalSeconds),
+      recordsPerRequest: parsedRecordsPerRequest,
     };
     const saved = await onCreate(base);
     if (saved) {
       setProviderId("");
       setProfileId("");
       setIntervalSeconds("60");
+      setRecordsPerRequest(String(DEFAULT_RECORDS_PER_REQUEST));
     }
   }
 
@@ -356,6 +377,47 @@ export function ProviderSourceLedger({
                 value={intervalSeconds}
                 onChange={(event) => setIntervalSeconds(event.target.value)} />
             </div>
+            <div className="admin-field source-config-form__records">
+              <label htmlFor="source-records-per-request">
+                Maximum records per request
+              </label>
+              <input
+                id="source-records-per-request"
+                type="number"
+                min="1"
+                max="5000"
+                step="1"
+                required
+                value={recordsPerRequest}
+                aria-describedby={recordsPerRequestError
+                  ? "source-records-per-request-help source-records-per-request-error"
+                  : "source-records-per-request-help"}
+                aria-invalid={recordsPerRequestError !== null}
+                onInvalid={(event) => {
+                  event.preventDefault();
+                  setRecordsPerRequestError(RECORDS_PER_REQUEST_ERROR);
+                }}
+                onChange={(event) => {
+                  setRecordsPerRequest(event.target.value);
+                  setRecordsPerRequestError(null);
+                }}
+              />
+              <p
+                className="source-config-field-help"
+                id="source-records-per-request-help"
+              >
+                {RECORDS_PER_REQUEST_HELP}
+              </p>
+              {recordsPerRequestError ? (
+                <p
+                  className="admin-form-error source-config-field-error"
+                  id="source-records-per-request-error"
+                  role="alert"
+                >
+                  {recordsPerRequestError}
+                </p>
+              ) : null}
+            </div>
             <p className="source-config-form__evidence" aria-live="polite">
               {provider
                 ? `Adapter: ${provider.sourceRegistration.sourceAdapterVersion} · Observation: ${provider.sourceRegistration.normalizedContractVersion} · Mapper: ${provider.sourceRegistration.mapperKey} @ ${provider.sourceRegistration.mapperVersion}`
@@ -398,6 +460,13 @@ export function ProviderSourceLedger({
                 <div><dt>Adapter</dt><dd>{source.sourceAdapterVersion}</dd></div>
                 <div><dt>Observation</dt><dd>{source.normalizedContractVersion}</dd></div>
                 <div><dt>Interval / grace</dt><dd>{source.intervalSeconds}s / 15m</dd></div>
+                <div>
+                  <dt>Maximum records per request</dt>
+                  <dd>{recordsPerRequestDisplay(
+                    source.recordsPerRequest,
+                    source.activeRunRecordsPerRequest,
+                  )}</dd>
+                </div>
                 <div><dt>Cursor</dt><dd>{source.cursor.resumeLabel}</dd></div>
                 <div className="source-config-ledger__fingerprint"><dt>Fingerprint</dt><dd>{source.cursor.fingerprint ?? "None"}</dd></div>
                 <div><dt>Generation</dt><dd>{source.cursor.generation}</dd></div>

@@ -112,6 +112,8 @@ function repository(
           "trade-v1",
         ],
         intervalSeconds: 60,
+        recordsPerRequest: 1_000,
+        activeRunRecordsPerRequest: 500,
         freshnessGraceSeconds: 900,
         scheduleRevisionId,
         cursorGeneration: 1n,
@@ -201,6 +203,8 @@ test("catalog advertises the sole v1 tuple while retaining masked connection and
     catalog.sources[0]?.sourceAdapterVersion,
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
+  assert.equal(catalog.sources[0]?.recordsPerRequest, 1_000);
+  assert.equal(catalog.sources[0]?.activeRunRecordsPerRequest, 500);
   assert.equal(catalog.sources[0]?.cursor.resumeLabel, "Feed start");
   assert.equal(JSON.stringify(catalog).includes("must-never-leave"), false);
   assert.equal(JSON.stringify(catalog).includes("/v1/events"), false);

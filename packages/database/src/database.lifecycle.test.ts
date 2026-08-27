@@ -110,7 +110,7 @@ test("startup fails closed when the expected Prisma migration is not ready", asy
   try {
     await harness.client.$executeRaw`
       delete from public."_prisma_migrations"
-      where migration_name = '20260825041000_raise_provider_source_raw_response_limit'
+      where migration_name = '20260826010000_provider_source_records_per_request'
     `;
     const lifecycle = harness.createClientLifecycle();
     try {
@@ -136,7 +136,7 @@ test("startup fails closed when the expected migration checksum is inconsistent"
     await harness.client.$executeRaw`
       update public."_prisma_migrations"
       set checksum = ${"0".repeat(64)}
-      where migration_name = '20260824223000_fix_normalized_text_vertical_tab'
+      where migration_name = '20260826010000_provider_source_records_per_request'
     `;
     const lifecycle = harness.createClientLifecycle();
     try {

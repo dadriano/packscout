@@ -155,7 +155,7 @@ function dataforrestEventsSourceAdapterManifest() {
     cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     operatorLabel: "DataForrest Events V1",
     requestBounds: {
-      pageLimit: providerSourceLaunchBounds.pageTargetRecords,
+      pageLimit: providerSourceLaunchBounds.recordsPerRequest.maximum,
       maximumResponseBytes: providerSourceLaunchBounds.maximumResponseBytes,
       timeoutMilliseconds: providerSourceLaunchBounds.requestTimeoutMilliseconds,
     },

@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
+  providerSourceLaunchBounds,
+  providerSourceRecordsPerRequest,
 } from "@packscout/contracts";
 import {
   ProviderSourceCapacityInputError,
@@ -43,6 +45,10 @@ interface MemoryMeasurement {
 
 interface CapacityArtifact {
   readonly storageMeasurement: Readonly<{
+    environment: Readonly<{
+      postgresVersionMajor: number;
+      schemaMigration: string;
+    }>;
     sample: Readonly<{ inputRecords: number }>;
     allocationPageBytes: number;
     structuredPhysicalBytesPerRecord: number;
@@ -114,6 +120,10 @@ async function capacityArtifact(): Promise<CapacityArtifact> {
 
 test("capacity artifact is derived from measured relations and exact retention volume", async () => {
   const artifact = await capacityArtifact();
+  assert.equal(
+    artifact.storageMeasurement.environment.schemaMigration,
+    "20260826010000_provider_source_records_per_request",
+  );
   assert.equal(
     artifact.forecastInput.measuredStructuredPhysicalBytesPerRecord,
     artifact.storageMeasurement.structuredPhysicalBytesPerRecord,
@@ -191,18 +201,25 @@ test("capacity artifact is derived from measured relations and exact retention v
     artifact.forecast,
   );
   assert.equal(
-    artifact.forecastInput.incrementalRecordsPerPollAttempt,
     artifact.forecastInput.pageRecordLimit,
+    providerSourceLaunchBounds.pageTargetRecords,
+  );
+  assert.equal(
+    artifact.forecastInput.incrementalRecordsPerPollAttempt,
+    providerSourceRecordsPerRequest.maximum,
   );
   assert.equal(artifact.forecast.initialPageCount, 58_108);
   assert.equal(artifact.forecast.thirtyDayPollAttempts, 172_800);
   assert.equal(artifact.forecast.firstWindowAttempts, 230_908);
   assert.equal(artifact.forecast.incrementalPollAttempts, 2_102_400);
-  assert.equal(artifact.forecast.incrementalRecordCount, 525_600_000);
-  assert.equal(artifact.forecast.sevenDayIncrementalRecordCount, 10_080_000);
+  assert.equal(artifact.forecast.incrementalRecordCount, 10_512_000_000);
+  assert.equal(
+    artifact.forecast.sevenDayIncrementalRecordCount,
+    201_600_000,
+  );
   assert.equal(
     artifact.forecast.thirtyDayIncrementalRecordCount,
-    43_200_000,
+    864_000_000,
   );
   assert.equal(
     artifact.forecast.projectedBytes.structuredAndCanonical,
@@ -228,13 +245,16 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   assert.equal(memory.retainedMetric, "theil-sen-managed-bytes-per-page");
   assert.ok(memory.trialCount >= 3);
   assert.equal(memory.trialCount * memory.pagesPerTrial, memory.pageCount);
-  assert.equal(memory.recordsPerPage, 250);
+  assert.equal(
+    memory.recordsPerPage,
+    providerSourceRecordsPerRequest.maximum,
+  );
   assert.equal(
     memory.responseBytesPerPage,
     dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes,
   );
-  assert.equal(memory.jsonNodesPerPage, 239_504);
-  assert.equal(memory.emptyObjectFactsPerRecord, 945);
+  assert.equal(memory.jsonNodesPerPage, 235_004);
+  assert.equal(memory.emptyObjectFactsPerRecord, 34);
   assert.equal(
     memory.totalRecordsProcessed,
     memory.pageCount * memory.recordsPerPage,

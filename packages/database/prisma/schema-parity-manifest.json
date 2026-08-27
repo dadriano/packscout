@@ -1,17 +1,17 @@
 {
-  "source": "provider-source integration plus operator invitations",
+  "source": "provider-source integration plus configurable records per request",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260825041000_raise_provider_source_raw_response_limit/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260826010000_provider_source_records_per_request/migration.sql"
   },
   "expectedCounts": {
     "tables": 84,
     "enums": 40,
-    "columns": 1325,
+    "columns": 1328,
     "indexes": 151,
     "uniqueConstraints": 54,
     "foreignKeys": 276,
-    "checkConstraints": 281
+    "checkConstraints": 284
   },
   "enums": {
     "admin_alert_state": [
@@ -4416,6 +4416,13 @@
           "identity": null,
           "default": "false"
         },
+        "records_per_request": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "requested_by_actor_key": {
           "type": "text",
           "primaryKey": false,
@@ -4723,6 +4730,9 @@
         },
         "import_runs_requested_cursor_bounded": {
           "value": "((source_instance_id IS NOT NULL) OR (requested_cursor IS NULL) OR (length(requested_cursor) <= 2048))"
+        },
+        "import_runs_records_per_request_check": {
+          "value": "(((source_instance_id IS NULL) AND (records_per_request IS NULL)) OR ((source_instance_id IS NOT NULL) AND (records_per_request IS NOT NULL) AND ((records_per_request >= 1) AND (records_per_request <= 5000))))"
         },
         "import_runs_source_pins_check": {
           "value": "((source_instance_id IS NULL) OR ((source_revision_id IS NOT NULL) AND (source_type_key IS NOT NULL) AND (btrim(source_type_key) <> ''::text) AND (source_adapter_version IS NOT NULL) AND (btrim(source_adapter_version) <> ''::text) AND (normalized_contract_version IS NOT NULL) AND (btrim(normalized_contract_version) <> ''::text) AND (mapper_key IS NOT NULL) AND (btrim(mapper_key) <> ''::text) AND (mapper_version IS NOT NULL) AND (btrim(mapper_version) <> ''::text) AND (identity_namespace_key IS NOT NULL) AND (btrim(identity_namespace_key) <> ''::text) AND (connection_profile_id IS NOT NULL) AND (connection_revision_id IS NOT NULL) AND (cursor_codec_version IS NOT NULL) AND (btrim(cursor_codec_version) <> ''::text) AND (cursor_generation IS NOT NULL) AND (cursor_generation >= 1) AND ((requested_cursor IS NULL) = (requested_cursor_fingerprint IS NULL)) AND ((requested_cursor IS NULL) OR ((octet_length(requested_cursor) >= 1) AND (octet_length(requested_cursor) <= 16384))) AND ((requested_cursor_fingerprint IS NULL) OR (requested_cursor_fingerprint ~ '^[0-9a-f]{64}$'::text)) AND (requested_cursor_key IS NOT NULL) AND (requested_cursor_key = COALESCE(requested_cursor_fingerprint, 'initial'::text))))"
@@ -10980,6 +10990,13 @@
           "identity": null,
           "default": null
         },
+        "records_per_request": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "500"
+        },
         "revision_number": {
           "type": "integer",
           "primaryKey": false,
@@ -11026,6 +11043,9 @@
       "checkConstraints": {
         "provider_source_schedule_revisions_bounds_check": {
           "value": "((revision_number > 0) AND ((interval_seconds >= 60) AND (interval_seconds <= 86400)) AND (freshness_grace_seconds = 900))"
+        },
+        "provider_source_schedule_revisions_records_per_request_check": {
+          "value": "((records_per_request >= 1) AND (records_per_request <= 5000))"
         }
       }
     },
@@ -11284,6 +11304,13 @@
           "identity": null,
           "default": "clock_timestamp()"
         },
+        "records_per_request": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "requested_by_actor_key": {
           "type": "text",
           "primaryKey": false,
@@ -11419,6 +11446,9 @@
         },
         "provider_source_test_jobs_generation_check": {
           "value": "(expected_health_generation >= 0)"
+        },
+        "provider_source_test_jobs_records_per_request_check": {
+          "value": "((records_per_request >= 1) AND (records_per_request <= 5000))"
         }
       }
     },

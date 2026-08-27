@@ -39,7 +39,7 @@ relationships, replay identity, catalog revision, and reached-head shape.
 
 | Setting | Launch value | Evidence |
 | --- | ---: | --- |
-| Filtered page target | 250 records | A 500-record Phygitals response advertised 3,114,066 bytes and was rejected by the 2 MiB cap. Two 250-record Phygitals pages were 1,415,669 and 1,698,526 bytes. |
+| Filtered page target | 250 records live-evidenced; 1–5,000 configurable (default 500) | A 500-record Phygitals response advertised 3,114,066 bytes and was rejected by the former 2 MiB cap. Two 250-record Phygitals pages were 1,415,669 and 1,698,526 bytes. Every configured request remains subject to the 8 MiB response ceiling and its pinned count. |
 | Maximum response | 8,388,608 bytes | The original smaller bounds fit the first launch samples, but later live 250-record Phygitals pages crossed them. The triggering page replayed as HTTP 200 with the exact three-key wrapper, 250 records, and 4,730,013 bytes. The sole current V1 adapter owns the 8 MiB hard cap. |
 | Request timeout | 10,000 ms | Fourteen successful filtered requests ranged from 435 to 4,042 ms, averaging 1,728 ms. |
 | Stable-profile request cap | 2 | Two different filters overlapped in the client, both returned 200, both remained filter-correct, and their cursors were independent. A higher value was not tested. |
@@ -48,9 +48,11 @@ relationships, replay identity, catalog revision, and reached-head shape.
 | Raw page retention | 7 days | One authoritative protected copy only. |
 | Quarantine, diagnostics, terminal attempts | 30 days | Protected quarantine remains independently retryable; diagnostics and attempts are sanitized. |
 
-The provider supports a maximum requested limit of 5,000, but PackScout does
-not use that limit. The live launch bound is 250 because response bytes, rather
-than record count alone, bound memory and transport risk.
+The provider supports a maximum requested limit of 5,000. PackScout now stores
+and pins a per-source value from 1 through 5,000, defaulting to 500. The dated
+live evidence remains 250 because response bytes, rather than record count
+alone, bound memory and transport risk; a larger configured pin does not relax
+the independent 8 MiB response ceiling.
 
 ## Live request and cursor evidence
 

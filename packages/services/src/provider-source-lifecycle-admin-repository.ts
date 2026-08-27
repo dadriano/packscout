@@ -22,6 +22,7 @@ export interface ProviderSourceLifecycleSnapshot {
   readonly recordIdScopes: readonly string[];
   readonly scheduleRevisionId: string;
   readonly intervalSeconds: number;
+  readonly recordsPerRequest: number;
   readonly cursorGeneration: bigint;
   readonly cursorFingerprint: string | null;
   readonly hasActiveRun: boolean;
@@ -64,6 +65,7 @@ export interface ProviderSourceLifecycleAdminRepository {
     configurationHash: string;
     recordIdScopes: readonly string[];
     intervalSeconds: number;
+    recordsPerRequest: number;
     actorKey: string;
     createdAt: Date;
   }>): Promise<Readonly<{ sourceInstanceId: string; sourceRevisionId: string }>>;
@@ -89,6 +91,16 @@ export interface ProviderSourceLifecycleAdminRepository {
     expectedSourceRevisionId: string;
     expectedScheduleRevisionId: string;
     intervalSeconds: number;
+    actorKey: string;
+    effectiveAt: Date;
+  }>): Promise<{ readonly scheduleRevisionId: string }>;
+  reviseRecordsPerRequest(input: Readonly<{
+    organizationId: string;
+    providerId: string;
+    sourceInstanceId: string;
+    expectedSourceRevisionId: string;
+    expectedScheduleRevisionId: string;
+    recordsPerRequest: number;
     actorKey: string;
     effectiveAt: Date;
   }>): Promise<{ readonly scheduleRevisionId: string }>;

@@ -122,6 +122,8 @@ const catalog = providerSourceAdminCatalogSchema.parse({
         "trade-v1",
       ],
       intervalSeconds: 60,
+      recordsPerRequest: 1_000,
+      activeRunRecordsPerRequest: index === 0 ? 500 : null,
       freshnessGraceSeconds: 900,
       cursor: {
         generation: "1",
@@ -343,6 +345,7 @@ function runtime(
     lastProgressAt: new Date(now.getTime() - 1_000),
     reachedHead: false,
     failureCode: null,
+    recordsPerRequest: 500,
     counters,
   };
   return new ProviderSourceOperationsService({
@@ -443,6 +446,8 @@ test("source operations compose the registered four rows with durable supervisor
   const courtyard = overview.sources[0]!;
   assert.equal(courtyard.processor?.waitReason, "profile_capacity");
   assert.equal(courtyard.processor?.retryCount, 1);
+  assert.equal(courtyard.source?.recordsPerRequest, 1_000);
+  assert.equal(courtyard.activeRun?.recordsPerRequest, 500);
   assert.deepEqual(courtyard.progress.records, {
     catalog: 8,
     pulls: 7,

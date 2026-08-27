@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestIdentityNamespaceByProvider,
+  providerSourceLaunchBounds,
   launchRecordIdScopeDeclarations,
 } from "@packscout/contracts";
 import {
@@ -77,7 +78,7 @@ function connectionWork(): ClaimedConnectionTestWork {
   };
 }
 
-function sourceWork(): ClaimedSourceTestWork {
+function sourceWork(recordsPerRequest = 500): ClaimedSourceTestWork {
   const persistedScopes = JSON.parse(JSON.stringify(
     launchRecordIdScopeDeclarations.map(({ recordIdScopeKey }) =>
       recordIdScopeKey
@@ -91,6 +92,7 @@ function sourceWork(): ClaimedSourceTestWork {
     provider: "courtyard",
     sourceInstanceId: "source-1",
     sourceRevisionId: "source-revision-1",
+    recordsPerRequest,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     mapperKey: "courtyard-v1",
     mapperVersion: "v1",
@@ -123,6 +125,7 @@ function pageWork(): ClaimedPageReadWork {
 class RecordingAdapter extends AlternateBookmarkSourceAdapter {
   throwOnCapture = false;
   failRequest = false;
+  readonly capturedOperations: SourceAdapterOperation[] = [];
   constructor(private readonly events: string[], payload?: unknown) {
     super(payload);
   }
@@ -132,6 +135,7 @@ class RecordingAdapter extends AlternateBookmarkSourceAdapter {
     invocation: SourceAdapterCaptureInvocation,
   ) {
     this.events.push("capture");
+    this.capturedOperations.push(operation);
     if (this.throwOnCapture) throw new Error("unknown capture state");
     if (this.failRequest) {
       invocation.consume(operation);
@@ -356,9 +360,10 @@ test("a captured connection interpretation failure publishes its test result", a
 
 test("JSONB roundtrip preserves the canonical record-scope sequence", async () => {
   const subject = fixture();
-  const result = await subject.executor.execute(sourceWork(), subject.context);
+  const result = await subject.executor.execute(sourceWork(137), subject.context);
   assert.deepEqual(result, { kind: "test_terminal" });
   assert.equal(subject.adapter.captureCount, 1);
+  assert.equal(subject.adapter.capturedOperations[0]?.bounds.pageLimit, 137);
   assert.ok(subject.events.includes("source-test-result"));
   subject.releaseRetained();
 });
@@ -389,6 +394,20 @@ test("a failed source interpretation publishes one terminal test result", async 
     subject.events.filter((event) => event === "source-test-result").length,
     1,
   );
+  subject.releaseRetained();
+});
+
+test("profile-only connection tests do not inherit a source request-size pin", async () => {
+  const subject = fixture();
+  await subject.executor.execute(connectionWork(), subject.context);
+  const operation = subject.adapter.capturedOperations[0];
+  assert.ok(operation);
+  assert.equal(operation.operationKind, "connection_test");
+  assert.equal(
+    operation.bounds.pageLimit,
+    providerSourceLaunchBounds.pageTargetRecords,
+  );
+  assert.equal("recordsPerRequest" in operation, false);
   subject.releaseRetained();
 });
 

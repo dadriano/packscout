@@ -2,7 +2,7 @@
 
 **Evidence date:** 2026-08-20
 
-**DataForrest Events V1 transport gate:** PASS WITH 250-RECORD PAGE BOUND
+**DataForrest Events V1 transport gate:** PASS WITH 250-RECORD LIVE EVIDENCE AND AN 8 MIB RESPONSE BOUND
 
 **DataForrest V1 record gate:** PASS — current catalog, pull, and trade envelopes
 
@@ -22,9 +22,11 @@ the `records` / `next_cursor` / `poll_after_seconds` wrapper, `payment_method`,
 tri-state `available`, and a safe aggregate concurrency of two.
 
 A 500-record Phygitals response exceeded the original 2 MiB capture cap, so the
-page target remains 250 records. Later 250-record pages crossed the earlier
-transport bounds; the sole current V1 adapter has an 8 MiB hard cap after a
-protected replay measured the failing page at 4,730,013 bytes. The historical
+live-evidenced page target remains 250 records. Each source can now pin a
+request size from 1 through 5,000 (default 500), while every request remains
+subject to the same 8 MiB hard cap and rejects a response that exceeds its
+pinned record count. Later 250-record pages crossed the earlier transport
+bounds; a protected replay measured the failing page at 4,730,013 bytes. The historical
 8,759,332,238,475-byte Task 010 result is a maximum-throughput stress ceiling,
 not the operational local estimate. Current local operation uses measured
 whole-database growth plus an explicit free-space floor; see
@@ -47,7 +49,7 @@ upgrade, or source replacement is registered.
 
 | Current launch evidence | Current state | Verdict |
 | --- | --- | --- |
-| Live request, wrapper, cursor isolation, and 250-record page target | Reviewed authenticated capture | PASS |
+| Live request, wrapper, cursor isolation, configurable 1–5,000 request pin, and 250-record evidence target | Reviewed authenticated capture plus pinned-bound tests | PASS |
 | Catalog, partial pull, and trade normalization under the exact V1 tuple | Contract and mapper tests | PASS |
 | Sole adapter/observation/mapper runtime registration | Production registries and Task 010 fail-closed topology gate | PASS |
 | Historical database-pin handling | Guarded full local reset and reimport; no in-place upgrade path | REQUIRED |

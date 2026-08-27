@@ -84,6 +84,7 @@ const baseSource: ProviderSourceOperationsSource = {
     recordIdScopes: ["catalog-record-v1"],
     lifecycle: "active",
     pauseRequested: false,
+    recordsPerRequest: 1_000,
     configuration: {
       validated: true,
       fields: [{ label: "Binding", value: "registered", masked: false }],
@@ -136,6 +137,7 @@ const baseSource: ProviderSourceOperationsSource = {
     lastProgressAt: now,
     reachedHead: false,
     failureCode: null,
+    recordsPerRequest: 500,
   },
   latestRun: null,
   connectionImpact: { state: "none", safeCode: null, healthGeneration: null },
@@ -166,6 +168,11 @@ test("source-neutral overview renders shared capacity and the exact supplied reg
   assert.equal((html.match(/Total unknown/g) ?? []).length, 4);
   assert.match(html, /60 · Total unknown/);
   assert.match(html, /12\.5\/s/);
+  assert.equal(
+    (html.match(/Current run: 500\. Next run: 1,000\./g) ?? []).length,
+    4,
+  );
+  assert.doesNotMatch(html, /Maximum records per request[\s\S]*?<input/);
   assert.doesNotMatch(html, /bearer|authorization|rawPayload|vendorCursor/i);
 });
 
