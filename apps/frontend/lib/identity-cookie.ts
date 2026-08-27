@@ -134,3 +134,20 @@ export function buildIdentityCookieValue(input: Readonly<{
   if (maxAgeSeconds <= 0) return clearIdentityCookieValue(input.secure);
   return `${ACCESS_IDENTITY_COOKIE}=${input.token}; ${cookieAttributes(input.secure, maxAgeSeconds)}`;
 }
+
+/**
+ * Whether this document currently carries the server-readable identity
+ * cookie.
+ *
+ * Signing in establishes the provider session in the browser first; the
+ * cookie that lets server rendering see it is written moments later. Any
+ * navigation taken in between renders as a signed-out visitor, so callers
+ * that want the server to route a freshly signed-in person wait for this to
+ * become true before navigating.
+ */
+export function browserHasIdentityCookie(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.cookie
+    .split(";")
+    .some((entry) => entry.trim().startsWith(`${ACCESS_IDENTITY_COOKIE}=`));
+}
