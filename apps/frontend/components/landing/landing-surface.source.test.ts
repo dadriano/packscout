@@ -129,3 +129,19 @@ test("the root is the landing surface's address and carries its marketing metada
   // landing surface (asserted behaviorally in lib/access-gate.server.test.ts).
   assert.match(rootRouteSource, /rootRouteMetadata\(await resolveVisitorAccess\(\)\)/);
 });
+
+test("a completed sign-in hands off to the server instead of asking for a click", () => {
+  // The visitor should not have to press Continue after signing in: only the
+  // server knows whether they belong in the product or the holding surface,
+  // so the surface navigates to the root and lets the gate decide.
+  assert.match(ctaSource, /router\.replace\(action\.href\)/u);
+  // It must wait for the server-readable cookie first. Navigating in the gap
+  // between provider session and cookie renders as a signed-out visitor,
+  // which would drop them back on this very page.
+  assert.match(ctaSource, /browserHasIdentityCookie\(\)/u);
+  // And it must give up rather than retry forever, leaving the visible link
+  // as a working manual fallback.
+  assert.match(ctaSource, /IDENTITY_HANDOFF_TIMEOUT_MS/u);
+  // One handoff only.
+  assert.match(ctaSource, /entered\.current/u);
+});
