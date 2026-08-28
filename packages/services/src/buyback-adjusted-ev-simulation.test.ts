@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   canonicalJson,
   publicRepackViewDetailV3Schema,
+  safePresentPackScoutPublicEvV3,
   unavailableRepackHeat,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
@@ -242,10 +243,23 @@ test("every approved public state appears and passes the production contracts", 
       assert.ok(isPackScoutBuybackEvSimulatedPublicIdV1(detail.publicRepackId));
       assert.ok(detail.vendorKey.startsWith("simulated-"));
       assert.ok(detail.name.startsWith("[Simulated]"));
+      const presented = safePresentPackScoutPublicEvV3(
+        detail.evEstimates.packScout,
+        result.readAt,
+      );
+      assert.equal(presented.success, true);
+      if (!presented.success) continue;
       // Heat stays explicitly unavailable on v3 views (documented divergence).
       const view = publicRepackViewDetailV3Schema.safeParse({
         ...detail,
         heat: unavailableRepackHeat(),
+        packScoutEvPresentation: presented.presentation,
+        providerHealth: {
+          state: "healthy",
+          observedAt: result.readAt,
+          rankingEligible: true,
+          rankingIneligibilityReason: null,
+        },
       });
       assert.ok(view.success);
       assert.ok(!JSON.stringify(detail).includes('"heat"'));
@@ -317,20 +331,21 @@ test("every approved public state appears and passes the production contracts", 
     "unavailable:VALUE_UNAVAILABLE",
   );
 
-  // The fixed observation expires purely by advancing the calculation clock.
+  // The fixed observation becomes last-known purely by advancing the read
+  // clock; its immutable release metrics remain present.
   assert.deepEqual(states.get("courtyard-source-age-expiry"), [
     "current",
     "current",
-    "unavailable:SOURCE_DATA_STALE",
-    "unavailable:SOURCE_DATA_STALE",
+    "last_known",
+    "last_known",
   ]);
 
   // Sold-out history stays frozen with its original confidence.
   assert.deepEqual(states.get("trove-sold-out-historical"), [
-    "sold_out_historical",
-    "sold_out_historical",
-    "sold_out_historical",
-    "sold_out_historical",
+    "historical",
+    "historical",
+    "historical",
+    "historical",
   ]);
 
   // Per-pack and per-draw unit bases both traverse the path.

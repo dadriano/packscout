@@ -238,8 +238,8 @@ export class PackScoutBuybackAdjustedEvRecomputationService {
    * read, selected deterministically: the store's completed-current revision
    * for the approved method version, evaluated against the caller's read
    * clock. An available revision whose immutable evidence window has expired
-   * is reported as `expired_since_calculation` so the publisher renders the
-   * deterministic stale public state without any revision being mutated.
+   * is reported as `expired_since_calculation` so publication can distinguish
+   * last-known evidence without mutating or erasing the calculable revision.
    * Repeating the read with the same `readAt` returns the same answer.
    */
   async getPublicationEligibleRevision(query: {

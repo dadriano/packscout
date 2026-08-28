@@ -5,6 +5,8 @@ import {
   type PackScoutBuybackEvConfidenceLimitationCodeV1,
   type PackScoutBuybackEvEvidenceOutcomeV1,
   type PackScoutBuybackEvPublicReasonCodeV1,
+  type PackScoutPublicEvPresentationLimitationCodeV1,
+  type PackScoutPublicEvPresentationV1,
   type PublicCategory,
   type PublicCollectible,
   type PublicRepackChase,
@@ -103,10 +105,10 @@ export type PackScoutBuybackEvSimulatedSourceRevisionV1 =
 
 /** Bounded per-frame expectation; never a precomputed final metric. */
 export interface PackScoutBuybackEvSimulationExpectationV1 {
-  readonly publicState: "current" | "sold_out_historical" | "unavailable";
+  readonly publicState: PackScoutPublicEvPresentationV1["status"];
   readonly publicReason: PackScoutBuybackEvPublicReasonCodeV1 | null;
   readonly limitationCodes:
-    readonly PackScoutBuybackEvConfidenceLimitationCodeV1[];
+    readonly PackScoutPublicEvPresentationLimitationCodeV1[];
 }
 
 export interface PackScoutBuybackEvSimulationScenarioFrameV1 {
@@ -1000,7 +1002,7 @@ function troveSoldOutHistorical(
     scenarioKey,
     purpose: "a sold-out repack freezes its last valid estimate as history",
     expectation: {
-      publicState: "sold_out_historical",
+      publicState: "historical",
       publicReason: null,
       limitationCodes: ["platform_published_odds"],
     },
@@ -1023,25 +1025,42 @@ function troveSoldOutHistorical(
 
 /**
  * A fixed observation whose fingerprint never changes: later frames replay
- * `unchanged` while the advancing read clock alone carries the estimate
- * across the 60-minute boundary into the deterministic stale public state.
+ * `unchanged` while the advancing read clock alone carries the immutable
+ * estimate across the 60-minute boundary into last-known presentation.
  */
 function courtyardSourceAgeExpiry(
   build: ScenarioBuildContext,
 ): PackScoutBuybackEvSimulationScenarioFrameV1 {
   const scenarioKey = "courtyard-source-age-expiry";
   const observedAt = isoMinus(build.controls.startAt, 5 * MINUTE);
-  const expiresAtMillis =
-    Date.parse(observedAt) + FRESHNESS_WINDOW_MILLISECONDS;
-  const stale = Date.parse(build.readAt) > expiresAtMillis;
+  const sourceAgeMilliseconds =
+    Date.parse(build.readAt) - Date.parse(observedAt);
+  const freshnessExpectation: PackScoutBuybackEvSimulationExpectationV1 =
+    sourceAgeMilliseconds > FRESHNESS_WINDOW_MILLISECONDS
+      ? {
+          publicState: "last_known",
+          publicReason: null,
+          limitationCodes: [
+            "platform_published_odds",
+            "source_age_over_60_minutes",
+          ],
+        }
+      : sourceAgeMilliseconds > 30 * MINUTE
+        ? {
+            publicState: "current",
+            publicReason: null,
+            limitationCodes: [
+              "platform_published_odds",
+              "source_age_over_30_through_60_minutes",
+            ],
+          }
+        : CURRENT;
   return scenarioFrame({
     build,
     scenarioKey,
     purpose:
-      "advancing the calculation clock over a fixed observation expires the estimate without new evidence",
-    expectation: stale
-      ? unavailable("SOURCE_DATA_STALE")
-      : CURRENT,
+      "advancing the read clock over a fixed observation derives last-known confidence without new evidence",
+    expectation: freshnessExpectation,
     sourceRevision: courtyardSource({
       build,
       scenarioKey,

@@ -13,6 +13,7 @@ import {
   publicRepackFiltersSchema,
   publicRepackListPageV3Schema,
   publicRepackViewDetailV3Schema,
+  publicShellStatusV3Schema,
   repackPageRangeSchema,
   repackSummaryGroupSchema,
   type AcceptedRepackQuery,
@@ -27,6 +28,7 @@ import {
   type PublicRepackListPageV3,
   type PublicRepackViewDetailV3,
   type PublicResult,
+  type PublicShellStatusV3,
   type RepackPageRange,
 } from "@packscout/contracts";
 
@@ -66,7 +68,7 @@ export type ListPublicRepacksPageV3 = PublicRepackListPageV3 &
     paginationReset: "release_changed" | null;
   }>;
 
-export type PublicShellStatusV3 = Readonly<{ release: DataReleaseV3Identity }>;
+export type { PublicShellStatusV3 };
 
 export type PublicCollectibleSearchResultsV3 = Readonly<{
   release: DataReleaseV3Identity;
@@ -214,9 +216,8 @@ function parseListPublicRepacksPageV3(
 }
 
 function parseShellStatusV3(data: unknown): PublicShellStatusV3 | null {
-  if (!isRecord(data)) return null;
-  const releaseParsed = dataReleaseV3IdentitySchema.safeParse(data.release);
-  return releaseParsed.success ? { release: releaseParsed.data } : null;
+  const parsed = publicShellStatusV3Schema.safeParse(data);
+  return parsed.success ? parsed.data : null;
 }
 
 function parseCollectibleSearchResultsV3(

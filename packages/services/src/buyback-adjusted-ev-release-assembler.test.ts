@@ -135,31 +135,40 @@ test("identical replay assembles a byte-identical plan", async () => {
   assert.deepEqual(second, first);
 });
 
-test("an expired-since-calculation revision publishes the deterministic stale state", async () => {
+test("an expired-since-calculation revision preserves its known economics", async () => {
   const snapshot = buildReleaseSnapshot([
     buildReleaseProduct({ publicRepackId: REPACK_A }),
   ]);
+  const eligibility = buildExpiredEligibility();
   const assembler = new DataReleaseV3ReleaseAssembler(
     catalogPort(snapshot),
     eligibilityPort(
-      new Map([[snapshot.products[0]!.productKey, buildExpiredEligibility()]]),
+      new Map([[snapshot.products[0]!.productKey, eligibility]]),
     ),
   );
-  // The stale conversion is honest only once the read clock has passed the
-  // 60-minute deadline for the frozen observation.
+  // Release assembly preserves the immutable calculation after its old
+  // deadline. The public read boundary derives current versus last-known at
+  // one evaluation clock without rewriting the release.
+  assert.equal(eligibility.projection.dataAsOf.state, "known");
+  if (eligibility.projection.dataAsOf.state !== "known") return;
   const readAt = new Date(
-    Date.parse(RELEASE_READ_AT) + 61 * 60_000,
+    Date.parse(eligibility.projection.dataAsOf.observedAt) + 60 * 60_000 + 1,
   ).toISOString();
   const plan = await assembler.assemble({ readAt });
   assert.equal(plan.classification, "publish");
   if (plan.classification !== "publish") return;
   const [detail] = repackDetails(plan);
-  assert.equal(detail!.evEstimates.packScout.status, "unavailable");
-  if (detail!.evEstimates.packScout.status !== "unavailable") return;
-  assert.equal(detail!.evEstimates.packScout.reason, "SOURCE_DATA_STALE");
+  assert.equal(detail!.evEstimates.packScout.status, "current");
+  if (detail!.evEstimates.packScout.status !== "current") return;
+  assert.deepEqual(
+    detail!.evEstimates.packScout.metrics,
+    eligibility.projection.status === "available"
+      ? eligibility.projection.metrics
+      : null,
+  );
   assert.deepEqual(detail!.evEstimates.packScout.dataAsOf, {
     state: "known",
-    observedAt: buildExpiredEligibility().projection.dataAsOf.observedAt,
+    observedAt: eligibility.projection.dataAsOf.observedAt,
   });
 });
 

@@ -262,6 +262,22 @@
   white-space: nowrap;
 }
 
+.estimateEvidence {
+  display: grid;
+  gap: 0.1rem;
+  margin-top: 0.2rem;
+  color: var(--color-warning-strong);
+  font-size: 0.58rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.estimateEvidence time {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  white-space: normal;
+}
+
 .emptyState {
   display: grid;
   justify-items: center;
@@ -271,6 +287,17 @@
   font-size: 0.78rem;
   padding: 2.4rem 1rem;
   text-align: center;
+}
+
+.eligibilityNotice {
+  margin: 0;
+  border-block: 1px solid color-mix(in srgb, var(--color-warning) 30%, var(--color-border));
+  background: color-mix(in srgb, var(--color-warning) 7%, transparent);
+  padding: 0.65rem 0.85rem;
+  color: var(--color-warning-strong);
+  font-size: 0.68rem;
+  font-weight: 620;
+  line-height: 1.45;
 }
 
 .emptyState p {

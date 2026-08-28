@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { publicReadError } from "@packscout/contracts";
+import {
+  PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+  publicReadError,
+} from "@packscout/contracts";
 import {
   allRepacksCatalogIsEmpty,
   dashboardCatalogIsEmpty,
@@ -13,6 +16,8 @@ import {
 } from "./public-repacks-v3";
 import {
   FIXTURE_RELEASE_ID,
+  FIXTURE_CURRENT_EVALUATED_AT,
+  buildV3ProviderHealthSummary,
   buildV3ReleaseIdentity,
   buildV3ViewDetail,
 } from "./packscout-ev-fixtures.test-support";
@@ -42,7 +47,16 @@ function dashboardPayload() {
     ok: true,
     data: {
       release: buildV3ReleaseIdentity(),
+      publicFreshnessPolicyVersion:
+        PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      confidenceEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
+      providerHealthEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
+      providerHealthSummary: buildV3ProviderHealthSummary(),
       opportunities: [summaryOf(detail)],
+      opportunityEligibility: {
+        rankingEligibleRepackCount: 1,
+        providerIneligibleRepackCount: 0,
+      },
       details: [detail],
       selectedRepack: detail,
       kpis: {
@@ -85,6 +99,11 @@ function listPayload() {
     ok: true,
     data: {
       release: buildV3ReleaseIdentity(),
+      publicFreshnessPolicyVersion:
+        PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      confidenceEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
+      providerHealthEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
+      providerHealthSummary: buildV3ProviderHealthSummary(),
       rows: [summaryOf(detail)],
       details: [detail],
       selectedRepack: detail,
@@ -130,6 +149,42 @@ test("parses a coherent v3 list page and its pagination envelope", () => {
   assert.equal(result.data.hasPrevious, false);
   assert.equal(result.data.nextCursor, null);
   assert.equal(allRepacksCatalogIsEmpty(result.data), false);
+});
+
+test("parses provider health on shell, dashboard, and list responses", () => {
+  const providerHealthSummary = buildV3ProviderHealthSummary("delayed");
+  const shell = parseGetPublicShellStatusV3Result({
+    ok: true,
+    data: {
+      release: buildV3ReleaseIdentity(),
+      publicFreshnessPolicyVersion:
+        PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      confidenceEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
+      providerHealthEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
+      providerHealthSummary,
+    },
+  });
+  assert.equal(shell.ok, true);
+  if (!shell.ok) return;
+  assert.deepEqual(shell.data.providerHealthSummary, providerHealthSummary);
+
+  const dashboard = dashboardPayload();
+  dashboard.data.providerHealthSummary = providerHealthSummary;
+  const parsedDashboard = parseGetDashboardBundleV3Result(dashboard);
+  assert.equal(parsedDashboard.ok, true);
+  if (!parsedDashboard.ok) return;
+  assert.equal(parsedDashboard.data.providerHealthSummary.state, "delayed");
+  assert.equal(
+    parsedDashboard.data.opportunityEligibility.rankingEligibleRepackCount,
+    1,
+  );
+
+  const list = listPayload();
+  list.data.providerHealthSummary = providerHealthSummary;
+  const parsedList = parseListPublicRepacksV3Result(list);
+  assert.equal(parsedList.ok, true);
+  if (!parsedList.ok) return;
+  assert.equal(parsedList.data.providerHealthSummary.state, "delayed");
 });
 
 test("rejects payloads carrying protected calculation evidence", () => {

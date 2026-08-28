@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   formatRelativeReleaseTime,
   presentDataReleaseStatus,
+  providerHealthRefreshDelayMilliseconds,
 } from "./data-release-status.client";
 
 const NOW = Date.parse("2026-08-11T19:00:00.000Z");
@@ -13,28 +14,32 @@ test("data release status exposes stable fresh, delayed, loading, and unavailabl
       {
         state: "fresh",
         updatedAt: "2026-08-11T18:59:32.000Z",
-        staleAt: "2026-08-11T19:15:00.000Z",
+        freshThrough: "2026-08-11T19:15:00.000Z",
+        evaluatedAt: "2026-08-11T19:00:00.000Z",
+        nextHealthEvaluationAt: "2026-08-11T19:15:00.000Z",
         dataSource: "canonical",
       },
       NOW,
     ).visibleLabel,
-    "Updated 28s ago",
+    "Provider feeds healthy · Checked 28s ago",
   );
   assert.equal(
     presentDataReleaseStatus(
       {
         state: "delayed",
         updatedAt: "2026-08-11T18:38:00.000Z",
-        staleAt: "2026-08-11T18:53:00.000Z",
+        freshThrough: "2026-08-11T18:53:00.000Z",
+        evaluatedAt: "2026-08-11T18:53:00.000Z",
+        nextHealthEvaluationAt: null,
         dataSource: "canonical",
       },
       NOW,
     ).visibleLabel,
-    "Some data delayed · Updated 22m ago",
+    "Provider feeds delayed · Checked 22m ago",
   );
   assert.equal(
     presentDataReleaseStatus({ state: "unavailable" }, NOW).visibleLabel,
-    "Repack data unavailable",
+    "Provider feed status unavailable",
   );
   assert.equal(
     presentDataReleaseStatus({ state: "loading" }, NOW).visibleLabel,
@@ -47,7 +52,9 @@ test("data release status identifies mock data without presenting it as live", (
     {
       state: "fresh",
       updatedAt: "2026-08-11T18:59:32.000Z",
-      staleAt: "2026-08-11T19:15:00.000Z",
+      freshThrough: "2026-08-11T19:15:00.000Z",
+      evaluatedAt: "2026-08-11T19:00:00.000Z",
+      nextHealthEvaluationAt: "2026-08-11T19:15:00.000Z",
       dataSource: "mock",
     },
     NOW,
@@ -59,7 +66,9 @@ test("data release status identifies mock data without presenting it as live", (
     {
       state: "delayed",
       updatedAt: "2026-08-11T18:38:00.000Z",
-      staleAt: "2026-08-11T18:53:00.000Z",
+      freshThrough: "2026-08-11T18:53:00.000Z",
+      evaluatedAt: "2026-08-11T18:53:00.000Z",
+      nextHealthEvaluationAt: null,
       dataSource: "mock",
     },
     NOW,
@@ -68,23 +77,71 @@ test("data release status identifies mock data without presenting it as live", (
   assert.match(delayed.exactLabel, /^Mock repack data is delayed\./);
 });
 
-test("freshness becomes delayed when the published stale deadline passes", () => {
+test("provider health becomes delayed when its fresh-through time passes", () => {
   const presentation = presentDataReleaseStatus(
     {
       state: "fresh",
       updatedAt: "2026-08-11T18:38:00.000Z",
-      staleAt: "2026-08-11T18:53:00.000Z",
+      freshThrough: "2026-08-11T18:53:00.000Z",
+      evaluatedAt: "2026-08-11T18:53:00.000Z",
+      nextHealthEvaluationAt: null,
       dataSource: "canonical",
     },
     NOW,
   );
   assert.equal(presentation.state, "delayed");
-  assert.equal(presentation.visibleLabel, "Some data delayed · Updated 22m ago");
+  assert.equal(
+    presentation.visibleLabel,
+    "Provider feeds delayed · Checked 22m ago",
+  );
+});
+
+test("provider health refresh delay uses only the trusted server clock pair", () => {
+  assert.equal(
+    providerHealthRefreshDelayMilliseconds({
+      state: "fresh",
+      updatedAt: "2026-08-11T18:59:00.000Z",
+      evaluatedAt: "2026-08-11T19:00:00.000Z",
+      freshThrough: "2026-08-11T19:15:00.000Z",
+      nextHealthEvaluationAt: "2026-08-11T19:15:00.000Z",
+    }),
+    15 * 60_000,
+  );
+  assert.equal(
+    providerHealthRefreshDelayMilliseconds({
+      state: "fresh",
+      updatedAt: "2026-08-11T18:59:00.000Z",
+      evaluatedAt: "2026-08-11T19:15:00.000Z",
+      freshThrough: "2026-08-11T19:15:00.000Z",
+      nextHealthEvaluationAt: "2026-08-11T19:15:00.000Z",
+    }),
+    0,
+  );
+  assert.equal(
+    providerHealthRefreshDelayMilliseconds({
+      state: "delayed",
+      updatedAt: "2026-08-11T18:59:00.000Z",
+      evaluatedAt: "2026-08-11T19:15:00.000Z",
+      freshThrough: "2026-08-11T19:15:00.000Z",
+      nextHealthEvaluationAt: null,
+    }),
+    null,
+  );
+  assert.equal(
+    providerHealthRefreshDelayMilliseconds({
+      state: "delayed",
+      updatedAt: "2026-08-11T18:55:00.000Z",
+      evaluatedAt: "2026-08-11T19:00:00.000Z",
+      freshThrough: "2026-08-11T18:59:00.000Z",
+      nextHealthEvaluationAt: "2026-08-11T19:07:00.000Z",
+    }),
+    7 * 60_000,
+  );
 });
 
 test("release relative time is bounded and never reports future age", () => {
   assert.equal(formatRelativeReleaseTime("2026-08-11T19:00:10.000Z", NOW), "0s ago");
   assert.equal(formatRelativeReleaseTime("not-a-date", NOW), "recently");
   assert.equal(formatRelativeReleaseTime("2026-08-10T18:00:00.000Z", NOW), "1d ago");
-  assert.equal(formatRelativeReleaseTime("2026-08-06T18:00:00.000Z", NOW), "1d ago");
+  assert.equal(formatRelativeReleaseTime("2026-08-06T18:00:00.000Z", NOW), "5d ago");
 });

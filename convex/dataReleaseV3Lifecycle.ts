@@ -271,7 +271,7 @@ function refuse(code: ProductionDataReleaseErrorCode): never {
   return refuseProductionDataRelease(code);
 }
 
-function parseRequest<T>(bodyJson: string, schema: z.ZodType<T>): T {
+export function parseRequest<T>(bodyJson: string, schema: z.ZodType<T>): T {
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(bodyJson);
@@ -291,13 +291,13 @@ function parseRequest<T>(bodyJson: string, schema: z.ZodType<T>): T {
   return parsed.data;
 }
 
-function assertRequestDigest(requestDigest: string): void {
+export function assertRequestDigest(requestDigest: string): void {
   if (!/^[0-9a-f]{64}$/u.test(requestDigest)) {
     refuse("PUBLICATION_REQUEST_INVALID");
   }
 }
 
-interface DataReleaseV3Receipt {
+export interface DataReleaseV3Receipt {
   readonly schemaVersion: typeof DATA_RELEASE_V3_SCHEMA_VERSION;
   readonly operationKind: string;
   readonly operationId: string;
@@ -310,7 +310,7 @@ interface DataReleaseV3Receipt {
   readonly receiptDigest: string;
 }
 
-async function buildReceipt(
+export async function buildReceipt(
   input: Omit<DataReleaseV3Receipt, "receiptDigest">,
 ): Promise<DataReleaseV3Receipt> {
   const receiptDigest = await sha256CanonicalJson(
@@ -320,7 +320,7 @@ async function buildReceipt(
   return { ...input, receiptDigest };
 }
 
-async function loadExactReplay(
+export async function loadExactReplay(
   ctx: MutationCtx,
   input: {
     readonly operationKind: string;
@@ -374,7 +374,7 @@ async function loadExactReplay(
   return receipt;
 }
 
-async function storeReceipt(
+export async function storeReceipt(
   ctx: MutationCtx,
   receipt: DataReleaseV3Receipt,
 ): Promise<DataReleaseV3Receipt> {

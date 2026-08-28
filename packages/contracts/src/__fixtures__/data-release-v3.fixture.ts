@@ -18,7 +18,9 @@ import {
   publicRepackListPageV3Schema,
   publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
+  safePresentPackScoutPublicEvV3,
   vendorReportedEvV3Schema,
+  PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
   PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   type DataReleaseV3Identity,
   type DesiredCollectibleRepackResultsV3,
@@ -29,6 +31,9 @@ import {
   type PublicRepackDetailV3,
   type PublicRepackListPageV3,
   type PublicRepackViewDetailV3,
+  type PublicProviderHealthV1,
+  type PublicProviderHealthSummaryV1,
+  type PublicShellStatusV3,
   type VendorReportedEvV3,
 } from "../data-release-v3.ts";
 
@@ -395,11 +400,62 @@ export function buildNonPurchasablePublicRepackDetailV3(
 
 export function buildPublicRepackViewDetailV3(
   overrides: Partial<PublicRepackDetailV3> = {},
+  options: Readonly<{
+    confidenceEvaluatedAt?: string;
+    providerHealth?: PublicProviderHealthV1;
+  }> = {},
 ): PublicRepackViewDetailV3 {
+  const detail = buildPublicRepackDetailV3(overrides);
+  const confidenceEvaluatedAt =
+    options.confidenceEvaluatedAt ??
+    (detail.evEstimates.packScout.status === "sold_out_historical"
+      ? detail.evEstimates.packScout.soldOutAt
+      : detail.evEstimates.packScout.calculatedAt);
+  const presented = safePresentPackScoutPublicEvV3(
+    detail.evEstimates.packScout,
+    confidenceEvaluatedAt,
+  );
+  if (!presented.success) {
+    throw new Error(`fixture EV presentation failed: ${presented.reason}`);
+  }
   return publicRepackViewDetailV3Schema.parse({
-    ...buildPublicRepackDetailV3(overrides),
+    ...detail,
     heat: unavailableRepackHeat(),
+    packScoutEvPresentation: presented.presentation,
+    providerHealth:
+      options.providerHealth ?? buildHealthyPublicProviderHealthV1(),
   });
+}
+
+export function buildHealthyPublicProviderHealthV1(): PublicProviderHealthV1 {
+  return {
+    state: "healthy",
+    observedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    rankingEligible: true,
+    rankingIneligibilityReason: null,
+  };
+}
+
+export function buildHealthyPublicProviderHealthSummaryV1(): PublicProviderHealthSummaryV1 {
+  return {
+    state: "healthy",
+    observedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    freshThrough: DATA_RELEASE_V3_EXPIRES_AT,
+    totalProviderCount: 1,
+    delayedProviderCount: 0,
+    nextHealthEvaluationAt: DATA_RELEASE_V3_EXPIRES_AT,
+  };
+}
+
+export function buildPublicShellStatusV3(): PublicShellStatusV3 {
+  return {
+    release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
+  };
 }
 
 export function buildDataReleaseV3Identity(): DataReleaseV3Identity {
@@ -426,6 +482,15 @@ export function buildPublicDashboardBundleV3(): PublicDashboardBundleV3 {
   });
   return publicDashboardBundleV3Schema.parse({
     release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
+    opportunityEligibility: {
+      rankingEligibleRepackCount: 2,
+      providerIneligibleRepackCount: 0,
+    },
     opportunities: [
       publicRepackViewSummaryV3FromDetail(secondary),
       publicRepackViewSummaryV3FromDetail(primary),
@@ -436,16 +501,23 @@ export function buildPublicDashboardBundleV3(): PublicDashboardBundleV3 {
 }
 
 export function buildPublicRepackListPageV3(): PublicRepackListPageV3 {
-  const primary = buildPublicRepackViewDetailV3();
-  const soldOut = publicRepackViewDetailV3Schema.parse({
-    ...buildSoldOutPublicRepackDetailV3({
+  const primary = buildPublicRepackViewDetailV3(
+    {},
+    { confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT },
+  );
+  const soldOut = buildPublicRepackViewDetailV3(
+    buildSoldOutPublicRepackDetailV3({
       publicRepackId: DATA_RELEASE_V3_SECONDARY_REPACK_ID,
       name: "Pokémon Vault Repack",
     }),
-    heat: unavailableRepackHeat(),
-  });
+  );
   return publicRepackListPageV3Schema.parse({
     release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
+    providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
     rows: [
       publicRepackViewSummaryV3FromDetail(primary),
       publicRepackViewSummaryV3FromDetail(soldOut),
@@ -464,31 +536,38 @@ export function buildPublicRepackListPageV3(): PublicRepackListPageV3 {
  * so it is the only legal selection for a purchase-oriented flow.
  */
 export function buildAllAvailabilityStatesPublicRepackListPageV3(): PublicRepackListPageV3 {
-  const available = buildPublicRepackViewDetailV3();
-  const soldOut = publicRepackViewDetailV3Schema.parse({
-    ...buildSoldOutPublicRepackDetailV3({
+  const available = buildPublicRepackViewDetailV3(
+    {},
+    { confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT },
+  );
+  const soldOut = buildPublicRepackViewDetailV3(
+    buildSoldOutPublicRepackDetailV3({
       publicRepackId: DATA_RELEASE_V3_SECONDARY_REPACK_ID,
       name: "Pokémon Vault Repack",
     }),
-    heat: unavailableRepackHeat(),
-  });
-  const unavailable = publicRepackViewDetailV3Schema.parse({
-    ...buildNonPurchasablePublicRepackDetailV3("unavailable", {
+  );
+  const unavailable = buildPublicRepackViewDetailV3(
+    buildNonPurchasablePublicRepackDetailV3("unavailable", {
       publicRepackId: DATA_RELEASE_V3_UNAVAILABLE_REPACK_ID,
       name: "Pokémon Withdrawn Gacha",
     }),
-    heat: unavailableRepackHeat(),
-  });
-  const unknown = publicRepackViewDetailV3Schema.parse({
-    ...buildNonPurchasablePublicRepackDetailV3("unknown", {
+    { confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT },
+  );
+  const unknown = buildPublicRepackViewDetailV3(
+    buildNonPurchasablePublicRepackDetailV3("unknown", {
       publicRepackId: DATA_RELEASE_V3_UNKNOWN_REPACK_ID,
       name: "Pokémon Unverified Gacha",
     }),
-    heat: unavailableRepackHeat(),
-  });
+    { confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT },
+  );
   const details = [available, soldOut, unavailable, unknown];
   return publicRepackListPageV3Schema.parse({
     release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
+    providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
     rows: details.map(publicRepackViewSummaryV3FromDetail),
     details,
     selectedRepack: available,
@@ -502,6 +581,10 @@ export function buildDesiredCollectibleRepackResultsV3(): DesiredCollectibleRepa
   const primary = buildPublicRepackViewDetailV3();
   return desiredCollectibleRepackResultsV3Schema.parse({
     release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     desiredCollectible: chaseCollectibleDisplay,
     matches: [
       {

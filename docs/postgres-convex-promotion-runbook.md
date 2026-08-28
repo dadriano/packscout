@@ -62,6 +62,7 @@ into evidence, or commit their values.
 | `PACKSCOUT_HEAT_RETENTION_MAX_BATCHES_PER_CYCLE` | Optional; default `4`, allowed `1` through `20`. |
 | `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` | Required in Convex. A strict JSON object mapping each versioned key ID to the same canonical-base64 secret configured on its publisher. Decoded secret bytes must be pairwise unique across every configured entry, including unbound, rotation, or orphan IDs, because the key ID is not signed. Invalid key IDs, malformed JSON, arrays, noncanonical base64, decoded values outside 32 through 256 bytes, or any duplicate decoded secret make all provider, manifest, retention, Heat, and `data_release_v3` HTTP routes fail closed before nonce writes. |
 | `PACKSCOUT_DATA_RELEASE_V3_PUBLICATION_KEY_IDS` | Required in Convex only when `data_release_v3` publication is enabled; leave it absent to keep the V3 write surface inert. Canonical JSON contains one through four C-sorted, unique V3-only publication key IDs for bounded overlap rotation. Every ID must resolve in `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` and must be absent from Heat, provider, and manifest authorities. Missing while V3 publication is attempted, malformed, noncanonical, duplicate, unsorted, unknown, or cross-role entries make V3 authentication fail closed; an invalid configured authority graph makes every authenticated publication route fail closed before nonce or state writes. |
+| `PACKSCOUT_PUBLIC_CURSOR_HMAC_KEY` | Required in Convex wherever public `data_release_v3` pagination is enabled. Dedicated server-only HMAC key for opaque cursors; never expose it to the browser or publisher. It prevents callers from changing offsets, query bindings, release identity, or the server-pinned confidence clock. Rotate with a reviewed bounded pagination cutover because existing cursors intentionally fail closed after replacement. |
 | `PACKSCOUT_HEAT_PUBLICATION_KEY_IDS` | Required in Convex. Canonical JSON contains one through four sorted, unique Heat-only publication key IDs for bounded overlap rotation. Every ID must resolve in `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` and must be absent from V3, provider, and manifest authority maps; missing, malformed, noncanonical, duplicate, unsorted, unknown, or cross-role entries make every Heat route fail closed before nonce or state writes. |
 | `PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS` | Required in Convex for provider-release publication. A strict JSON object maps each provider publisher key ID to exactly one canonical `platformKey`. The authenticated key ID must match the request platform; the map is server-side authority, contains no secrets, and is never returned. V3 and Heat key IDs must not appear in this map. |
 | `PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES` | Required in Convex for manifest and retention operations. Canonical JSON maps at most 16 configured publication key IDs to a sorted unique nonempty subset of `clear`, `publish`, `retain`, and `rollback`. Activation, status, refresh, and block require `publish`; catalog retention requires `retain`; rollback and clear are separate capabilities. V3, provider, and Heat key IDs must not appear in this map. Unknown keys, malformed or noncanonical JSON, and unsorted/duplicate roles fail closed. Rotate by temporarily granting the same least-privilege role set to old and new configured key IDs, then remove the old entry after in-flight reconciliation. The map is never returned or logged. |
@@ -211,7 +212,8 @@ and removes only its bounded temporary artifacts:
         "publicRepacksV3.js:listPublicRepacksV3",
         "publicRepacksV3.js:getPublicRepackV3",
         "publicRepacksV3.js:searchPublicCollectiblesV3",
-        "publicRepacksV3.js:findRepacksByDesiredCollectibleV3"
+        "publicRepacksV3.js:findRepacksByDesiredCollectibleV3",
+        "dataReleaseV3ProviderObservation.js:refresh"
       ] as $required |
        [.functions[].identifier] as $actual |
        ($required - $actual | length) == 0)
@@ -275,22 +277,22 @@ npm run promote:data-release-v3:clutchpacks:local -- --dry-run
 
 Review the exact database identity and `expectedRepackCount: 17`, then use the
 returned confirmation to stage. Staging recomputes all 17 canonical EV rows,
-requires an exact settled and current source clock, rejects incomplete source
-lineage or any positive signed PackScout EV, assembles the complete catalog,
-and finalizes an inactive Convex release. It never moves the public pointer.
+requires known source time plus exact settled/head and lineage coherence,
+rejects incomplete source lineage or any positive signed PackScout EV,
+assembles the complete catalog, and finalizes an inactive Convex release. Age
+alone is not a rejection: known calculable economics remain immutable release
+evidence and the public read policy presents them as current or last-known with
+a decaying confidence score. It never moves the public pointer.
 
 ```bash
 PACKSCOUT_CLUTCHPACKS_V3_CONFIRMATION='<stage confirmation>' \
   npm run promote:data-release-v3:clutchpacks:local -- --stage
 ```
 
-Do not bypass `CLUTCHPACKS_V3_POSITIVE_EV`. PR #15's arithmetic midpoint can
-produce a positive result for a changing remaining pool; resolving that needs
-an explicit versioned methodology decision, not clamping or a script override.
-The latest settled watermark must be no more than 60 minutes old, and every
-current estimate must retain at least 20 minutes locally. The extra five
-minutes reserve Convex authentication clock skew while the command continues
-to advertise a guaranteed 15-minute public handoff window.
+Do not bypass `CLUTCHPACKS_V3_POSITIVE_EV`. A positive signed PackScout EV still
+fails closed; resolving one requires an explicit versioned methodology decision,
+not clamping or a script override. True missing or unsupported essential inputs
+retain their bounded unavailable reasons and do not become invented estimates.
 
 After reviewing the staged fingerprint, accepted counts, unchanged active
 pointer, expected predecessor, and the returned activation confirmation,
@@ -304,12 +306,15 @@ PACKSCOUT_CLUTCHPACKS_V3_CONFIRMATION='<activation confirmation>' \
     --expected-active-release <genesis-or-prior-public-release-UUID>
 ```
 
-Activation repeats the database-identity, settlement, lifetime, fingerprint,
-predecessor, completeness, and non-positive-EV gates. It then reads all 17
-repacks and bounded category, collectible, chase, dashboard, and search paths
-through the public V3 queries. A failed post-activation proof rolls back to the
-guarded predecessor when one exists; genesis verification failures require
-explicit recovery and return a non-success status.
+Activation repeats the database-identity, settlement, source-coherence,
+fingerprint, predecessor, completeness, and non-positive-EV gates. It then
+publishes a signed, release-bound provider observation from the actual local
+source lifecycle and reads all 17 repacks plus bounded category, collectible,
+chase, dashboard, and search paths through trusted-clock public V3 reads.
+Provider health gates Top Opportunities only; it never erases catalog EV. A
+failed post-activation proof rolls back to the guarded predecessor when one
+exists; genesis verification failures require explicit recovery and return a
+non-success status.
 
 ## Organization and deployment binding gate
 

@@ -225,6 +225,25 @@
   white-space: normal;
 }
 
+.evidenceNote,
+.providerWarning {
+  display: block;
+  max-width: 15rem;
+  margin-top: 0.18rem;
+  font-size: 0.62rem;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.evidenceNote {
+  color: var(--color-text-muted);
+}
+
+.providerWarning {
+  color: var(--color-warning-strong);
+  font-weight: 650;
+}
+
 .unavailable,
 .notAvailable {
   color: var(--color-text-muted);

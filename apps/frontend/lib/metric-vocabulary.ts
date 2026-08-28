@@ -30,9 +30,9 @@ export const METRIC_TRUST_COPY = Object.freeze({
   sourceExplanation:
     "Vendor-reported EV and PackScout Gross EV are separate estimates and are never averaged or substituted.",
   confidenceExplanation:
-    "Confidence describes how reliable and fresh PackScout's supporting evidence is, not profit likelihood or whether EV is positive.",
+    "Confidence describes how reliable and fresh PackScout's supporting evidence is, not profit likelihood or whether EV is positive. After 60 minutes, confidence decays while the last-known economics remain visible.",
   unavailableExplanation:
-    "Unavailable means PackScout does not have complete supported evidence. PackScout never assumes missing buyback terms.",
+    "Unavailable means required supported inputs are missing. Age alone does not make an estimate unavailable. PackScout never assumes missing buyback terms.",
 });
 
 export const PUBLIC_REASON_COPY = Object.freeze({
@@ -45,7 +45,8 @@ export const PUBLIC_REASON_COPY = Object.freeze({
     "Unavailable: supported outcome values are unavailable.",
   BUYBACK_UNAVAILABLE:
     "Unavailable: documented buyback terms are unavailable.",
-  SOURCE_DATA_STALE: "Expired: source data is older than 60 minutes.",
+  SOURCE_DATA_STALE:
+    "Unavailable: supported source evidence was not retained.",
   CALCULATION_UNAVAILABLE:
     "Unavailable: the calculation could not be completed.",
   ESTIMATE_UNAVAILABLE: "Estimate unavailable.",
@@ -67,13 +68,15 @@ export const SOURCE_AGE_COPY = Object.freeze({
     "Source data delayed (15–30 minutes old)",
   delayed_over_30_through_60_minutes:
     "Source data delayed (30–60 minutes old)",
+  last_known_over_60_minutes:
+    "Source evidence is over 60 minutes old; showing the last-known estimate",
 } as const);
 
 export const ESTIMATE_STATUS_COPY = Object.freeze({
   current: "Current estimate",
-  sold_out_historical: "Sold out · historical estimate",
+  last_known: "Last-known estimate",
+  historical: "Sold out · historical estimate",
   unavailable: "Unavailable",
-  expired: "Expired",
   simulated: "Simulated data",
   unknownSourceTime: "Source observation time unknown",
 } as const);
@@ -173,7 +176,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "evConfidence",
     label: "EV Confidence",
     definition:
-      "How reliable and fresh PackScout’s supporting evidence is; it never describes profit likelihood or a predicted outcome",
+      "How reliable and fresh PackScout’s supporting evidence is; after 60 minutes it decays while last-known EV remains visible, and it never describes profit likelihood or a predicted outcome",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },

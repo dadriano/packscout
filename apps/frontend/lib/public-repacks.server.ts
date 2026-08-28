@@ -1,4 +1,4 @@
-import { fetchQuery } from "convex/nextjs";
+import { fetchAction, fetchQuery } from "convex/nextjs";
 import {
   publicReadError,
   type DashboardQueryInput,
@@ -25,11 +25,11 @@ import {
 import { readPublicConvexOrigin } from "./security-policy.server";
 
 /**
- * Server-side reads against the data_release_v3 public queries. Every read
- * carries the server clock so the backend can apply its authoritative
- * deadline conversion, presents the server-held catalog-read credential on
- * that same round trip, and re-validates every result against the strict v3
- * contracts before rendering.
+ * Server-side reads against the data_release_v3 public API. Time-sensitive
+ * views use Convex actions so the backend, not this Next.js process or a URL,
+ * mints the authoritative confidence/provider-health clock. Every read
+ * presents the server-held catalog credential on that same round trip and
+ * re-validates the result against the strict v3 contracts before rendering.
  */
 
 type PublicRepacksEnvironment = Readonly<{
@@ -81,7 +81,7 @@ export function readCatalogReadCredential(
 
 /**
  * Attaches the catalog-read credential to one read's arguments. Every
- * catalog `fetchQuery` below routes its arguments through here, so the
+ * catalog request below routes its arguments through here, so the
  * rendering path presents the credential on each existing round trip — no
  * additional requests — and callers' argument shapes are untouched whenever
  * no credential is configured (the beta-off contract).
@@ -101,7 +101,7 @@ export async function readPublicShellStatus(): Promise<GetPublicShellStatusV3Res
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
     return parseGetPublicShellStatusV3Result(
-      await fetchQuery(
+      await fetchAction(
         api.publicRepacksV3.getPublicShellStatusV3,
         catalogReadArguments({}),
         { url },
@@ -119,10 +119,11 @@ export async function readDashboardBundle(
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
     return parseGetDashboardBundleV3Result(
-      await fetchQuery(api.publicRepacksV3.getDashboardBundleV3, catalogReadArguments({
-        ...input,
-        currentTime: Date.now(),
-      }), { url }),
+      await fetchAction(
+        api.publicRepacksV3.getDashboardBundleV3,
+        catalogReadArguments({ ...input }),
+        { url },
+      ),
     );
   } catch {
     return publicReadError("RELEASE_UNAVAILABLE");
@@ -136,10 +137,11 @@ export async function readPublicRepacks(
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
     return parseListPublicRepacksV3Result(
-      await fetchQuery(api.publicRepacksV3.listPublicRepacksV3, catalogReadArguments({
-        ...input,
-        currentTime: Date.now(),
-      }), { url }),
+      await fetchAction(
+        api.publicRepacksV3.listPublicRepacksV3,
+        catalogReadArguments({ ...input }),
+        { url },
+      ),
     );
   } catch {
     return publicReadError("RELEASE_UNAVAILABLE");
@@ -153,10 +155,11 @@ export async function readPublicRepack(
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
     return parseGetPublicRepackV3Result(
-      await fetchQuery(api.publicRepacksV3.getPublicRepackV3, catalogReadArguments({
-        ...input,
-        currentTime: Date.now(),
-      }), { url }),
+      await fetchAction(
+        api.publicRepacksV3.getPublicRepackV3,
+        catalogReadArguments({ ...input }),
+        { url },
+      ),
     );
   } catch {
     return publicReadError("RELEASE_UNAVAILABLE");
@@ -188,10 +191,11 @@ export async function readRepacksByDesiredCollectible(
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
     return parseFindRepacksByDesiredCollectibleV3Result(
-      await fetchQuery(api.publicRepacksV3.findRepacksByDesiredCollectibleV3, catalogReadArguments({
-        ...input,
-        currentTime: Date.now(),
-      }), { url }),
+      await fetchAction(
+        api.publicRepacksV3.findRepacksByDesiredCollectibleV3,
+        catalogReadArguments({ ...input }),
+        { url },
+      ),
     );
   } catch {
     return publicReadError("RELEASE_UNAVAILABLE");

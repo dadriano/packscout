@@ -630,11 +630,11 @@ export const PACKSCOUT_BUYBACK_EV_BROWSER_EVIDENCE_PENDING_V1: readonly PackScou
             "keyboard-only walk of the catalog surfaces.",
         },
         {
-          id: "live-deadline-flip",
+          id: "live-confidence-transition",
           sourceTask: "010",
           description:
-            "A current estimate flips to the expired state in an open tab " +
-            "at its deadline without reload or aria-live chatter.",
+            "A current estimate becomes last-known with decayed confidence " +
+            "after 60 minutes without losing its metrics.",
         },
         {
           id: "glossary-hint-positioning",
@@ -689,7 +689,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
     {
       claim:
         "Positive raw EV fails closed at publication, while neutral, negative, " +
-        "zero, unavailable, delayed, expired, simulated, and sold-out states " +
+        "zero, unavailable, delayed, last-known, simulated, and sold-out states " +
         "present through the shared boundary.",
       evidence: [
         {
@@ -720,7 +720,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
           testName:
-            "expired estimates present the distinct expired state with stale copy",
+            "last-known estimates retain metrics while confidence decays",
         },
         {
           file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
@@ -990,23 +990,23 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
     },
     {
       claim:
-        "Deadline expiry converts client-side exactly like the server and " +
-        "never invents a live state.",
+        "The 60-minute transition keeps known economics visible while the " +
+        "shared server policy derives last-known confidence.",
       evidence: [
         {
-          file: "apps/frontend/lib/packscout-ev-deadline.client.test.ts",
+          file: "packages/contracts/src/public-ev-presentation-v1.test.ts",
           testName:
-            "strictly after the deadline the estimate converts to the stale state",
+            "public confidence follows the approved boundary table without expiring EV",
         },
         {
-          file: "apps/frontend/lib/packscout-ev-deadline.client.test.ts",
+          file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
           testName:
-            "historical and unavailable estimates never expire into a live state",
+            "last-known estimates retain metrics while confidence decays",
         },
         {
           file: "convex/publicRepacksV3.test.ts",
           testName:
-            "a current estimate past its deadline fails closed at read time without any new transition",
+            "a current estimate past 60 minutes remains visible as last known with decayed confidence",
         },
       ],
     },

@@ -1,10 +1,12 @@
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
   PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
   packScoutPublicEvV3Schema,
+  safePresentPackScoutPublicEvV3,
   unavailableRepackHeat,
   type PackScoutPublicEvV3,
   type PublicRepackChase,
@@ -25,6 +27,8 @@ import {
 
 export const FIXTURE_OBSERVED_AT = "2026-08-19T10:00:00.000Z";
 export const FIXTURE_EXPIRES_AT = "2026-08-19T11:00:00.000Z";
+export const FIXTURE_CURRENT_EVALUATED_AT = "2026-08-19T10:10:00.000Z";
+export const FIXTURE_LAST_KNOWN_EVALUATED_AT = "2026-08-19T12:00:00.000Z";
 export const FIXTURE_SOLD_OUT_AT = "2026-08-19T10:05:00.000Z";
 export const FIXTURE_PACK_PRICE_MINOR = 10_000;
 
@@ -78,26 +82,6 @@ export function buildV3CurrentEv(
     dataAsOf: { state: "known", observedAt: FIXTURE_OBSERVED_AT },
     sourceAge: { milliseconds: 0, state: "fresh_within_15_minutes" },
     expiresAt: FIXTURE_EXPIRES_AT,
-  });
-}
-
-/**
- * A structurally valid current estimate whose public deadline is firmly in
- * the past relative to any real test clock — for proving that server
- * rendering keeps the served values and only the post-hydration deadline
- * store converts them.
- */
-export function buildV3PastDeadlineCurrentEv(gross = 8_500): PackScoutPublicEvV3 {
-  return packScoutPublicEvV3Schema.parse({
-    status: "current",
-    methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
-    confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
-    metrics: buildV3Metrics(gross),
-    confidence: FRESH_CONFIDENCE,
-    calculatedAt: "2026-08-18T10:00:00.000Z",
-    dataAsOf: { state: "known", observedAt: "2026-08-18T10:00:00.000Z" },
-    sourceAge: { milliseconds: 0, state: "fresh_within_15_minutes" },
-    expiresAt: "2026-08-18T11:00:00.000Z",
   });
 }
 
@@ -161,19 +145,6 @@ export function buildV3UnavailableEv(
   });
 }
 
-export function buildV3ExpiredEv(): PackScoutPublicEvV3 {
-  return packScoutPublicEvV3Schema.parse({
-    status: "unavailable",
-    methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
-    confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
-    metrics: null,
-    confidence: null,
-    calculatedAt: "2026-08-19T11:10:00.000Z",
-    dataAsOf: { state: "known", observedAt: FIXTURE_OBSERVED_AT },
-    reason: "SOURCE_DATA_STALE",
-  });
-}
-
 export function buildV3UnknownTimeUnavailableEv(): PackScoutPublicEvV3 {
   return packScoutPublicEvV3Schema.parse({
     status: "unavailable",
@@ -185,6 +156,109 @@ export function buildV3UnknownTimeUnavailableEv(): PackScoutPublicEvV3 {
     dataAsOf: { state: "unknown_source_time", observedAt: null },
     reason: "SOURCE_EVIDENCE_UNAVAILABLE",
   });
+}
+
+export function buildV3EvPresentation(
+  estimate: PackScoutPublicEvV3,
+  confidenceEvaluatedAt = estimate.status === "sold_out_historical"
+    ? FIXTURE_SOLD_OUT_AT
+    : estimate.calculatedAt,
+): PublicRepackViewDetailV3["packScoutEvPresentation"] {
+  const result = safePresentPackScoutPublicEvV3(
+    estimate,
+    confidenceEvaluatedAt,
+  );
+  if (!result.success) {
+    throw new Error(
+      `buildV3EvPresentation produced an invalid presentation: ${result.reason}`,
+    );
+  }
+  return result.presentation;
+}
+
+export function buildV3LastKnownPresentation(
+  gross = 8_500,
+): PublicRepackViewDetailV3["packScoutEvPresentation"] {
+  return buildV3EvPresentation(
+    buildV3CurrentEv(gross),
+    FIXTURE_LAST_KNOWN_EVALUATED_AT,
+  );
+}
+
+export function buildV3CurrentPresentation(
+  gross: number,
+): PublicRepackViewDetailV3["packScoutEvPresentation"] {
+  return buildV3EvPresentation(buildV3CurrentEv(gross), FIXTURE_CURRENT_EVALUATED_AT);
+}
+
+export function buildV3DelayedPresentation(
+  gross: number,
+): PublicRepackViewDetailV3["packScoutEvPresentation"] {
+  const estimate = buildV3DelayedEv(gross);
+  return buildV3EvPresentation(estimate, estimate.calculatedAt);
+}
+
+export function buildV3HistoricalPresentation(
+  gross = 8_500,
+): PublicRepackViewDetailV3["packScoutEvPresentation"] {
+  return buildV3EvPresentation(buildV3SoldOutEv(gross));
+}
+
+export function buildV3UnavailablePresentation(
+  reason: Parameters<typeof buildV3UnavailableEv>[0] = "BUYBACK_UNAVAILABLE",
+): PublicRepackViewDetailV3["packScoutEvPresentation"] {
+  const estimate = buildV3UnavailableEv(reason);
+  return buildV3EvPresentation(estimate, estimate.calculatedAt);
+}
+
+export function buildV3UnknownTimeUnavailablePresentation(): PublicRepackViewDetailV3["packScoutEvPresentation"] {
+  const estimate = buildV3UnknownTimeUnavailableEv();
+  return buildV3EvPresentation(estimate, estimate.calculatedAt);
+}
+
+export function buildV3HealthyProviderHealth(): PublicRepackViewDetailV3["providerHealth"] {
+  return {
+    state: "healthy",
+    observedAt: FIXTURE_CURRENT_EVALUATED_AT,
+    rankingEligible: true,
+    rankingIneligibilityReason: null,
+  };
+}
+
+export function buildV3DelayedProviderHealth(): PublicRepackViewDetailV3["providerHealth"] {
+  return {
+    state: "delayed",
+    observedAt: FIXTURE_OBSERVED_AT,
+    rankingEligible: false,
+    rankingIneligibilityReason: "PROVIDER_OBSERVATION_STALE",
+  };
+}
+
+export function buildV3ProviderHealthSummary(
+  state: "healthy" | "delayed" | "unavailable" = "healthy",
+  evaluatedAt: string = FIXTURE_CURRENT_EVALUATED_AT,
+) {
+  if (state === "unavailable") {
+    return {
+      state,
+      observedAt: null,
+      freshThrough: null,
+      totalProviderCount: 0,
+      delayedProviderCount: 0,
+      nextHealthEvaluationAt: null,
+    } as const;
+  }
+  const freshThrough = new Date(
+    Date.parse(evaluatedAt) + 50 * 60_000,
+  ).toISOString();
+  return {
+    state,
+    observedAt: evaluatedAt,
+    freshThrough,
+    totalProviderCount: 1,
+    delayedProviderCount: state === "delayed" ? 1 : 0,
+    nextHealthEvaluationAt: state === "delayed" ? null : freshThrough,
+  } as const;
 }
 
 export function buildV3Price(
@@ -241,6 +315,14 @@ export function buildV3ViewDetail(
   overrides: DetailOverrides = {},
 ): PublicRepackViewDetailV3 {
   const publicRepackId = overrides.publicRepackId ?? FIXTURE_REPACK_ID;
+  const packScoutEv =
+    overrides.evEstimates?.packScout ?? buildV3CurrentEv(8_500);
+  const fixtureEvaluationAt = new Date(
+    Math.max(
+      Date.parse(FIXTURE_CURRENT_EVALUATED_AT),
+      Date.parse(packScoutEv.calculatedAt),
+    ),
+  ).toISOString();
   return publicRepackViewDetailV3Schema.parse({
     publicRepackId,
     publicVendorId: FIXTURE_VENDOR_ID,
@@ -260,7 +342,7 @@ export function buildV3ViewDetail(
       alt: "Pokemon Grail Gacha",
     },
     evEstimates: {
-      packScout: buildV3CurrentEv(8_500),
+      packScout: packScoutEv,
       vendorReported: {
         status: "available",
         sourceMoney: { minorUnits: 9_000, currency: "USD" },
@@ -268,6 +350,11 @@ export function buildV3ViewDetail(
         observedAt: FIXTURE_OBSERVED_AT,
       },
     },
+    packScoutEvPresentation:
+      overrides.packScoutEvPresentation ??
+      buildV3EvPresentation(packScoutEv, fixtureEvaluationAt),
+    providerHealth:
+      overrides.providerHealth ?? buildV3HealthyProviderHealth(),
     topChase: buildV3Chase(publicRepackId),
     contentSummary: {
       knownCollectibleCount: 1,
@@ -308,6 +395,7 @@ export function buildV3SoldOutViewDetail(
         reason: "NOT_REPORTED",
       },
     },
+    packScoutEvPresentation: buildV3EvPresentation(buildV3SoldOutEv(8_500)),
     actionAvailability: { promo: false, repackLink: false },
     actions: {},
     ...overrides,
@@ -340,10 +428,25 @@ export function buildV3ReleaseIdentity() {
 export function buildV3ListPage(
   details: readonly PublicRepackViewDetailV3[],
 ): ListPublicRepacksPageV3 {
+  const confidenceEvaluatedAt =
+    details.find(
+      ({ packScoutEvPresentation }) =>
+        packScoutEvPresentation.status !== "historical",
+    )?.packScoutEvPresentation.confidenceEvaluatedAt ??
+    details.at(-1)?.packScoutEvPresentation.confidenceEvaluatedAt ??
+    FIXTURE_CURRENT_EVALUATED_AT;
   const payload = {
     ok: true,
     data: {
       release: buildV3ReleaseIdentity(),
+      publicFreshnessPolicyVersion:
+        PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      confidenceEvaluatedAt,
+      providerHealthEvaluatedAt: confidenceEvaluatedAt,
+      providerHealthSummary: buildV3ProviderHealthSummary(
+        "healthy",
+        confidenceEvaluatedAt,
+      ),
       rows: details.map(publicRepackViewSummaryV3FromDetail),
       details,
       selectedRepack: details[0] ?? null,

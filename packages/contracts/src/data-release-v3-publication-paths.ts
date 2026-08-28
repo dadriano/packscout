@@ -14,6 +14,8 @@ export const PRODUCTION_DATA_RELEASE_V3_PATHS = Object.freeze({
   activate: "/internal/data-release/v3/activate",
   rollback: "/internal/data-release/v3/rollback",
   status: "/internal/data-release/v3/status",
+  refreshProviderObservation:
+    "/internal/data-release/v3/refresh-provider-observation",
 });
 
 /**
