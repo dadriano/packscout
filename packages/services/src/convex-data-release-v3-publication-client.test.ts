@@ -194,6 +194,54 @@ test("v3 active state rides the shared signed HTTP byte and nonce boundary", asy
   assert.deepEqual(bodies, [expectedBody, expectedBody]);
 });
 
+test("v3 active state accepts only the exact retained pre-policy pointer shape", async () => {
+  const {
+    publicEvPolicyVersion: _legacyMissingPolicyMarker,
+    ...legacyPointer
+  } = pointer;
+  void _legacyMissingPolicyMarker;
+  const transport = client(async (_input, init) => {
+    const bodyJson = String(init?.body);
+    return new Response(JSON.stringify(await signedEnvelope({
+      ...activeStateReceiptBody(bodyJson),
+      details: {
+        generation: 3,
+        activeRelease: legacyPointer,
+        previousRelease: null,
+      },
+    })));
+  });
+
+  assert.deepEqual(await transport.activeState(), {
+    generation: 3,
+    activeRelease: legacyPointer,
+    previousRelease: null,
+  });
+});
+
+test("v3 active state rejects non-current markers and other pointer drift", async () => {
+  for (const activeRelease of [
+    { ...pointer, publicEvPolicyVersion: "some-other-public-policy" },
+    { ...pointer, unexpectedLegacyField: true },
+    (({ methodVersion: _missingRequiredField, ...rest }) => {
+      void _missingRequiredField;
+      return rest;
+    })(pointer),
+  ]) {
+    const transport = client(async (_input, init) => {
+      const bodyJson = String(init?.body);
+      return new Response(JSON.stringify(await signedEnvelope({
+        ...activeStateReceiptBody(bodyJson),
+        details: { generation: 3, activeRelease, previousRelease: null },
+      })));
+    });
+    await assert.rejects(
+      transport.activeState(),
+      expectsPortError("PUBLICATION_RESPONSE_INVALID", true),
+    );
+  }
+});
+
 test("v3 start sends canonical bytes and returns the bound verified receipt", async () => {
   const request = startRequest();
   const transport = client(async (input, init) => {
