@@ -453,13 +453,14 @@ async function expectedRecomputedFingerprint(
     | "publicReleaseId"
     | "methodVersion"
     | "confidencePolicyVersion"
-    | "publicEvPolicyVersion"
     | "dataAsOf"
     | "contentHash"
     | "searchAlgorithmVersion"
     | "expectedBatchCount"
     | "expectedBatchChainHash"
-  >,
+  > & Readonly<{
+    publicEvPolicyVersion: typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
+  }>,
 ): Promise<string> {
   return sha256CanonicalJson(DATA_RELEASE_V3_RELEASE_FINGERPRINT_DOMAIN, {
     schemaVersion: DATA_RELEASE_V3_SCHEMA_VERSION,
