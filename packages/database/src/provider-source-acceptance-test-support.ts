@@ -194,7 +194,8 @@ export async function createPinnedSourceRun(
       mapper_key: source.mapperKey,
       mapper_version: "1",
       identity_namespace_key: source.identityNamespaceKey,
-      records_per_request: input.recordsPerRequest ?? 250,
+      records_per_request:
+        input.recordsPerRequest ?? providerSourceLaunchBounds.pageTargetRecords,
       connection_profile_id: fixture.connectionProfileId,
       connection_revision_id: fixture.connectionRevisionId,
       cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,

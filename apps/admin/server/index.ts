@@ -1,64 +1,17 @@
-import path from "node:path";
 import type { Server } from "node:http";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
 import type { ViteDevServer } from "vite";
-import { RECOMPUTATION_BACKLOG_DEPTH_DEFAULT } from "@packscout/contracts";
 import {
-  CanonicalInspectionService,
-  MachineryAlertService,
-  resolveEmailLinkTokenSecret,
-} from "@packscout/services";
-import {
-  createPrismaClientLifecycle,
-  DatabaseLoginAttemptLimiter,
-  PrismaCanonicalInspectionRepository,
-  PrismaProviderPromotionFactsRepository,
-  PrismaAuthAuditSink,
-  PrismaAuthRepository,
-  PrismaProviderConfigurationRepository,
-  PrismaProviderHealthRepository,
-} from "@packscout/database";
-import { createAdminApp } from "./app.ts";
-import { createParityRuntime } from "./parity-runtime.ts";
-import { createPublishedCatalogReader } from "./published-catalog-reader.ts";
-import { createAdminAuthRuntime } from "./auth/runtime.ts";
-import { createAdminBackgroundWorkRuntime } from "./background-work-runtime.ts";
-import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
-import {
-  createAdminMachineryAlertFactsSource,
-  createAdminMachineryAlertObserver,
   startMachineryAlertLoop,
   type MachineryAlertLoop,
 } from "./machinery-alert-runtime.ts";
-import { createAdminOperationalRuntime } from "./operational-runtime.ts";
-import { createBetaAllowlistAuditSink } from "./beta-allowlist-audit.ts";
-import { createBetaAllowlistDirectoryClient } from "./beta-allowlist-directory.ts";
-import { createProductUserAuditSink } from "./product-user-audit.ts";
-import { createProductUserDirectoryReader } from "./product-user-directory.ts";
-import { createProviderAdminRuntime } from "./provider-runtime.ts";
-import { createAdminProviderSourceRuntime } from "./provider-source-runtime.ts";
-import { createAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
-import { createAdminMessageDeliveryRuntime } from "./message-delivery-runtime.ts";
-import { createAdminPasswordResetRuntime } from "./password-reset-runtime.ts";
-import { createAdminOperatorInvitationRuntime } from "./operator-invitation-runtime.ts";
-import { createAdminOperatorAccountCreatedNoticeRuntime } from "./operator-account-created-notice-runtime.ts";
-import { createAdminAccessDecisionNoticeRuntime } from "./access-decision-notice-runtime.ts";
+import { createAdminRuntime, type AdminRuntime } from "./runtime.ts";
 import {
-  adminDevelopmentAllowedOrigins,
   adminDevelopmentServerNetwork,
-  readAllowedOrigins,
-  readBase64Key,
-  readCatalogDeploymentKey,
-  readProductUserDirectoryConfig,
-  readServiceHost,
   readPort,
-  readPositiveCount,
-  readPositiveDuration,
-  readRequiredSecret,
-  readSourceAdministrationSettings,
-  readTrustedProxies,
   serviceHttpOrigin,
 } from "./runtime-config.ts";
 
@@ -68,102 +21,11 @@ const workspaceRoot = path.resolve(adminRoot, "..", "..");
 
 dotenv.config({ path: path.join(workspaceRoot, ".env") });
 
-const isDevelopment = process.env.NODE_ENV !== "production";
 const port = readPort(
   process.env.PACKSCOUT_ADMIN_PORT,
   5101,
   "PACKSCOUT_ADMIN_PORT",
 );
-const host = readServiceHost(
-  process.env.PACKSCOUT_ADMIN_HOST,
-  isDevelopment ? "127.0.0.1" : "0.0.0.0",
-  "PACKSCOUT_ADMIN_HOST",
-  isDevelopment,
-);
-const sessionIdleMs = readPositiveDuration(
-  process.env.PACKSCOUT_SESSION_IDLE_MS,
-  60 * 60 * 1_000,
-  "PACKSCOUT_SESSION_IDLE_MS",
-);
-const sessionAbsoluteMs = readPositiveDuration(
-  process.env.PACKSCOUT_SESSION_ABSOLUTE_MS,
-  12 * 60 * 60 * 1_000,
-  "PACKSCOUT_SESSION_ABSOLUTE_MS",
-);
-if (sessionAbsoluteMs < sessionIdleMs) {
-  throw new Error(
-    "PACKSCOUT_SESSION_ABSOLUTE_MS must be greater than or equal to PACKSCOUT_SESSION_IDLE_MS.",
-  );
-}
-const databaseUrl = readRequiredSecret(
-  process.env.PACKSCOUT_DATABASE_URL,
-  "PACKSCOUT_DATABASE_URL",
-);
-const sessionSecret = readRequiredSecret(
-  process.env.PACKSCOUT_SESSION_HASHING_SECRET,
-  "PACKSCOUT_SESSION_HASHING_SECRET",
-  32,
-);
-const providerCredentialKey = readBase64Key(
-  process.env.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64,
-  "PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64",
-);
-const providerActorKey = readBase64Key(
-  process.env.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
-  "PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64",
-);
-/**
- * Absent as a pair, the source-connection keys leave source administration
- * unconfigured rather than stopping the admin: every other workflow stays
- * available and the source routes answer with a stable error. A partially set
- * or invalid pair still fails startup.
- */
-const sourceAdministration = readSourceAdministrationSettings({
-  key: process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64,
-  keyVersion: process.env.PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION,
-});
-const allowedOrigins = readAllowedOrigins(
-  process.env.PACKSCOUT_ADMIN_ALLOWED_ORIGINS,
-  isDevelopment ? adminDevelopmentAllowedOrigins(host, port) : [],
-  "PACKSCOUT_ADMIN_ALLOWED_ORIGINS",
-);
-const trustedProxies = readTrustedProxies(
-  process.env.PACKSCOUT_ADMIN_TRUSTED_PROXIES,
-  "PACKSCOUT_ADMIN_TRUSTED_PROXIES",
-);
-/**
- * How often the machinery conditions are evaluated. The cadence only decides
- * how quickly a condition is noticed; the thresholds themselves come from the
- * settings the worker fleet publishes.
- */
-const machineryAlertIntervalMs = readPositiveDuration(
-  process.env.PACKSCOUT_ADMIN_MACHINERY_ALERT_INTERVAL_MS,
-  60 * 1_000,
-  "PACKSCOUT_ADMIN_MACHINERY_ALERT_INTERVAL_MS",
-);
-/** Shared by the background-work page and the queue-depth alert condition. */
-const recomputationBacklogLimit = readPositiveCount(
-  process.env.PACKSCOUT_ADMIN_RECOMPUTATION_BACKLOG_LIMIT,
-  RECOMPUTATION_BACKLOG_DEPTH_DEFAULT,
-  "PACKSCOUT_ADMIN_RECOMPUTATION_BACKLOG_LIMIT",
-);
-/**
- * The product backend's admin surface. Absent or unusable configuration leaves
- * the directory unconfigured rather than stopping the admin: every pipeline
- * workflow stays available and the users page explains the missing integration.
- */
-const catalogDeploymentKey = readCatalogDeploymentKey(process.env);
-const productUserDirectoryConfig = readProductUserDirectoryConfig({
-  baseUrl: process.env.PACKSCOUT_ADMIN_DIRECTORY_URL,
-  token: process.env.PACKSCOUT_ADMIN_DIRECTORY_TOKEN,
-});
-/**
- * Keys the one-time email-link verifier HMAC (messaging/008) behind the
- * operator password-reset flow. Absent configuration leaves that flow
- * unmounted rather than stopping the admin; a present-but-weak value fails
- * startup closed when the runtime derives its keys.
- */
-const emailLinkTokenSecret = resolveEmailLinkTokenSecret(process.env);
 
 function waitForListening(server: Server): Promise<void> {
   if (server.listening) return Promise.resolve();
@@ -188,146 +50,17 @@ function closeHttpServer(server: Server | undefined): Promise<void> {
   });
 }
 
-const databaseLifecycle = createPrismaClientLifecycle({ databaseUrl });
+let runtime: AdminRuntime | undefined;
 let server: Server | undefined;
 let developmentServer: ViteDevServer | undefined;
 let machineryAlerts: MachineryAlertLoop | undefined;
 let shutdownPromise: Promise<void> | undefined;
 
 try {
-  await databaseLifecycle.start();
-  const database = databaseLifecycle.client;
-  const canonicalInspection = new CanonicalInspectionService(
-    new PrismaCanonicalInspectionRepository(database),
-  );
-  const providerRepository = new PrismaProviderConfigurationRepository(database);
-  const operational = createAdminOperationalRuntime({
-    database,
-    actorPseudonymKey: providerActorKey,
-    alertEmail: { env: process.env },
-  });
-  const auth = await createAdminAuthRuntime({
-    repository: new PrismaAuthRepository(database),
-    loginLimiter: new DatabaseLoginAttemptLimiter(database, {
-      windowMs: 15 * 60 * 1_000,
-      blockMs: 15 * 60 * 1_000,
-      maximumFailures: 8,
-    }),
-    audit: new PrismaAuthAuditSink(database),
-    sessionSecret,
-    sessionIdleMs,
-    sessionAbsoluteMs,
-    production: !isDevelopment,
-    allowedOrigins,
-  });
-  const providerSourceRuntime = sourceAdministration
-    ? createAdminProviderSourceRuntime({
-      database,
-      connectionConfigurationKey:
-        sourceAdministration.connectionConfigurationKey,
-      connectionConfigurationKeyVersion:
-        sourceAdministration.connectionConfigurationKeyVersion,
-      actorPseudonymKey: providerActorKey,
-      environment: isDevelopment ? "local" : "production",
-    })
-    : undefined;
-  const app = createAdminApp({
-    trustedProxies,
-    auth,
-    providers: createProviderAdminRuntime({
-      repository: providerRepository,
-      healthRepository: new PrismaProviderHealthRepository(database),
-      credentialKey: providerCredentialKey,
-      actorPseudonymKey: providerActorKey,
-      environment: isDevelopment ? "local" : "production",
-      operational,
-    }),
-    importOperations: createAdminImportOperationsRuntime({
-      database,
-      actorPseudonymKey: providerActorKey,
-    }),
-    backgroundWork: createAdminBackgroundWorkRuntime({
-      database,
-      actorPseudonymKey: providerActorKey,
-      backlogDepthLimit: recomputationBacklogLimit,
-    }),
-    workerFleet: createAdminWorkerFleetRuntime({ database }),
-    canonical: canonicalInspection,
-    // Both halves must be configured: without the deployment key the admin
-    // cannot know which promotion lane is this deployment's, and reading the
-    // wrong one would produce confident, wrong verdicts.
-    parity: catalogDeploymentKey === null ? undefined : createParityRuntime({
-      canonical: canonicalInspection,
-      promotion: new PrismaProviderPromotionFactsRepository(database),
-      published: createPublishedCatalogReader({
-        config: productUserDirectoryConfig,
-      }),
-      deploymentKey: catalogDeploymentKey,
-    }),
-    productUsers: {
-      directory: createProductUserDirectoryReader({
-        config: productUserDirectoryConfig,
-      }),
-      audit: createProductUserAuditSink({
-        database,
-        actorPseudonymKey: providerActorKey,
-      }),
-      // A committed approve or decline enqueues the person's notice into the
-      // same durable outbox the worker drains; the verified address is read
-      // back through the same directory integration.
-      decisionNotice: createAdminAccessDecisionNoticeRuntime({
-        database,
-        directory: createProductUserDirectoryReader({
-          config: productUserDirectoryConfig,
-        }),
-      }),
-    },
-    // The allowlist lives with the product backend and is reached through the
-    // same integration and credential as the directory reads above.
-    betaAllowlist: {
-      directory: createBetaAllowlistDirectoryClient({
-        config: productUserDirectoryConfig,
-      }),
-      audit: createBetaAllowlistAuditSink({
-        database,
-        actorPseudonymKey: providerActorKey,
-      }),
-    },
-    operationalAlerts: { alerts: operational.alerts },
-    operationalHealth: { health: operational.health },
-    providerSources: providerSourceRuntime,
-    providerSourceOperations: providerSourceRuntime,
-    sourceAdministrationUnconfigured: providerSourceRuntime === undefined,
-    // The delivery history reads the same durable outbox the worker drains.
-    messages: createAdminMessageDeliveryRuntime({
-      database,
-      actorPseudonymKey: providerActorKey,
-    }),
-    // Self-service operator password reset over the one-time link mechanism.
-    passwordReset:
-      emailLinkTokenSecret === null
-        ? undefined
-        : createAdminPasswordResetRuntime({
-            database,
-            authService: auth.service,
-            secret: emailLinkTokenSecret,
-          }),
-    // Operator provisioning by invitation over the same link mechanism.
-    operatorInvitations:
-      emailLinkTokenSecret === null
-        ? undefined
-        : createAdminOperatorInvitationRuntime({
-            database,
-            authService: auth.service,
-            secret: emailLinkTokenSecret,
-          }),
-    // Directly provisioned accounts are already active. Their informational
-    // sign-in email is an independent durable outbox intent.
-    operatorAccountCreatedNotifier:
-      createAdminOperatorAccountCreatedNoticeRuntime({ database }),
-  });
+  runtime = await createAdminRuntime({ port });
+  const { app, configuration } = runtime;
 
-  if (isDevelopment) {
+  if (configuration.development) {
     const { createServer: createViteServer } = await import("vite");
     const hmrPort = readPort(
       process.env.PACKSCOUT_ADMIN_HMR_PORT,
@@ -336,10 +69,9 @@ try {
     );
     developmentServer = await createViteServer({
       root: adminRoot,
-      server: adminDevelopmentServerNetwork(host, hmrPort),
+      server: adminDevelopmentServerNetwork(configuration.host, hmrPort),
       appType: "spa",
     });
-
     app.use(developmentServer.middlewares);
   } else {
     const outputDirectory = path.join(adminRoot, "dist");
@@ -349,26 +81,10 @@ try {
     });
   }
 
-  // Fleet silence cannot be detected by the fleet, so the machinery conditions
-  // are evaluated here: the admin is the always-on process that survives the
-  // exact failure the loudest condition describes.
-  const machineryAlertService = new MachineryAlertService(
-    createAdminMachineryAlertFactsSource({
-      database,
-      backlogDepthLimit: recomputationBacklogLimit,
-    }),
-    operational.events,
-    // Alerting that cannot read its evidence is indistinguishable from a
-    // healthy pipeline, so a degraded or unreadable cycle says so.
-    createAdminMachineryAlertObserver(),
-  );
   machineryAlerts = startMachineryAlertLoop({
-    cycle: () => machineryAlertService.runCycle(),
-    intervalMs: machineryAlertIntervalMs,
+    cycle: () => runtime?.runMachineryAlertCycle() ?? Promise.resolve(),
+    intervalMs: configuration.machineryAlertIntervalMs,
     onFailure: () => {
-      // A cycle that evaluated nothing rejects rather than reporting a quiet
-      // all-zero result, and lands here. Names the failed capability, never
-      // any evidence it was reading.
       console.error(
         JSON.stringify({
           level: "error",
@@ -378,19 +94,19 @@ try {
     },
   });
 
-  server = app.listen(port, host);
+  server = app.listen(port, configuration.host);
   await waitForListening(server);
   process.once("SIGINT", handleShutdownSignal);
   process.once("SIGTERM", handleShutdownSignal);
-  console.log(`Packscout Admin is available at ${serviceHttpOrigin(host, port)}`);
-  if (productUserDirectoryConfig === null) {
-    // Names the missing capability, never any configuration value.
+  console.log(
+    `Packscout Admin is available at ${serviceHttpOrigin(configuration.host, port)}`,
+  );
+  if (!configuration.productUserDirectoryConfigured) {
     console.log(
-      "Packscout Admin: the product-user directory integration is not configured.",
+      "PackScout Admin: the product-user directory integration is not configured.",
     );
   }
-  if (sourceAdministration === null) {
-    // Names the missing capability, never any configuration value.
+  if (!configuration.sourceAdministrationConfigured) {
     console.warn(
       JSON.stringify({
         level: "warn",
@@ -398,17 +114,16 @@ try {
       }),
     );
   }
-  if (emailLinkTokenSecret === null) {
-    // Names the missing capability, never any configuration value.
+  if (!configuration.emailLinkTokenConfigured) {
     console.log(
-      "Packscout Admin: the operator password reset flow is not configured.",
+      "PackScout Admin: the operator password reset flow is not configured.",
     );
   }
 } catch (error) {
   await machineryAlerts?.stop().catch(() => undefined);
   await closeHttpServer(server).catch(() => undefined);
   await developmentServer?.close().catch(() => undefined);
-  await databaseLifecycle.close().catch(() => undefined);
+  await runtime?.close().catch(() => undefined);
   throw error;
 }
 
@@ -431,7 +146,7 @@ function shutDown(): Promise<void> {
       shutdownError ??= error;
     }
     try {
-      await databaseLifecycle.close();
+      await runtime?.close();
     } catch (error) {
       shutdownError ??= error;
     }

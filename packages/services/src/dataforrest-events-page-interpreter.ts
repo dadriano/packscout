@@ -2,14 +2,13 @@ import type { ZodError } from "zod";
 import { isUtf8 } from "node:buffer";
 import { JSONParser, TokenType } from "@streamparser/json";
 import {
-  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   dataforrestContinuation,
   dataforrestEventRecordV1Schema,
   dataforrestEventsPageV1Schema,
   dataforrestEventsSourceConfigurationV1Schema,
   dataforrestNextCursor,
-  dataforrestEventsV1SourceAdapterManifest,
-  normalizeDataforrestEventRecord,
+  dataforrestEventsV1SourceAdapterManifests,
+  normalizeDataforrestEventRecordForAdapter,
   sourceAdapterFailureSchema,
   type DataforrestEventsPageV1,
   type DataforrestEventRecordV1,
@@ -38,9 +37,9 @@ type PageParseResult =
   | Readonly<{ ok: false }>;
 
 function dataforrestManifest(adapterVersion: string) {
-  return adapterVersion === DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-    ? dataforrestEventsV1SourceAdapterManifest
-    : null;
+  return dataforrestEventsV1SourceAdapterManifests.find(
+    (manifest) => manifest.adapterVersion === adapterVersion,
+  ) ?? null;
 }
 
 const knownStreams = new Set(["catalog", "pulls", "trades"]);
@@ -383,7 +382,7 @@ function parsePage(
     return { ok: false };
   }
   try {
-    if (adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION) {
+    if (dataforrestManifest(adapterVersion) === null) {
       return { ok: false };
     }
     if (!isBoundedDataforrestEventsPageV1(raw, pageLimit)) {
@@ -496,6 +495,7 @@ function interpretRecord(
   record: Record<string, unknown>,
   provider: LaunchProviderKey,
   recordIndex: number,
+  adapterVersion: string,
 ): NormalizedObservationOutcome {
   const evidenceReference = `page_record:${recordIndex}`;
   if (
@@ -552,10 +552,11 @@ function interpretRecord(
     return {
       status: "valid",
       recordIndex,
-      observation: normalizeDataforrestEventRecord(
+      observation: normalizeDataforrestEventRecordForAdapter(
         parsed.data as DataforrestEventRecordV1,
         provider,
         evidenceReference,
+        adapterVersion,
       ),
     };
   } catch (error) {
@@ -577,11 +578,11 @@ function interpretRecords(
   provider: LaunchProviderKey,
   adapterVersion: string,
 ): readonly NormalizedObservationOutcome[] {
-  if (adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION) {
+  if (dataforrestManifest(adapterVersion) === null) {
     throw new RangeError("dataforrest_events.adapter_version_unsupported");
   }
   return page.records.map((record, recordIndex) =>
-    interpretRecord(record, provider, recordIndex)
+    interpretRecord(record, provider, recordIndex, adapterVersion)
   );
 }
 

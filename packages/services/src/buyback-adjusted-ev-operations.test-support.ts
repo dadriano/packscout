@@ -6,6 +6,7 @@ import {
   allocatePublicChangeCauses,
   prismaApprovedPublicRepackIdentityMaterializer,
   PrismaCatalogReleaseSourceRepository,
+  ProviderSourceLifecycleRepository,
 } from "@packscout/database";
 import type { MigratedTestDatabase } from "@packscout/database/test-support";
 import type { CanonicalAvailability } from "./catalog-projection-contracts.ts";
@@ -164,11 +165,13 @@ function packContent(input: {
   readonly availability: CanonicalAvailability;
   readonly priceValueMinor: number | null;
   readonly buybackPercent: number | null;
+  readonly evInputStatus?: "ready" | "unavailable";
   readonly sourceStatus?: string | null;
 }) {
   return {
     schemaVersion: "catalog-projection-v1",
     entityType: "pack",
+    evInputStatus: input.evInputStatus ?? "unavailable",
     parentExternalId: null,
     name: input.name,
     category: null,
@@ -242,7 +245,8 @@ function evInputContent() {
 
 export interface SeededOperationsIngestion {
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly sourceInstanceId: string;
+  readonly providerSourceRevisionId: string;
 }
 
 interface CanonicalRevisionSeed {
@@ -365,9 +369,16 @@ export async function seedBuybackEvOperationsCatalog(
     data: { id: input.organizationId, slug: input.slug, name: input.slug },
   });
   const providerId = randomUUID();
-  const configurationRevisionId = randomUUID();
   const runId = randomUUID();
   const pageId = randomUUID();
+  const sourceTypeKey = "dataforrest-events-v1";
+  const sourceAdapterVersion = "dataforrest-events-adapter-v1";
+  const normalizedContractVersion = "packscout.provider-observation.v1";
+  const mapperKey = "dataforrest-catalog-v1";
+  const mapperVersion = "1";
+  const identityNamespaceKey = "dataforrest-vendor-v1";
+  const cursorCodecVersion = "dataforrest-cursor-v1";
+  const createdAt = new Date(OPERATIONS_TIMELINE.configApprovedAt);
   await harness.client.provider_sources.create({
     data: {
       id: providerId,
@@ -376,33 +387,95 @@ export async function seedBuybackEvOperationsCatalog(
       display_name: "Vendor",
     },
   });
-  await harness.client.provider_config_revisions.create({
-    data: {
-      id: configurationRevisionId,
-      organization_id: input.organizationId,
-      provider_id: providerId,
-      version: 1,
-      adapter_key: "http-cursor-v1",
-      endpoint_url: "https://vendor.example/protected-feed",
-      auth_mode: "none",
-      created_by_actor_key: "operator:protected-actor",
-    },
+  const lifecycle = new ProviderSourceLifecycleRepository(harness.client);
+  const connection = await lifecycle.createConnectionProfileRevision({
+    organizationId: input.organizationId,
+    sourceTypeKey,
+    connectionTypeKey: "dataforrest-events-connection-v1",
+    displayName: "DataForrest Vendor",
+    requestLimit: 1,
+    sourceAdapterVersion,
+    revisionNumber: 1,
+    configurationCiphertext: new Uint8Array(32).fill(1),
+    configurationNonce: new Uint8Array(12).fill(2),
+    configurationAuthTag: new Uint8Array(16).fill(3),
+    encryptionKeyVersion: 1,
+    configurationFingerprint: "a".repeat(64),
+    actorKey: "operator:protected-actor",
+    createdAt,
   });
-  await harness.client.provider_sources.update({
-    where: { id: providerId },
-    data: { state: "active", active_revision_id: configurationRevisionId },
+  const source = await lifecycle.createSourceInstanceRevision({
+    organizationId: input.organizationId,
+    providerId,
+    connectionProfileId: connection.profileId,
+    sourceTypeKey,
+    sourceAdapterVersion,
+    normalizedContractVersion,
+    mapperKey,
+    mapperVersion,
+    identityNamespaceKey,
+    cursorCodecVersion,
+    revisionNumber: 1,
+    intervalSeconds: 300,
+    configuration: { provider: OPERATIONS_PLATFORM_KEY },
+    configurationHash: "b".repeat(64),
+    recordIdScopes: ["catalog-pack-v1", "catalog-card-v1"],
+    actorKey: "operator:protected-actor",
+    createdAt,
+  });
+  await harness.client.$transaction(async (transaction) => {
+    await transaction.provider_sources.update({
+      where: { id: providerId },
+      data: { state: "active", updated_at: createdAt },
+    });
+    await transaction.source_connection_revisions.update({
+      where: { id: connection.revisionId },
+      data: { state: "active", activated_at: createdAt },
+    });
+    await transaction.source_connection_profiles.update({
+      where: { id: connection.profileId },
+      data: {
+        state: "active",
+        active_revision_id: connection.revisionId,
+        updated_at: createdAt,
+      },
+    });
+    await transaction.provider_source_instances.update({
+      where: { id: source.sourceInstanceId },
+      data: {
+        state: "active",
+        activated_at: createdAt,
+        updated_at: createdAt,
+      },
+    });
   });
   await harness.client.import_runs.create({
     data: {
       id: runId,
       organization_id: input.organizationId,
       provider_id: providerId,
-      config_revision_id: configurationRevisionId,
+      config_revision_id: null,
       trigger: "scheduled",
       state: "succeeded",
       started_at: new Date("2026-08-18T01:05:00.000Z"),
       finished_at: new Date(OPERATIONS_TIMELINE.backfillFinishedAt),
       reached_provider_head: true,
+      source_instance_id: source.sourceInstanceId,
+      source_revision_id: source.sourceRevisionId,
+      source_type_key: sourceTypeKey,
+      source_adapter_version: sourceAdapterVersion,
+      normalized_contract_version: normalizedContractVersion,
+      mapper_key: mapperKey,
+      mapper_version: mapperVersion,
+      identity_namespace_key: identityNamespaceKey,
+      records_per_request: 500,
+      connection_profile_id: connection.profileId,
+      connection_revision_id: connection.revisionId,
+      cursor_codec_version: cursorCodecVersion,
+      cursor_generation: 1n,
+      requested_cursor_key: "initial",
+      current_cursor_key: "initial",
+      next_page_number: 1,
     },
   });
   await harness.client.import_pages.create({
@@ -432,12 +505,13 @@ export async function seedBuybackEvOperationsCatalog(
         changeKind: "provider_lifecycle",
         entityKey: `provider:v1:${providerId}`,
         sourceKey: OPERATIONS_PLATFORM_KEY,
-        sourceRevisionKey: configurationRevisionId,
+        sourceRevisionKey: source.sourceRevisionId,
         metadata: {
           providerId,
           platformKey: OPERATIONS_PLATFORM_KEY,
           state: "active",
-          configurationRevisionId,
+          sourceInstanceId: source.sourceInstanceId,
+          sourceRevisionId: source.sourceRevisionId,
         },
         occurredAt: new Date(OPERATIONS_TIMELINE.lifecycleAt),
         catalogImpact: {
@@ -469,6 +543,7 @@ export async function seedBuybackEvOperationsCatalog(
           availability: "available",
           priceValueMinor: 10_000,
           buybackPercent: 85,
+          evInputStatus: "ready",
         }),
         sourceUpdatedAt: OPERATIONS_TIMELINE.activeObservedAt,
       },
@@ -550,7 +625,11 @@ export async function seedBuybackEvOperationsCatalog(
     ],
     OPERATIONS_TIMELINE.readAt,
   );
-  return { providerId, configurationRevisionId };
+  return {
+    providerId,
+    sourceInstanceId: source.sourceInstanceId,
+    providerSourceRevisionId: source.sourceRevisionId,
+  };
 }
 
 export interface OperationsEvidenceDraftInput {
@@ -656,14 +735,14 @@ export function operationsEvidence(
 export function operationsCommand(input: {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
   readonly evidence: PackScoutBuybackEvEvidenceOutcomeV1;
   readonly calculatedAt: string;
 }): PackScoutBuybackEvRecomputationCommandV1 {
   return {
     organizationId: input.organizationId,
     providerId: input.providerId,
-    configurationRevisionId: input.configurationRevisionId,
+    providerSourceRevisionId: input.providerSourceRevisionId,
     evidence: input.evidence,
     calculatedAt: input.calculatedAt,
   };

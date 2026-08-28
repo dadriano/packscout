@@ -13,6 +13,7 @@ import {
   IngestionPersistenceRepository,
   PersistenceError,
   PipelineSetupRepository,
+  ProviderSourceLifecycleRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { calculatePackScoutBuybackAdjustedEvV1 } from "./buyback-adjusted-ev-calculator.ts";
@@ -40,6 +41,7 @@ const ids = {
   organization: "40000000-0000-4000-8000-000000000001",
   otherOrganization: "40000000-0000-4000-8000-000000000009",
   provider: "40000000-0000-4000-8000-000000000002",
+  otherProvider: "40000000-0000-4000-8000-000000000008",
   configuration: "40000000-0000-4000-8000-000000000003",
   run: "40000000-0000-4000-8000-000000000004",
 } as const;
@@ -49,6 +51,7 @@ const PRODUCT_KEY = "courtyard-ironman-repack";
 
 function identityFor(
   input: PackScoutBuybackEvInputV1,
+  providerSourceRevisionId: string,
 ): PackScoutBuybackEvCalculationIdentityV1 {
   return {
     methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
@@ -59,13 +62,14 @@ function identityFor(
     sourceRevisionId: input.observation.sourceRevisionId,
     sourceManifestSha256: input.observation.sourceManifestSha256,
     observationCoherence: input.observation.coherenceKind,
-    configurationRevisionId: ids.configuration,
+    providerSourceRevisionId,
   };
 }
 
 function commandFor(
   input: PackScoutBuybackEvInputV1,
   calculatedAt: string,
+  providerSourceRevisionId: string,
   overrides: Partial<PersistPackScoutBuybackEvRevisionCommandV1> = {},
 ): PersistPackScoutBuybackEvRevisionCommandV1 {
   const calculation = calculatePackScoutBuybackAdjustedEvV1({
@@ -79,11 +83,11 @@ function commandFor(
   return {
     organizationId: ids.organization,
     providerId: ids.provider,
-    configurationRevisionId: ids.configuration,
+    providerSourceRevisionId,
     calculation,
     confidenceEvaluation: evaluation,
     effectiveFingerprint: computePackScoutBuybackEvEffectiveFingerprintV1({
-      identity: identityFor(input),
+      identity: identityFor(input, providerSourceRevisionId),
       evidence: { kind: "complete_input", input },
     }),
     sourceRevisions: [
@@ -140,20 +144,82 @@ async function setupHarness() {
     platformKey: PLATFORM_KEY,
     displayName: "Courtyard",
   });
-  await setup.createConfigRevision({
-    id: ids.configuration,
+  await setup.createProviderSource({
+    id: ids.otherProvider,
+    organizationId: ids.otherOrganization,
+    platformKey: PLATFORM_KEY,
+    displayName: "Other Courtyard",
+  });
+  const lifecycle = new ProviderSourceLifecycleRepository(harness.database);
+  const createSourceRevision = async (input: {
+    organizationId: string;
+    providerId: string;
+    hashCharacter: string;
+  }) => {
+    const createdAt = new Date("2026-08-19T17:00:00.000Z");
+    const connection = await lifecycle.createConnectionProfileRevision({
+      organizationId: input.organizationId,
+      sourceTypeKey: "synthetic-events-v1",
+      connectionTypeKey: "synthetic-events-connection-v1",
+      displayName: "Synthetic source",
+      requestLimit: 1,
+      sourceAdapterVersion: "synthetic-events-adapter-v1",
+      revisionNumber: 1,
+      configurationCiphertext: new Uint8Array(32).fill(1),
+      configurationNonce: new Uint8Array(12).fill(2),
+      configurationAuthTag: new Uint8Array(16).fill(3),
+      encryptionKeyVersion: 1,
+      configurationFingerprint: input.hashCharacter.repeat(64),
+      actorKey: "actor:test",
+      createdAt,
+    });
+    return lifecycle.createSourceInstanceRevision({
+      organizationId: input.organizationId,
+      providerId: input.providerId,
+      connectionProfileId: connection.profileId,
+      sourceTypeKey: "synthetic-events-v1",
+      sourceAdapterVersion: "synthetic-events-adapter-v1",
+      normalizedContractVersion: "packscout.provider-observation.v1",
+      mapperKey: "synthetic-catalog-v1",
+      mapperVersion: "1",
+      identityNamespaceKey: `synthetic-${input.hashCharacter}-v1`,
+      cursorCodecVersion: "synthetic-cursor-v1",
+      revisionNumber: 1,
+      intervalSeconds: 300,
+      configuration: { fixture: input.hashCharacter },
+      configurationHash: input.hashCharacter.repeat(64),
+      recordIdScopes: ["catalog-pack-v1"],
+      actorKey: "actor:test",
+      createdAt,
+    });
+  };
+  const source = await createSourceRevision({
     organizationId: ids.organization,
     providerId: ids.provider,
-    version: 1,
-    adapterKey: "synthetic-mapper-v1",
-    endpointUrl: "https://provider.example/feed",
-    authMode: "none",
-    createdByActorKey: "actor:test",
+    hashCharacter: "a",
+  });
+  const otherSource = await createSourceRevision({
+    organizationId: ids.otherOrganization,
+    providerId: ids.otherProvider,
+    hashCharacter: "b",
   });
   const repository = new BuybackEvRevisionRepository(harness.database);
   return {
     ...harness,
     repository,
+    sourceInstanceId: source.sourceInstanceId,
+    providerSourceRevisionId: source.sourceRevisionId,
+    otherProviderSourceRevisionId: otherSource.sourceRevisionId,
+    commandFor: (
+      input: PackScoutBuybackEvInputV1,
+      calculatedAt: string,
+      overrides: Partial<PersistPackScoutBuybackEvRevisionCommandV1> = {},
+    ) => commandFor(
+      input,
+      calculatedAt,
+      source.sourceRevisionId,
+      overrides,
+    ),
     store: new PackScoutBuybackEvRevisionStore(repository),
   };
 }
@@ -161,8 +227,13 @@ async function setupHarness() {
 test("buyback EV revisions persist immutably with replay, conflict, failure, and trace guarantees", async () => {
   const harness = await setupHarness();
   try {
+    assert.equal(
+      await harness.database.provider_config_revisions.count(),
+      0,
+      "source-native buyback persistence must not require a legacy provider configuration",
+    );
     const availableInput = buildBuybackEvInput();
-    const availableCommand = commandFor(
+    const availableCommand = harness.commandFor(
       availableInput,
       "2026-08-19T18:05:00.000Z",
     );
@@ -197,6 +268,11 @@ test("buyback EV revisions persist immutably with replay, conflict, failure, and
     );
     assert.equal(storedRow.platform_key, PLATFORM_KEY);
     assert.equal(storedRow.product_key, PRODUCT_KEY);
+    assert.equal(
+      storedRow.provider_source_revision_id,
+      harness.providerSourceRevisionId,
+    );
+    assert.equal(storedRow.source_instance_id, harness.sourceInstanceId);
     assert.equal(storedRow.product_revision_id, "product-revision-42");
     assert.equal(storedRow.source_revision_id, "catalog-revision-100");
     assert.equal(storedRow.gross_ev_minor_units, 8_500n);
@@ -234,7 +310,10 @@ test("buyback EV revisions persist immutably with replay, conflict, failure, and
         normalization: { kind: "usd_direct" },
       },
     });
-    const identityReuse = commandFor(repricedInput, "2026-08-19T18:05:00.000Z");
+    const identityReuse = harness.commandFor(
+      repricedInput,
+      "2026-08-19T18:05:00.000Z",
+    );
     const rejected = await harness.store.persistCompletedCalculation(
       identityReuse,
     );
@@ -258,7 +337,7 @@ test("buyback EV revisions persist immutably with replay, conflict, failure, and
       "repeated invalid work must dedupe into one bounded failure row",
     );
 
-    const driftedClock = commandFor(availableInput, "2026-08-19T18:06:00.000Z", {
+    const driftedClock = harness.commandFor(availableInput, "2026-08-19T18:06:00.000Z", {
       effectiveFingerprint: availableCommand.effectiveFingerprint,
     });
     const resultConflict = await harness.store.persistCompletedCalculation(
@@ -326,7 +405,10 @@ test("buyback EV revisions persist immutably with replay, conflict, failure, and
         observedAt: "2026-08-19T18:30:00.000Z",
       },
     });
-    const staleCommand = commandFor(staleInput, "2026-08-19T20:05:00.000Z");
+    const staleCommand = harness.commandFor(
+      staleInput,
+      "2026-08-19T20:05:00.000Z",
+    );
     const stale = await harness.store.persistCompletedCalculation(staleCommand);
     assert.equal(stale.outcome, "created");
     if (stale.outcome !== "created") return;
@@ -365,7 +447,7 @@ test("buyback EV revisions persist immutably with replay, conflict, failure, and
     const unbindableCommand: PersistPackScoutBuybackEvRevisionCommandV1 = {
       organizationId: ids.organization,
       providerId: ids.provider,
-      configurationRevisionId: ids.configuration,
+      providerSourceRevisionId: harness.providerSourceRevisionId,
       calculation: unbindable,
       confidenceEvaluation: null,
       effectiveFingerprint: "f".repeat(64),
@@ -475,7 +557,16 @@ test("buyback EV revisions persist immutably with replay, conflict, failure, and
     );
     await assert.rejects(
       harness.store.persistCompletedCalculation({
-        ...commandFor(
+        ...availableCommand,
+        providerSourceRevisionId: harness.otherProviderSourceRevisionId,
+      }),
+      (error: unknown) =>
+        error instanceof PersistenceError &&
+        error.code === "TENANT_SCOPE_VIOLATION",
+    );
+    await assert.rejects(
+      harness.store.persistCompletedCalculation({
+        ...harness.commandFor(
           buildBuybackEvInput({
             observation: {
               coherenceKind: "provider_revision",
@@ -514,7 +605,7 @@ test("the persistence transaction refuses older essential source evidence even a
   });
   try {
     const newer = await harness.store.persistCompletedCalculation(
-      commandFor(
+      harness.commandFor(
         buildBuybackEvInput({
           observation: observationFor(
             "catalog-revision-410",
@@ -531,7 +622,7 @@ test("the persistence transaction refuses older essential source evidence even a
     // newer revision committed writes its older evidence afterwards: the
     // transaction that assigns currency must refuse it as superseded.
     const older = await harness.store.persistCompletedCalculation(
-      commandFor(buildBuybackEvInput(), "2026-08-19T18:12:00.000Z"),
+      harness.commandFor(buildBuybackEvInput(), "2026-08-19T18:12:00.000Z"),
     );
     assert.equal(older.outcome, "superseded");
     if (older.outcome !== "superseded") return;
@@ -549,7 +640,7 @@ test("the persistence transaction refuses older essential source evidence even a
 
     // Equal essential source time is not a regression: identity rules own it.
     const equalTime = await harness.store.persistCompletedCalculation(
-      commandFor(
+      harness.commandFor(
         buildBuybackEvInput({
           observation: observationFor(
             "catalog-revision-420",
@@ -565,7 +656,7 @@ test("the persistence transaction refuses older essential source evidence even a
     // the scheduler produces, the newest essential source time ends current.
     const [olderWriter, newerWriter] = await Promise.all([
       harness.store.persistCompletedCalculation(
-        commandFor(
+        harness.commandFor(
           buildBuybackEvInput({
             observation: observationFor(
               "catalog-revision-430",
@@ -576,7 +667,7 @@ test("the persistence transaction refuses older essential source evidence even a
         ),
       ),
       harness.store.persistCompletedCalculation(
-        commandFor(
+        harness.commandFor(
           buildBuybackEvInput({
             observation: observationFor(
               "catalog-revision-440",
@@ -630,6 +721,16 @@ test("historical pre-buyback revisions keep their original method identity and a
   const harness = await setupHarness();
   try {
     const setup = new PipelineSetupRepository(harness.database);
+    await setup.createConfigRevision({
+      id: ids.configuration,
+      organizationId: ids.organization,
+      providerId: ids.provider,
+      version: 1,
+      adapterKey: "synthetic-mapper-v1",
+      endpointUrl: "https://provider.example/feed",
+      authMode: "none",
+      createdByActorKey: "actor:test",
+    });
     await setup.createImportRun({
       id: ids.run,
       organizationId: ids.organization,
@@ -754,7 +855,7 @@ test("historical pre-buyback revisions keep their original method identity and a
     );
 
     const created = await harness.store.persistCompletedCalculation(
-      commandFor(buildBuybackEvInput(), "2026-08-19T18:05:00.000Z"),
+      harness.commandFor(buildBuybackEvInput(), "2026-08-19T18:05:00.000Z"),
     );
     assert.equal(created.outcome, "created");
     const current = await harness.store.getCurrentPublication({
@@ -783,7 +884,8 @@ test("historical pre-buyback revisions keep their original method identity and a
     await assert.rejects(
       harness.database.$executeRawUnsafe(`
         insert into public.buyback_ev_revisions (
-          organization_id, provider_id, configuration_revision_id,
+          organization_id, provider_id, provider_source_revision_id,
+          source_instance_id,
           platform_key, product_key, product_revision_id,
           method_version, confidence_policy_version, lifecycle, status,
           revision_number, calculation_key, effective_fingerprint, result_hash,
@@ -791,7 +893,8 @@ test("historical pre-buyback revisions keep their original method identity and a
           used_closed_range_midpoint, calculated_at, data_as_of_state,
           freshness_state, internal_reasons, public_primary_reason
         ) values (
-          '${ids.organization}', '${ids.provider}', '${ids.configuration}',
+          '${ids.organization}', '${ids.provider}',
+          '${harness.providerSourceRevisionId}', '${harness.sourceInstanceId}',
           '${PLATFORM_KEY}', '${PRODUCT_KEY}', 'product-revision-42',
           '${PACKSCOUT_ESTIMATED_EV_METHOD_VERSION}',
           'packscout-buyback-adjusted-ev-confidence-v1', 'completed', 'unavailable',

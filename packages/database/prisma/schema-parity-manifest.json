@@ -1,17 +1,17 @@
 {
-  "source": "provider-source integration, configurable records per request, platform request lanes, and buyback-adjusted EV revisions",
+  "source": "provider-source V1 configurable request limits, relationship confirmation, relationship-causal Heat evidence, platform request lanes, and source-native buyback-adjusted EV revisions",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260827010000_provider_source_platform_request_lanes/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260827020000_buyback_ev_provider_source_origin/migration.sql"
   },
   "expectedCounts": {
-    "tables": 87,
+    "tables": 91,
     "enums": 40,
-    "columns": 1387,
-    "indexes": 154,
-    "uniqueConstraints": 59,
-    "foreignKeys": 290,
-    "checkConstraints": 317
+    "columns": 1453,
+    "indexes": 166,
+    "uniqueConstraints": 64,
+    "foreignKeys": 304,
+    "checkConstraints": 337
   },
   "enums": {
     "admin_alert_state": [
@@ -142,7 +142,8 @@
       "estimated_ev_outcome",
       "public_configuration",
       "provider_lifecycle",
-      "manual_correction"
+      "manual_correction",
+      "relationship_confirmation"
     ],
     "public_derivation_kind": [
       "estimated_ev"
@@ -1177,13 +1178,6 @@
           "identity": null,
           "default": null
         },
-        "configuration_revision_id": {
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": null,
-          "default": null
-        },
         "created_at": {
           "type": "timestamp(6) with time zone",
           "primaryKey": false,
@@ -1345,6 +1339,13 @@
           "identity": null,
           "default": null
         },
+        "provider_source_revision_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "public_primary_reason": {
           "type": "text",
           "primaryKey": false,
@@ -1370,6 +1371,13 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_instance_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
           "identity": null,
           "default": null
         },
@@ -1455,32 +1463,6 @@
         }
       },
       "foreignKeys": {
-        "buyback_ev_revisions_configuration_fk": {
-          "columns": [
-            "configuration_revision_id"
-          ],
-          "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "buyback_ev_revisions_configuration_tenant_fk": {
-          "columns": [
-            "configuration_revision_id",
-            "provider_id",
-            "organization_id"
-          ],
-          "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "buyback_ev_revisions_organization_fk": {
           "columns": [
             "organization_id"
@@ -1501,6 +1483,34 @@
             "id"
           ],
           "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revisions_provider_source_revision_fk": {
+          "columns": [
+            "provider_source_revision_id"
+          ],
+          "referencedTable": "provider_source_revisions",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revisions_provider_source_revision_scope_fk": {
+          "columns": [
+            "provider_source_revision_id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "referencedTable": "provider_source_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "buyback_ev_revisions_provider_tenant_fk": {
@@ -1827,7 +1837,27 @@
           "where": null
         }
       },
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "canonical_relationships_confirmation_identity_unique": {
+          "columns": [
+            "id",
+            "organization_id",
+            "source_entity_id",
+            "relationship_kind",
+            "target_platform_key",
+            "target_record_kind",
+            "target_external_id"
+          ],
+          "nullsNotDistinct": false
+        },
+        "canonical_relationships_id_organization_unique": {
+          "columns": [
+            "id",
+            "organization_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
       "foreignKeys": {
         "canonical_relationships_created_change_fk": {
           "columns": [
@@ -6565,6 +6595,13 @@
           "identity": null,
           "default": null
         },
+        "source_relationship_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "status": {
           "type": "text",
           "primaryKey": false,
@@ -6664,16 +6701,27 @@
         "normalized_heat_observation_outcomes_revision_fk": {
           "columns": [
             "canonical_revision_id",
-            "organization_id",
-            "public_change_sequence"
+            "organization_id"
           ],
           "referencedTable": "canonical_revisions",
           "referencedColumns": [
             "id",
-            "organization_id",
-            "public_change_sequence"
+            "organization_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "normalized_heat_observation_outcomes_source_relationship_fk": {
+          "columns": [
+            "source_relationship_id",
+            "organization_id"
+          ],
+          "referencedTable": "canonical_relationships",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -6714,6 +6762,13 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "catalog_order_sequence": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "identity": null,
           "default": null
         },
@@ -6808,6 +6863,13 @@
           "identity": null,
           "default": null
         },
+        "source_relationship_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
         "value_multiple_basis_points": {
           "type": "integer",
           "primaryKey": false,
@@ -6817,6 +6879,23 @@
         }
       },
       "indexes": {
+        "normalized_heat_observations_catalog_order_backfill_idx": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence",
+            "observation_key"
+          ],
+          "unique": false,
+          "where": "((observation_kind = 'catalog_snapshot'::text) AND (catalog_order_sequence IS NULL))"
+        },
+        "normalized_heat_observations_catalog_order_unique": {
+          "columns": [
+            "organization_id",
+            "catalog_order_sequence"
+          ],
+          "unique": true,
+          "where": null
+        },
         "normalized_heat_observations_retention_idx": {
           "columns": [
             "organization_id",
@@ -6888,16 +6967,14 @@
         "normalized_heat_observations_revision_fk": {
           "columns": [
             "canonical_revision_id",
-            "organization_id",
-            "public_change_sequence"
+            "organization_id"
           ],
           "referencedTable": "canonical_revisions",
           "referencedColumns": [
             "id",
-            "organization_id",
-            "public_change_sequence"
+            "organization_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "normalized_heat_observations_source_change_fk": {
@@ -6912,6 +6989,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "normalized_heat_observations_source_relationship_fk": {
+          "columns": [
+            "source_relationship_id",
+            "organization_id"
+          ],
+          "referencedTable": "canonical_relationships",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "checkConstraints": {
@@ -6920,6 +7010,9 @@
         },
         "normalized_heat_observations_catalog_bounds_check": {
           "value": "(((available_chase_count IS NULL) OR ((available_chase_count >= 0) AND (available_chase_count <= 10000))) AND normalized_heat_outcome_keys_valid(outcome_keys))"
+        },
+        "normalized_heat_observations_catalog_order_check": {
+          "value": "(((catalog_order_sequence IS NULL) OR ((catalog_order_sequence >= 1) AND (catalog_order_sequence <= 2147483647))) AND ((observation_kind = 'catalog_snapshot'::text) OR (catalog_order_sequence IS NULL)))"
         },
         "normalized_heat_observations_key_check": {
           "value": "(observation_key ~ '^[0-9a-f]{64}$'::text)"
@@ -6941,6 +7034,171 @@
         },
         "normalized_heat_observations_shape_check": {
           "value": "(((observation_kind = 'pull'::text) AND (catalog_sequence IS NULL) AND (available_chase_count IS NULL) AND (outcome_keys = ARRAY[]::text[])) OR ((observation_kind = 'catalog_snapshot'::text) AND (catalog_sequence IS NOT NULL) AND (realized_return_basis_points IS NULL) AND (value_multiple_basis_points IS NULL) AND (available_chase_count IS NOT NULL)))"
+        }
+      }
+    },
+    "normalized_heat_relationship_backfills": {
+      "columns": {
+        "catalog_observation_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "completed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "failure_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "initial_catalog_observation_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "next_catalog_order_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "1"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "phase": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'awaiting_confirmations'::text"
+        },
+        "processed_through_confirmation_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "processed_through_confirmation_set_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "processed_through_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "processed_through_relationship_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "relationship_source_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "started_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "target_catalog_observation_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "target_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_relationship_source_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "normalized_heat_relationship_backfills_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "normalized_heat_relationship_backfills_count_check": {
+          "value": "((target_relationship_source_count >= 0) AND ((relationship_source_count >= 0) AND (relationship_source_count <= target_relationship_source_count)) AND (initial_catalog_observation_count >= 0) AND ((target_catalog_observation_count IS NULL) OR (target_catalog_observation_count >= initial_catalog_observation_count)) AND (catalog_observation_count >= 0) AND ((target_catalog_observation_count IS NULL) OR (catalog_observation_count <= target_catalog_observation_count)))"
+        },
+        "normalized_heat_relationship_backfills_cursor_check": {
+          "value": "((target_public_change_sequence >= 0) AND ((processed_through_public_change_sequence >= 0) AND (processed_through_public_change_sequence <= target_public_change_sequence)) AND ((processed_through_confirmation_public_change_sequence >= 0) AND (processed_through_confirmation_public_change_sequence <= processed_through_public_change_sequence)) AND ((processed_through_public_change_sequence > 0) OR ((processed_through_confirmation_set_id IS NULL) AND (processed_through_relationship_id IS NULL))) AND ((processed_through_confirmation_public_change_sequence = 0) = (processed_through_confirmation_set_id IS NULL)) AND ((processed_through_confirmation_set_id IS NULL) = (processed_through_relationship_id IS NULL)) AND ((next_catalog_order_sequence >= 1) AND (next_catalog_order_sequence <= '2147483648'::bigint)))"
+        },
+        "normalized_heat_relationship_backfills_failure_check": {
+          "value": "(((phase = 'failed'::text) AND (failure_code ~ '^[A-Z][A-Z0-9_]{0,127}$'::text)) OR ((phase <> 'failed'::text) AND (failure_code IS NULL)))"
+        },
+        "normalized_heat_relationship_backfills_phase_check": {
+          "value": "(phase = ANY (ARRAY['awaiting_confirmations'::text, 'relationships'::text, 'catalog_order'::text, 'complete'::text, 'failed'::text]))"
+        },
+        "normalized_heat_relationship_backfills_shape_check": {
+          "value": "(((phase = 'awaiting_confirmations'::text) AND (target_public_change_sequence = 0) AND (processed_through_public_change_sequence = 0) AND (processed_through_confirmation_public_change_sequence = 0) AND (processed_through_confirmation_set_id IS NULL) AND (processed_through_relationship_id IS NULL) AND (target_relationship_source_count = 0) AND (relationship_source_count = 0) AND (target_catalog_observation_count IS NULL) AND (catalog_observation_count = 0) AND (completed_at IS NULL)) OR ((phase = 'relationships'::text) AND (target_catalog_observation_count IS NULL) AND (completed_at IS NULL)) OR ((phase = 'catalog_order'::text) AND (target_catalog_observation_count IS NOT NULL) AND (completed_at IS NULL)) OR ((phase = 'complete'::text) AND (processed_through_public_change_sequence = target_public_change_sequence) AND (relationship_source_count = target_relationship_source_count) AND (target_catalog_observation_count IS NOT NULL) AND (catalog_observation_count = target_catalog_observation_count) AND (next_catalog_order_sequence = (catalog_observation_count + 1)) AND (completed_at IS NOT NULL)) OR (phase = 'failed'::text))"
+        },
+        "normalized_heat_relationship_backfills_timestamp_check": {
+          "value": "((date_trunc('milliseconds'::text, created_at) = created_at) AND (date_trunc('milliseconds'::text, updated_at) = updated_at) AND ((started_at IS NULL) OR (date_trunc('milliseconds'::text, started_at) = started_at)) AND ((completed_at IS NULL) OR (date_trunc('milliseconds'::text, completed_at) = completed_at)))"
         }
       }
     },
@@ -15065,6 +15323,25 @@
           "unique": true,
           "where": null
         },
+        "source_delivery_occurrences_relationship_coverage_idx": {
+          "columns": [
+            "organization_id",
+            "source_revision_id",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "source_delivery_occurrences_relationship_cursor_idx": {
+          "columns": [
+            "organization_id",
+            "source_revision_id",
+            "source_record_id",
+            "id"
+          ],
+          "unique": false,
+          "where": "((source_record_id IS NOT NULL) AND (semantic_observation_id IS NOT NULL))"
+        },
         "source_delivery_occurrences_run_idx": {
           "columns": [
             "organization_id",
@@ -16625,6 +16902,662 @@
       "checkConstraints": {
         "source_records_external_id_not_blank": {
           "value": "(length(TRIM(BOTH FROM external_id)) > 0)"
+        }
+      }
+    },
+    "source_relationship_confirmation_backfills": {
+      "columns": {
+        "completed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "confirmed_semantic_set_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "0"
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "failure_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "phase": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "processed_through_source_record_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "retry_eligibility_cutoff_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_instance_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_revision_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "started_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "target_delivery_occurrence_id": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_semantic_set_count": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "updated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "source_relationship_confirmation_backfills_phase_idx": {
+          "columns": [
+            "phase",
+            "organization_id",
+            "source_revision_id"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "source_relationship_confirmation_backfills_revision_fk": {
+          "columns": [
+            "source_revision_id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "referencedTable": "provider_source_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "source_relationship_confirmation_backfills_count_check": {
+          "value": "((target_delivery_occurrence_id >= 0) AND (target_semantic_set_count >= 0) AND ((confirmed_semantic_set_count >= 0) AND (confirmed_semantic_set_count <= target_semantic_set_count)))"
+        },
+        "source_relationship_confirmation_backfills_failure_check": {
+          "value": "(((phase = 'failed'::text) AND (failure_code ~ '^[A-Z][A-Z0-9_]{0,127}$'::text)) OR ((phase <> 'failed'::text) AND (failure_code IS NULL)))"
+        },
+        "source_relationship_confirmation_backfills_phase_check": {
+          "value": "(phase = ANY (ARRAY['pending'::text, 'running'::text, 'complete'::text, 'failed'::text]))"
+        },
+        "source_relationship_confirmation_backfills_shape_check": {
+          "value": "(((phase = ANY (ARRAY['pending'::text, 'running'::text])) AND (completed_at IS NULL)) OR ((phase = 'complete'::text) AND (confirmed_semantic_set_count = target_semantic_set_count) AND (completed_at IS NOT NULL)) OR (phase = 'failed'::text))"
+        },
+        "source_relationship_confirmation_backfills_timestamp_check": {
+          "value": "((date_trunc('milliseconds'::text, created_at) = created_at) AND (date_trunc('milliseconds'::text, updated_at) = updated_at) AND (date_trunc('milliseconds'::text, retry_eligibility_cutoff_at) = retry_eligibility_cutoff_at) AND ((started_at IS NULL) OR (date_trunc('milliseconds'::text, started_at) = started_at)) AND ((completed_at IS NULL) OR (date_trunc('milliseconds'::text, completed_at) = completed_at)))"
+        }
+      }
+    },
+    "source_relationship_confirmation_sets": {
+      "columns": {
+        "confirmation_mode": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "confirmed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "declaration_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "normalized_contract_version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "relationship_count": {
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "semantic_effective_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "semantic_observation_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_canonical_content_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_canonical_revision_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_entity_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_instance_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_record_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_revision_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "source_relationship_confirmation_sets_heat_latest_idx": {
+          "columns": [
+            "organization_id",
+            "source_entity_id",
+            "semantic_effective_at",
+            "public_change_sequence",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "source_relationship_confirmation_sets_latest_semantic_idx": {
+          "columns": [
+            "organization_id",
+            "source_revision_id",
+            "source_entity_id",
+            "semantic_effective_at",
+            "public_change_sequence",
+            "id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "source_relationship_confirmation_sets_release_idx": {
+          "columns": [
+            "organization_id",
+            "source_revision_id",
+            "source_entity_id",
+            "public_change_sequence"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "source_relationship_confirmation_sets_semantic_unique": {
+          "columns": [
+            "organization_id",
+            "source_revision_id",
+            "semantic_observation_id"
+          ],
+          "nullsNotDistinct": false
+        },
+        "source_relationship_confirmation_sets_tenant_unique": {
+          "columns": [
+            "id",
+            "organization_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "source_relationship_confirmation_sets_change_fk": {
+          "columns": [
+            "organization_id",
+            "public_change_sequence"
+          ],
+          "referencedTable": "public_change_causes",
+          "referencedColumns": [
+            "organization_id",
+            "sequence"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_entity_fk": {
+          "columns": [
+            "source_entity_id",
+            "organization_id"
+          ],
+          "referencedTable": "canonical_entities",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_provider_fk": {
+          "columns": [
+            "provider_id",
+            "organization_id"
+          ],
+          "referencedTable": "provider_sources",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_record_fk": {
+          "columns": [
+            "source_record_id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "referencedTable": "source_record_identities",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_revision_fk": {
+          "columns": [
+            "source_revision_id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "referencedTable": "provider_source_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_revision_origin_fk": {
+          "columns": [
+            "source_canonical_revision_id",
+            "source_entity_id",
+            "organization_id"
+          ],
+          "referencedTable": "canonical_revisions",
+          "referencedColumns": [
+            "id",
+            "entity_id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmation_sets_semantic_fk": {
+          "columns": [
+            "semantic_observation_id",
+            "organization_id",
+            "source_record_id",
+            "normalized_contract_version"
+          ],
+          "referencedTable": "source_semantic_observations",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "source_record_id",
+            "normalized_contract_version"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "source_relationship_confirmation_sets_contract_check": {
+          "value": "(normalized_contract_version = 'packscout.provider-observation.v1'::text)"
+        },
+        "source_relationship_confirmation_sets_count_check": {
+          "value": "((relationship_count >= 1) AND (relationship_count <= 2))"
+        },
+        "source_relationship_confirmation_sets_hash_check": {
+          "value": "((declaration_hash ~ '^[0-9a-f]{64}$'::text) AND (source_canonical_content_hash ~ '^[0-9a-f]{64}$'::text))"
+        },
+        "source_relationship_confirmation_sets_mode_check": {
+          "value": "(confirmation_mode = ANY (ARRAY['native'::text, 'adopted'::text]))"
+        },
+        "source_relationship_confirmation_sets_timestamp_check": {
+          "value": "((date_trunc('milliseconds'::text, semantic_effective_at) = semantic_effective_at) AND (date_trunc('milliseconds'::text, confirmed_at) = confirmed_at) AND (date_trunc('milliseconds'::text, created_at) = created_at))"
+        }
+      }
+    },
+    "source_relationship_confirmations": {
+      "columns": {
+        "canonical_relationship_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "confirmation_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "confirmation_set_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "heat_effective_public_change_sequence": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "relationship_kind": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_entity_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_external_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_platform_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "target_record_kind": {
+          "type": "canonical_record_kind",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "source_relationship_confirmations_effective_cursor_idx": {
+          "columns": [
+            "organization_id",
+            "heat_effective_public_change_sequence",
+            "confirmation_public_change_sequence",
+            "confirmation_set_id",
+            "canonical_relationship_id"
+          ],
+          "unique": false,
+          "where": "(heat_effective_public_change_sequence IS NOT NULL)"
+        },
+        "source_relationship_confirmations_relationship_idx": {
+          "columns": [
+            "organization_id",
+            "canonical_relationship_id",
+            "confirmation_set_id"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "source_relationship_confirmations_set_kind_idx": {
+          "columns": [
+            "organization_id",
+            "confirmation_set_id",
+            "relationship_kind"
+          ],
+          "unique": false,
+          "where": null
+        },
+        "source_relationship_confirmations_target_idx": {
+          "columns": [
+            "organization_id",
+            "target_platform_key",
+            "target_record_kind",
+            "target_external_id",
+            "confirmation_set_id"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "source_relationship_confirmations_kind_unique": {
+          "columns": [
+            "confirmation_set_id",
+            "organization_id",
+            "relationship_kind"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "source_relationship_confirmations_relationship_fk": {
+          "columns": [
+            "canonical_relationship_id",
+            "organization_id",
+            "source_entity_id",
+            "relationship_kind",
+            "target_platform_key",
+            "target_record_kind",
+            "target_external_id"
+          ],
+          "referencedTable": "canonical_relationships",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "source_entity_id",
+            "relationship_kind",
+            "target_platform_key",
+            "target_record_kind",
+            "target_external_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_relationship_confirmations_set_fk": {
+          "columns": [
+            "confirmation_set_id",
+            "organization_id"
+          ],
+          "referencedTable": "source_relationship_confirmation_sets",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "source_relationship_confirmations_heat_sequence_check": {
+          "value": "((confirmation_public_change_sequence > 0) AND ((heat_effective_public_change_sequence IS NULL) OR (heat_effective_public_change_sequence >= confirmation_public_change_sequence)))"
+        },
+        "source_relationship_confirmations_kind_check": {
+          "value": "(((relationship_kind = 'pack'::text) AND (target_record_kind = 'pack'::canonical_record_kind)) OR ((relationship_kind = 'card'::text) AND (target_record_kind = 'catalog_asset'::canonical_record_kind)))"
+        },
+        "source_relationship_confirmations_timestamp_check": {
+          "value": "(date_trunc('milliseconds'::text, created_at) = created_at)"
         }
       }
     },

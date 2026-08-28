@@ -481,3 +481,33 @@ test("source testing is offered only for draft and disabled lifecycle states", a
     assert.equal(hasTest, state === "draft" || state === "disabled", state);
   }
 });
+
+test("an active source exposes an idempotent promotion-identity reassert", async (context) => {
+  const activeCatalog: ProviderSourceAdminCatalog = {
+    ...catalog,
+    sources: catalog.sources.map((source) => ({ ...source, state: "active" })),
+  };
+  let command: string | null = null;
+  const renderer = await renderPage(
+    <ProviderSourceLedger
+      catalog={activeCatalog}
+      canManage
+      pendingKey={null}
+      onCreate={async () => true}
+      onCommand={(action) => { command = action; }}
+      onInterval={async () => true}
+    />,
+  );
+  cleanupPage(context, renderer);
+
+  await act(async () => {
+    findButton(renderer, "Reassert promotion identity").click();
+  });
+  assert.equal(command, "resume");
+  assert.equal(
+    [...renderer.container.querySelectorAll("button")].some((button) =>
+      button.textContent?.startsWith("Resume from") === true
+    ),
+    false,
+  );
+});

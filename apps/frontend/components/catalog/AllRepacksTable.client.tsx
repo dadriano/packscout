@@ -37,6 +37,7 @@ type AllRepacksTableProps = Readonly<{
   onSort: (sort: PublicRepackSort, direction: CatalogSortDirection) => void;
   onCopyPromo: (publicRepackId: string) => void;
   onOpenRepack: (publicRepackId: string) => void;
+  repackHrefById: ReadonlyMap<string, string>;
   controls?: ReactNode;
 }>;
 
@@ -69,6 +70,7 @@ function RepackRow({
   onSelect,
   onCopyPromo,
   onOpenRepack,
+  repackHref,
   desiredChase,
   desiredSearchActive,
 }: Readonly<{
@@ -77,6 +79,7 @@ function RepackRow({
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
   onCopyPromo: (publicRepackId: string) => void;
   onOpenRepack: (publicRepackId: string) => void;
+  repackHref: string | null;
   desiredChase: PublicRepackChase | null;
   desiredSearchActive: boolean;
 }>) {
@@ -195,7 +198,17 @@ function RepackRow({
         )}
       </td>
       <td>
-        {actions.repackLink ? (
+        {actions.repackLink && repackHref ? (
+          <a
+            className={styles.inlineAction}
+            href={repackHref}
+            onClick={() => onOpenRepack(repack.publicRepackId)}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Open repack <span aria-hidden="true">↗</span>
+          </a>
+        ) : actions.repackLink ? (
           <button className={styles.inlineAction} onClick={() => onOpenRepack(repack.publicRepackId)} type="button">
             Open repack <span aria-hidden="true">↗</span>
           </button>
@@ -214,6 +227,7 @@ export function AllRepacksTable({
   onSort,
   onCopyPromo,
   onOpenRepack,
+  repackHrefById,
   controls,
 }: AllRepacksTableProps) {
   const { activeQuery } = page;
@@ -321,6 +335,7 @@ export function AllRepacksTable({
                 onOpenRepack={onOpenRepack}
                 onSelect={onSelect}
                 repack={repack}
+                repackHref={repackHrefById.get(repack.publicRepackId) ?? null}
                 selected={repack.publicRepackId === selectedPublicRepackId}
               />
             ))}

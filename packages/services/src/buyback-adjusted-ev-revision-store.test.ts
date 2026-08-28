@@ -35,6 +35,7 @@ const ids = {
   organization: "40000000-0000-4000-8000-000000000001",
   provider: "40000000-0000-4000-8000-000000000002",
   configuration: "40000000-0000-4000-8000-000000000003",
+  sourceInstance: "40000000-0000-4000-8000-000000000004",
   revision: "40000000-0000-4000-8000-0000000000aa",
 } as const;
 
@@ -50,7 +51,7 @@ function identityFor(
     sourceRevisionId: input.observation.sourceRevisionId,
     sourceManifestSha256: input.observation.sourceManifestSha256,
     observationCoherence: input.observation.coherenceKind,
-    configurationRevisionId: ids.configuration,
+    providerSourceRevisionId: ids.configuration,
   };
 }
 
@@ -70,7 +71,7 @@ function availableCommand(
   return {
     organizationId: ids.organization,
     providerId: ids.provider,
-    configurationRevisionId: ids.configuration,
+    providerSourceRevisionId: ids.configuration,
     calculation,
     confidenceEvaluation: evaluation,
     effectiveFingerprint: computePackScoutBuybackEvEffectiveFingerprintV1({
@@ -132,7 +133,7 @@ function gateFailedFreshCommand(): PersistPackScoutBuybackEvRevisionCommandV1 {
   return {
     organizationId: ids.organization,
     providerId: ids.provider,
-    configurationRevisionId: ids.configuration,
+    providerSourceRevisionId: ids.configuration,
     calculation,
     confidenceEvaluation: null,
     effectiveFingerprint: computePackScoutBuybackEvEffectiveFingerprintV1({
@@ -167,7 +168,8 @@ class FakePort implements PackScoutBuybackEvRevisionPersistencePortV1 {
       revisionId: ids.revision,
       organizationId: input.organizationId,
       providerId: input.providerId,
-      configurationRevisionId: input.configurationRevisionId,
+      providerSourceRevisionId: input.providerSourceRevisionId,
+      sourceInstanceId: ids.sourceInstance,
       platformKey: input.platformKey,
       productKey: input.productKey,
       productRevisionId: input.productRevisionId,

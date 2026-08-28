@@ -35,6 +35,7 @@ export const RECOMPUTATION_TEST_IDS = {
   organization: "41000000-0000-4000-8000-000000000001",
   provider: "41000000-0000-4000-8000-000000000002",
   configuration: "41000000-0000-4000-8000-000000000003",
+  sourceInstance: "41000000-0000-4000-8000-000000000004",
 } as const;
 
 export function completeEvidenceOutcome(
@@ -111,7 +112,7 @@ export function recomputationCommand(
   return {
     organizationId: RECOMPUTATION_TEST_IDS.organization,
     providerId: RECOMPUTATION_TEST_IDS.provider,
-    configurationRevisionId: RECOMPUTATION_TEST_IDS.configuration,
+    providerSourceRevisionId: RECOMPUTATION_TEST_IDS.configuration,
     evidence,
     calculatedAt,
     ...overrides,
@@ -188,7 +189,8 @@ implements PackScoutBuybackEvRevisionPersistencePortV1 {
       revisionId: `41000000-0000-4000-8000-${String(this.#revisionSequence).padStart(12, "0")}`,
       organizationId: input.organizationId,
       providerId: input.providerId,
-      configurationRevisionId: input.configurationRevisionId,
+      providerSourceRevisionId: input.providerSourceRevisionId,
+      sourceInstanceId: RECOMPUTATION_TEST_IDS.sourceInstance,
       platformKey: input.platformKey,
       productKey: input.productKey,
       productRevisionId: input.productRevisionId,

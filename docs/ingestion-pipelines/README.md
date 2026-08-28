@@ -63,17 +63,17 @@ Atomic importer ----------- evidence + canonical data + EV work + cursor
 
 ## Interpreting the storage estimate
 
-Do not use the 128.56 TB maximum-throughput scenario as a prediction for a local
-backfill. The artifact measured at 2026-08-28T11:37:55.470Z pins initial pages
+Do not use the 158.43 TB maximum-throughput scenario as a prediction for a local
+backfill. The artifact measured at 2026-08-28T14:20:28.505Z pins initial pages
 to 500 records, then assumes all four one-minute ongoing poll attempts return
 the configurable maximum of 5,000 new records for 365 days. It projects
-128,564,163,101,465 bytes and requires 171,418,884,135,287 bytes free with
-headroom. The measured 994,662,584,320-byte host volume had 822,147,469,312
-bytes used (about 82.66%) and 172,515,115,008 bytes available, so the committed
+158,428,176,709,145 bytes and requires 211,237,568,945,527 bytes free with
+headroom. The measured 994,662,584,320-byte host volume had 818,673,340,416
+bytes used (about 82.31%) and 175,989,243,904 bytes available, so the committed
 Task010 decision is rejected. The first live `packscout_dev` sample instead measured 7,024 marginal bytes per
 committed record and 8,123 bytes per record including fixed database overhead.
 At the dated 14,526,877-record provider baseline, that is a provisional
-136.1–157.3 GB planning range with 25% free headroom, not 128.56 TB. See the
+136.1–157.3 GB planning range with 25% free headroom, not 158.43 TB. See the
 [live capacity observation](../provider-source-live-capacity-observation-2026-08-24.md)
 for the samples, assumptions, and remeasurement points.
 
@@ -224,9 +224,9 @@ For each stable provider root:
 
 Activation pins the exact source, adapter, normalized contract, mapper,
 connection revision, schedule, and cursor generation. The DataForrest runtime
-accepts only the current v1/v1/v1 adapter, observation, and mapper tuple. During
-early development, changing those semantic pins requires the guarded full local
-database reset and a complete reimport; it is not an in-place source operation.
+accepts only the current adapter-v3 / observation-v1 / mapper-v1 tuple. A
+database containing adapter-v1 or adapter-v2 pins must use the guarded full
+local reset and complete reimport; it is not an in-place source operation.
 
 ### 3. Begin ingestion
 

@@ -707,4 +707,3 @@ export const CERTIFICATION_PROVIDER_FIXTURES: readonly CertificationProviderFixt
       },
     },
   ]);
-

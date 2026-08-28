@@ -69,6 +69,61 @@ function retentionRunner(calls?: string[]) {
   };
 }
 
+test("startup prerequisite blocks every sibling lane and aborts cooperatively", async () => {
+  const calls: string[] = [];
+  let announceStarted!: () => void;
+  const prerequisiteStarted = new Promise<void>((resolve) => {
+    announceStarted = resolve;
+  });
+  const runtime = new ProviderWorkerRuntime({
+    startupPrerequisite: {
+      async run(signal) {
+        calls.push("prerequisite.start");
+        announceStarted();
+        await new Promise<never>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => reject(new Error("cooperative prerequisite abort")),
+            { once: true },
+          );
+        });
+      },
+    },
+    scheduler: { async runOnce() { calls.push("scheduler.run"); return { kind: "idle" }; } },
+    imports: {
+      async executeImport(): Promise<never> { throw new Error("not reached"); },
+      async executeNextImport() { calls.push("imports.run"); return { kind: "idle" }; },
+    },
+    promotion: {
+      async start() { calls.push("promotion.start"); },
+      stop() { calls.push("promotion.stop"); },
+    },
+    heatPromotion: {
+      async start() { calls.push("heat.start"); },
+      stop() { calls.push("heat.stop"); },
+    },
+    catalogRetention: {
+      async start() { calls.push("catalog-retention.start"); },
+      stop() { calls.push("catalog-retention.stop"); },
+    },
+    retention: retentionRunner(calls),
+    logger: capturingLogger([]),
+    workerId: "worker:startup-prerequisite",
+  });
+
+  const started = runtime.start();
+  await prerequisiteStarted;
+  assert.deepEqual(calls, ["prerequisite.start"]);
+  runtime.stop();
+  await started;
+  assert.equal(calls.includes("promotion.start"), false);
+  assert.equal(calls.includes("heat.start"), false);
+  assert.equal(calls.includes("catalog-retention.start"), false);
+  assert.equal(calls.includes("scheduler.run"), false);
+  assert.equal(calls.includes("imports.run"), false);
+  assert.equal(calls.includes("retention.run"), false);
+});
+
 test("a worker cycle composes durable scheduling, shared import execution, and health", async () => {
   const calls: string[] = [];
   let claimAvailable = true;

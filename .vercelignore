@@ -1,0 +1,8 @@
+# Generated build output belongs to Vercel's remote build, not the source upload.
+**/.next
+**/.next-*
+**/dist
+**/coverage
+**/*.tsbuildinfo
+apps/admin/public/index.html
+apps/admin/public/assets

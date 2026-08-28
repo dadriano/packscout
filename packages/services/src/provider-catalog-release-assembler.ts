@@ -174,6 +174,9 @@ function validateSnapshotEcho(
     snapshot.revisions.some(
       ({ platformKey }) => platformKey !== checkpoint.platformKey,
     ) ||
+    snapshot.assetPackAssociations.some(
+      ({ platformKey }) => platformKey !== checkpoint.platformKey,
+    ) ||
     snapshot.repackIdentities.some(
       ({ platformKey }) => platformKey !== checkpoint.platformKey,
     )
@@ -247,13 +250,11 @@ function validateReadinessAndRows(
 ): ProviderCatalogReleaseBlockReasonV1 | null {
   if (
     snapshot.readiness.lifecycleState !== "active" ||
-    typeof snapshot.readiness.configurationRevisionId !== "string" ||
-    snapshot.readiness.configurationRevisionId.length === 0 ||
+    typeof snapshot.readiness.sourceRevisionId !== "string" ||
+    snapshot.readiness.sourceRevisionId.length === 0 ||
     snapshot.readiness.lifecycleSequence <= 0n ||
     snapshot.readiness.lifecycleSequence > checkpoint.settledSequence ||
-    !finiteDate(snapshot.readiness.completedBackfillAt) ||
-    snapshot.readiness.completedBackfillAt.getTime() >
-      checkpoint.settledAt.getTime()
+    !finiteDate(snapshot.readiness.completedBackfillAt)
   ) return "INITIAL_BACKFILL_INCOMPLETE";
   if (!finiteDate(snapshot.observation.lastSuccessfulObservationAt)) {
     return "PROVIDER_SOURCE_INVALID";
@@ -275,6 +276,20 @@ function validateReadinessAndRows(
       revision.acceptedAt.getTime() > checkpoint.settledAt.getTime()
     ) return "PROVIDER_SOURCE_INVALID";
     revisionKeys.add(revisionKey);
+  }
+  const associationSources = new Set<string>();
+  for (const association of snapshot.assetPackAssociations) {
+    if (
+      associationSources.has(association.sourceEntityId) ||
+      association.sourceEntityId.length === 0 ||
+      association.assetExternalId.length === 0 ||
+      association.packExternalId.length === 0 ||
+      association.publicChangeSequence <= 0n ||
+      association.publicChangeSequence > checkpoint.settledSequence ||
+      !finiteDate(association.associatedAt) ||
+      association.associatedAt.getTime() > checkpoint.settledAt.getTime()
+    ) return "PROVIDER_SOURCE_INVALID";
+    associationSources.add(association.sourceEntityId);
   }
   const identityKeys = new Set<string>();
   for (const identity of snapshot.repackIdentities) {
@@ -364,6 +379,7 @@ export class ProviderCatalogReleaseAssembler {
         configuration: configured.configuration,
         platformKey: checkpoint.platformKey,
         revisions: snapshot.revisions,
+        assetPackAssociations: snapshot.assetPackAssociations,
         repackIdentities: snapshot.repackIdentities,
       });
     } catch (error) {

@@ -40,7 +40,7 @@ export interface ProviderCatalogReleaseConfigurationSnapshot {
 export interface ProviderCatalogReleaseReadinessSnapshot {
   readonly lifecycleState: string;
   readonly lifecycleSequence: bigint;
-  readonly configurationRevisionId: string;
+  readonly sourceRevisionId: string;
   readonly completedBackfillAt: Date;
 }
 
@@ -66,6 +66,21 @@ export interface ProviderCatalogCanonicalRevisionSnapshot {
   readonly publicChangeSequence: bigint;
 }
 
+/**
+ * One exact V1 card-to-pack association derived from the paired `card` and
+ * `pack` relationships owned by a canonical pull entity. The source identity
+ * remains present so malformed one-pull-to-many-target shapes fail closed,
+ * while multiple pull entities may independently establish the same pair.
+ */
+export interface ProviderCatalogAssetPackAssociationSnapshot {
+  readonly sourceEntityId: string;
+  readonly platformKey: string;
+  readonly assetExternalId: string;
+  readonly packExternalId: string;
+  readonly associatedAt: Date;
+  readonly publicChangeSequence: bigint;
+}
+
 export interface ProviderGovernedPublicRepackIdentity {
   readonly platformKey: string;
   readonly packExternalId: string;
@@ -80,6 +95,8 @@ export interface ProviderCatalogReleaseSourceSnapshot {
   readonly configuration: ProviderCatalogReleaseConfigurationSnapshot;
   readonly readiness: ProviderCatalogReleaseReadinessSnapshot;
   readonly revisions: readonly ProviderCatalogCanonicalRevisionSnapshot[];
+  readonly assetPackAssociations:
+    readonly ProviderCatalogAssetPackAssociationSnapshot[];
   readonly repackIdentities: readonly ProviderGovernedPublicRepackIdentity[];
   readonly observation: ProviderCatalogReleaseObservationSnapshot;
 }

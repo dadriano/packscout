@@ -23,6 +23,7 @@ import type {
   CanonicalEstimatedEvProjectionContent,
 } from "./estimated-ev-projection-contracts.ts";
 import { publicConfidenceLimitationsFromPipeline } from "./public-confidence-projection.ts";
+import { configuredPublicRepackLink } from "./public-repack-link.ts";
 import {
   ProviderCatalogProjectionAssemblyError,
   assertProviderCatalogEstimateDependencies as assertEstimateDependencies,
@@ -39,6 +40,7 @@ import {
   type PublicAvailabilityPackContent,
 } from "./provider-catalog-release-public-projection-validation.ts";
 import type {
+  ProviderCatalogAssetPackAssociationSnapshot,
   ProviderCatalogCanonicalRevisionSnapshot,
   ProviderGovernedPublicRepackIdentity,
 } from "./provider-catalog-release-types.ts";
@@ -412,6 +414,7 @@ export function projectProviderCatalogRelease(input: {
   configuration: ApprovedPublicCatalogConfigurationV1;
   platformKey: string;
   revisions: readonly ProviderCatalogCanonicalRevisionSnapshot[];
+  assetPackAssociations: readonly ProviderCatalogAssetPackAssociationSnapshot[];
   repackIdentities: readonly ProviderGovernedPublicRepackIdentity[];
 }): ProviderCatalogPublicProjection {
   const platform = input.configuration.platforms.find(
@@ -526,19 +529,68 @@ export function projectProviderCatalogRelease(input: {
     }
   }
 
+  const packIdsByAsset = new Map<string, Set<string>>();
+  const associationSourceIds = new Set<string>();
+  const firstAssociationByPair = new Map<
+    string,
+    ProviderCatalogAssetPackAssociationSnapshot
+  >();
+  for (const association of input.assetPackAssociations) {
+    if (
+      association.platformKey !== input.platformKey ||
+      association.sourceEntityId.length === 0 ||
+      association.assetExternalId.length === 0 ||
+      association.packExternalId.length === 0 ||
+      association.publicChangeSequence <= 0n ||
+      associationSourceIds.has(association.sourceEntityId)
+    ) invalid("CANONICAL_PROJECTION_INVALID");
+    associationSourceIds.add(association.sourceEntityId);
+    if (
+      !packByExternalId.has(association.packExternalId) ||
+      !configuredRepackIdentities.has(
+        key(association.platformKey, association.packExternalId),
+      )
+    ) invalid("PUBLIC_REFERENCE_INVALID");
+    finiteDate(association.associatedAt);
+    const pairKey = key(association.assetExternalId, association.packExternalId);
+    const current = firstAssociationByPair.get(pairKey);
+    if (
+      current === undefined ||
+      association.publicChangeSequence < current.publicChangeSequence ||
+      association.publicChangeSequence === current.publicChangeSequence &&
+        (association.associatedAt.getTime() < current.associatedAt.getTime() ||
+          association.associatedAt.getTime() === current.associatedAt.getTime() &&
+          compareProviderCatalogCodeUnits(
+            association.sourceEntityId,
+            current.sourceEntityId,
+          ) < 0)
+    ) {
+      firstAssociationByPair.set(pairKey, association);
+    }
+  }
+  for (const association of firstAssociationByPair.values()) {
+    const packIds = packIdsByAsset.get(association.assetExternalId) ??
+      new Set<string>();
+    packIds.add(association.packExternalId);
+    packIdsByAsset.set(association.assetExternalId, packIds);
+  }
+
   const collectibles: PublicCollectible[] = [];
   const collectibleByAsset = new Map<string, PublicCollectible>();
   const assetsByPack = new Map<string, ProviderCatalogCanonicalRevisionSnapshot[]>();
+  const associatedAssetIds = new Set<string>();
   for (const revision of assets) {
     const content = assetContent(revision.content);
-    if (content.relatedPackExternalId === null) continue;
-    const relatedPack = packByExternalId.get(content.relatedPackExternalId);
-    if (relatedPack === undefined || !configuredRepackIdentities.has(
-      key(revision.platformKey, content.relatedPackExternalId),
-    )) invalid("PUBLIC_REFERENCE_INVALID");
-    const related = assetsByPack.get(content.relatedPackExternalId) ?? [];
-    related.push(revision);
-    assetsByPack.set(content.relatedPackExternalId, related);
+    const relatedPackIds = packIdsByAsset.get(revision.externalId);
+    if (relatedPackIds === undefined) continue;
+    associatedAssetIds.add(revision.externalId);
+    for (const packExternalId of [...relatedPackIds].sort(
+      compareProviderCatalogCodeUnits,
+    )) {
+      const related = assetsByPack.get(packExternalId) ?? [];
+      related.push(revision);
+      assetsByPack.set(packExternalId, related);
+    }
     const mapping = collectibleMappings.get(key(revision.platformKey, revision.externalId));
     if (mapping === undefined || content.name === null || content.name.trim().length === 0) {
       invalid("PUBLIC_IDENTITY_MAPPING_MISSING");
@@ -594,6 +646,9 @@ export function projectProviderCatalogRelease(input: {
     collectibles.push(collectible);
     markContributingRevision(revision);
     collectibleByAsset.set(key(revision.platformKey, revision.externalId), collectible);
+  }
+  if (associatedAssetIds.size !== packIdsByAsset.size) {
+    invalid("PUBLIC_REFERENCE_INVALID");
   }
   collectibles.sort((left, right) => compareProviderCatalogCodeUnits(
     left.publicCollectibleId,
@@ -708,8 +763,10 @@ export function projectProviderCatalogRelease(input: {
       },
     );
     repackChases.push(...chases);
-    const categoryIds = [...categoryIdsFor(platform, content.category)]
-      .sort(compareProviderCatalogCodeUnits);
+    const categoryIds = [...new Set([
+      ...categoryIdsFor(platform, content.category),
+      ...chases.flatMap(({ collectible }) => collectible.publicCategoryIds),
+    ])].sort(compareProviderCatalogCodeUnits);
     if (categoryIds.some((categoryId) => !categoryById.has(categoryId))) {
       invalid("PUBLIC_REFERENCE_INVALID");
     }
@@ -742,6 +799,11 @@ export function projectProviderCatalogRelease(input: {
     const promo = availability === "available"
       ? platform.vendor.publicPromo ?? undefined
       : undefined;
+    const repackLink = configuredPublicRepackLink({
+      identity: configuredIdentity,
+      platform,
+      available: availability === "available",
+    }) ?? undefined;
     const packScout = packScoutEv({
       estimate: estimateEntry?.content ?? null,
       evInput,
@@ -808,10 +870,16 @@ export function projectProviderCatalogRelease(input: {
         evidenceCompleteness: evInput?.evidenceCompleteness ?? "unknown",
         probabilityCoverageBasisPoints,
       },
-      actionAvailability: { promo: promo !== undefined, repackLink: false },
+      actionAvailability: {
+        promo: promo !== undefined,
+        repackLink: repackLink !== undefined,
+      },
       sourceUpdatedAt: iso(revision.sourceUpdatedAt),
       description: content.description?.trim() || null,
-      actions: promo === undefined ? {} : { promo },
+      actions: {
+        ...(promo === undefined ? {} : { promo }),
+        ...(repackLink === undefined ? {} : { repackLink }),
+      },
     });
     markContributingRevision(revision);
     if (evInputEntry !== null) {

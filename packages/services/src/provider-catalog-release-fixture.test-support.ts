@@ -140,6 +140,26 @@ export function providerFixtureSnapshot(
     revision: checkpoint.sharedConfigurationEpoch.revision,
   });
   const source = fixtureSnapshot({ alphaName: options.alphaName });
+  let assetPackAssociations = source.revisions.flatMap((revision) => {
+    if (
+      revision.recordKind !== "catalog_asset" ||
+      (revision.platformKey !== checkpoint.platformKey &&
+        options.includeForeignRows !== true)
+    ) return [];
+    const relatedPackExternalId = (
+      revision.content as Record<string, unknown>
+    ).relatedPackExternalId;
+    if (typeof relatedPackExternalId !== "string") return [];
+    return [{
+      sourceEntityId:
+        `${revision.platformKey}-pull-${revision.externalId}-${relatedPackExternalId}`,
+      platformKey: revision.platformKey,
+      assetExternalId: revision.externalId,
+      packExternalId: relatedPackExternalId,
+      associatedAt: revision.acceptedAt,
+      publicChangeSequence: revision.publicChangeSequence,
+    }];
+  });
   let revisions: ProviderCatalogCanonicalRevisionSnapshot[] = source.revisions
     .filter(({ platformKey }) =>
       platformKey === checkpoint.platformKey || options.includeForeignRows === true)
@@ -152,6 +172,18 @@ export function providerFixtureSnapshot(
           : `${revision.platformKey}-${revision.recordKind}-revision`,
     }));
   revisions = revisions.map((revision) => {
+    if (
+      revision.platformKey === checkpoint.platformKey &&
+      revision.recordKind === "catalog_asset"
+    ) {
+      return {
+        ...revision,
+        content: {
+          ...(revision.content as Record<string, unknown>),
+          relatedPackExternalId: null,
+        },
+      };
+    }
     if (
       revision.platformKey !== checkpoint.platformKey ||
       revision.recordKind !== "pack"
@@ -180,6 +212,7 @@ export function providerFixtureSnapshot(
     platformKey === checkpoint.platformKey || options.includeForeignRows === true);
   if (options.reverseRows === true) {
     revisions = [...revisions].reverse();
+    assetPackAssociations = [...assetPackAssociations].reverse();
     repackIdentities = [...repackIdentities].reverse();
   }
   return {
@@ -195,10 +228,11 @@ export function providerFixtureSnapshot(
     readiness: {
       lifecycleState: options.lifecycleState ?? "active",
       lifecycleSequence: 2n,
-      configurationRevisionId: "60000000-0000-4000-8000-000000000001",
+      sourceRevisionId: "60000000-0000-4000-8000-000000000001",
       completedBackfillAt: options.completedBackfillAt ?? observed,
     },
     revisions,
+    assetPackAssociations,
     repackIdentities,
     observation: {
       lastSuccessfulObservationAt:

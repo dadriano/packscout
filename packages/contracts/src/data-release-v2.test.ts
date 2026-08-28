@@ -7,6 +7,7 @@ import {
   SYNTHETIC_FOCUSED_REPACK_ID,
   SYNTHETIC_MIXED_REPACK_ID,
   SYNTHETIC_POKEMON_CATEGORY_ID,
+  SYNTHETIC_ROLEX_ID,
   SYNTHETIC_WATCHES_CATEGORY_ID,
 } from "./__fixtures__/data-release-v2.fixture.ts";
 import {
@@ -628,4 +629,41 @@ test("either classification dimension can prove mixed while neither yields unkno
   );
   unknown.metadata.repackChaseCount = unknown.repackChases.length;
   assert.equal(safeParseDataReleaseManifestV2(unknown).success, true);
+});
+
+test("same-type cross-branch chases require the repack's complete category union", () => {
+  const complete = structuredClone(buildSyntheticDataReleaseV2());
+  const mixed = complete.repacks.find(
+    ({ publicRepackId }) => publicRepackId === SYNTHETIC_MIXED_REPACK_ID,
+  )!;
+  const rolex = complete.collectibles.find(
+    ({ publicCollectibleId }) => publicCollectibleId === SYNTHETIC_ROLEX_ID,
+  )!;
+  rolex.collectibleType = "card";
+  for (const chase of complete.repackChases) {
+    if (chase.publicCollectibleId === SYNTHETIC_ROLEX_ID) {
+      chase.collectible.collectibleType = "card";
+    }
+  }
+  assert.ok(mixed.topChase);
+  mixed.topChase.collectible.collectibleType = "card";
+  mixed.collectibleTypes = ["card"];
+  mixed.contentSummary.collectibleTypeCount = 1;
+
+  assert.equal(safeParseDataReleaseManifestV2(complete).success, true);
+
+  const incomplete = structuredClone(complete);
+  const incompleteMixed = incomplete.repacks.find(
+    ({ publicRepackId }) => publicRepackId === SYNTHETIC_MIXED_REPACK_ID,
+  )!;
+  incompleteMixed.categories = incompleteMixed.categories.filter(
+    ({ publicCategoryId }) => publicCategoryId !== SYNTHETIC_WATCHES_CATEGORY_ID,
+  );
+  incompleteMixed.contentSummary.categoryCount =
+    incompleteMixed.categories.length;
+  assert.ok(
+    rejectionMessages(incomplete).includes(
+      "data_release.chase_classification_mismatch",
+    ),
+  );
 });

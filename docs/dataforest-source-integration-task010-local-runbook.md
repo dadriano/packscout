@@ -11,10 +11,10 @@ owns only the guarded Task010 target, configuration, first backfill, and final
 reconciliation procedure.
 
 DataForrest has one production identity: source type
-`dataforrest-events-v1`, adapter `dataforrest-events-adapter-v1`, normalized
+`dataforrest-events-v1`, adapter `dataforrest-events-adapter-v3`, normalized
 observation `packscout.provider-observation.v1`, and mapper revision `1`.
 Historical adapter, observation, and mapper revisions are not upgrade inputs.
-Any local database that contains a v2 or v3 pin must be rebuilt before this
+Any local database that contains a v1 or v2 pin must be rebuilt before this
 procedure is used.
 
 For the normal development database, stop admin and worker processes and run
@@ -35,12 +35,12 @@ password. Cursor reset, adapter upgrade, source replacement, and selective
 table deletion are not clean-slate substitutes.
 
 **Current Task 010 admission state (artifact measured
-2026-08-28T11:37:55.470Z): BLOCKED.** The artifact projects
-128,564,163,101,465 bytes of retained growth and requires
-171,418,884,135,287 available bytes with headroom. The measured host had a
-994,662,584,320-byte volume with 822,147,469,312 bytes used (about 82.66%) and
-172,515,115,008 bytes available, so the preflight rejected it for both the
-171,246,369,020,279-byte free-space deficit and the independently enforced 80%
+2026-08-28T14:20:28.505Z): BLOCKED.** The artifact projects
+158,428,176,709,145 bytes of retained growth and requires
+211,237,568,945,527 available bytes with headroom. The measured host had a
+994,662,584,320-byte volume with 818,673,340,416 bytes used (about 82.31%) and
+175,989,243,904 bytes available, so the preflight rejected it for both the
+211,061,579,701,623-byte free-space deficit and the independently enforced 80%
 fence. The stress model pins the initial backfill to 500 records per page and
 reserves the configurable 5,000-record maximum for every ongoing poll attempt;
 it is not the operational estimate for the current `packscout_dev` import. For
@@ -193,12 +193,12 @@ receipt, and four-source backfill topology. The topology gate requires every
 active source schedule revision to remain pinned to exactly 500 records per
 request. Any failed recheck stops before the supervisor can claim work.
 
-The backfill start requires exactly one active tested profile whose configured
-provider maximum is two. Beneath that maximum, PackScout operates each
-independent platform request lane at exactly one request. Every connection revision must use DataForrest
-adapter v1, and exactly four tested,
-paused-or-active sources must have only the adapter-v1, observation-v1,
-mapper-v1 tuple across every revision. Any v2, v3, unknown, or mixed tuple
+The backfill start requires exactly one active tested profile whose approved
+per-platform hard cap is no greater than two. PackScout's runtime operates each
+platform lane at exactly one request beneath that hard cap. Every connection
+revision must use DataForrest adapter v3, and exactly four tested,
+paused-or-active sources must have only the adapter-v3, observation-v1,
+mapper-v1 tuple across every revision. Any v1, v2, unknown, or mixed tuple
 fails closed before the supervisor starts. In Operations, select **Resume** for
 all four sources; Resume makes each lane due immediately.
 The dedicated Task 010 runner forces `PACKSCOUT_SOURCE_EXECUTION_SLOTS=4`, even

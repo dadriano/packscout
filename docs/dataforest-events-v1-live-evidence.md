@@ -149,30 +149,33 @@ stable `dataforrest-<platform>-records-v1` provider identity namespace. Changing
 that namespace or its evidenced record-ID scopes requires a separately designed
 identity migration.
 
-The sole current V1 adapter copies the two timestamps, outer relationships,
-event code, amount, currency, payment method, and tri-state availability into
-`packscout.provider-observation.v1`.
+The current adapter is `dataforrest-events-adapter-v3`; the provider endpoint
+and normalized contract remain V1. It copies the two timestamps, outer
+relationships, event code, amount, currency, payment method, and tri-state
+availability into `packscout.provider-observation.v1`.
 
 Local capture evidence reviewed on 2026-08-24 showed catalog pack names at
 `data.name` for Collector Crypt, Phygitals, and ClutchPacks. Their pack records
-therefore read exactly `data.name`; Courtyard packs and every non-pack kind read
-exactly `data.provider_label`. There is no cross-field fallback: a missing,
-null, or malformed declared field remains absent or malformed even when the
-other field is present. Every other nested key stays protected provenance. The
-mapper never receives the native object, and this provider-local extraction
-does not add provider-specific canonical rules to the generic mapper.
+therefore read exactly `data.name`; Courtyard packs and non-ClutchPacks card
+kind records read exactly their declared provider label. Historical adapter v2
+read ClutchPacks catalog-card display facts from the exact `data.asset`
+allowlist documented in
+[`ingestion-pipelines/dataforrest-clutchpacks-card-v2.md`](ingestion-pipelines/dataforrest-clutchpacks-card-v2.md).
+Adapter v3 retains those card semantics and adds the exact ClutchPacks pack
+allowlist documented in
+[`ingestion-pipelines/dataforrest-clutchpacks-pack-v3.md`](ingestion-pipelines/dataforrest-clutchpacks-pack-v3.md).
+Every other nested key stays protected provenance. The generic mapper never
+receives the native object.
 
 V1 also accepts evidenced one-sided pulls: `pack_id` and `card_id` are each
 nullable, at least one must be present, and relationships remain ordered pack
 before card. A canonical pull receives only the authoritative edge or edges in
 the source record; PackScout never fabricates the missing identity.
 
-Only the V1 adapter, observation, and mapper tuple is registered. Connection
-revisions, source revisions, and import runs continue to expose their immutable
-current pins for diagnostics, but there is no compatibility reader, adapter
-upgrade, or source-replacement path. An early-development database containing a
-historical tuple must be cleared with the guarded full local reset and reimported
-from Feed start.
+Production registers only adapter v3 for every DataForrest provider. A database
+containing adapter-v1 or adapter-v2 connection or source pins must use the
+guarded clean reset and complete reimport; neither historical version is a
+runtime compatibility path.
 
 ## Failure contract
 
@@ -201,7 +204,7 @@ independent 24-page windows: 288 input records, 216 accepted records, and 72
 quarantined records. Every retained component uses a PostgreSQL physical
 table/index/TOAST slope. The committed bound adds one measured 8 KiB allocation
 page per affected relation instead of an arbitrary multiplier. This produces
-11,947 structured/canonical bytes per input record, 3,322 bytes per record for
+14,763 structured/canonical bytes per input record, 4,346 bytes per record for
 the seven-day normalized payload, 15,020 bytes per committed page before raw
 payload expiry, and separately measured quarantine lineage/evidence. The complete
 machine-readable artifact is
@@ -229,26 +232,26 @@ twice. It projects:
 
 | Component | Projected bytes |
 | --- | ---: |
-| Structured and canonical data | 125,760,416,599,519 |
+| Structured and canonical data | 155,403,116,285,151 |
 | Conservative raw full history | 98,700,000,000 |
 | Seven-day steady-poll raw pages | 25,902,938,880 |
-| Seven-day normalized page payload | 717,973,485,394 |
+| Seven-day normalized page payload | 939,287,407,442 |
 | Permanent expired page lineage | 32,014,439,080 |
 | Quarantine lineage and evidence | 1,914,090,433,264 |
 | Page diagnostics | 413,598,846 |
 | Terminal request attempts | 826,995,838 |
 | Permanent compact attempt lineage | 13,824,610,644 |
-| **Total** | **128,564,163,101,465** |
+| **Total** | **158,428,176,709,145** |
 
 At a 60-second interval, four sources create 172,800 poll attempts in 30 days;
 including the 29,054 initial pages gives 201,854 first-window attempts. Leaving
 25% of the target volume free after the projected import requires
-**171,418,884,135,287 available bytes** before Task 010 may start. The 200 GB
+**211,237,568,945,527 available bytes** before Task 010 may start. The 200 GB
 provisional floor is therefore superseded by this measured requirement. The
 80%-used abort threshold remains independently enforced.
 
 The refreshed committed host measurement reported 994,662,584,320 bytes of capacity and
-only 172,515,115,008 available bytes. Admission was rejected for insufficient
+only 175,989,243,904 available bytes. Admission was rejected for insufficient
 free bytes, an already-exceeded 80% threshold, and a projected threshold
 breach. Task 010 must not start a real backfill on this host. This does not block
 contract, adapter, mapper, importer, scheduler, admin, or UI implementation.
@@ -258,12 +261,12 @@ reserved-key, depth, and transport rejection boundaries without retaining an
 additional decoded copy of the complete response. It rejects more than 64
 container levels, 480,000 JSON values, 5,000 array items, or 256 syntactic
 member occurrences in one object; duplicate names count toward the work bound
-and otherwise retain JSON last-write semantics. The committed 8 MiB V2
+and otherwise retain JSON last-write semantics. The committed 8 MiB maximum-page
 measurement on 2026-08-28 processed all 500,000 records across 100 pages in
 four-page concurrent waves. Every page carried 475,004 JSON values, including
 82 high-overhead empty-object facts per record, to exercise the 5,000-record,
 maximum-byte, and near-maximum-node boundaries together. The fresh-process
-measurement passed the four-page aggregate gates: its 123,813,888-byte peak
+measurement passed the four-page aggregate gates: its 85,442,560-byte peak
 delta and zero retained growth stayed beneath the 256 MiB peak-delta and 32 MiB
 retained-growth limits. The dedicated Task 010 runner now
 pins four source execution slots beneath one singleton supervisor. Its four

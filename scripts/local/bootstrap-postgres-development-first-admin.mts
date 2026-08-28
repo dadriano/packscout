@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import { emitKeypressEvents } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import path from "node:path";
@@ -140,11 +141,25 @@ export function assertConnectedLocalDatabaseIdentity(
   }> | undefined,
   expectedDatabaseName: string,
 ): void {
+  const serverAddress = (() => {
+    const value = identity?.serverAddress;
+    if (value === null || value === undefined) return value;
+    const inet = /^(.*)\/(\d{1,3})$/u.exec(value);
+    if (!inet) return value;
+    const address = inet[1]!;
+    const prefixLength = Number(inet[2]);
+    const family = isIP(address);
+    return (family === 4 && prefixLength === 32) ||
+        (family === 6 && prefixLength === 128)
+      ? address
+      : value;
+  })();
   if (
     !identity ||
     identity.databaseName !== expectedDatabaseName ||
-    identity.serverAddress === null ||
-    !isLoopbackHostname(identity.serverAddress)
+    serverAddress === null ||
+    serverAddress === undefined ||
+    !isLoopbackHostname(serverAddress)
   ) {
     throw new LocalFirstAdminBootstrapError(
       "CONNECTED_DATABASE_IDENTITY_NOT_LOCAL",

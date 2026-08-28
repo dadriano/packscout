@@ -39,16 +39,16 @@ retry; the runtime never silently downshifts it. A response above 8 MiB or above
 the pinned record count fails that page without advancing its checkpoint. The
 current Task 010 capacity result reserves a full 5,000-record page for every
 ongoing poll as a maximum-throughput stress ceiling, not an operational local
-estimate. The regenerated model projects 128,564,163,101,465 bytes and requires
-171,418,884,135,287 available bytes with headroom; the measured host had only
-172,515,115,008 bytes available, so admission remains rejected. Current local
+estimate. The regenerated model projects 158,428,176,709,145 bytes and requires
+211,237,568,945,527 available bytes with headroom; the measured host had only
+175,989,243,904 bytes available, so admission remains rejected. Current local
 operation uses measured whole-database growth plus an explicit free-space floor; see
 [`provider-source-live-capacity-observation-2026-08-24.md`](./provider-source-live-capacity-observation-2026-08-24.md).
 
 ## Current launch boundary
 
 DataForrest has one launch identity: source type `dataforrest-events-v1`, source
-adapter `dataforrest-events-adapter-v1`, normalized observation
+adapter `dataforrest-events-adapter-v3`, normalized observation
 `packscout.provider-observation.v1`, and provider mapper revision `1`. The live
 evidence supplies the request path, authentication shape, platform selector,
 raw page wrapper, page-size behavior, opaque cursor, reached-head signal, and

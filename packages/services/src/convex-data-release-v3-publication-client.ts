@@ -122,6 +122,10 @@ const releaseStatusSchema = z
     acceptedSearchRowCount: z.number().int().min(0),
     acceptedSearchRowSetHash: sha256HexSchema,
     acceptedTopChaseCount: z.number().int().min(0),
+    // Optional so a deployment predating the verified top-chase counter still
+    // parses. An absent value means "this server does not report it", which is
+    // deliberately distinct from a reported 0.
+    acceptedVerifiedTopChaseCount: z.number().int().min(0).optional(),
     completedAt: z.string().min(1).max(64).nullable(),
   })
   .strict();

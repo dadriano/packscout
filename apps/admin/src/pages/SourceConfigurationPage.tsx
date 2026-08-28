@@ -219,7 +219,9 @@ export function SourceConfigurationPage() {
           : action === "pause"
             ? "Pause requested. The current page may commit, but no next page or queued run will start."
             : action === "resume"
-              ? `Source resumed from ${source.cursor.resumeLabel}.`
+              ? source.state === "active"
+                ? "Promotion identity reasserted for the active source revision."
+                : `Source resumed from ${source.cursor.resumeLabel}.`
               : "Source command completed.",
     );
   }

@@ -19,6 +19,7 @@ import type {
   CanonicalPackProjectionContent,
 } from "./catalog-projection-contracts.ts";
 import { normalizeLegacyAvailability } from "./catalog-release-public-projection.ts";
+import { configuredPublicRepackLink } from "./public-repack-link.ts";
 import type {
   CatalogCanonicalRevisionSnapshot,
   CatalogProviderReadinessSnapshot,
@@ -74,14 +75,31 @@ export interface DataReleaseV3SoldOutTransitionSnapshot {
   readonly soldOutAt: Date;
 }
 
+export interface DataReleaseV3AssetPackAssociationSnapshot {
+  readonly sourceEntityId: string;
+  readonly platformKey: string;
+  readonly assetExternalId: string;
+  readonly packExternalId: string;
+  readonly associatedAt: Date;
+  readonly publicChangeSequence: bigint;
+}
+
+/**
+ * The snapshot carries no sequence ceiling on purpose. The ceiling the source
+ * applies is the live settled watermark, which grows between two reads at the
+ * same `readAt`; exposing it from a structure whose contract is byte-for-byte
+ * repeatability would invite it into a fingerprint or a hash and silently break
+ * that contract. `readAt` alone determines membership.
+ */
 export interface DataReleaseV3CanonicalSourceSnapshot {
   readonly organizationId: string;
   readonly readAt: Date;
-  readonly throughSequence: bigint;
   readonly configuration: CatalogReleaseSourceSnapshot["configuration"];
   readonly revisions: readonly CatalogCanonicalRevisionSnapshot[];
   readonly providers: readonly CatalogProviderReadinessSnapshot[];
   readonly repackIdentities: readonly GovernedPublicRepackIdentity[];
+  readonly assetPackAssociations:
+    readonly DataReleaseV3AssetPackAssociationSnapshot[];
   readonly soldOutTransitions: readonly DataReleaseV3SoldOutTransitionSnapshot[];
 }
 
@@ -128,9 +146,18 @@ function storedAvailability(value: unknown): CanonicalAvailability | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
-function packContent(value: unknown): CanonicalPackProjectionContent {
+type DataReleaseV3CanonicalPackProjectionContent =
+  CanonicalPackProjectionContent & Readonly<{
+    evInputStatus: "ready" | "unavailable";
+  }>;
+
+function packContent(
+  value: unknown,
+): DataReleaseV3CanonicalPackProjectionContent {
   if (!isObject(value) || value.schemaVersion !== "catalog-projection-v1" ||
-      value.entityType !== "pack" || typeof value.name !== "string") {
+      value.entityType !== "pack" || typeof value.name !== "string" ||
+      (value.evInputStatus !== "ready" &&
+        value.evInputStatus !== "unavailable")) {
     refuse("CANONICAL_PROJECTION_INVALID");
   }
   const availability = storedAvailability(value.availability);
@@ -138,7 +165,7 @@ function packContent(value: unknown): CanonicalPackProjectionContent {
     refuse("CANONICAL_PROJECTION_INVALID");
   }
   return {
-    ...(value as unknown as CanonicalPackProjectionContent),
+    ...(value as unknown as DataReleaseV3CanonicalPackProjectionContent),
     availability,
   };
 }
@@ -154,6 +181,14 @@ function assetContent(value: unknown): CanonicalCatalogAssetProjectionContent {
     // unrecognized value stays `unknown` rather than being assumed available.
     availability: storedAvailability(value.availability) ?? "unknown",
   };
+}
+
+function publicCollectibleName(
+  content: CanonicalCatalogAssetProjectionContent,
+): string | null {
+  if (typeof content.name !== "string") return null;
+  const name = content.name.trim();
+  return name.length > 0 && name.length <= 240 ? name : null;
 }
 
 function evInputContent(value: unknown): CanonicalEvInputProjectionContent {
@@ -328,7 +363,9 @@ export class DataReleaseV3CanonicalCatalogAdapter
       }
       if (
         provider?.state !== "active" ||
-        provider.configurationRevisionId === null ||
+        provider.providerId === null ||
+        provider.sourceInstanceId === null ||
+        provider.sourceRevisionId === null ||
         provider.completedBackfillAt === null
       ) {
         refuse("CANONICAL_PROVIDER_NOT_READY");
@@ -381,26 +418,83 @@ export class DataReleaseV3CanonicalCatalogAdapter
     const assets = relevant.filter(
       ({ recordKind }) => recordKind === "catalog_asset",
     );
-    const evInputByPack = new Map(
-      relevant
-        .filter(({ recordKind }) => recordKind === "ev_input")
-        .map((revision) => {
-          const content = evInputContent(revision.content);
-          return [key(revision.platformKey, content.packExternalId), content] as const;
-        }),
-    );
+    const assetByKey = new Map(assets.map((asset) => [
+      key(asset.platformKey, asset.externalId),
+      asset,
+    ]));
+    const packKeys = new Set(packs.map((pack) =>
+      key(pack.platformKey, pack.externalId)));
+    const associatedAssetKeys = new Set<string>();
+    const assetKeysByPack = new Map<string, string[]>();
+    const associationSourceIds = new Set<string>();
+    const associationPairs = new Set<string>();
+    for (const association of source.assetPackAssociations) {
+      if (!activePlatforms.has(association.platformKey)) continue;
+      const assetKey = key(
+        association.platformKey,
+        association.assetExternalId,
+      );
+      const packKey = key(
+        association.platformKey,
+        association.packExternalId,
+      );
+      const pairKey = `${assetKey}\0${association.packExternalId}`;
+      if (
+        association.sourceEntityId.length === 0 ||
+        association.publicChangeSequence <= 0n ||
+        !Number.isFinite(association.associatedAt.getTime()) ||
+        association.associatedAt.getTime() > source.readAt.getTime() ||
+        !assetByKey.has(assetKey) ||
+        !packKeys.has(packKey) ||
+        associationSourceIds.has(association.sourceEntityId) ||
+        associationPairs.has(pairKey)
+      ) {
+        refuse("CANONICAL_PROJECTION_INVALID");
+      }
+      associationSourceIds.add(association.sourceEntityId);
+      associationPairs.add(pairKey);
+      associatedAssetKeys.add(assetKey);
+      const packAssetKeys = assetKeysByPack.get(packKey) ?? [];
+      packAssetKeys.push(assetKey);
+      assetKeysByPack.set(packKey, packAssetKeys);
+    }
+    const evInputByPack = new Map<
+      string,
+      CanonicalEvInputProjectionContent
+    >();
+    for (const revision of relevant) {
+      if (revision.recordKind !== "ev_input") continue;
+      const content = evInputContent(revision.content);
+      const inputKey = key(revision.platformKey, content.packExternalId);
+      if (evInputByPack.has(inputKey)) {
+        refuse("CANONICAL_PROJECTION_INVALID", content.packExternalId);
+      }
+      evInputByPack.set(inputKey, content);
+    }
 
     const collectibles: PublicCollectible[] = [];
     const collectibleByAsset = new Map<string, PublicCollectible>();
     for (const revision of assets) {
       const content = assetContent(revision.content);
-      if (content.availability === "unavailable" || content.relatedPackExternalId === null) {
+      // A configured catalog asset is independently publishable as a
+      // collectible. Its optional pack relationship controls only whether the
+      // collectible becomes a chase below; it is not an existence gate for
+      // collectible search, saved items, or inspection.
+      if (content.availability === "unavailable") {
         continue;
       }
       const mapping = collectibleMappings.get(
         key(revision.platformKey, revision.externalId),
       );
-      if (!mapping || content.name === null) {
+      const assetKey = key(revision.platformKey, revision.externalId);
+      const name = publicCollectibleName(content);
+      const associated = associatedAssetKeys.has(assetKey);
+      // An unassociated, unconfigured source shell that cannot satisfy the
+      // public name contract has no public identity to project. This is the
+      // only non-unavailable asset shape omitted here. Named-but-unconfigured,
+      // associated unnamed, and configured unnamed assets remain hard errors.
+      if (!mapping && !associated && name === null) continue;
+      if (!mapping || name === null) {
         refuse("PUBLIC_IDENTITY_MAPPING_MISSING");
       }
       const valuationMinor = safeMinor(content.providerValueMinor);
@@ -425,8 +519,8 @@ export class DataReleaseV3CanonicalCatalogAdapter
       const normalizedAliases = mapping.aliases.map(normalizePublicSearchText).sort();
       const collectible: PublicCollectible = {
         publicCollectibleId: mapping.publicCollectibleId,
-        name: content.name.trim(),
-        normalizedName: normalizePublicSearchText(content.name),
+        name,
+        normalizedName: normalizePublicSearchText(name),
         aliases: mapping.aliases,
         normalizedAliases,
         collectibleType: mapping.collectibleType,
@@ -439,7 +533,7 @@ export class DataReleaseV3CanonicalCatalogAdapter
         subject: mapping.subject,
         grade: mapping.grade,
         grader: mapping.grader,
-        primaryImage: approvedImage(content.imageUrls, origins, content.name),
+        primaryImage: approvedImage(content.imageUrls, origins, name),
         valuation,
         searchText: "",
         dataAsOf: iso(revision.sourceUpdatedAt),
@@ -490,13 +584,21 @@ export class DataReleaseV3CanonicalCatalogAdapter
           identity.publicRepackId !== configuredIdentity.publicRepackId) {
         refuse("PUBLIC_IDENTITY_MAPPING_MISSING", productKey);
       }
-      const relatedAssets = assets.filter((asset) => {
-        if (asset.platformKey !== revision.platformKey) return false;
-        const candidate = assetContent(asset.content);
-        return candidate.relatedPackExternalId === productKey &&
-          candidate.availability !== "unavailable";
-      });
-      const evInput = evInputByPack.get(key(revision.platformKey, productKey)) ?? null;
+      const relatedAssets = (assetKeysByPack.get(
+        key(revision.platformKey, productKey),
+      ) ?? []).map((assetKey) => assetByKey.get(assetKey)!).filter((asset) =>
+        assetContent(asset.content).availability !== "unavailable"
+      );
+      const evInputClaim =
+        evInputByPack.get(key(revision.platformKey, productKey)) ?? null;
+      if (content.evInputStatus === "ready" && evInputClaim === null) {
+        refuse("CANONICAL_PROJECTION_INVALID", productKey);
+      }
+      // The current pack revision is authoritative. A retained canonical
+      // ev_input entity can outlive the provider evidence that produced it;
+      // once the pack says that EV inputs are unavailable, no historical
+      // probabilities or vendor-odds evidence may reach the public release.
+      const evInput = content.evInputStatus === "ready" ? evInputClaim : null;
       const probabilityByBucket = new Map(
         evInput?.probabilityBuckets.map(
           (bucket) => [bucket.bucketId, bucket.probability],
@@ -554,11 +656,17 @@ export class DataReleaseV3CanonicalCatalogAdapter
         },
       );
       chases.push(...packChases);
-      const categoryIds = [
+      const categoryIds = [...new Set([
         ...(platform.categoryMappings.find(
           ({ sourceValue }) => sourceValue === content.category,
         )?.publicCategoryIds ?? platform.defaultPublicCategoryIds),
-      ].sort();
+        ...packChases.flatMap(
+          ({ collectible }) => collectible.publicCategoryIds,
+        ),
+      ])].sort();
+      if (categoryIds.some((categoryId) => !categoryById.has(categoryId))) {
+        refuse("CANONICAL_PROJECTION_INVALID", productKey);
+      }
       const collectibleTypes = [...new Set(
         packChases.map(({ collectible }) => collectible.collectibleType),
       )].sort();
@@ -576,6 +684,11 @@ export class DataReleaseV3CanonicalCatalogAdapter
         refuse("CANONICAL_PROJECTION_INVALID", productKey);
       }
       const promo = platform.vendor.publicPromo ?? undefined;
+      const repackLink = configuredPublicRepackLink({
+        identity: configuredIdentity,
+        platform,
+        available: content.availability === "available",
+      }) ?? undefined;
       products.push({
         platformKey: revision.platformKey,
         productKey,
@@ -620,10 +733,16 @@ export class DataReleaseV3CanonicalCatalogAdapter
             ? null
             : Math.round(evInput.coverage.calculatedCoverage * 10_000),
         },
-        actionAvailability: { promo: promo !== undefined, repackLink: false },
+        actionAvailability: {
+          promo: promo !== undefined,
+          repackLink: repackLink !== undefined,
+        },
         sourceUpdatedAt: iso(revision.sourceUpdatedAt, productKey),
         description: content.description?.trim() || null,
-        actions: promo === undefined ? {} : { promo },
+        actions: {
+          ...(promo === undefined ? {} : { promo }),
+          ...(repackLink === undefined ? {} : { repackLink }),
+        },
       });
     }
     products.sort((left, right) =>

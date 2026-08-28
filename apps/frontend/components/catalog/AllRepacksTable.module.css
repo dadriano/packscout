@@ -236,12 +236,16 @@
 }
 
 .inlineAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
   border: 1px solid var(--color-border);
   border-radius: 0.45rem;
   padding: 0.42rem 0.58rem;
   color: var(--color-action-strong);
   font-size: 0.72rem;
   font-weight: 700;
+  text-decoration: none;
 }
 
 .inlineAction:hover {

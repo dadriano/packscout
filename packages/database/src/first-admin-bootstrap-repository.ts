@@ -138,14 +138,90 @@ export class PrismaFirstAdminBootstrapRepository {
         return { kind: "development_seed_not_exact" } as const;
       }
 
-      // The canonical local seed owns rows in exactly two Prisma models:
-      // organizations and provider_sources. Deriving the remaining model set
-      // from the generated schema makes a newly introduced persistence table
-      // fail closed automatically until the seed/bootstrap contract is
-      // deliberately revised.
+      // Every new organization receives one database-owned, zero-history Heat
+      // checkpoint. Admit only that exact initialized shape; the checkpoint is
+      // not user seed data, but omitting its proof would let a modified system
+      // row masquerade as a pristine development database.
+      const heatCheckpoints = await transaction.$queryRaw<Array<{
+        organizationId: string;
+        phase: string;
+        targetPublicChangeSequence: bigint;
+        processedThroughPublicChangeSequence: bigint;
+        processedThroughConfirmationPublicChangeSequence: bigint;
+        processedThroughConfirmationSetId: string | null;
+        processedThroughRelationshipId: string | null;
+        nextCatalogOrderSequence: bigint;
+        targetRelationshipSourceCount: bigint;
+        relationshipSourceCount: bigint;
+        initialCatalogObservationCount: bigint;
+        targetCatalogObservationCount: bigint | null;
+        catalogObservationCount: bigint;
+        failureCode: string | null;
+        timestampsMatch: boolean;
+      }>>(Prisma.sql`
+        select organization_id::text as "organizationId",
+               phase,
+               target_public_change_sequence as "targetPublicChangeSequence",
+               processed_through_public_change_sequence as
+                 "processedThroughPublicChangeSequence",
+               processed_through_confirmation_public_change_sequence as
+                 "processedThroughConfirmationPublicChangeSequence",
+               processed_through_confirmation_set_id::text as
+                 "processedThroughConfirmationSetId",
+               processed_through_relationship_id::text as
+                 "processedThroughRelationshipId",
+               next_catalog_order_sequence as "nextCatalogOrderSequence",
+               target_relationship_source_count as
+                 "targetRelationshipSourceCount",
+               relationship_source_count as "relationshipSourceCount",
+               initial_catalog_observation_count as
+                 "initialCatalogObservationCount",
+               target_catalog_observation_count as
+                 "targetCatalogObservationCount",
+               catalog_observation_count as "catalogObservationCount",
+               failure_code as "failureCode",
+               started_at is not null
+                 and started_at = completed_at
+                 and started_at = created_at
+                 and started_at = updated_at as "timestampsMatch"
+        from public.normalized_heat_relationship_backfills
+        order by organization_id
+        for update
+      `);
+      const heatCheckpoint = heatCheckpoints[0];
+      if (
+        heatCheckpoints.length !== 1
+        || heatCheckpoint?.organizationId !== organization.id
+        || heatCheckpoint.phase !== "complete"
+        || heatCheckpoint.targetPublicChangeSequence !== 0n
+        || heatCheckpoint.processedThroughPublicChangeSequence !== 0n
+        || heatCheckpoint.processedThroughConfirmationPublicChangeSequence
+          !== 0n
+        || heatCheckpoint.processedThroughConfirmationSetId !== null
+        || heatCheckpoint.processedThroughRelationshipId !== null
+        || heatCheckpoint.nextCatalogOrderSequence !== 1n
+        || heatCheckpoint.targetRelationshipSourceCount !== 0n
+        || heatCheckpoint.relationshipSourceCount !== 0n
+        || heatCheckpoint.initialCatalogObservationCount !== 0n
+        || heatCheckpoint.targetCatalogObservationCount !== 0n
+        || heatCheckpoint.catalogObservationCount !== 0n
+        || heatCheckpoint.failureCode !== null
+        || heatCheckpoint.timestampsMatch !== true
+      ) {
+        return { kind: "development_seed_not_exact" } as const;
+      }
+
+      // The canonical local seed otherwise owns rows in exactly two Prisma
+      // models: organizations and provider_sources. Deriving the remaining
+      // model set from the generated schema makes a newly introduced table
+      // fail closed until this contract is deliberately revised.
       const materialModels = Prisma.dmmf.datamodel.models
         .map(({ name }) => name)
-        .filter((name) => name !== "organizations" && name !== "provider_sources");
+        .filter((name) =>
+          name !== "organizations"
+          && name !== "provider_sources"
+          && name !== "normalized_heat_relationship_backfills"
+        );
       const materialCounts = await Promise.all(
         materialModels.map(async (name) => ({
           name,

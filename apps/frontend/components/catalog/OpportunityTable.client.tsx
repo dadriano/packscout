@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { PublicRepackViewSummaryV3 } from "@packscout/contracts";
 import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
 import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
@@ -15,6 +16,7 @@ export type OpportunitySelectionHandler = (
 
 type OpportunityTableProps = Readonly<{
   opportunities: readonly PublicRepackViewSummaryV3[];
+  repacksHref: string;
   selectedPublicRepackId: string | null;
   onSelectOpportunity: OpportunitySelectionHandler;
 }>;
@@ -147,6 +149,7 @@ function OpportunityRow({
 
 export function OpportunityTable({
   opportunities,
+  repacksHref,
   selectedPublicRepackId,
   onSelectOpportunity,
 }: OpportunityTableProps) {
@@ -165,13 +168,14 @@ export function OpportunityTable({
         </span>
       </div>
 
-      <div
-        aria-label="Top opportunities comparison"
-        className={styles.scrollRegion}
-        role="region"
-        tabIndex={0}
-      >
-        <table className={styles.table}>
+      {opportunities.length > 0 ? (
+        <div
+          aria-label="Top opportunities comparison"
+          className={styles.scrollRegion}
+          role="region"
+          tabIndex={0}
+        >
+          <table className={styles.table}>
           <thead>
             <tr>
               <th scope="col">#</th>
@@ -214,12 +218,16 @@ export function OpportunityTable({
               />
             ))}
           </tbody>
-        </table>
-      </div>
-
-      {opportunities.length === 0 ? (
-        <p className={styles.emptyState}>No estimated opportunities match these filters.</p>
-      ) : null}
+          </table>
+        </div>
+      ) : (
+        <div className={styles.emptyState}>
+          <p role="status">No estimated opportunities match these filters.</p>
+          <Link className={styles.emptyAction} href={repacksHref}>
+            View matching repacks
+          </Link>
+        </div>
+      )}
     </section>
   );
 }

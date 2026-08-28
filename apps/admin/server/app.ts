@@ -71,6 +71,8 @@ export interface AdminAuthHttpDependencies {
 
 export interface AdminAppDependencies {
   trustedProxies?: readonly string[];
+  /** Adapter-owned hop count for platforms that overwrite forwarded headers. */
+  trustedProxyHops?: number;
   auth?: AdminAuthHttpDependencies;
   providers?: Omit<
     ProvidersRouterDependencies,
@@ -110,6 +112,7 @@ export interface AdminAppDependencies {
   >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
   canonical?: DataInspectionRouterDependencies["canonical"];
+  published?: DataInspectionRouterDependencies["published"];
   parity?: DataInspectionRouterDependencies["parity"];
   /**
    * Deployments without the source-connection keys run with source
@@ -179,7 +182,9 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
   const app = express();
 
   app.disable("x-powered-by");
-  if (dependencies.trustedProxies?.length) {
+  if (dependencies.trustedProxyHops !== undefined) {
+    app.set("trust proxy", dependencies.trustedProxyHops);
+  } else if (dependencies.trustedProxies?.length) {
     app.set("trust proxy", [...dependencies.trustedProxies]);
   }
   app.use((request, response, next) => {
@@ -272,6 +277,7 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         auth: service,
         cookiePolicy,
         canonical: dependencies.canonical,
+        published: dependencies.published,
         parity: dependencies.parity,
       }),
     );

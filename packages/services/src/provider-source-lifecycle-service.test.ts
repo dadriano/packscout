@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   providerIdentityNamespaceByLaunchProvider,
 } from "@packscout/contracts";
@@ -40,7 +41,7 @@ function snapshot(
     connectionProfileId: profileId,
     connectionRevisionId,
     sourceTypeKey: "dataforrest-events-v1",
-    sourceAdapterVersion: "dataforrest-events-adapter-v1",
+    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     state: "paused",
     pauseRequested: false,
     mapperKey: "courtyard-provider-observation",
@@ -269,7 +270,7 @@ test("records per request revision validates the guarded pin and changes only th
 test("active profiles require the current adapter for creation while drafts can stage it", async () => {
   const { repository, service } = fixture();
   repository.activeRevisionSourceAdapterVersion =
-    "dataforrest-events-adapter-v2";
+    DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION;
 
   await assert.rejects(
     service.createSource(

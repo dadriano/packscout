@@ -501,6 +501,7 @@ export class ProviderSourceQuarantineRepository {
         projection: ProviderSourceCanonicalProjectionPlan;
         becomesCurrent: boolean;
         disposition: "inserted" | "revised" | "duplicate";
+        reuseCanonicalRevisionId?: string | null;
       }>;
       for (const projection of input.projections) {
         const history = await loadProviderSourceCanonicalHistory(
@@ -515,6 +516,7 @@ export class ProviderSourceQuarantineRepository {
           effectiveAt: projection.effectiveAt,
           existingBinding: null,
           revisions: history.map((revision) => ({
+            canonicalRevisionId: revision.canonicalRevisionId,
             contentFingerprint: revision.contentFingerprint,
             effectiveAt: revision.effectiveAt.toISOString(),
           })),
@@ -529,15 +531,21 @@ export class ProviderSourceQuarantineRepository {
           projection,
           becomesCurrent: decision.becomesCurrent,
           disposition: decision.disposition,
+          ...(decision.disposition === "duplicate"
+            ? {
+                reuseCanonicalRevisionId: decision.reuseCanonicalRevisionId,
+              }
+            : {}),
         });
       }
-      const changes = decisions.filter(
-        ({ disposition }) => disposition !== "duplicate",
+      const writableDecisions = decisions.filter((change) =>
+        change.disposition !== "duplicate"
+        || change.projection.recordKind === "pull"
       );
       const writes = await writeCanonicalProjectionBatch(
         transaction,
         { retentionDays: 90, actorPseudonymKey: this.actorPseudonymKey },
-        changes.map((change, projectionIndex) => ({
+        writableDecisions.map((change, projectionIndex) => ({
           organizationId: input.organizationId,
           providerId: occurrence.provider_id,
           origin: {
@@ -553,12 +561,18 @@ export class ProviderSourceQuarantineRepository {
           becomesCurrent: change.becomesCurrent,
           acceptedAt: authoritativeNow,
           publicChangeKind: "provider_projection" as const,
+          ...(change.disposition === "duplicate"
+            ? {
+                reuseCanonicalRevisionId:
+                  change.reuseCanonicalRevisionId ?? null,
+              }
+            : {}),
         })),
       );
       const causes = writes.flatMap((write, index) =>
         write.created &&
-          changes[index]?.becomesCurrent &&
-          changes[index]?.projection.evInputStatus === "ready"
+          writableDecisions[index]?.becomesCurrent &&
+          writableDecisions[index]?.projection.evInputStatus === "ready"
           ? [write.publicChangeSequence]
           : []);
       const packExternalId = input.projections.find(

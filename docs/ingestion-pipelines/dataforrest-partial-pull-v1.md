@@ -13,11 +13,11 @@ Crypt spin pulls with a nonblank pack ID and `card_id = null`. Both sets retain
 a stable pull record ID. There is no authoritative value for either missing
 relationship, so PackScout must not infer or fabricate one.
 
-## Sole current contract
+## Current contract
 
-DataForrest has one exact production tuple:
+New DataForrest revisions use this exact tuple:
 
-- source adapter `dataforrest-events-adapter-v1`;
+- source adapter `dataforrest-events-adapter-v3`;
 - normalized observation `packscout.provider-observation.v1`; and
 - mapper revision `1` for the provider's registered mapper.
 
@@ -33,9 +33,10 @@ A pack-only pull retains its pack relationship but has no card attribution.
 Downstream behavior uses only present edges until the provider supplies an
 authoritative missing identity.
 
-Unknown or historical tuples fail closed. There is no fallback, dual read,
-dual write, source-replacement path, or provider-name branch in generic
-orchestration.
+Unknown tuples fail closed. Production registers only adapter v3. A database
+containing adapter-v1 or adapter-v2 revisions requires the guarded full local
+reset and complete reimport; historical pages are never reinterpreted through
+the current adapter.
 
 ## Clean-slate reset and reimport
 
@@ -52,12 +53,14 @@ Immediately follow the
 and run `npm run db:bootstrap-first-admin:local`; its password comes from the
 hidden prompt or approved standard input, never argv or an environment
 variable. Then recreate the encrypted DataForrest connection, create and test
-each source under the sole current tuple, and reimport from Feed start.
-Cursor reset, adapter upgrade, source replacement, quarantine retry, and
-selective table deletion are not substitutes for the clean reset because
-previously rejected records have no normalized observation or semantic
-identity. Reconcile provider outcomes and canonical catalog, pull, and
-market-event counts at provider head.
+each source under the current tuple, and reimport from Feed start. Cursor reset,
+quarantine retry, and selective table deletion are not substitutes for this
+historical partial-pull remediation because previously rejected records have no
+normalized observation or semantic identity. The archived adapter-v2
+ClutchPacks evidence is documented separately in
+[`dataforrest-clutchpacks-card-v2.md`](dataforrest-clutchpacks-card-v2.md).
+Reconcile provider outcomes and canonical catalog, pull, and market-event counts
+at provider head.
 
 The dedicated Task 010 database follows its stricter empty-target procedure in
 the Task 010 runbook. Do not run the normal seeded reset against that target.

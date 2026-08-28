@@ -678,6 +678,12 @@ export class PackScoutBuybackEvBackfillReconciliationRunnerV1 {
       status.acceptedBatchCount !== plan.manifest.batchCount ||
       status.acceptedBatchChainHash !== plan.manifest.batchChainHash ||
       status.acceptedTopChaseCount !== plan.manifest.topChaseCount ||
+      // A server that reports the verified top-chase counter must report it
+      // agreeing with the declared one on a complete release; a server that
+      // predates the counter reports nothing and is not held to it.
+      (status.acceptedVerifiedTopChaseCount !== undefined &&
+        status.acceptedVerifiedTopChaseCount !==
+          status.acceptedTopChaseCount) ||
       JSON.stringify(status.acceptedCounts) !==
         JSON.stringify(plan.manifest.counts) ||
       JSON.stringify(status.acceptedEntityChainHashes) !==
@@ -686,7 +692,15 @@ export class PackScoutBuybackEvBackfillReconciliationRunnerV1 {
       blocked.push({
         code: "STAGING_DIVERGENT",
         productKey: null,
-        detail: "The staged release did not read back complete.",
+        // The declared/verified pair is named explicitly because it is the
+        // one divergence an operator cannot reconstruct from the plan: both
+        // counts are server-derived, and when the verified guard is what
+        // refuses, the declared count still matches the manifest.
+        detail:
+          "The staged release did not read back complete" +
+          ` (top chases: manifest ${plan.manifest.topChaseCount},` +
+          ` declared ${status === null ? "unknown" : status.acceptedTopChaseCount},` +
+          ` verified ${status?.acceptedVerifiedTopChaseCount ?? "unreported"}).`,
       });
       return this.stagingState(plan, before, false, "not_staged");
     }

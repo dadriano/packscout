@@ -92,7 +92,7 @@ export function createFiltersAppliedEvent(input: Readonly<{
   if (
     !base ||
     !resultBucket ||
-    ![0, 1, 2, 3, 4].includes(input.activeFilterCount)
+    ![0, 1, 2, 3, 4, 5].includes(input.activeFilterCount)
   ) {
     return null;
   }
@@ -101,7 +101,7 @@ export function createFiltersAppliedEvent(input: Readonly<{
     name: "filters_applied",
     surface: input.surface,
     outcome: input.outcome,
-    activeFilterCount: input.activeFilterCount as 0 | 1 | 2 | 3 | 4,
+    activeFilterCount: input.activeFilterCount as 0 | 1 | 2 | 3 | 4 | 5,
     resultCountBucket: resultBucket,
   };
 }

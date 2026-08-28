@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 import {
+  buildPublicCollectibleSearchText,
+  normalizePublicSearchText,
   publicCollectibleSchema,
   publicRepackChaseSchema,
   type PublicCollectible,
@@ -65,6 +67,8 @@ const V3_REPACK_ID_F = "00000000-0000-5000-8000-000000000306";
  * reports this value instead of the available pack's.
  */
 const V3_GRAIL_COLLECTIBLE_ID = "00000000-0000-5000-8000-000000000202";
+const V3_STANDALONE_COLLECTIBLE_ID =
+  "00000000-0000-5000-8000-000000000203";
 const V3_GRAIL_CHASE_VALUE_MINOR = 250_000;
 const V3_DEFAULT_CHASE_VALUE_MINOR = 85_000;
 
@@ -79,6 +83,33 @@ function grailCollectible(): PublicCollectible {
       displayMoney: money,
       usdComparison: { status: "available", value: money },
     },
+  });
+}
+
+function standaloneCollectible(): PublicCollectible {
+  const base = buildV3Collectible();
+  const name = "Pikachu Illustrator Promo";
+  const aliases = ["Pikachu Promo"];
+  return publicCollectibleSchema.parse({
+    ...base,
+    publicCollectibleId: V3_STANDALONE_COLLECTIBLE_ID,
+    name,
+    normalizedName: normalizePublicSearchText(name),
+    aliases,
+    normalizedAliases: aliases.map(normalizePublicSearchText),
+    subject: "Pikachu",
+    searchText: buildPublicCollectibleSearchText({
+      name,
+      aliases,
+      year: base.year,
+      brand: base.brand,
+      setOrSeries: base.setOrSeries,
+      cardNumber: base.cardNumber,
+      referenceNumber: base.referenceNumber,
+      subject: "Pikachu",
+      grade: base.grade,
+      grader: base.grader,
+    }),
   });
 }
 
@@ -474,7 +505,10 @@ describe("data_release_v3 public reads", () => {
 
   test("desired-collectible matching binds rows to chases and search stays bounded", async () => {
     const t = convexTest(schema, modules);
-    await publishFixture(t);
+    await publishFixture(t, fixtureDetails(), [
+      buildV3Collectible(),
+      standaloneCollectible(),
+    ]);
     const list = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
       desiredPublicCollectibleId: V3_COLLECTIBLE_ID,
       currentTime: NOW,
@@ -516,6 +550,29 @@ describe("data_release_v3 public reads", () => {
       (searched.data as { matches: { publicCollectibleId: string }[] }).matches[0]
         ?.publicCollectibleId,
     ).toBe(V3_COLLECTIBLE_ID);
+
+    const standaloneSearch = (await t.query(
+      api.publicRepacksV3.searchPublicCollectiblesV3,
+      { search: "pikachu illustrator promo" },
+    )) as AnyResult;
+    expect(standaloneSearch.ok).toBe(true);
+    expect(
+      (
+        standaloneSearch.data as {
+          matches: { publicCollectibleId: string }[];
+        }
+      ).matches[0]?.publicCollectibleId,
+    ).toBe(V3_STANDALONE_COLLECTIBLE_ID);
+
+    const noRepackMatches = (await t.query(
+      api.publicRepacksV3.findRepacksByDesiredCollectibleV3,
+      {
+        publicCollectibleId: V3_STANDALONE_COLLECTIBLE_ID,
+        currentTime: NOW,
+      },
+    )) as AnyResult;
+    expect(noRepackMatches.ok).toBe(true);
+    expect(noRepackMatches.data).toMatchObject({ matches: [], total: 0 });
   });
 
   test("pagination is bounded, fingerprinted, and survives release changes explicitly", async () => {

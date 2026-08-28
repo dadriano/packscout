@@ -107,7 +107,9 @@ if (typeof allocationPageBytes !== "number" || !Number.isFinite(allocationPageBy
   throw new Error("provider source allocation page measurement invalid");
 }
 const storageBoundInputs = {
-  structuredPhysicalBytesPerRecord: { denominator: 96, allocationPages: 9 },
+  // Every permanently retained, record-scaling relation receives one extra
+  // PostgreSQL allocation page in the conservative physical bound.
+  structuredPhysicalBytesPerRecord: { denominator: 96, allocationPages: 11 },
   normalizedPayloadPhysicalBytesPerRecord: { denominator: 96, allocationPages: 1 },
   importPagePhysicalBytes: { denominator: 24, allocationPages: 1 },
   quarantinePhysicalBytes: { denominator: 24, allocationPages: 1 },

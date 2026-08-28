@@ -6,7 +6,6 @@
     var(--color-text)
   );
 }
-
 .indexPage {
   max-width: 1180px;
   margin-inline: auto;
@@ -775,4 +774,3 @@
     padding: 1rem;
   }
 }
-

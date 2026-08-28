@@ -31,11 +31,10 @@ export function OverviewPage() {
   const [serviceState, setServiceState] = useState<ServiceState>("checking");
   const [providerCount, setProviderCount] = useState<ProviderCount>(null);
 
-  // Setup guidance is only true for an operator who may actually create a
-  // provider. `data_operator` holds `providers:view` without
-  // `providers:manage`, and the providers page hides its create action from
-  // that role, so prompting it to configure a source sends it to a page that
-  // offers no way to do it.
+  // Setup guidance is only true for an operator who may administer Provider
+  // Sources. `data_operator` holds `providers:view` without
+  // `providers:manage`, so prompting it to configure a source would send it
+  // to a surface where every mutation is correctly unavailable.
   const canManageProviders =
     status.phase === "authenticated" &&
     status.session.permissions.includes("providers:manage");
@@ -114,19 +113,19 @@ export function OverviewPage() {
         canManageProviders ? (
           <EmptyState
             eyebrow="Next step"
-            title="Set up your first provider."
-            description="Configure a source and test it before enabling imports."
+            title="Set up your first provider source."
+            description="Create and test it in Provider Sources before enabling imports."
             action={
-              <Link className="admin-button admin-button-primary" to="/providers/new">
-                Add provider
+              <Link className="admin-button admin-button-primary" to="/source-configuration">
+                Configure Provider Sources
               </Link>
             }
           />
         ) : (
           <EmptyState
             eyebrow="Next step"
-            title="No providers are configured yet."
-            description="An administrator adds and enables a source before imports can run."
+            title="No provider sources are configured yet."
+            description="An administrator creates and enables one in Provider Sources before imports can run."
           />
         )
       ) : null}

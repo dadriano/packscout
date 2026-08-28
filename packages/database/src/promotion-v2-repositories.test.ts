@@ -61,6 +61,118 @@ function checkpoint(
   };
 }
 
+test("provider checkpoints recompute derived freshness only across later configuration epochs", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await harness.client.organizations.create({
+      data: {
+        id: organizationId,
+        slug: "promotion-v2-checkpoint-epoch-test",
+        name: "Promotion V2 Checkpoint Epoch Test",
+      },
+    });
+    const provider = new PrismaProviderPromotionRepository(harness.client, {
+      organizationId,
+      deploymentKey: "promotion-v2-checkpoint-epoch-test",
+      platformKey,
+    });
+    const initial = checkpoint();
+    assert.deepEqual(await provider.enqueueEvaluation({
+      checkpoint: initial,
+      requestedAt,
+    }), { evaluationSequence: 1n, result: "created" });
+
+    const expectRegression = async (
+      candidate: ProviderPromotionCheckpointIdentity,
+      offsetMs: number,
+    ) => await assert.rejects(
+      () => provider.enqueueEvaluation({
+        checkpoint: candidate,
+        requestedAt: new Date(requestedAt.getTime() + offsetMs),
+      }),
+      (error) => error instanceof PromotionV2PersistenceError &&
+        error.code === "PROMOTION_V2_CHECKPOINT_REGRESSED",
+    );
+
+    await expectRegression({
+      ...initial,
+      staleAt: new Date(initial.staleAt.getTime() + 60_000),
+    }, 1);
+    const delayedSameEpoch: ProviderPromotionCheckpointIdentity = {
+      ...initial,
+      settledSequence: 11n,
+      sourceHeadSequence: 11n,
+      settledAt: new Date(requestedAt.getTime() + 1),
+      sourceHeadAt: new Date(requestedAt.getTime() + 1),
+      freshness: "delayed",
+    };
+    await expectRegression(delayedSameEpoch, 2);
+
+    const laterEpoch: ProviderPromotionCheckpointIdentity = {
+      ...delayedSameEpoch,
+      sharedConfigurationEpoch: {
+        configurationKey: "catalog-v1",
+        revision: 2,
+        publicChangeSequence: 11n,
+        configurationHash: "b".repeat(64),
+      },
+      staleAt: new Date(initial.staleAt.getTime() + 900_000),
+    };
+    assert.deepEqual(await provider.enqueueEvaluation({
+      checkpoint: laterEpoch,
+      requestedAt: new Date(requestedAt.getTime() + 3),
+    }), { evaluationSequence: 2n, result: "created" });
+
+    await expectRegression({
+      ...laterEpoch,
+      settledSequence: 12n,
+      sourceHeadSequence: 12n,
+      settledAt: new Date(requestedAt.getTime() + 2),
+      sourceHeadAt: new Date(requestedAt.getTime() + 2),
+      sharedConfigurationEpoch: {
+        ...initial.sharedConfigurationEpoch,
+        publicChangeSequence: 10n,
+      },
+    }, 4);
+    await expectRegression({
+      ...laterEpoch,
+      settledSequence: 10n,
+      sourceHeadSequence: 12n,
+      settledAt: requestedAt,
+      sourceHeadAt: new Date(requestedAt.getTime() + 2),
+      sharedConfigurationEpoch: {
+        configurationKey: "catalog-v1",
+        revision: 3,
+        publicChangeSequence: 12n,
+        configurationHash: "c".repeat(64),
+      },
+      blockedState: {
+        kind: "blocked",
+        reason: "pending_derivation",
+        causeSequence: 11n,
+      },
+    }, 5);
+    const olderObservation = new Date(requestedAt.getTime() - 1);
+    await expectRegression({
+      ...laterEpoch,
+      settledSequence: 12n,
+      sourceHeadSequence: 12n,
+      settledAt: new Date(requestedAt.getTime() + 2),
+      sourceHeadAt: new Date(requestedAt.getTime() + 2),
+      lastSuccessfulObservationAt: olderObservation,
+      staleAt: new Date(olderObservation.getTime() + 1_800_000),
+      sharedConfigurationEpoch: {
+        configurationKey: "catalog-v1",
+        revision: 3,
+        publicChangeSequence: 12n,
+        configurationHash: "c".repeat(64),
+      },
+    }, 6);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("provider and manifest lanes serialize claims, recover leases, and coalesce exact replay", async () => {
   const harness = await createMigratedTestDatabase();
   try {

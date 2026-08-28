@@ -69,6 +69,14 @@ const EXPECTED_MIGRATIONS = Object.freeze([
     checksum: "25899178e7256a15fc4d86c158f560e597b9fa0e8c949caa696aa55439cc57c8",
   }),
   Object.freeze({
+    name: "20260826005000_source_relationship_confirmations",
+    checksum: "19cfc4cdae5fc3615159c5ead740fdc3e3e83945bf6c9ec2176ce36067ce9a21",
+  }),
+  Object.freeze({
+    name: "20260826010000_heat_relationship_causality",
+    checksum: "5ac08e4eb77bc83838d94796ace095c93dbdfab2344a2658cb87b46e3397193d",
+  }),
+  Object.freeze({
     name: "20260826010000_provider_source_records_per_request",
     checksum: "222365302a3fb76001f1f9cab9b7b80f375dcc629ae7146877661420fafa0d16",
   }),
@@ -76,8 +84,12 @@ const EXPECTED_MIGRATIONS = Object.freeze([
     name: "20260827010000_provider_source_platform_request_lanes",
     checksum: "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
   }),
+  Object.freeze({
+    name: "20260827020000_buyback_ev_provider_source_origin",
+    checksum: "10ae3670f6fbafb0ed529154ac7aad227b60bab735630e1079e805ddf8e7b24e",
+  }),
 ]);
-const EXPECTED_TABLE_COUNT = 87;
+const EXPECTED_TABLE_COUNT = 91;
 
 interface MigrationReadinessRow {
   migrationName: string;

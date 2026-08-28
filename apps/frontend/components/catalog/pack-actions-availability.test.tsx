@@ -55,6 +55,7 @@ function renderSurfaces(detail: ReturnType<typeof buildV3ViewDetail>) {
         onSelect={noop}
         onSort={noop}
         page={buildV3ListPage([detail])}
+        repackHrefById={new Map()}
         selectedPublicRepackId={detail.publicRepackId}
       />,
     ),

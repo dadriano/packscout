@@ -488,7 +488,10 @@ test("a relationship resolves once when its target is beyond the 500-projection 
     assert.equal(relationships.length, 1);
     const relationship = relationships[0]!;
     assert.ok(relationship.targetEntityId);
-    assert.equal(relationship.resolvedSequence, relationship.createdSequence);
+    assert.ok(
+      relationship.resolvedSequence !== null &&
+        relationship.resolvedSequence > relationship.createdSequence,
+    );
 
     const entityKey = relationshipPublicEntityKey({
       sourceEntityId: relationship.sourceEntityId,
@@ -497,15 +500,23 @@ test("a relationship resolves once when its target is beyond the 500-projection 
       targetRecordKind: "catalog_asset",
       targetExternalId,
     });
-    assert.equal(
-      await harness.database.public_change_causes.count({
+    const relationshipCauses =
+      await harness.database.public_change_causes.findMany({
         where: {
           organization_id: ids.organization,
           change_kind: "relationship_resolution",
           entity_key: entityKey,
         },
-      }),
-      1,
+        orderBy: { sequence: "asc" },
+        select: { sequence: true, metadata_json: true },
+      });
+    assert.deepEqual(
+      relationshipCauses.map(({ sequence }) => sequence),
+      [relationship.createdSequence, relationship.resolvedSequence],
+    );
+    assert.deepEqual(
+      relationshipCauses.map(({ metadata_json: metadata }) => metadata),
+      [{ relationshipState: "unresolved" }, { relationshipState: "resolved" }],
     );
   } finally {
     await harness.close();

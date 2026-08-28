@@ -74,7 +74,24 @@ export interface PromotionV2WorkerRuntimePort {
   stop(): void;
 }
 
+export type PromotionV2ProviderReconciliationCycle = Readonly<{
+  snapshot: ManifestEligibilitySnapshot;
+  results: readonly Readonly<{
+    platformKey: string;
+    result: unknown;
+  }>[];
+}>;
+
+export type PromotionV2ManifestReconciliationCycle = Readonly<{
+  snapshot: ManifestEligibilitySnapshot;
+  result: unknown;
+}>;
+
 const safeIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/u;
+
+function cancelled(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
 
 const HARD_STARTUP_REFUSAL_CODES = new Set([
   "CATALOG_MANIFEST_BOOTSTRAP_CONFIGURATION_INVALID",
@@ -341,19 +358,72 @@ export class PromotionV2WorkerRuntime implements PromotionV2WorkerRuntimePort {
     }
   }
 
+  private async loadVerifiedSnapshot(
+    signal: AbortSignal | undefined,
+  ): Promise<ManifestEligibilitySnapshot> {
+    const snapshot = await this.input.eligibility.getSnapshot();
+    this.input.validateEligibility(snapshot);
+    await this.input.bootstrap.ensureVerified({
+      verifiedAt: this.input.clock.now(),
+      signal,
+    });
+    this.#bootstrapComplete = true;
+    return snapshot;
+  }
+
+  /** Reconciles provider lanes in canonical order without evaluating a manifest. */
+  async runProviderReconciliationCycle(
+    signal?: AbortSignal,
+  ): Promise<PromotionV2ProviderReconciliationCycle> {
+    if (this.#cycleInProgress) {
+      throw new Error("Promotion worker cycle is already running.");
+    }
+    this.#cycleInProgress = true;
+    try {
+      const snapshot = await this.loadVerifiedSnapshot(signal);
+      const enabled = new Set(snapshot.enabledPlatformKeys);
+      const results: Array<{ platformKey: string; result: unknown }> = [];
+      if (!cancelled(signal)) {
+        for (const lane of this.#providerLanes.values()) {
+          const result = enabled.has(lane.platformKey)
+            ? await lane.runCycle(signal)
+            : await lane.runRecoveryCycle(signal);
+          results.push({ platformKey: lane.platformKey, result });
+          if (cancelled(signal)) break;
+        }
+      }
+      return { snapshot, results };
+    } finally {
+      this.#cycleInProgress = false;
+    }
+  }
+
+  /** Evaluates only the manifest lane after a caller proves provider completion. */
+  async runManifestReconciliationCycle(
+    signal?: AbortSignal,
+  ): Promise<PromotionV2ManifestReconciliationCycle> {
+    if (this.#cycleInProgress) {
+      throw new Error("Promotion worker cycle is already running.");
+    }
+    this.#cycleInProgress = true;
+    try {
+      const snapshot = await this.loadVerifiedSnapshot(signal);
+      const result = signal?.aborted === true
+        ? undefined
+        : await this.input.manifestLane.runCycle(signal);
+      return { snapshot, result };
+    } finally {
+      this.#cycleInProgress = false;
+    }
+  }
+
   async runCycle(signal?: AbortSignal): Promise<void> {
     if (this.#cycleInProgress) {
       throw new Error("Promotion worker cycle is already running.");
     }
     this.#cycleInProgress = true;
     try {
-      const snapshot = await this.input.eligibility.getSnapshot();
-      this.input.validateEligibility(snapshot);
-      await this.input.bootstrap.ensureVerified({
-        verifiedAt: this.input.clock.now(),
-        signal,
-      });
-      this.#bootstrapComplete = true;
+      const snapshot = await this.loadVerifiedSnapshot(signal);
       if (signal?.aborted === true) return;
       const enabled = new Set(snapshot.enabledPlatformKeys);
       const executions = [

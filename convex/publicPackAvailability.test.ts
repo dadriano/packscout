@@ -115,6 +115,33 @@ describe("public pack availability query behavior", () => {
     });
   });
 
+  test("reports EV summaries as unavailable when available packs have no estimate", () => {
+    const withoutEstimate: RepackSearchRow = {
+      ...fourStates[0],
+      packScoutGrossEvMinor: null,
+      packScoutGrossEvNullRank: 1,
+      packScoutEvDollarsMinor: null,
+      packScoutEvDollarsNullRank: 1,
+      packScoutEvPercentBasisPoints: null,
+      packScoutEvPercentNullRank: 1,
+      packScoutConfidenceBasisPoints: null,
+      packScoutConfidenceNullRank: 1,
+      packScoutConfidenceBand: null,
+    };
+
+    expect(dashboardKpis([withoutEstimate])).toEqual({
+      totalRepacks: 1,
+      positiveEvRepacks: 0,
+      medianPackScoutEvPercent: {
+        status: "unavailable",
+        basisPoints: null,
+        reason: "ESTIMATE_UNAVAILABLE",
+      },
+      highestChaseValueUsdMinor: null,
+      highConfidenceRepacks: 0,
+    });
+  });
+
   test("selection falls back deterministically and a later available revision restores eligibility", () => {
     const selectedId = fourStates[1].publicRepackId;
     const completeCatalog = matchingRepackRows(

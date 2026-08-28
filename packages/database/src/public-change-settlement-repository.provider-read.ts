@@ -57,9 +57,18 @@ export interface ProviderPromotionCheckpointProjectionRecord
 export interface ProviderCausalReadinessRecord {
   readonly platformKey: string;
   readonly lifecycleSequence: bigint;
-  readonly configurationRevisionId: string;
+  readonly providerId: string;
+  readonly sourceInstanceId: string;
+  readonly sourceRevisionId: string;
   readonly completedBackfillAt: Date | null;
   readonly lastSuccessfulObservationAt: Date | null;
+}
+
+export class ProviderCausalReadinessPersistenceError extends Error {
+  constructor(readonly code: "LIFECYCLE_INELIGIBLE" | "SOURCE_INVALID") {
+    super("Provider causal readiness is unavailable or invalid.");
+    this.name = "ProviderCausalReadinessPersistenceError";
+  }
 }
 
 interface EpochContext {
@@ -94,12 +103,25 @@ interface CausalReadinessRow {
   platformKey: string;
   lifecycleState: "active" | "disabled" | "archived";
   lifecycleSequence: bigint;
+  lifecycleCatalogAffected: boolean;
+  causeChangeKind: string;
+  causeEntityKey: string;
+  causeSourceKey: string | null;
+  causeSourceRevisionKey: string | null;
   causePlatformKey: string | null;
   causeLifecycleState: string | null;
   causeProviderId: string | null;
-  configurationRevisionId: string | null;
+  causeSourceInstanceId: string | null;
+  causeSourceRevisionId: string | null;
   providerId: string | null;
+  sourceInstanceId: string | null;
+  sourceProviderId: string | null;
+  sourceState: string | null;
+  activeSourceRevisionId: string | null;
+  sourceRevisionId: string | null;
   revisionProviderId: string | null;
+  revisionSourceInstanceId: string | null;
+  checkpointMatches: boolean;
   completedBackfillAt: Date | null;
   lastSuccessfulObservationAt: Date | null;
 }
@@ -266,7 +288,7 @@ async function loadEnabledPlatformKeys(
     configuredPlatformKeys: readonly string[];
     throughSequence: bigint;
   },
-): Promise<readonly string[]> {
+): Promise<readonly string[] | null> {
   if (input.configuredPlatformKeys.length === 0) return [];
   const rows = await database.$queryRaw<Array<{
     platformKey: string;
@@ -276,19 +298,78 @@ async function loadEnabledPlatformKeys(
            impact.lifecycle_platform_key as "platformKey",
            impact.lifecycle_state::text as state
     from public.public_change_catalog_impacts as impact
+    join public.public_change_causes as cause
+      on cause.organization_id = impact.organization_id
+     and cause.sequence = impact.cause_sequence
+    join public.provider_sources as provider
+      on provider.organization_id = impact.organization_id
+     and provider.platform_key = impact.lifecycle_platform_key
+    join public.provider_source_instances as source
+      on source.organization_id = provider.organization_id
+     and source.provider_id = provider.id
+     and source.id::text = cause.metadata_json->>'sourceInstanceId'
+    join public.provider_source_revisions as revision
+      on revision.organization_id = source.organization_id
+     and revision.provider_id = source.provider_id
+     and revision.source_instance_id = source.id
+     and revision.id::text = cause.metadata_json->>'sourceRevisionId'
+     and source.active_revision_id = revision.id
     where impact.organization_id = ${uuid(input.organizationId)}
       and impact.lifecycle_platform_key = any(
         ${[...input.configuredPlatformKeys]}::text[]
       )
       and impact.cause_sequence <= ${input.throughSequence}
+      and cause.change_kind in ('provider_lifecycle', 'public_configuration')
+      and cause.entity_key = 'provider:v1:' || provider.id::text
+      and cause.source_key = impact.lifecycle_platform_key
+      and cause.source_revision_key = revision.id::text
+      and cause.metadata_json->>'providerId' = provider.id::text
+      and cause.metadata_json->>'platformKey' = impact.lifecycle_platform_key
+      and cause.metadata_json->>'state' = impact.lifecycle_state::text
+      and (
+        impact.lifecycle_state = 'active'
+          and source.state in ('active', 'paused')
+        or impact.lifecycle_state = 'disabled'
+          and source.state = 'disabled'
+      )
     order by impact.lifecycle_platform_key collate "C",
              impact.cause_sequence desc
   `);
-  return canonicalCatalogPlatformKeys(
+  const enabledPlatformKeys = canonicalCatalogPlatformKeys(
     rows
       .filter(({ state }) => state === "active")
       .map(({ platformKey }) => platformKey),
   );
+  const activeSources = await database.$queryRaw<Array<{
+    platformKey: string;
+    sourceCount: number;
+  }>>(Prisma.sql`
+    select provider.platform_key as "platformKey",
+           count(*)::integer as "sourceCount"
+    from public.provider_sources as provider
+    join public.provider_source_instances as source
+      on source.organization_id = provider.organization_id
+     and source.provider_id = provider.id
+    join public.provider_source_revisions as revision
+      on revision.organization_id = source.organization_id
+     and revision.provider_id = source.provider_id
+     and revision.source_instance_id = source.id
+     and revision.id = source.active_revision_id
+    where provider.organization_id = ${uuid(input.organizationId)}
+      and provider.platform_key = any(
+        ${[...input.configuredPlatformKeys]}::text[]
+      )
+      and source.state in ('active', 'paused')
+    group by provider.platform_key
+    order by provider.platform_key collate "C"
+  `);
+  // A current V1 source without an exact source-native lifecycle decision is
+  // an incomplete cutover, not a disabled provider. Treating it as disabled
+  // could publish an empty manifest before the operator reasserts the source.
+  if (activeSources.some(({ platformKey, sourceCount }) =>
+    sourceCount !== 1 || !enabledPlatformKeys.includes(platformKey)
+  )) return null;
+  return enabledPlatformKeys;
 }
 
 export class PrismaProviderCatalogSettlementRepository {
@@ -344,7 +425,11 @@ export class PrismaProviderCatalogSettlementRepository {
       if (!checkpoint) return null;
       const readiness = (await loadProviderCausalReadinessInTransaction(
         transaction,
-        { organizationId: input.organizationId, checkpoints: [checkpoint] },
+        {
+          organizationId: input.organizationId,
+          checkpoints: [checkpoint],
+          lifecycleDecisionSequence: context.lifecycleDecisionSequence,
+        },
       ))[0];
       if (!readiness?.completedBackfillAt ||
         !readiness.lastSuccessfulObservationAt) return null;
@@ -366,72 +451,159 @@ export class PrismaProviderCatalogSettlementRepository {
   }
 }
 
-/** Exact Task 007 lifecycle/config-revision readiness, transaction-bound. */
+/** Exact source-native lifecycle/revision readiness, transaction-bound. */
 export async function loadProviderCausalReadinessInTransaction(
   transaction: PackscoutTransactionClient,
   input: Readonly<{
     organizationId: string;
     checkpoints: readonly ProviderCatalogCheckpointRecord[];
+    lifecycleDecisionSequence: bigint;
   }>,
 ): Promise<readonly ProviderCausalReadinessRecord[]> {
   if (input.checkpoints.length === 0) return [];
+  if (input.checkpoints.some((checkpoint) =>
+    checkpoint.organizationId !== input.organizationId
+  ) || new Set(input.checkpoints.map(({ platformKey }) => platformKey)).size !==
+      input.checkpoints.length) {
+    throw new ProviderCausalReadinessPersistenceError("SOURCE_INVALID");
+  }
   const platformKeys = input.checkpoints.map(({ platformKey }) => platformKey);
+  const checkpointValues = Prisma.join(input.checkpoints.map((checkpoint) =>
+    Prisma.sql`(
+      ${checkpoint.platformKey}::text,
+      ${checkpoint.settledSequence}::bigint,
+      ${checkpoint.sourceHeadSequence}::bigint,
+      ${checkpoint.settledAt}::timestamptz,
+      ${checkpoint.sourceHeadAt}::timestamptz
+    )`));
   const rows = await transaction.$queryRaw<CausalReadinessRow[]>(Prisma.sql`
-    with latest_lifecycle as (
+    with requested_checkpoint(
+      "platformKey", "settledSequence", "sourceHeadSequence",
+      "settledAt", "sourceHeadAt"
+    ) as (values ${checkpointValues}),
+    requested_lifecycle as (
+      select settled_sequence as "lifecycleDecisionSequence"
+      from public.catalog_manifest_lifecycle_checkpoints
+      where organization_id = ${uuid(input.organizationId)}
+        and settled_sequence = ${input.lifecycleDecisionSequence}
+    ),
+    latest_lifecycle as (
       select distinct on (impact.lifecycle_platform_key collate "C")
              impact.lifecycle_platform_key as "platformKey",
              impact.lifecycle_state::text as "lifecycleState",
              impact.cause_sequence as "lifecycleSequence",
+             impact.lifecycle_platform_key = any(impact.provider_platform_keys)
+               as "lifecycleCatalogAffected",
+             cause.change_kind::text as "causeChangeKind",
+             cause.entity_key as "causeEntityKey",
+             cause.source_key as "causeSourceKey",
+             cause.source_revision_key as "causeSourceRevisionKey",
              cause.metadata_json->>'platformKey' as "causePlatformKey",
              cause.metadata_json->>'state' as "causeLifecycleState",
              cause.metadata_json->>'providerId' as "causeProviderId",
-             cause.metadata_json->>'configurationRevisionId'
-               as "configurationRevisionId"
+             cause.metadata_json->>'sourceInstanceId'
+               as "causeSourceInstanceId",
+             cause.metadata_json->>'sourceRevisionId'
+               as "causeSourceRevisionId"
       from public.public_change_catalog_impacts as impact
       join public.public_change_causes as cause
         on cause.organization_id = impact.organization_id
        and cause.sequence = impact.cause_sequence
+      join requested_checkpoint as requested
+        on requested."platformKey" = impact.lifecycle_platform_key
+      cross join requested_lifecycle
+      join public.provider_sources as provider
+        on provider.organization_id = impact.organization_id
+       and provider.platform_key = impact.lifecycle_platform_key
+      join public.provider_source_instances as source
+        on source.organization_id = provider.organization_id
+       and source.provider_id = provider.id
+       and source.id::text = cause.metadata_json->>'sourceInstanceId'
+      join public.provider_source_revisions as revision
+        on revision.organization_id = source.organization_id
+       and revision.provider_id = source.provider_id
+       and revision.source_instance_id = source.id
+       and revision.id::text = cause.metadata_json->>'sourceRevisionId'
+       and source.active_revision_id = revision.id
       where impact.organization_id = ${uuid(input.organizationId)}
         and impact.lifecycle_platform_key = any(${platformKeys}::text[])
-        and impact.cause_sequence <= (
-          select settled_sequence
-          from public.catalog_manifest_lifecycle_checkpoints
-          where organization_id = ${uuid(input.organizationId)}
+        and impact.cause_sequence <=
+          requested_lifecycle."lifecycleDecisionSequence"
+        and cause.change_kind in (
+          'provider_lifecycle', 'public_configuration'
+        )
+        and cause.entity_key = 'provider:v1:' || provider.id::text
+        and cause.source_key = impact.lifecycle_platform_key
+        and cause.source_revision_key = revision.id::text
+        and cause.metadata_json->>'providerId' = provider.id::text
+        and cause.metadata_json->>'platformKey' =
+          impact.lifecycle_platform_key
+        and cause.metadata_json->>'state' = impact.lifecycle_state::text
+        and (
+          impact.lifecycle_state = 'active'
+            and source.state in ('active', 'paused')
+          or impact.lifecycle_state = 'disabled'
+            and source.state = 'disabled'
         )
       order by impact.lifecycle_platform_key collate "C",
                impact.cause_sequence desc
     )
     select lifecycle.*, provider.id::text as "providerId",
+           source.id::text as "sourceInstanceId",
+           source.provider_id::text as "sourceProviderId",
+           source.state::text as "sourceState",
+           source.active_revision_id::text as "activeSourceRevisionId",
+           revision.id::text as "sourceRevisionId",
            revision.provider_id::text as "revisionProviderId",
+           revision.source_instance_id::text as "revisionSourceInstanceId",
+           checkpoint.organization_id is not null as "checkpointMatches",
            backfill."completedBackfillAt",
            observation."lastSuccessfulObservationAt"
     from latest_lifecycle as lifecycle
+    join requested_checkpoint as requested
+      on requested."platformKey" = lifecycle."platformKey"
     left join public.provider_sources as provider
-      on provider.organization_id = ${uuid(input.organizationId)}
+     on provider.organization_id = ${uuid(input.organizationId)}
      and provider.platform_key = lifecycle."platformKey"
-    left join public.provider_config_revisions as revision
-      on revision.organization_id = provider.organization_id
-     and revision.provider_id = provider.id
-     and revision.id::text = lifecycle."configurationRevisionId"
+    left join public.provider_source_instances as source
+      on source.organization_id = provider.organization_id
+     and source.provider_id = provider.id
+     and source.id::text = lifecycle."causeSourceInstanceId"
+    left join public.provider_source_revisions as revision
+      on revision.organization_id = source.organization_id
+     and revision.provider_id = source.provider_id
+     and revision.source_instance_id = source.id
+     and revision.id::text = lifecycle."causeSourceRevisionId"
     left join public.provider_catalog_checkpoints as checkpoint
       on checkpoint.organization_id = provider.organization_id
      and checkpoint.platform_key = lifecycle."platformKey"
+     and checkpoint.settled_sequence = requested."settledSequence"
+     and checkpoint.source_head_sequence = requested."sourceHeadSequence"
+     and checkpoint.settled_at is not distinct from requested."settledAt"
+     and checkpoint.source_head_at = requested."sourceHeadAt"
     left join lateral (
       select min(run.finished_at) as "completedBackfillAt"
       from public.import_runs as run
       where run.organization_id = provider.organization_id
         and run.provider_id = provider.id
-        and run.config_revision_id = revision.id
+        and run.config_revision_id is null
+        and run.source_instance_id = source.id
+        and run.source_revision_id = revision.id
         and run.state = 'succeeded' and run.reached_provider_head = true
-        and checkpoint.settled_at is not null
-        and run.finished_at <= checkpoint.settled_at
+        -- Reaching the provider head is supervisor state, not a public catalog
+        -- mutation. The supervisor records it after the last page settlement,
+        -- so bounding finished_at by settledAt would permanently reject the
+        -- production ordering even though every canonical page is settled.
+        and requested."settledAt" is not null
     ) as backfill on true
     left join lateral (
       select max(run.finished_at) as "lastSuccessfulObservationAt"
       from public.import_runs as run
       where run.organization_id = provider.organization_id
         and run.provider_id = provider.id
-        and run.config_revision_id = revision.id
+        and run.config_revision_id is null
+        and run.source_instance_id = source.id
+        and run.source_revision_id = revision.id
         and run.state = 'succeeded' and run.reached_provider_head = true
     ) as observation on true
     order by lifecycle."platformKey" collate "C"
@@ -441,16 +613,39 @@ export async function loadProviderCausalReadinessInTransaction(
     const row = byPlatform.get(platformKey);
     if (!row || row.lifecycleState !== "active" ||
       row.causePlatformKey !== platformKey ||
-      row.causeLifecycleState !== "active" ||
-      row.configurationRevisionId === null ||
+      row.causeLifecycleState !== "active") {
+      throw new ProviderCausalReadinessPersistenceError(
+        "LIFECYCLE_INELIGIBLE",
+      );
+    }
+    if ((row.causeChangeKind !== "provider_lifecycle" &&
+        row.causeChangeKind !== "public_configuration") ||
+      row.causeEntityKey !== `provider:v1:${row.providerId}` ||
+      row.causeSourceKey !== platformKey ||
+      row.causeSourceRevisionKey !== row.causeSourceRevisionId ||
+      !row.lifecycleCatalogAffected ||
+      !row.checkpointMatches ||
+      row.providerId === null ||
+      row.sourceInstanceId === null ||
+      row.causeSourceInstanceId === null ||
+      row.causeSourceRevisionId === null ||
       row.causeProviderId !== row.providerId ||
-      row.revisionProviderId !== row.providerId) {
-      throw new Error("Provider causal readiness is invalid.");
+      row.sourceInstanceId !== row.causeSourceInstanceId ||
+      row.sourceProviderId !== row.providerId ||
+      !["active", "paused"].includes(row.sourceState ?? "") ||
+      row.activeSourceRevisionId !== row.causeSourceRevisionId ||
+      row.sourceRevisionId === null ||
+      row.sourceRevisionId !== row.causeSourceRevisionId ||
+      row.revisionProviderId !== row.providerId ||
+      row.revisionSourceInstanceId !== row.sourceInstanceId) {
+      throw new ProviderCausalReadinessPersistenceError("SOURCE_INVALID");
     }
     return {
       platformKey,
       lifecycleSequence: row.lifecycleSequence,
-      configurationRevisionId: row.configurationRevisionId,
+      providerId: row.providerId,
+      sourceInstanceId: row.sourceInstanceId,
+      sourceRevisionId: row.sourceRevisionId,
       completedBackfillAt: row.completedBackfillAt,
       lastSuccessfulObservationAt: row.lastSuccessfulObservationAt,
     };
@@ -469,6 +664,7 @@ export async function loadManifestEligibilitySnapshotInTransaction(
     configuredPlatformKeys: context.configuredPlatformKeys,
     throughSequence: context.lifecycleDecisionSequence,
   });
+  if (enabledPlatformKeys === null) return null;
   const checkpoints = await loadCheckpointRows(transaction, {
     organizationId: input.organizationId,
     platformKeys: enabledPlatformKeys,

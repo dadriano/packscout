@@ -84,6 +84,7 @@ async function planFrom(input: Readonly<{
     configuration,
     platformKey: checkpoint.platformKey,
     revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
   return {
@@ -108,6 +109,7 @@ async function representativeVolumePlan() {
     configuration,
     platformKey: "alpha",
     revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
   const seed = base.collectibles[0]!;

@@ -80,7 +80,7 @@ function capturedPage(value: unknown): SuccessfulSourceAdapterRequest {
   } as unknown as SuccessfulSourceAdapterRequest;
 }
 
-test("the sole v1 adapter projects partial pulls without fabricating a relationship", async (t) => {
+test("the DataForrest events adapter projects partial pulls without fabricating a relationship", async (t) => {
   const fixtures = [
     {
       name: "Collector Crypt pack-only pull",

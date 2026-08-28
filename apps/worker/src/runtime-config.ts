@@ -107,6 +107,11 @@ export interface ProviderWorkerConfiguration
   readonly workerVersion: string;
 }
 
+export interface ProviderWorkerSharedConfiguration
+  extends ProviderSourceSupervisorSharedConfiguration {
+  readonly publicOrganizationId: string;
+}
+
 function boundedInteger(
   value: string | undefined,
   fallback: number,
@@ -146,6 +151,29 @@ function publicOrganizationIdFor(value: string | undefined): string {
     );
   }
   return value.toLowerCase();
+}
+
+/** Reads only the production DB/actor/identity pins shared by narrow workers. */
+export function readProviderWorkerSharedConfiguration(
+  environment: NodeJS.ProcessEnv,
+  fallbackWorkerId: string,
+): ProviderWorkerSharedConfiguration {
+  try {
+    return Object.freeze({
+      ...readProviderSourceSupervisorSharedConfiguration(
+        environment,
+        fallbackWorkerId,
+      ),
+      publicOrganizationId: publicOrganizationIdFor(
+        environment.PACKSCOUT_PUBLIC_ORGANIZATION_ID,
+      ),
+    });
+  } catch (error) {
+    if (error instanceof ProviderSourceSupervisorConfigurationError) {
+      throw new ProviderWorkerConfigurationError(error.code);
+    }
+    throw error;
+  }
 }
 
 /**

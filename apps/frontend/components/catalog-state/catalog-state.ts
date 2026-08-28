@@ -1,3 +1,5 @@
+import type { PublicReadError, PublicReadErrorCode } from "@packscout/contracts";
+
 export const CATALOG_STATE_COPY = Object.freeze({
   loading: "Loading repack data.",
   updating: "Updating results…",
@@ -14,6 +16,65 @@ export const CATALOG_STATE_COPY = Object.freeze({
   clearSucceeded: "Filters cleared.",
   clearFailed: "Could not clear filters. Your current filters are unchanged.",
 } as const);
+
+type NonRetryablePublicReadErrorCode = Exclude<
+  PublicReadErrorCode,
+  "RELEASE_UNAVAILABLE"
+>;
+
+export type CatalogResultRecoveryPresentation =
+  | Readonly<{ kind: "retry" }>
+  | Readonly<{
+      kind: "navigate";
+      eyebrow: string;
+      title: string;
+      description: string;
+      actionLabel: string;
+    }>;
+
+const NON_RETRYABLE_RESULT_COPY = Object.freeze({
+  INVALID_QUERY: Object.freeze({
+    eyebrow: "Catalog link",
+    title: "This repack catalog link cannot be applied",
+    description: "Reset the catalog to remove unsupported query state.",
+    actionLabel: "Reset repack catalog",
+  }),
+  CURSOR_EXPIRED: Object.freeze({
+    eyebrow: "Catalog page",
+    title: "This repack page has expired",
+    description: "Return to the first page with your accepted filters preserved.",
+    actionLabel: "Return to first page",
+  }),
+  REPACK_NOT_FOUND: Object.freeze({
+    eyebrow: "Repack selection",
+    title: "This selected repack is no longer available",
+    description: "Clear the selection to continue browsing the catalog.",
+    actionLabel: "Clear repack selection",
+  }),
+  COLLECTIBLE_NOT_FOUND: Object.freeze({
+    eyebrow: "Desired chase",
+    title: "This desired chase is no longer available",
+    description: "Clear the desired chase to continue with your other catalog filters.",
+    actionLabel: "Clear desired chase",
+  }),
+} satisfies Readonly<
+  Record<
+    NonRetryablePublicReadErrorCode,
+    Readonly<{
+      eyebrow: string;
+      title: string;
+      description: string;
+      actionLabel: string;
+    }>
+  >
+>);
+
+export function catalogResultRecoveryPresentation(
+  error: PublicReadError,
+): CatalogResultRecoveryPresentation {
+  if (error.code === "RELEASE_UNAVAILABLE") return { kind: "retry" };
+  return { kind: "navigate", ...NON_RETRYABLE_RESULT_COPY[error.code] };
+}
 
 export type CatalogConstraint = Readonly<{
   label: string;
