@@ -408,7 +408,6 @@ export const CERTIFICATION_PROVIDER_FIXTURES: readonly CertificationProviderFixt
         normalizeBeezieBuybackEvEvidenceV1(BEEZIE_SOURCE, certificationEvidenceContext()),
       expected: {
         status: "current",
-        publicStatus: "unavailable",
         // 0.8 x (2000c x 0.975) + 0.2 x (10000c x 0.975) = 1560 + 1950.
         metrics: {
           grossEvMinorUnits: 3_510,
@@ -421,7 +420,7 @@ export const CERTIFICATION_PROVIDER_FIXTURES: readonly CertificationProviderFixt
           band: "medium",
           limitationCodes: ["closed_range_midpoint", "platform_published_odds"],
         },
-        publicReason: "CALCULATION_UNAVAILABLE",
+        publicReason: null,
         sourceAgeState: "fresh_within_15_minutes",
         rendered: availableRendered({
           grossEvDollars: "$35.10",
@@ -453,6 +452,7 @@ export const CERTIFICATION_PROVIDER_FIXTURES: readonly CertificationProviderFixt
         ),
       expected: {
         status: "current",
+        publicStatus: "unavailable",
         // (3/4) x (2000c x 0.9) + (1/4) x (10000c x 0.8) = 1350 + 2000.
         metrics: {
           grossEvMinorUnits: 3_350,
@@ -465,7 +465,7 @@ export const CERTIFICATION_PROVIDER_FIXTURES: readonly CertificationProviderFixt
           band: "high",
           limitationCodes: [],
         },
-        publicReason: null,
+        publicReason: "CALCULATION_UNAVAILABLE",
         sourceAgeState: "fresh_within_15_minutes",
         rendered: unavailableRendered(
           "Unavailable: the calculation could not be completed.",

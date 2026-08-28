@@ -2,6 +2,7 @@ import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
   PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3,
+  packScoutPublicEvMetricsAreNonpositiveV3,
   parsePackScoutBuybackEvTimestampMillisV1,
   sha256CanonicalJson,
   type PackScoutBuybackEvPublicReasonCodeV1,
@@ -255,6 +256,8 @@ function expectedStateFor(
       reason: projection.publicReason,
     };
   }
+  const violatesPublicEvPolicy =
+    !packScoutPublicEvMetricsAreNonpositiveV3(projection.metrics);
   if (product.availability === "sold_out") {
     const soldOutMillis =
       product.soldOutAt === null ? null : Date.parse(product.soldOutAt);
@@ -266,6 +269,13 @@ function expectedStateFor(
       soldOutMillis - observedMillis <=
         PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3
     ) {
+      if (violatesPublicEvPolicy) {
+        return {
+          classification: "deterministic_unavailable",
+          status: "unavailable",
+          reason: "CALCULATION_UNAVAILABLE",
+        };
+      }
       return {
         classification: "sold_out_historical",
         status: "sold_out_historical",
@@ -283,6 +293,13 @@ function expectedStateFor(
       classification: "deterministic_unavailable",
       status: "unavailable",
       reason: "SOURCE_DATA_STALE",
+    };
+  }
+  if (violatesPublicEvPolicy) {
+    return {
+      classification: "deterministic_unavailable",
+      status: "unavailable",
+      reason: "CALCULATION_UNAVAILABLE",
     };
   }
   return {

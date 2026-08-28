@@ -5,6 +5,7 @@ import {
   PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3,
   containsProtectedEvPublicationKeyV3,
   containsProtectedPublicationField,
+  packScoutPublicEvMetricsAreNonpositiveV3,
   parsePackScoutBuybackEvTimestampMillisV1,
   publicRepackDetailV3Schema,
   sha256CanonicalJson,
@@ -144,9 +145,7 @@ function composePackScoutPublicEv(
   }
   const observedAt = projection.dataAsOf.observedAt;
   const violatesPublicEvPolicy =
-    projection.metrics.grossReturnBasisPoints > 10_000 ||
-    projection.metrics.evDollars.minorUnits > 0 ||
-    projection.metrics.evPercentBasisPoints > 0;
+    !packScoutPublicEvMetricsAreNonpositiveV3(projection.metrics);
   const unavailableByPublicEvPolicy = (): PackScoutPublicEvV3 => ({
     status: "unavailable",
     ...versions,

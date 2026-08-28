@@ -1109,7 +1109,7 @@ export async function runBuybackEvLaunchCertificationHarness(
     readAt: CERTIFICATION_TIMELINE.readAtAfterPulls,
   });
   let secondReleaseId = "";
-  let pullsReleaseGross = -1;
+  let pullsReleasePolicyUnavailable = false;
   if (secondPlan.classification === "publish") {
     secondReleaseId = secondPlan.publicReleaseId;
     const secondDetails = secondPlan.batches
@@ -1122,10 +1122,10 @@ export async function runBuybackEvLaunchCertificationHarness(
     );
     if (
       clutchDetail !== undefined &&
-      clutchDetail.evEstimates.packScout.status === "current"
+      clutchDetail.evEstimates.packScout.status === "unavailable" &&
+      clutchDetail.evEstimates.packScout.reason === "CALCULATION_UNAVAILABLE"
     ) {
-      pullsReleaseGross =
-        clutchDetail.evEstimates.packScout.metrics.grossEvMoney.minorUnits;
+      pullsReleasePolicyUnavailable = true;
     }
   }
   const unprovenCommand: PackScoutBuybackEvRecomputationCommandV1 = {
@@ -1159,8 +1159,8 @@ export async function runBuybackEvLaunchCertificationHarness(
       : -1;
   const pullsVerifiedInventoryOnly =
     provenPullsGross === 4_900 &&
-    pullsReleaseGross === 4_900 &&
-    unprovenGross === 3_350;
+    unprovenGross === 3_350 &&
+    pullsReleasePolicyUnavailable;
 
   // Public-boundary sanitization: the serialized staged releases and every
   // rendered presentation must carry none of the forbidden tokens, and the
