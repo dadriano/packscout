@@ -362,6 +362,73 @@ test("readiness is tied to the active causal provider revision, not an old compl
   }
 });
 
+test("the occurred_at bound is opt-in: omitting it selects the whole sequence prefix", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await harness.client.organizations.create({
+      data: {
+        id: organizationId,
+        slug: "occurred-at-bound",
+        name: "Occurred At Bound",
+      },
+    });
+    await registerVendor(harness.client);
+    const repository = new PrismaCatalogReleaseSourceRepository(
+      harness.client,
+      organizationId,
+    );
+    const secondRepack = {
+      platformKey: "vendor",
+      packExternalId: "pack-2",
+      publicRepackId: "81444444-4444-5444-8444-444444444444",
+    } as const;
+    const first = await repository.approveConfiguration(
+      configuration(),
+      materializer,
+    );
+    // Approved from an operator-supplied time an hour past the read clock
+    // below, while holding the higher sequence: exactly the shape a sequence
+    // prefix cannot separate from a genuinely earlier change.
+    const ahead = configuration({
+      revision: 2,
+      configurationKey: "catalog-r2",
+      repacks: [...configuration().repacks, secondRepack],
+    });
+    const second = await repository.approveConfiguration(
+      { ...ahead, approvedAt: "2026-08-15T03:00:00.000Z" },
+      materializer,
+    );
+    assert.ok(second.publicChangeSequence > first.publicChangeSequence);
+    const readAt = new Date("2026-08-15T02:00:00.000Z");
+
+    // v2 shape: a settled prefix and no bound. Byte for byte the prior read.
+    const prefix = await repository.loadSnapshot({
+      throughSequence: second.publicChangeSequence,
+      throughOccurredAt: readAt,
+    });
+    assert.equal(prefix.configuration?.configuration.configurationKey, "catalog-r2");
+    assert.deepEqual(
+      prefix.repackIdentities.map(({ packExternalId }) => packExternalId),
+      ["pack-1", "pack-2"],
+    );
+
+    // v3 shape: the same prefix, bounded on each row's own cause time.
+    const bounded = await repository.loadSnapshot({
+      throughSequence: second.publicChangeSequence,
+      throughOccurredAt: readAt,
+      occurredAtBound: readAt,
+    });
+    assert.equal(bounded.configuration?.configuration.configurationKey, "catalog-r1");
+    assert.equal(bounded.configuration?.publicChangeSequence, first.publicChangeSequence);
+    assert.deepEqual(
+      bounded.repackIdentities.map(({ packExternalId }) => packExternalId),
+      ["pack-1"],
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 async function waitForBlockedProviderRead(database: {
   $queryRaw<T>(query: Prisma.Sql): Promise<T>;
 }) {

@@ -190,7 +190,15 @@ export interface DataReleaseV3ReleaseStatus {
   readonly acceptedEntityChainHashes: DataReleaseV3EntityChainHashes;
   readonly acceptedSearchRowCount: number;
   readonly acceptedSearchRowSetHash: string;
+  /** Top chases the staged repack details *declare*. */
   readonly acceptedTopChaseCount: number;
+  /**
+   * Top chases the server *verified* against staged chase rows. Finalize
+   * requires it to equal `acceptedTopChaseCount`; the pair is what makes a
+   * reconciliation refusal legible. Optional because a deployment predating
+   * the counter does not report it at all.
+   */
+  readonly acceptedVerifiedTopChaseCount?: number;
   readonly completedAt: string | null;
 }
 

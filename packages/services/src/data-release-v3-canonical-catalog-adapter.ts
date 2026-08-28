@@ -74,10 +74,16 @@ export interface DataReleaseV3SoldOutTransitionSnapshot {
   readonly soldOutAt: Date;
 }
 
+/**
+ * The snapshot carries no sequence ceiling on purpose. The ceiling the source
+ * applies is the live settled watermark, which grows between two reads at the
+ * same `readAt`; exposing it from a structure whose contract is byte-for-byte
+ * repeatability would invite it into a fingerprint or a hash and silently break
+ * that contract. `readAt` alone determines membership.
+ */
 export interface DataReleaseV3CanonicalSourceSnapshot {
   readonly organizationId: string;
   readonly readAt: Date;
-  readonly throughSequence: bigint;
   readonly configuration: CatalogReleaseSourceSnapshot["configuration"];
   readonly revisions: readonly CatalogCanonicalRevisionSnapshot[];
   readonly providers: readonly CatalogProviderReadinessSnapshot[];

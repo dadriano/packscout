@@ -1608,7 +1608,26 @@ export default defineSchema({
     expectedBatchChainHash: sha256Validator,
     acceptedCounts: dataReleaseV3CountsValidator,
     acceptedEntityChainHashes: dataReleaseV3EntityChainHashesValidator,
+    // Two server-derived views of the same quantity. `acceptedTopChaseCount` is
+    // the count *declared* by the staged repack details (how many advertise a
+    // top chase); `acceptedVerifiedTopChaseCount` is the count *verified*
+    // against staged chase rows that canonically match those details. Finalize
+    // requires them to agree, so a release can never advertise a top chase
+    // whose chase row was never staged.
+    //
+    // The verified counter is `v.optional` only to keep the deploy that
+    // introduces it applicable. This table is never deleted from -- retention
+    // is what makes rollback to the previous release possible -- so documents
+    // written before this field existed outlive the deploy, and
+    // `schemaValidation` (on by default) validates them at push time. A
+    // required field would fail `convex/deploy` outright on any environment
+    // that has ever started a v3 release. Every read coalesces the absent
+    // value to 0, which is the fail-safe direction: a legacy in-flight release
+    // that declared a top chase refuses at finalize instead of completing
+    // unverified. `start` always writes the field, so no release created from
+    // this deploy forward can be missing it.
     acceptedTopChaseCount: v.number(),
+    acceptedVerifiedTopChaseCount: v.optional(v.number()),
     acceptedBatchCount: v.number(),
     acceptedBatchChainHash: sha256Validator,
     acceptedSearchRowCount: v.number(),

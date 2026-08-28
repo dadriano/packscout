@@ -333,6 +333,243 @@ describe("data_release_v3 lifecycle", () => {
     );
   });
 
+  test("a declared top chase with no staged chase row never completes or activates", async () => {
+    const t = convexTest(schema, modules);
+    const detail = buildV3Detail({ publicRepackId: V3_REPACK_ID_A });
+    expect(detail.topChase).not.toBeNull();
+    // A publisher whose manifest is internally consistent — counts, entity
+    // chains, batch chain, content hash, and fingerprint all computed over
+    // exactly the bytes it stages — but which never stages the chase row its
+    // own repack detail advertises. Every per-batch guard passes: chases are
+    // staged after repacks, so nothing at staging time can observe the gap.
+    const plan = await buildV3FixturePlan({
+      publicReleaseId: RELEASE_ID_1,
+      details: [detail],
+      chases: [],
+    });
+    expect(plan.manifest.topChaseCount).toBe(1);
+    expect(plan.manifest.counts.chases).toBe(0);
+    expect(plan.batches.some(({ kind }) => kind === "chases")).toBe(false);
+
+    await run(t, internal.dataReleaseV3Lifecycle.start, v3StartRequest(plan));
+    for (const batch of plan.batches) {
+      const accepted = await run(
+        t,
+        internal.dataReleaseV3Lifecycle.applyBatch,
+        v3BatchRequest(plan, batch),
+      );
+      expect(accepted.result).toBe("accepted");
+    }
+
+    // Reconciliation is the only place the inconsistency is visible, and it
+    // must refuse: the release advertises one top chase and verified none.
+    await expectRefusal(
+      run(t, internal.dataReleaseV3Lifecycle.finalize, v3FinalizeRequest(plan)),
+      "PUBLICATION_RECONCILIATION_FAILED",
+    );
+    const status = (await t.query(internal.dataReleaseV3Lifecycle.status, {
+      publicReleaseId: RELEASE_ID_1,
+    })) as Record<string, unknown>;
+    expect(status.lifecycle).toBe("staging");
+    expect(status.completedAt).toBeNull();
+
+    // An unreconciled release can never become the public catalog.
+    await expectRefusal(activate(t, plan, null), "PUBLICATION_STATE_CONFLICT");
+    const state = (await t.query(
+      internal.dataReleaseV3Lifecycle.activeState,
+      {},
+    )) as { activeRelease: unknown };
+    expect(state.activeRelease).toBeNull();
+  });
+
+  test("a manifest that under-declares its own top chases never reconciles", async () => {
+    const t = convexTest(schema, modules);
+    // Coverage for the *pre-existing* manifest check, not the declared-vs-
+    // verified guard: the publisher stages a repack detail advertising a top
+    // chase but reports `topChaseCount: 0`, so the count the server derives
+    // from the staged repack details (1) disagrees with both the manifest and
+    // the finalize request (0) and `acceptedTopChaseCount ===
+    // expectedTopChaseCount` refuses on its own. The verified counter never
+    // gets a say here — with nothing staged it is 0 while declared is 1, but
+    // finalize has already refused. The case that isolates the verified guard
+    // is the preceding test, where the manifest is internally honest.
+    const plan = await buildV3FixturePlan({
+      publicReleaseId: RELEASE_ID_1,
+      details: [buildV3Detail({ publicRepackId: V3_REPACK_ID_A })],
+      chases: [],
+      topChaseCount: 0,
+    });
+    expect(plan.manifest.topChaseCount).toBe(0);
+    await run(t, internal.dataReleaseV3Lifecycle.start, v3StartRequest(plan));
+    for (const batch of plan.batches) {
+      await run(
+        t,
+        internal.dataReleaseV3Lifecycle.applyBatch,
+        v3BatchRequest(plan, batch),
+      );
+    }
+    await expectRefusal(
+      run(t, internal.dataReleaseV3Lifecycle.finalize, v3FinalizeRequest(plan)),
+      "PUBLICATION_RECONCILIATION_FAILED",
+    );
+    await expectRefusal(activate(t, plan, null), "PUBLICATION_STATE_CONFLICT");
+  });
+
+  // `dataReleaseV3Releases` is never deleted from — retention is what makes
+  // rollback to the previous release possible — so documents written before
+  // `acceptedVerifiedTopChaseCount` existed outlive the deploy that introduces
+  // it, and `schemaValidation` (on by default) validates them at push time.
+  // The field is therefore `v.optional`, and these two tests pin both halves of
+  // that decision: that such a document is genuinely valid, and that reading
+  // the absent value as 0 refuses rather than completes.
+  describe("releases staged before the verified top-chase counter", () => {
+    async function stageOneDeclaredTopChase(
+      t: V3Test,
+    ): Promise<V3FixturePlan> {
+      const plan = await buildV3FixturePlan({
+        publicReleaseId: RELEASE_ID_1,
+        details: [buildV3Detail({ publicRepackId: V3_REPACK_ID_A })],
+      });
+      expect(plan.manifest.topChaseCount).toBe(1);
+      await run(t, internal.dataReleaseV3Lifecycle.start, v3StartRequest(plan));
+      for (const batch of plan.batches) {
+        await run(
+          t,
+          internal.dataReleaseV3Lifecycle.applyBatch,
+          v3BatchRequest(plan, batch),
+        );
+      }
+      return plan;
+    }
+
+    test("a release document without the verified counter is a valid document", async () => {
+      const t = convexTest(schema, modules);
+      await stageOneDeclaredTopChase(t);
+      // convex-test validates every write against `schema`, so this insert is
+      // the deploy-safety proof itself: were the field required, writing a
+      // document that omits it would throw here.
+      const legacyId = await t.run(async (ctx) => {
+        const staged = await ctx.db
+          .query("dataReleaseV3Releases")
+          .withIndex("by_public_release_id", (index) =>
+            index.eq("publicReleaseId", RELEASE_ID_1),
+          )
+          .unique();
+        expect(staged).not.toBeNull();
+        const {
+          _id: _ignoredId,
+          _creationTime: _ignoredCreationTime,
+          acceptedVerifiedTopChaseCount,
+          ...withoutVerifiedCounter
+        } = staged!;
+        expect(acceptedVerifiedTopChaseCount).toBe(1);
+        return await ctx.db.insert("dataReleaseV3Releases", {
+          ...withoutVerifiedCounter,
+          publicReleaseId: RELEASE_ID_2,
+        });
+      });
+      const stored = await t.run(async (ctx) =>
+        ctx.db.get("dataReleaseV3Releases", legacyId),
+      );
+      expect(stored).not.toBeNull();
+      expect(stored!.acceptedVerifiedTopChaseCount).toBeUndefined();
+      expect(stored!.acceptedTopChaseCount).toBe(1);
+    });
+
+    test("one that declared a top chase refuses at finalize instead of completing", async () => {
+      const t = convexTest(schema, modules);
+      const plan = await stageOneDeclaredTopChase(t);
+      // Rewrite the staged release as one whose entire staging predates the
+      // counter: declared 1, verified never recorded. Everything else about
+      // the release is honest and would otherwise reconcile.
+      await t.run(async (ctx) => {
+        const staged = await ctx.db
+          .query("dataReleaseV3Releases")
+          .withIndex("by_public_release_id", (index) =>
+            index.eq("publicReleaseId", RELEASE_ID_1),
+          )
+          .unique();
+        const {
+          _id,
+          _creationTime: _ignoredCreationTime,
+          acceptedVerifiedTopChaseCount: _ignoredVerified,
+          ...withoutVerifiedCounter
+        } = staged!;
+        await ctx.db.replace(
+          "dataReleaseV3Releases",
+          _id,
+          withoutVerifiedCounter,
+        );
+      });
+      // Fail safe: the absent counter reads as 0, which cannot equal the
+      // declared 1, so the release refuses rather than completing unverified.
+      await expectRefusal(
+        run(t, internal.dataReleaseV3Lifecycle.finalize, v3FinalizeRequest(plan)),
+        "PUBLICATION_RECONCILIATION_FAILED",
+      );
+      const status = (await t.query(internal.dataReleaseV3Lifecycle.status, {
+        publicReleaseId: RELEASE_ID_1,
+      })) as Record<string, unknown>;
+      expect(status.lifecycle).toBe("staging");
+      expect(status.completedAt).toBeNull();
+      // The status surface reports the declared counter, and OMITS the
+      // verified one for a release staged before that counter existed. The
+      // absence is the signal: a publisher's divergence checks are
+      // presence-guarded, so reporting 0 here would be indistinguishable
+      // from a server that genuinely verified zero and would wedge a
+      // release completed before this deploy.
+      expect(status.acceptedTopChaseCount).toBe(1);
+      expect(status.acceptedVerifiedTopChaseCount).toBeUndefined();
+      await expectRefusal(activate(t, plan, null), "PUBLICATION_STATE_CONFLICT");
+    });
+
+    test("one that declared no top chase still completes", async () => {
+      const t = convexTest(schema, modules);
+      const plan = await buildV3FixturePlan({
+        publicReleaseId: RELEASE_ID_1,
+        details: [
+          buildV3Detail({ publicRepackId: V3_REPACK_ID_A, topChase: null }),
+        ],
+      });
+      expect(plan.manifest.topChaseCount).toBe(0);
+      await run(t, internal.dataReleaseV3Lifecycle.start, v3StartRequest(plan));
+      for (const batch of plan.batches) {
+        await run(
+          t,
+          internal.dataReleaseV3Lifecycle.applyBatch,
+          v3BatchRequest(plan, batch),
+        );
+      }
+      await t.run(async (ctx) => {
+        const staged = await ctx.db
+          .query("dataReleaseV3Releases")
+          .withIndex("by_public_release_id", (index) =>
+            index.eq("publicReleaseId", RELEASE_ID_1),
+          )
+          .unique();
+        const {
+          _id,
+          _creationTime: _ignoredCreationTime,
+          acceptedVerifiedTopChaseCount: _ignoredVerified,
+          ...withoutVerifiedCounter
+        } = staged!;
+        await ctx.db.replace(
+          "dataReleaseV3Releases",
+          _id,
+          withoutVerifiedCounter,
+        );
+      });
+      // Reading the absent counter as 0 must not over-refuse: with nothing
+      // declared there was nothing to verify, so the release still completes.
+      const receipt = await run(
+        t,
+        internal.dataReleaseV3Lifecycle.finalize,
+        v3FinalizeRequest(plan),
+      );
+      expect(receipt.result).toBe("complete");
+    });
+  });
+
   test("a mixed-method or malformed estimate never enters a release", async () => {
     const t = convexTest(schema, modules);
     const detail = buildV3Detail({ publicRepackId: V3_REPACK_ID_A });
