@@ -1,78 +1,62 @@
-import type { ProviderConfigurationSummary } from "@packscout/contracts";
-import {
-  ProviderHealthService,
-  type ProviderConfigurationRepository,
-  type ProviderHealthDto,
-  type ProviderHealthRepository,
-  type ProviderFreshnessOperationalHooks,
-} from "@packscout/services";
 import type {
-  ProviderAdminListItem,
-  ProviderHealthView,
+  ProviderLifecycleState,
+  ProviderSourceRootSummary,
+} from "@packscout/contracts";
+import type {
   ProvidersRouterDependencies,
 } from "./routes/providers.ts";
 
-interface ProviderCatalogRepository extends Pick<
-  ProviderConfigurationRepository,
-  "getProvider"
-> {
+interface ProviderSourceRootRecord {
+  readonly id: string;
+  readonly provider: string;
+  readonly displayName: string;
+  readonly state: ProviderLifecycleState;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+interface ProviderCatalogRepository {
   listProviders(
     organizationId: string,
-  ): Promise<readonly ProviderConfigurationSummary[]>;
+  ): Promise<readonly ProviderSourceRootRecord[]>;
+  getProvider(
+    organizationId: string,
+    providerId: string,
+  ): Promise<ProviderSourceRootRecord | null>;
 }
 
 export interface ProviderAdminRuntimeInput {
   readonly repository: ProviderCatalogRepository;
-  readonly healthRepository: ProviderHealthRepository;
-  readonly operational?: ProviderFreshnessOperationalHooks;
 }
 
-function healthView(health: ProviderHealthDto): ProviderHealthView {
+function providerSummary(
+  provider: ProviderSourceRootRecord,
+): ProviderSourceRootSummary {
   return {
-    providerId: health.providerId,
-    freshnessState: health.freshnessState,
-    qualityState: health.qualityState,
-    activeRun: health.activeRun,
-    latestRun: health.latestRun,
-    lastHeadReachedAt: health.lastHeadReachedAt,
-    nextDueAt: health.nextDueAt,
-    openQuarantineCount: health.openQuarantineCount,
-    consecutiveFailures: health.consecutiveFailures,
-    latestFailureClass: health.latestFailureClass,
-    recoveryHint: health.recoveryHint,
+    id: provider.id,
+    platformKey: provider.provider,
+    displayName: provider.displayName,
+    state: provider.state,
+    createdAt: provider.createdAt.toISOString(),
+    updatedAt: provider.updatedAt.toISOString(),
   };
 }
 
 export function createProviderAdminRuntime(
   input: ProviderAdminRuntimeInput,
 ): Omit<ProvidersRouterDependencies, "auth" | "cookiePolicy" | "sameOrigin"> {
-  const clock = { now: () => new Date() };
-  const health = new ProviderHealthService(
-    input.healthRepository,
-    clock,
-    input.operational,
-  );
   return {
-    health: {
-      async getHealth(request) {
-        return healthView(await health.getHealth(request));
-      },
-    },
     catalog: {
-      getProvider(organizationId, providerId) {
-        return input.repository.getProvider(organizationId, providerId);
-      },
-      async listProviders(organizationId): Promise<readonly ProviderAdminListItem[]> {
-        const providers = await input.repository.listProviders(organizationId);
-        return Promise.all(
-          providers.map(async (provider) => ({
-            provider,
-            health: healthView(await health.getHealth({
-              organizationId,
-              providerId: provider.id,
-            })),
-          })),
+      async getProvider(organizationId, providerId) {
+        const provider = await input.repository.getProvider(
+          organizationId,
+          providerId,
         );
+        return provider === null ? null : providerSummary(provider);
+      },
+      async listProviders(organizationId) {
+        const providers = await input.repository.listProviders(organizationId);
+        return providers.map(providerSummary);
       },
     },
   };

@@ -40,43 +40,13 @@ const dataOperator: AuthenticatedActor = {
 function summary() {
   return {
     id: providerId,
-    platformKey: "fanatics",
-    displayName: "Fanatics cards",
-    state: "active" as const,
-    latestRevision: {
-      id: revisionId,
-      version: 1,
-      adapterKey: "cursor-http",
-      endpoint: "https://feed.packscout.test/cards",
-      endpointHost: "feed.packscout.test",
-      authMode: "bearer" as const,
-      hasBearerSecret: true,
-      scheduleSeconds: 300,
-      staleAfterSeconds: 900,
-      testedAt: null,
-      createdAt: "2026-08-06T12:00:00.000Z",
-      lastConnectionTest: null,
-    },
-    activeRevisionId: revisionId,
-    nextRunAt: null,
+    platformKey: "clutchpacks",
+    displayName: "ClutchPacks",
+    state: "draft" as const,
     createdAt: "2026-08-06T12:00:00.000Z",
     updatedAt: "2026-08-06T12:00:00.000Z",
   };
 }
-
-const health = {
-  providerId,
-  freshnessState: "stale" as const,
-  qualityState: "healthy" as const,
-  activeRun: null,
-  latestRun: null,
-  lastHeadReachedAt: null,
-  nextDueAt: null,
-  openQuarantineCount: 0,
-  consecutiveFailures: 0,
-  latestFailureClass: null,
-  recoveryHint: "Run an import through provider head.",
-};
 
 async function withServer(app: Express, run: (baseUrl: string) => Promise<void>) {
   const server = app.listen(0, "127.0.0.1");
@@ -98,7 +68,7 @@ function createHarness(options: {
   readonly providerExists?: boolean;
 } = {}) {
   const current = summary();
-  const calls = { list: 0, get: 0, health: 0 };
+  const calls = { list: 0, get: 0 };
   const auth: ProvidersRouterDependencies["auth"] = {
     async resolveSession({ sessionToken }) {
       if (!sessionToken) {
@@ -128,20 +98,13 @@ function createHarness(options: {
       async listProviders(requestOrganizationId) {
         calls.list += 1;
         assert.equal(requestOrganizationId, organizationId);
-        return [{ provider: current, health }];
+        return [current];
       },
       async getProvider(requestOrganizationId, requestProviderId) {
         calls.get += 1;
         assert.equal(requestOrganizationId, organizationId);
         assert.equal(requestProviderId, providerId);
         return options.providerExists === false ? null : current;
-      },
-    },
-    health: {
-      async getHealth(input) {
-        calls.health += 1;
-        assert.deepEqual(input, { organizationId, providerId });
-        return health;
       },
     },
     cookiePolicy,
@@ -158,7 +121,7 @@ function headers(cookieName: string, session = "admin-session") {
   };
 }
 
-test("historical provider list and detail remain authenticated read-only views", async () => {
+test("source-native provider list and detail expose clean V3 provider roots", async () => {
   const { app, calls, cookiePolicy } = createHarness();
   await withServer(app, async (baseUrl) => {
     assert.equal((await fetch(`${baseUrl}/api/data-providers`)).status, 401);
@@ -168,22 +131,20 @@ test("historical provider list and detail remain authenticated read-only views",
     });
     assert.equal(list.status, 200);
     const serializedList = await list.text();
-    assert.match(serializedList, /"hasBearerSecret":true/);
-    assert.doesNotMatch(serializedList, /"(?:bearerSecret|authorization|token)"\s*:/i);
+    assert.match(serializedList, /"platformKey":"clutchpacks"/);
+    assert.match(serializedList, /"displayName":"ClutchPacks"/);
+    assert.doesNotMatch(serializedList, /"(?:latestRevision|health)"\s*:/i);
 
     const detail = await fetch(`${baseUrl}/api/data-providers/${providerId}`, {
       headers: { Cookie: `${cookiePolicy.name}=data-session` },
     });
     assert.equal(detail.status, 200);
-    assert.doesNotMatch(
-      await detail.text(),
-      /"(?:bearerSecret|authorization|token)"\s*:/i,
-    );
+    assert.deepEqual(await detail.json(), { provider: summary() });
   });
-  assert.deepEqual(calls, { list: 1, get: 1, health: 1 });
+  assert.deepEqual(calls, { list: 1, get: 1 });
 });
 
-test("a missing historical provider detail keeps the stable not-found contract", async () => {
+test("a missing provider source root keeps the stable not-found contract", async () => {
   const { app, cookiePolicy } = createHarness({ providerExists: false });
   await withServer(app, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/data-providers/${providerId}`, {
@@ -240,5 +201,5 @@ test("every retired provider mutation returns the same explicit Provider Sources
     }
   });
 
-  assert.deepEqual(calls, { list: 0, get: 0, health: 0 });
+  assert.deepEqual(calls, { list: 0, get: 0 });
 });
