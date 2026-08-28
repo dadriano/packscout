@@ -58,13 +58,6 @@ test("renders the four metrics, price, status, source, and advice lines", () => 
   assert.match(markup, /data-state="negative"/);
 });
 
-test("positive estimates show explicit plus signs and a Positive text label", () => {
-  const markup = render(buildV3CurrentEv(11_900));
-  assert.ok(markup.includes("+$19.00"));
-  assert.ok(markup.includes("+19.00%"));
-  assert.match(markup, /Positive/);
-});
-
 test("unavailable estimates show the stable reason and never a zero", () => {
   const markup = render(buildV3UnavailableEv("BUYBACK_UNAVAILABLE"));
 

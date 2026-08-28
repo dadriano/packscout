@@ -53,7 +53,7 @@ function unavailableVendorEv() {
 }
 
 /**
- * Fixture set: B ranks first (+$25 EV), A second (+$20 EV), C is sold out
+ * Fixture set: B ranks first (-$5 EV), A second (-$15 EV), C is sold out
  * with visible history, D is available without an estimate.
  */
 const V3_REPACK_ID_D = "00000000-0000-5000-8000-000000000304";
@@ -136,7 +136,7 @@ function fixtureDetails() {
       publicRepackId: V3_REPACK_ID_B,
       name: "Pokemon Value Gacha",
       evEstimates: {
-        packScout: buildV3CurrentEv(12_500),
+        packScout: buildV3CurrentEv(9_500),
         vendorReported: unavailableVendorEv(),
       },
     }),
@@ -201,6 +201,9 @@ describe("data_release_v3 public reads", () => {
     const release = (after.data as { release: Record<string, unknown> }).release;
     expect(release.publicReleaseId).toBe(RELEASE_ID_1);
     expect(release.methodVersion).toBe("packscout-buyback-adjusted-ev-v1");
+    expect(release.publicEvPolicyVersion).toBe(
+      "packscout-public-ev-nonpositive-v1",
+    );
   });
 
   test("dashboard ranks by signed EV dollars, excludes ineligible repacks, and aggregates with the same rules", async () => {
@@ -215,7 +218,6 @@ describe("data_release_v3 public reads", () => {
       opportunities: { publicRepackId: string }[];
       kpis: {
         totalRepacks: number;
-        positiveEvRepacks: number;
         highConfidenceRepacks: number;
         medianPackScoutEvPercent: { status: string; basisPoints: number | null };
       };
@@ -225,23 +227,21 @@ describe("data_release_v3 public reads", () => {
       }[];
       selectedRepack: { publicRepackId: string } | null;
     };
-    // B (+$25) outranks A (+$20); sold-out C and unavailable D never rank.
+    // B (-$5) outranks A (-$15); sold-out C and unavailable D never rank.
     expect(data.opportunities.map(({ publicRepackId }) => publicRepackId)).toEqual([
       V3_REPACK_ID_B,
       V3_REPACK_ID_A,
     ]);
     expect(data.selectedRepack?.publicRepackId).toBe(V3_REPACK_ID_B);
     expect(data.kpis.totalRepacks).toBe(4);
-    // Positive-EV counts admit only available repacks with a current estimate.
-    expect(data.kpis.positiveEvRepacks).toBe(2);
-    // Median excludes unavailable and sold-out estimates: (2000+2500)/2.
+    // Median excludes unavailable and sold-out estimates: (-1500+-500)/2.
     expect(data.kpis.medianPackScoutEvPercent).toEqual({
       status: "available",
-      basisPoints: 2_250,
+      basisPoints: -1_000,
     });
     expect(data.vendorSummaries[0]?.repackCount).toBe(4);
     expect(data.vendorSummaries[0]?.medianPackScoutEvPercent.basisPoints).toBe(
-      2_250,
+      -1_000,
     );
   });
 
@@ -350,8 +350,8 @@ describe("data_release_v3 public reads", () => {
     const t = convexTest(schema, modules);
     // Every non-available pack here carries a *current* PackScout estimate, so
     // only the availability guard itself can keep them out of the filtered
-    // list, the opportunity ranking, and the positive-EV count. All three also
-    // out-chase the available pack, so any headline KPI that reads an ungated
+    // list and the opportunity ranking. They also out-chase the available
+    // pack, so any headline KPI that reads an ungated
     // row reports their number instead of the available pack's.
     await publishFixture(
       t,
@@ -428,7 +428,7 @@ describe("data_release_v3 public reads", () => {
       ).toBe(detail.availability !== "available");
     }
 
-    // Ranking and the positive-EV KPI admit the available pack alone.
+    // Ranking admits the available pack alone.
     const dashboard = (await t.query(api.publicRepacksV3.getDashboardBundleV3, {
       filters: { availability: "all" },
       currentTime: NOW,
@@ -438,7 +438,6 @@ describe("data_release_v3 public reads", () => {
       opportunities: { publicRepackId: string }[];
       kpis: {
         totalRepacks: number;
-        positiveEvRepacks: number;
         highestChaseValueUsdMinor: number | null;
       };
     };
@@ -447,7 +446,6 @@ describe("data_release_v3 public reads", () => {
     ).toEqual([V3_REPACK_ID_A]);
     // The catalog total stays ungated: all four states remain discoverable.
     expect(dashboardData.kpis.totalRepacks).toBe(4);
-    expect(dashboardData.kpis.positiveEvRepacks).toBe(1);
     // The headline chase value reports the available pack's chase, never the
     // richer chase sitting inside a sold_out, unavailable, or unknown pack.
     expect(dashboardData.kpis.highestChaseValueUsdMinor).toBe(
@@ -466,12 +464,10 @@ describe("data_release_v3 public reads", () => {
     const data = result.data as {
       opportunities: unknown[];
       kpis: {
-        positiveEvRepacks: number;
         medianPackScoutEvPercent: { status: string };
       };
     };
     expect(data.opportunities).toEqual([]);
-    expect(data.kpis.positiveEvRepacks).toBe(0);
     expect(data.kpis.medianPackScoutEvPercent.status).toBe("unavailable");
 
     const detail = (await t.query(api.publicRepacksV3.getPublicRepackV3, {

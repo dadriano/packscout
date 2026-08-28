@@ -197,16 +197,16 @@ test("seed, clock, and frame control changes each produce the expected new resul
   );
   assert.equal(shifted[0]!.readAt, "2026-08-19T13:00:00.000Z");
 
-  // Price-driven transition: the $100 listing reprices to $80 and turns
-  // positive; pull-driven and value-driven transitions also change bytes.
+  // Price-driven transition: the $100 listing reprices to $80, its raw result
+  // turns positive, and the public policy makes the estimate unavailable.
   const frame0 = baseline[0]!;
   const frame1 = baseline[1]!;
   const priced0 = detailFor(frame0, "courtyard-uniform-price-shift");
   const priced1 = detailFor(frame1, "courtyard-uniform-price-shift");
   assert.ok(priced0.evEstimates.packScout.status === "current");
-  assert.ok(priced1.evEstimates.packScout.status === "current");
+  assert.ok(priced1.evEstimates.packScout.status === "unavailable");
   assert.equal(priced0.evEstimates.packScout.metrics.evDollars.minorUnits, -1_500);
-  assert.equal(priced1.evEstimates.packScout.metrics.evDollars.minorUnits, 500);
+  assert.equal(priced1.evEstimates.packScout.reason, "CALCULATION_UNAVAILABLE");
 
   const transitioned = ["courtyard-uniform-price-shift", "clutchpacks-pool-pulls", "trove-per-draw-final-payout"]
     .filter((scenarioKey) =>
@@ -259,10 +259,14 @@ test("every approved public state appears and passes the production contracts", 
   const frame2 = results[2]!;
   const frame3 = results[3]!;
 
-  // Positive, neutral, negative, and valid zero-payout available states.
-  const positive = detailFor(results[1]!, "courtyard-uniform-price-shift");
-  assert.ok(positive.evEstimates.packScout.status === "current");
-  assert.ok(positive.evEstimates.packScout.metrics.evDollars.minorUnits > 0);
+  // Positive raw results fail closed; neutral, negative, and valid zero-payout
+  // states remain available.
+  const positiveRaw = detailFor(results[1]!, "courtyard-uniform-price-shift");
+  assert.ok(positiveRaw.evEstimates.packScout.status === "unavailable");
+  assert.equal(
+    positiveRaw.evEstimates.packScout.reason,
+    "CALCULATION_UNAVAILABLE",
+  );
   const neutral = detailFor(frame2, "gamestop-fixed-offers");
   assert.ok(neutral.evEstimates.packScout.status === "current");
   assert.equal(neutral.evEstimates.packScout.metrics.evDollars.minorUnits, 0);

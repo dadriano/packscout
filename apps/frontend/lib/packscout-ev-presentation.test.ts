@@ -65,14 +65,26 @@ test("renders the approved $100 / 85% example with all four exact metrics", () =
   assert.match(presentation.accessibleLabel, /EV %: -15\.00%. Negative/);
 });
 
-test("positive estimates carry explicit plus signs on both signed metrics", () => {
-  const presentation = presentPackScoutEvV3(input(buildV3CurrentEv(11_900)));
+test("a forged positive estimate fails closed at the presentation boundary", () => {
+  const estimate = buildV3CurrentEv(8_500);
+  assert.equal(estimate.status, "current");
+  if (estimate.status !== "current") return;
+  const forged = {
+    ...estimate,
+    metrics: {
+      grossEvMoney: { minorUnits: 11_900, currency: "USD" as const },
+      grossReturnBasisPoints: 11_900,
+      evDollars: { minorUnits: 1_900, currency: "USD" as const },
+      evPercentBasisPoints: 1_900,
+    },
+  };
 
-  assert.equal(presentation.evDollars.displayValue, "+$19.00");
-  assert.equal(presentation.evPercent.displayValue, "+19.00%");
-  assert.equal(presentation.semanticState, "positive");
-  assert.equal(presentation.grossEvDollars.displayValue, "$119.00");
-  assert.equal(presentation.grossEvPercent.displayValue, "119.00%");
+  assert.throws(
+    () => presentPackScoutEvV3(input(forged)),
+    (error: unknown) =>
+      error instanceof MetricPresentationConsistencyError &&
+      error.issues.includes("public PackScout EV must be nonpositive"),
+  );
 });
 
 test("break-even estimates present a neutral state without invented signs", () => {
@@ -435,6 +447,13 @@ test("server aggregates format through the same signed-percent presentation", ()
   );
   assert.equal(unavailable.availability, "unavailable");
   assert.equal(unavailable.displayValue, "Unavailable");
+
+  const forbiddenPositive = presentSignedEvPercentMetric(
+    { status: "available", basisPoints: 100 },
+    "Median EV %",
+  );
+  assert.equal(forbiddenPositive.availability, "unavailable");
+  assert.equal(forbiddenPositive.displayValue, "Unavailable");
 });
 
 test("presentation output never carries protected calculation evidence", () => {

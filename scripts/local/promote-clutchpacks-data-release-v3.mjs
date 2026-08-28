@@ -46,6 +46,16 @@ export const CLUTCHPACKS_CONVEX_PUBLICATION_URL =
 export const CLUTCHPACKS_CONVEX_QUERY_URL =
   "https://shiny-newt-310.convex.cloud/";
 
+export function clutchpacksConvexHttpClientAddress(queryUrl) {
+  if (queryUrl !== CLUTCHPACKS_CONVEX_QUERY_URL) {
+    refuse("CLUTCHPACKS_V3_TARGET_INVALID");
+  }
+  // ConvexHttpClient appends `/api/query` directly to the supplied address.
+  // The protected target is represented canonically with a trailing slash,
+  // so pass only its origin to avoid issuing a `//api/query` request.
+  return new URL(queryUrl).origin;
+}
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
@@ -421,6 +431,152 @@ function exactIdSet(values) {
   return [...new Set(values)].sort();
 }
 
+function clutchpacksCanonicalAssetKey(externalId) {
+  return `${CLUTCHPACKS_PLATFORM_KEY}\0${externalId}`;
+}
+
+/**
+ * ClutchPacks alone currently emits schema-valid, metadata-free catalog rows
+ * before some provider records receive their public payload. Keep the generic
+ * V3 adapter fail-closed: this local boundary removes only unconfigured exact
+ * shells and their otherwise-valid relationship rows. Once any public-bearing
+ * field arrives, the predicate returns false and the next catalog refresh must
+ * map the asset before this source can assemble it. Every other ClutchPacks
+ * asset must have both a valid public name and an approved mapping here,
+ * including unavailable and unassociated records that the generic adapter can
+ * otherwise omit.
+ */
+export function clutchpacksCatalogSourceWithEmptyShellOmissions(
+  source,
+  { parseConfiguration, hasPublicName, isOmittablePublicShell },
+) {
+  if (
+    typeof source?.loadSourceSnapshot !== "function" ||
+    typeof parseConfiguration !== "function" ||
+    typeof hasPublicName !== "function" ||
+    typeof isOmittablePublicShell !== "function"
+  ) {
+    throw new TypeError("Invalid ClutchPacks catalog source policy.");
+  }
+  return Object.freeze({
+    async loadSourceSnapshot(input) {
+      const snapshot = await source.loadSourceSnapshot(input);
+      const parsedConfiguration = parseConfiguration(
+        snapshot?.configuration?.configuration,
+      );
+      if (
+        parsedConfiguration?.success !== true ||
+        !Array.isArray(snapshot?.revisions) ||
+        !Array.isArray(snapshot?.assetPackAssociations) ||
+        !(snapshot?.readAt instanceof Date) ||
+        !Number.isFinite(snapshot.readAt.getTime())
+      ) {
+        return snapshot;
+      }
+      const configuredAssetKeys = new Set(
+        parsedConfiguration.data.collectibles
+          .filter(({ platformKey }) =>
+            platformKey === CLUTCHPACKS_PLATFORM_KEY)
+          .map(({ externalId }) => clutchpacksCanonicalAssetKey(externalId)),
+      );
+      const assetRevisionCounts = new Map();
+      const packKeys = new Set();
+      for (const revision of snapshot.revisions) {
+        if (revision?.platformKey !== CLUTCHPACKS_PLATFORM_KEY) continue;
+        const revisionKey = clutchpacksCanonicalAssetKey(revision.externalId);
+        if (revision.recordKind === "pack") packKeys.add(revisionKey);
+        if (revision.recordKind === "catalog_asset") {
+          assetRevisionCounts.set(
+            revisionKey,
+            (assetRevisionCounts.get(revisionKey) ?? 0) + 1,
+          );
+        }
+      }
+      const associationSourceIds = new Set();
+      const associationPairs = new Set();
+      const associatedAssetKeys = new Set();
+      let relationshipsAreValid = true;
+      for (const association of snapshot.assetPackAssociations) {
+        if (association?.platformKey !== CLUTCHPACKS_PLATFORM_KEY) continue;
+        const assetKey = clutchpacksCanonicalAssetKey(
+          association.assetExternalId,
+        );
+        const packKey = clutchpacksCanonicalAssetKey(
+          association.packExternalId,
+        );
+        const pairKey = `${assetKey}\0${association.packExternalId}`;
+        if (
+          typeof association.assetExternalId !== "string" ||
+          association.assetExternalId.length === 0 ||
+          typeof association.packExternalId !== "string" ||
+          association.packExternalId.length === 0 ||
+          typeof association.sourceEntityId !== "string" ||
+          association.sourceEntityId.length === 0 ||
+          typeof association.publicChangeSequence !== "bigint" ||
+          association.publicChangeSequence <= 0n ||
+          !(association.associatedAt instanceof Date) ||
+          !Number.isFinite(association.associatedAt.getTime()) ||
+          association.associatedAt.getTime() > snapshot.readAt.getTime() ||
+          assetRevisionCounts.get(assetKey) !== 1 ||
+          !packKeys.has(packKey) ||
+          associationSourceIds.has(association.sourceEntityId) ||
+          associationPairs.has(pairKey)
+        ) {
+          relationshipsAreValid = false;
+          break;
+        }
+        associationSourceIds.add(association.sourceEntityId);
+        associationPairs.add(pairKey);
+        associatedAssetKeys.add(assetKey);
+      }
+      if (!relationshipsAreValid) return snapshot;
+
+      const omittedAssetKeys = new Set();
+      for (const revision of snapshot.revisions) {
+        if (
+          revision?.platformKey !== CLUTCHPACKS_PLATFORM_KEY ||
+          revision.recordKind !== "catalog_asset"
+        ) {
+          continue;
+        }
+        const assetKey = clutchpacksCanonicalAssetKey(revision.externalId);
+        const asset = {
+          externalId: revision.externalId,
+          content: revision.content,
+          associated: associatedAssetKeys.has(assetKey),
+        };
+        const configured = configuredAssetKeys.has(assetKey);
+        const omittable = assetRevisionCounts.get(assetKey) === 1 &&
+          isOmittablePublicShell(asset);
+        if (omittable && !configured) {
+          omittedAssetKeys.add(assetKey);
+          continue;
+        }
+        if (!configured || !hasPublicName(asset)) {
+          refuse("CLUTCHPACKS_V3_SCOPE_INVALID");
+        }
+      }
+      if (omittedAssetKeys.size === 0) return snapshot;
+      return Object.freeze({
+        ...snapshot,
+        revisions: Object.freeze(snapshot.revisions.filter((revision) =>
+          revision?.platformKey !== CLUTCHPACKS_PLATFORM_KEY ||
+          revision.recordKind !== "catalog_asset" ||
+          !omittedAssetKeys.has(
+            clutchpacksCanonicalAssetKey(revision.externalId),
+          ))),
+        assetPackAssociations: Object.freeze(
+          snapshot.assetPackAssociations.filter((association) =>
+            association?.platformKey !== CLUTCHPACKS_PLATFORM_KEY ||
+            !omittedAssetKeys.has(
+              clutchpacksCanonicalAssetKey(association.assetExternalId),
+            )),
+        ),
+      });
+    },
+  });
+}
+
 export function assertClutchpacksCatalogScope(snapshot) {
   const products = snapshot?.products;
   const categories = snapshot?.categories;
@@ -752,13 +908,45 @@ function firstMiddleLast(records) {
   return indexes.map((index) => records[index]);
 }
 
+function boundedFirstMiddleLast(records, maximumCount) {
+  if (records.length <= maximumCount) return [...records];
+  const requiredIndexes = new Set([
+    0,
+    Math.floor((records.length - 1) / 2),
+    records.length - 1,
+  ]);
+  if (maximumCount < requiredIndexes.size) {
+    refuse("CLUTCHPACKS_V3_SCOPE_INVALID");
+  }
+  for (
+    let sampleIndex = 0;
+    sampleIndex < maximumCount && requiredIndexes.size < maximumCount;
+    sampleIndex += 1
+  ) {
+    requiredIndexes.add(Math.floor(
+      sampleIndex * (records.length - 1) / (maximumCount - 1),
+    ));
+  }
+  for (
+    let recordIndex = 0;
+    recordIndex < records.length && requiredIndexes.size < maximumCount;
+    recordIndex += 1
+  ) {
+    requiredIndexes.add(recordIndex);
+  }
+  return [...requiredIndexes]
+    .sort((left, right) => left - right)
+    .map((index) => records[index]);
+}
+
 /**
  * A full public lookup sweep over thousands of standalone collectibles would
  * be both operationally unsafe and redundant: every public V3 query first
  * proves the active release's finalized accepted counts and entity-chain
  * hashes. We therefore add deterministic first/middle/last direct and search
- * probes, plus exhaustive direct probes for every collectible referenced by a
- * chase while that chase surface remains within this command's fixed budget.
+ * probes, then spend the remaining fixed direct-read budget on a deterministic
+ * sample of chase-linked collectibles. The sampled lookups prove the public
+ * relationship path without making catalog growth a publication blocker.
  */
 export function clutchpacksCollectibleReadbackProbes(scope) {
   const collectibles = sortedEntityRecords(
@@ -768,11 +956,7 @@ export function clutchpacksCollectibleReadbackProbes(scope) {
   const chaseCollectibleIds = exactIdSet(
     (scope?.entities?.chases ?? []).map((chase) => chase.publicCollectibleId),
   );
-  if (
-    collectibles.length === 0 ||
-    chaseCollectibleIds.length >
-      CLUTCHPACKS_MAX_CHASE_READBACK_COLLECTIBLES
-  ) {
+  if (collectibles.length === 0) {
     refuse("CLUTCHPACKS_V3_SCOPE_INVALID");
   }
   const byId = new Map(collectibles.map((collectible) => [
@@ -780,11 +964,23 @@ export function clutchpacksCollectibleReadbackProbes(scope) {
     collectible,
   ]));
   const directRepresentative = firstMiddleLast(collectibles);
-  const directIds = exactIdSet([
-    ...directRepresentative.map((collectible) =>
-      collectible.publicCollectibleId),
-    ...chaseCollectibleIds,
-  ]);
+  const directIdSet = new Set(directRepresentative.map((collectible) =>
+    collectible.publicCollectibleId));
+  for (const publicCollectibleId of firstMiddleLast(chaseCollectibleIds)) {
+    directIdSet.add(publicCollectibleId);
+  }
+  const remainingChaseIds = chaseCollectibleIds.filter(
+    (publicCollectibleId) => !directIdSet.has(publicCollectibleId),
+  );
+  const remainingDirectBudget =
+    CLUTCHPACKS_MAX_CHASE_READBACK_COLLECTIBLES - directIdSet.size;
+  for (const publicCollectibleId of boundedFirstMiddleLast(
+    remainingChaseIds,
+    remainingDirectBudget,
+  )) {
+    directIdSet.add(publicCollectibleId);
+  }
+  const directIds = exactIdSet([...directIdSet]);
   const direct = directIds.map((publicCollectibleId) => {
     const collectible = byId.get(publicCollectibleId);
     if (collectible === undefined) {
@@ -834,6 +1030,8 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
     shell.data.release.methodVersion !== plan.manifest.methodVersion ||
     shell.data.release.confidencePolicyVersion !==
       plan.manifest.confidencePolicyVersion ||
+    shell.data.release.publicEvPolicyVersion !==
+      plan.manifest.publicEvPolicyVersion ||
     list?.ok !== true ||
     list.data?.release?.publicReleaseId !== plan.publicReleaseId ||
     list.data?.range?.total !== CLUTCHPACKS_EXPECTED_REPACK_COUNT ||
@@ -951,10 +1149,15 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
       refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
     }
   }
+  const probedCollectibleIds = new Set(
+    probes.direct.map((collectible) => collectible.publicCollectibleId),
+  );
+  const expectedPublicChases = scope.entities.chases.filter((chase) =>
+    probedCollectibleIds.has(chase.publicCollectibleId));
   if (
     !isDeepStrictEqual(
       sortedEntityRecords("chases", publicChases),
-      sortedEntityRecords("chases", scope.entities.chases),
+      sortedEntityRecords("chases", expectedPublicChases),
     )
   ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
@@ -1503,18 +1706,38 @@ export function createProductionDependencies() {
       }
     },
     async open(command) {
-      const [database, services] = await Promise.all([
+      const [
+        database,
+        services,
+        contracts,
+        catalogCandidate,
+      ] = await Promise.all([
         import("../../packages/database/src/index.ts"),
         import("../../packages/services/src/index.ts"),
+        import("../../packages/contracts/src/index.ts"),
+        import("./generate-clutchpacks-v3-public-catalog-candidate.mts"),
       ]);
       const lifecycle = database.createPrismaClientLifecycle({
         databaseUrl: command.databaseUrl,
       });
       await lifecycle.start();
       try {
-        const source = new database.PrismaDataReleaseV3CanonicalCatalogSource(
-          lifecycle.client,
-          command.organizationId,
+        const canonicalSource =
+          new database.PrismaDataReleaseV3CanonicalCatalogSource(
+            lifecycle.client,
+            command.organizationId,
+          );
+        const source = clutchpacksCatalogSourceWithEmptyShellOmissions(
+          canonicalSource,
+          {
+            parseConfiguration: (value) =>
+              contracts.approvedPublicCatalogConfigurationV1Schema.safeParse(
+                value,
+              ),
+            hasPublicName: catalogCandidate.clutchpacksAssetHasPublicName,
+            isOmittablePublicShell:
+              catalogCandidate.clutchpacksAssetIsOmittablePublicShell,
+          },
         );
         const catalog = new services.DataReleaseV3CanonicalCatalogAdapter(source);
         const repository = new database.BuybackEvRevisionRepository(
@@ -1593,7 +1816,9 @@ async function readPublicRelease(command, input) {
     import("convex/browser"),
     import("../../convex/_generated/api.js"),
   ]);
-  const client = new ConvexHttpClient(command.queryUrl);
+  const client = new ConvexHttpClient(
+    clutchpacksConvexHttpClientAddress(command.queryUrl),
+  );
   const withToken = (value) => command.catalogReadToken === null
     ? value
     : { ...value, catalogReadToken: command.catalogReadToken };

@@ -329,7 +329,7 @@ export const EXPECTED_VALUE_GUIDE = {
         },
         {
           type: "paragraph",
-          text: `Gross EV % of ${BREAK_EVEN_GROSS_EV_PERCENT_LABEL} is the break-even point: the expected guaranteed payout exactly equals Pack Price. EV $ and EV % are signed against Pack Price, so values above break-even carry an explicit plus sign and values below render negative — in the shared example, a Gross EV % of ${CANONICAL_EXAMPLE.presentation.grossEvPercent.displayValue} is exactly an EV % of ${CANONICAL_EXAMPLE.presentation.evPercent.displayValue}.`,
+          text: `Gross EV % of ${BREAK_EVEN_GROSS_EV_PERCENT_LABEL} is the break-even point: the expected guaranteed payout exactly equals Pack Price. Public V3 only exposes signed EV at or below break-even; a positive raw result is labeled Unavailable under the versioned nonpositive-EV publication policy. Values below break-even render negative — in the shared example, a Gross EV % of ${CANONICAL_EXAMPLE.presentation.grossEvPercent.displayValue} is exactly an EV % of ${CANONICAL_EXAMPLE.presentation.evPercent.displayValue}.`,
         },
       ],
       metricKeys: EXPECTED_VALUE_METRIC_KEYS,

@@ -90,6 +90,21 @@ function assetContent(overrides = {}) {
   };
 }
 
+function emptyAssetShellContent(overrides = {}) {
+  return assetContent({
+    name: null,
+    description: null,
+    category: null,
+    availability: "unknown",
+    providerValueMinor: null,
+    providerValueCurrency: null,
+    valueSource: null,
+    imageUrls: [],
+    dataQualityEvidence: [],
+    ...overrides,
+  });
+}
+
 function environment(overrides = {}) {
   return {
     NODE_ENV: "development",
@@ -210,7 +225,7 @@ function evidence(overrides = {}) {
       associated: true,
     }, {
       externalId: "card-1",
-      content: assetContent({ name: null }),
+      content: emptyAssetShellContent(),
       associated: false,
     }],
     ...overrides,
@@ -407,7 +422,7 @@ test("candidate governs both branches needed for a Liftoff-style mixed projectio
       associated: true,
     }, {
       externalId: "blank-card",
-      content: assetContent({ name: null }),
+      content: emptyAssetShellContent(),
       associated: false,
     }],
   }), parsedEnvironment.policy);
@@ -448,18 +463,18 @@ test("candidate refuses an unapproved source category", () => {
   );
 });
 
-test("candidate omits only unassociated assets that cannot satisfy the public name contract", () => {
+test("candidate omits exact ClutchPacks public shells even when associated", () => {
   const parsedEnvironment = readClutchpacksCatalogCandidateEnvironment(environment());
   const candidate = buildClutchpacksCatalogCandidate(evidence({
     canonicalAssetCount: 4,
     assets: [{
       externalId: "first-null-unassociated",
-      content: assetContent({ name: null }),
+      content: emptyAssetShellContent(),
       associated: false,
     }, {
-      externalId: "second-null-unassociated",
-      content: assetContent({ name: null }),
-      associated: false,
+      externalId: "second-null-associated",
+      content: emptyAssetShellContent(),
+      associated: true,
     }, {
       externalId: "named-unassociated",
       content: assetContent({ name: "Searchable standalone" }),
@@ -474,6 +489,53 @@ test("candidate omits only unassociated assets that cannot satisfy the public na
     "named-associated",
     "named-unassociated",
   ]);
+});
+
+test("candidate fails closed when an unnamed ClutchPacks asset bears public data", () => {
+  const parsedEnvironment = readClutchpacksCatalogCandidateEnvironment(environment());
+  const publicBearingOverrides = [{
+    description: "Provider description",
+  }, {
+    category: "Basketball",
+  }, {
+    availability: "available",
+  }, {
+    providerValueMinor: 1_000,
+    providerValueCurrency: "USD",
+  }, {
+    valueSource: "provider_value",
+  }, {
+    imageUrls: ["https://cdn.example.test/card.jpg"],
+  }, {
+    dataQualityEvidence: [{
+      code: "provider_public_field_incomplete",
+      severity: "warning",
+      fieldPath: "name",
+    }],
+  }, {
+    sourceStatus: "listed",
+  }, {
+    parentExternalId: "parent-asset",
+  }, {
+    relatedPackExternalId: PACK_EXTERNAL_ID,
+  }, {
+    assetType: "sealed_product",
+  }];
+  for (const associated of [false, true]) {
+    for (const overrides of publicBearingOverrides) {
+      assert.throws(
+        () => buildClutchpacksCatalogCandidate(evidence({
+          canonicalAssetCount: 1,
+          assets: [{
+            externalId: "unnamed-public-bearing",
+            content: emptyAssetShellContent(overrides),
+            associated,
+          }],
+        }), parsedEnvironment.policy),
+        assertCode("TARGET_NOT_QUALIFIED"),
+      );
+    }
+  }
 });
 
 test("candidate observes only canonical imageUrls and rejects unapproved image origins", () => {
@@ -497,7 +559,7 @@ test("candidate observes only canonical imageUrls and rejects unapproved image o
       associated: true,
     }, {
       externalId: "card-1",
-      content: assetContent({ name: null }),
+      content: emptyAssetShellContent(),
       associated: false,
     }],
   }), parsedEnvironment.policy);
@@ -524,7 +586,7 @@ test("candidate observes only canonical imageUrls and rejects unapproved image o
         associated: true,
       }, {
         externalId: "card-1",
-        content: assetContent({ name: null }),
+        content: emptyAssetShellContent(),
         associated: false,
       }],
     }),
@@ -572,7 +634,7 @@ test("association membership is set-oriented and consumes relationship evidence 
   assert.ok(marked.every(({ associated }) => associated === true));
 });
 
-test("qualification fails closed on lineage, anomalies, settlement, or unnamed associated data", () => {
+test("qualification fails closed on lineage, anomalies, settlement, or unnamed non-shell data", () => {
   const bad = [
     evidence({ mapperVersion: "2" }),
     evidence({ quarantineCount: 1 }),
@@ -671,7 +733,10 @@ test("execute repeats qualification and requires the exact candidate-bound confi
   });
   assert.equal(dryRun.written, false);
   assert.deepEqual(dryRun.databaseIdentity, DATABASE_IDENTITY);
-  assert.equal(dryRun.collectibleMappingCount, 1);
+  assert.equal(dryRun.canonicalAssetCount, 2);
+  assert.equal(dryRun.publicMappedAssetCount, 1);
+  assert.equal(dryRun.omittedShellCount, 1);
+  assert.equal(dryRun.omittedAssociatedShellCount, 0);
   assert.deepEqual(dryRun.observedPublicAssetOrigins, [
     "https://cdn.example.test",
   ]);
@@ -694,6 +759,10 @@ test("execute repeats qualification and requires the exact candidate-bound confi
     ],
   });
   assert.equal(executed.written, true);
+  assert.equal(
+    executed.canonicalAssetCount,
+    executed.publicMappedAssetCount + executed.omittedShellCount,
+  );
   assert.equal(writes.length, 1);
   assert.equal(writes[0][0], outputPath);
   assert.match(writes[0][1], /"schemaVersion":"approved_public_catalog_v1"/u);

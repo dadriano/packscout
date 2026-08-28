@@ -1,10 +1,11 @@
-import type {
-  PublicCategory,
-  PublicCollectible,
-  PublicRepackChase,
-  PublicRepackDetailV3,
-  PublicBuybackSummaryV3,
-  VendorReportedEvV3,
+import {
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
+  type PublicCategory,
+  type PublicCollectible,
+  type PublicRepackChase,
+  type PublicRepackDetailV3,
+  type PublicBuybackSummaryV3,
+  type VendorReportedEvV3,
 } from "@packscout/contracts";
 import type {
   PackScoutBuybackEvPublicationEligibilityV1,
@@ -76,6 +77,8 @@ export interface DataReleaseV3StartManifest {
   readonly methodVersion: "packscout-buyback-adjusted-ev-v1";
   readonly confidencePolicyVersion:
     "packscout-buyback-adjusted-ev-confidence-v1";
+  readonly publicEvPolicyVersion:
+    typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
   readonly dataAsOf: string;
   readonly contentHash: string;
   readonly searchAlgorithmVersion:
@@ -169,15 +172,38 @@ export interface DataReleaseV3Pointer {
   readonly methodVersion: "packscout-buyback-adjusted-ev-v1";
   readonly confidencePolicyVersion:
     "packscout-buyback-adjusted-ev-confidence-v1";
+  readonly publicEvPolicyVersion:
+    typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
   readonly dataAsOf: string;
   readonly completedAt: string;
   readonly counts: DataReleaseV3Counts;
 }
 
+/**
+ * A pointer read from retained active-state history. The only approved legacy
+ * shape omits `publicEvPolicyVersion`; every other pointer field remains
+ * required, and current release writers still produce `DataReleaseV3Pointer`.
+ * Policy-sensitive consumers compare the optional marker to the current
+ * literal and therefore fail closed when it is absent.
+ *
+ * Owner: PackScout data-release V3 promotion maintainers.
+ * Removal condition: after the audited retained-document migration described
+ * beside the Convex schema reports zero missing markers in release rows and
+ * active/previous pointer snapshots, remove this type and make active state
+ * use `DataReleaseV3Pointer` directly again.
+ */
+export type RetainedDataReleaseV3Pointer = Omit<
+  DataReleaseV3Pointer,
+  "publicEvPolicyVersion"
+> &
+  Readonly<{
+    publicEvPolicyVersion?: typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
+  }>;
+
 export interface DataReleaseV3ActiveState {
   readonly generation: number;
-  readonly activeRelease: DataReleaseV3Pointer | null;
-  readonly previousRelease: DataReleaseV3Pointer | null;
+  readonly activeRelease: RetainedDataReleaseV3Pointer | null;
+  readonly previousRelease: RetainedDataReleaseV3Pointer | null;
 }
 
 export interface DataReleaseV3ReleaseStatus {

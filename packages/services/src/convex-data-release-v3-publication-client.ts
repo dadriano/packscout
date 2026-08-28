@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES,
   PRODUCTION_DATA_RELEASE_V3_PATHS,
   canonicalJson,
@@ -89,6 +90,13 @@ const releasePointerSchema = z
     confidencePolicyVersion: z.literal(
       PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
     ),
+    // Exact retained pre-policy pointer compatibility. Only absence is
+    // accepted; a present marker must still be the current literal, and the
+    // strict object rejects every other legacy drift. Remove with the
+    // RetainedDataReleaseV3Pointer type after its audited migration condition.
+    publicEvPolicyVersion: z
+      .literal(PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3)
+      .optional(),
     dataAsOf: z.string().min(1).max(64),
     completedAt: z.string().min(1).max(64),
     counts: releaseCountsSchema,

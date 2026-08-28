@@ -567,11 +567,11 @@ export class DataReleaseV3CanonicalCatalogAdapter
       // to end.
       //
       // Discoverable is not purchasable. `available` remains the only state
-      // that may rank, count toward positive-EV summaries, or expose an
-      // outbound purchase link, and that is enforced on the read side by
+      // that may rank or expose an outbound purchase link, and that is
+      // enforced on the read side by
       // `packAvailabilityIsPurchasableV3`: opportunity eligibility
       // (`publicDashboardBundleV3Schema`), sort-row materialization
-      // (`repackEvSortRowV3FromDetail`), the KPI rows in
+      // (`repackEvSortRowV3FromDetail`), the aggregate rows in
       // `convex/publicRepacksV3.ts`, and the outbound-link rule in
       // `publicRepackDetailV3Schema` all fail closed for the other states.
       const productKey = revision.externalId;

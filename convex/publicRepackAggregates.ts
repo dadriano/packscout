@@ -96,11 +96,6 @@ export function dashboardKpis(
   );
   return {
     totalRepacks: rows.length,
-    positiveEvRepacks: currentRows.filter(
-      (row) =>
-        row.packScoutEvDollarsMinor !== null &&
-        row.packScoutEvDollarsMinor > 0,
-    ).length,
     medianPackScoutEvPercent: medianPackScoutEvPercent(currentRows),
     highestChaseValueUsdMinor:
       chaseValues.length === 0 ? null : Math.max(...chaseValues),

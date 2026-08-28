@@ -1798,8 +1798,8 @@ This driver requires the protected local bootstrap environment. It never starts
 a worker and never calls DataForrest directly. Start the target-only supervisor
 separately with PACKSCOUT_SOURCE_EXECUTION_SLOTS=1. The target profile retains
 the governed requestLimit of 2, while the one execution slot keeps the canary at
-one provider request at a time. Every action first proves the exact 84-table
-active-source migration subset. Status and plan are read-only. Each --advance
+one provider request at a time. Every action first proves the exact 91-table
+current-composite migration set. Status and plan are read-only. Each --advance
 invocation performs at most one transition and queues tests for that supervisor.
 The required expected stage fences a retry after a transition already committed.
 Every advance and resume fails closed until the original adapter-v1 ClutchPacks

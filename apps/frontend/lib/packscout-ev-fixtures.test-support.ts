@@ -1,6 +1,7 @@
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
   packScoutPublicEvV3Schema,
@@ -325,6 +326,7 @@ export function buildV3ReleaseIdentity() {
     publicReleaseId: FIXTURE_RELEASE_ID,
     methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
     confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+    publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
     dataAsOf: FIXTURE_OBSERVED_AT,
     completedAt: FIXTURE_OBSERVED_AT,
   };

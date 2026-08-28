@@ -70,7 +70,7 @@ function goldenEligibility() {
       (product) => product.publicRepackId === publicRepackId,
     )!.productKey;
   return new Map<string, PackScoutBuybackEvPublicationEligibilityV1 | null>([
-    [productKeyOf(REPACK_A), buildPublishableEligibility(12_000)],
+    [productKeyOf(REPACK_A), buildPublishableEligibility(9_000)],
     [productKeyOf(REPACK_B), buildPublishableEligibility(8_500)],
     [productKeyOf(REPACK_C), buildUnavailableEligibility("BUYBACK_UNAVAILABLE")],
   ]);
@@ -161,6 +161,65 @@ test("an expired-since-calculation revision publishes the deterministic stale st
     state: "known",
     observedAt: buildExpiredEligibility().projection.dataAsOf.observedAt,
   });
+});
+
+test("positive raw current EV fails closed per pack without altering the revision", async () => {
+  const snapshot = buildReleaseSnapshot([
+    buildReleaseProduct({ publicRepackId: REPACK_A }),
+  ]);
+  const eligibility = buildPublishableEligibility(12_000);
+  const assembler = new DataReleaseV3ReleaseAssembler(
+    catalogPort(snapshot),
+    eligibilityPort(new Map([[snapshot.products[0]!.productKey, eligibility]])),
+  );
+
+  const plan = await assembler.assemble({ readAt: RELEASE_READ_AT });
+  assert.equal(plan.classification, "publish");
+  if (plan.classification !== "publish") return;
+  const [detail] = repackDetails(plan);
+  assert.deepEqual(detail?.evEstimates.packScout, {
+    status: "unavailable",
+    methodVersion: eligibility.revision.methodVersion,
+    confidencePolicyVersion: eligibility.revision.confidencePolicyVersion,
+    metrics: null,
+    confidence: null,
+    calculatedAt: eligibility.projection.calculatedAt,
+    dataAsOf: eligibility.projection.dataAsOf,
+    reason: "CALCULATION_UNAVAILABLE",
+  });
+  assert.equal(
+    eligibility.projection.status === "available"
+      ? eligibility.projection.metrics.evDollars.minorUnits
+      : null,
+    2_000,
+    "the protected raw revision remains exact",
+  );
+});
+
+test("positive raw EV cannot enter a sold-out historical public estimate", async () => {
+  const snapshot = buildReleaseSnapshot([
+    buildReleaseProduct({
+      publicRepackId: REPACK_A,
+      availability: "sold_out",
+      soldOutAt: RELEASE_SOLD_OUT_AT,
+      actionAvailability: { promo: true, repackLink: false },
+      actions: { promo: { code: "SCOUT", label: "Use SCOUT" } },
+    }),
+  ]);
+  const assembler = new DataReleaseV3ReleaseAssembler(
+    catalogPort(snapshot),
+    eligibilityPort(
+      new Map([[snapshot.products[0]!.productKey, buildPublishableEligibility(12_000)]]),
+    ),
+  );
+
+  const plan = await assembler.assemble({ readAt: RELEASE_READ_AT });
+  assert.equal(plan.classification, "publish");
+  if (plan.classification !== "publish") return;
+  assert.equal(
+    repackDetails(plan)[0]?.evEstimates.packScout.status,
+    "unavailable",
+  );
 });
 
 test("a product with no completed revision publishes the explicit unknown-evidence state", async () => {

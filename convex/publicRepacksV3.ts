@@ -1,5 +1,6 @@
 import {
   dataReleaseV3IdentitySchema,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   desiredCollectibleRepackResultsV3Schema,
   findRepacksByDesiredCollectibleInputSchema,
   normalizeDashboardQueryInput,
@@ -86,7 +87,7 @@ function currentTimeIsValid(currentTime: number): boolean {
  * The one pack-availability state a repack may be ranked, counted, or acted on
  * from. `available` is exhaustively opposed by `sold_out`, `unavailable`, and
  * `unknown`: all three stay fully discoverable in the catalog and all three
- * stay out of every opportunity ranking, positive-EV KPI, and outbound action.
+ * stay out of every opportunity ranking and outbound action.
  * Nothing falls into an `else` branch that assumes availability — a state this
  * code has never seen reads as not-purchasable, never as purchasable.
  *
@@ -132,6 +133,9 @@ async function loadActiveDataReleaseV3(
       release.publicReleaseId !== state.activeRelease.publicReleaseId ||
       release.releaseFingerprint !== state.activeRelease.releaseFingerprint ||
       release.completedAt !== state.activeRelease.completedAt ||
+      release.publicEvPolicyVersion !== PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3 ||
+      state.activeRelease.publicEvPolicyVersion !==
+        PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3 ||
       canonicalJson(release.expectedCounts) !==
         canonicalJson(state.activeRelease.counts) ||
       canonicalJson(release.acceptedCounts) !==
@@ -149,6 +153,7 @@ async function loadActiveDataReleaseV3(
       publicReleaseId: release.publicReleaseId,
       methodVersion: release.methodVersion,
       confidencePolicyVersion: release.confidencePolicyVersion,
+      publicEvPolicyVersion: release.publicEvPolicyVersion,
       dataAsOf: release.dataAsOf,
       completedAt: release.completedAt,
     });
@@ -544,11 +549,6 @@ function dashboardKpis(rows: readonly DataReleaseV3SearchRow[]): DashboardKpis {
   );
   return {
     totalRepacks: rows.length,
-    positiveEvRepacks: purchasableRows.filter(
-      (row) =>
-        row.packScoutEvDollarsMinor !== null &&
-        row.packScoutEvDollarsMinor > 0,
-    ).length,
     medianPackScoutEvPercent: medianPackScoutEvPercent(purchasableRows),
     highestChaseValueUsdMinor:
       chaseValues.length === 0 ? null : Math.max(...chaseValues),

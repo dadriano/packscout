@@ -67,18 +67,23 @@ test("eight sanitized provider examples reconcile from source revision to render
       );
     }
 
-    // Exactly two examples are deliberately unavailable, with the two
-    // required bounded public reasons; the other six are current.
+    // Two examples lack usable evidence and the raw positive ClutchPacks
+    // example is withheld by the public nonpositive-EV policy. The other five
+    // remain current.
     const unavailable = result.traces.filter(
       ({ status }) => status === "unavailable",
     );
     assert.deepEqual(
       unavailable.map(({ publicReason }) => publicReason).sort(),
-      ["BUYBACK_UNAVAILABLE", "SOURCE_EVIDENCE_UNAVAILABLE"],
+      [
+        "BUYBACK_UNAVAILABLE",
+        "CALCULATION_UNAVAILABLE",
+        "SOURCE_EVIDENCE_UNAVAILABLE",
+      ],
     );
     assert.equal(
       result.traces.filter(({ status }) => status === "current").length,
-      6,
+      5,
     );
 
     // Vendor-reported EV stayed separate; pulls moved EV only through

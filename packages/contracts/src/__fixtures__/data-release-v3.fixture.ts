@@ -19,6 +19,7 @@ import {
   publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
   vendorReportedEvV3Schema,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   type DataReleaseV3Identity,
   type DesiredCollectibleRepackResultsV3,
   type PackScoutPublicEvV3,
@@ -135,11 +136,6 @@ export function buildPackScoutPublicEvCurrentV3(
     sourceAge: { milliseconds: 0, state: "fresh_within_15_minutes" },
     expiresAt: DATA_RELEASE_V3_EXPIRES_AT,
   });
-}
-
-/** Gross EV $120 on a $100 pack: signed EV is +$20 and +20%. */
-export function buildPackScoutPublicEvPositiveV3(): PackScoutPublicEvV3 {
-  return buildPackScoutPublicEvCurrentV3(12_000);
 }
 
 /** Gross EV $100 on a $100 pack: signed EV is exactly $0 and 0%. */
@@ -267,7 +263,7 @@ export function buildPublicEvEstimatesV3(
   overrides: Partial<PublicEvEstimatesV3> = {},
 ): PublicEvEstimatesV3 {
   return publicEvEstimatesV3Schema.parse({
-    packScout: buildPackScoutPublicEvPositiveV3(),
+    packScout: buildPackScoutPublicEvNegativeV3(),
     vendorReported: buildVendorReportedEvAvailableV3(),
     ...overrides,
   });
@@ -380,10 +376,10 @@ export function buildSoldOutPublicRepackDetailV3(
 /**
  * A discoverable pack outside both `available` and `sold_out`.
  *
- * It deliberately keeps the default current, positive PackScout estimate:
+ * It deliberately keeps the default current PackScout estimate:
  * pack availability and PackScout EV availability are independent axes, so
- * this is a legal projection that must still never rank, never count toward
- * a positive-EV summary, and never carry an outbound purchase link.
+ * this is a legal projection that must still never rank or carry an outbound
+ * purchase link.
  */
 export function buildNonPurchasablePublicRepackDetailV3(
   availability: Exclude<PublicPackAvailability, "available" | "sold_out">,
@@ -412,29 +408,30 @@ export function buildDataReleaseV3Identity(): DataReleaseV3Identity {
     publicReleaseId: "20000000-0000-4000-8000-000000000003",
     methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
     confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+    publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
     dataAsOf: DATA_RELEASE_V3_OBSERVED_AT,
     completedAt: "2026-08-19T18:05:00.000Z",
   });
 }
 
-/** Two available current-EV repacks ranked by signed EV dollars descending. */
+/** Two available nonpositive-EV repacks ranked by signed EV dollars descending. */
 export function buildPublicDashboardBundleV3(): PublicDashboardBundleV3 {
   const primary = buildPublicRepackViewDetailV3();
   const secondary = buildPublicRepackViewDetailV3({
     publicRepackId: DATA_RELEASE_V3_SECONDARY_REPACK_ID,
     name: "Pokémon Value Gacha",
     evEstimates: buildPublicEvEstimatesV3({
-      packScout: buildPackScoutPublicEvCurrentV3(10_500),
+      packScout: buildPackScoutPublicEvCurrentV3(9_500),
     }),
   });
   return publicDashboardBundleV3Schema.parse({
     release: buildDataReleaseV3Identity(),
     opportunities: [
-      publicRepackViewSummaryV3FromDetail(primary),
       publicRepackViewSummaryV3FromDetail(secondary),
+      publicRepackViewSummaryV3FromDetail(primary),
     ],
-    details: [primary, secondary],
-    selectedRepack: primary,
+    details: [secondary, primary],
+    selectedRepack: secondary,
   });
 }
 

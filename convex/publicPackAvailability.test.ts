@@ -63,11 +63,11 @@ function row(
     vendorReportedEvDollarsNullRank: 1,
     vendorReportedEvPercentBasisPoints: null,
     vendorReportedEvPercentNullRank: 1,
-    packScoutGrossEvMinor: 12_000,
+    packScoutGrossEvMinor: 8_000,
     packScoutGrossEvNullRank: 0,
-    packScoutEvDollarsMinor: 2_000,
+    packScoutEvDollarsMinor: -2_000,
     packScoutEvDollarsNullRank: 0,
-    packScoutEvPercentBasisPoints: 2_000,
+    packScoutEvPercentBasisPoints: -2_000,
     packScoutEvPercentNullRank: 0,
     packScoutConfidenceBasisPoints: 8_000,
     packScoutConfidenceNullRank: 0,
@@ -102,13 +102,12 @@ describe("public pack availability query behavior", () => {
     expect(availableRepackRows(fourStates)).toEqual([fourStates[0]]);
   });
 
-  test("positive-EV and confidence summaries ignore every non-available pack", () => {
+  test("EV and confidence summaries ignore every non-available pack", () => {
     expect(dashboardKpis(fourStates)).toEqual({
       totalRepacks: 4,
-      positiveEvRepacks: 1,
       medianPackScoutEvPercent: {
         status: "available",
-        basisPoints: 2_000,
+        basisPoints: -2_000,
       },
       highestChaseValueUsdMinor: null,
       highConfidenceRepacks: 1,
@@ -131,7 +130,6 @@ describe("public pack availability query behavior", () => {
 
     expect(dashboardKpis([withoutEstimate])).toEqual({
       totalRepacks: 1,
-      positiveEvRepacks: 0,
       medianPackScoutEvPercent: {
         status: "unavailable",
         basisPoints: null,

@@ -542,6 +542,30 @@ const buybackEvMethodVersionValidator = v.literal(
 const buybackEvConfidencePolicyVersionValidator = v.literal(
   "packscout-buyback-adjusted-ev-confidence-v1",
 );
+const publicEvPolicyVersionV3Validator = v.literal(
+  "packscout-public-ev-nonpositive-v1",
+);
+
+/**
+ * Temporary retained-document compatibility for the public-EV-policy marker.
+ *
+ * Exact legacy shape: `dataReleaseV3Releases` rows and the active/previous
+ * pointer snapshots written before the nonpositive public-EV policy shipped do
+ * not have `publicEvPolicyVersion`. Convex validates those retained documents
+ * before deploying a schema, so requiring the field in its introducing deploy
+ * would make that deploy impossible. New release and pointer writers still
+ * always set the marker, while every serving/rollback reader rejects an absent
+ * or non-current marker.
+ *
+ * Owner: PackScout data-release V3 promotion maintainers.
+ * Removal condition: in a separate audited migration, backfill or retire every
+ * retained release without the marker and replace the singleton's active and
+ * previous pointer snapshots; after a bounded audit reports zero missing
+ * markers in both tables, make these two fields required in the next deploy.
+ */
+const retainedDataReleaseV3PublicEvPolicyVersionValidator = v.optional(
+  publicEvPolicyVersionV3Validator,
+);
 
 const buybackEvConfidenceResultValidator = v.object({
   policyVersion: buybackEvConfidencePolicyVersionValidator,
@@ -737,6 +761,7 @@ export const dataReleaseV3PointerValidator = v.object({
   releaseFingerprint: sha256Validator,
   methodVersion: buybackEvMethodVersionValidator,
   confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+  publicEvPolicyVersion: retainedDataReleaseV3PublicEvPolicyVersionValidator,
   dataAsOf: timestampValidator,
   completedAt: timestampValidator,
   counts: dataReleaseV3CountsValidator,
@@ -1598,6 +1623,7 @@ export default defineSchema({
     ),
     methodVersion: buybackEvMethodVersionValidator,
     confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+    publicEvPolicyVersion: retainedDataReleaseV3PublicEvPolicyVersionValidator,
     dataAsOf: timestampValidator,
     contentHash: sha256Validator,
     searchAlgorithmVersion: v.literal("repack_ev_search_v3"),

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { tsImport } from "tsx/esm/api";
 import {
   CLUTCHPACKS_CONVEX_AUTH_CLOCK_SKEW_ALLOWANCE_MILLISECONDS,
   CLUTCHPACKS_CONVEX_PUBLICATION_URL,
@@ -16,12 +18,30 @@ import {
   assertNoPositiveClutchpacksEv,
   bindClutchpacksDataReleaseV3DatabaseIdentity,
   buildClutchpacksV3ActivationConfirmation,
+  clutchpacksCatalogSourceWithEmptyShellOmissions,
   clutchpacksCollectibleReadbackProbes,
+  clutchpacksConvexHttpClientAddress,
   exactDataReleaseV3StagingPort,
   operatorBoundDataReleaseV3ActivationPort,
   parseClutchpacksDataReleaseV3Command,
   runClutchpacksDataReleaseV3Promotion,
 } from "./promote-clutchpacks-data-release-v3.mjs";
+
+const {
+  clutchpacksAssetHasPublicName,
+  clutchpacksAssetIsOmittablePublicShell,
+} = await tsImport(
+  "./generate-clutchpacks-v3-public-catalog-candidate.mts",
+  import.meta.url,
+);
+const { approvedPublicCatalogConfigurationV1Schema } = await tsImport(
+  "@packscout/contracts",
+  import.meta.url,
+);
+const { DataReleaseV3CanonicalCatalogAdapter } = await tsImport(
+  "@packscout/services",
+  import.meta.url,
+);
 
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 const READ_AT = "2026-08-27T19:20:44.000Z";
@@ -40,6 +60,23 @@ const scriptPath = fileURLToPath(new URL(
   "./promote-clutchpacks-data-release-v3.mjs",
   import.meta.url,
 ));
+
+test("Convex public readback uses a single-slash API address", () => {
+  const address = clutchpacksConvexHttpClientAddress(
+    CLUTCHPACKS_CONVEX_QUERY_URL,
+  );
+  assert.equal(address, "https://shiny-newt-310.convex.cloud");
+  assert.equal(
+    `${address}/api/query`,
+    "https://shiny-newt-310.convex.cloud/api/query",
+  );
+  assert.throws(
+    () => clutchpacksConvexHttpClientAddress(
+      "https://different-newt-999.convex.cloud/",
+    ),
+    (error) => assertPromotionError(error, "CLUTCHPACKS_V3_TARGET_INVALID"),
+  );
+});
 
 function baseEnvironment(overrides = {}) {
   return {
@@ -185,6 +222,7 @@ function plan(overrides = {}) {
       methodVersion: "packscout-buyback-adjusted-ev-v1",
       confidencePolicyVersion:
         "packscout-buyback-adjusted-ev-confidence-v1",
+      publicEvPolicyVersion: "packscout-public-ev-nonpositive-v1",
       dataAsOf: READ_AT,
       counts: {
         categories: 2,
@@ -225,6 +263,434 @@ function snapshot() {
 function scope() {
   return assertClutchpacksCatalogScope(snapshot());
 }
+
+function canonicalAssetContent(overrides = {}) {
+  return {
+    schemaVersion: "catalog-projection-v1",
+    firstSeenAt: READ_AT,
+    imageUrls: [],
+    dataQualityEvidence: [],
+    entityType: "catalog_asset",
+    assetType: "card",
+    relatedPackExternalId: null,
+    parentExternalId: null,
+    name: null,
+    description: null,
+    category: null,
+    availability: "unknown",
+    sourceStatus: null,
+    providerValueMinor: null,
+    providerValueCurrency: null,
+    valueSource: null,
+    ...overrides,
+  };
+}
+
+function stableIdHash(values) {
+  return createHash("sha256").update(
+    JSON.stringify([...values].sort()),
+  ).digest("hex");
+}
+
+test("ClutchPacks source omits two associated empty shells while retaining all 21 named mappings", async () => {
+  const namedExternalIds = Array.from(
+    { length: 21 },
+    (_, index) => `named-asset-${index.toString().padStart(2, "0")}`,
+  );
+  const shellExternalIds = ["associated-shell-a", "associated-shell-b"];
+  const configuration = {
+    collectibles: namedExternalIds.map((externalId) => ({
+      platformKey: "clutchpacks",
+      externalId,
+    })),
+  };
+  const revisions = [{
+    platformKey: "clutchpacks",
+    recordKind: "pack",
+    externalId: "pack-1",
+    content: {},
+  }, ...namedExternalIds.map((externalId) => ({
+    platformKey: "clutchpacks",
+    recordKind: "catalog_asset",
+    externalId,
+    content: canonicalAssetContent({ name: `Named ${externalId}` }),
+  })), ...shellExternalIds.map((externalId) => ({
+    platformKey: "clutchpacks",
+    recordKind: "catalog_asset",
+    externalId,
+    content: canonicalAssetContent(),
+  }))];
+  const assetPackAssociations = [...namedExternalIds, ...shellExternalIds]
+    .map((assetExternalId, index) => ({
+      platformKey: "clutchpacks",
+      assetExternalId,
+      packExternalId: "pack-1",
+      sourceEntityId: `association-${index}`,
+      publicChangeSequence: BigInt(index + 1),
+      associatedAt: new Date(READ_AT),
+    }));
+  const rawSnapshot = {
+    readAt: new Date(READ_AT),
+    configuration: { configuration },
+    revisions,
+    assetPackAssociations,
+  };
+  const source = clutchpacksCatalogSourceWithEmptyShellOmissions({
+    async loadSourceSnapshot() {
+      return rawSnapshot;
+    },
+  }, {
+    parseConfiguration: (value) => ({ success: true, data: value }),
+    hasPublicName: clutchpacksAssetHasPublicName,
+    isOmittablePublicShell: clutchpacksAssetIsOmittablePublicShell,
+  });
+
+  const filtered = await source.loadSourceSnapshot({ readAt: READ_AT });
+  const retainedAssets = filtered.revisions.filter(({ recordKind }) =>
+    recordKind === "catalog_asset");
+  const retainedAssetIds = retainedAssets.map(({ externalId }) => externalId);
+  const retainedAssociationIds = filtered.assetPackAssociations.map(
+    ({ assetExternalId }) => assetExternalId,
+  );
+  assert.equal(retainedAssets.length, 21);
+  assert.equal(filtered.assetPackAssociations.length, 21);
+  assert.ok(shellExternalIds.every((externalId) =>
+    !retainedAssetIds.includes(externalId)));
+  assert.equal(stableIdHash(retainedAssetIds), stableIdHash(namedExternalIds));
+  assert.equal(
+    stableIdHash(retainedAssociationIds),
+    stableIdHash(namedExternalIds),
+  );
+  assert.equal(
+    stableIdHash(configuration.collectibles.map(({ externalId }) => externalId)),
+    stableIdHash(namedExternalIds),
+  );
+
+  const oneNamedMappingMissing = structuredClone(rawSnapshot);
+  oneNamedMappingMissing.configuration.configuration.collectibles.pop();
+  const failClosedSource = clutchpacksCatalogSourceWithEmptyShellOmissions({
+    async loadSourceSnapshot() {
+      return oneNamedMappingMissing;
+    },
+  }, {
+    parseConfiguration: (value) => ({ success: true, data: value }),
+    hasPublicName: clutchpacksAssetHasPublicName,
+    isOmittablePublicShell: clutchpacksAssetIsOmittablePublicShell,
+  });
+  await assert.rejects(
+    failClosedSource.loadSourceSnapshot({ readAt: READ_AT }),
+    (error) => assertPromotionError(error, "CLUTCHPACKS_V3_SCOPE_INVALID"),
+  );
+});
+
+function oneShellSourceSnapshot({ configured = false, associations } = {}) {
+  const shellExternalId = "associated-empty-shell";
+  return {
+    readAt: new Date(READ_AT),
+    configuration: {
+      configuration: {
+        collectibles: configured
+          ? [{ platformKey: "clutchpacks", externalId: shellExternalId }]
+          : [],
+      },
+    },
+    revisions: [{
+      platformKey: "clutchpacks",
+      recordKind: "pack",
+      externalId: "pack-1",
+      content: {},
+    }, {
+      platformKey: "clutchpacks",
+      recordKind: "catalog_asset",
+      externalId: shellExternalId,
+      content: canonicalAssetContent(),
+    }],
+    assetPackAssociations: associations ?? [{
+      platformKey: "clutchpacks",
+      assetExternalId: shellExternalId,
+      packExternalId: "pack-1",
+      sourceEntityId: "association-1",
+      publicChangeSequence: 1n,
+      associatedAt: new Date(READ_AT),
+    }],
+  };
+}
+
+function filteredShellSource(snapshotValue) {
+  return clutchpacksCatalogSourceWithEmptyShellOmissions({
+    async loadSourceSnapshot() {
+      return snapshotValue;
+    },
+  }, {
+    parseConfiguration: (value) => ({ success: true, data: value }),
+    hasPublicName: clutchpacksAssetHasPublicName,
+    isOmittablePublicShell: clutchpacksAssetIsOmittablePublicShell,
+  });
+}
+
+test("ClutchPacks source refuses an already configured empty shell", async () => {
+  const rawSnapshot = oneShellSourceSnapshot({ configured: true });
+  await assert.rejects(
+    filteredShellSource(rawSnapshot).loadSourceSnapshot({ readAt: READ_AT }),
+    (error) => assertPromotionError(error, "CLUTCHPACKS_V3_SCOPE_INVALID"),
+  );
+});
+
+test("ClutchPacks source refuses every unmapped or unnamed non-shell regardless of association or availability", async () => {
+  for (const { configured, associations, content } of [{
+    configured: false,
+    associations: [],
+    content: canonicalAssetContent({ availability: "available" }),
+  }, {
+    configured: true,
+    associations: undefined,
+    content: canonicalAssetContent({ availability: "unavailable" }),
+  }, {
+    configured: false,
+    associations: [],
+    content: canonicalAssetContent({
+      name: "Unavailable but still requires an approved mapping",
+      availability: "unavailable",
+    }),
+  }]) {
+    const rawSnapshot = oneShellSourceSnapshot({ configured, associations });
+    rawSnapshot.revisions[1].content = content;
+    await assert.rejects(
+      filteredShellSource(rawSnapshot).loadSourceSnapshot({ readAt: READ_AT }),
+      (error) => assertPromotionError(error, "CLUTCHPACKS_V3_SCOPE_INVALID"),
+    );
+  }
+});
+
+test("ClutchPacks source leaves invalid relationship snapshots untouched for generic validation", async () => {
+  const validAssociation = oneShellSourceSnapshot().assetPackAssociations[0];
+  const invalidAssociationSets = [[{
+    ...validAssociation,
+    sourceEntityId: "",
+  }], [{
+    ...validAssociation,
+    associatedAt: new Date(new Date(READ_AT).getTime() + 1),
+  }], [validAssociation, {
+    ...validAssociation,
+    sourceEntityId: "association-2",
+  }], [{
+    ...validAssociation,
+    assetExternalId: "missing-asset",
+  }]];
+  for (const assetPackAssociations of invalidAssociationSets) {
+    const rawSnapshot = oneShellSourceSnapshot({
+      associations: assetPackAssociations,
+    });
+    const filtered = await filteredShellSource(rawSnapshot).loadSourceSnapshot({
+      readAt: READ_AT,
+    });
+    assert.equal(filtered, rawSnapshot);
+  }
+});
+
+test("real V3 adapter projects every retained mapping and no omitted associated shell", async () => {
+  const publicRepackId = "22222222-2222-5222-8222-222222222222";
+  const associatedCollectibleId = "33333333-3333-5333-8333-333333333333";
+  const standaloneCollectibleId = "44444444-4444-5444-8444-444444444444";
+  const configuration = {
+    schemaVersion: "approved_public_catalog_v1",
+    configurationKey: "clutchpacks-adapter-shell-proof-v1",
+    revision: 1,
+    approvedAt: READ_AT,
+    staleAfterSeconds: 900,
+    confidencePolicy: {
+      version: "clutchpacks-shell-proof-v1",
+      completeScoreBasisPoints: 9_000,
+      partialScoreBasisPoints: 6_000,
+      unknownScoreBasisPoints: 3_000,
+      limitationPenaltyBasisPoints: 500,
+    },
+    publicAssetOrigins: [],
+    verifiedUsdStablecoins: [],
+    categories: [],
+    platforms: [{
+      platformKey: "clutchpacks",
+      vendor: {
+        publicVendorId: "11111111-1111-5111-8111-111111111111",
+        vendorKey: "clutchpacks",
+        displayName: "ClutchPacks",
+        logoUrl: null,
+        websiteUrl: "https://clutchpacks.io/",
+        listingHosts: ["clutchpacks.io"],
+        imageOrigins: [],
+        referralParameters: [],
+        publicPromo: null,
+      },
+      format: "repack",
+      defaultPublicCategoryIds: [],
+      categoryMappings: [],
+      collectibleTypeMappings: [],
+    }],
+    repacks: [{
+      platformKey: "clutchpacks",
+      packExternalId: "pack-1",
+      publicRepackId,
+      listingUrl: "https://clutchpacks.io/checkout/pack-1/",
+    }],
+    collectibles: [{
+      platformKey: "clutchpacks",
+      externalId: "mapped-associated",
+      publicCollectibleId: associatedCollectibleId,
+      aliases: [],
+      collectibleType: "card",
+      publicCategoryIds: [],
+      year: null,
+      brand: null,
+      setOrSeries: null,
+      cardNumber: null,
+      referenceNumber: null,
+      subject: null,
+      grade: null,
+      grader: null,
+      probabilityBucketId: null,
+      matchConfidenceBasisPoints: 10_000,
+      chaseEvidenceKinds: [
+        "historical_pull_inference",
+        "packscout_resolved",
+      ],
+    }, {
+      platformKey: "clutchpacks",
+      externalId: "mapped-standalone",
+      publicCollectibleId: standaloneCollectibleId,
+      aliases: [],
+      collectibleType: "card",
+      publicCategoryIds: [],
+      year: null,
+      brand: null,
+      setOrSeries: null,
+      cardNumber: null,
+      referenceNumber: null,
+      subject: null,
+      grade: null,
+      grader: null,
+      probabilityBucketId: null,
+      matchConfidenceBasisPoints: 10_000,
+      chaseEvidenceKinds: ["packscout_resolved"],
+    }],
+  };
+  assert.equal(
+    approvedPublicCatalogConfigurationV1Schema.safeParse(configuration).success,
+    true,
+  );
+  const revision = (recordKind, externalId, content, sequence) => ({
+    entityId: `entity-${externalId}`,
+    platformKey: "clutchpacks",
+    recordKind,
+    externalId,
+    content,
+    sourceUpdatedAt: new Date(READ_AT),
+    sourceCollectedAt: new Date(READ_AT),
+    acceptedAt: new Date(READ_AT),
+    publicChangeSequence: BigInt(sequence),
+  });
+  const sourceSnapshot = {
+    organizationId: ORGANIZATION_ID,
+    readAt: new Date(READ_AT),
+    configuration: {
+      id: "configuration-1",
+      configuration,
+      configurationHash: HASH,
+      publicChangeSequence: 1n,
+    },
+    providers: [{
+      platformKey: "clutchpacks",
+      state: "active",
+      lifecycleSequence: 1n,
+      providerId: "55555555-5555-4555-8555-555555555555",
+      sourceInstanceId: "66666666-6666-4666-8666-666666666666",
+      sourceRevisionId: "77777777-7777-4777-8777-777777777777",
+      completedBackfillAt: new Date(READ_AT),
+    }],
+    revisions: [
+      revision("pack", "pack-1", {
+        schemaVersion: "catalog-projection-v1",
+        firstSeenAt: READ_AT,
+        imageUrls: [],
+        dataQualityEvidence: [],
+        entityType: "pack",
+        evInputStatus: "unavailable",
+        parentExternalId: null,
+        name: "ClutchPacks adapter proof",
+        category: null,
+        description: null,
+        availability: "available",
+        availabilityProvenance: {
+          kind: "canonical_provider_observation",
+          observedAvailability: "available",
+        },
+        sourceStatus: null,
+        priceValueMinor: 10_000,
+        priceCurrency: "USD",
+        providerReportedEvValueMinor: null,
+        providerReportedEvCurrency: null,
+        buybackPercent: 90,
+        drawCount: 1,
+      }, 1),
+      revision("catalog_asset", "mapped-associated", canonicalAssetContent({
+        name: "Mapped associated card",
+      }), 2),
+      revision("catalog_asset", "mapped-standalone", canonicalAssetContent({
+        name: "Mapped standalone card",
+      }), 3),
+      revision("catalog_asset", "omitted-associated-shell",
+        canonicalAssetContent(), 4),
+    ],
+    repackIdentities: [{
+      platformKey: "clutchpacks",
+      packExternalId: "pack-1",
+      publicRepackId,
+      approvedConfigurationKey: configuration.configurationKey,
+      publicChangeSequence: 1n,
+      approvedAt: new Date(READ_AT),
+    }],
+    assetPackAssociations: [{
+      platformKey: "clutchpacks",
+      assetExternalId: "mapped-associated",
+      packExternalId: "pack-1",
+      sourceEntityId: "pull-mapped",
+      publicChangeSequence: 2n,
+      associatedAt: new Date(READ_AT),
+    }, {
+      platformKey: "clutchpacks",
+      assetExternalId: "omitted-associated-shell",
+      packExternalId: "pack-1",
+      sourceEntityId: "pull-shell",
+      publicChangeSequence: 4n,
+      associatedAt: new Date(READ_AT),
+    }],
+    soldOutTransitions: [],
+  };
+  const source = clutchpacksCatalogSourceWithEmptyShellOmissions({
+    async loadSourceSnapshot() {
+      return sourceSnapshot;
+    },
+  }, {
+    parseConfiguration: (value) =>
+      approvedPublicCatalogConfigurationV1Schema.safeParse(value),
+    hasPublicName: clutchpacksAssetHasPublicName,
+    isOmittablePublicShell: clutchpacksAssetIsOmittablePublicShell,
+  });
+  const projected = await new DataReleaseV3CanonicalCatalogAdapter(source)
+    .loadCatalogSnapshot({ readAt: READ_AT });
+
+  assert.equal(projected.products.length, 1);
+  assert.deepEqual(
+    projected.collectibles.map(({ publicCollectibleId }) => publicCollectibleId),
+    [associatedCollectibleId, standaloneCollectibleId],
+  );
+  assert.equal(projected.chases.length, 1);
+  assert.equal(projected.chases[0].publicCollectibleId, associatedCollectibleId);
+  assert.equal(projected.products[0].topChase.publicCollectibleId,
+    associatedCollectibleId);
+  assert.equal(projected.products[0].contentSummary.knownCollectibleCount, 1);
+  assert.equal(projected.products[0].contentSummary.chaseCount, 1);
+  assert.deepEqual(projected.products[0].collectibleTypes, ["card"]);
+});
 
 function planRecords(candidate, kind) {
   return candidate.batches
@@ -373,6 +839,7 @@ function publicReadBack(candidate = plan(), count = 17, governedScope = scope())
           dataAsOf: candidate.manifest.dataAsOf,
           methodVersion: candidate.manifest.methodVersion,
           confidencePolicyVersion: candidate.manifest.confidencePolicyVersion,
+          publicEvPolicyVersion: candidate.manifest.publicEvPolicyVersion,
         },
       },
     },
@@ -837,6 +1304,55 @@ test("a bounded nonzero chase set is exhaustively reconciled through its collect
       "CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT",
     ),
   );
+});
+
+test("a large chase surface uses deterministic bounded relationship probes", () => {
+  const governedSnapshot = snapshot();
+  governedSnapshot.collectibles = Array.from(
+    { length: 100 },
+    (_, index) => collectible(index),
+  );
+  governedSnapshot.chases = governedSnapshot.collectibles.map((item, index) => ({
+    ...chase(index % 17),
+    publicCollectibleId: item.publicCollectibleId,
+    collectible: collectibleDisplay(item),
+    role: "possible_outcome",
+    displayOrder: Math.floor(index / 17),
+  }));
+  const governedScope = assertClutchpacksCatalogScope(governedSnapshot);
+  const probes = clutchpacksCollectibleReadbackProbes(governedScope);
+  const directIds = probes.direct.map((item) => item.publicCollectibleId);
+
+  assert.equal(probes.direct.length, 64);
+  assert.deepEqual(
+    directIds,
+    clutchpacksCollectibleReadbackProbes(governedScope).direct.map((item) =>
+      item.publicCollectibleId),
+  );
+  for (const index of [0, 49, 99]) {
+    assert.equal(directIds.includes(publicCollectibleId(index)), true);
+  }
+
+  const candidate = plan();
+  candidate.manifest.counts.collectibles = governedSnapshot.collectibles.length;
+  candidate.manifest.counts.chases = governedSnapshot.chases.length;
+  candidate.manifest.batchCount = 4;
+  candidate.batches.find((batch) => batch.kind === "collectibles").records =
+    governedSnapshot.collectibles;
+  candidate.batches.push({
+    batchIndex: 3,
+    kind: "chases",
+    batchHash: HASH,
+    records: governedSnapshot.chases,
+  });
+
+  assert.doesNotThrow(() =>
+    assertClutchpacksPlanCompleteness(candidate, governedScope));
+  assert.doesNotThrow(() => assertClutchpacksPublicReadBack(
+    publicReadBack(candidate, 17, governedScope),
+    candidate,
+    governedScope,
+  ));
 });
 
 test("current EV reserves Convex auth skew beyond the advertised lifetime", () => {

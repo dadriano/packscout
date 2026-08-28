@@ -688,13 +688,14 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
   Object.freeze([
     {
       claim:
-        "Positive, neutral, negative, zero, unavailable, delayed, expired, " +
-        "simulated, and sold-out states present through the shared boundary.",
+        "Positive raw EV fails closed at publication, while neutral, negative, " +
+        "zero, unavailable, delayed, expired, simulated, and sold-out states " +
+        "present through the shared boundary.",
       evidence: [
         {
           file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
           testName:
-            "positive estimates carry explicit plus signs on both signed metrics",
+            "a forged positive estimate fails closed at the presentation boundary",
         },
         {
           file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
@@ -789,7 +790,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/components/catalog/overview-presentation.test.ts",
           testName:
-            "always presents four overview KPIs with buyback-adjusted meaning",
+            "presents the three nonpositive-policy overview KPIs",
         },
         {
           file: "apps/frontend/components/catalog/overview-presentation.test.ts",
@@ -962,7 +963,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/packscout-ev-examples.test.ts",
           testName:
-            "exposes exactly the six approved worked examples in teaching order",
+            "exposes exactly the five public-policy worked examples in teaching order",
         },
         {
           file: "apps/frontend/lib/packscout-ev-examples.test.ts",

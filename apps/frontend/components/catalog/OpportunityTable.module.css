@@ -234,11 +234,6 @@
   white-space: nowrap;
 }
 
-.metric[data-state="positive"] .metricValue,
-.metric[data-state="positive"] .metricState {
-  color: var(--color-positive);
-}
-
 .metric[data-state="negative"] .metricValue,
 .metric[data-state="negative"] .metricState {
   color: var(--color-negative);

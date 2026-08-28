@@ -1,6 +1,7 @@
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   parsePackScoutBuybackEvTimestampMillisV1,
   safeParsePublicRepackDetailV3,
   type PackScoutBuybackEvPublicReasonCodeV1,
@@ -662,7 +663,7 @@ export class PackScoutBuybackEvSimulator {
       if (!expectationHolds) {
         runFailure(
           "EXPECTATION_MISMATCH",
-          `Scenario resolved to ${packScout.status} instead of ${expectation.publicState}.`,
+          `Scenario ${scenario.scenarioKey} resolved to ${packScout.status} instead of ${expectation.publicState}.`,
           scenario.scenarioKey,
         );
       }
@@ -716,6 +717,7 @@ export async function openPackScoutBuybackEvSimulationSessionV1(options: {
       publicationSchemaVersion: DATA_RELEASE_V3_PUBLICATION_SCHEMA_VERSION,
       methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
       confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+      publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
       scenarioVersion: controls.scenarioVersion,
     },
     activeState,

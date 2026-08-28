@@ -1,6 +1,7 @@
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   buildPublicCollectibleSearchText,
   normalizePublicSearchText,
   packScoutPublicEvV3Schema,
@@ -224,7 +225,7 @@ export function buildV3Detail(
       alt: "Pokemon Grail Gacha",
     },
     evEstimates: {
-      packScout: buildV3CurrentEv(12_000),
+      packScout: buildV3CurrentEv(8_500),
       vendorReported: {
         status: "available",
         sourceMoney: { minorUnits: 8_500, currency: "USD" },
@@ -305,6 +306,8 @@ export interface V3FixturePlan {
     readonly methodVersion: typeof PACKSCOUT_BUYBACK_EV_METHOD_VERSION;
     readonly confidencePolicyVersion:
       typeof PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION;
+    readonly publicEvPolicyVersion:
+      typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
     readonly dataAsOf: string;
     readonly contentHash: string;
     readonly searchAlgorithmVersion:
@@ -437,6 +440,7 @@ export async function buildV3FixturePlan(input: {
       publicReleaseId: input.publicReleaseId,
       methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
       confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+      publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
       dataAsOf,
       contentHash,
       searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,
@@ -450,6 +454,7 @@ export async function buildV3FixturePlan(input: {
     manifest: {
       methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
       confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+      publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
       dataAsOf,
       contentHash,
       searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,

@@ -482,7 +482,28 @@ export function clutchpacksAssetHasPublicName(
 export function clutchpacksAssetIsOmittablePublicShell(
   asset: ClutchpacksCatalogEntityCandidate,
 ): boolean {
-  return asset.associated === false && !clutchpacksAssetHasPublicName(asset);
+  const parsed = providerSourceCanonicalCatalogAssetContentV1Schema.safeParse(
+    asset.content,
+  );
+  if (!parsed.success) return false;
+  const content = parsed.data;
+  // ClutchPacks can deliver placeholder catalog rows before their public
+  // metadata. This omission ends automatically as soon as a later canonical
+  // revision supplies a name or any other public-bearing field; that revision
+  // must then be mapped by the next approved catalog refresh.
+  return content.assetType === "card" &&
+    content.relatedPackExternalId === null &&
+    content.parentExternalId === null &&
+    content.sourceStatus === null &&
+    content.name === null &&
+    content.description === null &&
+    content.category === null &&
+    content.availability === "unknown" &&
+    content.providerValueMinor === null &&
+    content.providerValueCurrency === null &&
+    content.valueSource === null &&
+    content.imageUrls.length === 0 &&
+    content.dataQualityEvidence.length === 0;
 }
 
 /**
@@ -596,9 +617,10 @@ export function assertClutchpacksCatalogCandidateTargetQualified(
   ) {
     refuse("TARGET_NOT_QUALIFIED");
   }
-  const unnamedAssociated = evidence.assets.filter((asset) =>
-    asset.associated === true && !clutchpacksAssetHasPublicName(asset));
-  if (unnamedAssociated.length !== 0) refuse("TARGET_NOT_QUALIFIED");
+  const unnamedNonShell = evidence.assets.filter((asset) =>
+    !clutchpacksAssetHasPublicName(asset) &&
+    !clutchpacksAssetIsOmittablePublicShell(asset));
+  if (unnamedNonShell.length !== 0) refuse("TARGET_NOT_QUALIFIED");
 }
 
 function canonicalPackEntity(entity: ClutchpacksCatalogEntityCandidate) {
@@ -1672,9 +1694,9 @@ export async function runClutchpacksCatalogCandidate(input: Readonly<{
     latestRunId: evidence.latestRunId!,
     configurationHash,
   });
-  const associatedCollectibleCount = evidence.assets.filter(
-    ({ associated }) => associated,
-  ).length;
+  const omittedShells = evidence.assets.filter(
+    clutchpacksAssetIsOmittablePublicShell,
+  );
   const summary = Object.freeze({
     ok: true,
     operation: WORKFLOW,
@@ -1684,9 +1706,12 @@ export async function runClutchpacksCatalogCandidate(input: Readonly<{
     organizationId: environment.organizationId,
     latestRunId: evidence.latestRunId,
     packCount: evidence.packs.length,
-    collectibleMappingCount: configuration.collectibles.length,
-    associatedCollectibleCount,
-    unassociatedCollectibleCount: evidence.assets.length - associatedCollectibleCount,
+    canonicalAssetCount: evidence.assets.length,
+    publicMappedAssetCount: configuration.collectibles.length,
+    omittedShellCount: omittedShells.length,
+    omittedAssociatedShellCount: omittedShells.filter(
+      ({ associated }) => associated,
+    ).length,
     publicAssetOriginCount: configuration.publicAssetOrigins.length,
     observedPublicAssetOrigins: configuration.publicAssetOrigins,
     serializedBytes: Buffer.byteLength(serialized),
@@ -1733,7 +1758,9 @@ export function clutchpacksCatalogCandidateUsage(): string {
 Default mode is read-only. Both modes re-read and qualify the exact paused,
 provider-head, adapter-v3 ClutchPacks target. Execute creates one new 0600 file
 and refuses an existing path. The required policy is supplied only through the
-protected PACKSCOUT_CLUTCHPACKS_CATALOG_* environment variables.`;
+protected PACKSCOUT_CLUTCHPACKS_CATALOG_* environment variables. The result
+audits canonicalAssetCount, publicMappedAssetCount, omittedShellCount, and
+omittedAssociatedShellCount.`;
 }
 
 function safeFailure(error: unknown): Readonly<{

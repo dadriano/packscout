@@ -1,6 +1,6 @@
 import { Router, type RequestHandler, type Response } from "express";
 import { z } from "zod";
-import type { ProviderConfigurationSummary } from "@packscout/contracts";
+import type { ProviderSourceRootSummary } from "@packscout/contracts";
 import {
   type AuthService,
 } from "@packscout/services";
@@ -12,39 +12,14 @@ import {
 
 const providerIdSchema = z.string().uuid("Provider ID must be a UUID.");
 
-export interface ProviderHealthView {
-  readonly providerId: string;
-  readonly freshnessState: "fresh" | "stale";
-  readonly qualityState: "healthy" | "warning" | "degraded";
-  readonly activeRun: { id: string; state: "queued" | "running" } | null;
-  readonly latestRun: { id: string; state: string } | null;
-  readonly lastHeadReachedAt: string | null;
-  readonly nextDueAt: string | null;
-  readonly openQuarantineCount: number;
-  readonly consecutiveFailures: number;
-  readonly latestFailureClass: string | null;
-  readonly recoveryHint: string;
-}
-
-export interface ProviderAdminListItem {
-  readonly provider: ProviderConfigurationSummary;
-  readonly health: ProviderHealthView;
-}
-
 export interface ProvidersRouterDependencies {
   auth: Pick<AuthService, "resolveSession" | "requirePermission">;
   catalog: {
-    listProviders(organizationId: string): Promise<readonly ProviderAdminListItem[]>;
+    listProviders(organizationId: string): Promise<readonly ProviderSourceRootSummary[]>;
     getProvider(
       organizationId: string,
       providerId: string,
-    ): Promise<ProviderConfigurationSummary | null>;
-  };
-  health: {
-    getHealth(input: {
-      organizationId: string;
-      providerId: string;
-    }): Promise<ProviderHealthView>;
+    ): Promise<ProviderSourceRootSummary | null>;
   };
   cookiePolicy: SessionCookiePolicy;
   sameOrigin: RequestHandler;
@@ -108,16 +83,10 @@ export function createProvidersRouter(dependencies: ProvidersRouterDependencies)
     if (!providerId.success) return validationError(response, { providerId: providerId.error.issues });
     try {
       const authenticated = getAuthenticatedActor(response);
-      const [provider, health] = await Promise.all([
-        dependencies.catalog.getProvider(
-          authenticated.organizationId,
-          providerId.data,
-        ),
-        dependencies.health.getHealth({
-          organizationId: authenticated.organizationId,
-          providerId: providerId.data,
-        }),
-      ]);
+      const provider = await dependencies.catalog.getProvider(
+        authenticated.organizationId,
+        providerId.data,
+      );
       if (!provider) {
         response.status(404).json({
           error: "Provider not found.",
@@ -125,7 +94,7 @@ export function createProvidersRouter(dependencies: ProvidersRouterDependencies)
         });
         return;
       }
-      response.status(200).json({ provider, health });
+      response.status(200).json({ provider });
     } catch (error) {
       serviceError(response, error);
     }

@@ -312,7 +312,7 @@ test("summary and detail projections carry byte-equivalent EV estimates", () => 
 
   const divergent = buildPublicRepackDetailV3({
     evEstimates: buildPublicEvEstimatesV3({
-      packScout: buildPackScoutPublicEvCurrentV3(10_500),
+      packScout: buildPackScoutPublicEvCurrentV3(9_000),
     }),
   });
   assert.equal(
@@ -359,7 +359,7 @@ test("dashboard opportunities stay eligible, ranked, and byte-aligned", () => {
 
   const divergentDetail = buildPublicRepackViewDetailV3({
     evEstimates: buildPublicEvEstimatesV3({
-      packScout: buildPackScoutPublicEvCurrentV3(10_500),
+      packScout: buildPackScoutPublicEvCurrentV3(9_000),
     }),
   });
   assert.equal(
@@ -394,7 +394,7 @@ test("list pages keep rows, details, selection, and desired matches aligned", ()
 
   const divergentDetail = buildPublicRepackViewDetailV3({
     evEstimates: buildPublicEvEstimatesV3({
-      packScout: buildPackScoutPublicEvCurrentV3(10_500),
+      packScout: buildPackScoutPublicEvCurrentV3(9_000),
     }),
   });
   assert.equal(
@@ -448,9 +448,9 @@ test("list pages keep rows, details, selection, and desired matches aligned", ()
 
 test("sort rows materialize only bounded values with honest null ranks", () => {
   const current = repackEvSortRowV3FromDetail(buildPublicRepackDetailV3());
-  assert.equal(current.packScoutEvDollarsMinor, 2_000);
+  assert.equal(current.packScoutEvDollarsMinor, -1_500);
   assert.equal(current.packScoutEvDollarsNullRank, 0);
-  assert.equal(current.packScoutGrossEvMinor, 12_000);
+  assert.equal(current.packScoutGrossEvMinor, 8_500);
   assert.equal(current.packScoutConfidenceBand, "high");
   assert.equal(current.vendorReportedEvUsdMinor, 8_500);
   assert.equal(
@@ -504,6 +504,7 @@ test("sort rows materialize only bounded values with honest null ranks", () => {
 test("the release identity requires data_release_v3 and the exact versions", () => {
   const identity = buildDataReleaseV3Identity();
   assert.equal(identity.schemaVersion, "data_release_v3");
+  assert.equal(identity.publicEvPolicyVersion, "packscout-public-ev-nonpositive-v1");
   assert.equal(
     dataReleaseV3IdentitySchema.safeParse({
       ...identity,
@@ -523,6 +524,13 @@ test("the release identity requires data_release_v3 and the exact versions", () 
     dataReleaseV3IdentitySchema.safeParse({
       ...identity,
       confidencePolicyVersion: "confidence-v1",
+    }).success,
+    false,
+  );
+  assert.equal(
+    dataReleaseV3IdentitySchema.safeParse({
+      ...identity,
+      publicEvPolicyVersion: "packscout-public-ev-positive-v1",
     }).success,
     false,
   );

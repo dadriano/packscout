@@ -221,7 +221,7 @@ function halfUpReturnBasisPoints(gross: number, price: number): number {
 }
 
 export function buildAvailableProjection(
-  gross = 12_000,
+  gross = 8_500,
   price = 10_000,
 ): Extract<
   PackScoutBuybackEvRevisionPublicationProjectionV1,
@@ -269,7 +269,7 @@ export function buildRevisionIdentity(
 }
 
 export function buildPublishableEligibility(
-  gross = 12_000,
+  gross = 8_500,
 ): PackScoutBuybackEvPublicationEligibilityV1 {
   return {
     revision: buildRevisionIdentity("available"),
@@ -634,6 +634,7 @@ export class InMemoryDataReleaseV3Port implements DataReleaseV3PublicationPort {
       methodVersion: release.request.manifest.methodVersion,
       confidencePolicyVersion:
         release.request.manifest.confidencePolicyVersion,
+      publicEvPolicyVersion: release.request.manifest.publicEvPolicyVersion,
       dataAsOf: release.request.manifest.dataAsOf,
       completedAt: release.completedAt!,
       counts: release.request.manifest.counts,

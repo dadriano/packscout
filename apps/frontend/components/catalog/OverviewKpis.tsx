@@ -5,7 +5,6 @@ import styles from "./OverviewKpis.module.css";
 
 const KPI_MARKS = Object.freeze({
   repacks: "#",
-  positiveEv: "+",
   medianEv: "%",
   highestChase: "◇",
 });
