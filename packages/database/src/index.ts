@@ -30,6 +30,7 @@ export * from "./operational-alert-repository.ts";
 export * from "./operational-health-repository.ts";
 export * from "./persistence-error.ts";
 export * from "./pipeline-types.ts";
+export * from "./postgres-advisory-operation-guard.ts";
 export * from "./provider-configuration-repository.ts";
 export * from "./provider-source-cursor-repository.ts";
 export * from "./provider-source-admin-lifecycle-repository.ts";

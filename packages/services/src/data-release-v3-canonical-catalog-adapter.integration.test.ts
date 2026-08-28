@@ -59,6 +59,17 @@ const PROJECTION_AT = "2026-08-18T02:00:00.000Z";
 const READ_AT = "2026-08-18T02:00:00.000Z";
 const LATER_AT = "2026-08-18T03:00:00.000Z";
 const LATER_UPDATED_AT = "2026-08-18T02:50:00.000Z";
+/**
+ * The clock the commit that wins the LOWER sequence carries: half a second
+ * after the read clock.
+ */
+const SKEWED_AHEAD_AT = "2026-08-18T02:00:00.500Z";
+/**
+ * The clock the commit that wins the HIGHER sequence carries: a second before
+ * the read clock.
+ */
+const SKEWED_BEHIND_AT = "2026-08-18T01:59:59.000Z";
+const SKEWED_SETTLED_AT = "2026-08-18T02:00:02.000Z";
 
 function sha256Json(value: unknown): string {
   return createHash("sha256")
@@ -765,6 +776,15 @@ function withBaselineAssetPackAssociation(
   return {
     async loadSourceSnapshot(input) {
       const snapshot = await source.loadSourceSnapshot(input);
+      const publicChangeSequence = snapshot.revisions.find(
+        ({ platformKey, recordKind, externalId }) =>
+          platformKey === "vendor" &&
+          recordKind === "catalog_asset" &&
+          externalId === "asset-1",
+      )?.publicChangeSequence;
+      if (publicChangeSequence === undefined || publicChangeSequence <= 0n) {
+        throw new Error("The baseline catalog asset revision is missing.");
+      }
       return {
         ...snapshot,
         assetPackAssociations: [{
@@ -773,12 +793,12 @@ function withBaselineAssetPackAssociation(
           assetExternalId: "asset-1",
           packExternalId: "pack-active",
           associatedAt: new Date(ASSET_UPDATED_AT),
-          publicChangeSequence: snapshot.throughSequence,
+          publicChangeSequence,
         }, ...additional.map((association) => ({
           ...association,
           platformKey: "vendor",
           associatedAt: new Date(ASSET_UPDATED_AT),
-          publicChangeSequence: snapshot.throughSequence,
+          publicChangeSequence,
         }))],
       };
     },
@@ -1448,6 +1468,15 @@ test("an association established after the source read clock fails closed", asyn
     const source: DataReleaseV3CanonicalSourcePort = {
       async loadSourceSnapshot(input) {
         const snapshot = await rawSource.loadSourceSnapshot(input);
+        const publicChangeSequence = snapshot.revisions.find(
+          ({ platformKey, recordKind, externalId }) =>
+            platformKey === "vendor" &&
+            recordKind === "catalog_asset" &&
+            externalId === "asset-1",
+        )?.publicChangeSequence;
+        if (publicChangeSequence === undefined || publicChangeSequence <= 0n) {
+          throw new Error("The baseline catalog asset revision is missing.");
+        }
         return {
           ...snapshot,
           assetPackAssociations: [{
@@ -1457,7 +1486,7 @@ test("an association established after the source read clock fails closed", asyn
             packExternalId: "pack-active",
             associatedAt: new Date(LATER_AT),
             // A sequence fence alone would accept this association.
-            publicChangeSequence: snapshot.throughSequence,
+            publicChangeSequence,
           }],
         };
       },
@@ -1469,6 +1498,114 @@ test("an association established after the source read clock fails closed", asyn
       (error: unknown) =>
         error instanceof DataReleaseV3CanonicalCatalogError &&
         error.code === "CANONICAL_PROJECTION_INVALID",
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+/**
+ * The fixture above is monotonic by construction: every cause is stamped with a
+ * time that rises with its sequence, so a sequence prefix and a time bound pick
+ * the same rows. Production is not. `occurred_at` is never ordered by any
+ * constraint, trigger, or by cause allocation itself, and writers stamp it from
+ * three unsynchronized clocks. Two provider page commits reproduce the skew
+ * exactly: each reads `clock_timestamp()` when it takes its page lock and only
+ * later reaches cause allocation, so the transaction holding the LATER clock
+ * can win the EARLIER sequence.
+ *
+ * A read that derives `max(sequence) where occurred_at <= readAt` and then
+ * selects that whole prefix therefore answers the same `readAt` differently as
+ * writes land, and publishes revisions dated after the `dataAsOf` it declares.
+ */
+test("a cause dated after readAt stays out of that readAt's release once a later-sequenced cause dated before it settles", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const ingestion = await seedGovernedCatalog(harness);
+    const source = new PrismaDataReleaseV3CanonicalCatalogSource(
+      harness.client,
+      organizationId,
+    );
+    const adapter = new DataReleaseV3CanonicalCatalogAdapter(
+      withBaselineAssetPackAssociation(source),
+    );
+    const before = await adapter.loadCatalogSnapshot({ readAt: READ_AT });
+
+    // Commit A: read the clock half a second AFTER the read clock, committed
+    // first, so it holds the lower sequence. It is not part of this readAt.
+    await seedCanonicalRevisions(harness, organizationId, ingestion, [{
+      recordKind: "pack",
+      externalId: "pack-active",
+      revisionNumber: 2,
+      content: packContent({
+        name: "Pokemon Grail Gacha",
+        evInputStatus: "ready",
+        availability: "available",
+        priceValueMinor: 20_000,
+        buybackPercent: 85,
+        providerReportedEvValueMinor: 12_000,
+      }),
+      sourceUpdatedAt: LATER_UPDATED_AT,
+      occurredAt: SKEWED_AHEAD_AT,
+    }], SKEWED_AHEAD_AT);
+
+    // Commit B: read the clock a second BEFORE the read clock, committed
+    // second, so it holds the higher sequence. It re-observes a sellout the
+    // release already carries -- same availability, same `source_updated_at`,
+    // only the vendor's raw status string differs -- so it publishes nothing
+    // new on its own. What it must not do is act as a time boundary and drag
+    // commit A in behind it.
+    await seedCanonicalRevisions(harness, organizationId, ingestion, [{
+      recordKind: "pack",
+      externalId: "pack-soldout",
+      revisionNumber: 4,
+      content: packContent({
+        name: "Pokemon Vault Repack",
+        evInputStatus: "unavailable",
+        availability: "sold_out",
+        priceValueMinor: 20_000,
+        buybackPercent: null,
+        sourceStatus: "sold-out-reconfirmed-again",
+      }),
+      sourceUpdatedAt: SOLD_OUT_REOBSERVED_AT,
+      occurredAt: SKEWED_BEHIND_AT,
+    }], SKEWED_SETTLED_AT);
+
+    const after = await adapter.loadCatalogSnapshot({ readAt: READ_AT });
+    const active = after.products.find(
+      ({ productKey }) => productKey === "pack-active",
+    )!;
+    assert.equal(active.price.usdComparison.value?.minorUnits, 10_000);
+    assert.equal(active.sourceUpdatedAt, ACTIVE_UPDATED_AT);
+    assert.equal(
+      after.products.find(({ productKey }) => productKey === "pack-soldout")!
+        .soldOutAt,
+      SOLD_OUT_AT,
+    );
+    assert.equal(JSON.stringify(after), JSON.stringify(before));
+
+    // Nothing dated after the read clock reached the raw snapshot either, so
+    // the release's `dataAsOf` still describes every row underneath it.
+    const raw = await source.loadSourceSnapshot({ readAt: READ_AT });
+    assert.deepEqual(
+      raw.revisions
+        .filter(({ acceptedAt }) =>
+          acceptedAt.getTime() > new Date(READ_AT).getTime())
+        .map(({ externalId, acceptedAt }) => ({
+          externalId,
+          acceptedAt: acceptedAt.toISOString(),
+        })),
+      [],
+    );
+
+    // Commit A is deferred, not dropped: a read clock past it publishes it.
+    const later = await adapter.loadCatalogSnapshot({
+      readAt: SKEWED_SETTLED_AT,
+    });
+    assert.equal(
+      later.products.find(({ productKey }) => productKey === "pack-active")!
+        .price.usdComparison.value?.minorUnits,
+      20_000,
     );
   } finally {
     await harness.close();

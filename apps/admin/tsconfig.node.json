@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["server", "vite.config.ts"]
+  "include": ["server", "server.ts", "vite.config.ts"]
 }
