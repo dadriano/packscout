@@ -7,21 +7,17 @@ const source = readFileSync(
   "utf8",
 );
 
-test("overview omits the inspector until an opportunity can be selected", () => {
+test("overview keeps a truthful inspector shell while selection loads", () => {
   assert.match(
     source,
-    /inspectorOpen && inspectorPlacement === "side" && selectedRepack !== null/,
+    /inspectorOpen && inspectorPlacement === "side"/,
   );
-  assert.equal(
-    source.includes("Select an opportunity to inspect its current evidence."),
-    false,
+  assert.match(
+    source,
+    /Select an opportunity to inspect its current evidence\./,
   );
 });
 
-test("opportunity empty state receives EV coverage and a matching catalog link", () => {
-  assert.match(
-    source,
-    /evaluatedEvRepacks=\{bundle\.kpis\.evaluatedEvRepacks\}/,
-  );
-  assert.match(source, /repacksHref=\{repacksHref\}/);
+test("overview does not pass the retired evaluated-EV coverage contract", () => {
+  assert.doesNotMatch(source, /evaluatedEvRepacks=/);
 });

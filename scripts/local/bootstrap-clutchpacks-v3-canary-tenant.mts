@@ -56,6 +56,11 @@ const PLATFORM_REQUEST_LANES_MIGRATION_CHECKSUM =
   "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7";
 const TARGET_COMPOSITE_MIGRATIONS = Object.freeze([
   Object.freeze({
+    name: "20260819010000_buyback_ev_revisions",
+    checksum:
+      "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
+  }),
+  Object.freeze({
     name: "20260826005000_source_relationship_confirmations",
     checksum:
       "19cfc4cdae5fc3615159c5ead740fdc3e3e83945bf6c9ec2176ce36067ce9a21",
@@ -71,7 +76,7 @@ const TARGET_COMPOSITE_MIGRATIONS = Object.freeze([
   }),
 ]);
 const ACTIVE_SOURCE_APPLICATION_TABLE_COUNT = 84;
-const TARGET_APPLICATION_TABLE_COUNT = 88;
+const TARGET_APPLICATION_TABLE_COUNT = 91;
 
 export class ClutchpacksV3CanaryBootstrapError extends Error {
   override readonly name = "ClutchpacksV3CanaryBootstrapError";
@@ -936,7 +941,7 @@ Required protected environment:
 
 The source database is read in a read-only transaction and must prove the exact
 84-table active-source migration subset. The target must be a different, fresh,
-fully migrated local database containing the 88-table composite schema. Execute
+fully migrated local database containing the 91-table composite schema. Execute
 stages one ClutchPacks adapter-v3 draft at Feed start; it does not queue tests,
 call DataForrest, pause the original source, activate anything, or start replay.`;
 }

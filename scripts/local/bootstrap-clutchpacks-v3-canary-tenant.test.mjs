@@ -235,8 +235,13 @@ test("the active source requires the exact 84-table migration subset", () => {
   }
 });
 
-test("the target requires all composite migrations and 88 application tables", () => {
+test("the target requires all composite migrations and 91 application tables", () => {
   const migrations = [
+    {
+      migrationName: "20260819010000_buyback_ev_revisions",
+      checksum:
+        "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
+    },
     {
       migrationName: "20260826005000_source_relationship_confirmations",
       checksum:
@@ -256,7 +261,7 @@ test("the target requires all composite migrations and 88 application tables", (
     ...migration,
     finishedAt: new Date("2026-08-27T08:00:00.000Z"),
     rolledBackAt: null,
-    tableCount: 88,
+    tableCount: 91,
   }));
   assert.doesNotThrow(() =>
     assertClutchpacksV3TargetCompositeMigrations(migrations)
@@ -267,7 +272,7 @@ test("the target requires all composite migrations and 88 application tables", (
       index === 0 ? { ...row, checksum: "0".repeat(64) } : row
     ),
     migrations.map((row, index) =>
-      index === 1 ? { ...row, tableCount: 87 } : row
+      index === 1 ? { ...row, tableCount: 90 } : row
     ),
     migrations.map((row, index) =>
       index === 2 ? { ...row, finishedAt: null } : row
@@ -446,7 +451,7 @@ test("safe failures and help never expose credentials or require an admin", () =
   assert.match(result.stdout, /PACKSCOUT_CLUTCHPACKS_V1_DATABASE_URL/u);
   assert.match(result.stdout, /PACKSCOUT_DATABASE_URL/u);
   assert.match(result.stdout, /84-table active-source migration subset/u);
-  assert.match(result.stdout, /88-table composite schema/u);
+  assert.match(result.stdout, /91-table composite schema/u);
   assert.match(result.stdout, /does not queue tests,/u);
   assert.match(result.stdout, /call DataForrest/u);
   assert.doesNotMatch(

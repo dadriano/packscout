@@ -96,9 +96,6 @@ export function dashboardKpis(
   );
   return {
     totalRepacks: rows.length,
-    evaluatedEvRepacks: currentRows.filter(
-      (row) => row.packScoutEvDollarsMinor !== null,
-    ).length,
     positiveEvRepacks: currentRows.filter(
       (row) =>
         row.packScoutEvDollarsMinor !== null &&

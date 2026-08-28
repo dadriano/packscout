@@ -1,3 +1,4 @@
+import { METRIC_TRUST_COPY } from "../metric-vocabulary";
 import type { LearnGuide } from "./types";
 
 export const WHAT_IS_A_REPACK_GUIDE = {
@@ -141,6 +142,34 @@ export const WHAT_IS_A_REPACK_GUIDE = {
           ],
         },
       ],
+    },
+    {
+      id: "buyback-offers",
+      heading: "What a Buyback Offer Means",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "Some platforms document an offer to buy a pull back instead of shipping it. Buyback % is the percentage of a pull’s stated value the platform pays on that sell-back. PackScout shows one Buyback % number only when the platform documents a single uniform rate governing every eligible outcome; otherwise it shows a bounded summary such as Varies by outcome or Fixed/final payout.",
+        },
+        {
+          type: "paragraph",
+          text: "Documented terms can also mark outcomes ineligible and apply mandatory fees, caps, floors, or fixed offers, and a guaranteed payout is not the same as an item’s market value. Availability, timing, and conditions vary by platform and product, so confirm the current vendor terms before relying on them.",
+        },
+      ],
+    },
+    {
+      id: "vendor-facts-and-packscout-estimates",
+      heading: "Vendor Facts and PackScout Estimates",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "Vendors report listing details such as price, eligible inventory, stated odds, and buyback terms. PackScout uses supported post-processed evidence to calculate comparison estimates; it does not control the opening or the item you receive.",
+        },
+      ],
+      callout: {
+        label: "Keep the sources separate",
+        paragraphs: [METRIC_TRUST_COPY.sourceExplanation],
+      },
     },
     {
       id: "should-you-buy-a-repack",

@@ -105,7 +105,6 @@ describe("public pack availability query behavior", () => {
   test("positive-EV and confidence summaries ignore every non-available pack", () => {
     expect(dashboardKpis(fourStates)).toEqual({
       totalRepacks: 4,
-      evaluatedEvRepacks: 1,
       positiveEvRepacks: 1,
       medianPackScoutEvPercent: {
         status: "available",
@@ -116,7 +115,7 @@ describe("public pack availability query behavior", () => {
     });
   });
 
-  test("reports EV counts as unevaluated when available packs have no estimate", () => {
+  test("reports EV summaries as unavailable when available packs have no estimate", () => {
     const withoutEstimate: RepackSearchRow = {
       ...fourStates[0],
       packScoutGrossEvMinor: null,
@@ -132,7 +131,6 @@ describe("public pack availability query behavior", () => {
 
     expect(dashboardKpis([withoutEstimate])).toEqual({
       totalRepacks: 1,
-      evaluatedEvRepacks: 0,
       positiveEvRepacks: 0,
       medianPackScoutEvPercent: {
         status: "unavailable",

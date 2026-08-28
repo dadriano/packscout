@@ -3,6 +3,7 @@ import { ConvexError } from "convex/values";
 import {
   PRODUCTION_CATALOG_MANIFEST_PATHS,
   PRODUCTION_CATALOG_RETENTION_PATHS,
+  PRODUCTION_DATA_RELEASE_V3_PATHS,
   PRODUCTION_PROVIDER_RELEASE_PATHS,
   PRODUCTION_REPACK_HEAT_PATHS,
 } from "@packscout/contracts";
@@ -11,6 +12,7 @@ import { env, httpAction } from "./_generated/server";
 import {
   handleAuthenticatedCatalogManifestRequest,
   handleAuthenticatedCatalogRetentionRequest,
+  handleAuthenticatedDataReleaseV3Request,
   handleAuthenticatedHeatPublicationRequest,
   handleAuthenticatedProviderReleaseRequest,
 } from "./productionDataReleaseAuth";
@@ -700,6 +702,90 @@ const settleProductUserWelcome = httpAction(async (ctx, request) => {
 const http = httpRouter();
 
 
+
+http.route({
+  path: PRODUCTION_DATA_RELEASE_V3_PATHS.activeState,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedDataReleaseV3Request(
+      ctx,
+      request,
+      internal.dataReleaseV3Read.activeState,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_DATA_RELEASE_V3_PATHS.start,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedDataReleaseV3Request(
+      ctx,
+      request,
+      internal.dataReleaseV3Lifecycle.start,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_DATA_RELEASE_V3_PATHS.applyBatch,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedDataReleaseV3Request(
+      ctx,
+      request,
+      internal.dataReleaseV3Lifecycle.applyBatch,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_DATA_RELEASE_V3_PATHS.finalize,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedDataReleaseV3Request(
+      ctx,
+      request,
+      internal.dataReleaseV3Lifecycle.finalize,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_DATA_RELEASE_V3_PATHS.activate,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedDataReleaseV3Request(
+      ctx,
+      request,
+      internal.dataReleaseV3Lifecycle.activate,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_DATA_RELEASE_V3_PATHS.rollback,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedDataReleaseV3Request(
+      ctx,
+      request,
+      internal.dataReleaseV3Lifecycle.rollback,
+    ),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_DATA_RELEASE_V3_PATHS.status,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedDataReleaseV3Request(
+      ctx,
+      request,
+      internal.dataReleaseV3Read.status,
+    ),
+  ),
+});
 
 http.route({
   path: PRODUCTION_CATALOG_RETENTION_PATHS.retainManifests,

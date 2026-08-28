@@ -1,18 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import type {
-  DashboardKpis,
-  PublicRepackViewSummary,
-} from "@packscout/contracts";
-import type { MetricValuePresentation } from "@/lib/metric-presentation";
+import type { PublicRepackViewSummaryV3 } from "@packscout/contracts";
+import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
+import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { CatalogImage } from "./CatalogImage.client";
-import {
-  presentOpportunityEmptyState,
-  presentOpportunities,
-  type DisplayField,
-} from "./overview-presentation";
+import { presentOpportunityRow } from "./overview-presentation";
 import styles from "./OpportunityTable.module.css";
 
 export type OpportunitySelectionHandler = (
@@ -21,8 +15,7 @@ export type OpportunitySelectionHandler = (
 ) => void;
 
 type OpportunityTableProps = Readonly<{
-  opportunities: readonly PublicRepackViewSummary[];
-  evaluatedEvRepacks: DashboardKpis["evaluatedEvRepacks"];
+  opportunities: readonly PublicRepackViewSummaryV3[];
   repacksHref: string;
   selectedPublicRepackId: string | null;
   onSelectOpportunity: OpportunitySelectionHandler;
@@ -49,22 +42,6 @@ function MetricCell({ metric }: { metric: MetricValuePresentation }) {
   );
 }
 
-function PriceCell({ price }: { price: DisplayField }) {
-  return (
-    <span className={styles.metric} data-state={price.availability}>
-      <span aria-hidden="true" className={styles.metricValue}>
-        {price.displayValue}
-      </span>
-      <span className="sr-only">{price.accessibleLabel}</span>
-      {price.reasonCopy ? (
-        <span aria-hidden="true" className={styles.unavailableReason}>
-          {price.reasonCopy}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
 function ColumnLabel({
   children,
   field,
@@ -76,6 +53,7 @@ function ColumnLabel({
     | "vendor"
     | "category"
     | "repackPrice"
+    | "evDollars"
     | "evPercent"
     | "buybackPercent"
     | "topChaseValue";
@@ -89,16 +67,92 @@ function ColumnLabel({
   );
 }
 
+function OpportunityRow({
+  repack,
+  rank,
+  selected,
+  onSelectOpportunity,
+}: Readonly<{
+  repack: PublicRepackViewSummaryV3;
+  rank: number;
+  selected: boolean;
+  onSelectOpportunity: OpportunitySelectionHandler;
+}>) {
+  const estimate = useDeadlineBoundPackScoutEv(repack.evEstimates.packScout);
+  const row = presentOpportunityRow(repack, rank, estimate);
+
+  return (
+    <tr data-selected={selected ? "true" : "false"}>
+      <td className={styles.rank}>{row.rank}</td>
+      <td className={styles.packCell}>
+        <button
+          aria-label={`Inspect ${row.name}${selected ? ", selected" : ""}`}
+          aria-pressed={selected}
+          className={styles.selectPack}
+          onClick={(event) =>
+            onSelectOpportunity(row.publicRepackId, event.currentTarget)
+          }
+          type="button"
+        >
+          <CatalogImage
+            fallbackAlt={row.name}
+            image={row.primaryImage}
+            variant="thumbnail"
+          />
+          <span className={styles.packName}>{row.name}</span>
+          {selected ? (
+            <span aria-hidden="true" className={styles.selectedLabel}>
+              Selected
+            </span>
+          ) : null}
+        </button>
+      </td>
+      <td>
+        <span className={styles.vendor}>
+          {row.vendorLogoUrl ? (
+            <CatalogImage
+              decorative
+              fallback="none"
+              fallbackAlt={`${row.vendorDisplayName} logo`}
+              image={{
+                url: row.vendorLogoUrl,
+                alt: `${row.vendorDisplayName} logo`,
+              }}
+              variant="vendor"
+            />
+          ) : null}
+          <span>{row.vendorDisplayName}</span>
+        </span>
+      </td>
+      <td>{row.category}</td>
+      <td>
+        <MetricCell metric={row.packPrice} />
+      </td>
+      <td>
+        <MetricCell metric={row.packScoutEv.evDollars} />
+      </td>
+      <td>
+        <MetricCell metric={row.packScoutEv.evPercent} />
+        <span className={styles.unavailableReason}>
+          Confidence: {row.packScoutEv.confidence.displayValue}
+        </span>
+      </td>
+      <td>
+        <MetricCell metric={row.buyback} />
+      </td>
+      <td>
+        <MetricCell metric={row.topChaseValue} />
+      </td>
+    </tr>
+  );
+}
+
 export function OpportunityTable({
   opportunities,
-  evaluatedEvRepacks,
   repacksHref,
   selectedPublicRepackId,
   onSelectOpportunity,
 }: OpportunityTableProps) {
-  const rows = presentOpportunities(opportunities);
-  const emptyState = presentOpportunityEmptyState(evaluatedEvRepacks);
-
   return (
     <section aria-labelledby="top-opportunities-heading" className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -109,11 +163,12 @@ export function OpportunityTable({
           </h2>
         </div>
         <span className={styles.resultCount}>
-          {rows.length} {rows.length === 1 ? "repack" : "repacks"}
+          {opportunities.length}{" "}
+          {opportunities.length === 1 ? "repack" : "repacks"}
         </span>
       </div>
 
-      {rows.length > 0 ? (
+      {opportunities.length > 0 ? (
         <div
           aria-label="Top opportunities comparison"
           className={styles.scrollRegion}
@@ -121,116 +176,55 @@ export function OpportunityTable({
           tabIndex={0}
         >
           <table className={styles.table}>
-            <thead>
-              <tr>
-                <th scope="col">#</th>
-                <th scope="col">
-                  <ColumnLabel field="repack">Repack</ColumnLabel>
-                </th>
-                <th scope="col">
-                  <ColumnLabel field="vendor">Vendor</ColumnLabel>
-                </th>
-                <th scope="col">
-                  <ColumnLabel field="category">Category</ColumnLabel>
-                </th>
-                <th scope="col">
-                  <ColumnLabel field="repackPrice">Repack price</ColumnLabel>
-                </th>
-                <th scope="col">
-                  <ColumnLabel field="evPercent">EV %</ColumnLabel>
-                </th>
-                <th scope="col">
-                  <ColumnLabel field="buybackPercent">Buyback %</ColumnLabel>
-                </th>
-                <th scope="col">
-                  <ColumnLabel align="end" field="topChaseValue">
-                    Top chase value
-                  </ColumnLabel>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const selected = row.publicRepackId === selectedPublicRepackId;
-                return (
-                  <tr
-                    data-selected={selected ? "true" : "false"}
-                    key={row.publicRepackId}
-                  >
-                    <td className={styles.rank}>{row.rank}</td>
-                    <td className={styles.packCell}>
-                      <button
-                        aria-label={`Inspect ${row.name}${selected ? ", selected" : ""}`}
-                        aria-pressed={selected}
-                        className={styles.selectPack}
-                        onClick={(event) =>
-                          onSelectOpportunity(
-                            row.publicRepackId,
-                            event.currentTarget,
-                          )
-                        }
-                        type="button"
-                      >
-                        <CatalogImage
-                          fallbackAlt={row.name}
-                          image={row.primaryImage}
-                          variant="thumbnail"
-                        />
-                        <span className={styles.packName}>{row.name}</span>
-                        {selected ? (
-                          <span
-                            aria-hidden="true"
-                            className={styles.selectedLabel}
-                          >
-                            Selected
-                          </span>
-                        ) : null}
-                      </button>
-                    </td>
-                    <td>
-                      <span className={styles.vendor}>
-                        {row.vendorLogoUrl ? (
-                          <CatalogImage
-                            decorative
-                            fallback="none"
-                            fallbackAlt={`${row.vendorDisplayName} logo`}
-                            image={{
-                              url: row.vendorLogoUrl,
-                              alt: `${row.vendorDisplayName} logo`,
-                            }}
-                            variant="vendor"
-                          />
-                        ) : null}
-                        <span>{row.vendorDisplayName}</span>
-                      </span>
-                    </td>
-                    <td>{row.category}</td>
-                    <td>
-                      <PriceCell price={row.repackPrice} />
-                    </td>
-                    <td>
-                      <MetricCell metric={row.packScoutEvPercent} />
-                      <span className={styles.unavailableReason}>
-                        Confidence: {row.packScoutConfidence.displayValue}
-                      </span>
-                    </td>
-                    <td>
-                      <MetricCell metric={row.buyback} />
-                    </td>
-                    <td>
-                      <MetricCell metric={row.topChaseValue} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">
+                <ColumnLabel field="repack">Repack</ColumnLabel>
+              </th>
+              <th scope="col">
+                <ColumnLabel field="vendor">Vendor</ColumnLabel>
+              </th>
+              <th scope="col">
+                <ColumnLabel field="category">Category</ColumnLabel>
+              </th>
+              <th scope="col">
+                <ColumnLabel field="repackPrice">Pack price</ColumnLabel>
+              </th>
+              <th scope="col">
+                <ColumnLabel field="evDollars">EV $</ColumnLabel>
+              </th>
+              <th scope="col">
+                <ColumnLabel field="evPercent">EV %</ColumnLabel>
+              </th>
+              <th scope="col">
+                <ColumnLabel field="buybackPercent">Buyback %</ColumnLabel>
+              </th>
+              <th scope="col">
+                <ColumnLabel align="end" field="topChaseValue">
+                  Top chase value
+                </ColumnLabel>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {opportunities.map((repack, index) => (
+              <OpportunityRow
+                key={repack.publicRepackId}
+                onSelectOpportunity={onSelectOpportunity}
+                rank={index + 1}
+                repack={repack}
+                selected={repack.publicRepackId === selectedPublicRepackId}
+              />
+            ))}
+          </tbody>
           </table>
         </div>
       ) : (
         <div className={styles.emptyState}>
-          <p role="status">{emptyState.message}</p>
+          <p role="status">No estimated opportunities match these filters.</p>
           <Link className={styles.emptyAction} href={repacksHref}>
-            {emptyState.actionLabel}
+            View matching repacks
           </Link>
         </div>
       )}

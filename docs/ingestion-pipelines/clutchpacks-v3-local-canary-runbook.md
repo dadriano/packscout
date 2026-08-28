@@ -19,7 +19,7 @@ database, or stop the Collector Crypt, Courtyard, or Phygitals lanes.
 - Before every driver action, the active V1 source database must prove the
   exact platform-request-lanes migration checksum and its intentional
   84-application-table subset. The target independently proves the current
-  88-table composite schema through its full lifecycle startup.
+  91-table composite schema through its full lifecycle startup.
 - The target contains exactly one organization, one active ClutchPacks provider
   root, one DataForrest connection profile, and one ClutchPacks source.
 - The provider root is identity-only: it has no legacy active revision, next

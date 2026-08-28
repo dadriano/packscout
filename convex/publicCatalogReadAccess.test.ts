@@ -3,7 +3,18 @@
 import { publicReadError } from "@packscout/contracts";
 import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
+import {
+  buildV3Detail,
+  buildV3FixturePlan,
+  v3ActivateRequest,
+  v3BatchRequest,
+  v3Body,
+  v3FinalizeRequest,
+  v3StartRequest,
+  V3_COLLECTIBLE_ID,
+  V3_REPACK_ID_A,
+} from "./dataReleaseV3Fixture.test-support";
 import { seedMockCatalogManifestGraph } from "./mockCatalogManifestSeed";
 import {
   MOCK_DATA_RELEASE_CONFIDENCE_POLICY_VERSION,
@@ -48,7 +59,17 @@ type SeededCatalog = Readonly<{
   publicReleaseId: string;
   publicRepackId: string;
   publicCollectibleId: string;
+  v3PublicReleaseId: string;
+  v3PublicRepackId: string;
+  v3PublicCollectibleId: string;
 }>;
+
+/**
+ * The data_release_v3 release the *V3 reads resolve. The frontend now reads
+ * exclusively from those queries, so the gate matrix has to exercise them
+ * against real activated v3 data, not only the v2 manifest graph.
+ */
+const V3_PUBLIC_RELEASE_ID = "20000000-0000-4000-8000-000000000001";
 
 type ExtraCatalogArgs = Readonly<{ catalogReadToken?: unknown }>;
 
@@ -64,6 +85,38 @@ function configureCredential(value: string) {
   vi.stubEnv("PACKSCOUT_CATALOG_READ_TOKEN", value);
 }
 
+/**
+ * Publishes and activates one data_release_v3 release through the real
+ * lifecycle mutations. The canonical watermark is pinned to the stubbed seed
+ * clock because finalize refuses a release whose `dataAsOf` runs ahead of
+ * server time.
+ */
+async function publishActiveDataReleaseV3(t: CatalogAccessTest): Promise<void> {
+  const plan = await buildV3FixturePlan({
+    publicReleaseId: V3_PUBLIC_RELEASE_ID,
+    dataAsOf: SEED_TIME,
+    details: [buildV3Detail({ publicRepackId: V3_REPACK_ID_A })],
+  });
+  await t.mutation(
+    internal.dataReleaseV3Lifecycle.start,
+    await v3Body(v3StartRequest(plan)),
+  );
+  for (const batch of plan.batches) {
+    await t.mutation(
+      internal.dataReleaseV3Lifecycle.applyBatch,
+      await v3Body(v3BatchRequest(plan, batch)),
+    );
+  }
+  await t.mutation(
+    internal.dataReleaseV3Lifecycle.finalize,
+    await v3Body(v3FinalizeRequest(plan)),
+  );
+  await t.mutation(
+    internal.dataReleaseV3Lifecycle.activate,
+    await v3Body(v3ActivateRequest(plan, null)),
+  );
+}
+
 async function seedActiveCatalog(t: CatalogAccessTest): Promise<SeededCatalog> {
   const plans = await buildMockProviderCatalogReleasePlans();
   const seeded = await t.run((ctx) =>
@@ -73,11 +126,15 @@ async function seedActiveCatalog(t: CatalogAccessTest): Promise<SeededCatalog> {
       serverTime: SEED_TIME,
     })
   );
+  await publishActiveDataReleaseV3(t);
   const fixture = buildMockDataReleaseV2();
   return {
     publicReleaseId: seeded.publicReleaseId,
     publicRepackId: fixture.repacks[0]!.publicRepackId,
     publicCollectibleId: fixture.collectibles[0]!.publicCollectibleId,
+    v3PublicReleaseId: V3_PUBLIC_RELEASE_ID,
+    v3PublicRepackId: V3_REPACK_ID_A,
+    v3PublicCollectibleId: V3_COLLECTIBLE_ID,
   };
 }
 
@@ -149,7 +206,12 @@ const OPEN_PUBLIC_QUERIES: Readonly<Record<string, string>> = Object.freeze({
     "references",
 });
 
-/** Every catalog-serving public query, all of which must run the gate. */
+/**
+ * Every catalog-serving public query, all of which must run the gate. The
+ * data_release_v3 reads are gated on exactly the same terms as their v1/v2
+ * twins: the product renders from the *V3 queries, so a v3 read that skipped
+ * the check would reopen the whole catalog no matter how well v2 is gated.
+ */
 const GATED_CATALOG_QUERIES = [
   "publicRepacks.getPublicShellStatus",
   "publicRepacks.getDashboardBundle",
@@ -157,6 +219,12 @@ const GATED_CATALOG_QUERIES = [
   "publicRepacks.getPublicRepack",
   "publicRepacks.searchPublicCollectibles",
   "publicRepacks.findRepacksByDesiredCollectible",
+  "publicRepacksV3.getPublicShellStatusV3",
+  "publicRepacksV3.getDashboardBundleV3",
+  "publicRepacksV3.listPublicRepacksV3",
+  "publicRepacksV3.getPublicRepackV3",
+  "publicRepacksV3.searchPublicCollectiblesV3",
+  "publicRepacksV3.findRepacksByDesiredCollectibleV3",
 ] as const;
 
 type GatedCatalogQuery = (typeof GATED_CATALOG_QUERIES)[number];
@@ -227,6 +295,36 @@ const CATALOG_QUERY_INVOCATIONS: Readonly<
   "publicRepacks.findRepacksByDesiredCollectible": (reader, seeded, extra) =>
     reader.query(api.publicRepacks.findRepacksByDesiredCollectible, {
       publicCollectibleId: seeded.publicCollectibleId,
+      currentTime: Date.now(),
+      ...extra,
+    }),
+  "publicRepacksV3.getPublicShellStatusV3": (reader, _seeded, extra) =>
+    reader.query(api.publicRepacksV3.getPublicShellStatusV3, { ...extra }),
+  "publicRepacksV3.getDashboardBundleV3": (reader, _seeded, extra) =>
+    reader.query(api.publicRepacksV3.getDashboardBundleV3, {
+      currentTime: Date.now(),
+      ...extra,
+    }),
+  "publicRepacksV3.listPublicRepacksV3": (reader, _seeded, extra) =>
+    reader.query(api.publicRepacksV3.listPublicRepacksV3, {
+      currentTime: Date.now(),
+      ...extra,
+    }),
+  "publicRepacksV3.getPublicRepackV3": (reader, seeded, extra) =>
+    reader.query(api.publicRepacksV3.getPublicRepackV3, {
+      publicRepackId: seeded.v3PublicRepackId,
+      publicReleaseId: seeded.v3PublicReleaseId,
+      currentTime: Date.now(),
+      ...extra,
+    }),
+  "publicRepacksV3.searchPublicCollectiblesV3": (reader, _seeded, extra) =>
+    reader.query(api.publicRepacksV3.searchPublicCollectiblesV3, {
+      search: "charizard",
+      ...extra,
+    }),
+  "publicRepacksV3.findRepacksByDesiredCollectibleV3": (reader, seeded, extra) =>
+    reader.query(api.publicRepacksV3.findRepacksByDesiredCollectibleV3, {
+      publicCollectibleId: seeded.v3PublicCollectibleId,
       currentTime: Date.now(),
       ...extra,
     }),
@@ -335,10 +433,19 @@ describe("catalog read refusal semantics", () => {
       error: "Repack data is temporarily unavailable.",
       retryable: true,
     });
+    // The v3 read refuses with the byte-identical result, so which read model
+    // serves the product is not observable from a refusal.
+    await expect(
+      t.query(api.publicRepacksV3.getDashboardBundleV3, {
+        currentTime: Date.now(),
+      }),
+    ).resolves.toEqual(refusal);
+
     // Nothing about the seeded release, the credential, or admission leaks.
     const serialized = JSON.stringify(refusal);
     expect(serialized).not.toContain(seeded.publicReleaseId);
     expect(serialized).not.toContain(seeded.publicRepackId);
+    expect(serialized).not.toContain(seeded.v3PublicReleaseId);
     expect(serialized).not.toContain("catalogReadToken");
     expect(serialized).not.toContain("admitted");
   });

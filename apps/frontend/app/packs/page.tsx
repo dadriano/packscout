@@ -19,7 +19,8 @@ import {
 } from "@/lib/catalog-query-state.client";
 import { toUrlSearchParams } from "@/lib/catalog-route-state.server";
 import { readPublicRepacks } from "@/lib/public-repacks.server";
-import { dataReleaseStatusFromMetadata } from "@/lib/public-release-status";
+import { allRepacksCatalogIsEmpty } from "@/lib/public-repacks-v3";
+import { dataReleaseStatusFromRelease } from "@/lib/public-release-status";
 import { AllRepacksClient } from "./AllRepacksClient.client";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -80,7 +81,7 @@ export default async function AllRepacksPage({
     );
   }
 
-  const status = dataReleaseStatusFromMetadata(result.data.metadata);
+  const status = dataReleaseStatusFromRelease(result.data.release);
 
   return (
     <>
@@ -94,12 +95,12 @@ export default async function AllRepacksPage({
           layout,
         }}
       />
-      {result.data.metadata.repackCount === 0 ? (
+      {allRepacksCatalogIsEmpty(result.data) ? (
         <EmptyCatalog />
       ) : (
         <AllRepacksClient
           details={result.data.details}
-          key={`${result.data.metadata.publicReleaseId}:${result.data.range.start}:${result.data.queryFingerprint}`}
+          key={`${result.data.release.publicReleaseId}:${result.data.range.start}:${result.data.queryFingerprint}`}
           initialLayout={layout}
           page={result.data}
           query={parsed.query}
