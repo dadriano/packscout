@@ -31,7 +31,7 @@ import type {
 import { PersistenceError } from "./persistence-error.ts";
 import { hashJson } from "./security.ts";
 import {
-  advanceSettledPublicWatermarkWriteOnly,
+  advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
   canonicalCatalogPlatformKeys,
   createPublicDerivationObligations,
@@ -195,7 +195,7 @@ export class IngestionPersistenceRepository {
         changedEvInputs: [...changedEvInputs.values()],
         createdAt: input.committedAt,
       });
-      await advanceSettledPublicWatermarkWriteOnly(transaction, {
+      await advanceSettledPublicWatermark(transaction, {
         organizationId: input.organizationId,
         settledAt: input.committedAt,
       });
@@ -316,7 +316,7 @@ export class IngestionPersistenceRepository {
         changedEvInputs: [...changedEvInputs.values()],
         createdAt: input.acceptedAt,
       });
-      await advanceSettledPublicWatermarkWriteOnly(transaction, {
+      await advanceSettledPublicWatermark(transaction, {
         organizationId: input.organizationId,
         settledAt: input.acceptedAt,
       });
@@ -439,7 +439,7 @@ export class IngestionPersistenceRepository {
           );
         }
       } else {
-        await advanceSettledPublicWatermarkWriteOnly(transaction, {
+        await advanceSettledPublicWatermark(transaction, {
           organizationId: input.organizationId,
           settledAt: input.acceptedAt,
         });
@@ -585,7 +585,7 @@ export class IngestionPersistenceRepository {
         changedEvInputs: [...changedEvInputs.values()],
         createdAt: input.acceptedAt,
       });
-      await advanceSettledPublicWatermarkWriteOnly(transaction, {
+      await advanceSettledPublicWatermark(transaction, {
         organizationId: input.organizationId,
         settledAt: input.acceptedAt,
       });
@@ -749,7 +749,7 @@ export class IngestionPersistenceRepository {
             and relationship.target_entity_id is null
         `);
       }
-      await advanceSettledPublicWatermarkWriteOnly(transaction, {
+      await advanceSettledPublicWatermark(transaction, {
         organizationId: input.organizationId,
         settledAt: input.resolvedAt,
       });

@@ -299,7 +299,7 @@ export async function createPublicDerivationObligations(
   `);
 }
 
-export async function advanceSettledPublicWatermarkWriteOnly(
+export async function advanceSettledPublicWatermark(
   database: PackscoutTransactionClient,
   input: { organizationId: string; settledAt: Date },
 ): Promise<void> {
@@ -345,14 +345,6 @@ export async function advanceSettledPublicWatermarkWriteOnly(
     where watermark.organization_id = candidate.organization_id
   `);
   await advanceCatalogImpactCheckpoints(database, input);
-}
-
-export async function advanceSettledPublicWatermark(
-  database: PackscoutTransactionClient,
-  input: { organizationId: string; settledAt: Date },
-): Promise<SettledPublicWatermark> {
-  await advanceSettledPublicWatermarkWriteOnly(database, input);
-  return loadSettledPublicWatermark(database, input.organizationId);
 }
 
 async function loadSettledPublicWatermark(

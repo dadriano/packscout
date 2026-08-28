@@ -50,7 +50,7 @@ import {
   providerSourceUnresolvedRelationshipKey,
   type ProviderSourceCanonicalHistoryRow,
 } from "./provider-source-canonical-page-queries.ts";
-import { advanceSettledPublicWatermarkWriteOnly } from "./public-change-settlement-repository.ts";
+import { advanceSettledPublicWatermark } from "./public-change-settlement-repository.ts";
 
 const MILLISECONDS_PER_DAY = 86_400_000;
 
@@ -740,7 +740,7 @@ export class ProviderSourcePageRepository {
           committedAt,
         },
       );
-      await advanceSettledPublicWatermarkWriteOnly(transaction, {
+      await advanceSettledPublicWatermark(transaction, {
         organizationId: input.pins.organizationId,
         settledAt: committedAt,
       });

@@ -12,7 +12,7 @@ import type {
 } from "./database.ts";
 import { PACKSCOUT_TRANSACTION_OPTIONS } from "./database.ts";
 import {
-  advanceSettledPublicWatermarkWriteOnly,
+  advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
 } from "./public-change-settlement-repository.ts";
 
@@ -224,7 +224,7 @@ export class PrismaCatalogReleaseSourceRepository
         approvedAt,
         mappings: configuration.repacks,
       });
-      await advanceSettledPublicWatermarkWriteOnly(transaction, {
+      await advanceSettledPublicWatermark(transaction, {
         organizationId: this.organizationId,
         settledAt: approvedAt,
       });

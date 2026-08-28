@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
   advanceSettledPublicWatermark,
-  advanceSettledPublicWatermarkWriteOnly,
   allocatePublicChangeCauses,
   createPublicDerivationObligations,
   PrismaPublicChangeSettlementRepository,
@@ -91,7 +90,7 @@ test("causes roll back with their authoritative write and settlement never skips
 
     const reader = new PrismaPublicChangeSettlementRepository(harness.client);
     const writeOnlyResult = await harness.client.$transaction((transaction) =>
-      advanceSettledPublicWatermarkWriteOnly(transaction, {
+      advanceSettledPublicWatermark(transaction, {
         organizationId: firstOrganizationId,
         settledAt: new Date("2026-08-15T01:01:01.000Z"),
       }));
@@ -115,21 +114,19 @@ test("causes roll back with their authoritative write and settlement never skips
         updated_at: completedAt,
       },
     });
-    const settled = await harness.client.$transaction((transaction) =>
+    await harness.client.$transaction((transaction) =>
       advanceSettledPublicWatermark(transaction, {
         organizationId: firstOrganizationId,
         settledAt: completedAt,
       }));
+    const settled = await reader.getSettledWatermark(firstOrganizationId);
     assert.equal(settled.settledSequence, 3n);
-    assert.deepEqual(
-      await reader.getSettledWatermark(firstOrganizationId),
-      settled,
-    );
-    const stale = await harness.client.$transaction((transaction) =>
+    await harness.client.$transaction((transaction) =>
       advanceSettledPublicWatermark(transaction, {
         organizationId: firstOrganizationId,
         settledAt: new Date("2026-08-15T01:00:00.000Z"),
       }));
+    const stale = await reader.getSettledWatermark(firstOrganizationId);
     assert.equal(stale.settledSequence, 3n);
     assert.equal(stale.settledAt?.toISOString(), completedAt.toISOString());
 
