@@ -123,6 +123,7 @@ export * from "./provider-stream-normalization.ts";
 export * from "./providers/buyback-ev-evidence.ts";
 export * from "./providers/beezie/buyback-ev-evidence.ts";
 export * from "./providers/clutchpacks/buyback-ev-evidence.ts";
+export * from "./providers/clutchpacks/canonical-v3-buyback-ev-evidence.ts";
 export * from "./providers/collector-crypt/buyback-ev-evidence.ts";
 export * from "./providers/courtyard/buyback-ev-evidence.ts";
 export * from "./providers/gamestop/buyback-ev-evidence.ts";

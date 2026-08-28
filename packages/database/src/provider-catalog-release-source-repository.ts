@@ -24,6 +24,8 @@ import {
   loadProviderCausalReadinessInTransaction,
   ProviderCausalReadinessPersistenceError,
 } from "./public-change-settlement-repository.provider-read.ts";
+import { loadProviderV1AssetPackAssociations } from
+  "./provider-v1-asset-pack-association-reader.ts";
 import { assertCanonicalActorDataSafe } from "./security.ts";
 import {
   loadProviderV1RelationshipConfirmationReadiness,
@@ -292,6 +294,7 @@ export class PrismaProviderCatalogReleaseSourceRepository
       const assetPackAssociations = await this.loadAssetPackAssociations(
         transaction,
         checkpoint.settledSequence,
+        checkpoint.settledAt,
         readiness.sourceRevisionId,
       );
       const repackIdentities = await this.loadRepackIdentities(
@@ -563,173 +566,22 @@ export class PrismaProviderCatalogReleaseSourceRepository
   private async loadAssetPackAssociations(
     database: PackscoutTransactionClient,
     throughSequence: bigint,
+    throughOccurredAt: Date,
     sourceRevisionId: string,
   ): Promise<ProviderCatalogAssetPackAssociationSnapshot[]> {
-    const rows = await database.$queryRaw<
-      ProviderCatalogAssetPackAssociationSnapshot[]
-    >(Prisma.sql`
-      with ${providerV1ConfirmedRelationshipCtes({
-        organizationId: this.#organizationId,
-        sourceRevisionId,
-        throughSequence,
-        materialization: "not_materialized",
-      })},
-      latest_v1_pull_sets as (
-        select distinct on (source_entity_id)
-               confirmation_set_id,
-               source_entity_id
-        from confirmed_provider_v1_pull_relationship_sets
-        order by source_entity_id,
-                 semantic_effective_at desc,
-                 confirmation_public_change_sequence desc,
-                 confirmation_set_id desc
-      ),
-      latest_v1_pull_relationships as (
-        select relationship.*
-        from confirmed_provider_v1_pull_relationships as relationship
-        join latest_v1_pull_sets as latest
-          on latest.confirmation_set_id = relationship.confirmation_set_id
-         and latest.source_entity_id = relationship.source_entity_id
-      ),
-      -- Keep card/pack pairing to one grouped scan. This avoids the previous
-      -- self-join whose cardinality cliff made assembly quadratic at scale.
-      latest_v1_pull_pairs as (
-        select relationship.confirmation_set_id,
-               relationship.organization_id,
-               relationship.source_entity_id,
-               (array_agg(relationship.target_entity_id)
-                 filter (where relationship.relationship_kind = 'card'))[1]
-                 as card_target_entity_id,
-               max(relationship.target_external_id)
-                 filter (where relationship.relationship_kind = 'card')
-                 as card_target_external_id,
-               max(relationship.resolved_public_change_sequence)
-                 filter (where relationship.relationship_kind = 'card')
-                 as card_resolved_public_change_sequence,
-               max(relationship.effective_public_change_sequence)
-                 filter (where relationship.relationship_kind = 'card')
-                 as card_effective_public_change_sequence,
-               max(relationship.effective_at)
-                 filter (where relationship.relationship_kind = 'card')
-                 as card_effective_at,
-               (array_agg(relationship.target_entity_id)
-                 filter (where relationship.relationship_kind = 'pack'))[1]
-                 as pack_target_entity_id,
-               max(relationship.target_external_id)
-                 filter (where relationship.relationship_kind = 'pack')
-                 as pack_target_external_id,
-               max(relationship.resolved_public_change_sequence)
-                 filter (where relationship.relationship_kind = 'pack')
-                 as pack_resolved_public_change_sequence,
-               max(relationship.effective_public_change_sequence)
-                 filter (where relationship.relationship_kind = 'pack')
-                 as pack_effective_public_change_sequence,
-               max(relationship.effective_at)
-                 filter (where relationship.relationship_kind = 'pack')
-                 as pack_effective_at
-        from latest_v1_pull_relationships as relationship
-        where relationship.target_platform_key = ${this.#platformKey}
-          and relationship.target_entity_id is not null
-          and relationship.effective_public_change_sequence is not null
-          and (
-            relationship.relationship_kind = 'card'
-              and relationship.target_record_kind = 'catalog_asset'
-            or relationship.relationship_kind = 'pack'
-              and relationship.target_record_kind = 'pack'
-          )
-        group by relationship.confirmation_set_id,
-                 relationship.organization_id,
-                 relationship.source_entity_id
-        having count(*) filter (
-                 where relationship.relationship_kind = 'card'
-               ) = 1
-           and count(*) filter (
-                 where relationship.relationship_kind = 'pack'
-               ) = 1
-      ),
-      complete_v1_pairs as (
-        select source.id::text as "sourceEntityId",
-               source.platform_key as "platformKey",
-               card_target.external_id as "assetExternalId",
-               pack_target.external_id as "packExternalId",
-               greatest(pair.card_effective_at, pair.pack_effective_at)
-                 as "associatedAt",
-               greatest(
-                 pair.card_effective_public_change_sequence,
-                 pair.pack_effective_public_change_sequence
-               ) as "publicChangeSequence"
-        from public.canonical_entities as source
-        join latest_v1_pull_pairs as pair
-          on pair.organization_id = source.organization_id
-         and pair.source_entity_id = source.id
-        join public.canonical_entities as card_target
-          on card_target.organization_id = pair.organization_id
-         and card_target.id = pair.card_target_entity_id
-         and card_target.platform_key = source.platform_key
-         and card_target.record_kind = 'catalog_asset'
-         and card_target.external_id = pair.card_target_external_id
-        join public.canonical_entities as pack_target
-          on pack_target.organization_id = pair.organization_id
-         and pack_target.id = pair.pack_target_entity_id
-         and pack_target.platform_key = source.platform_key
-         and pack_target.record_kind = 'pack'
-         and pack_target.external_id = pair.pack_target_external_id
-        where source.organization_id = ${uuid(this.#organizationId)}
-          and source.platform_key = ${this.#platformKey}
-          and source.record_kind = 'pull'
-          and exists (
-            select 1
-            from public.canonical_revisions as revision
-            join public.public_change_catalog_impacts as impact
-              on impact.organization_id = revision.organization_id
-             and impact.cause_sequence = revision.public_change_sequence
-            where revision.organization_id = card_target.organization_id
-              and revision.entity_id = card_target.id
-              and revision.public_change_sequence <=
-                pair.card_resolved_public_change_sequence
-              and ${this.#platformKey} = any(impact.provider_platform_keys)
-          )
-          and exists (
-            select 1
-            from public.canonical_revisions as revision
-            join public.public_change_catalog_impacts as impact
-              on impact.organization_id = revision.organization_id
-             and impact.cause_sequence = revision.public_change_sequence
-            where revision.organization_id = pack_target.organization_id
-              and revision.entity_id = pack_target.id
-              and revision.public_change_sequence <=
-                pair.pack_resolved_public_change_sequence
-              and ${this.#platformKey} = any(impact.provider_platform_keys)
-          )
-          and exists (
-            select 1
-            from public.public_change_catalog_impacts as impact
-            where impact.organization_id = pair.organization_id
-              and impact.cause_sequence =
-                pair.card_effective_public_change_sequence
-              and ${this.#platformKey} = any(impact.provider_platform_keys)
-          )
-          and exists (
-            select 1
-            from public.public_change_catalog_impacts as impact
-            where impact.organization_id = pair.organization_id
-              and impact.cause_sequence =
-                pair.pack_effective_public_change_sequence
-              and ${this.#platformKey} = any(impact.provider_platform_keys)
-          )
-      )
-      select distinct on (
-               "assetExternalId" collate "C", "packExternalId" collate "C"
-             ) *
-      from complete_v1_pairs
-      order by "assetExternalId" collate "C", "packExternalId" collate "C",
-               "publicChangeSequence", "sourceEntityId" collate "C"
-    `);
+    const rows = await loadProviderV1AssetPackAssociations(database, {
+      organizationId: this.#organizationId,
+      platformKey: this.#platformKey,
+      sourceRevisionId,
+      throughSequence,
+      throughOccurredAt,
+    });
     const sourceIds = new Set<string>();
     return rows.map((row) => {
       if (sourceIds.has(row.sourceEntityId) ||
           row.platformKey !== this.#platformKey ||
           row.publicChangeSequence > throughSequence ||
+          row.associatedAt.getTime() > throughOccurredAt.getTime() ||
           !Number.isFinite(row.associatedAt.getTime())) {
         refuse("PROVIDER_RELEASE_SOURCE_INVALID");
       }

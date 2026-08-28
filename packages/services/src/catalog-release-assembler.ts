@@ -90,7 +90,12 @@ export class CatalogReleaseAssembler {
     for (const platform of configuration.platforms) {
       const provider = providerByPlatform.get(platform.platformKey);
       if (provider?.state === "disabled" || provider?.state === "archived") continue;
-      if (provider?.state !== "active" || provider.configurationRevisionId === null) {
+      if (
+        provider?.state !== "active" ||
+        provider.providerId === null ||
+        provider.sourceInstanceId === null ||
+        provider.sourceRevisionId === null
+      ) {
         return blocked(input, "INITIAL_BACKFILL_INCOMPLETE");
       }
       if (provider.completedBackfillAt === null) {

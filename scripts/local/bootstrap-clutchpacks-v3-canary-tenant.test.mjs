@@ -257,6 +257,11 @@ test("the target requires all composite migrations and 91 application tables", (
       checksum:
         "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
     },
+    {
+      migrationName: "20260827020000_buyback_ev_provider_source_origin",
+      checksum:
+        "10ae3670f6fbafb0ed529154ac7aad227b60bab735630e1079e805ddf8e7b24e",
+    },
   ].map((migration) => Object.freeze({
     ...migration,
     finishedAt: new Date("2026-08-27T08:00:00.000Z"),

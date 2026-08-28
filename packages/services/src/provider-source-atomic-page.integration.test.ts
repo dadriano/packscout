@@ -862,8 +862,23 @@ async function measureCapacityRelations(
            coalesce(sum(pg_column_size(candidate)), 0)::bigint
     from public.source_relationship_confirmations candidate
     where organization_id = ${organizationId}::uuid
+    -- pg_current_xact_id() is retained as text on every cause. Normalize its
+    -- width for logical schema/content comparison so crossing a decimal XID
+    -- boundary cannot look like row-shape growth; physical measurements below
+    -- continue to include the exact stored value.
     union all select 'public_change_causes', count(*)::bigint,
-           coalesce(sum(pg_column_size(candidate)), 0)::bigint
+           coalesce(sum(pg_column_size(row(
+             candidate.organization_id,
+             candidate.sequence,
+             candidate.change_kind,
+             candidate.entity_key,
+             candidate.source_key,
+             candidate.source_revision_key,
+             candidate.metadata_json,
+             candidate.occurred_at,
+             '0000000'::text,
+             candidate.created_at
+           )::public.public_change_causes)), 0)::bigint
     from public.public_change_causes candidate where organization_id = ${organizationId}::uuid
     union all select 'public_derivation_obligations', count(*)::bigint,
            coalesce(sum(pg_column_size(candidate)), 0)::bigint
@@ -2162,6 +2177,22 @@ test("representative mixed commit measures normalized, canonical, evidence, oper
     const relations = capacityRelationDelta(before, after);
     const pages = capacityWindowCount * capacityPagesPerWindow;
     const inputRecords = pages * 4;
+    const relationshipCountMetadata = await runtime.database.$queryRaw<Array<{
+      rows: bigint;
+      invalidRows: bigint;
+    }>>`
+      select count(*)::bigint as rows,
+             count(*) filter (
+               where metadata_json->>'relationshipCount' is distinct from '2'
+             )::bigint as "invalidRows"
+      from public.public_change_causes
+      where organization_id = ${runtime.organizationId}::uuid
+        and metadata_json ? 'relationshipCount'
+    `;
+    assert.deepEqual(relationshipCountMetadata, [{
+      rows: BigInt(pages * 2),
+      invalidRows: 0n,
+    }]);
     const conservativeWindowValue = (
       key:
         | "structuredPhysicalBytesPerRecord"

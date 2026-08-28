@@ -7,6 +7,7 @@ import {
   publicRepackDetailV3Schema,
   repackEvSortRowV3FromDetail,
   type ApprovedPublicCatalogConfigurationV1,
+  type PublicCollectible,
   type PublicPackAvailability,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
@@ -17,6 +18,7 @@ import {
   allocatePublicChangeCauses,
   prismaApprovedPublicRepackIdentityMaterializer,
   PrismaCatalogReleaseSourceRepository,
+  ProviderSourceLifecycleRepository,
 } from "@packscout/database";
 import {
   createMigratedTestDatabase,
@@ -37,6 +39,7 @@ const publicVendorId = "83111111-1111-5111-8111-111111111111";
 const publicCategoryId = "83222222-2222-5222-8222-222222222222";
 const publicChaseCategoryId = "83233333-3333-5333-8333-333333333333";
 const publicCollectibleId = "83333333-3333-5333-8333-333333333333";
+const publicStandaloneCollectibleId = "83333333-3333-5333-8333-444444444444";
 const publicRepackIdActive = "83444444-4444-5444-8444-444444444444";
 const publicRepackIdSoldOut = "83555555-5555-5555-8555-555555555555";
 const publicRepackIdUnavailable = "83666666-6666-5666-8666-666666666666";
@@ -166,30 +169,52 @@ function configuration(): ApprovedPublicCatalogConfigurationV1 {
         listingUrl: "https://vendor.example/listings/pack",
       },
     ],
-    collectibles: [{
-      platformKey: "vendor",
-      externalId: "asset-1",
-      publicCollectibleId,
-      aliases: [],
-      collectibleType: "card",
-      publicCategoryIds: [publicChaseCategoryId],
-      year: null,
-      brand: null,
-      setOrSeries: null,
-      cardNumber: null,
-      referenceNumber: null,
-      subject: null,
-      grade: null,
-      grader: null,
-      probabilityBucketId: "grail",
-      matchConfidenceBasisPoints: 9_500,
-      chaseEvidenceKinds: ["vendor_inventory"],
-    }],
+    collectibles: [
+      {
+        platformKey: "vendor",
+        externalId: "asset-1",
+        publicCollectibleId,
+        aliases: [],
+        collectibleType: "card",
+        publicCategoryIds: [publicChaseCategoryId],
+        year: null,
+        brand: null,
+        setOrSeries: null,
+        cardNumber: null,
+        referenceNumber: null,
+        subject: null,
+        grade: null,
+        grader: null,
+        probabilityBucketId: "grail",
+        matchConfidenceBasisPoints: 9_500,
+        chaseEvidenceKinds: ["vendor_inventory"],
+      },
+      {
+        platformKey: "vendor",
+        externalId: "asset-standalone",
+        publicCollectibleId: publicStandaloneCollectibleId,
+        aliases: ["Pikachu Promo"],
+        collectibleType: "card",
+        publicCategoryIds: [publicChaseCategoryId],
+        year: 1998,
+        brand: "Pokemon",
+        setOrSeries: "Promo",
+        cardNumber: null,
+        referenceNumber: null,
+        subject: "Pikachu",
+        grade: null,
+        grader: null,
+        probabilityBucketId: null,
+        matchConfidenceBasisPoints: 9_000,
+        chaseEvidenceKinds: ["vendor_inventory"],
+      },
+    ],
   };
 }
 
 function packContent(input: {
   name: string;
+  evInputStatus: "ready" | "unavailable";
   /**
    * Widened past the public union on purpose: canonical rows persisted before
    * the rename still carry `active`/`disabled`, and a row outside both
@@ -204,6 +229,7 @@ function packContent(input: {
   return {
     schemaVersion: "catalog-projection-v1",
     entityType: "pack",
+    evInputStatus: input.evInputStatus,
     parentExternalId: null,
     name: input.name,
     category: null,
@@ -222,16 +248,21 @@ function packContent(input: {
   };
 }
 
-function assetContent() {
+function assetContent(input: {
+  readonly availability?: PublicPackAvailability;
+  readonly name?: string | null;
+} = {}) {
   return {
     schemaVersion: "catalog-projection-v1",
     entityType: "catalog_asset",
     assetType: "card",
-    relatedPackExternalId: "pack-active",
+    // V1 normalization keeps relationships on the source pull; catalog assets
+    // never carry a copied pack foreign key.
+    relatedPackExternalId: null,
     parentExternalId: null,
-    name: "Charizard ex #199",
+    name: input.name === undefined ? "Charizard ex #199" : input.name,
     category: null,
-    availability: "available",
+    availability: input.availability ?? "available",
     sourceStatus: null,
     providerValueMinor: 85_000,
     providerValueCurrency: "USD",
@@ -278,6 +309,8 @@ function evInputContent() {
 
 interface SeededCanonicalIngestion {
   readonly providerId: string;
+  readonly sourceInstanceId: string;
+  readonly sourceRevisionId: string;
   readonly runId: string;
   readonly pageId: string;
 }
@@ -285,11 +318,18 @@ interface SeededCanonicalIngestion {
 async function seedProviderIngestion(
   harness: MigratedTestDatabase,
   targetOrganizationId: string,
-  activeRevisionId: string,
 ): Promise<SeededCanonicalIngestion> {
   const providerId = randomUUID();
   const runId = randomUUID();
   const pageId = randomUUID();
+  const sourceTypeKey = "dataforrest-events-v1";
+  const sourceAdapterVersion = "dataforrest-events-adapter-v1";
+  const normalizedContractVersion = "packscout.provider-observation.v1";
+  const mapperKey = "dataforrest-catalog-v1";
+  const mapperVersion = "1";
+  const identityNamespaceKey = "dataforrest-vendor-v1";
+  const cursorCodecVersion = "dataforrest-cursor-v1";
+  const createdAt = new Date("2026-08-18T01:00:00.000Z");
   await harness.client.provider_sources.create({
     data: {
       id: providerId,
@@ -298,33 +338,94 @@ async function seedProviderIngestion(
       display_name: "Vendor",
     },
   });
-  await harness.client.provider_config_revisions.create({
-    data: {
-      id: activeRevisionId,
-      organization_id: targetOrganizationId,
-      provider_id: providerId,
-      version: 1,
-      adapter_key: "http-cursor-v1",
-      endpoint_url: "https://vendor.example/protected-feed",
-      auth_mode: "none",
-      created_by_actor_key: "operator:protected-actor",
-    },
+  const lifecycle = new ProviderSourceLifecycleRepository(harness.client);
+  const connection = await lifecycle.createConnectionProfileRevision({
+    organizationId: targetOrganizationId,
+    sourceTypeKey,
+    connectionTypeKey: "dataforrest-events-connection-v1",
+    displayName: "DataForrest Vendor",
+    requestLimit: 1,
+    sourceAdapterVersion,
+    revisionNumber: 1,
+    configurationCiphertext: new Uint8Array(32).fill(1),
+    configurationNonce: new Uint8Array(12).fill(2),
+    configurationAuthTag: new Uint8Array(16).fill(3),
+    encryptionKeyVersion: 1,
+    configurationFingerprint: "a".repeat(64),
+    actorKey: "operator:protected-actor",
+    createdAt,
   });
-  await harness.client.provider_sources.update({
-    where: { id: providerId },
-    data: { state: "active", active_revision_id: activeRevisionId },
+  const source = await lifecycle.createSourceInstanceRevision({
+    organizationId: targetOrganizationId,
+    providerId,
+    connectionProfileId: connection.profileId,
+    sourceTypeKey,
+    sourceAdapterVersion,
+    normalizedContractVersion,
+    mapperKey,
+    mapperVersion,
+    identityNamespaceKey,
+    cursorCodecVersion,
+    revisionNumber: 1,
+    intervalSeconds: 300,
+    configuration: { provider: "vendor" },
+    configurationHash: "b".repeat(64),
+    recordIdScopes: ["catalog-pack-v1", "catalog-card-v1"],
+    actorKey: "operator:protected-actor",
+    createdAt,
+  });
+  await harness.client.$transaction(async (transaction) => {
+    await transaction.provider_sources.update({
+      where: { id: providerId },
+      data: { state: "active", updated_at: createdAt },
+    });
+    await transaction.source_connection_revisions.update({
+      where: { id: connection.revisionId },
+      data: { state: "active", activated_at: createdAt },
+    });
+    await transaction.source_connection_profiles.update({
+      where: { id: connection.profileId },
+      data: {
+        state: "active",
+        active_revision_id: connection.revisionId,
+        updated_at: createdAt,
+      },
+    });
+    await transaction.provider_source_instances.update({
+      where: { id: source.sourceInstanceId },
+      data: {
+        state: "active",
+        activated_at: createdAt,
+        updated_at: createdAt,
+      },
+    });
   });
   await harness.client.import_runs.create({
     data: {
       id: runId,
       organization_id: targetOrganizationId,
       provider_id: providerId,
-      config_revision_id: activeRevisionId,
+      config_revision_id: null,
       trigger: "scheduled",
       state: "succeeded",
       started_at: new Date("2026-08-18T01:05:00.000Z"),
       finished_at: new Date(BACKFILL_FINISHED_AT),
       reached_provider_head: true,
+      source_instance_id: source.sourceInstanceId,
+      source_revision_id: source.sourceRevisionId,
+      source_type_key: sourceTypeKey,
+      source_adapter_version: sourceAdapterVersion,
+      normalized_contract_version: normalizedContractVersion,
+      mapper_key: mapperKey,
+      mapper_version: mapperVersion,
+      identity_namespace_key: identityNamespaceKey,
+      connection_profile_id: connection.profileId,
+      connection_revision_id: connection.revisionId,
+      cursor_codec_version: cursorCodecVersion,
+      cursor_generation: 1n,
+      requested_cursor_key: "initial",
+      current_cursor_key: "initial",
+      next_page_number: 1,
     },
   });
   await harness.client.import_pages.create({
@@ -340,7 +441,13 @@ async function seedProviderIngestion(
       expires_at: new Date("2026-11-18T01:00:00.000Z"),
     },
   });
-  return { providerId, runId, pageId };
+  return {
+    providerId,
+    sourceInstanceId: source.sourceInstanceId,
+    sourceRevisionId: source.sourceRevisionId,
+    runId,
+    pageId,
+  };
 }
 
 interface CanonicalRevisionSeed {
@@ -459,12 +566,7 @@ async function seedGovernedCatalog(
   await harness.client.organizations.create({
     data: { id: organizationId, slug: "v3-canonical", name: "V3 Canonical" },
   });
-  const activeRevisionId = randomUUID();
-  const ingestion = await seedProviderIngestion(
-    harness,
-    organizationId,
-    activeRevisionId,
-  );
+  const ingestion = await seedProviderIngestion(harness, organizationId);
   await new PrismaCatalogReleaseSourceRepository(
     harness.client,
     organizationId,
@@ -479,12 +581,13 @@ async function seedGovernedCatalog(
         changeKind: "provider_lifecycle",
         entityKey: `provider:v1:${ingestion.providerId}`,
         sourceKey: "vendor",
-        sourceRevisionKey: activeRevisionId,
+        sourceRevisionKey: ingestion.sourceRevisionId,
         metadata: {
           providerId: ingestion.providerId,
           platformKey: "vendor",
           state: "active",
-          configurationRevisionId: activeRevisionId,
+          sourceInstanceId: ingestion.sourceInstanceId,
+          sourceRevisionId: ingestion.sourceRevisionId,
         },
         occurredAt: new Date(LIFECYCLE_AT),
         catalogImpact: {
@@ -506,6 +609,7 @@ async function seedGovernedCatalog(
       revisionNumber: 1,
       content: packContent({
         name: "Pokemon Grail Gacha",
+        evInputStatus: "ready",
         availability: "available",
         priceValueMinor: 10_000,
         buybackPercent: 85,
@@ -520,6 +624,7 @@ async function seedGovernedCatalog(
       revisionNumber: 1,
       content: packContent({
         name: "Pokemon Vault Repack",
+        evInputStatus: "unavailable",
         availability: "available",
         priceValueMinor: 20_000,
         buybackPercent: null,
@@ -533,6 +638,7 @@ async function seedGovernedCatalog(
       revisionNumber: 2,
       content: packContent({
         name: "Pokemon Vault Repack",
+        evInputStatus: "unavailable",
         availability: "sold_out",
         priceValueMinor: 20_000,
         buybackPercent: null,
@@ -547,6 +653,7 @@ async function seedGovernedCatalog(
       revisionNumber: 3,
       content: packContent({
         name: "Pokemon Vault Repack",
+        evInputStatus: "unavailable",
         availability: "sold_out",
         priceValueMinor: 20_000,
         buybackPercent: null,
@@ -589,6 +696,7 @@ const AVAILABILITY_COVERAGE_PACKS: readonly CanonicalRevisionSeed[] = [
     revisionNumber: 1,
     content: packContent({
       name: "Vendor Withdrew This Pack",
+      evInputStatus: "unavailable",
       availability: "unavailable",
       priceValueMinor: 10_000,
       buybackPercent: 85,
@@ -602,6 +710,7 @@ const AVAILABILITY_COVERAGE_PACKS: readonly CanonicalRevisionSeed[] = [
     revisionNumber: 1,
     content: packContent({
       name: "Vendor Reported No Availability",
+      evInputStatus: "unavailable",
       availability: "unknown",
       priceValueMinor: 10_000,
       buybackPercent: 85,
@@ -615,6 +724,7 @@ const AVAILABILITY_COVERAGE_PACKS: readonly CanonicalRevisionSeed[] = [
     revisionNumber: 1,
     content: packContent({
       name: "Legacy Active Vocabulary",
+      evInputStatus: "unavailable",
       availability: "active",
       priceValueMinor: 10_000,
       buybackPercent: 85,
@@ -628,6 +738,7 @@ const AVAILABILITY_COVERAGE_PACKS: readonly CanonicalRevisionSeed[] = [
     revisionNumber: 1,
     content: packContent({
       name: "Legacy Disabled Vocabulary",
+      evInputStatus: "unavailable",
       availability: "disabled",
       priceValueMinor: 10_000,
       buybackPercent: 85,
@@ -643,6 +754,37 @@ const OUTBOUND_REPACK_LINK = {
   referralParameters: [],
 } as const;
 
+function withBaselineAssetPackAssociation(
+  source: PrismaDataReleaseV3CanonicalCatalogSource,
+  additional: readonly Readonly<{
+    sourceEntityId: string;
+    assetExternalId: string;
+    packExternalId: string;
+  }>[] = [],
+): DataReleaseV3CanonicalSourcePort {
+  return {
+    async loadSourceSnapshot(input) {
+      const snapshot = await source.loadSourceSnapshot(input);
+      return {
+        ...snapshot,
+        assetPackAssociations: [{
+          sourceEntityId: "normalized-pull-asset-1-pack-active",
+          platformKey: "vendor",
+          assetExternalId: "asset-1",
+          packExternalId: "pack-active",
+          associatedAt: new Date(ASSET_UPDATED_AT),
+          publicChangeSequence: snapshot.throughSequence,
+        }, ...additional.map((association) => ({
+          ...association,
+          platformKey: "vendor",
+          associatedAt: new Date(ASSET_UPDATED_AT),
+          publicChangeSequence: snapshot.throughSequence,
+        }))],
+      };
+    },
+  };
+}
+
 async function seedShadowTenant(harness: MigratedTestDatabase): Promise<void> {
   await harness.client.organizations.create({
     data: {
@@ -651,17 +793,14 @@ async function seedShadowTenant(harness: MigratedTestDatabase): Promise<void> {
       name: "V3 Canonical Shadow",
     },
   });
-  const ingestion = await seedProviderIngestion(
-    harness,
-    shadowOrganizationId,
-    randomUUID(),
-  );
+  const ingestion = await seedProviderIngestion(harness, shadowOrganizationId);
   await seedCanonicalRevisions(harness, shadowOrganizationId, ingestion, [{
     recordKind: "pack",
     externalId: "pack-b",
     revisionNumber: 1,
     content: packContent({
       name: "Shadow Tenant Pack",
+      evInputStatus: "unavailable",
       availability: "available",
       priceValueMinor: 5_000,
       buybackPercent: 50,
@@ -680,7 +819,7 @@ test("the Prisma canonical adapter serves one repeatable, sanitized, assembler-c
       harness.client,
       organizationId,
     );
-    const sourcePort: DataReleaseV3CanonicalSourcePort = source;
+    const sourcePort = withBaselineAssetPackAssociation(source);
     const adapter = new DataReleaseV3CanonicalCatalogAdapter(sourcePort);
     const catalogPort: DataReleaseV3CanonicalCatalogPort = adapter;
 
@@ -789,6 +928,321 @@ test("the Prisma canonical adapter serves one repeatable, sanitized, assembler-c
   }
 });
 
+test("a current unavailable EV-input status suppresses retained historical EV evidence", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const ingestion = await seedGovernedCatalog(harness);
+    const adapter = new DataReleaseV3CanonicalCatalogAdapter(
+      withBaselineAssetPackAssociation(new PrismaDataReleaseV3CanonicalCatalogSource(
+        harness.client,
+        organizationId,
+      )),
+    );
+
+    const before = await adapter.loadCatalogSnapshot({ readAt: READ_AT });
+    const ready = before.products.find(
+      ({ publicRepackId }) => publicRepackId === publicRepackIdActive,
+    )!;
+    assert.equal(ready.topChase?.probabilityBasisPoints, 50);
+    assert.equal(ready.topChase?.evidenceKinds.includes("vendor_odds"), true);
+
+    // Only the pack advances. The previously ready ev_input entity remains
+    // current in canonical storage and must not be reused after the provider
+    // explicitly withdraws EV inputs for the pack.
+    await seedCanonicalRevisions(harness, organizationId, ingestion, [{
+      recordKind: "pack",
+      externalId: "pack-active",
+      revisionNumber: 2,
+      content: packContent({
+        name: "Pokemon Grail Gacha",
+        evInputStatus: "unavailable",
+        availability: "available",
+        priceValueMinor: 10_000,
+        buybackPercent: 85,
+        providerReportedEvValueMinor: 12_000,
+      }),
+      sourceUpdatedAt: LATER_UPDATED_AT,
+      occurredAt: LATER_AT,
+    }], LATER_AT);
+
+    const after = await adapter.loadCatalogSnapshot({ readAt: LATER_AT });
+    const unavailable = after.products.find(
+      ({ publicRepackId }) => publicRepackId === publicRepackIdActive,
+    )!;
+    assert.equal(unavailable.topChase?.probabilityBasisPoints, null);
+    assert.deepEqual(unavailable.topChase?.evidenceKinds, [
+      "vendor_inventory",
+    ]);
+    assert.equal(
+      unavailable.contentSummary.evidenceCompleteness,
+      "unknown",
+    );
+    assert.equal(
+      unavailable.contentSummary.probabilityCoverageBasisPoints,
+      null,
+    );
+    assert.equal(
+      after.chases.some(
+        (chase) =>
+          chase.publicRepackId === publicRepackIdActive &&
+          (chase.probabilityBasisPoints !== null ||
+            chase.evidenceKinds.includes("vendor_odds")),
+      ),
+      false,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a current ready pack without a matching EV-input claim fails closed", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await seedGovernedCatalog(harness, [{
+      recordKind: "pack",
+      externalId: "pack-unavailable",
+      revisionNumber: 1,
+      content: packContent({
+        name: "Ready Without EV Evidence",
+        evInputStatus: "ready",
+        availability: "available",
+        priceValueMinor: 10_000,
+        buybackPercent: 85,
+      }),
+      sourceUpdatedAt: ACTIVE_UPDATED_AT,
+      occurredAt: PROJECTION_AT,
+    }]);
+    const adapter = new DataReleaseV3CanonicalCatalogAdapter(
+      withBaselineAssetPackAssociation(new PrismaDataReleaseV3CanonicalCatalogSource(
+        harness.client,
+        organizationId,
+      )),
+    );
+
+    await assert.rejects(
+      adapter.loadCatalogSnapshot({ readAt: READ_AT }),
+      (error: unknown) =>
+        error instanceof DataReleaseV3CanonicalCatalogError &&
+        error.code === "CANONICAL_PROJECTION_INVALID" &&
+        error.productKey === "pack-unavailable",
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("duplicate EV-input entities claiming one current pack fail closed", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await seedGovernedCatalog(harness, [{
+      recordKind: "ev_input",
+      externalId: "ev-input-duplicate",
+      revisionNumber: 1,
+      content: evInputContent(),
+      sourceUpdatedAt: ASSET_UPDATED_AT,
+      occurredAt: PROJECTION_AT,
+    }]);
+    const adapter = new DataReleaseV3CanonicalCatalogAdapter(
+      withBaselineAssetPackAssociation(new PrismaDataReleaseV3CanonicalCatalogSource(
+        harness.client,
+        organizationId,
+      )),
+    );
+
+    await assert.rejects(
+      adapter.loadCatalogSnapshot({ readAt: READ_AT }),
+      (error: unknown) =>
+        error instanceof DataReleaseV3CanonicalCatalogError &&
+        error.code === "CANONICAL_PROJECTION_INVALID" &&
+        error.productKey === "pack-active",
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("standalone configured assets publish as searchable collectibles without becoming pack content or chases", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await seedGovernedCatalog(harness, [
+      {
+        recordKind: "catalog_asset",
+        externalId: "asset-standalone",
+        revisionNumber: 1,
+        content: assetContent({
+          name: "Pikachu Illustrator Promo",
+        }),
+        sourceUpdatedAt: ASSET_UPDATED_AT,
+        occurredAt: PROJECTION_AT,
+      },
+      {
+        // Unavailable assets remain excluded before public-identity lookup, so
+        // an unavailable unconfigured row cannot leak into the release.
+        recordKind: "catalog_asset",
+        externalId: "asset-unmapped-unavailable",
+        revisionNumber: 1,
+        content: assetContent({
+          availability: "unavailable",
+          name: "Withdrawn card",
+        }),
+        sourceUpdatedAt: ASSET_UPDATED_AT,
+        occurredAt: PROJECTION_AT,
+      },
+    ]);
+    const adapter = new DataReleaseV3CanonicalCatalogAdapter(
+      withBaselineAssetPackAssociation(new PrismaDataReleaseV3CanonicalCatalogSource(
+        harness.client,
+        organizationId,
+      )),
+    );
+
+    const snapshot = await adapter.loadCatalogSnapshot({ readAt: READ_AT });
+    assert.deepEqual(
+      snapshot.collectibles.map(({ publicCollectibleId: id }) => id),
+      [publicCollectibleId, publicStandaloneCollectibleId].sort(),
+    );
+    const standalone = snapshot.collectibles.find(
+      ({ publicCollectibleId: id }) => id === publicStandaloneCollectibleId,
+    );
+    assert.equal(standalone?.name, "Pikachu Illustrator Promo");
+    assert.match(standalone?.searchText ?? "", /pikachu illustrator promo/);
+    assert.equal(
+      snapshot.chases.some(
+        ({ publicCollectibleId: id }) => id === publicStandaloneCollectibleId,
+      ),
+      false,
+    );
+    const active = snapshot.products.find(
+      ({ publicRepackId }) => publicRepackId === publicRepackIdActive,
+    );
+    assert.equal(active?.contentSummary.knownCollectibleCount, 1);
+    assert.equal(active?.contentSummary.chaseCount, 1);
+    assert.equal(active?.topChase?.publicCollectibleId, publicCollectibleId);
+
+    const plan = await new DataReleaseV3ReleaseAssembler(adapter, {
+      async getPublicationEligibleRevision() {
+        return null;
+      },
+    }).assemble({ readAt: READ_AT });
+    assert.equal(plan.classification, "publish");
+    if (plan.classification !== "publish") return;
+    assert.equal(plan.manifest.counts.collectibles, 2);
+    assert.equal(plan.manifest.counts.chases, 1);
+    const publishedCollectibles = plan.batches
+      .filter(({ kind }) => kind === "collectibles")
+      .flatMap(({ records }) => records as readonly PublicCollectible[]);
+    assert.equal(
+      publishedCollectibles.some(
+        ({ publicCollectibleId: id }) => id === publicStandaloneCollectibleId,
+      ),
+      true,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("an available standalone asset without an approved public mapping fails closed", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await seedGovernedCatalog(harness, [{
+      recordKind: "catalog_asset",
+      externalId: "asset-unmapped",
+      revisionNumber: 1,
+      content: assetContent({
+        name: "Unmapped standalone card",
+      }),
+      sourceUpdatedAt: ASSET_UPDATED_AT,
+      occurredAt: PROJECTION_AT,
+    }]);
+    const adapter = new DataReleaseV3CanonicalCatalogAdapter(
+      withBaselineAssetPackAssociation(new PrismaDataReleaseV3CanonicalCatalogSource(
+        harness.client,
+        organizationId,
+      )),
+    );
+
+    await assert.rejects(
+      adapter.loadCatalogSnapshot({ readAt: READ_AT }),
+      (error: unknown) =>
+        error instanceof DataReleaseV3CanonicalCatalogError &&
+        error.code === "PUBLIC_IDENTITY_MAPPING_MISSING",
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("an unmapped unassociated asset shell without a public name is omitted", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await seedGovernedCatalog(harness, [{
+      recordKind: "catalog_asset",
+      externalId: "asset-empty-shell",
+      revisionNumber: 1,
+      content: assetContent({ name: null }),
+      sourceUpdatedAt: ASSET_UPDATED_AT,
+      occurredAt: PROJECTION_AT,
+    }]);
+    const adapter = new DataReleaseV3CanonicalCatalogAdapter(
+      withBaselineAssetPackAssociation(new PrismaDataReleaseV3CanonicalCatalogSource(
+        harness.client,
+        organizationId,
+      )),
+    );
+
+    const snapshot = await adapter.loadCatalogSnapshot({ readAt: READ_AT });
+    assert.equal(snapshot.collectibles.length, 1);
+    assert.equal(snapshot.chases.length, 1);
+    assert.equal(
+      snapshot.collectibles.some(({ name }) => name === ""),
+      false,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("associated unnamed and configured unnamed assets remain fail-closed", async () => {
+  for (const scenario of ["associated", "configured"] as const) {
+    const harness = await createMigratedTestDatabase();
+    try {
+      const externalId = scenario === "configured"
+        ? "asset-standalone"
+        : "asset-associated-shell";
+      await seedGovernedCatalog(harness, [{
+        recordKind: "catalog_asset",
+        externalId,
+        revisionNumber: 1,
+        content: assetContent({ name: null }),
+        sourceUpdatedAt: ASSET_UPDATED_AT,
+        occurredAt: PROJECTION_AT,
+      }]);
+      const rawSource = new PrismaDataReleaseV3CanonicalCatalogSource(
+        harness.client,
+        organizationId,
+      );
+      const source = scenario === "associated"
+        ? withBaselineAssetPackAssociation(rawSource, [{
+            sourceEntityId: "normalized-pull-associated-empty-shell",
+            assetExternalId: externalId,
+            packExternalId: "pack-active",
+          }])
+        : withBaselineAssetPackAssociation(rawSource);
+
+      await assert.rejects(
+        new DataReleaseV3CanonicalCatalogAdapter(source)
+          .loadCatalogSnapshot({ readAt: READ_AT }),
+        (error: unknown) =>
+          error instanceof DataReleaseV3CanonicalCatalogError &&
+          error.code === "PUBLIC_IDENTITY_MAPPING_MISSING",
+      );
+    } finally {
+      await harness.close();
+    }
+  }
+});
+
 test("every availability state stays discoverable in the release while only `available` can rank or link out", async () => {
   const harness = await createMigratedTestDatabase();
   try {
@@ -797,10 +1251,10 @@ test("every availability state stays discoverable in the release while only `ava
       AVAILABILITY_COVERAGE_PACKS,
     );
     const adapter = new DataReleaseV3CanonicalCatalogAdapter(
-      new PrismaDataReleaseV3CanonicalCatalogSource(
+      withBaselineAssetPackAssociation(new PrismaDataReleaseV3CanonicalCatalogSource(
         harness.client,
         organizationId,
-      ),
+      )),
     );
     const snapshot = await adapter.loadCatalogSnapshot({ readAt: READ_AT });
 
@@ -918,6 +1372,7 @@ test("every availability state stays discoverable in the release while only `ava
       revisionNumber: 2,
       content: packContent({
         name: "Pokemon Grail Gacha",
+        evInputStatus: "ready",
         availability: "retired",
         priceValueMinor: 10_000,
         buybackPercent: 85,
@@ -941,10 +1396,10 @@ test("the same readAt stays byte-equal after later canonical writes and moves on
   try {
     const ingestion = await seedGovernedCatalog(harness);
     const adapter = new DataReleaseV3CanonicalCatalogAdapter(
-      new PrismaDataReleaseV3CanonicalCatalogSource(
+      withBaselineAssetPackAssociation(new PrismaDataReleaseV3CanonicalCatalogSource(
         harness.client,
         organizationId,
-      ),
+      )),
     );
     const before = await adapter.loadCatalogSnapshot({ readAt: READ_AT });
 
@@ -954,6 +1409,7 @@ test("the same readAt stays byte-equal after later canonical writes and moves on
       revisionNumber: 2,
       content: packContent({
         name: "Pokemon Grail Gacha",
+        evInputStatus: "ready",
         availability: "available",
         priceValueMinor: 20_000,
         buybackPercent: 85,
@@ -981,6 +1437,44 @@ test("the same readAt stays byte-equal after later canonical writes and moves on
   }
 });
 
+test("an association established after the source read clock fails closed", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    await seedGovernedCatalog(harness);
+    const rawSource = new PrismaDataReleaseV3CanonicalCatalogSource(
+      harness.client,
+      organizationId,
+    );
+    const source: DataReleaseV3CanonicalSourcePort = {
+      async loadSourceSnapshot(input) {
+        const snapshot = await rawSource.loadSourceSnapshot(input);
+        return {
+          ...snapshot,
+          assetPackAssociations: [{
+            sourceEntityId: "normalized-pull-after-read-clock",
+            platformKey: "vendor",
+            assetExternalId: "asset-1",
+            packExternalId: "pack-active",
+            associatedAt: new Date(LATER_AT),
+            // A sequence fence alone would accept this association.
+            publicChangeSequence: snapshot.throughSequence,
+          }],
+        };
+      },
+    };
+
+    await assert.rejects(
+      new DataReleaseV3CanonicalCatalogAdapter(source)
+        .loadCatalogSnapshot({ readAt: READ_AT }),
+      (error: unknown) =>
+        error instanceof DataReleaseV3CanonicalCatalogError &&
+        error.code === "CANONICAL_PROJECTION_INVALID",
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 test("unsettled, invalid, or unapproved reads refuse instead of degrading, and tenant scope holds", async () => {
   const harness = await createMigratedTestDatabase();
   try {
@@ -990,7 +1484,9 @@ test("unsettled, invalid, or unapproved reads refuse instead of degrading, and t
       harness.client,
       organizationId,
     );
-    const adapter = new DataReleaseV3CanonicalCatalogAdapter(source);
+    const adapter = new DataReleaseV3CanonicalCatalogAdapter(
+      withBaselineAssetPackAssociation(source),
+    );
 
     await assert.rejects(
       adapter.loadCatalogSnapshot({ readAt: "2026-08-18T02:00:01.000Z" }),

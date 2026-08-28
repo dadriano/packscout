@@ -9,6 +9,7 @@ const {
   assertClutchpacksV3CanaryOneSlotSupervisor,
   assertClutchpacksV3CanaryExpectedStage,
   assertClutchpacksV3CanarySupervisorStopped,
+  assertClutchpacksV3CanaryResetGenerationAtFeedStart,
   assertClutchpacksV3CanaryTargetCanPause,
   assertClutchpacksV3CanaryTargetIsExact,
   assertClutchpacksV3CanaryTargetIsPristine,
@@ -19,10 +20,12 @@ const {
   clutchpacksV3CanaryDriverUsage,
   clutchpacksV3CanaryHasExactSucceededHeadRun,
   clutchpacksV3CanaryLineageCount,
+  clutchpacksV3CanaryResumeMode,
   clutchpacksV3CanaryTargetWideSafetyEvidence,
   determineClutchpacksV3CanaryQualificationStage,
   parseClutchpacksV3CanaryDriverCommand,
   pauseClutchpacksV3CanaryTarget,
+  resetClutchpacksV3CanaryTargetCursor,
   safeClutchpacksV3CanaryDriverFailure,
 } = await tsImport(
   "./advance-clutchpacks-v3-canary.mts",
@@ -131,10 +134,12 @@ function targetSnapshot(overrides = {}) {
     canonicalEntityCount: 0,
     quarantineRecordCount: 0,
     warningErrorCriticalDiagnosticCount: 0,
+    unresolvedCurrentCursorGenerationDiagnosticCount: 0,
     legacyProviderConfigRevisionCount: 0,
     legacyProviderSecretVersionCount: 0,
     legacyProviderCursorCheckpointCount: 0,
     queuedOrRunningRunCount: 0,
+    currentCursorGenerationImportRunCount: 0,
     latestRun: null,
     connectionTest: null,
     sourceTest: null,
@@ -169,6 +174,7 @@ function completedReplay(snapshot = targetSnapshot(), overrides = {}) {
   return {
     ...active,
     importRunCount: 1,
+    currentCursorGenerationImportRunCount: 1,
     latestRun: {
       id: "88888888-8888-4888-8888-888888888888",
       organizationId,
@@ -184,13 +190,32 @@ function completedReplay(snapshot = targetSnapshot(), overrides = {}) {
       connectionProfileId: profileId,
       connectionRevisionId,
       cursorCodecVersion: revision.cursorCodecVersion,
-      cursorGeneration: 1n,
+      cursorGeneration: active.cursors[0]?.generation ?? 1n,
       configRevisionId: null,
       state: "succeeded",
       reachedProviderHead: true,
       finishedAt: new Date("2026-08-27T14:00:00.000Z"),
       failureCode: null,
     },
+    ...overrides,
+  };
+}
+
+function resetGeneration(overrides = {}) {
+  const completed = completedReplay();
+  return {
+    ...completed,
+    sources: [{ ...completed.sources[0], state: "paused" }],
+    cursors: [{
+      ...completed.cursors[0],
+      generation: 2n,
+      fingerprint: null,
+      advancedByRunId: null,
+      advancedByPageId: null,
+    }],
+    currentCursorGenerationImportRunCount: 0,
+    warningErrorCriticalDiagnosticCount: 1,
+    unresolvedCurrentCursorGenerationDiagnosticCount: 0,
     ...overrides,
   };
 }
@@ -203,6 +228,8 @@ test("commands require action-specific digest-bound confirmations", () => {
     pauseOriginal: "PAUSE ORIGINAL CLUTCHPACKS V1 LOCAL aaaaaaaaaaaaaaaa",
     pauseTarget: "PAUSE CLUTCHPACKS V3 TARGET LOCAL aaaaaaaaaaaaaaaa",
     resume: "RESUME CLUTCHPACKS V3 LOCAL aaaaaaaaaaaaaaaa",
+    resetTargetCursor:
+      "RESET CLUTCHPACKS V3 TARGET CURSOR LOCAL aaaaaaaaaaaaaaaa",
   });
   assert.deepEqual(parseClutchpacksV3CanaryDriverCommand([], confirmations), {
     action: "status",
@@ -230,6 +257,11 @@ test("commands require action-specific digest-bound confirmations", () => {
     ["--pause-original", "pause_original", confirmations.pauseOriginal],
     ["--pause-target", "pause_target", confirmations.pauseTarget],
     ["--resume", "resume", confirmations.resume],
+    [
+      "--reset-target-cursor",
+      "reset_target_cursor",
+      confirmations.resetTargetCursor,
+    ],
   ]) {
     assert.deepEqual(parseClutchpacksV3CanaryDriverCommand(
       [flag, "--confirmation", confirmation],
@@ -255,6 +287,7 @@ test("commands require action-specific digest-bound confirmations", () => {
     ],
     ["--resume", "--confirmation", "RESUME CLUTCHPACKS V3 LOCAL wrong"],
     ["--pause-target", "--confirmation", confirmations.pauseOriginal],
+    ["--reset-target-cursor", "--confirmation", confirmations.pauseTarget],
     ["--status", "--confirmation", confirmations.advance],
   ]) {
     assert.throws(
@@ -345,6 +378,12 @@ test("the target guard requires the exact one-tenant adapter-v3 topology", () =>
   assert.doesNotThrow(() =>
     assertClutchpacksV3CanaryTargetIsExact(activated, environment)
   );
+  assert.doesNotThrow(() =>
+    assertClutchpacksV3CanaryTargetIsExact({
+      ...activated,
+      cursors: [{ ...activated.cursors[0], generation: 2n }],
+    }, environment)
+  );
   const invalid = [
     { ...staged, organizationCount: 2 },
     { ...staged, providers: [...staged.providers, staged.providers[0]] },
@@ -385,7 +424,7 @@ test("the target guard requires the exact one-tenant adapter-v3 topology", () =>
       ...staged.sourceRevisions[0],
       cursorCodecVersion: "dataforrest-cursor-v0",
     }] },
-    { ...staged, cursors: [{ ...staged.cursors[0], generation: 2n }] },
+    { ...staged, cursors: [{ ...staged.cursors[0], generation: 0n }] },
     { ...staged, legacyProviderConfigRevisionCount: 1 },
     { ...staged, legacyProviderSecretVersionCount: 1 },
     { ...staged, legacyProviderCursorCheckpointCount: 1 },
@@ -419,6 +458,11 @@ test("pre-resume evidence must remain at Feed start with no import lineage", () 
     { ...pristine, pageReadAttemptCount: 1 },
     { ...pristine, deliveryOccurrenceCount: 1 },
     { ...pristine, canonicalEntityCount: 1 },
+    { ...pristine, currentCursorGenerationImportRunCount: 1 },
+    { ...pristine, queuedOrRunningRunCount: 1 },
+    { ...pristine, quarantineRecordCount: 1 },
+    { ...pristine, unresolvedCurrentCursorGenerationDiagnosticCount: 1 },
+    { ...pristine, cursors: [{ ...pristine.cursors[0], generation: 2n }] },
     { ...pristine, cursors: [{
       ...pristine.cursors[0],
       fingerprint: "a".repeat(64),
@@ -431,6 +475,38 @@ test("pre-resume evidence must remain at Feed start with no import lineage", () 
     assert.throws(
       () => assertClutchpacksV3CanaryTargetIsPristine(candidate),
       hasCode("TARGET_NOT_PRISTINE_FOR_RESUME"),
+    );
+  }
+});
+
+test("a reset generation resumes only from its current Feed start", () => {
+  const reset = resetGeneration();
+  assert.doesNotThrow(() =>
+    assertClutchpacksV3CanaryResetGenerationAtFeedStart(reset)
+  );
+  assert.equal(
+    determineClutchpacksV3CanaryQualificationStage(reset),
+    "ready_to_resume",
+  );
+  assert.equal(clutchpacksV3CanaryResumeMode(reset), "reset");
+  for (const candidate of [
+    { ...reset, currentCursorGenerationImportRunCount: 1 },
+    { ...reset, queuedOrRunningRunCount: 1 },
+    { ...reset, quarantineRecordCount: 1 },
+    { ...reset, unresolvedCurrentCursorGenerationDiagnosticCount: 1 },
+    { ...reset, cursors: [{ ...reset.cursors[0], generation: 1n }] },
+    { ...reset, cursors: [{
+      ...reset.cursors[0],
+      fingerprint: "a".repeat(64),
+    }] },
+    { ...reset, cursors: [{
+      ...reset.cursors[0],
+      advancedByRunId: "88888888-8888-4888-8888-888888888888",
+    }] },
+  ]) {
+    assert.throws(
+      () => assertClutchpacksV3CanaryResetGenerationAtFeedStart(candidate),
+      hasCode("TARGET_RESET_GENERATION_NOT_AT_FEED_START"),
     );
   }
 });
@@ -558,7 +634,9 @@ test("target pause requires the exact latest succeeded head run and a stopped su
   assert.deepEqual(clutchpacksV3CanaryTargetWideSafetyEvidence(complete), {
     quarantineRecords: 0,
     warningErrorCriticalDiagnostics: 0,
+    unresolvedCurrentCursorGenerationDiagnostics: 0,
     targetWideEvidenceClean: true,
+    protectiveActionEvidenceClear: true,
   });
   assert.deepEqual(clutchpacksV3CanaryTargetWideSafetyEvidence({
     ...complete,
@@ -567,10 +645,20 @@ test("target pause requires the exact latest succeeded head run and a stopped su
   }), {
     quarantineRecords: 1,
     warningErrorCriticalDiagnostics: 2,
+    unresolvedCurrentCursorGenerationDiagnostics: 0,
     targetWideEvidenceClean: false,
+    protectiveActionEvidenceClear: false,
   });
   assert.equal(clutchpacksV3CanaryHasExactSucceededHeadRun(complete), true);
   assert.doesNotThrow(() => assertClutchpacksV3CanaryTargetCanPause(complete));
+  const generationTwo = completedReplay({
+    ...targetSnapshot(),
+    cursors: [{ ...targetSnapshot().cursors[0], generation: 2n }],
+  });
+  assert.equal(
+    clutchpacksV3CanaryHasExactSucceededHeadRun(generationTwo),
+    true,
+  );
   const alreadyPaused = {
     ...complete,
     sources: [{ ...complete.sources[0], state: "paused" }],
@@ -635,12 +723,17 @@ test("target pause requires the exact latest succeeded head run and a stopped su
     }),
     hasCode("TARGET_QUARANTINE_NOT_EMPTY"),
   );
+  assert.doesNotThrow(() => assertClutchpacksV3CanaryTargetCanPause({
+    ...complete,
+    warningErrorCriticalDiagnosticCount: 1,
+  }));
   assert.throws(
     () => assertClutchpacksV3CanaryTargetCanPause({
       ...complete,
       warningErrorCriticalDiagnosticCount: 1,
+      unresolvedCurrentCursorGenerationDiagnosticCount: 1,
     }),
-    hasCode("TARGET_WARNING_ERROR_CRITICAL_DIAGNOSTICS_PRESENT"),
+    hasCode("TARGET_CURRENT_GENERATION_DIAGNOSTICS_UNRESOLVED"),
   );
 
   const stopped = Object.freeze({
@@ -660,6 +753,46 @@ test("target pause requires the exact latest succeeded head run and a stopped su
     }),
     hasCode("TARGET_SUPERVISOR_MUST_BE_STOPPED"),
   );
+});
+
+test("a paused completed replay remains eligible for a bounded provider-head refresh", () => {
+  const completed = completedReplay();
+  const paused = {
+    ...completed,
+    sources: [{ ...completed.sources[0], state: "paused" }],
+  };
+  assert.equal(
+    determineClutchpacksV3CanaryQualificationStage(paused),
+    "replay_paused",
+  );
+  assert.equal(clutchpacksV3CanaryResumeMode(paused), "refresh");
+  assert.doesNotThrow(() => assertClutchpacksV3CanaryTargetCanPause(paused));
+
+  const initial = activeProfile(targetSnapshot(), {
+    sources: [{ ...targetSnapshot().sources[0], state: "paused" }],
+    sourceTest: successfulTest(),
+  });
+  assert.equal(clutchpacksV3CanaryResumeMode(initial), "initial");
+  assert.equal(clutchpacksV3CanaryResumeMode(completed), "already_active");
+  assert.equal(clutchpacksV3CanaryResumeMode({
+    ...paused,
+    warningErrorCriticalDiagnosticCount: 1,
+  }), "refresh");
+
+  for (const candidate of [
+    { ...paused, queuedOrRunningRunCount: 1 },
+    { ...paused, quarantineRecordCount: 1 },
+    { ...paused, unresolvedCurrentCursorGenerationDiagnosticCount: 1 },
+    {
+      ...paused,
+      latestRun: { ...paused.latestRun, reachedProviderHead: false },
+    },
+  ]) {
+    assert.throws(
+      () => clutchpacksV3CanaryResumeMode(candidate),
+      (error) => error instanceof ClutchpacksV3CanaryDriverError,
+    );
+  }
 });
 
 test("target pause delegates exact pins and proves the service transition idempotently", async () => {
@@ -712,7 +845,9 @@ test("target pause delegates exact pins and proves the service transition idempo
     latestRunExactSucceededHead: true,
     quarantineRecords: 0,
     warningErrorCriticalDiagnostics: 0,
+    unresolvedCurrentCursorGenerationDiagnostics: 0,
     targetWideEvidenceClean: true,
+    protectiveActionEvidenceClear: true,
   });
   assert.equal(result.supervisorLiveEpochCount, 0);
   assert.equal(result.providerCallMadeDirectly, false);
@@ -759,6 +894,146 @@ test("target pause delegates exact pins and proves the service transition idempo
   );
 });
 
+test("target cursor reset binds the service preview CAS and proves the next Feed start", async () => {
+  const completed = completedReplay();
+  const paused = {
+    ...completed,
+    sources: [{ ...completed.sources[0], state: "paused" }],
+    warningErrorCriticalDiagnosticCount: 1,
+  };
+  const afterReset = resetGeneration();
+  const stopped = {
+    liveEpochCount: 0,
+    epochState: null,
+    maximumExecutionSlots: null,
+    capacityState: null,
+    snapshotPublished: false,
+  };
+  const driverEnvironment = {
+    ...environment,
+    sourceDatabaseName: "packscout_dev",
+    targetDatabaseName: "packscout_clutch_v3",
+    targetDigest: "a".repeat(64),
+  };
+  let previewInput = null;
+  let resetInput = null;
+  const preview = {
+    providerId,
+    provider: "clutchpacks",
+    sourceInstanceId: sourceId,
+    sourceRevisionId,
+    sourceState: "paused",
+    cursorGeneration: "1",
+    cursorFingerprint: null,
+    confirmation: "RESET CLUTCHPACKS",
+  };
+  const result = await resetClutchpacksV3CanaryTargetCursor(
+    null,
+    driverEnvironment,
+    paused,
+    stopped,
+    {
+      async previewCursorReset(input) {
+        previewInput = input;
+        return preview;
+      },
+      async resetCursor(input) {
+        resetInput = input;
+        return { cursorGeneration: "2", cursorFingerprint: null };
+      },
+      async readTarget() {
+        return { snapshot: afterReset, supervisor: stopped };
+      },
+    },
+  );
+  assert.deepEqual(previewInput, {
+    organizationId,
+    providerId,
+    sourceInstanceId: sourceId,
+    sourceRevisionId,
+  });
+  assert.deepEqual(resetInput, {
+    ...previewInput,
+    expectedCursorGeneration: "1",
+    expectedCursorFingerprint: null,
+    confirmation: "RESET CLUTCHPACKS",
+  });
+  assert.deepEqual(result.target, {
+    state: "paused",
+    previousCursorGeneration: "1",
+    cursorGeneration: "2",
+    cursorAtFeedStart: true,
+    currentCursorGenerationImportRuns: 0,
+    queuedOrRunningRuns: 0,
+    quarantineRecords: 0,
+    warningErrorCriticalDiagnostics: 1,
+    unresolvedCurrentCursorGenerationDiagnostics: 0,
+  });
+  assert.equal(result.outcome, "cursor_reset");
+  assert.equal(result.supervisorLiveEpochCount, 0);
+
+  await assert.rejects(
+    resetClutchpacksV3CanaryTargetCursor(
+      null,
+      driverEnvironment,
+      paused,
+      stopped,
+      {
+        async previewCursorReset() {
+          return { ...preview, cursorGeneration: "2" };
+        },
+        async resetCursor() {
+          throw new Error("must not reset");
+        },
+        async readTarget() {
+          throw new Error("must not read");
+        },
+      },
+    ),
+    hasCode("TARGET_CURSOR_RESET_PREVIEW_CHANGED"),
+  );
+  await assert.rejects(
+    resetClutchpacksV3CanaryTargetCursor(
+      null,
+      driverEnvironment,
+      paused,
+      stopped,
+      {
+        async previewCursorReset() {
+          return preview;
+        },
+        async resetCursor() {
+          return { cursorGeneration: "3", cursorFingerprint: null };
+        },
+        async readTarget() {
+          throw new Error("must not read");
+        },
+      },
+    ),
+    hasCode("TARGET_CURSOR_RESET_RECEIPT_INVALID"),
+  );
+  await assert.rejects(
+    resetClutchpacksV3CanaryTargetCursor(
+      null,
+      driverEnvironment,
+      { ...paused, sources: [{ ...paused.sources[0], state: "active" }] },
+      stopped,
+      {
+        async previewCursorReset() {
+          throw new Error("must not preview");
+        },
+        async resetCursor() {
+          throw new Error("must not reset");
+        },
+        async readTarget() {
+          throw new Error("must not read");
+        },
+      },
+    ),
+    hasCode("TARGET_CURSOR_RESET_REQUIRES_PAUSED_SOURCE"),
+  );
+});
+
 test("failures and help output are stable and credential-free", () => {
   assert.deepEqual(
     safeClutchpacksV3CanaryDriverFailure(
@@ -791,5 +1066,6 @@ test("failures and help output are stable and credential-free", () => {
   assert.match(help.stdout, /--pause-original/u);
   assert.match(help.stdout, /--pause-target/u);
   assert.match(help.stdout, /--resume/u);
+  assert.match(help.stdout, /--reset-target-cursor/u);
   assert.doesNotMatch(help.stdout, /postgresql:\/\//u);
 });
