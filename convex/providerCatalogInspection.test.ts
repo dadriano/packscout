@@ -23,6 +23,8 @@ const ACTIVE_RELEASE_PATH = "/admin/provider-catalog/active-release";
 const ENTITIES_PATH = "/admin/provider-catalog/entities";
 const ENTITY_IDS_PATH = "/admin/provider-catalog/entity-ids";
 const DOCUMENT_PATH = "/admin/provider-catalog/document";
+const CHASE_RECONCILIATION_PATH =
+  "/admin/provider-catalog/chase-reconciliation";
 
 const INTEGRATION_TOKEN = "a".repeat(48);
 
@@ -118,6 +120,16 @@ describe("provider catalog inspection is server-to-server only", () => {
     });
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({
+      code: "PROVIDER_CATALOG_REQUEST_INVALID",
+    });
+
+    const missingPlatform = await post(convex, ENTITIES_PATH, {
+      expectedPublicProviderReleaseId: "release-id",
+      entityKind: "repacks",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(missingPlatform.status).toBe(400);
+    expect(await missingPlatform.json()).toMatchObject({
       code: "PROVIDER_CATALOG_REQUEST_INVALID",
     });
   });
@@ -238,7 +250,8 @@ describe("entity paging is stable, complete, and server-bounded", () => {
     const seeded = await seedActiveCatalog(convex);
     const page = (await (
       await post(convex, ENTITIES_PATH, {
-        publicProviderReleaseId: seeded.publicProviderReleaseId,
+        platformKey: seeded.platformKey,
+        expectedPublicProviderReleaseId: seeded.publicProviderReleaseId,
         entityKind: "repacks",
         paginationOpts: { numItems: 100_000, cursor: null },
       })
@@ -251,7 +264,8 @@ describe("entity paging is stable, complete, and server-bounded", () => {
     const convex = createTest();
     authorize();
     const response = await post(convex, ENTITIES_PATH, {
-      publicProviderReleaseId: "release-that-does-not-exist",
+      platformKey: "courtyard",
+      expectedPublicProviderReleaseId: "release-that-does-not-exist",
       entityKind: "repacks",
       paginationOpts: { numItems: 10, cursor: null },
     });
@@ -275,7 +289,8 @@ describe("single document reads", () => {
 
     const present = (await (
       await post(convex, DOCUMENT_PATH, {
-        publicProviderReleaseId: seeded.publicProviderReleaseId,
+        platformKey: seeded.platformKey,
+        expectedPublicProviderReleaseId: seeded.publicProviderReleaseId,
         entityKind: "repacks",
         publicEntityId: knownRepackId,
       })
@@ -285,11 +300,93 @@ describe("single document reads", () => {
 
     const absent = (await (
       await post(convex, DOCUMENT_PATH, {
-        publicProviderReleaseId: seeded.publicProviderReleaseId,
+        platformKey: seeded.platformKey,
+        expectedPublicProviderReleaseId: seeded.publicProviderReleaseId,
         entityKind: "repacks",
         publicEntityId: "a-repack-that-was-never-published",
       })
     ).json()) as { status: string };
     expect(absent.status).toBe("not_present");
+  });
+});
+
+describe("published reads pin validation and data to one manifest snapshot", () => {
+  test("a retained release becomes unreadable after a newer manifest is active", async () => {
+    const convex = createTest();
+    authorize();
+    const first = await seedActiveCatalog(convex);
+
+    const staleRepackId = (await (
+      await post(convex, ENTITY_IDS_PATH, {
+        publicProviderReleaseId: first.publicProviderReleaseId,
+        entityKind: "repacks",
+        paginationOpts: { numItems: 1, cursor: null },
+      })
+    ).json() as { publicEntityIds: string[] }).publicEntityIds[0]!;
+
+    const revisedPlans = await buildMockProviderCatalogReleasePlans({
+      providerRevisions: { [first.platformKey]: 1 },
+    });
+    const revised = await convex.run((ctx) =>
+      seedMockCatalogManifestGraph(ctx, {
+        plans: revisedPlans,
+        confidencePolicyVersion: MOCK_DATA_RELEASE_CONFIDENCE_POLICY_VERSION,
+        serverTime: "2026-08-24T01:00:00.000Z",
+        observationSequence: 2,
+      }),
+    );
+    const activePublicProviderReleaseId = revised.manifest.providerReferences
+      .find(({ platformKey }) => platformKey === first.platformKey)!
+      .publicProviderReleaseId;
+
+    const requests = [
+      {
+        path: ENTITIES_PATH,
+        body: {
+          platformKey: first.platformKey,
+          entityKind: "repacks",
+          paginationOpts: { numItems: 10, cursor: null },
+        },
+      },
+      {
+        path: DOCUMENT_PATH,
+        body: {
+          platformKey: first.platformKey,
+          entityKind: "repacks",
+          publicEntityId: staleRepackId,
+        },
+      },
+      {
+        path: CHASE_RECONCILIATION_PATH,
+        body: {
+          platformKey: first.platformKey,
+          publicRepackId: staleRepackId,
+        },
+      },
+    ] as const;
+
+    for (const request of requests) {
+      const stale = await post(convex, request.path, {
+        ...request.body,
+        expectedPublicProviderReleaseId: first.publicProviderReleaseId,
+      });
+      expect(stale.status).toBe(200);
+      expect(await stale.json()).toEqual({ status: "release_unknown" });
+
+      const active = await post(convex, request.path, {
+        ...request.body,
+        expectedPublicProviderReleaseId: activePublicProviderReleaseId,
+      });
+      expect(active.status).toBe(200);
+      expect(await active.json()).toMatchObject({ status: "ok" });
+    }
+
+    const wrongPlatform = await post(convex, DOCUMENT_PATH, {
+      platformKey: MOCK_PROVIDER_PLATFORM_KEYS[1],
+      expectedPublicProviderReleaseId: activePublicProviderReleaseId,
+      entityKind: "repacks",
+      publicEntityId: staleRepackId,
+    });
+    expect(await wrongPlatform.json()).toEqual({ status: "release_unknown" });
   });
 });

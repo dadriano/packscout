@@ -161,7 +161,6 @@ function canonicalStub(overrides: Record<string, unknown> = {}) {
 }
 
 const publishedReleaseId = "10000000-0000-5000-8000-000000000001";
-const nextPublishedReleaseId = "10000000-0000-5000-8000-000000000003";
 const publishedManifestId = "10000000-0000-5000-8000-000000000002";
 const publishedVendorId = "00000000-0000-5000-8000-000000000001";
 const publishedRepackId = "00000000-0000-5000-8000-000000000301";
@@ -336,7 +335,7 @@ test("published reads require permission and remain non-cacheable on refusal", a
   );
 });
 
-test("published routes derive the active release and expose only bounded reads", async () => {
+test("published routes use one atomic backend read per requested document", async () => {
   const published = publishedStub();
   await withServer(
     ["data_inspection:view"],
@@ -382,15 +381,35 @@ test("published routes derive the active release and expose only bounded reads",
     ({ operation }) => operation === "listEntities",
   );
   assert.deepEqual(entityCall?.input, {
-    publicProviderReleaseId: publishedReleaseId,
+    platformKey: "clutchpacks",
+    expectedPublicProviderReleaseId: publishedReleaseId,
     entityKind: "vendors",
     numItems: 25,
     cursor: "next",
   });
+  assert.deepEqual(
+    published.calls.find(({ operation }) => operation === "readDocument")?.input,
+    {
+      platformKey: "clutchpacks",
+      expectedPublicProviderReleaseId: publishedReleaseId,
+      entityKind: "vendors",
+      publicEntityId: publishedVendorId,
+    },
+  );
+  assert.deepEqual(
+    published.calls.find(
+      ({ operation }) => operation === "readChaseReconciliation",
+    )?.input,
+    {
+      platformKey: "clutchpacks",
+      expectedPublicProviderReleaseId: publishedReleaseId,
+      publicRepackId: publishedRepackId,
+    },
+  );
   assert.equal(
     published.calls.filter(({ operation }) => operation === "activeRelease")
       .length,
-    4,
+    1,
   );
 });
 
@@ -454,54 +473,20 @@ test("published inputs are strict and reject unverified release selectors", asyn
   );
 });
 
-test("a manifest change is represented without reading an arbitrary release", async () => {
-  const published = publishedStub({
-    async activeRelease() {
-      return { status: "no_active_manifest" };
-    },
-  });
-  await withServer(
-    ["data_inspection:view"],
-    async (baseUrl) => {
-      const response = await fetch(
-        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/entities?entityKind=repacks&expectedPublicProviderReleaseId=${publishedReleaseId}`,
-        { headers: { cookie: "packscout_session=operator-session" } },
-      );
-      assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), { status: "release_unknown" });
-      assert.equal(
-        published.calls.some(({ operation }) => operation === "listEntities"),
-        false,
-      );
-    },
-    canonicalStub() as never,
-    published.reader,
-  );
-});
-
-test("a manifest flip cannot mix a new release into displayed release facts", async () => {
-  let activeReads = 0;
+test("a stale release is decided by the atomic backend read without a preflight", async () => {
   let entityReads = 0;
   const published = publishedStub({
-    async activeRelease() {
-      activeReads += 1;
-      const active = activePublishedRelease();
-      if (activeReads === 1) return active;
-      return {
-        ...active,
-        release: {
-          ...active.release,
-          publicProviderReleaseId: nextPublishedReleaseId,
-        },
-      };
-    },
-    async listEntities() {
+    async listEntities(input) {
       entityReads += 1;
+      assert.deepEqual(input, {
+        platformKey: "clutchpacks",
+        expectedPublicProviderReleaseId: publishedReleaseId,
+        entityKind: "repacks",
+        numItems: 50,
+        cursor: null,
+      });
       return {
-        status: "ok",
-        items: [],
-        isDone: true,
-        continueCursor: "",
+        status: "release_unknown",
       };
     },
   });
@@ -526,10 +511,15 @@ test("a manifest flip cannot mix a new release into displayed release facts", as
       );
       assert.equal(page.status, 200);
       assert.deepEqual(await page.json(), { status: "release_unknown" });
-      assert.equal(entityReads, 0);
+      assert.equal(entityReads, 1);
     },
     canonicalStub() as never,
     published.reader,
+  );
+  assert.equal(
+    published.calls.filter(({ operation }) => operation === "activeRelease")
+      .length,
+    1,
   );
 });
 

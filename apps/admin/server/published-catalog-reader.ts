@@ -68,7 +68,8 @@ export type PublishedChaseReconciliation =
 export interface PublishedCatalogReader {
   activeRelease(platformKey: string): Promise<PublishedActiveRelease>;
   listEntities(input: {
-    publicProviderReleaseId: string;
+    platformKey: string;
+    expectedPublicProviderReleaseId: string;
     entityKind: PublishedInspectableEntityKind;
     numItems: number;
     cursor: string | null;
@@ -80,12 +81,14 @@ export interface PublishedCatalogReader {
     cursor: string | null;
   }): Promise<PublishedIdPage>;
   readDocument(input: {
-    publicProviderReleaseId: string;
+    platformKey: string;
+    expectedPublicProviderReleaseId: string;
     entityKind: PublishedInspectableEntityKind;
     publicEntityId: string;
   }): Promise<PublishedDocument>;
   readChaseReconciliation(input: {
-    publicProviderReleaseId: string;
+    platformKey: string;
+    expectedPublicProviderReleaseId: string;
     publicRepackId: string;
   }): Promise<PublishedChaseReconciliation>;
 }
@@ -178,11 +181,18 @@ export function createPublishedCatalogReader(input: {
   return {
     activeRelease: (platformKey) =>
       call(ACTIVE_RELEASE_PATH, { platformKey }, publishedActiveReleaseSchema),
-    listEntities: ({ publicProviderReleaseId, entityKind, numItems, cursor }) =>
+    listEntities: ({
+      platformKey,
+      expectedPublicProviderReleaseId,
+      entityKind,
+      numItems,
+      cursor,
+    }) =>
       call(
         ENTITIES_PATH,
         {
-          publicProviderReleaseId,
+          platformKey,
+          expectedPublicProviderReleaseId,
           entityKind,
           paginationOpts: { numItems, cursor },
         },

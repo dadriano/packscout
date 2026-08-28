@@ -136,19 +136,6 @@ async function assertPublishedProviderBelongsToOrganization(input: {
   }
 }
 
-async function activePublishedReleaseMatches(input: {
-  published: NonNullable<DataInspectionRouterDependencies["published"]>;
-  platformKey: string;
-  expectedPublicProviderReleaseId: string;
-}): Promise<boolean> {
-  const active = await input.published.activeRelease(input.platformKey);
-  return (
-    active.status === "active" &&
-    active.release.publicProviderReleaseId ===
-      input.expectedPublicProviderReleaseId
-  );
-}
-
 /** A single positive integer from a query string, or undefined. */
 function readLimit(raw: unknown): number | undefined {
   if (typeof raw !== "string" || raw.trim().length === 0) return undefined;
@@ -323,18 +310,10 @@ export function createDataInspectionRouter(
           organizationId: actor.organizationId,
           platformKey: platform.data,
         });
-        const releaseMatches = await activePublishedReleaseMatches({
-          published,
-          platformKey: platform.data,
-          expectedPublicProviderReleaseId: expectedRelease.data,
-        });
-        if (!releaseMatches) {
-          response.status(200).json({ status: "release_unknown" });
-          return;
-        }
         response.status(200).json(
           await published.listEntities({
-            publicProviderReleaseId: expectedRelease.data,
+            platformKey: platform.data,
+            expectedPublicProviderReleaseId: expectedRelease.data,
             entityKind: entityKind.data,
             numItems,
             cursor,
@@ -395,18 +374,10 @@ export function createDataInspectionRouter(
           organizationId: actor.organizationId,
           platformKey: platform.data,
         });
-        const releaseMatches = await activePublishedReleaseMatches({
-          published,
-          platformKey: platform.data,
-          expectedPublicProviderReleaseId: expectedRelease.data,
-        });
-        if (!releaseMatches) {
-          response.status(200).json({ status: "release_unknown" });
-          return;
-        }
         response.status(200).json(
           await published.readDocument({
-            publicProviderReleaseId: expectedRelease.data,
+            platformKey: platform.data,
+            expectedPublicProviderReleaseId: expectedRelease.data,
             entityKind: entityKind.data,
             publicEntityId: publicEntityId.data,
           }),
@@ -462,18 +433,10 @@ export function createDataInspectionRouter(
           organizationId: actor.organizationId,
           platformKey: platform.data,
         });
-        const releaseMatches = await activePublishedReleaseMatches({
-          published,
-          platformKey: platform.data,
-          expectedPublicProviderReleaseId: expectedRelease.data,
-        });
-        if (!releaseMatches) {
-          response.status(200).json({ status: "release_unknown" });
-          return;
-        }
         response.status(200).json(
           await published.readChaseReconciliation({
-            publicProviderReleaseId: expectedRelease.data,
+            platformKey: platform.data,
+            expectedPublicProviderReleaseId: expectedRelease.data,
             publicRepackId: publicRepackId.data,
           }),
         );

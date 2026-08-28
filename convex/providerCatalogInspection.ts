@@ -197,6 +197,61 @@ async function releaseByPublicId(
     .unique();
 }
 
+/**
+ * Resolve the release only when the active manifest still selects it.
+ *
+ * This check deliberately lives in the same Convex query as the requested
+ * document read. Convex queries observe one transactional snapshot, so a
+ * manifest promotion cannot happen between validating the selector and
+ * reading entities from the selected release.
+ */
+async function expectedActiveRelease(
+  ctx: QueryCtx,
+  platformKey: string,
+  expectedPublicProviderReleaseId: string,
+): Promise<Doc<"providerCatalogReleases"> | null> {
+  const { state, document } = await loadActiveCatalogManifestState(ctx);
+  const activeManifest = state.activeManifest;
+  const activeManifestId = document?.activeManifestId ?? null;
+  if (
+    activeManifest === null ||
+    document === null ||
+    activeManifestId === null
+  ) {
+    return null;
+  }
+
+  const reference = await ctx.db
+    .query("catalogManifestProviderReferences")
+    .withIndex("by_manifest_id_and_platform_key", (index) =>
+      index
+        .eq("manifestId", activeManifestId)
+        .eq("platformKey", platformKey),
+    )
+    .unique();
+  if (
+    reference === null ||
+    reference.manifestPublicReleaseId !== activeManifest.publicReleaseId ||
+    reference.manifestFingerprint !== activeManifest.manifestFingerprint ||
+    reference.platformKey !== platformKey ||
+    reference.publicProviderReleaseId !== expectedPublicProviderReleaseId
+  ) {
+    return null;
+  }
+
+  const release = await ctx.db.get(reference.releaseId);
+  if (
+    release === null ||
+    release.platformKey !== platformKey ||
+    release.publicProviderReleaseId !== expectedPublicProviderReleaseId ||
+    release.providerReleaseFingerprint !==
+      reference.providerReleaseFingerprint
+  ) {
+    return null;
+  }
+  return release;
+}
+
 function releaseFacts(release: Doc<"providerCatalogReleases">) {
   return {
     publicProviderReleaseId: release.publicProviderReleaseId,
@@ -272,13 +327,18 @@ export const activeRelease = internalQuery({
 /** One page of published documents for a release and entity kind. */
 export const listEntities = internalQuery({
   args: {
-    publicProviderReleaseId: v.string(),
+    platformKey: v.string(),
+    expectedPublicProviderReleaseId: v.string(),
     entityKind: identifiedEntityKindValidator,
     paginationOpts: paginationOptsValidator,
   },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const release = await releaseByPublicId(ctx, args.publicProviderReleaseId);
+    const release = await expectedActiveRelease(
+      ctx,
+      args.platformKey,
+      args.expectedPublicProviderReleaseId,
+    );
     if (release === null) return { status: "release_unknown" as const };
 
     const page = await paginateEntities(ctx, release._id, args.entityKind, {
@@ -333,13 +393,18 @@ export const listEntityIds = internalQuery({
 /** One published document, or a representable absence. */
 export const readDocument = internalQuery({
   args: {
-    publicProviderReleaseId: v.string(),
+    platformKey: v.string(),
+    expectedPublicProviderReleaseId: v.string(),
     entityKind: identifiedEntityKindValidator,
     publicEntityId: v.string(),
   },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const release = await releaseByPublicId(ctx, args.publicProviderReleaseId);
+    const release = await expectedActiveRelease(
+      ctx,
+      args.platformKey,
+      args.expectedPublicProviderReleaseId,
+    );
     if (release === null) return { status: "release_unknown" as const };
 
     const detail = await findEntity(
@@ -366,12 +431,17 @@ export const readDocument = internalQuery({
  */
 export const readRepackChaseReconciliation = internalQuery({
   args: {
-    publicProviderReleaseId: v.string(),
+    platformKey: v.string(),
+    expectedPublicProviderReleaseId: v.string(),
     publicRepackId: v.string(),
   },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const release = await releaseByPublicId(ctx, args.publicProviderReleaseId);
+    const release = await expectedActiveRelease(
+      ctx,
+      args.platformKey,
+      args.expectedPublicProviderReleaseId,
+    );
     if (release === null) return { status: "release_unknown" as const };
 
     const row = await ctx.db

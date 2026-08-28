@@ -103,61 +103,102 @@ test("reader keeps credentials server-side and validates active release facts", 
 });
 
 test("reader validates entity pages and document identity by selected kind", async () => {
+  let entityBody = "";
   const pageReader = createPublishedCatalogReader({
     config,
-    fetchImplementation: jsonFetch({
-      status: "ok",
-      items: [{ publicEntityId: VENDOR_ID, detail: vendor }],
-      isDone: true,
-      continueCursor: "",
-    }),
+    fetchImplementation: (async (_url, init) => {
+      entityBody = String(init?.body);
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          items: [{ publicEntityId: VENDOR_ID, detail: vendor }],
+          isDone: true,
+          continueCursor: "",
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch,
   });
   assert.equal(
     (await pageReader.listEntities({
-      publicProviderReleaseId: RELEASE_ID,
+      platformKey: "clutchpacks",
+      expectedPublicProviderReleaseId: RELEASE_ID,
       entityKind: "vendors",
       numItems: 25,
       cursor: null,
     })).status,
     "ok",
   );
+  assert.deepEqual(JSON.parse(entityBody), {
+    platformKey: "clutchpacks",
+    expectedPublicProviderReleaseId: RELEASE_ID,
+    entityKind: "vendors",
+    paginationOpts: { numItems: 25, cursor: null },
+  });
 
+  let documentBody = "";
   const invalidDocumentReader = createPublishedCatalogReader({
     config,
-    fetchImplementation: jsonFetch({
-      status: "ok",
-      publicEntityId: VENDOR_ID,
-      detail: { ...vendor, organizationId: "protected" },
-    }),
+    fetchImplementation: (async (_url, init) => {
+      documentBody = String(init?.body);
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          publicEntityId: VENDOR_ID,
+          detail: { ...vendor, organizationId: "protected" },
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch,
   });
   await expectCode(
     invalidDocumentReader.readDocument({
-      publicProviderReleaseId: RELEASE_ID,
+      platformKey: "clutchpacks",
+      expectedPublicProviderReleaseId: RELEASE_ID,
       entityKind: "vendors",
       publicEntityId: VENDOR_ID,
     }),
     "PUBLISHED_CATALOG_UNAVAILABLE",
   );
+  assert.deepEqual(JSON.parse(documentBody), {
+    platformKey: "clutchpacks",
+    expectedPublicProviderReleaseId: RELEASE_ID,
+    entityKind: "vendors",
+    publicEntityId: VENDOR_ID,
+  });
 });
 
 test("reader validates chase reconciliation invariants", async () => {
+  let chaseBody = "";
   const reader = createPublishedCatalogReader({
     config,
-    fetchImplementation: jsonFetch({
-      status: "ok",
-      publicRepackId: "00000000-0000-5000-8000-000000000301",
-      expectedChaseCount: 2,
-      acceptedChaseCount: 1,
-      complete: true,
-    }),
+    fetchImplementation: (async (_url, init) => {
+      chaseBody = String(init?.body);
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          publicRepackId: "00000000-0000-5000-8000-000000000301",
+          expectedChaseCount: 2,
+          acceptedChaseCount: 1,
+          complete: true,
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch,
   });
   await expectCode(
     reader.readChaseReconciliation({
-      publicProviderReleaseId: RELEASE_ID,
+      platformKey: "clutchpacks",
+      expectedPublicProviderReleaseId: RELEASE_ID,
       publicRepackId: "00000000-0000-5000-8000-000000000301",
     }),
     "PUBLISHED_CATALOG_UNAVAILABLE",
   );
+  assert.deepEqual(JSON.parse(chaseBody), {
+    platformKey: "clutchpacks",
+    expectedPublicProviderReleaseId: RELEASE_ID,
+    publicRepackId: "00000000-0000-5000-8000-000000000301",
+  });
 });
 
 test("reader maps upstream status without forwarding its response body", async () => {

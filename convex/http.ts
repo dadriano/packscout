@@ -1135,11 +1135,15 @@ const listProviderCatalogEntities = httpAction(async (ctx, request) => {
   if (!isAuthorized(request)) return unauthorized();
   const body = await readJsonObject(request);
   if (body === null) return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
-  const publicProviderReleaseId = readPlatformKey(body.publicProviderReleaseId);
+  const platformKey = readPlatformKey(body.platformKey);
+  const expectedPublicProviderReleaseId = readPlatformKey(
+    body.expectedPublicProviderReleaseId,
+  );
   const entityKind = readEntityKind(body.entityKind);
   const paginationOpts = readPaginationOpts(body.paginationOpts);
   if (
-    publicProviderReleaseId === null ||
+    platformKey === null ||
+    expectedPublicProviderReleaseId === null ||
     entityKind === null ||
     paginationOpts === null
   ) {
@@ -1149,7 +1153,8 @@ const listProviderCatalogEntities = httpAction(async (ctx, request) => {
     return jsonResponse(
       200,
       await ctx.runQuery(internal.providerCatalogInspection.listEntities, {
-        publicProviderReleaseId,
+        platformKey,
+        expectedPublicProviderReleaseId,
         entityKind,
         paginationOpts,
       }),
@@ -1191,11 +1196,15 @@ const readProviderCatalogDocument = httpAction(async (ctx, request) => {
   if (!isAuthorized(request)) return unauthorized();
   const body = await readJsonObject(request);
   if (body === null) return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
-  const publicProviderReleaseId = readPlatformKey(body.publicProviderReleaseId);
+  const platformKey = readPlatformKey(body.platformKey);
+  const expectedPublicProviderReleaseId = readPlatformKey(
+    body.expectedPublicProviderReleaseId,
+  );
   const entityKind = readEntityKind(body.entityKind);
   const publicEntityId = readPlatformKey(body.publicEntityId);
   if (
-    publicProviderReleaseId === null ||
+    platformKey === null ||
+    expectedPublicProviderReleaseId === null ||
     entityKind === null ||
     publicEntityId === null
   ) {
@@ -1205,7 +1214,8 @@ const readProviderCatalogDocument = httpAction(async (ctx, request) => {
     return jsonResponse(
       200,
       await ctx.runQuery(internal.providerCatalogInspection.readDocument, {
-        publicProviderReleaseId,
+        platformKey,
+        expectedPublicProviderReleaseId,
         entityKind,
         publicEntityId,
       }),
@@ -1220,11 +1230,16 @@ const readProviderCatalogChaseReconciliation = httpAction(
     if (!isAuthorized(request)) return unauthorized();
     const body = await readJsonObject(request);
     if (body === null) return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
-    const publicProviderReleaseId = readPlatformKey(
-      body.publicProviderReleaseId,
+    const platformKey = readPlatformKey(body.platformKey);
+    const expectedPublicProviderReleaseId = readPlatformKey(
+      body.expectedPublicProviderReleaseId,
     );
     const publicRepackId = readPlatformKey(body.publicRepackId);
-    if (publicProviderReleaseId === null || publicRepackId === null) {
+    if (
+      platformKey === null ||
+      expectedPublicProviderReleaseId === null ||
+      publicRepackId === null
+    ) {
       return badRequest(PROVIDER_CATALOG_REQUEST_INVALID);
     }
     try {
@@ -1232,7 +1247,7 @@ const readProviderCatalogChaseReconciliation = httpAction(
         200,
         await ctx.runQuery(
           internal.providerCatalogInspection.readRepackChaseReconciliation,
-          { publicProviderReleaseId, publicRepackId },
+          { platformKey, expectedPublicProviderReleaseId, publicRepackId },
         ),
       );
     } catch (error) {
