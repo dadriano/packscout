@@ -391,6 +391,9 @@ export async function persistSourceRelationshipConfirmationSetsForCanonicalWrite
     ${uuid(set.sourceEntityId)}, ${uuid(set.sourceCanonicalRevisionId)},
     ${set.sourceCanonicalContentHash}
   )`);
+  // A time-only replay intentionally reuses the retained content revision.
+  // Bind lineage by stable entity and exact content hash; the later semantic
+  // occurrence keeps its own effective time on the confirmation set.
   const lineageRows = await transaction.$queryRaw<ConfirmationLineageRow[]>(Prisma.sql`
     select source_revision.id as "sourceRevisionId",
            semantic.id as "semanticObservationId",
@@ -440,8 +443,6 @@ export async function persistSourceRelationshipConfirmationSetsForCanonicalWrite
      and canonical_revision.entity_id = source_entity.id
      and canonical_revision.organization_id = source_entity.organization_id
      and canonical_revision.content_hash = requested.canonical_content_hash
-     and canonical_revision.source_updated_at =
-       semantic.effective_source_time
   `);
   if (lineageRows.length !== sets.length) {
     throw new TypeError("Source relationship confirmation scope is invalid.");

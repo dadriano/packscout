@@ -3443,6 +3443,49 @@ test("one run commits page two from its mutable turn while run-start lineage sta
   }
 });
 
+test("time-only pull replay reuses the retained canonical revision", async () => {
+  const runtime = await createRuntime("time-only-pull-replay");
+  try {
+    assert.equal(runtime.adapterResult.ok, true);
+    if (!runtime.adapterResult.ok) assert.fail("Expected captured page.");
+    const initialPullOutcome = runtime.adapterResult.value.normalizedPage.outcomes[2];
+    const initialPull = initialPullOutcome?.status === "valid"
+      ? initialPullOutcome.observation
+      : null;
+    if (initialPull?.kind !== "pull") {
+      assert.fail("Pull observation unavailable.");
+    }
+    await service(runtime).importPage({
+      pins: runtime.pins,
+      adapterResult: runtime.adapterResult,
+      committedAt: await databaseNow(runtime.database),
+    });
+
+    const replay = await service(runtime).importPage(
+      await capturedPageTurn(runtime, {
+        pageNumber: 2,
+        requestedValue: "cursor-a",
+        nextValue: "cursor-b",
+        outcomes: [{
+          status: "valid",
+          recordIndex: 0,
+          observation: pullObservation({
+            ...initialPull,
+            effectiveAt: "2026-08-21T13:00:00.000Z",
+            collectedAt: "2026-08-21T13:00:01.000Z",
+          }),
+        }],
+      }),
+    );
+
+    assert.equal(replay.kind, "committed");
+    assert.equal(replay.counts.duplicate, 1);
+    assert.equal(replay.counts.canonicalRevisions, 0);
+  } finally {
+    await runtime.close();
+  }
+});
+
 test("atomic lifecycle covers correction, time-only replay, A-B-A, immutable conflicts, identity quarantine, and relationship recovery", async () => {
   const runtime = await createRuntime("atomic-lifecycle-matrix");
   try {

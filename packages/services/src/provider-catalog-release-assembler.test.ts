@@ -343,6 +343,26 @@ test("source head completion recorded after the final settlement remains publish
   assert.equal(plan.classification, "publish");
 });
 
+test("association confirmation after observation time does not block publication", async () => {
+  const checkpoint = providerFixtureCheckpoint();
+  const snapshot = providerFixtureSnapshot({
+    checkpoint,
+    lastSuccessfulObservationAt: new Date("2026-08-15T02:30:00.000Z"),
+  });
+  const plan = await fixtureAssembler({
+    checkpoint,
+    snapshot: {
+      ...snapshot,
+      assetPackAssociations: snapshot.assetPackAssociations.map((association) => ({
+        ...association,
+        associatedAt: new Date("2026-08-15T02:45:00.000Z"),
+      })),
+    },
+  }).assembler.assemble({ trigger: "settled_change" });
+
+  assert.equal(plan.classification, "publish");
+});
+
 test("asset-pack associations cannot exceed the exact settled boundary", async () => {
   const checkpoint = providerFixtureCheckpoint();
   const base = providerFixtureSnapshot({ checkpoint });

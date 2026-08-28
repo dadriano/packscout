@@ -59,7 +59,9 @@ function packContent() {
   return {
     schemaVersion: "catalog-projection-v1",
     entityType: "pack",
-    availability: "available",
+    // Simulates retained canonical V1 rows written before the vocabulary was
+    // standardized to available/unavailable.
+    availability: "active",
     priceValueMinor: 2_500,
     priceCurrency: "USD",
     buybackPercent: 80,
@@ -71,7 +73,7 @@ function assetContent(externalId: string) {
     schemaVersion: "catalog-projection-v1",
     entityType: "catalog_asset",
     relatedPackExternalId: null,
-    availability: "available",
+    availability: "active",
     name: externalId,
   };
 }
@@ -147,7 +149,7 @@ function initialPage(runId: string): CommitPageInput {
             externalId: "asset-2",
             content: {
               ...assetContent("asset-2"),
-              availability: "unavailable",
+              availability: "disabled",
             },
             sourceUpdatedAt: sourceAt,
             sourceCollectedAt: collectedAt,
@@ -812,6 +814,15 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         created_at: configuredAt,
       },
     });
+    await assert.rejects(
+      harness.client.$executeRaw`
+        update public.normalized_heat_observation_outcomes
+        set created_at = created_at
+        where organization_id = ${ids.organization}::uuid
+          and candidate_key = ${"b".repeat(64)}
+      `,
+      /normalized Heat observations are append-only/,
+    );
     await assert.rejects(
       harness.client.$transaction(async (transaction) => {
         const [clock] = await transaction.$queryRaw<

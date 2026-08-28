@@ -498,6 +498,7 @@ export class ProviderSourcePageRepository {
             effectiveAt: projection.effectiveAt,
             existingBinding: null,
             revisions: history.map((revision) => ({
+              canonicalRevisionId: revision.canonicalRevisionId,
               contentFingerprint: revision.contentFingerprint,
               effectiveAt: revision.effectiveAt.toISOString(),
             })),
@@ -512,13 +513,7 @@ export class ProviderSourcePageRepository {
             becomesCurrent: decision.becomesCurrent,
             ...(decision.disposition === "duplicate"
               ? {
-                  reuseCanonicalRevisionId:
-                    history.find((revision) =>
-                      revision.contentFingerprint ===
-                        projection.contentFingerprint
-                      && revision.effectiveAt.getTime() ===
-                        new Date(projection.effectiveAt).getTime()
-                    )?.canonicalRevisionId ?? null,
+                  reuseCanonicalRevisionId: decision.reuseCanonicalRevisionId,
                 }
               : {}),
           });

@@ -145,6 +145,30 @@ test("later duplicate pull evidence cannot advance an established pair's public 
   assert.equal(repeated.dataAsOf.toISOString(), baseline.dataAsOf.toISOString());
 });
 
+test("association confirmation time does not become public source data time", () => {
+  const snapshot = providerFixtureSnapshot();
+  const configuration = providerFixtureApprovedConfiguration();
+  const baseline = projectProviderCatalogRelease({
+    configuration,
+    platformKey: "alpha",
+    revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
+    repackIdentities: snapshot.repackIdentities,
+  });
+  const confirmedLater = projectProviderCatalogRelease({
+    configuration,
+    platformKey: "alpha",
+    revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations.map((association) => ({
+      ...association,
+      associatedAt: new Date(association.associatedAt.getTime() + 60_000),
+    })),
+    repackIdentities: snapshot.repackIdentities,
+  });
+
+  assert.deepEqual(confirmedLater, baseline);
+});
+
 test("current-V1 association scope, pull-pair identity, and targets fail closed", () => {
   const snapshot = providerFixtureSnapshot();
   const baseAssociation = snapshot.assetPackAssociations[0]!;

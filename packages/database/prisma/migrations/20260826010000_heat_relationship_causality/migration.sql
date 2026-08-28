@@ -942,6 +942,58 @@ create trigger normalized_heat_observations_append_only
 before insert or update or delete on public.normalized_heat_observations
 for each row execute function public.protect_normalized_heat_observation();
 
+-- Outcomes share the append-only and retention policy, but not the observation
+-- row shape. Keep a table-specific trigger function so PL/pgSQL never resolves
+-- observation-only fields against the outcome relation during an update.
+create or replace function public.protect_normalized_heat_observation_outcome()
+returns trigger
+language plpgsql
+as $$
+declare
+  heat_phase text;
+begin
+  if tg_op = 'INSERT' then
+    select backfill.phase
+      into heat_phase
+    from public.normalized_heat_relationship_backfills as backfill
+    where backfill.organization_id = new.organization_id
+    for share;
+    if heat_phase = 'catalog_order' then
+      raise exception 'normalized Heat catalog order is frozen'
+        using errcode = '55000';
+    end if;
+    return new;
+  end if;
+  if tg_op = 'UPDATE' then
+    raise exception 'normalized Heat observations are append-only'
+      using errcode = '55000';
+  end if;
+  if tg_op = 'DELETE' then
+    begin
+      select backfill.phase
+        into heat_phase
+      from public.normalized_heat_relationship_backfills as backfill
+      where backfill.organization_id = old.organization_id
+      for share nowait;
+    exception
+      when lock_not_available then
+        raise exception 'normalized Heat catalog order transition is in progress'
+          using errcode = '55000';
+    end;
+    if heat_phase = 'catalog_order' then
+      raise exception 'normalized Heat catalog order is frozen'
+        using errcode = '55000';
+    end if;
+    if old.retained_until > current_timestamp then
+      raise exception 'normalized Heat observation retention has not elapsed'
+        using errcode = '55000';
+    end if;
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
 -- A row trigger can prove that catalog order is a one-way fill, but it cannot
 -- prove that a statement assigned the exact next causal ranks. Validate the
 -- complete bounded batch before the repository advances its durable counter.
@@ -1053,7 +1105,8 @@ drop trigger normalized_heat_observation_outcomes_append_only
   on public.normalized_heat_observation_outcomes;
 create trigger normalized_heat_observation_outcomes_append_only
 before insert or update or delete on public.normalized_heat_observation_outcomes
-for each row execute function public.protect_normalized_heat_observation();
+for each row execute function
+  public.protect_normalized_heat_observation_outcome();
 
 -- Once a V1 pull edge is resolved, its identity and causal watermark are
 -- immutable. Otherwise a later direct write could silently change evidence

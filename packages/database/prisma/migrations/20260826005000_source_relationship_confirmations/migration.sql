@@ -839,14 +839,14 @@ begin
    and source_entity.organization_id = confirmation_set.organization_id
    and source_entity.platform_key = provider.platform_key
    and source_entity.record_kind = 'pull'
+  -- Time-only semantic replays reuse the retained content revision. The
+  -- confirmation preserves the replay time separately in semantic_effective_at.
   join public.canonical_revisions as canonical_revision
     on canonical_revision.id = confirmation_set.source_canonical_revision_id
    and canonical_revision.entity_id = confirmation_set.source_entity_id
    and canonical_revision.organization_id = confirmation_set.organization_id
    and canonical_revision.content_hash =
      confirmation_set.source_canonical_content_hash
-   and canonical_revision.source_updated_at =
-     semantic.effective_source_time
    and canonical_revision.public_change_sequence <=
      confirmation_set.public_change_sequence
   join public.public_change_causes as cause

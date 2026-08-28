@@ -240,12 +240,12 @@ test("the target requires all composite migrations and 88 application tables", (
     {
       migrationName: "20260826005000_source_relationship_confirmations",
       checksum:
-        "c998b630b2d986117511f899e541bc9c885a666753ebc99f07b15ed0db49d5cc",
+        "19cfc4cdae5fc3615159c5ead740fdc3e3e83945bf6c9ec2176ce36067ce9a21",
     },
     {
       migrationName: "20260826010000_heat_relationship_causality",
       checksum:
-        "fd8fd289035cbd918f199d4929c5b0c9cae580d170c06729d168eb48c68222ab",
+        "5ac08e4eb77bc83838d94796ace095c93dbdfab2344a2658cb87b46e3397193d",
     },
     {
       migrationName: "20260827010000_provider_source_platform_request_lanes",

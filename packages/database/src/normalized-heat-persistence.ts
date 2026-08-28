@@ -250,13 +250,15 @@ function catalogContentIsActive(content: unknown): boolean {
   return isObject(content)
     && content.entityType === "catalog_asset"
     && content.relatedPackExternalId === null
-    && content.availability === "available";
+    && (content.availability === "active"
+      || content.availability === "available");
 }
 
 function packContentIsActive(content: unknown): boolean {
   return isObject(content)
     && content.entityType === "pack"
-    && content.availability === "available";
+    && (content.availability === "active"
+      || content.availability === "available");
 }
 
 function pullValues(
@@ -700,7 +702,8 @@ async function loadCatalogAssetsAsOfCauses(
         ) as asset_revision on true
         where asset_revision.content_json ->> 'entityType' = 'catalog_asset'
           and asset_revision.content_json -> 'relatedPackExternalId' = 'null'::jsonb
-          and asset_revision.content_json ->> 'availability' = 'available'
+          and asset_revision.content_json ->> 'availability'
+            in ('active', 'available')
           and (
             latest_confirmation.id is null
             or (

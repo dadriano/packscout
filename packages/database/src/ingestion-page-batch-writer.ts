@@ -601,11 +601,11 @@ export async function writeCanonicalProjectionBatch(
         (revision) =>
           revision.entityId === projection.entityId
           && revision.contentHash === projection.contentHash
-          && revision.sourceUpdatedAt.getTime()
-            === projection.projection.sourceUpdatedAt.getTime()
           && (
-            projection.reuseCanonicalRevisionId === null
-            || revision.id === projection.reuseCanonicalRevisionId
+            typeof projection.reuseCanonicalRevisionId === "string"
+              ? revision.id === projection.reuseCanonicalRevisionId
+              : revision.sourceUpdatedAt.getTime()
+                === projection.projection.sourceUpdatedAt.getTime()
           ),
       );
       if (candidates.length !== 1) {

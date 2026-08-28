@@ -11,8 +11,13 @@ import type {
 } from "./database.ts";
 
 export const maximumAvailableChaseCount = 10_000;
+// Historical canonical rows used active/disabled before the public vocabulary
+// standardized on available/unavailable. Writes remain on the current contract,
+// while Heat must continue to read both retained vocabularies.
 export const canonicalAvailabilities = new Set([
+  "active",
   "available",
+  "disabled",
   "unavailable",
   "sold_out",
   "unknown",
@@ -479,39 +484,6 @@ implements NormalizedHeatObservationReadPort {
         and public_change_sequence <= ${input.throughSettledSequence}
         and mapping_public_change_sequence <= ${input.throughSettledSequence}
         and public_repack_id in (${Prisma.join(publicRepackIds.map(uuid))})
-        and (
-          observation_kind <> 'pull'
-          or not exists (
-            select 1
-            from public.normalized_heat_observations as newer
-            join public.canonical_revisions as newer_revision
-              on newer_revision.id = newer.canonical_revision_id
-             and newer_revision.organization_id = newer.organization_id
-            join public.canonical_revisions as current_revision
-              on current_revision.id =
-                   normalized_heat_observations.canonical_revision_id
-             and current_revision.organization_id =
-                   normalized_heat_observations.organization_id
-             and current_revision.entity_id = newer_revision.entity_id
-            where newer.organization_id =
-              normalized_heat_observations.organization_id
-              and newer.observation_kind = 'pull'
-              and newer.public_change_sequence <=
-                ${input.throughSettledSequence}
-              and newer.mapping_public_change_sequence <=
-                ${input.throughSettledSequence}
-              and (
-                newer.public_change_sequence >
-                  normalized_heat_observations.public_change_sequence
-                or (
-                  newer.public_change_sequence =
-                    normalized_heat_observations.public_change_sequence
-                  and newer.observation_key >
-                    normalized_heat_observations.observation_key
-                )
-              )
-          )
-        )
     `);
     const observationBounds = bounds[0] ?? {
       observationCount: 0n,
@@ -571,39 +543,6 @@ implements NormalizedHeatObservationReadPort {
         and public_change_sequence <= ${input.throughSettledSequence}
         and mapping_public_change_sequence <= ${input.throughSettledSequence}
         and public_repack_id in (${Prisma.join(publicRepackIds.map(uuid))})
-        and (
-          observation_kind <> 'pull'
-          or not exists (
-            select 1
-            from public.normalized_heat_observations as newer
-            join public.canonical_revisions as newer_revision
-              on newer_revision.id = newer.canonical_revision_id
-             and newer_revision.organization_id = newer.organization_id
-            join public.canonical_revisions as current_revision
-              on current_revision.id =
-                   normalized_heat_observations.canonical_revision_id
-             and current_revision.organization_id =
-                   normalized_heat_observations.organization_id
-             and current_revision.entity_id = newer_revision.entity_id
-            where newer.organization_id =
-              normalized_heat_observations.organization_id
-              and newer.observation_kind = 'pull'
-              and newer.public_change_sequence <=
-                ${input.throughSettledSequence}
-              and newer.mapping_public_change_sequence <=
-                ${input.throughSettledSequence}
-              and (
-                newer.public_change_sequence >
-                  normalized_heat_observations.public_change_sequence
-                or (
-                  newer.public_change_sequence =
-                    normalized_heat_observations.public_change_sequence
-                  and newer.observation_key >
-                    normalized_heat_observations.observation_key
-                )
-              )
-          )
-        )
       order by occurred_at asc,
                public_change_sequence asc,
                catalog_order_sequence asc nulls first,

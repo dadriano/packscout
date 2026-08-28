@@ -465,14 +465,6 @@ export function projectProviderCatalogRelease(input: {
       maximumRelevantTime = time;
     }
   };
-  const markContributingAssociation = (
-    association: ProviderCatalogAssetPackAssociationSnapshot,
-  ): void => {
-    const time = finiteDate(association.associatedAt).getTime();
-    if (maximumRelevantTime === null || time > maximumRelevantTime) {
-      maximumRelevantTime = time;
-    }
-  };
   const seenRevisions = new Set<string>();
   for (const revision of relevant) {
     const revisionKey = `${revision.recordKind}\u0000${revision.externalId}`;
@@ -581,7 +573,6 @@ export function projectProviderCatalogRelease(input: {
       new Set<string>();
     packIds.add(association.packExternalId);
     packIdsByAsset.set(association.assetExternalId, packIds);
-    markContributingAssociation(association);
   }
 
   const collectibles: PublicCollectible[] = [];
