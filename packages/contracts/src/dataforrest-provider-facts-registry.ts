@@ -2,6 +2,11 @@ import { clutchpacksCardProviderFacts } from
   "./dataforrest-clutchpacks-card-v2.ts";
 import { clutchpacksPackProviderFacts } from
   "./dataforrest-clutchpacks-pack-v3.ts";
+import {
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+} from "./dataforrest-events-v1-adapter-versions.ts";
 import type { LaunchProviderKey } from "./provider-source-contract-v1.ts";
 import type { NormalizedProviderFacts } from "./provider-source-facts-v1.ts";
 
@@ -19,24 +24,30 @@ type ProviderFactsAdapter = Readonly<{
  */
 const providerFactsAdapters = Object.freeze([
   {
-    adapterVersion: "dataforrest-events-adapter-v2",
+    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
     provider: "clutchpacks",
     kind: "card",
     read: clutchpacksCardProviderFacts,
   },
   {
-    adapterVersion: "dataforrest-events-adapter-v3",
+    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     provider: "clutchpacks",
     kind: "card",
     read: clutchpacksCardProviderFacts,
   },
   {
-    adapterVersion: "dataforrest-events-adapter-v3",
+    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     provider: "clutchpacks",
     kind: "pack",
     read: clutchpacksPackProviderFacts,
   },
 ] as const satisfies readonly ProviderFactsAdapter[]);
+
+const supportedAdapterVersions: ReadonlySet<string> = new Set([
+  DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+]);
 
 export function readDataforrestProviderFacts(
   adapterVersion: string,
@@ -44,6 +55,9 @@ export function readDataforrestProviderFacts(
   kind: NormalizedProviderFacts["kind"],
   nativeData: Readonly<Record<string, unknown>>,
 ): NormalizedProviderFacts | null {
+  if (!supportedAdapterVersions.has(adapterVersion)) {
+    throw new RangeError("dataforrest_events.adapter_version_unsupported");
+  }
   const adapter = providerFactsAdapters.find(
     (candidate) =>
       candidate.adapterVersion === adapterVersion &&

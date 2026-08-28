@@ -18,6 +18,11 @@ import {
   emptyNormalizedProviderFacts,
   type NormalizedProviderFacts,
 } from "./provider-source-facts-v1.ts";
+import {
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+} from "./dataforrest-events-v1-adapter-versions.ts";
 import { readDataforrestProviderFacts } from
   "./dataforrest-provider-facts-registry.ts";
 import {
@@ -27,12 +32,11 @@ import {
 
 export const DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY =
   "dataforrest-events-v1" as const;
-export const DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION =
-  "dataforrest-events-adapter-v1" as const;
-export const DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION =
-  "dataforrest-events-adapter-v2" as const;
-export const DATAFORREST_EVENTS_V1_ADAPTER_VERSION =
-  "dataforrest-events-adapter-v3" as const;
+export {
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+} from "./dataforrest-events-v1-adapter-versions.ts";
 export const DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY =
   "dataforrest-events-connection-v1" as const;
 export const DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY =

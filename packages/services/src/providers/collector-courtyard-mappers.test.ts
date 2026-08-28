@@ -128,7 +128,7 @@ test("ClutchPacks native pack name reaches an accepted canonical pack", () => {
   );
 });
 
-test("ClutchPacks v3 pack facts reach proven vendor EV and ready odds without invented buyback", () => {
+test("ClutchPacks v3 pack facts keep EV unavailable without buyback evidence", () => {
   const observation = normalizeDataforrestEventRecord(
     dataforrestEventRecordV1Schema.parse({
       platform: "clutchpacks",
@@ -190,29 +190,17 @@ test("ClutchPacks v3 pack facts reach proven vendor EV and ready odds without in
   assert.equal(outcome.candidate.buybackPercent, null);
   assert.equal(outcome.candidate.drawCount, 1);
   assert.equal(outcome.candidate.availability, "available");
-  assert.equal(outcome.evInputStatus, "ready");
-  assert.equal(outcome.evInputCandidate?.buybackPercent, null);
-  assert.deepEqual(
-    outcome.evInputCandidate?.buckets.map(({ bucketId, probability, quantity }) =>
-      ({ bucketId, probability, quantity })
-    ),
-    [
-      { bucketId: "base", probability: 0.75, quantity: 3 },
-      { bucketId: "high", probability: 0.25, quantity: 1 },
-    ],
-  );
-  const canonicalEvInput = canonicalProviderObservationContent(
-    outcome.evInputCandidate!,
-  );
-  assert.equal(canonicalEvInput.buybackPercent, null);
-  assert.deepEqual(canonicalEvInput.readiness, {
-    status: "ready",
-    reasons: [],
-  });
+  assert.equal(outcome.evInputStatus, "unavailable");
+  assert.equal(outcome.evInputCandidate, null);
   const canonicalPack = canonicalProviderObservationContent(outcome.candidate);
   assert.equal(canonicalPack.providerReportedEvValueMinor, 99_900);
   assert.equal(canonicalPack.providerReportedEvCurrency, "USD");
-  assert.equal(outcome.warnings.length, 0);
+  assert.deepEqual(outcome.warnings, [
+    {
+      code: "ev_input_unavailable",
+      fieldPath: "providerFacts.evInput",
+    },
+  ]);
 });
 
 test("ClutchPacks V1 asset facts reach a publishable canonical catalog asset", () => {
