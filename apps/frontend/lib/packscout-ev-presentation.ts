@@ -35,13 +35,9 @@ const PRESENTATION_LOCALE = "en-US" as const;
 type PublicMoney = Readonly<{ minorUnits: number; currency: string }>;
 type PublicPrice = PublicRepackSummaryV3["price"];
 
-export type MetricSemanticState =
-  | "positive"
-  | "neutral"
-  | "negative"
-  | "unavailable";
+export type MetricSemanticState = "neutral" | "negative" | "unavailable";
 
-export type MetricSemanticLabel = "Positive" | "Neutral" | "Negative";
+export type MetricSemanticLabel = "Neutral" | "Negative";
 
 export type AvailableMetricValue = Readonly<{
   availability: "available";
@@ -246,7 +242,9 @@ export function formatGrossEvPercent(basisPoints: number): string {
 export function semanticStateForSignedBasisPoints(
   basisPoints: number,
 ): Exclude<MetricSemanticState, "unavailable"> {
-  if (basisPoints > 0) return "positive";
+  if (basisPoints > 0) {
+    throw new RangeError("public PackScout EV cannot be positive");
+  }
   if (basisPoints < 0) return "negative";
   return "neutral";
 }
@@ -254,7 +252,6 @@ export function semanticStateForSignedBasisPoints(
 function semanticLabel(
   state: Exclude<MetricSemanticState, "unavailable">,
 ): MetricSemanticLabel {
-  if (state === "positive") return "Positive";
   if (state === "negative") return "Negative";
   return "Neutral";
 }
@@ -496,6 +493,13 @@ export function packScoutMetricConsistencyIssuesV3(
     }
   }
   if (issues.length > 0) return Object.freeze(issues);
+  if (
+    metrics.grossReturnBasisPoints > 10_000 ||
+    metrics.evDollars.minorUnits > 0 ||
+    metrics.evPercentBasisPoints > 0
+  ) {
+    issues.push("public PackScout EV must be nonpositive");
+  }
   if (
     metrics.evPercentBasisPoints !==
     metrics.grossReturnBasisPoints - 10_000
@@ -776,6 +780,9 @@ export function presentSignedEvPercentMetric(
 ): MetricValuePresentation {
   if (metric.status === "unavailable") {
     return unavailableMetric(label, "evPercent", metric.reason);
+  }
+  if (metric.basisPoints > 0) {
+    return unavailableMetric(label, "evPercent", "CALCULATION_UNAVAILABLE");
   }
   const state = semanticStateForSignedBasisPoints(metric.basisPoints);
   return availableMetric(

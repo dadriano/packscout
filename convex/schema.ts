@@ -542,6 +542,9 @@ const buybackEvMethodVersionValidator = v.literal(
 const buybackEvConfidencePolicyVersionValidator = v.literal(
   "packscout-buyback-adjusted-ev-confidence-v1",
 );
+const publicEvPolicyVersionV3Validator = v.literal(
+  "packscout-public-ev-nonpositive-v1",
+);
 
 const buybackEvConfidenceResultValidator = v.object({
   policyVersion: buybackEvConfidencePolicyVersionValidator,
@@ -737,6 +740,7 @@ export const dataReleaseV3PointerValidator = v.object({
   releaseFingerprint: sha256Validator,
   methodVersion: buybackEvMethodVersionValidator,
   confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+  publicEvPolicyVersion: publicEvPolicyVersionV3Validator,
   dataAsOf: timestampValidator,
   completedAt: timestampValidator,
   counts: dataReleaseV3CountsValidator,
@@ -1598,6 +1602,7 @@ export default defineSchema({
     ),
     methodVersion: buybackEvMethodVersionValidator,
     confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+    publicEvPolicyVersion: publicEvPolicyVersionV3Validator,
     dataAsOf: timestampValidator,
     contentHash: sha256Validator,
     searchAlgorithmVersion: v.literal("repack_ev_search_v3"),

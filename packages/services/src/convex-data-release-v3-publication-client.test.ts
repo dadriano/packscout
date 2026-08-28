@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   PRODUCTION_AUTH_HEADER_NAMES,
   canonicalJson,
   productionPublicationReceiptSigningValue,
@@ -44,6 +45,7 @@ const pointer = Object.freeze({
   releaseFingerprint: fingerprint,
   methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
   confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+  publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   dataAsOf: "2026-08-19T11:55:00.000Z",
   completedAt: "2026-08-19T11:56:00.000Z",
   counts,
@@ -63,6 +65,7 @@ function startRequest(): DataReleaseV3StartRequest {
     manifest: {
       methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
       confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+      publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
       dataAsOf: "2026-08-19T11:55:00.000Z",
       contentHash: "5".repeat(64),
       searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,

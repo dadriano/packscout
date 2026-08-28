@@ -492,7 +492,7 @@ export interface PackScoutEvPresentationBoundary {
     availability: "available" | "unavailable";
     status: string;
     statusLabel: string;
-    semanticState: "positive" | "neutral" | "negative" | "unavailable";
+    semanticState: "neutral" | "negative" | "unavailable";
     simulated: boolean;
     zeroPayout: boolean;
     sourceLine: string;
@@ -775,6 +775,7 @@ export async function runBuybackEvLaunchCertificationHarness(
     const platform = seed.platforms.get(fixture.providerKey)!;
     const evidence = fixture.normalize();
     const expected = fixture.expected;
+    const publicStatus = expected.publicStatus ?? expected.status;
 
     // Hop 1: source revision -> normalized evidence.
     check(
@@ -889,7 +890,7 @@ export async function runBuybackEvLaunchCertificationHarness(
     check(state, detail !== null, "the staged release lost the repack row");
     if (detail !== null) {
       const estimate = detail.evEstimates.packScout;
-      if (expected.status === "current") {
+      if (publicStatus === "current") {
         const releaseMetrics = metricsOf(detail);
         check(
           state,
@@ -966,7 +967,7 @@ export async function runBuybackEvLaunchCertificationHarness(
           rendered.adviceLine === "Not financial or gambling advice",
         "trust copy, provenance labeling, or the outbound-action rule diverged",
       );
-      if (expected.sourceAgeState !== null) {
+      if (publicStatus === "current" && expected.sourceAgeState !== null) {
         check(
           state,
           rendered.freshness.sourceAgeState === expected.sourceAgeState &&
@@ -1021,11 +1022,11 @@ export async function runBuybackEvLaunchCertificationHarness(
         calculatedAt: CERTIFICATION_TIMELINE.calculatedAt,
         effectiveFingerprint: fingerprint,
         revisionId: orEmpty(revision?.revisionId),
-        status: expected.status,
+        status: publicStatus,
         publicReason: expected.publicReason,
-        metrics: expected.status === "current" ? metricsOf(detail) : null,
+        metrics: publicStatus === "current" ? metricsOf(detail) : null,
         confidence:
-          expected.status === "current" &&
+          publicStatus === "current" &&
           detail.evEstimates.packScout.status === "current"
             ? {
                 scoreBasisPoints:
@@ -1051,7 +1052,7 @@ export async function runBuybackEvLaunchCertificationHarness(
         calculatedAt: CERTIFICATION_TIMELINE.calculatedAt,
         effectiveFingerprint: fingerprint,
         revisionId: orEmpty(revision?.revisionId),
-        status: expected.status,
+        status: publicStatus,
         publicReason: expected.publicReason,
         metrics: null,
         confidence: null,

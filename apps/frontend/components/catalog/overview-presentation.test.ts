@@ -17,11 +17,10 @@ import {
   resolveOverviewSelection,
 } from "./overview-presentation";
 
-test("always presents four overview KPIs with buyback-adjusted meaning", () => {
+test("presents the three nonpositive-policy overview KPIs", () => {
   const kpis: DashboardKpis = {
     totalRepacks: 1_248,
-    positiveEvRepacks: 612,
-    medianPackScoutEvPercent: { status: "available", basisPoints: 180 },
+    medianPackScoutEvPercent: { status: "available", basisPoints: -180 },
     highestChaseValueUsdMinor: null,
     highConfidenceRepacks: 500,
   };
@@ -30,29 +29,21 @@ test("always presents four overview KPIs with buyback-adjusted meaning", () => {
 
   assert.deepEqual(
     presentation.map(({ id }) => id),
-    ["repacks", "positiveEv", "medianEv", "highestChase"],
+    ["repacks", "medianEv", "highestChase"],
   );
   assert.deepEqual(
     presentation.map(({ value }) => value),
-    ["1,248", "612", "+1.80%", "Unavailable"],
+    ["1,248", "-1.80%", "Unavailable"],
   );
   assert.equal(
     presentation[1]?.helper,
-    "Available repacks with EV $ above zero",
-  );
-  assert.match(
-    presentation[1]?.accessibleLabel ?? "",
-    /Excludes packs labeled Unavailable, Availability unknown, or Sold out, and packs whose estimate is unavailable or expired/,
-  );
-  assert.equal(
-    presentation[2]?.helper,
     "Median EV % · 500 high confidence",
   );
   assert.equal(
-    presentation[2]?.accessibleLabel,
-    "Median EV %: +1.80%. Positive.",
+    presentation[1]?.accessibleLabel,
+    "Median EV %: -1.80%. Negative.",
   );
-  assert.equal(presentation[3]?.reasonCopy, "Collectible value unavailable.");
+  assert.equal(presentation[2]?.reasonCopy, "Collectible value unavailable.");
 });
 
 test("presents server-ranked opportunities without re-sorting or recomputing", () => {
@@ -106,7 +97,7 @@ test("scales repack groups and retains unavailable reasons", () => {
       key: "collector_crypt",
       label: "Collector Crypt",
       repackCount: 732,
-      medianPackScoutEvPercent: { status: "available", basisPoints: 230 },
+      medianPackScoutEvPercent: { status: "available", basisPoints: -230 },
     },
     {
       key: "courtyard",
@@ -123,6 +114,6 @@ test("scales repack groups and retains unavailable reasons", () => {
   const presentation = presentCatalogSummaries(summaries);
 
   assert.deepEqual(presentation.map(({ barRatio }) => barRatio), [1, 0.5]);
-  assert.equal(presentation[0]?.medianEvPercent.displayValue, "+2.30%");
+  assert.equal(presentation[0]?.medianEvPercent.displayValue, "-2.30%");
   assert.equal(presentation[1]?.medianEvPercent.displayValue, "Unavailable");
 });

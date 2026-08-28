@@ -47,7 +47,6 @@ function dashboardPayload() {
       selectedRepack: detail,
       kpis: {
         totalRepacks: 1,
-        positiveEvRepacks: 0,
         medianPackScoutEvPercent: { status: "available", basisPoints: -1_500 },
         highestChaseValueUsdMinor: 85_000,
         highConfidenceRepacks: 1,
@@ -116,7 +115,6 @@ test("parses a coherent v3 dashboard bundle and preserves aggregates", () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.data.release.publicReleaseId, FIXTURE_RELEASE_ID);
-  assert.equal(result.data.kpis.positiveEvRepacks, 0);
   assert.equal(result.data.opportunities.length, 1);
   assert.equal(result.data.vendorSummaries[0]?.repackCount, 1);
   assert.equal(dashboardCatalogIsEmpty(result.data), false);
@@ -210,7 +208,6 @@ test("distinguishes an empty catalog from a filtered-down zero result", () => {
     selectedRepack: null,
     kpis: {
       totalRepacks: 0,
-      positiveEvRepacks: 0,
       medianPackScoutEvPercent: {
         status: "unavailable",
         basisPoints: null,

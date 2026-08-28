@@ -13,7 +13,10 @@ import {
   publicRepackHeatSchema,
   type PublicRepackHeat,
 } from "./repack-heat.ts";
-import { DATA_RELEASE_V3_SCHEMA_VERSION } from "./data-release-v3-ev-estimates.ts";
+import {
+  DATA_RELEASE_V3_SCHEMA_VERSION,
+  packScoutPublicEvPolicyVersionV3Schema,
+} from "./data-release-v3-ev-estimates.ts";
 import {
   packAvailabilityIsPurchasableV3,
   packScoutEvProjectionsAreByteEquivalentV3,
@@ -31,7 +34,8 @@ export * from "./data-release-v3-search.ts";
 /**
  * The active release identity carried by every data_release_v3 result
  * envelope. The exact buyback-adjusted calculation and confidence-policy
- * versions are required; no other EV interpretation can enter this release.
+ * versions and the public nonpositive-EV policy are required; no other EV
+ * interpretation can enter this release.
  */
 export const dataReleaseV3IdentitySchema = z
   .object({
@@ -39,6 +43,7 @@ export const dataReleaseV3IdentitySchema = z
     publicReleaseId: z.uuid(),
     methodVersion: packScoutBuybackEvMethodVersionV1Schema,
     confidencePolicyVersion: packScoutBuybackEvConfidencePolicyVersionV1Schema,
+    publicEvPolicyVersion: packScoutPublicEvPolicyVersionV3Schema,
     dataAsOf: packScoutBuybackEvTimestampV1Schema,
     completedAt: packScoutBuybackEvTimestampV1Schema,
   })

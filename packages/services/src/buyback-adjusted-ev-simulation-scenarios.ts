@@ -353,7 +353,8 @@ function unavailable(
  * The `$100 outcome EV / 85% uniform buyback / $100 price` walk-through with
  * a price-driven transition: frame 0 prices the pack at $100 (Gross EV $85,
  * 85%, EV -$15, -15%), later frames reprice it to $80 under a fresh source
- * revision so the same buyback terms turn positive.
+ * revision so the raw result turns positive and the public policy fails it
+ * closed.
  */
 function courtyardUniformPriceShift(
   build: ScenarioBuildContext,
@@ -379,7 +380,10 @@ function courtyardUniformPriceShift(
     scenarioKey,
     purpose:
       "uniform documented buyback with published-odds fallback and a price-driven transition",
-    expectation: CURRENT,
+    expectation:
+      build.frameIndex === 0
+        ? CURRENT
+        : unavailable("CALCULATION_UNAVAILABLE"),
     sourceRevision,
     calculatedAt: build.readAt,
     product: buildProduct(build, {
@@ -598,7 +602,7 @@ function gamestopFixedOffers(
   });
 }
 
-/** Per-draw final guaranteed payouts with a value-driven transition. */
+/** Positive raw per-draw payouts that fail closed at the public boundary. */
 function trovePerDrawFinalPayout(
   build: ScenarioBuildContext,
 ): PackScoutBuybackEvSimulationScenarioFrameV1 {
@@ -635,7 +639,7 @@ function trovePerDrawFinalPayout(
     scenarioKey,
     purpose:
       "per-draw final guaranteed payouts that are never re-discounted, with a value-driven transition at frame 1",
-    expectation: CURRENT,
+    expectation: unavailable("CALCULATION_UNAVAILABLE"),
     sourceRevision,
     calculatedAt: build.readAt,
     product: buildProduct(build, {
@@ -942,7 +946,7 @@ function courtyardDelayed(
       scenarioKey,
       frameTag: `r${build.frameIndex}`,
       observedAt,
-      salePriceUsd: 40,
+      salePriceUsd: 50,
       buybackRatio: 0.85,
       oddsBuckets: [courtyardBucket("only", 100, 50, 50)],
     }),
@@ -953,7 +957,7 @@ function courtyardDelayed(
       productKey: `courtyard:sim-${scenarioKey}`,
       name: `Delayed ${delayMinutes} Minute Listing`,
       description: `evidence observed ${delayMinutes} minutes before its calculation clock`,
-      priceUsdCents: 4_000,
+      priceUsdCents: 5_000,
       buyback: { kind: "uniform_rate", rateBasisPoints: 8_500 },
       availability: "available",
       soldOutAt: null,
@@ -1043,7 +1047,7 @@ function courtyardSourceAgeExpiry(
       scenarioKey,
       frameTag: "frozen",
       observedAt,
-      salePriceUsd: 50,
+      salePriceUsd: 70,
       buybackRatio: 0.9,
       oddsBuckets: [courtyardBucket("only", 100, 70, 70)],
     }),
@@ -1054,7 +1058,7 @@ function courtyardSourceAgeExpiry(
       productKey: `courtyard:sim-${scenarioKey}`,
       name: "Source Age Expiry Listing",
       description: "one frozen observation aging past the 60-minute window",
-      priceUsdCents: 5_000,
+      priceUsdCents: 7_000,
       buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 },
       availability: "available",
       soldOutAt: null,

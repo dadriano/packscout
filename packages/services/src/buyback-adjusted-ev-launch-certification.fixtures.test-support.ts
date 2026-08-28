@@ -1,4 +1,7 @@
-import type { PackScoutBuybackEvEvidenceOutcomeV1 } from "@packscout/contracts";
+import type {
+  PackScoutBuybackEvEvidenceOutcomeV1,
+  PackScoutBuybackEvPublicReasonCodeV1,
+} from "@packscout/contracts";
 import {
   type PackScoutBuybackEvLaunchProviderV1,
   type PackScoutBuybackEvLaunchScenarioClassV1,
@@ -98,13 +101,13 @@ export function certificationEvidenceContext(): PackScoutBuybackEvEvidenceContex
 // ---------------------------------------------------------------------------
 
 export interface CertificationExpectationV1 {
+  /** Raw V1 calculator/revision status before the public policy boundary. */
   readonly status: "current" | "unavailable";
+  /** Defaults to `status`; positive raw estimates publish as unavailable. */
+  readonly publicStatus?: "current" | "unavailable";
   readonly metrics: PackScoutBuybackEvTraceMetricsV1 | null;
   readonly confidence: PackScoutBuybackEvTraceConfidenceV1 | null;
-  readonly publicReason:
-    | "BUYBACK_UNAVAILABLE"
-    | "SOURCE_EVIDENCE_UNAVAILABLE"
-    | null;
+  readonly publicReason: PackScoutBuybackEvPublicReasonCodeV1 | null;
   readonly sourceAgeState:
     | "fresh_within_15_minutes"
     | "delayed_over_15_through_30_minutes"
@@ -117,7 +120,7 @@ export interface CertificationExpectationV1 {
     evPercent: string;
     confidenceDisplay: string;
     reasonCopy: string | null;
-    semanticState: "positive" | "neutral" | "negative" | "unavailable";
+    semanticState: "neutral" | "negative" | "unavailable";
   }>;
 }
 
@@ -146,7 +149,7 @@ const availableRendered = (input: {
   evDollars: string;
   evPercent: string;
   confidenceDisplay: string;
-  semanticState: "positive" | "neutral" | "negative";
+  semanticState: "neutral" | "negative";
 }) => ({
   statusLabel: "Current estimate",
   reasonCopy: null,
@@ -405,6 +408,7 @@ export const CERTIFICATION_PROVIDER_FIXTURES: readonly CertificationProviderFixt
         normalizeBeezieBuybackEvEvidenceV1(BEEZIE_SOURCE, certificationEvidenceContext()),
       expected: {
         status: "current",
+        publicStatus: "unavailable",
         // 0.8 x (2000c x 0.975) + 0.2 x (10000c x 0.975) = 1560 + 1950.
         metrics: {
           grossEvMinorUnits: 3_510,
@@ -417,7 +421,7 @@ export const CERTIFICATION_PROVIDER_FIXTURES: readonly CertificationProviderFixt
           band: "medium",
           limitationCodes: ["closed_range_midpoint", "platform_published_odds"],
         },
-        publicReason: null,
+        publicReason: "CALCULATION_UNAVAILABLE",
         sourceAgeState: "fresh_within_15_minutes",
         rendered: availableRendered({
           grossEvDollars: "$35.10",
@@ -463,14 +467,9 @@ export const CERTIFICATION_PROVIDER_FIXTURES: readonly CertificationProviderFixt
         },
         publicReason: null,
         sourceAgeState: "fresh_within_15_minutes",
-        rendered: availableRendered({
-          grossEvDollars: "$33.50",
-          grossEvPercent: "134.00%",
-          evDollars: "+$8.50",
-          evPercent: "+34.00%",
-          confidenceDisplay: "High · 100%",
-          semanticState: "positive",
-        }),
+        rendered: unavailableRendered(
+          "Unavailable: the calculation could not be completed.",
+        ),
       },
     },
     {

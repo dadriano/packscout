@@ -95,6 +95,33 @@ function threeRepackPlanDetails() {
 }
 
 describe("data_release_v3 lifecycle", () => {
+  test("start requires the exact public EV policy version", async () => {
+    const t = convexTest(schema, modules);
+    const plan = await buildV3FixturePlan({
+      publicReleaseId: RELEASE_ID_1,
+      details: [buildV3Detail({ publicRepackId: V3_REPACK_ID_A })],
+    });
+    const missing = structuredClone(v3StartRequest(plan)) as Record<
+      string,
+      unknown
+    > & { manifest: Record<string, unknown> };
+    delete missing.manifest.publicEvPolicyVersion;
+    await expectRefusal(
+      run(t, internal.dataReleaseV3Lifecycle.start, missing),
+      "PUBLICATION_REQUEST_INVALID",
+    );
+
+    const wrong = structuredClone(v3StartRequest(plan)) as Record<
+      string,
+      unknown
+    > & { manifest: Record<string, unknown> };
+    wrong.manifest.publicEvPolicyVersion = "some-other-public-policy";
+    await expectRefusal(
+      run(t, internal.dataReleaseV3Lifecycle.start, wrong),
+      "PUBLICATION_REQUEST_INVALID",
+    );
+  });
+
   test("stages, reconciles, completes, and activates one coherent release", async () => {
     const t = convexTest(schema, modules);
     const plan = await buildV3FixturePlan({
@@ -606,6 +633,31 @@ describe("data_release_v3 lifecycle", () => {
                     ...packScout.metrics.evDollars,
                     minorUnits: packScout.metrics.evDollars.minorUnits + 1,
                   },
+                },
+              },
+            },
+          },
+        ],
+      }),
+      "PUBLICATION_REQUEST_INVALID",
+    );
+    // Internally coherent positive raw metrics are still forbidden at the
+    // public release boundary.
+    await expectRefusal(
+      run(t, internal.dataReleaseV3Lifecycle.applyBatch, {
+        ...v3BatchRequest(plan, repackBatch),
+        records: [
+          {
+            ...detail,
+            evEstimates: {
+              ...detail.evEstimates,
+              packScout: {
+                ...packScout,
+                metrics: {
+                  grossEvMoney: { minorUnits: 12_000, currency: "USD" },
+                  grossReturnBasisPoints: 12_000,
+                  evDollars: { minorUnits: 2_000, currency: "USD" },
+                  evPercentBasisPoints: 2_000,
                 },
               },
             },

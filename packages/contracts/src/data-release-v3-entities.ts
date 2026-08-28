@@ -32,8 +32,8 @@ import {
 
 /**
  * The single availability gate for this release. `available` is the only
- * public pack availability that may rank in EV opportunities, count toward
- * positive-EV summaries, or expose an outbound purchase action.
+ * public pack availability that may rank in EV opportunities or expose an
+ * outbound purchase action.
  *
  * `unavailable`, `unknown`, and `sold_out` all stay discoverable and all sit
  * on the excluded side. The predicate is written against `available` alone,
@@ -116,6 +116,18 @@ function validateRepackSummaryV3(
         code: "custom",
         path: ["evEstimates", "packScout"],
         message: "data_release_v3.comparable_price_required",
+      });
+    } else if (
+      packScout.metrics.grossEvMoney.minorUnits >
+        repack.price.usdComparison.value.minorUnits ||
+      packScout.metrics.grossReturnBasisPoints > 10_000 ||
+      packScout.metrics.evDollars.minorUnits > 0 ||
+      packScout.metrics.evPercentBasisPoints > 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["evEstimates", "packScout", "metrics"],
+        message: "data_release_v3.positive_public_ev_forbidden",
       });
     } else if (
       !packScoutBuybackEvMetricsAreConsistentV1({

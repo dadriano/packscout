@@ -23,13 +23,13 @@ const COUNT_FORMATTER = new Intl.NumberFormat("en-US", {
 });
 
 export type KpiPresentation = Readonly<{
-  id: "repacks" | "positiveEv" | "medianEv" | "highestChase";
-  label: "Repacks" | "Positive EV" | "Median EV" | "Highest Chase";
+  id: "repacks" | "medianEv" | "highestChase";
+  label: "Repacks" | "Median EV" | "Highest Chase";
   value: string;
   helper: string;
   accessibleLabel: string;
   state: MetricSemanticState | "plain";
-  stateLabel?: "Positive" | "Neutral" | "Negative" | "Unavailable";
+  stateLabel?: "Neutral" | "Negative" | "Unavailable";
   reasonCopy?: string;
 }>;
 
@@ -62,13 +62,7 @@ function countLabel(count: number): string {
   return COUNT_FORMATTER.format(count);
 }
 
-/**
- * Formats the server-materialized dashboard KPIs. The positive-EV count is
- * computed server-side over available packs with a current estimate above zero
- * only — `unavailable`, `unknown`, and `sold_out` packs are all excluded from
- * the count while staying discoverable in the catalog — and the browser never
- * recounts or re-ranks.
- */
+/** Formats the server-materialized dashboard KPIs without browser recomputation. */
 export function presentDashboardKpis(
   kpis: DashboardKpis,
 ): readonly KpiPresentation[] {
@@ -94,15 +88,6 @@ export function presentDashboardKpis(
       helper: "",
       accessibleLabel: `View all repacks: ${countLabel(kpis.totalRepacks)} public repacks matching the applied filters.`,
       state: "plain",
-    },
-    {
-      id: "positiveEv",
-      label: "Positive EV",
-      value: countLabel(kpis.positiveEvRepacks),
-      helper: "Available repacks with EV $ above zero",
-      accessibleLabel: `${countLabel(kpis.positiveEvRepacks)} available repacks have a current PackScout estimate with EV $ above zero. Excludes packs labeled Unavailable, Availability unknown, or Sold out, and packs whose estimate is unavailable or expired.`,
-      state: "positive",
-      stateLabel: "Positive",
     },
     {
       id: "medianEv",

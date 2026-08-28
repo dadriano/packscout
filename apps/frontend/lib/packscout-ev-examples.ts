@@ -34,7 +34,6 @@ const EXAMPLE_EXPIRES_AT = "2026-01-01T13:00:00.000Z" as const;
 
 export const PACKSCOUT_EV_WORKED_EXAMPLE_IDS = [
   "canonical_buyback",
-  "positive_above_break_even",
   "neutral_break_even",
   "negative_below_break_even",
   "valid_zero_payout",
@@ -379,15 +378,6 @@ function buildUnavailableExample(): PackScoutEvWorkedExample {
 
 export const PACKSCOUT_EV_WORKED_EXAMPLES = Object.freeze([
   buildCanonicalExample(),
-  buildUniformRateExample({
-    id: "positive_above_break_even",
-    title: "Above break-even (positive EV)",
-    packPriceMinor: 10_000,
-    statedOutcomeEvMinor: 12_000,
-    uniformRateBasisPoints: 9_000,
-    narrative: ({ price, stated, rate, gross }) =>
-      `A richer documented pool: ${stated} of probability-weighted stated value with a uniform ${rate} buyback on a ${price} pack. The expected guaranteed payout is ${gross}, which is more than the pack costs.`,
-  }),
   buildUniformRateExample({
     id: "neutral_break_even",
     title: "Exactly break-even (neutral EV)",

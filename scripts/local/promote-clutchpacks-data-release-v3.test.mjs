@@ -185,6 +185,7 @@ function plan(overrides = {}) {
       methodVersion: "packscout-buyback-adjusted-ev-v1",
       confidencePolicyVersion:
         "packscout-buyback-adjusted-ev-confidence-v1",
+      publicEvPolicyVersion: "packscout-public-ev-nonpositive-v1",
       dataAsOf: READ_AT,
       counts: {
         categories: 2,
@@ -373,6 +374,7 @@ function publicReadBack(candidate = plan(), count = 17, governedScope = scope())
           dataAsOf: candidate.manifest.dataAsOf,
           methodVersion: candidate.manifest.methodVersion,
           confidencePolicyVersion: candidate.manifest.confidencePolicyVersion,
+          publicEvPolicyVersion: candidate.manifest.publicEvPolicyVersion,
         },
       },
     },

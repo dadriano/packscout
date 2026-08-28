@@ -51,16 +51,13 @@ test("the Expected Value article renders shared example values and definitions",
   assert.ok(markup.includes(METRIC_TRUST_COPY.dashboardDisclaimer));
 
   // Canonical example values, exactly as the shared presentation renders
-  // them (positive, neutral, negative, zero, and unavailable companions).
+  // them (neutral, negative, zero, and unavailable companions).
   for (const fragment of [
     CANONICAL_BUYBACK_EQUATION,
     "$85.00",
     "85.00%",
     "-$15.00",
     "-15.00%",
-    "+$8.00",
-    "+8.00%",
-    "108.00%",
     "100.00%",
     "-$5.00",
     "-10.00%",

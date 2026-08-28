@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES,
   PRODUCTION_DATA_RELEASE_V3_PATHS,
   canonicalJson,
@@ -89,6 +90,7 @@ const releasePointerSchema = z
     confidencePolicyVersion: z.literal(
       PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
     ),
+    publicEvPolicyVersion: z.literal(PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3),
     dataAsOf: z.string().min(1).max(64),
     completedAt: z.string().min(1).max(64),
     counts: releaseCountsSchema,

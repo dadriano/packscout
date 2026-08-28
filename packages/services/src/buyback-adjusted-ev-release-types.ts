@@ -1,10 +1,11 @@
-import type {
-  PublicCategory,
-  PublicCollectible,
-  PublicRepackChase,
-  PublicRepackDetailV3,
-  PublicBuybackSummaryV3,
-  VendorReportedEvV3,
+import {
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
+  type PublicCategory,
+  type PublicCollectible,
+  type PublicRepackChase,
+  type PublicRepackDetailV3,
+  type PublicBuybackSummaryV3,
+  type VendorReportedEvV3,
 } from "@packscout/contracts";
 import type {
   PackScoutBuybackEvPublicationEligibilityV1,
@@ -76,6 +77,8 @@ export interface DataReleaseV3StartManifest {
   readonly methodVersion: "packscout-buyback-adjusted-ev-v1";
   readonly confidencePolicyVersion:
     "packscout-buyback-adjusted-ev-confidence-v1";
+  readonly publicEvPolicyVersion:
+    typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
   readonly dataAsOf: string;
   readonly contentHash: string;
   readonly searchAlgorithmVersion:
@@ -169,6 +172,8 @@ export interface DataReleaseV3Pointer {
   readonly methodVersion: "packscout-buyback-adjusted-ev-v1";
   readonly confidencePolicyVersion:
     "packscout-buyback-adjusted-ev-confidence-v1";
+  readonly publicEvPolicyVersion:
+    typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
   readonly dataAsOf: string;
   readonly completedAt: string;
   readonly counts: DataReleaseV3Counts;

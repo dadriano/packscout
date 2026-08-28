@@ -161,7 +161,6 @@ test("dashboard and errors expose repack vocabulary with no partial data", () =>
       metadata: release.metadata,
       kpis: {
         totalRepacks: 2,
-        positiveEvRepacks: 1,
         medianPackScoutEvPercent: {
           status: "available" as const,
           basisPoints: 2_000,
@@ -186,7 +185,7 @@ test("dashboard and errors expose repack vocabulary with no partial data", () =>
         ...result.data,
         kpis: {
           ...result.data.kpis,
-          positiveEvRepacks: 3,
+          highConfidenceRepacks: 3,
         },
       },
     }).success,

@@ -20,6 +20,15 @@ import {
 } from "./protected-publication-fields.ts";
 
 export const DATA_RELEASE_V3_SCHEMA_VERSION = "data_release_v3" as const;
+/**
+ * Public-release policy applied after the raw V1 calculation. Raw revisions
+ * remain exact; V3 only publishes estimates at or below break-even.
+ */
+export const PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3 =
+  "packscout-public-ev-nonpositive-v1" as const;
+export const packScoutPublicEvPolicyVersionV3Schema = z.literal(
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
+);
 export const PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3 =
   60 * 60_000;
 
@@ -74,14 +83,27 @@ export const packScoutPublicEvMetricsV3Schema = z
     evPercentBasisPoints: safeIntegerSchema,
   })
   .strict()
-  .refine(
-    ({ grossReturnBasisPoints, evPercentBasisPoints }) =>
-      evPercentBasisPoints === grossReturnBasisPoints - 10_000,
-    {
-      path: ["evPercentBasisPoints"],
-      message: "data_release_v3.ev_percent_inconsistent",
-    },
-  );
+  .superRefine((metrics, context) => {
+    if (
+      metrics.evPercentBasisPoints !== metrics.grossReturnBasisPoints - 10_000
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["evPercentBasisPoints"],
+        message: "data_release_v3.ev_percent_inconsistent",
+      });
+    }
+    if (
+      metrics.grossReturnBasisPoints > 10_000 ||
+      metrics.evDollars.minorUnits > 0 ||
+      metrics.evPercentBasisPoints > 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "data_release_v3.positive_public_ev_forbidden",
+      });
+    }
+  });
 
 export const PACKSCOUT_PUBLIC_EV_SOURCE_AGE_STATES_V3 = Object.freeze([
   "fresh_within_15_minutes",

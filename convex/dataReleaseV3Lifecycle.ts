@@ -1,9 +1,11 @@
 import {
   DATA_RELEASE_V3_SCHEMA_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   containsProtectedEvPublicationKeyV3,
   containsProtectedPublicationField,
   packScoutBuybackEvConfidencePolicyVersionV1Schema,
   packScoutBuybackEvMethodVersionV1Schema,
+  packScoutPublicEvPolicyVersionV3Schema,
   packScoutBuybackEvTimestampV1Schema,
   publicCategorySchema,
   publicCollectibleSchema,
@@ -135,6 +137,7 @@ export const dataReleaseV3StartManifestSchema = z
   .object({
     methodVersion: packScoutBuybackEvMethodVersionV1Schema,
     confidencePolicyVersion: packScoutBuybackEvConfidencePolicyVersionV1Schema,
+    publicEvPolicyVersion: packScoutPublicEvPolicyVersionV3Schema,
     dataAsOf: packScoutBuybackEvTimestampV1Schema,
     contentHash: sha256Schema,
     searchAlgorithmVersion: z.literal(DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION),
@@ -420,11 +423,16 @@ function releasePointer(release: Doc<"dataReleaseV3Releases">): {
   releaseFingerprint: string;
   methodVersion: "packscout-buyback-adjusted-ev-v1";
   confidencePolicyVersion: "packscout-buyback-adjusted-ev-confidence-v1";
+  publicEvPolicyVersion: typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
   dataAsOf: string;
   completedAt: string;
   counts: Doc<"dataReleaseV3Releases">["expectedCounts"];
 } {
-  if (release.lifecycle !== "complete" || release.completedAt === null) {
+  if (
+    release.lifecycle !== "complete" ||
+    release.completedAt === null ||
+    release.publicEvPolicyVersion !== PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3
+  ) {
     refuse("PUBLICATION_STATE_CONFLICT");
   }
   return {
@@ -432,6 +440,7 @@ function releasePointer(release: Doc<"dataReleaseV3Releases">): {
     releaseFingerprint: release.releaseFingerprint,
     methodVersion: release.methodVersion,
     confidencePolicyVersion: release.confidencePolicyVersion,
+    publicEvPolicyVersion: release.publicEvPolicyVersion,
     dataAsOf: release.dataAsOf,
     completedAt: release.completedAt,
     counts: release.expectedCounts,
@@ -444,6 +453,7 @@ async function expectedRecomputedFingerprint(
     | "publicReleaseId"
     | "methodVersion"
     | "confidencePolicyVersion"
+    | "publicEvPolicyVersion"
     | "dataAsOf"
     | "contentHash"
     | "searchAlgorithmVersion"
@@ -456,6 +466,7 @@ async function expectedRecomputedFingerprint(
     publicReleaseId: release.publicReleaseId,
     methodVersion: release.methodVersion,
     confidencePolicyVersion: release.confidencePolicyVersion,
+    publicEvPolicyVersion: release.publicEvPolicyVersion,
     dataAsOf: release.dataAsOf,
     contentHash: release.contentHash,
     searchAlgorithmVersion: release.searchAlgorithmVersion,
@@ -487,6 +498,7 @@ export const start = internalMutation({
       publicReleaseId: request.publicReleaseId,
       methodVersion: request.manifest.methodVersion,
       confidencePolicyVersion: request.manifest.confidencePolicyVersion,
+      publicEvPolicyVersion: request.manifest.publicEvPolicyVersion,
       dataAsOf: request.manifest.dataAsOf,
       contentHash: request.manifest.contentHash,
       searchAlgorithmVersion: request.manifest.searchAlgorithmVersion,
@@ -537,6 +549,7 @@ export const start = internalMutation({
       lifecycle: "staging",
       methodVersion: request.manifest.methodVersion,
       confidencePolicyVersion: request.manifest.confidencePolicyVersion,
+      publicEvPolicyVersion: request.manifest.publicEvPolicyVersion,
       dataAsOf: request.manifest.dataAsOf,
       contentHash: request.manifest.contentHash,
       searchAlgorithmVersion: request.manifest.searchAlgorithmVersion,
@@ -766,6 +779,15 @@ async function insertBatchRecords(
         record.evEstimates.packScout.methodVersion !== release.methodVersion ||
         record.evEstimates.packScout.confidencePolicyVersion !==
           release.confidencePolicyVersion
+      ) {
+        refuse("PUBLICATION_ENTITY_INVALID");
+      }
+      const estimate = record.evEstimates.packScout;
+      if (
+        estimate.status !== "unavailable" &&
+        (estimate.metrics.grossReturnBasisPoints > 10_000 ||
+          estimate.metrics.evDollars.minorUnits > 0 ||
+          estimate.metrics.evPercentBasisPoints > 0)
       ) {
         refuse("PUBLICATION_ENTITY_INVALID");
       }
@@ -1217,7 +1239,10 @@ export const rollback = internalMutation({
     if (
       target === null ||
       target.lifecycle !== "complete" ||
-      target.publicReleaseId !== request.targetPublicReleaseId
+      target.publicReleaseId !== request.targetPublicReleaseId ||
+      target.publicEvPolicyVersion !== PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3 ||
+      state.previousRelease.publicEvPolicyVersion !==
+        PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3
     ) {
       refuse("PUBLICATION_ROLLBACK_UNSAFE");
     }

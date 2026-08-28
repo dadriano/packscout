@@ -834,6 +834,8 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
     shell.data.release.methodVersion !== plan.manifest.methodVersion ||
     shell.data.release.confidencePolicyVersion !==
       plan.manifest.confidencePolicyVersion ||
+    shell.data.release.publicEvPolicyVersion !==
+      plan.manifest.publicEvPolicyVersion ||
     list?.ok !== true ||
     list.data?.release?.publicReleaseId !== plan.publicReleaseId ||
     list.data?.range?.total !== CLUTCHPACKS_EXPECTED_REPACK_COUNT ||

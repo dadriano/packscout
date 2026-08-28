@@ -1,6 +1,7 @@
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3,
   containsProtectedEvPublicationKeyV3,
   containsProtectedPublicationField,
@@ -142,6 +143,19 @@ function composePackScoutPublicEv(
     };
   }
   const observedAt = projection.dataAsOf.observedAt;
+  const violatesPublicEvPolicy =
+    projection.metrics.grossReturnBasisPoints > 10_000 ||
+    projection.metrics.evDollars.minorUnits > 0 ||
+    projection.metrics.evPercentBasisPoints > 0;
+  const unavailableByPublicEvPolicy = (): PackScoutPublicEvV3 => ({
+    status: "unavailable",
+    ...versions,
+    metrics: null,
+    confidence: null,
+    calculatedAt: projection.calculatedAt,
+    dataAsOf: { state: "known", observedAt },
+    reason: "CALCULATION_UNAVAILABLE",
+  });
   const frozenObservation = {
     metrics: {
       grossEvMoney: { ...projection.metrics.grossEvMoney },
@@ -177,6 +191,7 @@ function composePackScoutPublicEv(
       soldOutMillis - observedMillis <=
         PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3
     ) {
+      if (violatesPublicEvPolicy) return unavailableByPublicEvPolicy();
       return {
         status: "sold_out_historical",
         ...versions,
@@ -214,6 +229,7 @@ function composePackScoutPublicEv(
       reason: "SOURCE_DATA_STALE",
     };
   }
+  if (violatesPublicEvPolicy) return unavailableByPublicEvPolicy();
   return {
     status: "current",
     ...versions,
@@ -435,6 +451,7 @@ export class DataReleaseV3ReleaseAssembler {
       await sha256CanonicalJson(DATA_RELEASE_V3_RELEASE_ID_DOMAIN, {
         methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
         confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+        publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
         dataAsOf: readAt,
         contentHash,
         searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,
@@ -449,6 +466,7 @@ export class DataReleaseV3ReleaseAssembler {
         publicReleaseId,
         methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
         confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+        publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
         dataAsOf: readAt,
         contentHash,
         searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,
@@ -463,6 +481,7 @@ export class DataReleaseV3ReleaseAssembler {
       manifest: {
         methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
         confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+        publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
         dataAsOf: readAt,
         contentHash,
         searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,

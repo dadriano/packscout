@@ -1,6 +1,6 @@
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.85rem;
   margin: 0;
   padding: 0;
@@ -50,12 +50,6 @@
   opacity: 0;
 }
 
-.card[data-kind="positiveEv"]::after,
-.card[data-state="positive"]::after {
-  background: var(--color-positive);
-  opacity: 0.58;
-}
-
 .card[data-state="negative"]::after {
   background: var(--color-negative);
   opacity: 0.58;
@@ -78,12 +72,6 @@
   font-family: var(--font-mono);
   font-size: 1.1rem;
   font-weight: 760;
-}
-
-.card[data-kind="positiveEv"] .mark {
-  border-color: color-mix(in srgb, var(--color-positive) 22%, transparent);
-  background: color-mix(in srgb, var(--color-positive) 12%, transparent);
-  color: var(--color-positive);
 }
 
 .card[data-kind="highestChase"] .mark {
@@ -124,10 +112,6 @@
 .card[data-kind="highestChase"] .value {
   font-size: 1.08rem;
   letter-spacing: -0.045em;
-}
-
-.card[data-state="positive"] .value {
-  color: var(--color-positive);
 }
 
 .card[data-state="negative"] .value {

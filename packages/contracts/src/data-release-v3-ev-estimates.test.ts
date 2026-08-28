@@ -7,7 +7,6 @@ import {
   buildPackScoutPublicEvMetricsV3,
   buildPackScoutPublicEvNegativeV3,
   buildPackScoutPublicEvNeutralV3,
-  buildPackScoutPublicEvPositiveV3,
   buildPackScoutPublicEvSoldOutHistoricalV3,
   buildPackScoutPublicEvUnavailableV3,
   buildPackScoutPublicEvUnknownTimeV3,
@@ -67,13 +66,18 @@ test("the golden current estimate keeps the exact approved four-metric semantics
   assert.equal(estimate.sourceAge.state, "fresh_within_15_minutes");
 });
 
-test("positive, neutral, and valid-zero estimates stay available and distinct from unavailable", () => {
-  const positive = buildPackScoutPublicEvPositiveV3();
-  assert.equal(positive.status, "current");
-  if (positive.status === "current") {
-    assert.equal(positive.metrics.evDollars.minorUnits, 2_000);
-    assert.equal(positive.metrics.evPercentBasisPoints, 2_000);
-  }
+test("positive estimates fail closed while neutral and valid-zero remain available", () => {
+  const positive = currentEstimate();
+  positive.metrics = buildPackScoutPublicEvMetricsV3(12_000);
+  assert.equal(packScoutPublicEvV3Schema.safeParse(positive).success, false);
+
+  const independentlyPositiveDollars = currentEstimate();
+  independentlyPositiveDollars.metrics.evDollars.minorUnits = 1;
+  assert.equal(
+    packScoutPublicEvV3Schema.safeParse(independentlyPositiveDollars).success,
+    false,
+  );
+
   const neutral = buildPackScoutPublicEvNeutralV3();
   assert.equal(neutral.status, "current");
   if (neutral.status === "current") {
