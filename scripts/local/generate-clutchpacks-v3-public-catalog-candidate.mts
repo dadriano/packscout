@@ -22,11 +22,29 @@ import {
   sha256CanonicalJson,
 } from "../../packages/contracts/src/data-release-v2-canonical.ts";
 import {
+  parsedHttpsUrl,
+  publicHttpsOriginSchema,
+} from "../../packages/contracts/src/data-release-v2.ts";
+import {
+  providerSourceCanonicalCatalogAssetContentV1Schema,
+  providerSourceCanonicalPackContentV1Schema,
+} from "../../packages/contracts/src/provider-source-canonical-content-v1.ts";
+import {
   PACKSCOUT_TRANSACTION_OPTIONS,
   createPrismaClientLifecycle,
   type PackscoutPrismaClient,
+  type PackscoutTransactionClient,
 } from "../../packages/database/src/database.ts";
+import {
+  loadProviderV1AssetPackAssociations,
+  type ProviderV1AssetPackAssociationSnapshot,
+} from "../../packages/database/src/provider-v1-asset-pack-association-reader.ts";
 import { Prisma } from "@prisma/client";
+import {
+  assertSameConnectedPostgresIdentity,
+  connectedPostgresIdentityBindingParts,
+  readConnectedPostgresIdentity,
+} from "./connected-postgres-identity.mjs";
 
 const WORKFLOW = "generate_clutchpacks_v3_public_catalog_candidate" as const;
 const PLATFORM_KEY = "clutchpacks" as const;
@@ -38,9 +56,13 @@ const CANDIDATE_DIGEST_DOMAIN =
   "packscout.clutchpacks-v3-public-catalog-candidate.v1" as const;
 const PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN =
   "packscout.public-catalog.configuration.v1" as const;
+export const CLUTCHPACKS_CATALOG_QUALIFICATION_TRANSACTION_TIMEOUT_MS =
+  120_000 as const;
 const CLUTCHPACKS_CHECKOUT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CLUTCHPACKS_PUBLIC_ORIGIN = "https://clutchpacks.io" as const;
+const PUBLIC_ASSET_ORIGIN_ALLOWLIST_ENVIRONMENT_VARIABLE =
+  "PACKSCOUT_CLUTCHPACKS_CATALOG_PUBLIC_ASSET_ORIGINS_JSON" as const;
 const mapper = Object.freeze({
   mapperKey: "clutchpacks-provider-observation",
   mapperVersion: "1",
@@ -106,6 +128,41 @@ function nonnegativeInteger(
   return parsed;
 }
 
+function publicAssetOriginAllowlist(
+  environment: NodeJS.ProcessEnv,
+): readonly string[] {
+  const raw = environment[PUBLIC_ASSET_ORIGIN_ALLOWLIST_ENVIRONMENT_VARIABLE];
+  if (
+    raw === undefined || raw.length === 0 || raw.trim() !== raw ||
+    Buffer.byteLength(raw, "utf8") > 131_072
+  ) {
+    refuse("ENVIRONMENT_INVALID");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return refuse("ENVIRONMENT_INVALID");
+  }
+  if (
+    !Array.isArray(value) ||
+    value.length > 64 ||
+    JSON.stringify(value) !== raw
+  ) {
+    refuse("ENVIRONMENT_INVALID");
+  }
+  const origins = value.map((origin) => {
+    const parsed = publicHttpsOriginSchema.safeParse(origin);
+    if (!parsed.success) refuse("ENVIRONMENT_INVALID");
+    return parsed.data;
+  });
+  if (origins.some((origin, index) =>
+    index > 0 && origins[index - 1]! >= origin)) {
+    refuse("ENVIRONMENT_INVALID");
+  }
+  return Object.freeze(origins);
+}
+
 function canonicalLocalTarget(value: string): Readonly<{
   databaseUrl: string;
   target: string;
@@ -148,6 +205,7 @@ export interface ClutchpacksCatalogCandidatePolicy {
   readonly partialScoreBasisPoints: number;
   readonly unknownScoreBasisPoints: number;
   readonly limitationPenaltyBasisPoints: number;
+  readonly publicAssetOriginAllowlist: readonly string[];
   readonly vendorDisplayName: string;
   readonly format: "repack";
 }
@@ -235,6 +293,7 @@ export function readClutchpacksCatalogCandidateEnvironment(
       "PACKSCOUT_CLUTCHPACKS_CATALOG_LIMITATION_PENALTY_BPS",
       10_000,
     ),
+    publicAssetOriginAllowlist: publicAssetOriginAllowlist(environment),
     vendorDisplayName: required(
       environment,
       "PACKSCOUT_CLUTCHPACKS_CATALOG_VENDOR_DISPLAY_NAME",
@@ -290,7 +349,11 @@ export function parseClutchpacksCatalogCandidateCommand(
   tokens.splice(0, 2);
   let confirmation: string | null = null;
   if (tokens.length > 0) {
-    if (tokens.length !== 2 || tokens[0] !== "--confirmation" || !tokens[1]) {
+    const confirmationFlag: string | undefined = tokens.at(0);
+    if (
+      tokens.length !== 2 || confirmationFlag !== "--confirmation" ||
+      !tokens[1]
+    ) {
       refuse("ARGUMENT_INVALID");
     }
     confirmation = tokens[1];
@@ -326,11 +389,13 @@ export interface ClutchpacksCatalogEntityCandidate {
 }
 
 export interface ClutchpacksCatalogQualificationEvidence {
+  readonly databaseIdentity: ClutchpacksCatalogDatabaseIdentity;
   readonly organizationCount: number;
   readonly providerCount: number;
   readonly providerPlatformKey: string | null;
   readonly providerState: string | null;
   readonly sourceCount: number;
+  readonly sourceInstanceId: string | null;
   readonly sourceState: string | null;
   readonly sourcePauseRequested: boolean | null;
   readonly sourceRevisionCount: number;
@@ -341,13 +406,19 @@ export interface ClutchpacksCatalogQualificationEvidence {
   readonly mapperVersion: string | null;
   readonly identityNamespaceKey: string | null;
   readonly cursorCodecVersion: string | null;
+  readonly currentCursorCount: number;
+  readonly currentCursorSourceInstanceId: string | null;
+  readonly currentCursorSourceRevisionId: string | null;
+  readonly currentCursorGeneration: bigint | null;
   readonly latestRunCount: number;
   readonly latestRunId: string | null;
   readonly latestRunState: string | null;
   readonly latestRunReachedProviderHead: boolean | null;
   readonly latestRunFinished: boolean;
   readonly latestRunFailureCode: string | null;
+  readonly latestRunSourceInstanceId: string | null;
   readonly latestRunSourceRevisionId: string | null;
+  readonly latestRunCursorGeneration: bigint | null;
   readonly latestRunAdapterVersion: string | null;
   readonly latestRunNormalizedContractVersion: string | null;
   readonly latestRunMapperKey: string | null;
@@ -359,14 +430,17 @@ export interface ClutchpacksCatalogQualificationEvidence {
   readonly wrongDeliveryLineageCount: number;
   readonly deliveryCount: number;
   readonly quarantineCount: number;
-  readonly nonInfoDiagnosticCount: number;
-  readonly nonInfoSourceOperationalEventCount: number;
+  readonly unresolvedCurrentGenerationDiagnosticCount: number;
+  readonly unresolvedCurrentGenerationOperationalEventCount: number;
+  readonly unresolvedProviderHealthCount: number;
+  readonly unresolvedSourceHealthCount: number;
+  readonly openConnectionHealthEpisodeCount: number;
   readonly canonicalPackCount: number;
   readonly canonicalAssetCount: number;
   readonly canonicalPullCount: number;
   readonly canonicalMarketEventCount: number;
   readonly confirmationSetCount: number;
-  readonly currentPullConfirmationSetCount: number;
+  readonly coveredCurrentPullCount: number;
   readonly confirmationItemCount: number;
   readonly declaredConfirmationItemCount: number;
   readonly confirmationSetSizeMismatchCount: number;
@@ -376,14 +450,60 @@ export interface ClutchpacksCatalogQualificationEvidence {
   readonly globalSettledSequence: bigint | null;
   readonly globalSourceHeadSequence: bigint | null;
   readonly globalNextSequence: bigint | null;
+  readonly globalSettledAt: Date | null;
+  readonly globalSourceHeadAt: Date | null;
   readonly providerSettledSequence: bigint | null;
   readonly providerSourceHeadSequence: bigint | null;
+  readonly providerSettledAt: Date | null;
+  readonly providerSourceHeadAt: Date | null;
   readonly pendingObligationCount: number;
   readonly legacyProviderConfigurationCount: number;
   readonly legacyProviderSecretCount: number;
   readonly legacyProviderCursorCount: number;
   readonly packs: readonly ClutchpacksCatalogEntityCandidate[];
   readonly assets: readonly ClutchpacksCatalogEntityCandidate[];
+}
+
+export interface ClutchpacksCatalogDatabaseIdentity {
+  readonly databaseName: string;
+  readonly databaseOid: string;
+  readonly systemIdentifier: string;
+}
+
+export function clutchpacksAssetHasPublicName(
+  asset: ClutchpacksCatalogEntityCandidate,
+): boolean {
+  if (typeof asset.content !== "object" || asset.content === null) return false;
+  const name = (asset.content as Readonly<Record<string, unknown>>).name;
+  return typeof name === "string" && name.trim().length > 0 &&
+    name.trim().length <= 240;
+}
+
+export function clutchpacksAssetIsOmittablePublicShell(
+  asset: ClutchpacksCatalogEntityCandidate,
+): boolean {
+  return asset.associated === false && !clutchpacksAssetHasPublicName(asset);
+}
+
+/**
+ * Marks current catalog assets from one set-oriented settled-association read.
+ * The iterable is consumed exactly once so qualification never performs a
+ * relationship lookup (or scan) per asset.
+ */
+export function attachClutchpacksCatalogAssetAssociationEvidence(
+  assets: readonly ClutchpacksCatalogEntityCandidate[],
+  associations: Iterable<
+    Pick<ProviderV1AssetPackAssociationSnapshot, "assetExternalId">
+  >,
+): readonly ClutchpacksCatalogEntityCandidate[] {
+  const associatedExternalIds = new Set<string>();
+  for (const association of associations) {
+    associatedExternalIds.add(association.assetExternalId);
+  }
+  return Object.freeze(assets.map((asset) => Object.freeze({
+    ...asset,
+    associated: associatedExternalIds.has(asset.externalId),
+  })));
 }
 
 export function assertClutchpacksCatalogCandidateTargetQualified(
@@ -395,6 +515,7 @@ export function assertClutchpacksCatalogCandidateTargetQualified(
     evidence.providerPlatformKey !== PLATFORM_KEY ||
     evidence.providerState !== "active" ||
     evidence.sourceCount !== 1 ||
+    !evidence.sourceInstanceId ||
     evidence.sourceState !== "paused" ||
     evidence.sourcePauseRequested !== false ||
     evidence.sourceRevisionCount !== 1 ||
@@ -405,13 +526,20 @@ export function assertClutchpacksCatalogCandidateTargetQualified(
     evidence.mapperVersion !== mapper.mapperVersion ||
     evidence.identityNamespaceKey !== mapper.identityNamespaceKey ||
     evidence.cursorCodecVersion !== DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY ||
+    evidence.currentCursorCount !== 1 ||
+    evidence.currentCursorSourceInstanceId !== evidence.sourceInstanceId ||
+    evidence.currentCursorSourceRevisionId !== evidence.sourceRevisionId ||
+    evidence.currentCursorGeneration === null ||
+    evidence.currentCursorGeneration < 1n ||
     evidence.latestRunCount !== 1 ||
     !evidence.latestRunId ||
     evidence.latestRunState !== "succeeded" ||
     evidence.latestRunReachedProviderHead !== true ||
     !evidence.latestRunFinished ||
     evidence.latestRunFailureCode !== null ||
+    evidence.latestRunSourceInstanceId !== evidence.sourceInstanceId ||
     evidence.latestRunSourceRevisionId !== evidence.sourceRevisionId ||
+    evidence.latestRunCursorGeneration !== evidence.currentCursorGeneration ||
     evidence.latestRunAdapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION ||
     evidence.latestRunNormalizedContractVersion !==
       PROVIDER_OBSERVATION_CONTRACT_VERSION ||
@@ -424,16 +552,19 @@ export function assertClutchpacksCatalogCandidateTargetQualified(
     evidence.deliveryCount < 1 ||
     evidence.wrongDeliveryLineageCount !== 0 ||
     evidence.quarantineCount !== 0 ||
-    evidence.nonInfoDiagnosticCount !== 0 ||
-    evidence.nonInfoSourceOperationalEventCount !== 0 ||
+    evidence.unresolvedCurrentGenerationDiagnosticCount !== 0 ||
+    evidence.unresolvedCurrentGenerationOperationalEventCount !== 0 ||
+    evidence.unresolvedProviderHealthCount !== 0 ||
+    evidence.unresolvedSourceHealthCount !== 0 ||
+    evidence.openConnectionHealthEpisodeCount !== 0 ||
     evidence.canonicalPackCount < 1 ||
     evidence.canonicalAssetCount < 1 ||
     evidence.canonicalPullCount < 1 ||
     evidence.canonicalMarketEventCount < 1 ||
     evidence.packs.length !== evidence.canonicalPackCount ||
     evidence.assets.length !== evidence.canonicalAssetCount ||
-    evidence.confirmationSetCount !== evidence.canonicalPullCount ||
-    evidence.currentPullConfirmationSetCount !== evidence.canonicalPullCount ||
+    evidence.coveredCurrentPullCount !== evidence.canonicalPullCount ||
+    evidence.confirmationSetCount < evidence.coveredCurrentPullCount ||
     evidence.confirmationItemCount !== evidence.declaredConfirmationItemCount ||
     evidence.confirmationSetSizeMismatchCount !== 0 ||
     evidence.unresolvedConfirmationItemCount !== 0 ||
@@ -442,11 +573,21 @@ export function assertClutchpacksCatalogCandidateTargetQualified(
     evidence.globalSettledSequence === null ||
     evidence.globalSourceHeadSequence === null ||
     evidence.globalNextSequence === null ||
+    evidence.globalSettledAt === null ||
+    evidence.globalSourceHeadAt === null ||
     evidence.providerSettledSequence === null ||
     evidence.providerSourceHeadSequence === null ||
+    evidence.providerSettledAt === null ||
+    evidence.providerSourceHeadAt === null ||
     evidence.globalSettledSequence !== evidence.globalSourceHeadSequence ||
     evidence.providerSettledSequence !== evidence.providerSourceHeadSequence ||
     evidence.providerSettledSequence !== evidence.globalSettledSequence ||
+    evidence.globalSettledAt.getTime() !==
+      evidence.globalSourceHeadAt.getTime() ||
+    evidence.providerSettledAt.getTime() !==
+      evidence.providerSourceHeadAt.getTime() ||
+    evidence.providerSettledAt.getTime() !==
+      evidence.globalSettledAt.getTime() ||
     evidence.globalNextSequence !== evidence.globalSourceHeadSequence + 1n ||
     evidence.pendingObligationCount !== 0 ||
     evidence.legacyProviderConfigurationCount !== 0 ||
@@ -455,33 +596,47 @@ export function assertClutchpacksCatalogCandidateTargetQualified(
   ) {
     refuse("TARGET_NOT_QUALIFIED");
   }
-  const unnamedAssociated = evidence.assets.filter(({ associated, content }) => {
-    if (!associated || typeof content !== "object" || content === null) return false;
-    const name = (content as Readonly<Record<string, unknown>>).name;
-    return typeof name !== "string" || name.trim().length === 0;
-  });
+  const unnamedAssociated = evidence.assets.filter((asset) =>
+    asset.associated === true && !clutchpacksAssetHasPublicName(asset));
   if (unnamedAssociated.length !== 0) refuse("TARGET_NOT_QUALIFIED");
 }
 
-function collectHttpsOrigins(value: unknown, origins: Set<string>): void {
-  if (typeof value === "string") {
-    try {
-      const parsed = new URL(value);
-      if (parsed.protocol === "https:" && parsed.username === "" && parsed.password === "") {
-        origins.add(parsed.origin);
+function canonicalPackEntity(entity: ClutchpacksCatalogEntityCandidate) {
+  const parsed = providerSourceCanonicalPackContentV1Schema.safeParse(
+    entity.content,
+  );
+  if (!parsed.success) refuse("TARGET_NOT_QUALIFIED");
+  return Object.freeze({ ...entity, content: parsed.data });
+}
+
+function canonicalCatalogAssetEntity(
+  entity: ClutchpacksCatalogEntityCandidate,
+) {
+  const parsed = providerSourceCanonicalCatalogAssetContentV1Schema.safeParse(
+    entity.content,
+  );
+  if (!parsed.success) refuse("TARGET_NOT_QUALIFIED");
+  return Object.freeze({ ...entity, content: parsed.data });
+}
+
+function observedPublicAssetOrigins(
+  entities: readonly Readonly<{
+    content: Readonly<{ imageUrls: readonly string[] }>;
+  }>[],
+  allowedOrigins: readonly string[],
+): readonly string[] {
+  const allowed = new Set(allowedOrigins);
+  const observed = new Set<string>();
+  for (const { content } of entities) {
+    for (const imageUrl of content.imageUrls) {
+      const parsed = parsedHttpsUrl(imageUrl);
+      if (parsed === null || !allowed.has(parsed.origin)) {
+        refuse("TARGET_NOT_QUALIFIED");
       }
-    } catch {
-      // Canonical content contains many ordinary strings; only URLs matter.
+      observed.add(parsed.origin);
     }
-    return;
   }
-  if (Array.isArray(value)) {
-    for (const item of value) collectHttpsOrigins(item, origins);
-    return;
-  }
-  if (typeof value === "object" && value !== null) {
-    for (const item of Object.values(value)) collectHttpsOrigins(item, origins);
-  }
+  return Object.freeze([...observed].sort());
 }
 
 function compareExternalId(
@@ -594,13 +749,19 @@ const clutchpacksPublicCategoryDefinitions = Object.freeze([
   }),
 ] satisfies readonly ClutchpacksPublicCategoryDefinition[]);
 
-const clutchpacksCategoryBySourceValue = new Map(
+const clutchpacksCategoryBySourceValue = new Map<
+  string,
+  ClutchpacksPublicCategoryDefinition
+>(
   clutchpacksPublicCategoryDefinitions.map((definition) => [
     definition.sourceValue,
     definition,
   ]),
 );
-const clutchpacksCategoryByKey = new Map(
+const clutchpacksCategoryByKey = new Map<
+  string,
+  ClutchpacksPublicCategoryDefinition
+>(
   clutchpacksPublicCategoryDefinitions.map((definition) => [
     definition.categoryKey,
     definition,
@@ -705,20 +866,25 @@ export function buildClutchpacksCatalogCandidate(
   policy: ClutchpacksCatalogCandidatePolicy,
 ): ApprovedPublicCatalogConfigurationV1 {
   assertClutchpacksCatalogCandidateTargetQualified(evidence);
-  const packs = [...evidence.packs].sort(compareExternalId);
-  const assets = [...evidence.assets].sort(compareExternalId);
+  const packs = evidence.packs.map(canonicalPackEntity).sort(compareExternalId);
+  const assets = evidence.assets.map(canonicalCatalogAssetEntity)
+    .sort(compareExternalId);
+  const publicAssets = assets.filter(
+    (asset) => !clutchpacksAssetIsOmittablePublicShell(asset),
+  );
   if (
     new Set(packs.map(({ externalId }) => externalId)).size !== packs.length ||
     new Set(assets.map(({ externalId }) => externalId)).size !== assets.length
   ) {
     refuse("TARGET_NOT_QUALIFIED");
   }
-  const origins = new Set<string>();
-  for (const row of [...packs, ...assets]) collectHttpsOrigins(row.content, origins);
-  const publicAssetOrigins = [...origins].sort();
+  const publicAssetOrigins = observedPublicAssetOrigins(
+    [...packs, ...assets],
+    policy.publicAssetOriginAllowlist,
+  );
   const categoryConfiguration = clutchpacksCategoryConfiguration(
     policy.namespaceUuid,
-    [...packs, ...assets],
+    [...packs, ...publicAssets],
   );
   const candidate = {
     schemaVersion: "approved_public_catalog_v1" as const,
@@ -766,7 +932,7 @@ export function buildClutchpacksCatalogCandidate(
       ),
       listingUrl: clutchpacksListingUrl(externalId),
     })),
-    collectibles: assets.map(({ externalId, associated, content }) => ({
+    collectibles: publicAssets.map(({ externalId, associated, content }) => ({
       platformKey: PLATFORM_KEY,
       externalId,
       publicCollectibleId: uuidV5(
@@ -804,35 +970,89 @@ function integer(value: bigint | number): number {
   return parsed;
 }
 
-export function clutchpacksSourceOperationalEventWhere(
-  organizationId: string,
-): Prisma.operational_eventsWhereInput {
-  return {
-    organization_id: organizationId,
-    provider_id: { not: null },
-    severity: { in: ["warning", "critical"] },
-  };
+export async function applyClutchpacksCatalogQualificationTransactionGuards(
+  transaction: Pick<PackscoutTransactionClient, "$executeRaw" | "$queryRaw">,
+): Promise<void> {
+  await transaction.$executeRaw(Prisma.sql`set transaction read only`);
+  await transaction.$queryRaw(Prisma.sql`
+    select set_config(
+      'statement_timeout',
+      ${`${CLUTCHPACKS_CATALOG_QUALIFICATION_TRANSACTION_TIMEOUT_MS}ms`},
+      true
+    )
+  `);
 }
 
-async function readQualificationEvidence(
+export async function readClutchpacksCatalogDatabaseIdentity(
+  database: Pick<PackscoutPrismaClient, "$queryRawUnsafe">,
+): Promise<ClutchpacksCatalogDatabaseIdentity> {
+  try {
+    return await readConnectedPostgresIdentity(
+      (sql: string) => database.$queryRawUnsafe<
+        ClutchpacksCatalogDatabaseIdentity[]
+      >(sql),
+      TARGET_DATABASE_NAME,
+    ) as ClutchpacksCatalogDatabaseIdentity;
+  } catch {
+    return refuse("DATABASE_READ_FAILED");
+  }
+}
+
+export async function readClutchpacksCatalogQualificationEvidence(
   database: PackscoutPrismaClient,
   organizationId: string,
 ): Promise<ClutchpacksCatalogQualificationEvidence> {
   return database.$transaction(async (transaction) => {
-    await transaction.$executeRaw(Prisma.sql`set transaction read only`);
+    await applyClutchpacksCatalogQualificationTransactionGuards(transaction);
+    const databaseIdentity = await readClutchpacksCatalogDatabaseIdentity(
+      transaction,
+    );
+    const associationScopes = await transaction.$queryRaw<Array<{
+      sourceRevisionId: string | null;
+      settledSequence: bigint;
+      settledAt: Date;
+    }>>(Prisma.sql`
+      select source.active_revision_id::text as "sourceRevisionId",
+             watermark.settled_sequence as "settledSequence",
+             watermark.settled_at as "settledAt"
+      from public.provider_sources provider
+      join public.provider_source_instances source
+        on source.organization_id = provider.organization_id
+       and source.provider_id = provider.id
+      join public.settled_public_watermarks watermark
+        on watermark.organization_id = provider.organization_id
+      where provider.organization_id = ${organizationId}::uuid
+        and provider.platform_key = ${PLATFORM_KEY}
+      order by source.id
+    `);
+    const associationScope = associationScopes.length === 1
+      ? associationScopes[0]
+      : undefined;
+    const associationRead = associationScope?.sourceRevisionId
+      ? loadProviderV1AssetPackAssociations(transaction, {
+        organizationId,
+        platformKey: PLATFORM_KEY,
+        sourceRevisionId: associationScope.sourceRevisionId,
+        throughSequence: associationScope.settledSequence,
+        throughOccurredAt: associationScope.settledAt,
+      })
+      : Promise.resolve([]);
     const [
       organizationCount,
       providers,
       sources,
       sourceRevisions,
-      runs,
+      currentCursorRuns,
       activeRunCount,
       liveSupervisors,
       deliveryCount,
       wrongDeliveryLineageCount,
       quarantineCount,
-      nonInfoDiagnosticCount,
-      nonInfoSourceOperationalEventCount,
+      unresolvedCurrentGenerationDiagnostics,
+      unresolvedCurrentGenerationOperationalEvents,
+      unresolvedProviderHealthCount,
+      unresolvedSourceHealthCount,
+      openConnectionHealthEpisodeCount,
       counts,
       confirmation,
       backfills,
@@ -843,7 +1063,8 @@ async function readQualificationEvidence(
       legacyProviderSecretCount,
       legacyProviderCursorCount,
       packs,
-      assets,
+      rawAssets,
+      assetPackAssociations,
     ] = await Promise.all([
       transaction.organizations.count(),
       transaction.provider_sources.findMany({
@@ -871,24 +1092,66 @@ async function readQualificationEvidence(
           cursor_codec_version: true,
         },
       }),
-      transaction.import_runs.findMany({
-        where: { organization_id: organizationId },
-        orderBy: [{ created_at: "desc" }, { id: "desc" }],
-        select: {
-          id: true,
-          state: true,
-          reached_provider_head: true,
-          finished_at: true,
-          failure_code: true,
-          source_revision_id: true,
-          source_adapter_version: true,
-          normalized_contract_version: true,
-          mapper_key: true,
-          mapper_version: true,
-          identity_namespace_key: true,
-          cursor_codec_version: true,
-        },
-      }),
+      transaction.$queryRaw<Array<{
+        sourceInstanceId: string;
+        sourceRevisionId: string;
+        cursorGeneration: bigint;
+        runId: string | null;
+        runState: string | null;
+        runReachedProviderHead: boolean | null;
+        runFinishedAt: Date | null;
+        runFailureCode: string | null;
+        runSourceInstanceId: string | null;
+        runSourceRevisionId: string | null;
+        runCursorGeneration: bigint | null;
+        runSourceAdapterVersion: string | null;
+        runNormalizedContractVersion: string | null;
+        runMapperKey: string | null;
+        runMapperVersion: string | null;
+        runIdentityNamespaceKey: string | null;
+        runCursorCodecVersion: string | null;
+      }>>(Prisma.sql`
+        select source.id::text as "sourceInstanceId",
+               source.active_revision_id::text as "sourceRevisionId",
+               cursor.cursor_generation as "cursorGeneration",
+               latest_run.id::text as "runId",
+               latest_run.state::text as "runState",
+               latest_run.reached_provider_head as "runReachedProviderHead",
+               latest_run.finished_at as "runFinishedAt",
+               latest_run.failure_code as "runFailureCode",
+               latest_run.source_instance_id::text as "runSourceInstanceId",
+               latest_run.source_revision_id::text as "runSourceRevisionId",
+               latest_run.cursor_generation as "runCursorGeneration",
+               latest_run.source_adapter_version as "runSourceAdapterVersion",
+               latest_run.normalized_contract_version
+                 as "runNormalizedContractVersion",
+               latest_run.mapper_key as "runMapperKey",
+               latest_run.mapper_version as "runMapperVersion",
+               latest_run.identity_namespace_key as "runIdentityNamespaceKey",
+               latest_run.cursor_codec_version as "runCursorCodecVersion"
+        from public.provider_sources provider
+        join public.provider_source_instances source
+          on source.organization_id = provider.organization_id
+         and source.provider_id = provider.id
+        join public.provider_source_cursors cursor
+          on cursor.organization_id = source.organization_id
+         and cursor.provider_id = source.provider_id
+         and cursor.source_instance_id = source.id
+         and cursor.source_revision_id = source.active_revision_id
+        left join lateral (
+          select run.*
+          from public.import_runs run
+          where run.organization_id = source.organization_id
+            and run.provider_id = source.provider_id
+            and run.source_instance_id = source.id
+            and run.source_revision_id = source.active_revision_id
+            and run.cursor_generation = cursor.cursor_generation
+          order by run.created_at desc, run.id desc
+          limit 1
+        ) latest_run on true
+        where provider.organization_id = ${organizationId}::uuid
+          and provider.platform_key = ${PLATFORM_KEY}
+      `),
       transaction.import_runs.count({
         where: { organization_id: organizationId, state: { in: ["queued", "running"] } },
       }),
@@ -911,11 +1174,142 @@ async function readQualificationEvidence(
         },
       }),
       transaction.quarantine_records.count({ where: { organization_id: organizationId } }),
-      transaction.source_processor_diagnostic_events.count({
-        where: { organization_id: organizationId, severity: { in: ["warning", "critical"] } },
+      transaction.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+        with current_source as (
+          select source.id as source_instance_id,
+                 source.provider_id,
+                 source.connection_profile_id,
+                 source.active_revision_id as source_revision_id,
+                 cursor.cursor_generation,
+                 (
+                   select min(run.created_at)
+                   from public.import_runs run
+                   where run.organization_id = source.organization_id
+                     and run.provider_id = source.provider_id
+                     and run.source_instance_id = source.id
+                     and run.source_revision_id = source.active_revision_id
+                     and run.cursor_generation = cursor.cursor_generation
+                 ) as generation_started_at
+          from public.provider_source_instances source
+          join public.provider_sources provider
+            on provider.organization_id = source.organization_id
+           and provider.id = source.provider_id
+           and provider.platform_key = ${PLATFORM_KEY}
+          join public.provider_source_cursors cursor
+            on cursor.organization_id = source.organization_id
+           and cursor.provider_id = source.provider_id
+           and cursor.source_instance_id = source.id
+           and cursor.source_revision_id = source.active_revision_id
+          where source.organization_id = ${organizationId}::uuid
+        )
+        select count(*)::bigint as count
+        from public.source_processor_diagnostic_events diagnostic
+        join current_source current
+          on current.connection_profile_id = diagnostic.connection_profile_id
+        left join public.import_runs run
+          on run.organization_id = diagnostic.organization_id
+         and run.id = diagnostic.run_id
+        where diagnostic.organization_id = ${organizationId}::uuid
+          and diagnostic.severity in ('warning', 'critical')
+          and (
+            (
+              diagnostic.run_id is not null
+              and run.cursor_generation = current.cursor_generation
+              and (
+                diagnostic.severity = 'critical'
+                or run.state <> 'succeeded'
+                or run.reached_provider_head is distinct from true
+                or run.finished_at is null
+                or run.failure_code is not null
+                or run.source_instance_id is distinct from current.source_instance_id
+                or run.source_revision_id is distinct from current.source_revision_id
+              )
+            )
+            or (
+              diagnostic.run_id is null
+              and current.generation_started_at is not null
+              and diagnostic.occurred_at >= current.generation_started_at
+            )
+          )
+      `),
+      transaction.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+        with current_source as (
+          select source.id as source_instance_id,
+                 source.provider_id,
+                 source.active_revision_id as source_revision_id,
+                 cursor.cursor_generation,
+                 (
+                   select min(run.created_at)
+                   from public.import_runs run
+                   where run.organization_id = source.organization_id
+                     and run.provider_id = source.provider_id
+                     and run.source_instance_id = source.id
+                     and run.source_revision_id = source.active_revision_id
+                     and run.cursor_generation = cursor.cursor_generation
+                 ) as generation_started_at
+          from public.provider_source_instances source
+          join public.provider_sources provider
+            on provider.organization_id = source.organization_id
+           and provider.id = source.provider_id
+           and provider.platform_key = ${PLATFORM_KEY}
+          join public.provider_source_cursors cursor
+            on cursor.organization_id = source.organization_id
+           and cursor.provider_id = source.provider_id
+           and cursor.source_instance_id = source.id
+           and cursor.source_revision_id = source.active_revision_id
+          where source.organization_id = ${organizationId}::uuid
+        )
+        select count(*)::bigint as count
+        from public.operational_events event
+        join current_source current on current.provider_id = event.provider_id
+        left join public.import_runs run
+          on run.organization_id = event.organization_id
+         and run.id = event.run_id
+        where event.organization_id = ${organizationId}::uuid
+          and event.severity in ('warning', 'critical')
+          and (
+            (
+              event.run_id is not null
+              and run.cursor_generation = current.cursor_generation
+              and (
+                event.severity = 'critical'
+                or run.state <> 'succeeded'
+                or run.reached_provider_head is distinct from true
+                or run.finished_at is null
+                or run.failure_code is not null
+                or run.source_instance_id is distinct from current.source_instance_id
+                or run.source_revision_id is distinct from current.source_revision_id
+              )
+            )
+            or (
+              event.run_id is null
+              and current.generation_started_at is not null
+              and event.occurred_at >= current.generation_started_at
+            )
+          )
+      `),
+      transaction.provider_health_states.count({
+        where: {
+          organization_id: organizationId,
+          OR: [
+            { consecutive_failures: { gt: 0 } },
+            { latest_failure_code: { not: null } },
+            { mapping_warning_active: true },
+            { calculation_warning_active: true },
+          ],
+        },
       }),
-      transaction.operational_events.count({
-        where: clutchpacksSourceOperationalEventWhere(organizationId),
+      transaction.provider_source_health_states.count({
+        where: {
+          organization_id: organizationId,
+          OR: [
+            { consecutive_failures: { gt: 0 } },
+            { latest_failure_code: { not: null } },
+          ],
+        },
+      }),
+      transaction.source_connection_health_episodes.count({
+        where: { organization_id: organizationId, closed_at: null },
       }),
       transaction.$queryRaw<Array<{
         packCount: bigint;
@@ -934,7 +1328,7 @@ async function readQualificationEvidence(
       `),
       transaction.$queryRaw<Array<{
         confirmationSetCount: bigint;
-        currentPullConfirmationSetCount: bigint;
+        coveredCurrentPullCount: bigint;
         confirmationItemCount: bigint;
         declaredConfirmationItemCount: bigint;
         confirmationSetSizeMismatchCount: bigint;
@@ -955,14 +1349,14 @@ async function readQualificationEvidence(
         )
         select (select count(*) from set_sizes)::bigint as "confirmationSetCount",
                (
-                 select count(*)
+                 select count(distinct pull.id)
                  from set_sizes set_size
                  join public.canonical_entities pull
                    on pull.organization_id = ${organizationId}::uuid
                   and pull.id = set_size.source_entity_id
                   and pull.record_kind = 'pull'
                   and pull.current_revision_id = set_size.source_canonical_revision_id
-               )::bigint as "currentPullConfirmationSetCount",
+               )::bigint as "coveredCurrentPullCount",
                (select coalesce(sum(item_count), 0) from set_sizes)::bigint
                  as "confirmationItemCount",
                (select coalesce(sum(relationship_count), 0) from set_sizes)::bigint
@@ -989,7 +1383,13 @@ async function readQualificationEvidence(
       }),
       transaction.settled_public_watermarks.findUnique({
         where: { organization_id: organizationId },
-        select: { settled_sequence: true, source_head_sequence: true, next_sequence: true },
+        select: {
+          settled_sequence: true,
+          source_head_sequence: true,
+          next_sequence: true,
+          settled_at: true,
+          source_head_at: true,
+        },
       }),
       transaction.provider_catalog_checkpoints.findUnique({
         where: {
@@ -998,7 +1398,12 @@ async function readQualificationEvidence(
             platform_key: PLATFORM_KEY,
           },
         },
-        select: { settled_sequence: true, source_head_sequence: true },
+        select: {
+          settled_sequence: true,
+          source_head_sequence: true,
+          settled_at: true,
+          source_head_at: true,
+        },
       }),
       transaction.public_derivation_obligations.count({
         where: { organization_id: organizationId, state: { in: ["pending", "claimed"] } },
@@ -1021,35 +1426,9 @@ async function readQualificationEvidence(
       transaction.$queryRaw<Array<{
         externalId: string;
         content: unknown;
-        associated: boolean;
       }>>(Prisma.sql`
         select collectible.external_id as "externalId",
-               revision.content_json as content,
-               exists (
-                 select 1
-                 from public.canonical_entities pull
-                 join public.canonical_relationships card_relationship
-                   on card_relationship.organization_id = pull.organization_id
-                  and card_relationship.source_entity_id = pull.id
-                  and card_relationship.relationship_kind = 'card'
-                  and card_relationship.target_platform_key = ${PLATFORM_KEY}
-                  and card_relationship.target_record_kind = 'catalog_asset'
-                  and card_relationship.target_entity_id = collectible.id
-                  and card_relationship.resolved_public_change_sequence is not null
-                  and card_relationship.resolved_at is not null
-                 join public.canonical_relationships pack_relationship
-                   on pack_relationship.organization_id = pull.organization_id
-                  and pack_relationship.source_entity_id = pull.id
-                  and pack_relationship.relationship_kind = 'pack'
-                  and pack_relationship.target_platform_key = ${PLATFORM_KEY}
-                  and pack_relationship.target_record_kind = 'pack'
-                  and pack_relationship.target_entity_id is not null
-                  and pack_relationship.resolved_public_change_sequence is not null
-                  and pack_relationship.resolved_at is not null
-                 where pull.organization_id = collectible.organization_id
-                   and pull.platform_key = ${PLATFORM_KEY}
-                   and pull.record_kind = 'pull'
-               ) as associated
+               revision.content_json as content
         from public.canonical_entities collectible
         join public.canonical_revisions revision
           on revision.organization_id = collectible.organization_id
@@ -1060,19 +1439,26 @@ async function readQualificationEvidence(
           and collectible.record_kind = 'catalog_asset'
         order by collectible.external_id collate "C"
       `),
+      associationRead,
     ]);
+    const assets = attachClutchpacksCatalogAssetAssociationEvidence(
+      rawAssets,
+      assetPackAssociations,
+    );
     const source = sources[0];
     const sourceRevision = sourceRevisions[0];
-    const latestRun = runs[0];
+    const currentCursorRun = currentCursorRuns[0];
     const entityCounts = counts[0];
     const confirmationCounts = confirmation[0];
     if (!entityCounts || !confirmationCounts) refuse("DATABASE_READ_FAILED");
     return Object.freeze({
+      databaseIdentity,
       organizationCount,
       providerCount: providers.length,
       providerPlatformKey: providers[0]?.platform_key ?? null,
       providerState: providers[0]?.state ?? null,
       sourceCount: sources.length,
+      sourceInstanceId: source?.id ?? null,
       sourceState: source?.state ?? null,
       sourcePauseRequested: source ? source.pause_requested_at !== null : null,
       sourceRevisionCount: sourceRevisions.length,
@@ -1083,34 +1469,58 @@ async function readQualificationEvidence(
       mapperVersion: sourceRevision?.mapper_version ?? null,
       identityNamespaceKey: sourceRevision?.identity_namespace_key ?? null,
       cursorCodecVersion: sourceRevision?.cursor_codec_version ?? null,
-      latestRunCount: runs.length,
-      latestRunId: latestRun?.id ?? null,
-      latestRunState: latestRun?.state ?? null,
-      latestRunReachedProviderHead: latestRun?.reached_provider_head ?? null,
-      latestRunFinished: latestRun?.finished_at !== null,
-      latestRunFailureCode: latestRun?.failure_code ?? null,
-      latestRunSourceRevisionId: latestRun?.source_revision_id ?? null,
-      latestRunAdapterVersion: latestRun?.source_adapter_version ?? null,
+      currentCursorCount: currentCursorRuns.length,
+      currentCursorSourceInstanceId:
+        currentCursorRun?.sourceInstanceId ?? null,
+      currentCursorSourceRevisionId:
+        currentCursorRun?.sourceRevisionId ?? null,
+      currentCursorGeneration: currentCursorRun?.cursorGeneration ?? null,
+      latestRunCount: currentCursorRun?.runId === null ||
+          currentCursorRun?.runId === undefined ? 0 : 1,
+      latestRunId: currentCursorRun?.runId ?? null,
+      latestRunState: currentCursorRun?.runState ?? null,
+      latestRunReachedProviderHead:
+        currentCursorRun?.runReachedProviderHead ?? null,
+      latestRunFinished: currentCursorRun?.runFinishedAt !== null &&
+        currentCursorRun?.runFinishedAt !== undefined,
+      latestRunFailureCode: currentCursorRun?.runFailureCode ?? null,
+      latestRunSourceInstanceId:
+        currentCursorRun?.runSourceInstanceId ?? null,
+      latestRunSourceRevisionId:
+        currentCursorRun?.runSourceRevisionId ?? null,
+      latestRunCursorGeneration:
+        currentCursorRun?.runCursorGeneration ?? null,
+      latestRunAdapterVersion:
+        currentCursorRun?.runSourceAdapterVersion ?? null,
       latestRunNormalizedContractVersion:
-        latestRun?.normalized_contract_version ?? null,
-      latestRunMapperKey: latestRun?.mapper_key ?? null,
-      latestRunMapperVersion: latestRun?.mapper_version ?? null,
-      latestRunIdentityNamespaceKey: latestRun?.identity_namespace_key ?? null,
-      latestRunCursorCodecVersion: latestRun?.cursor_codec_version ?? null,
+        currentCursorRun?.runNormalizedContractVersion ?? null,
+      latestRunMapperKey: currentCursorRun?.runMapperKey ?? null,
+      latestRunMapperVersion: currentCursorRun?.runMapperVersion ?? null,
+      latestRunIdentityNamespaceKey:
+        currentCursorRun?.runIdentityNamespaceKey ?? null,
+      latestRunCursorCodecVersion:
+        currentCursorRun?.runCursorCodecVersion ?? null,
       activeRunCount,
       liveSupervisorCount: integer(liveSupervisors[0]?.count ?? 0n),
       deliveryCount,
       wrongDeliveryLineageCount,
       quarantineCount,
-      nonInfoDiagnosticCount,
-      nonInfoSourceOperationalEventCount,
+      unresolvedCurrentGenerationDiagnosticCount: integer(
+        unresolvedCurrentGenerationDiagnostics[0]?.count ?? 0n,
+      ),
+      unresolvedCurrentGenerationOperationalEventCount: integer(
+        unresolvedCurrentGenerationOperationalEvents[0]?.count ?? 0n,
+      ),
+      unresolvedProviderHealthCount,
+      unresolvedSourceHealthCount,
+      openConnectionHealthEpisodeCount,
       canonicalPackCount: integer(entityCounts.packCount),
       canonicalAssetCount: integer(entityCounts.assetCount),
       canonicalPullCount: integer(entityCounts.pullCount),
       canonicalMarketEventCount: integer(entityCounts.marketEventCount),
       confirmationSetCount: integer(confirmationCounts.confirmationSetCount),
-      currentPullConfirmationSetCount:
-        integer(confirmationCounts.currentPullConfirmationSetCount),
+      coveredCurrentPullCount:
+        integer(confirmationCounts.coveredCurrentPullCount),
       confirmationItemCount: integer(confirmationCounts.confirmationItemCount),
       declaredConfirmationItemCount:
         integer(confirmationCounts.declaredConfirmationItemCount),
@@ -1125,8 +1535,12 @@ async function readQualificationEvidence(
       globalSettledSequence: globalWatermark?.settled_sequence ?? null,
       globalSourceHeadSequence: globalWatermark?.source_head_sequence ?? null,
       globalNextSequence: globalWatermark?.next_sequence ?? null,
+      globalSettledAt: globalWatermark?.settled_at ?? null,
+      globalSourceHeadAt: globalWatermark?.source_head_at ?? null,
       providerSettledSequence: providerCheckpoint?.settled_sequence ?? null,
       providerSourceHeadSequence: providerCheckpoint?.source_head_sequence ?? null,
+      providerSettledAt: providerCheckpoint?.settled_at ?? null,
+      providerSourceHeadAt: providerCheckpoint?.source_head_at ?? null,
       pendingObligationCount,
       legacyProviderConfigurationCount,
       legacyProviderSecretCount,
@@ -1137,11 +1551,13 @@ async function readQualificationEvidence(
   }, {
     ...PACKSCOUT_TRANSACTION_OPTIONS,
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    timeout: CLUTCHPACKS_CATALOG_QUALIFICATION_TRANSACTION_TIMEOUT_MS,
   });
 }
 
 function candidateBinding(input: Readonly<{
   databaseTarget: string;
+  databaseIdentity: ClutchpacksCatalogDatabaseIdentity;
   organizationId: string;
   outputPath: string;
   latestRunId: string;
@@ -1150,6 +1566,7 @@ function candidateBinding(input: Readonly<{
   const digest = createHash("sha256").update([
     CANDIDATE_DIGEST_DOMAIN,
     input.databaseTarget,
+    ...connectedPostgresIdentityBindingParts(input.databaseIdentity),
     input.organizationId,
     input.outputPath,
     input.latestRunId,
@@ -1191,6 +1608,18 @@ async function writeCreateOnlyPrivateFile(
   }
 }
 
+async function readProductionDatabaseIdentity(
+  databaseUrl: string,
+): Promise<ClutchpacksCatalogDatabaseIdentity> {
+  const lifecycle = createPrismaClientLifecycle({ databaseUrl });
+  try {
+    await lifecycle.start();
+    return await readClutchpacksCatalogDatabaseIdentity(lifecycle.client);
+  } finally {
+    await lifecycle.close().catch(() => undefined);
+  }
+}
+
 export async function runClutchpacksCatalogCandidate(input: Readonly<{
   argv: readonly string[];
   environment: NodeJS.ProcessEnv;
@@ -1198,6 +1627,9 @@ export async function runClutchpacksCatalogCandidate(input: Readonly<{
     databaseUrl: string,
     organizationId: string,
   ) => Promise<ClutchpacksCatalogQualificationEvidence>;
+  readDatabaseIdentity?: (
+    databaseUrl: string,
+  ) => Promise<ClutchpacksCatalogDatabaseIdentity>;
   writeCandidate?: (outputPath: string, contents: string) => Promise<void>;
   writeOutput?: (value: string) => void;
 }>): Promise<unknown> {
@@ -1212,7 +1644,7 @@ export async function runClutchpacksCatalogCandidate(input: Readonly<{
     });
     try {
       await lifecycle.start();
-      evidence = await readQualificationEvidence(
+      evidence = await readClutchpacksCatalogQualificationEvidence(
         lifecycle.client,
         environment.organizationId,
       );
@@ -1234,6 +1666,7 @@ export async function runClutchpacksCatalogCandidate(input: Readonly<{
   const serialized = `${canonicalJson(configuration)}\n`;
   const binding = candidateBinding({
     databaseTarget: environment.databaseTarget,
+    databaseIdentity: evidence.databaseIdentity,
     organizationId: environment.organizationId,
     outputPath: command.outputPath,
     latestRunId: evidence.latestRunId!,
@@ -1247,13 +1680,15 @@ export async function runClutchpacksCatalogCandidate(input: Readonly<{
     operation: WORKFLOW,
     mode: command.execute ? "execute" : "dry_run",
     targetDatabase: TARGET_DATABASE_NAME,
+    databaseIdentity: evidence.databaseIdentity,
     organizationId: environment.organizationId,
     latestRunId: evidence.latestRunId,
     packCount: evidence.packs.length,
-    collectibleMappingCount: evidence.assets.length,
+    collectibleMappingCount: configuration.collectibles.length,
     associatedCollectibleCount,
     unassociatedCollectibleCount: evidence.assets.length - associatedCollectibleCount,
     publicAssetOriginCount: configuration.publicAssetOrigins.length,
+    observedPublicAssetOrigins: configuration.publicAssetOrigins,
     serializedBytes: Buffer.byteLength(serialized),
     configurationHash,
     candidateDigest: binding.digest,
@@ -1263,6 +1698,18 @@ export async function runClutchpacksCatalogCandidate(input: Readonly<{
   });
   if (command.execute) {
     if (command.confirmation !== binding.confirmation) refuse("CONFIRMATION_INVALID");
+    try {
+      const currentIdentity = await (
+        input.readDatabaseIdentity ?? readProductionDatabaseIdentity
+      )(environment.databaseUrl);
+      assertSameConnectedPostgresIdentity(
+        currentIdentity,
+        evidence.databaseIdentity,
+      );
+    } catch (error) {
+      if (error instanceof ClutchpacksCatalogCandidateError) throw error;
+      return refuse("DATABASE_READ_FAILED");
+    }
     await (input.writeCandidate ?? writeCreateOnlyPrivateFile)(
       command.outputPath,
       serialized,
