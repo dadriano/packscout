@@ -67,7 +67,7 @@ test("the preflight table allowlist exactly matches every Convex app table", () 
     /^  ([A-Za-z][A-Za-z0-9_]*): defineTable/gmu,
   )].map((match) => match[1]).sort();
   assert.deepEqual(CONVEX_APP_TABLES, schemaTables);
-  assert.equal(CONVEX_APP_TABLES.length, 36);
+  assert.equal(CONVEX_APP_TABLES.length, 44);
 });
 
 test("only an explicit preproduction reference or deployment name is accepted", () => {
@@ -173,7 +173,7 @@ test("a fresh target emits only canonical digest-scoped evidence", async () => {
   ]);
   assert.match(result.proofDigest, /^[0-9a-f]{64}$/u);
   assert.match(result.proof.scopeDigest, /^[0-9a-f]{64}$/u);
-  assert.equal(result.proof.database.appTableCount, 36);
+  assert.equal(result.proof.database.appTableCount, 44);
   assert.equal(result.proof.database.nonemptyAppTableCount, 0);
   assert.equal(result.proof.environment.runtimeEnvironment, "preproduction");
   assert.equal(result.proof.environment.forbiddenVariableCount, 0);

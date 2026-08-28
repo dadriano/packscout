@@ -15,6 +15,7 @@ export const FRESH_CONVEX_PREFLIGHT_SCHEMA_VERSION =
 
 export const CONVEX_APP_TABLES = Object.freeze([
   "activeCatalogManifestState",
+  "activeDataReleaseV3State",
   "betaAllowlistEntries",
   "catalogManifestBlocks",
   "catalogManifestOperations",
@@ -22,6 +23,13 @@ export const CONVEX_APP_TABLES = Object.freeze([
   "catalogRetentionOperations",
   "catalogRetentionState",
   "dataReleaseAuthNonces",
+  "dataReleaseV3Categories",
+  "dataReleaseV3Chases",
+  "dataReleaseV3Collectibles",
+  "dataReleaseV3Operations",
+  "dataReleaseV3Releases",
+  "dataReleaseV3Repacks",
+  "dataReleaseV3SearchShards",
   "globalCatalogManifests",
   "productUsers",
   "providerCatalogBatches",
