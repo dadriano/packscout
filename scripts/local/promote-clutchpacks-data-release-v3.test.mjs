@@ -20,6 +20,7 @@ import {
   buildClutchpacksV3ActivationConfirmation,
   clutchpacksCatalogSourceWithEmptyShellOmissions,
   clutchpacksCollectibleReadbackProbes,
+  clutchpacksConvexHttpClientAddress,
   exactDataReleaseV3StagingPort,
   operatorBoundDataReleaseV3ActivationPort,
   parseClutchpacksDataReleaseV3Command,
@@ -59,6 +60,23 @@ const scriptPath = fileURLToPath(new URL(
   "./promote-clutchpacks-data-release-v3.mjs",
   import.meta.url,
 ));
+
+test("Convex public readback uses a single-slash API address", () => {
+  const address = clutchpacksConvexHttpClientAddress(
+    CLUTCHPACKS_CONVEX_QUERY_URL,
+  );
+  assert.equal(address, "https://shiny-newt-310.convex.cloud");
+  assert.equal(
+    `${address}/api/query`,
+    "https://shiny-newt-310.convex.cloud/api/query",
+  );
+  assert.throws(
+    () => clutchpacksConvexHttpClientAddress(
+      "https://different-newt-999.convex.cloud/",
+    ),
+    (error) => assertPromotionError(error, "CLUTCHPACKS_V3_TARGET_INVALID"),
+  );
+});
 
 function baseEnvironment(overrides = {}) {
   return {

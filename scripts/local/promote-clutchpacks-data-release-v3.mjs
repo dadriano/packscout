@@ -46,6 +46,16 @@ export const CLUTCHPACKS_CONVEX_PUBLICATION_URL =
 export const CLUTCHPACKS_CONVEX_QUERY_URL =
   "https://shiny-newt-310.convex.cloud/";
 
+export function clutchpacksConvexHttpClientAddress(queryUrl) {
+  if (queryUrl !== CLUTCHPACKS_CONVEX_QUERY_URL) {
+    refuse("CLUTCHPACKS_V3_TARGET_INVALID");
+  }
+  // ConvexHttpClient appends `/api/query` directly to the supplied address.
+  // The protected target is represented canonically with a trailing slash,
+  // so pass only its origin to avoid issuing a `//api/query` request.
+  return new URL(queryUrl).origin;
+}
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
@@ -1806,7 +1816,9 @@ async function readPublicRelease(command, input) {
     import("convex/browser"),
     import("../../convex/_generated/api.js"),
   ]);
-  const client = new ConvexHttpClient(command.queryUrl);
+  const client = new ConvexHttpClient(
+    clutchpacksConvexHttpClientAddress(command.queryUrl),
+  );
   const withToken = (value) => command.catalogReadToken === null
     ? value
     : { ...value, catalogReadToken: command.catalogReadToken };
