@@ -5,7 +5,11 @@ import {
   type PackScoutBuybackEvPublicReasonCodeV1,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
-import { BuybackEvRevisionRepository, PipelineSetupRepository } from "@packscout/database";
+import {
+  BuybackEvRevisionRepository,
+  PipelineSetupRepository,
+  ProviderSourceLifecycleRepository,
+} from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { BuybackAdjustedEvRecomputationProcessor } from "./buyback-adjusted-ev-recomputation-processor.ts";
 import type { BuybackAdjustedEvRecomputationPort } from "./buyback-adjusted-ev-recomputation-processor.ts";
@@ -44,7 +48,6 @@ import type { PackScoutBuybackEvRecomputationCommandV1 } from "./buyback-adjuste
 const ids = {
   organization: "85000000-0000-4000-8000-000000000001",
   provider: "85000000-0000-4000-8000-000000000002",
-  configuration: "85000000-0000-4000-8000-000000000003",
 } as const;
 
 const OBSERVED_AT = "2026-08-18T01:00:00.000Z";
@@ -173,15 +176,42 @@ test("failure, expiry, interruption, malformed-projection, and replay drills fai
       platformKey: OPERATIONS_PLATFORM_KEY,
       displayName: "Vendor",
     });
-    await setup.createConfigRevision({
-      id: ids.configuration,
+    const lifecycle = new ProviderSourceLifecycleRepository(harness.database);
+    const createdAt = new Date("2026-08-18T00:00:00.000Z");
+    const connection = await lifecycle.createConnectionProfileRevision({
+      organizationId: ids.organization,
+      sourceTypeKey: "synthetic-events-v1",
+      connectionTypeKey: "synthetic-events-connection-v1",
+      displayName: "Synthetic source",
+      requestLimit: 1,
+      sourceAdapterVersion: "synthetic-events-adapter-v1",
+      revisionNumber: 1,
+      configurationCiphertext: new Uint8Array(32).fill(1),
+      configurationNonce: new Uint8Array(12).fill(2),
+      configurationAuthTag: new Uint8Array(16).fill(3),
+      encryptionKeyVersion: 1,
+      configurationFingerprint: "a".repeat(64),
+      actorKey: "actor:test",
+      createdAt,
+    });
+    const source = await lifecycle.createSourceInstanceRevision({
       organizationId: ids.organization,
       providerId: ids.provider,
-      version: 1,
-      adapterKey: "synthetic-mapper-v1",
-      endpointUrl: "https://provider.example/feed",
-      authMode: "none",
-      createdByActorKey: "actor:test",
+      connectionProfileId: connection.profileId,
+      sourceTypeKey: "synthetic-events-v1",
+      sourceAdapterVersion: "synthetic-events-adapter-v1",
+      normalizedContractVersion: "packscout.provider-observation.v1",
+      mapperKey: "synthetic-catalog-v1",
+      mapperVersion: "1",
+      identityNamespaceKey: "synthetic-drills-v1",
+      cursorCodecVersion: "synthetic-cursor-v1",
+      revisionNumber: 1,
+      intervalSeconds: 300,
+      configuration: { fixture: "failure-drills" },
+      configurationHash: "b".repeat(64),
+      recordIdScopes: ["catalog-pack-v1"],
+      actorKey: "actor:test",
+      createdAt,
     });
     const store = new PackScoutBuybackEvRevisionStore(
       new BuybackEvRevisionRepository(harness.database),
@@ -202,7 +232,7 @@ test("failure, expiry, interruption, malformed-projection, and replay drills fai
         operationsCommand({
           organizationId: ids.organization,
           providerId: ids.provider,
-          configurationRevisionId: ids.configuration,
+          providerSourceRevisionId: source.sourceRevisionId,
           evidence: operationsEvidence({
             productKey: drill.productKey,
             sourceRevisionId: `${drill.productKey}-rev-1`,
@@ -224,7 +254,7 @@ test("failure, expiry, interruption, malformed-projection, and replay drills fai
       operationsCommand({
         organizationId: ids.organization,
         providerId: ids.provider,
-        configurationRevisionId: ids.configuration,
+        providerSourceRevisionId: source.sourceRevisionId,
         evidence: operationsEvidence({
           productKey: AVAILABLE_PRODUCT_KEY,
           sourceRevisionId: `${AVAILABLE_PRODUCT_KEY}-rev-1`,
@@ -305,7 +335,7 @@ test("failure, expiry, interruption, malformed-projection, and replay drills fai
       operationsCommand({
         organizationId: ids.organization,
         providerId: ids.provider,
-        configurationRevisionId: ids.configuration,
+        providerSourceRevisionId: source.sourceRevisionId,
         evidence: operationsEvidence({
           productKey: AVAILABLE_PRODUCT_KEY,
           sourceRevisionId: `${AVAILABLE_PRODUCT_KEY}-rev-1`,

@@ -115,6 +115,22 @@ async function capacityArtifact(): Promise<CapacityArtifact> {
 
 test("capacity artifact is derived from measured relations and exact retention volume", async () => {
   const artifact = await capacityArtifact();
+  const structuredRelations = new Set([
+    "source_record_identities",
+    "source_semantic_observations",
+    "source_delivery_occurrences",
+    "canonical_entities",
+    "canonical_revisions",
+    "canonical_relationships",
+    "source_relationship_confirmation_sets",
+    "source_relationship_confirmations",
+    "public_change_causes",
+    "public_derivation_obligations",
+    "estimated_ev_recomputation_requests",
+  ]);
+  assert.ok([...structuredRelations].every((relation) =>
+    artifact.storageMeasurement.relations.some((measured) =>
+      measured.relation === relation)));
   assert.equal(
     artifact.forecastInput.measuredStructuredPhysicalBytesPerRecord,
     artifact.storageMeasurement.structuredPhysicalBytesPerRecord,
@@ -127,7 +143,8 @@ test("capacity artifact is derived from measured relations and exact retention v
           structuredPhysicalBytesPerRecord,
       ),
     ) + Math.ceil(
-      9 * artifact.storageMeasurement.allocationPageBytes / 96,
+      structuredRelations.size
+        * artifact.storageMeasurement.allocationPageBytes / 96,
     ),
   );
   for (const [key, denominator] of [

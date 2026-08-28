@@ -37,6 +37,7 @@ function renderOpportunityTable(detail = buildV3ViewDetail()): string {
     <OpportunityTable
       onSelectOpportunity={noop}
       opportunities={[publicRepackViewSummaryV3FromDetail(detail)]}
+      repacksHref="/packs"
       selectedPublicRepackId={detail.publicRepackId}
     />,
   );
@@ -52,6 +53,7 @@ function renderAllRepacksTable(
       onSelect={noop}
       onSort={noop}
       page={buildV3ListPage(details)}
+      repackHrefById={new Map()}
       selectedPublicRepackId={details[0]?.publicRepackId ?? null}
     />,
   );

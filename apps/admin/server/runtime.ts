@@ -129,10 +129,6 @@ export async function createAdminRuntime(
     "PACKSCOUT_SESSION_HASHING_SECRET",
     32,
   );
-  const providerCredentialKey = readBase64Key(
-    environment.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64,
-    "PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64",
-  );
   const providerActorKey = readBase64Key(
     environment.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
     "PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64",
@@ -223,6 +219,9 @@ export async function createAdminRuntime(
     const directory = createProductUserDirectoryReader({
       config: productUserDirectoryConfig,
     });
+    const publishedCatalog = createPublishedCatalogReader({
+      config: productUserDirectoryConfig,
+    });
     const app = createAdminApp({
       trustedProxies: configuredTrustedProxies,
       trustedProxyHops: input.trustedProxyHops,
@@ -230,9 +229,6 @@ export async function createAdminRuntime(
       providers: createProviderAdminRuntime({
         repository: providerRepository,
         healthRepository: new PrismaProviderHealthRepository(database),
-        credentialKey: providerCredentialKey,
-        actorPseudonymKey: providerActorKey,
-        environment: development ? "local" : "production",
         operational,
       }),
       importOperations: createAdminImportOperationsRuntime({
@@ -246,16 +242,15 @@ export async function createAdminRuntime(
       }),
       workerFleet: createAdminWorkerFleetRuntime({ database }),
       canonical: canonicalInspection,
+      published: publishedCatalog,
       parity:
         catalogDeploymentKey === null
           ? undefined
           : createParityRuntime({
-              canonical: canonicalInspection,
-              promotion: new PrismaProviderPromotionFactsRepository(database),
-              published: createPublishedCatalogReader({
-                config: productUserDirectoryConfig,
-              }),
-              deploymentKey: catalogDeploymentKey,
+            canonical: canonicalInspection,
+            promotion: new PrismaProviderPromotionFactsRepository(database),
+            published: publishedCatalog,
+            deploymentKey: catalogDeploymentKey,
             }),
       productUsers: {
         directory,

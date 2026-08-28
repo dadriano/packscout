@@ -30,7 +30,7 @@ export function createProductionSourceAdminConfigurationCodecRegistry(
   sourceAdapters: SourceAdapterRegistry,
 ): SourceAdminConfigurationCodecRegistry {
   return new SourceAdminConfigurationCodecRegistry(
-    [dataforrestEventsV1SourceAdapterManifest].map((manifest) =>
+    productionSourceAdapterManifests.map((manifest) =>
       new DataforrestEventsAdminConfigurationCodec(
         sourceAdapters.resolveSourceType(
           manifest.sourceTypeKey,

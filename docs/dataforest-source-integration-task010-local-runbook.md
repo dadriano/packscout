@@ -11,10 +11,10 @@ owns only the guarded Task010 target, configuration, first backfill, and final
 reconciliation procedure.
 
 DataForrest has one production identity: source type
-`dataforrest-events-v1`, adapter `dataforrest-events-adapter-v1`, normalized
+`dataforrest-events-v1`, adapter `dataforrest-events-adapter-v3`, normalized
 observation `packscout.provider-observation.v1`, and mapper revision `1`.
 Historical adapter, observation, and mapper revisions are not upgrade inputs.
-Any local database that contains a v2 or v3 pin must be rebuilt before this
+Any local database that contains a v1 or v2 pin must be rebuilt before this
 procedure is used.
 
 For the normal development database, stop admin and worker processes and run
@@ -188,9 +188,9 @@ supervisor can claim work.
 The backfill start requires exactly one active tested profile whose approved
 per-platform hard cap is no greater than two. PackScout's runtime operates each
 platform lane at one request. Every connection revision must use DataForrest
-adapter v1, and exactly four tested,
-paused-or-active sources must have only the adapter-v1, observation-v1,
-mapper-v1 tuple across every revision. Any v2, v3, unknown, or mixed tuple
+adapter v3, and exactly four tested,
+paused-or-active sources must have only the adapter-v3, observation-v1,
+mapper-v1 tuple across every revision. Any v1, v2, unknown, or mixed tuple
 fails closed before the supervisor starts. In Operations, select **Resume** for
 all four sources; Resume makes each lane due immediately.
 The dedicated Task 010 runner forces `PACKSCOUT_SOURCE_EXECUTION_SLOTS=4`, even

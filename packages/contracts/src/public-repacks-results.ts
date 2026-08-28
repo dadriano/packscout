@@ -174,8 +174,13 @@ export const dashboardKpisSchema = z
   })
   .strict()
   .refine(
-    ({ totalRepacks, positiveEvRepacks, highConfidenceRepacks }) =>
-      positiveEvRepacks <= totalRepacks && highConfidenceRepacks <= totalRepacks,
+    ({
+      totalRepacks,
+      positiveEvRepacks,
+      highConfidenceRepacks,
+    }) =>
+      positiveEvRepacks <= totalRepacks &&
+      highConfidenceRepacks <= totalRepacks,
     { message: "public_dashboard.count_invalid" },
   );
 

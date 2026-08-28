@@ -38,6 +38,7 @@ function fixture() {
     configuration,
     platformKey: "alpha",
     revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
   return { snapshot, projection };
@@ -241,4 +242,48 @@ test("approved stablecoin policy participates in provider governing identity", a
     governed.publicProviderReleaseId,
     baseline.publicProviderReleaseId,
   );
+});
+
+test("later duplicate pull evidence reuses the established provider release identity", async () => {
+  const { snapshot, projection } = fixture();
+  const approvedConfiguration = providerFixtureApprovedConfiguration();
+  const established = snapshot.assetPackAssociations[0]!;
+  const duplicateProjection = projectProviderCatalogRelease({
+    configuration: approvedConfiguration,
+    platformKey: snapshot.checkpoint.platformKey,
+    revisions: snapshot.revisions,
+    assetPackAssociations: [{
+      ...established,
+      sourceEntityId: `${established.sourceEntityId}-later-proof`,
+      associatedAt: new Date(established.associatedAt.getTime() + 86_400_000),
+      publicChangeSequence: established.publicChangeSequence + 100n,
+    }, ...snapshot.assetPackAssociations],
+    repackIdentities: snapshot.repackIdentities,
+  });
+  const baseline = await buildProviderCatalogReleasePublishPlan({
+    checkpoint: snapshot.checkpoint,
+    configuration: snapshot.configuration,
+    projection,
+    lastSuccessfulObservationAt:
+      snapshot.observation.lastSuccessfulObservationAt,
+  });
+  const laterCheckpoint = {
+    ...snapshot.checkpoint,
+    settledSequence: snapshot.checkpoint.settledSequence + 100n,
+    sourceHeadSequence: snapshot.checkpoint.sourceHeadSequence + 100n,
+    settledAt: new Date(snapshot.checkpoint.settledAt.getTime() + 86_400_000),
+    sourceHeadAt: new Date(snapshot.checkpoint.sourceHeadAt.getTime() + 86_400_000),
+  };
+  const repeated = await buildProviderCatalogReleasePublishPlan({
+    checkpoint: laterCheckpoint,
+    configuration: snapshot.configuration,
+    projection: duplicateProjection,
+    lastSuccessfulObservationAt:
+      snapshot.observation.lastSuccessfulObservationAt,
+  });
+
+  assert.equal(duplicateProjection.dataAsOf.toISOString(), projection.dataAsOf.toISOString());
+  assert.equal(repeated.publicProviderReleaseId, baseline.publicProviderReleaseId);
+  assert.equal(repeated.providerReleaseFingerprint, baseline.providerReleaseFingerprint);
+  assert.equal(repeated.contentHash, baseline.contentHash);
 });

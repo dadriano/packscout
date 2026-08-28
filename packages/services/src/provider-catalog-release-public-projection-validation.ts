@@ -228,7 +228,7 @@ export function providerCatalogAssetContent(
     !isObject(value) ||
     value.schemaVersion !== "catalog-projection-v1" ||
     value.entityType !== "catalog_asset" ||
-    !isNullableString(value.relatedPackExternalId) ||
+    value.relatedPackExternalId !== null ||
     !isNullableString(value.name) ||
     !isNullableString(value.category) ||
     !["available", "unavailable", "unknown", "sold_out"].includes(

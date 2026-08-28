@@ -102,6 +102,31 @@ test("approved public configuration requires a canonical stablecoin policy", () 
   );
 });
 
+test("approved public configuration governs per-repack listing hosts", () => {
+  const input = configuration();
+  const configured = {
+    ...input,
+    repacks: [{
+      ...input.repacks[0]!,
+      listingUrl: "https://vendor.example/checkout/pack-1/",
+    }],
+  };
+  assert.equal(
+    approvedPublicCatalogConfigurationV1Schema.safeParse(configured).success,
+    true,
+  );
+  assert.equal(
+    approvedPublicCatalogConfigurationV1Schema.safeParse({
+      ...configured,
+      repacks: [{
+        ...configured.repacks[0]!,
+        listingUrl: "https://unapproved.example/checkout/pack-1/",
+      }],
+    }).success,
+    false,
+  );
+});
+
 test("approved public configuration rejects a ninth launch platform with a stable error", () => {
   const input = configuration();
   input.platforms = Array.from({ length: 9 }, (_, index) => ({

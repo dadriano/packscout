@@ -16,10 +16,21 @@ import {
   type PackscoutTransactionClient,
 } from "./database.ts";
 import type {
+  ProviderCausalReadinessRecord,
   ProviderCatalogCheckpointRecord,
   SharedPublicConfigurationEpochRecord,
 } from "./public-change-settlement-repository.provider-read.ts";
+import {
+  loadProviderCausalReadinessInTransaction,
+  ProviderCausalReadinessPersistenceError,
+} from "./public-change-settlement-repository.provider-read.ts";
+import { loadProviderV1AssetPackAssociations } from
+  "./provider-v1-asset-pack-association-reader.ts";
 import { assertCanonicalActorDataSafe } from "./security.ts";
+import {
+  loadProviderV1RelationshipConfirmationReadiness,
+  providerV1ConfirmedRelationshipCtes,
+} from "./source-relationship-confirmation-repository.ts";
 
 export type ProviderCatalogReleaseSourceErrorCode =
   | "PROVIDER_RELEASE_SCOPE_MISMATCH"
@@ -67,7 +78,7 @@ export interface ProviderCatalogReleaseConfigurationSnapshot {
 export interface ProviderCatalogReleaseReadinessSnapshot {
   readonly lifecycleState: "active";
   readonly lifecycleSequence: bigint;
-  readonly configurationRevisionId: string;
+  readonly sourceRevisionId: string;
   readonly completedBackfillAt: Date;
 }
 
@@ -96,11 +107,22 @@ export interface ProviderCatalogGovernedRepackIdentitySnapshot {
   readonly approvedAt: Date;
 }
 
+export interface ProviderCatalogAssetPackAssociationSnapshot {
+  readonly sourceEntityId: string;
+  readonly platformKey: string;
+  readonly assetExternalId: string;
+  readonly packExternalId: string;
+  readonly associatedAt: Date;
+  readonly publicChangeSequence: bigint;
+}
+
 export interface ProviderCatalogReleaseSourceSnapshot {
   readonly checkpoint: ProviderCatalogReleaseCheckpointSnapshot;
   readonly configuration: ProviderCatalogReleaseConfigurationSnapshot;
   readonly readiness: ProviderCatalogReleaseReadinessSnapshot;
   readonly revisions: readonly ProviderCatalogCanonicalRevisionSnapshot[];
+  readonly assetPackAssociations:
+    readonly ProviderCatalogAssetPackAssociationSnapshot[];
   readonly repackIdentities: readonly ProviderCatalogGovernedRepackIdentitySnapshot[];
   readonly observation: Readonly<{ lastSuccessfulObservationAt: Date }>;
 }
@@ -125,19 +147,6 @@ interface ConfigurationRow {
   publicChangeSequence: bigint;
   configurationHash: string;
   configurationJson: unknown;
-}
-
-interface ReadinessRow {
-  lifecycleState: string;
-  lifecycleSequence: bigint;
-  causePlatformKey: string | null;
-  causeLifecycleState: string | null;
-  causeProviderId: string | null;
-  configurationRevisionId: string | null;
-  providerId: string;
-  revisionProviderId: string | null;
-  completedBackfillAt: Date | null;
-  lastSuccessfulObservationAt: Date | null;
 }
 
 interface RevisionRow extends ProviderCatalogCanonicalRevisionSnapshot {
@@ -257,14 +266,36 @@ export class PrismaProviderCatalogReleaseSourceRepository
     return this.database.$transaction(async (transaction) => {
       await transaction.$executeRaw(Prisma.sql`set transaction read only`);
       await this.assertPersistedCheckpoint(transaction, checkpoint);
+      const lifecycleDecisionSequence =
+        await this.loadLifecycleDecisionSequence(transaction);
       const configuration = await this.loadConfiguration(
         transaction,
         checkpoint.sharedConfigurationEpoch,
       );
-      const readiness = await this.loadReadiness(transaction, checkpoint);
+      const readiness = await this.loadReadiness(
+        transaction,
+        checkpoint,
+        lifecycleDecisionSequence,
+      );
+      const relationshipReadiness =
+        await loadProviderV1RelationshipConfirmationReadiness(transaction, {
+          organizationId: this.#organizationId,
+          providerId: readiness.providerId,
+          sourceInstanceId: readiness.sourceInstanceId,
+          sourceRevisionId: readiness.sourceRevisionId,
+        });
+      if (!relationshipReadiness.ready) {
+        refuse("PROVIDER_RELEASE_BACKFILL_INCOMPLETE");
+      }
       const revisions = await this.loadRevisions(
         transaction,
         checkpoint.settledSequence,
+      );
+      const assetPackAssociations = await this.loadAssetPackAssociations(
+        transaction,
+        checkpoint.settledSequence,
+        checkpoint.settledAt,
+        readiness.sourceRevisionId,
       );
       const repackIdentities = await this.loadRepackIdentities(
         transaction,
@@ -274,8 +305,10 @@ export class PrismaProviderCatalogReleaseSourceRepository
       await this.assertCompleteSource(
         transaction,
         checkpoint.settledSequence,
+        readiness.sourceRevisionId,
         configuration,
         revisions,
+        assetPackAssociations,
         repackIdentities,
       );
       return Object.freeze({
@@ -293,14 +326,15 @@ export class PrismaProviderCatalogReleaseSourceRepository
         readiness: Object.freeze({
           lifecycleState: "active",
           lifecycleSequence: readiness.lifecycleSequence,
-          configurationRevisionId: readiness.configurationRevisionId!,
-          completedBackfillAt: new Date(readiness.completedBackfillAt!.getTime()),
+          sourceRevisionId: readiness.sourceRevisionId,
+          completedBackfillAt: new Date(readiness.completedBackfillAt.getTime()),
         }),
         revisions: Object.freeze(revisions),
+        assetPackAssociations: Object.freeze(assetPackAssociations),
         repackIdentities: Object.freeze(repackIdentities),
         observation: Object.freeze({
           lastSuccessfulObservationAt: new Date(
-            readiness.lastSuccessfulObservationAt!.getTime(),
+            readiness.lastSuccessfulObservationAt.getTime(),
           ),
         }),
       });
@@ -383,81 +417,61 @@ export class PrismaProviderCatalogReleaseSourceRepository
     return configurationSlice(parsed.data, row, this.#platformKey);
   }
 
+  private async loadLifecycleDecisionSequence(
+    database: PackscoutTransactionClient,
+  ): Promise<bigint> {
+    const rows = await database.$queryRaw<
+      Array<{ lifecycleDecisionSequence: bigint }>
+    >(Prisma.sql`
+      select settled_sequence as "lifecycleDecisionSequence"
+      from public.catalog_manifest_lifecycle_checkpoints
+      where organization_id = ${uuid(this.#organizationId)}
+    `);
+    if (!rows[0]) refuse("PROVIDER_RELEASE_EPOCH_MISMATCH");
+    return rows[0].lifecycleDecisionSequence;
+  }
+
   private async loadReadiness(
     database: PackscoutTransactionClient,
     checkpoint: ReadyProviderCatalogCheckpointRecord,
-  ): Promise<ReadinessRow> {
-    const rows = await database.$queryRaw<ReadinessRow[]>(Prisma.sql`
-      with lifecycle as (
-        select impact.lifecycle_state::text as "lifecycleState",
-               impact.cause_sequence as "lifecycleSequence",
-               cause.metadata_json->>'platformKey' as "causePlatformKey",
-               cause.metadata_json->>'state' as "causeLifecycleState",
-               cause.metadata_json->>'providerId' as "causeProviderId",
-               cause.metadata_json->>'configurationRevisionId'
-                 as "configurationRevisionId"
-        from public.public_change_catalog_impacts as impact
-        join public.public_change_causes as cause
-          on cause.organization_id = impact.organization_id
-         and cause.sequence = impact.cause_sequence
-        where impact.organization_id = ${uuid(this.#organizationId)}
-          and impact.lifecycle_platform_key = ${this.#platformKey}
-          and impact.cause_sequence <= (
-            select manifest.settled_sequence
-            from public.catalog_manifest_lifecycle_checkpoints as manifest
-            where manifest.organization_id = ${uuid(this.#organizationId)}
-          )
-        order by impact.cause_sequence desc
-        limit 1
-      )
-      select lifecycle.*, provider.id::text as "providerId",
-             revision.provider_id::text as "revisionProviderId",
-             backfill."completedBackfillAt",
-             observation."lastSuccessfulObservationAt"
-      from lifecycle
-      join public.provider_sources as provider
-        on provider.organization_id = ${uuid(this.#organizationId)}
-       and provider.platform_key = ${this.#platformKey}
-      left join public.provider_config_revisions as revision
-        on revision.organization_id = provider.organization_id
-       and revision.provider_id = provider.id
-       and revision.id::text = lifecycle."configurationRevisionId"
-      left join lateral (
-        select min(run.finished_at) as "completedBackfillAt"
-        from public.import_runs as run
-        where run.organization_id = provider.organization_id
-          and run.provider_id = provider.id
-          and run.config_revision_id = revision.id
-          and run.state = 'succeeded'
-          and run.reached_provider_head = true
-          and run.finished_at <= ${checkpoint.settledAt}
-      ) as backfill on true
-      left join lateral (
-        select max(run.finished_at) as "lastSuccessfulObservationAt"
-        from public.import_runs as run
-        where run.organization_id = provider.organization_id
-          and run.provider_id = provider.id
-          and run.config_revision_id = revision.id
-          and run.state = 'succeeded'
-          and run.reached_provider_head = true
-      ) as observation on true
-    `);
-    const row = rows[0];
-    if (!row || row.lifecycleState !== "active" ||
-        row.causePlatformKey !== this.#platformKey ||
-        row.causeLifecycleState !== "active") {
-      refuse("PROVIDER_RELEASE_LIFECYCLE_INELIGIBLE");
+    lifecycleDecisionSequence: bigint,
+  ): Promise<Readonly<{
+    lifecycleSequence: bigint;
+    providerId: string;
+    sourceInstanceId: string;
+    sourceRevisionId: string;
+    completedBackfillAt: Date;
+    lastSuccessfulObservationAt: Date;
+  }>> {
+    let row: ProviderCausalReadinessRecord | undefined;
+    try {
+      [row] = await loadProviderCausalReadinessInTransaction(database, {
+        organizationId: this.#organizationId,
+        checkpoints: [checkpoint],
+        lifecycleDecisionSequence,
+      });
+    } catch (error) {
+      if (error instanceof ProviderCausalReadinessPersistenceError &&
+          error.code === "LIFECYCLE_INELIGIBLE") {
+        refuse("PROVIDER_RELEASE_LIFECYCLE_INELIGIBLE");
+      }
+      refuse("PROVIDER_RELEASE_SOURCE_INVALID");
     }
-    if (!row.configurationRevisionId ||
-        !uuidPattern.test(row.configurationRevisionId) ||
-        row.causeProviderId !== row.providerId ||
-        row.revisionProviderId !== row.providerId) {
+    if (!row || row.platformKey !== this.#platformKey ||
+        !uuidPattern.test(row.sourceRevisionId)) {
       refuse("PROVIDER_RELEASE_SOURCE_INVALID");
     }
     if (!row.completedBackfillAt || !row.lastSuccessfulObservationAt) {
       refuse("PROVIDER_RELEASE_BACKFILL_INCOMPLETE");
     }
-    return row;
+    return {
+      lifecycleSequence: row.lifecycleSequence,
+      providerId: row.providerId,
+      sourceInstanceId: row.sourceInstanceId,
+      sourceRevisionId: row.sourceRevisionId,
+      completedBackfillAt: row.completedBackfillAt,
+      lastSuccessfulObservationAt: row.lastSuccessfulObservationAt,
+    };
   }
 
   private async loadRevisions(
@@ -465,43 +479,40 @@ export class PrismaProviderCatalogReleaseSourceRepository
     throughSequence: bigint,
   ): Promise<ProviderCatalogCanonicalRevisionSnapshot[]> {
     const rows = await database.$queryRaw<RevisionRow[]>(Prisma.sql`
-      with latest as (
-        select distinct on (entity.id)
-               entity.id::text as "entityId",
-               revision.id::text as "revisionId",
-               entity.platform_key as "platformKey",
-               entity.record_kind::text as "recordKind",
-               entity.external_id as "externalId", revision.content_json as content,
-               revision.source_updated_at as "sourceUpdatedAt",
-               revision.source_collected_at as "sourceCollectedAt",
-               revision.accepted_at as "acceptedAt",
-               revision.public_change_sequence as "publicChangeSequence",
-               exists (
-                 select 1 from public.public_change_catalog_impacts as impact
-                 where impact.organization_id = revision.organization_id
-                   and impact.cause_sequence = revision.public_change_sequence
-                   and ${this.#platformKey} = any(impact.provider_platform_keys)
-               ) as "catalogImpactMatches"
-        from public.canonical_entities as entity
-        join public.canonical_revisions as revision
-          on revision.entity_id = entity.id
-         and revision.organization_id = entity.organization_id
-        where entity.organization_id = ${uuid(this.#organizationId)}
-          and entity.platform_key = ${this.#platformKey}
-          and revision.public_change_sequence <= ${throughSequence}
-          and entity.record_kind in (
-            'platform', 'pack', 'catalog_asset', 'ev_input', 'estimated_ev'
-          )
-        order by entity.id, revision.public_change_sequence desc,
-                 revision.revision_number desc
-      )
-      select * from latest
-      order by "recordKind" collate "C", "externalId" collate "C",
-               "entityId" collate "C"
+      select entity.id::text as "entityId",
+             revision.id::text as "revisionId",
+             entity.platform_key as "platformKey",
+             entity.record_kind::text as "recordKind",
+             entity.external_id as "externalId", revision.content_json as content,
+             revision.source_updated_at as "sourceUpdatedAt",
+             revision.source_collected_at as "sourceCollectedAt",
+             revision.accepted_at as "acceptedAt",
+             revision.public_change_sequence as "publicChangeSequence",
+             exists (
+               select 1 from public.public_change_catalog_impacts as impact
+               where impact.organization_id = revision.organization_id
+                 and impact.cause_sequence = revision.public_change_sequence
+                 and ${this.#platformKey} = any(impact.provider_platform_keys)
+             ) as "catalogImpactMatches"
+      from public.canonical_entities as entity
+      join public.canonical_revisions as revision
+        on revision.id = entity.current_revision_id
+       and revision.entity_id = entity.id
+       and revision.organization_id = entity.organization_id
+      where entity.organization_id = ${uuid(this.#organizationId)}
+        and entity.platform_key = ${this.#platformKey}
+        and entity.record_kind in (
+          'platform', 'pack', 'catalog_asset', 'ev_input', 'estimated_ev'
+        )
+      order by entity.record_kind::text collate "C",
+               entity.external_id collate "C", entity.id::text collate "C"
     `);
     const identities = new Set<string>();
     return rows.map((row) => {
       const key = `${row.recordKind}\u0000${row.externalId}`;
+      if (row.publicChangeSequence > throughSequence) {
+        refuse("PROVIDER_RELEASE_SCOPE_MISMATCH");
+      }
       if (identities.has(key) || !row.catalogImpactMatches) {
         refuse("PROVIDER_RELEASE_SOURCE_INVALID");
       }
@@ -552,11 +563,40 @@ export class PrismaProviderCatalogReleaseSourceRepository
     );
   }
 
+  private async loadAssetPackAssociations(
+    database: PackscoutTransactionClient,
+    throughSequence: bigint,
+    throughOccurredAt: Date,
+    sourceRevisionId: string,
+  ): Promise<ProviderCatalogAssetPackAssociationSnapshot[]> {
+    const rows = await loadProviderV1AssetPackAssociations(database, {
+      organizationId: this.#organizationId,
+      platformKey: this.#platformKey,
+      sourceRevisionId,
+      throughSequence,
+      throughOccurredAt,
+    });
+    const sourceIds = new Set<string>();
+    return rows.map((row) => {
+      if (sourceIds.has(row.sourceEntityId) ||
+          row.platformKey !== this.#platformKey ||
+          row.publicChangeSequence > throughSequence ||
+          row.associatedAt.getTime() > throughOccurredAt.getTime() ||
+          !Number.isFinite(row.associatedAt.getTime())) {
+        refuse("PROVIDER_RELEASE_SOURCE_INVALID");
+      }
+      sourceIds.add(row.sourceEntityId);
+      return Object.freeze(row);
+    });
+  }
+
   private async assertCompleteSource(
     database: PackscoutTransactionClient,
     throughSequence: bigint,
+    sourceRevisionId: string,
     configuration: ProviderCatalogReleaseConfigurationSnapshot,
     revisions: readonly ProviderCatalogCanonicalRevisionSnapshot[],
+    associations: readonly ProviderCatalogAssetPackAssociationSnapshot[],
     identities: readonly ProviderCatalogGovernedRepackIdentitySnapshot[],
   ): Promise<void> {
     const configured = configuration.repacks.map(({ packExternalId, publicRepackId }) =>
@@ -574,8 +614,43 @@ export class PrismaProviderCatalogReleaseSourceRepository
       platformKey !== this.#platformKey || publicChangeSequence > throughSequence)) {
       refuse("PROVIDER_RELEASE_SCOPE_MISMATCH");
     }
+    if (associations.some(({ platformKey, publicChangeSequence }) =>
+      platformKey !== this.#platformKey || publicChangeSequence > throughSequence)) {
+      refuse("PROVIDER_RELEASE_SCOPE_MISMATCH");
+    }
     const invalid = await database.$queryRaw<Array<{ invalid: boolean }>>(
       Prisma.sql`
+        with ${providerV1ConfirmedRelationshipCtes({
+          organizationId: this.#organizationId,
+          sourceRevisionId,
+          throughSequence,
+          materialization: "not_materialized",
+        })},
+        latest_v1_pull_sets as (
+          select distinct on (source_entity_id) *
+          from confirmed_provider_v1_pull_relationship_sets
+          order by source_entity_id,
+                   semantic_effective_at desc,
+                   confirmation_public_change_sequence desc,
+                   confirmation_set_id desc
+        ),
+        latest_v1_pull_relationships as (
+          select relationship.*
+          from confirmed_provider_v1_pull_relationships as relationship
+          join latest_v1_pull_sets as latest
+            on latest.confirmation_set_id = relationship.confirmation_set_id
+           and latest.source_entity_id = relationship.source_entity_id
+        ),
+        -- Complete-source validation needs the two cardinalities for every
+        -- latest set. Compute them once rather than rescanning the materialized
+        -- relationship CTE in two correlated subqueries per pull.
+        latest_v1_pull_relationship_counts as (
+          select confirmation_set_id,
+                 count(*) as relationship_count,
+                 count(distinct relationship_kind) as relationship_kind_count
+          from latest_v1_pull_relationships
+          group by confirmation_set_id
+        )
         select exists (
           select 1
           from public.public_change_catalog_impacts as impact
@@ -641,9 +716,112 @@ export class PrismaProviderCatalogReleaseSourceRepository
                 where target_revision.organization_id =
                     relationship.organization_id
                   and target_revision.entity_id = target.id
-                  and target_revision.public_change_sequence <= ${throughSequence}
+                  and target_revision.public_change_sequence <=
+                    relationship.resolved_public_change_sequence
               )
             )
+        ) or exists (
+          select 1
+          from latest_v1_pull_relationships as relationship
+          join public.canonical_entities as source
+            on source.id = relationship.source_entity_id
+           and source.organization_id = relationship.organization_id
+          left join public.canonical_entities as target
+            on target.id = relationship.target_entity_id
+           and target.organization_id = relationship.organization_id
+          where relationship.organization_id = ${uuid(this.#organizationId)}
+            and source.platform_key = ${this.#platformKey}
+            and source.record_kind = 'pull'
+            and (
+              not exists (
+                select 1
+                from public.public_change_catalog_impacts as impact
+                where impact.organization_id = relationship.organization_id
+                  and impact.cause_sequence =
+                    relationship.confirmation_public_change_sequence
+                  and ${this.#platformKey} = any(impact.provider_platform_keys)
+              )
+              or relationship.target_platform_key <> ${this.#platformKey}
+              or relationship.target_external_id is null
+              or btrim(relationship.target_external_id) = ''
+              or not (
+                relationship.relationship_kind = 'card'
+                  and relationship.target_record_kind = 'catalog_asset'
+                or relationship.relationship_kind = 'pack'
+                  and relationship.target_record_kind = 'pack'
+              )
+              or relationship.resolved_public_change_sequence is null
+                and (relationship.target_entity_id is not null
+                  or relationship.resolved_at is not null)
+              or (
+                relationship.resolved_public_change_sequence is not null
+                and (
+                  relationship.target_entity_id is null
+                  or relationship.resolved_at is null
+                  or relationship.resolved_public_change_sequence <
+                    relationship.created_public_change_sequence
+                  or not exists (
+                    select 1
+                    from public.public_change_catalog_impacts as resolved_impact
+                    join public.public_change_causes as resolved_cause
+                      on resolved_cause.organization_id =
+                          resolved_impact.organization_id
+                     and resolved_cause.sequence =
+                          resolved_impact.cause_sequence
+                     and resolved_cause.change_kind =
+                          'relationship_resolution'
+                    where resolved_impact.organization_id =
+                        relationship.organization_id
+                      and resolved_impact.cause_sequence =
+                        relationship.resolved_public_change_sequence
+                      and ${this.#platformKey} = any(
+                        resolved_impact.provider_platform_keys
+                      )
+                  )
+                  or target.id is null
+                  or target.platform_key is distinct from
+                    relationship.target_platform_key
+                  or target.record_kind is distinct from
+                    relationship.target_record_kind
+                  or target.external_id is distinct from
+                    relationship.target_external_id
+                  or not exists (
+                    select 1
+                    from public.canonical_revisions as target_revision
+                    where target_revision.organization_id =
+                        relationship.organization_id
+                      and target_revision.entity_id = target.id
+                      and target_revision.public_change_sequence <=
+                        relationship.resolved_public_change_sequence
+                  )
+                )
+              )
+            )
+        ) or exists (
+          select 1
+          from latest_v1_pull_sets as latest
+          join public.canonical_entities as pull
+            on pull.organization_id = latest.organization_id
+           and pull.id = latest.source_entity_id
+          left join latest_v1_pull_relationship_counts as present
+            on present.confirmation_set_id = latest.confirmation_set_id
+          where pull.platform_key <> ${this.#platformKey}
+             or pull.record_kind <> 'pull'
+             or latest.relationship_count not between 1 and 2
+             or latest.confirmation_public_change_sequence > ${throughSequence}
+             or not exists (
+               select 1
+               from public.canonical_revisions as source_revision
+               where source_revision.organization_id = latest.organization_id
+                 and source_revision.entity_id = latest.source_entity_id
+                 and source_revision.id = latest.source_canonical_revision_id
+                 and source_revision.public_change_sequence <=
+                   latest.confirmation_public_change_sequence
+             )
+             or latest.relationship_count <>
+               coalesce(present.relationship_count, 0)
+             or coalesce(present.relationship_kind_count, 0) <>
+               latest.relationship_count
         ) as invalid
       `,
     );

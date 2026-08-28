@@ -23,6 +23,7 @@ export interface SettledPublicChange {
     | "provider_projection"
     | "quarantine_correction"
     | "relationship_resolution"
+    | "relationship_confirmation"
     | "estimated_ev_outcome"
     | "public_configuration"
     | "provider_lifecycle"

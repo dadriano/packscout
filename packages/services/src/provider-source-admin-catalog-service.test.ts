@@ -135,7 +135,7 @@ function repository(
   return { value, requestedScopes };
 }
 
-test("catalog advertises the sole v1 tuple while retaining masked connection and source history", async () => {
+test("catalog advertises the current adapter tuple while retaining masked connection and source history", async () => {
   const records = repository();
   const resolutionInputs: unknown[] = [];
   const service = new ProviderSourceAdminCatalogService({

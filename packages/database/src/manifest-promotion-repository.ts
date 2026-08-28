@@ -1109,6 +1109,7 @@ export class PrismaManifestPromotionRepository {
         loadProviderCausalReadinessInTransaction(transaction, {
           organizationId: this.#organizationId,
           checkpoints: eligibility.checkpoints,
+          lifecycleDecisionSequence: eligibility.lifecycleDecisionSequence,
         }),
         this.#loadSelections(transaction),
         this.#loadActiveState(transaction),

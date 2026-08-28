@@ -54,6 +54,10 @@ export interface ProviderWorkerEstimatedEvPort {
   runCycle(): Promise<EstimatedEvRecomputationCycleResult>;
 }
 
+export interface ProviderWorkerStartupPrerequisitePort {
+  run(signal: AbortSignal): Promise<void>;
+}
+
 /**
  * Durable liveness reporting. Every member is best-effort by contract: the
  * runtime never awaits `activity`, and a failed presence write must not
@@ -152,6 +156,7 @@ export interface ProviderWorkerCycleResult {
 }
 
 export interface ProviderWorkerRuntimeDependencies {
+  readonly startupPrerequisite?: ProviderWorkerStartupPrerequisitePort;
   readonly scheduler: ProviderSchedulerPort;
   readonly imports: ProviderWorkerImportPort;
   readonly estimatedEv?: ProviderWorkerEstimatedEvPort;
@@ -245,6 +250,7 @@ export class ProviderWorkerRuntime {
   #cycleInProgress = false;
   #running = false;
   #sleepController: AbortController | null = null;
+  #startupController: AbortController | null = null;
   #stopRequested = false;
 
   constructor(private readonly dependencies: ProviderWorkerRuntimeDependencies) {
@@ -282,6 +288,25 @@ export class ProviderWorkerRuntime {
     this.#running = true;
     this.#stopRequested = false;
     this.log({ level: "info", event: "provider_worker_started" });
+    if (this.dependencies.startupPrerequisite !== undefined) {
+      const controller = new AbortController();
+      this.#startupController = controller;
+      try {
+        await this.dependencies.startupPrerequisite.run(controller.signal);
+      } catch (error) {
+        this.#startupController = null;
+        this.#running = false;
+        this.log({ level: "info", event: "provider_worker_stopped" });
+        if (this.#stopRequested && controller.signal.aborted) return;
+        throw error;
+      }
+      this.#startupController = null;
+      if (this.#stopRequested) {
+        this.#running = false;
+        this.log({ level: "info", event: "provider_worker_stopped" });
+        return;
+      }
+    }
     let promotionFailed = false;
     let promotionFailure: unknown;
     let signalPromotionFailure!: (error: unknown) => void;
@@ -454,6 +479,7 @@ export class ProviderWorkerRuntime {
     this.dependencies.promotion?.stop();
     this.dependencies.heatPromotion?.stop();
     this.dependencies.catalogRetention?.stop();
+    this.#startupController?.abort();
     // start()'s finally awaits sourceSupervisor.stop() again and surfaces its
     // failure after cleanup; this detached copy only needs a rejection sink
     // so it can never become an unhandled rejection.

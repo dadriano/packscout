@@ -268,12 +268,26 @@
 }
 
 .emptyState {
-  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
   border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
   font-size: 0.78rem;
   padding: 2.4rem 1rem;
   text-align: center;
+}
+
+.emptyState p {
+  max-width: 34rem;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.emptyAction {
+  color: var(--color-action-strong);
+  font-weight: 720;
+  text-underline-offset: 0.2em;
 }
 
 @media (prefers-reduced-motion: reduce) {

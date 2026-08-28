@@ -18,6 +18,9 @@ import {
   advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
 } from "./public-change-settlement-repository.ts";
+import { ProviderSourceLifecycleRepository } from "./provider-source-lifecycle-repository.ts";
+import { ProviderSourceAdminLifecycleRepository } from
+  "./provider-source-admin-lifecycle-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
 const organizationId = "81000000-0000-4000-8000-000000000001";
@@ -40,13 +43,14 @@ async function registerVendor(
 function configuration(overrides: {
   revision?: number;
   configurationKey?: string;
+  approvedAt?: string;
   repacks?: ApprovedPublicCatalogConfigurationV1["repacks"];
 } = {}): ApprovedPublicCatalogConfigurationV1 {
   return {
     schemaVersion: "approved_public_catalog_v1",
     configurationKey: overrides.configurationKey ?? "catalog-r1",
     revision: overrides.revision ?? 1,
-    approvedAt: "2026-08-15T01:00:00.000Z",
+    approvedAt: overrides.approvedAt ?? "2026-08-15T01:00:00.000Z",
     staleAfterSeconds: 900,
     confidencePolicy: {
       version: "confidence-v1",
@@ -129,7 +133,11 @@ test("configuration approval, governed identities, and settlement commit atomica
     );
     await assert.rejects(
       repository.approveConfiguration(
-        configuration({ revision: 2, configurationKey: "catalog-r2" }),
+        configuration({
+          revision: 2,
+          configurationKey: "catalog-r2",
+          approvedAt: "2026-08-15T02:00:00.000Z",
+        }),
         { async materializeApprovedMappings() { throw new Error("mapping write failed"); } },
       ),
       /mapping write failed/,
@@ -137,10 +145,73 @@ test("configuration approval, governed identities, and settlement commit atomica
     assert.equal(await harness.client.approved_public_catalog_configurations.count(), 1);
     assert.equal(await harness.client.public_change_causes.count(), 1);
 
-    const second = await repository.approveConfiguration(
-      configuration({ revision: 2, configurationKey: "catalog-r2" }),
-      materializer,
+    const exactPrevious = {
+      configurationKey: approved.configuration.configurationKey,
+      revision: approved.configuration.revision,
+      configurationHash: approved.configurationHash,
+      publicChangeSequence: approved.publicChangeSequence,
+    };
+    const predecessorMismatches = [{
+      ...exactPrevious,
+      configurationKey: "wrong-predecessor",
+    }, {
+      ...exactPrevious,
+      revision: exactPrevious.revision + 1,
+    }, {
+      ...exactPrevious,
+      configurationHash: "f".repeat(64),
+    }, {
+      ...exactPrevious,
+      publicChangeSequence: exactPrevious.publicChangeSequence + 1n,
+    }];
+    for (const expectedPrevious of predecessorMismatches) {
+      await assert.rejects(
+        repository.approveConfiguration(
+          configuration({
+            revision: 2,
+            configurationKey: "catalog-r2",
+            approvedAt: "2026-08-15T02:00:00.000Z",
+          }),
+          materializer,
+          { expectedPrevious },
+        ),
+        (error: unknown) =>
+          error instanceof ApprovedPublicCatalogConfigurationPersistenceError &&
+          error.code === "PUBLIC_CONFIGURATION_PREDECESSOR_MISMATCH",
+      );
+    }
+    assert.equal(await harness.client.approved_public_catalog_configurations.count(), 1);
+    assert.equal(await harness.client.public_change_causes.count(), 1);
+
+    const concurrent = await Promise.allSettled([1, 2].map(() =>
+      repository.approveConfiguration(
+        configuration({
+          revision: 2,
+          configurationKey: "catalog-r2",
+          approvedAt: "2026-08-15T02:00:00.000Z",
+        }),
+        materializer,
+        { expectedPrevious: exactPrevious },
+      )));
+    const fulfilled = concurrent.filter(
+      (result): result is PromiseFulfilledResult<
+        Awaited<ReturnType<typeof repository.approveConfiguration>>
+      > => result.status === "fulfilled",
     );
+    const rejected = concurrent.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+    assert.ok(
+      rejected[0]?.reason instanceof
+        ApprovedPublicCatalogConfigurationPersistenceError,
+    );
+    assert.equal(
+      rejected[0]?.reason.code,
+      "PUBLIC_CONFIGURATION_PREDECESSOR_MISMATCH",
+    );
+    const second = fulfilled[0]!.value;
     const preservedMappings = await harness.client.$queryRaw<Array<{
       approvedConfigurationKey: string;
       sequence: bigint;
@@ -159,6 +230,382 @@ test("configuration approval, governed identities, and settlement commit atomica
     });
     assert.equal(latest.configuration?.configuration.configurationKey, "catalog-r2");
     assert.equal(latest.repackIdentities[0]?.approvedConfigurationKey, "catalog-r1");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("guarded approval rejects watermark, source, cursor, and promotion races", async () => {
+  const harness = await createMigratedTestDatabase();
+  const guardedOrganizationId = "81400000-0000-4000-8000-000000000001";
+  const providerId = randomUUID();
+  const createdAt = new Date("2026-08-15T00:00:00.000Z");
+  const sourceTypeKey = "dataforrest-events-v1";
+  const sourceAdapterVersion = "dataforrest-events-adapter-v1";
+  const normalizedContractVersion = "packscout.provider-observation.v1";
+  const cursorCodecVersion = "dataforrest-cursor-v1";
+  const mapperKey = "dataforrest-catalog-v1";
+  const mapperVersion = "1";
+  const identityNamespaceKey = "dataforrest-vendor-guard";
+  try {
+    await harness.client.organizations.create({
+      data: {
+        id: guardedOrganizationId,
+        slug: "guarded-catalog",
+        name: "Guarded Catalog",
+      },
+    });
+    await harness.client.provider_sources.create({
+      data: {
+        id: providerId,
+        organization_id: guardedOrganizationId,
+        platform_key: "vendor",
+        display_name: "Vendor",
+      },
+    });
+    const lifecycle = new ProviderSourceLifecycleRepository(harness.client);
+    const connection = await lifecycle.createConnectionProfileRevision({
+      organizationId: guardedOrganizationId,
+      sourceTypeKey,
+      connectionTypeKey: "dataforrest-events-connection-v1",
+      displayName: "Guarded DataForrest",
+      requestLimit: 1,
+      sourceAdapterVersion,
+      revisionNumber: 1,
+      configurationCiphertext: new Uint8Array(32).fill(1),
+      configurationNonce: new Uint8Array(12).fill(2),
+      configurationAuthTag: new Uint8Array(16).fill(3),
+      encryptionKeyVersion: 1,
+      configurationFingerprint: "a".repeat(64),
+      actorKey: "operator:test",
+      createdAt,
+    });
+    const source = await lifecycle.createSourceInstanceRevision({
+      organizationId: guardedOrganizationId,
+      providerId,
+      connectionProfileId: connection.profileId,
+      sourceTypeKey,
+      sourceAdapterVersion,
+      normalizedContractVersion,
+      mapperKey,
+      mapperVersion,
+      identityNamespaceKey,
+      cursorCodecVersion,
+      revisionNumber: 1,
+      intervalSeconds: 300,
+      configuration: { provider: "vendor" },
+      configurationHash: "b".repeat(64),
+      recordIdScopes: ["catalog-pack-v1"],
+      actorKey: "operator:test",
+      createdAt,
+    });
+    await harness.client.$transaction(async (transaction) => {
+      await transaction.provider_sources.update({
+        where: { id: providerId },
+        data: { state: "active", updated_at: createdAt },
+      });
+      await transaction.source_connection_revisions.update({
+        where: { id: connection.revisionId },
+        data: { state: "active", activated_at: createdAt },
+      });
+      await transaction.source_connection_profiles.update({
+        where: { id: connection.profileId },
+        data: {
+          state: "active",
+          active_revision_id: connection.revisionId,
+          updated_at: createdAt,
+        },
+      });
+      await transaction.provider_source_instances.update({
+        where: { id: source.sourceInstanceId },
+        data: {
+          state: "paused",
+          activated_at: createdAt,
+          paused_at: createdAt,
+          pause_requested_at: null,
+          updated_at: createdAt,
+        },
+      });
+    });
+    const createHeadRun = (cursorGeneration: bigint, startedAt: Date) =>
+      harness.client.import_runs.create({
+        data: {
+          organization_id: guardedOrganizationId,
+          provider_id: providerId,
+          config_revision_id: null,
+          trigger: "manual",
+          state: "succeeded",
+          started_at: startedAt,
+          finished_at: new Date(startedAt.getTime() + 1_000),
+          reached_provider_head: true,
+          requested_by_actor_key: "operator:test",
+          source_instance_id: source.sourceInstanceId,
+          source_revision_id: source.sourceRevisionId,
+          source_type_key: sourceTypeKey,
+          source_adapter_version: sourceAdapterVersion,
+          normalized_contract_version: normalizedContractVersion,
+          mapper_key: mapperKey,
+          mapper_version: mapperVersion,
+          identity_namespace_key: identityNamespaceKey,
+          connection_profile_id: connection.profileId,
+          connection_revision_id: connection.revisionId,
+          cursor_codec_version: cursorCodecVersion,
+          cursor_generation: cursorGeneration,
+          requested_cursor_key: "initial",
+          current_cursor_key: "initial",
+          next_page_number: 1,
+        },
+      });
+    await createHeadRun(1n, new Date("2026-08-15T00:05:00.000Z"));
+    await harness.client.$transaction(async (transaction) => {
+      await allocatePublicChangeCauses(transaction, {
+        organizationId: guardedOrganizationId,
+        changes: [{
+          changeKind: "provider_lifecycle",
+          entityKey: `provider:v1:${providerId}`,
+          sourceKey: "vendor",
+          sourceRevisionKey: source.sourceRevisionId,
+          metadata: {
+            providerId,
+            platformKey: "vendor",
+            state: "active",
+            sourceInstanceId: source.sourceInstanceId,
+            sourceRevisionId: source.sourceRevisionId,
+          },
+          occurredAt: new Date("2026-08-15T00:10:00.000Z"),
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: ["vendor"],
+            manifestLifecycle: { platformKey: "vendor", state: "active" },
+          },
+        }],
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: guardedOrganizationId,
+        settledAt: new Date("2026-08-15T00:10:00.000Z"),
+      });
+    });
+    const repository = new PrismaCatalogReleaseSourceRepository(
+      harness.client,
+      guardedOrganizationId,
+    );
+    const firstConfiguration = configuration({
+      configurationKey: "catalog-r1",
+      revision: 1,
+      approvedAt: "2026-08-15T01:00:00.000Z",
+    });
+    const approved = await repository.approveConfiguration(
+      firstConfiguration,
+      materializer,
+    );
+    const expectedPrevious = {
+      configurationKey: approved.configuration.configurationKey,
+      revision: approved.configuration.revision,
+      configurationHash: approved.configurationHash,
+      publicChangeSequence: approved.publicChangeSequence,
+    };
+    const nextConfiguration = configuration({
+      configurationKey: "catalog-r2",
+      revision: 2,
+      approvedAt: "2026-08-15T03:00:00.000Z",
+    });
+    const currentSourcePrecondition = async () => {
+      const [watermark, checkpoint, cursor, latestRun] = await Promise.all([
+        harness.client.settled_public_watermarks.findUniqueOrThrow({
+          where: { organization_id: guardedOrganizationId },
+        }),
+        harness.client.provider_catalog_checkpoints.findUniqueOrThrow({
+          where: {
+            organization_id_platform_key: {
+              organization_id: guardedOrganizationId,
+              platform_key: "vendor",
+            },
+          },
+        }),
+        harness.client.provider_source_cursors.findUniqueOrThrow({
+          where: { source_instance_id: source.sourceInstanceId },
+        }),
+        harness.client.import_runs.findFirstOrThrow({
+          where: {
+            organization_id: guardedOrganizationId,
+            source_instance_id: source.sourceInstanceId,
+            source_revision_id: source.sourceRevisionId,
+            cursor_generation: (
+              await harness.client.provider_source_cursors.findUniqueOrThrow({
+                where: { source_instance_id: source.sourceInstanceId },
+              })
+            ).cursor_generation,
+          },
+          orderBy: [{ created_at: "desc" }, { id: "desc" }],
+        }),
+      ]);
+      return {
+        platformKey: "vendor",
+        sourceInstanceId: source.sourceInstanceId,
+        sourceRevisionId: source.sourceRevisionId,
+        cursorGeneration: cursor.cursor_generation,
+        latestRunId: latestRun.id,
+        settledSequence: watermark.settled_sequence,
+        sourceHeadSequence: watermark.source_head_sequence,
+        nextSequence: watermark.next_sequence,
+        providerSettledSequence: checkpoint.settled_sequence,
+        providerSourceHeadSequence: checkpoint.source_head_sequence,
+      };
+    };
+    const assertSourceGuardRejects = async (expectedSource: Awaited<
+      ReturnType<typeof currentSourcePrecondition>
+    >) => {
+      await assert.rejects(
+        repository.approveConfiguration(
+          nextConfiguration,
+          materializer,
+          { expectedPrevious, expectedSource },
+        ),
+        (error: unknown) =>
+          error instanceof ApprovedPublicCatalogConfigurationPersistenceError &&
+          error.code === "PUBLIC_CONFIGURATION_SOURCE_PRECONDITION_MISMATCH",
+      );
+    };
+
+    const beforeWatermarkMove = await currentSourcePrecondition();
+    await harness.client.$transaction(async (transaction) => {
+      await allocatePublicChangeCauses(transaction, {
+        organizationId: guardedOrganizationId,
+        changes: [{
+          changeKind: "provider_projection",
+          entityKey: "pack:v1:watermark-race",
+          sourceKey: "vendor",
+          sourceRevisionKey: source.sourceRevisionId,
+          metadata: {},
+          occurredAt: new Date("2026-08-15T01:30:00.000Z"),
+          catalogImpact: {
+            kind: "catalog",
+            providerPlatformKeys: ["vendor"],
+          },
+        }],
+      });
+      await advanceSettledPublicWatermark(transaction, {
+        organizationId: guardedOrganizationId,
+        settledAt: new Date("2026-08-15T01:30:00.000Z"),
+      });
+    });
+    await assertSourceGuardRejects(beforeWatermarkMove);
+
+    const beforeSourceMove = await currentSourcePrecondition();
+    await harness.client.provider_source_instances.update({
+      where: { id: source.sourceInstanceId },
+      data: { state: "active", paused_at: null },
+    });
+    await assertSourceGuardRejects(beforeSourceMove);
+    await harness.client.provider_source_instances.update({
+      where: { id: source.sourceInstanceId },
+      data: { state: "paused", paused_at: new Date("2026-08-15T01:40:00.000Z") },
+    });
+
+    const beforeCursorMove = await currentSourcePrecondition();
+    await new ProviderSourceAdminLifecycleRepository(harness.client).resetCursor({
+      organizationId: guardedOrganizationId,
+      providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      expectedSourceRevisionId: source.sourceRevisionId,
+      expectedGeneration: 1n,
+      expectedFingerprint: null,
+      actorKey: "operator:test",
+      resetAt: new Date("2026-08-15T01:45:00.000Z"),
+    });
+    await assertSourceGuardRejects(beforeCursorMove);
+    await createHeadRun(2n, new Date("2026-08-15T01:50:00.000Z"));
+
+    const deploymentKey = "guarded-local";
+    const emptyBody = "{}";
+    const emptyActiveStateBody = JSON.stringify({
+      generation: 0,
+      activeManifest: null,
+      previousManifest: null,
+      observation: null,
+      terminalReceiptSha256: null,
+    });
+    const beforePromotionMove = await currentSourcePrecondition();
+    await harness.client.$transaction(async (transaction) => {
+      await transaction.manifest_promotion_lanes.create({
+        data: { organization_id: guardedOrganizationId, deployment_key: deploymentKey },
+      });
+      await transaction.catalog_promotion_bootstrap_proofs.create({
+        data: {
+          organization_id: guardedOrganizationId,
+          deployment_key: deploymentKey,
+          proof_revision: 1n,
+          proof_kind: "empty",
+          active_state_request_body: emptyBody,
+          active_state_request_sha256: "a".repeat(64),
+          active_state_receipt_body: emptyBody,
+          active_state_receipt_sha256: "b".repeat(64),
+          active_state_body: emptyActiveStateBody,
+          active_state_sha256: "c".repeat(64),
+          verified_at: new Date("2026-08-15T02:00:00.000Z"),
+        },
+      });
+      await transaction.provider_promotion_lanes.create({
+        data: {
+          organization_id: guardedOrganizationId,
+          deployment_key: deploymentKey,
+          platform_key: "vendor",
+          next_evaluation_sequence: 1n,
+          requested_evaluation_sequence: 1n,
+          requested_at: new Date("2026-08-15T02:00:00.000Z"),
+          latest_checkpoint_body: emptyBody,
+          latest_checkpoint_sha256: "d".repeat(64),
+          settled_checkpoint: 1n,
+          settled_at: new Date("2026-08-15T02:00:00.000Z"),
+          source_head_checkpoint: 1n,
+          source_head_at: new Date("2026-08-15T02:00:00.000Z"),
+        },
+      });
+      await transaction.provider_promotion_evaluations.create({
+        data: {
+          organization_id: guardedOrganizationId,
+          deployment_key: deploymentKey,
+          platform_key: "vendor",
+          evaluation_sequence: 1n,
+          checkpoint_body: emptyBody,
+          checkpoint_sha256: "d".repeat(64),
+          settled_checkpoint: 1n,
+          source_head_checkpoint: 1n,
+          requested_at: new Date("2026-08-15T02:00:00.000Z"),
+        },
+      });
+      await transaction.provider_promotion_attempts.create({
+        data: {
+          organization_id: guardedOrganizationId,
+          deployment_key: deploymentKey,
+          platform_key: "vendor",
+          evaluation_sequence: 1n,
+          bootstrap_proof_revision: 1n,
+          bootstrap_provider_set_sha256: "e".repeat(64),
+          target_checkpoint: 1n,
+          state: "assembling",
+        },
+      });
+    });
+    await assertSourceGuardRejects(beforePromotionMove);
+    await harness.client.provider_promotion_attempts.deleteMany({
+      where: {
+        organization_id: guardedOrganizationId,
+        deployment_key: deploymentKey,
+        platform_key: "vendor",
+      },
+    });
+    const cleanSource = await currentSourcePrecondition();
+    const second = await repository.approveConfiguration(
+      nextConfiguration,
+      materializer,
+      { expectedPrevious, expectedSource: cleanSource },
+    );
+    assert.equal(second.configuration.configurationKey, "catalog-r2");
+    assert.equal(
+      await harness.client.approved_public_catalog_configurations.count(),
+      2,
+    );
   } finally {
     await harness.close();
   }
@@ -272,15 +719,13 @@ test("configuration approval compares registered platform keys in canonical byte
   }
 });
 
-test("readiness is tied to the active causal provider revision, not an old completed backfill", async () => {
+test("source-native readiness replays active history and selects an empty-impact disable", async () => {
   const harness = await createMigratedTestDatabase();
   try {
     await harness.client.organizations.create({
       data: { id: organizationId, slug: "revision-readiness", name: "Revision Readiness" },
     });
     const providerId = randomUUID();
-    const oldRevisionId = randomUUID();
-    const activeRevisionId = randomUUID();
     await harness.client.provider_sources.create({
       data: {
         id: providerId,
@@ -289,36 +734,105 @@ test("readiness is tied to the active causal provider revision, not an old compl
         display_name: "Vendor",
       },
     });
-    for (const [id, version] of [[oldRevisionId, 1], [activeRevisionId, 2]] as const) {
-      await harness.client.provider_config_revisions.create({
+    const sourceTypeKey = "dataforrest-events-v1";
+    const sourceAdapterVersion = "dataforrest-events-adapter-v1";
+    const normalizedContractVersion = "packscout.provider-observation.v1";
+    const cursorCodecVersion = "dataforrest-cursor-v1";
+    const lifecycleRepository = new ProviderSourceLifecycleRepository(
+      harness.client,
+    );
+    const createdAt = new Date("2026-08-15T01:00:00.000Z");
+    const connection = await lifecycleRepository.createConnectionProfileRevision({
+      organizationId,
+      sourceTypeKey,
+      connectionTypeKey: "dataforrest-events-connection-v1",
+      displayName: "DataForrest Vendor",
+      requestLimit: 1,
+      sourceAdapterVersion,
+      revisionNumber: 1,
+      configurationCiphertext: new Uint8Array(32).fill(1),
+      configurationNonce: new Uint8Array(12).fill(2),
+      configurationAuthTag: new Uint8Array(16).fill(3),
+      encryptionKeyVersion: 1,
+      configurationFingerprint: "a".repeat(64),
+      actorKey: "operator:test",
+      createdAt,
+    });
+    const createSource = (configurationHash: string) =>
+      lifecycleRepository.createSourceInstanceRevision({
+        organizationId,
+        providerId,
+        connectionProfileId: connection.profileId,
+        sourceTypeKey,
+        sourceAdapterVersion,
+        normalizedContractVersion,
+        mapperKey: "dataforrest-catalog-v1",
+        mapperVersion: "1",
+        identityNamespaceKey: `dataforrest-vendor-${configurationHash[0]}`,
+        cursorCodecVersion,
+        revisionNumber: 1,
+        intervalSeconds: 300,
+        configuration: { provider: "vendor", revision: configurationHash[0] },
+        configurationHash,
+        recordIdScopes: ["catalog-pack-v1"],
+        actorKey: "operator:test",
+        createdAt,
+      });
+    const oldSource = await createSource("b".repeat(64));
+    const activeSource = await createSource("c".repeat(64));
+    await harness.client.$transaction(async (transaction) => {
+      await transaction.provider_sources.update({
+        where: { id: providerId },
+        data: { state: "active", updated_at: createdAt },
+      });
+      await transaction.source_connection_revisions.update({
+        where: { id: connection.revisionId },
+        data: { state: "active", activated_at: createdAt },
+      });
+      await transaction.source_connection_profiles.update({
+        where: { id: connection.profileId },
         data: {
-          id,
-          organization_id: organizationId,
-          provider_id: providerId,
-          version,
-          adapter_key: "http-cursor-v1",
-          endpoint_url: "https://vendor.example/feed",
-          auth_mode: "none",
-          created_by_actor_key: "operator:test",
+          state: "active",
+          active_revision_id: connection.revisionId,
+          updated_at: createdAt,
         },
       });
-    }
-    await harness.client.provider_sources.update({
-      where: { id: providerId },
-      data: { state: "active", active_revision_id: activeRevisionId },
+      await transaction.provider_source_instances.update({
+        where: { id: activeSource.sourceInstanceId },
+        data: {
+          state: "active",
+          activated_at: createdAt,
+          updated_at: createdAt,
+        },
+      });
     });
     const backfillAt = new Date("2026-08-15T01:10:00.000Z");
     await harness.client.import_runs.create({
       data: {
         organization_id: organizationId,
         provider_id: providerId,
-        config_revision_id: oldRevisionId,
+        config_revision_id: null,
         trigger: "manual",
         state: "succeeded",
         started_at: new Date("2026-08-15T01:05:00.000Z"),
         finished_at: backfillAt,
         reached_provider_head: true,
         requested_by_actor_key: "operator:test",
+        source_instance_id: oldSource.sourceInstanceId,
+        source_revision_id: oldSource.sourceRevisionId,
+        source_type_key: sourceTypeKey,
+        source_adapter_version: sourceAdapterVersion,
+        normalized_contract_version: normalizedContractVersion,
+        mapper_key: "dataforrest-catalog-v1",
+        mapper_version: "1",
+        identity_namespace_key: "dataforrest-vendor-b",
+        connection_profile_id: connection.profileId,
+        connection_revision_id: connection.revisionId,
+        cursor_codec_version: cursorCodecVersion,
+        cursor_generation: 1n,
+        requested_cursor_key: "initial",
+        current_cursor_key: "initial",
+        next_page_number: 1,
       },
     });
     const repository = new PrismaCatalogReleaseSourceRepository(harness.client, organizationId);
@@ -330,11 +844,13 @@ test("readiness is tied to the active causal provider revision, not an old compl
           changeKind: "public_configuration",
           entityKey: `provider:v1:${providerId}`,
           sourceKey: "vendor",
-          sourceRevisionKey: activeRevisionId,
+          sourceRevisionKey: activeSource.sourceRevisionId,
           metadata: {
+            providerId,
             platformKey: "vendor",
             state: "active",
-            configurationRevisionId: activeRevisionId,
+            sourceInstanceId: activeSource.sourceInstanceId,
+            sourceRevisionId: activeSource.sourceRevisionId,
           },
           occurredAt: new Date("2026-08-15T01:20:00.000Z"),
           catalogImpact: {
@@ -355,8 +871,216 @@ test("readiness is tied to the active causal provider revision, not an old compl
       throughOccurredAt: new Date("2026-08-15T01:20:00.000Z"),
     });
     assert.equal(snapshot.configuration?.id, approved.id);
-    assert.equal(snapshot.providers[0]?.configurationRevisionId, activeRevisionId);
+    assert.equal(snapshot.providers[0]?.providerId, providerId);
+    assert.equal(
+      snapshot.providers[0]?.sourceInstanceId,
+      activeSource.sourceInstanceId,
+    );
+    assert.equal(
+      snapshot.providers[0]?.sourceRevisionId,
+      activeSource.sourceRevisionId,
+    );
     assert.equal(snapshot.providers[0]?.completedBackfillAt, null);
+    assert.equal(await harness.client.provider_config_revisions.count(), 0);
+
+    const activeBackfillAt = new Date("2026-08-15T01:25:00.000Z");
+    await harness.client.import_runs.create({
+      data: {
+        organization_id: organizationId,
+        provider_id: providerId,
+        config_revision_id: null,
+        trigger: "manual",
+        state: "succeeded",
+        started_at: new Date("2026-08-15T01:15:00.000Z"),
+        finished_at: activeBackfillAt,
+        reached_provider_head: true,
+        requested_by_actor_key: "operator:test",
+        source_instance_id: activeSource.sourceInstanceId,
+        source_revision_id: activeSource.sourceRevisionId,
+        source_type_key: sourceTypeKey,
+        source_adapter_version: sourceAdapterVersion,
+        normalized_contract_version: normalizedContractVersion,
+        mapper_key: "dataforrest-catalog-v1",
+        mapper_version: "1",
+        identity_namespace_key: "dataforrest-vendor-c",
+        connection_profile_id: connection.profileId,
+        connection_revision_id: connection.revisionId,
+        cursor_codec_version: cursorCodecVersion,
+        cursor_generation: 1n,
+        requested_cursor_key: "initial",
+        current_cursor_key: "initial",
+        next_page_number: 1,
+      },
+    });
+    const ready = await repository.loadSnapshot({
+      throughSequence: lifecycle!.sequence,
+      throughOccurredAt: new Date("2026-08-15T01:20:00.000Z"),
+    });
+    assert.equal(
+      ready.providers[0]?.completedBackfillAt?.toISOString(),
+      activeBackfillAt.toISOString(),
+      "source-head completion may follow the last settled catalog cause",
+    );
+
+    const laterSource = await createSource("d".repeat(64));
+    const [laterLifecycle] = await harness.client.$transaction(
+      async (transaction) => {
+        const replacedAt = new Date("2026-08-15T01:30:00.000Z");
+        await transaction.provider_source_instances.update({
+          where: { id: activeSource.sourceInstanceId },
+          data: {
+            state: "replaced",
+            replaced_at: replacedAt,
+            updated_at: replacedAt,
+          },
+        });
+        await transaction.provider_source_instances.update({
+          where: { id: laterSource.sourceInstanceId },
+          data: {
+            state: "active",
+            activated_at: replacedAt,
+            updated_at: replacedAt,
+          },
+        });
+        const causes = await allocatePublicChangeCauses(transaction, {
+          organizationId,
+          changes: [{
+            changeKind: "provider_lifecycle",
+            entityKey: `provider:v1:${providerId}`,
+            sourceKey: "vendor",
+            sourceRevisionKey: laterSource.sourceRevisionId,
+            metadata: {
+              providerId,
+              platformKey: "vendor",
+              state: "active",
+              sourceInstanceId: laterSource.sourceInstanceId,
+              sourceRevisionId: laterSource.sourceRevisionId,
+            },
+            occurredAt: replacedAt,
+            catalogImpact: {
+              kind: "catalog",
+              providerPlatformKeys: ["vendor"],
+              manifestLifecycle: { platformKey: "vendor", state: "active" },
+            },
+          }],
+        });
+        await advanceSettledPublicWatermark(transaction, {
+          organizationId,
+          settledAt: replacedAt,
+        });
+        return causes;
+      },
+    );
+
+    const historicalReplay = await repository.loadSnapshot({
+      throughSequence: lifecycle!.sequence,
+      throughOccurredAt: new Date("2026-08-15T01:20:00.000Z"),
+    });
+    assert.equal(
+      historicalReplay.providers[0]?.sourceInstanceId,
+      activeSource.sourceInstanceId,
+    );
+    assert.equal(
+      historicalReplay.providers[0]?.sourceRevisionId,
+      activeSource.sourceRevisionId,
+    );
+    assert.equal(
+      historicalReplay.providers[0]?.completedBackfillAt?.toISOString(),
+      activeBackfillAt.toISOString(),
+      "a later source activation must not change a prior causal snapshot",
+    );
+
+    const latest = await repository.loadSnapshot({
+      throughSequence: laterLifecycle!.sequence,
+      throughOccurredAt: new Date("2026-08-15T01:30:00.000Z"),
+    });
+    assert.equal(
+      latest.providers[0]?.sourceInstanceId,
+      laterSource.sourceInstanceId,
+    );
+    assert.equal(
+      latest.providers[0]?.sourceRevisionId,
+      laterSource.sourceRevisionId,
+    );
+    assert.equal(latest.providers[0]?.state, "active");
+    assert.equal(
+      latest.providers[0]?.lifecycleSequence,
+      laterLifecycle!.sequence,
+    );
+    assert.equal(latest.providers[0]?.completedBackfillAt, null);
+
+    const disabledAt = new Date("2026-08-15T01:40:00.000Z");
+    const [disabledLifecycle] = await harness.client.$transaction(
+      async (transaction) => {
+        await transaction.provider_source_instances.update({
+          where: { id: laterSource.sourceInstanceId },
+          data: {
+            state: "disabled",
+            disabled_at: disabledAt,
+            updated_at: disabledAt,
+          },
+        });
+        const causes = await allocatePublicChangeCauses(transaction, {
+          organizationId,
+          changes: [{
+            changeKind: "provider_lifecycle",
+            entityKey: `provider:v1:${providerId}`,
+            sourceKey: "vendor",
+            sourceRevisionKey: laterSource.sourceRevisionId,
+            metadata: {
+              providerId,
+              platformKey: "vendor",
+              state: "disabled",
+              sourceInstanceId: laterSource.sourceInstanceId,
+              sourceRevisionId: laterSource.sourceRevisionId,
+            },
+            occurredAt: disabledAt,
+            catalogImpact: {
+              kind: "catalog",
+              providerPlatformKeys: [],
+              manifestLifecycle: {
+                platformKey: "vendor",
+                state: "disabled",
+              },
+            },
+          }],
+        });
+        await advanceSettledPublicWatermark(transaction, {
+          organizationId,
+          settledAt: disabledAt,
+        });
+        return causes;
+      },
+    );
+
+    const activeReplay = await repository.loadSnapshot({
+      throughSequence: laterLifecycle!.sequence,
+      throughOccurredAt: new Date("2026-08-15T01:30:00.000Z"),
+    });
+    assert.equal(activeReplay.providers[0]?.state, "active");
+    assert.equal(
+      activeReplay.providers[0]?.lifecycleSequence,
+      laterLifecycle.sequence,
+    );
+    assert.equal(
+      activeReplay.providers[0]?.sourceRevisionId,
+      laterSource.sourceRevisionId,
+    );
+
+    const disabled = await repository.loadSnapshot({
+      throughSequence: disabledLifecycle!.sequence,
+      throughOccurredAt: disabledAt,
+    });
+    assert.equal(disabled.providers[0]?.state, "disabled");
+    assert.equal(
+      disabled.providers[0]?.lifecycleSequence,
+      disabledLifecycle.sequence,
+    );
+    assert.equal(
+      disabled.providers[0]?.sourceRevisionId,
+      laterSource.sourceRevisionId,
+      "the empty-impact disable must be selected instead of falling back active",
+    );
   } finally {
     await harness.close();
   }

@@ -4,6 +4,7 @@ import type { PackScoutBuybackEvEvidenceOutcomeV1 } from "@packscout/contracts";
 import {
   BuybackEvRevisionRepository,
   PipelineSetupRepository,
+  ProviderSourceLifecycleRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import {
@@ -22,7 +23,6 @@ import { PackScoutBuybackEvRevisionStore } from "./buyback-adjusted-ev-revision-
 const ids = {
   organization: "42000000-0000-4000-8000-000000000001",
   provider: "42000000-0000-4000-8000-000000000002",
-  configuration: "42000000-0000-4000-8000-000000000003",
 } as const;
 
 const PLATFORM_KEY = "courtyard";
@@ -122,11 +122,12 @@ function normalizedEvidence(
 function command(
   evidence: PackScoutBuybackEvEvidenceOutcomeV1,
   calculatedAt: string,
+  providerSourceRevisionId: string,
 ): PackScoutBuybackEvRecomputationCommandV1 {
   return {
     organizationId: ids.organization,
     providerId: ids.provider,
-    configurationRevisionId: ids.configuration,
+    providerSourceRevisionId,
     evidence,
     calculatedAt,
   };
@@ -156,22 +157,58 @@ async function setupHarness() {
     platformKey: PLATFORM_KEY,
     displayName: "Courtyard",
   });
-  await setup.createConfigRevision({
-    id: ids.configuration,
+  const lifecycle = new ProviderSourceLifecycleRepository(harness.database);
+  const createdAt = new Date("2026-08-19T17:00:00.000Z");
+  const connection = await lifecycle.createConnectionProfileRevision({
+    organizationId: ids.organization,
+    sourceTypeKey: "synthetic-events-v1",
+    connectionTypeKey: "synthetic-events-connection-v1",
+    displayName: "Synthetic source",
+    requestLimit: 1,
+    sourceAdapterVersion: "synthetic-events-adapter-v1",
+    revisionNumber: 1,
+    configurationCiphertext: new Uint8Array(32).fill(1),
+    configurationNonce: new Uint8Array(12).fill(2),
+    configurationAuthTag: new Uint8Array(16).fill(3),
+    encryptionKeyVersion: 1,
+    configurationFingerprint: "a".repeat(64),
+    actorKey: "actor:test",
+    createdAt,
+  });
+  const source = await lifecycle.createSourceInstanceRevision({
     organizationId: ids.organization,
     providerId: ids.provider,
-    version: 1,
-    adapterKey: "synthetic-mapper-v1",
-    endpointUrl: "https://provider.example/feed",
-    authMode: "none",
-    createdByActorKey: "actor:test",
+    connectionProfileId: connection.profileId,
+    sourceTypeKey: "synthetic-events-v1",
+    sourceAdapterVersion: "synthetic-events-adapter-v1",
+    normalizedContractVersion: "packscout.provider-observation.v1",
+    mapperKey: "synthetic-catalog-v1",
+    mapperVersion: "1",
+    identityNamespaceKey: "synthetic-recomputation-v1",
+    cursorCodecVersion: "synthetic-cursor-v1",
+    revisionNumber: 1,
+    intervalSeconds: 300,
+    configuration: { fixture: "recomputation" },
+    configurationHash: "b".repeat(64),
+    recordIdScopes: ["catalog-pack-v1"],
+    actorKey: "actor:test",
+    createdAt,
   });
   const store = new PackScoutBuybackEvRevisionStore(
     new BuybackEvRevisionRepository(harness.database),
   );
   const service = new PackScoutBuybackAdjustedEvRecomputationService(store);
   const queue = new InMemoryBuybackEvRecomputationQueue();
-  return { ...harness, store, service, queue };
+  return {
+    ...harness,
+    store,
+    service,
+    queue,
+    command: (
+      evidence: PackScoutBuybackEvEvidenceOutcomeV1,
+      calculatedAt: string,
+    ) => command(evidence, calculatedAt, source.sourceRevisionId),
+  };
 }
 
 function processorFor(
@@ -213,7 +250,7 @@ test("recomputation converges evidence changes into immutable revisions with det
     });
     assert.equal(initialEvidence.status, "complete");
     enqueue(
-      command(initialEvidence, "2026-08-19T18:05:00.000Z"),
+      harness.command(initialEvidence, "2026-08-19T18:05:00.000Z"),
       "2026-08-19T18:05:00.000Z",
     );
     const first = await processorFor(harness, time.clock).runCycle();
@@ -229,11 +266,11 @@ test("recomputation converges evidence changes into immutable revisions with det
     // Same evidence re-delivered — with the same clock and with a later
     // freshness-boundary clock — replays unchanged without new history.
     enqueue(
-      command(initialEvidence, "2026-08-19T18:05:00.000Z"),
+      harness.command(initialEvidence, "2026-08-19T18:05:00.000Z"),
       "2026-08-19T18:06:00.000Z",
     );
     enqueue(
-      command(initialEvidence, "2026-08-19T18:35:00.000Z"),
+      harness.command(initialEvidence, "2026-08-19T18:35:00.000Z"),
       "2026-08-19T18:06:00.000Z",
     );
     const replays = await processorFor(harness, time.clock).runCycle();
@@ -250,7 +287,7 @@ test("recomputation converges evidence changes into immutable revisions with det
       priceMinorUnits: 12_000,
     });
     enqueue(
-      command(repriced, "2026-08-19T18:11:00.000Z"),
+      harness.command(repriced, "2026-08-19T18:11:00.000Z"),
       "2026-08-19T18:11:00.000Z",
     );
     time.set("2026-08-19T18:12:00.000Z");
@@ -259,7 +296,7 @@ test("recomputation converges evidence changes into immutable revisions with det
 
     // The original observation arriving late is superseded by source order.
     enqueue(
-      command(initialEvidence, "2026-08-19T18:13:00.000Z"),
+      harness.command(initialEvidence, "2026-08-19T18:13:00.000Z"),
       "2026-08-19T18:13:00.000Z",
     );
     const late = await processorFor(harness, time.clock).runCycle();
@@ -277,7 +314,7 @@ test("recomputation converges evidence changes into immutable revisions with det
     });
     assert.equal(missingBuyback.status, "unavailable");
     enqueue(
-      command(missingBuyback, "2026-08-19T18:21:00.000Z"),
+      harness.command(missingBuyback, "2026-08-19T18:21:00.000Z"),
       "2026-08-19T18:21:00.000Z",
     );
     time.set("2026-08-19T18:22:00.000Z");
@@ -301,7 +338,7 @@ test("recomputation converges evidence changes into immutable revisions with det
       observedAt: "2026-08-19T18:30:00.000Z",
     });
     enqueue(
-      command(restored, "2026-08-19T18:31:00.000Z"),
+      harness.command(restored, "2026-08-19T18:31:00.000Z"),
       "2026-08-19T18:31:00.000Z",
     );
     time.set("2026-08-19T18:32:00.000Z");
@@ -322,7 +359,7 @@ test("recomputation converges evidence changes into immutable revisions with det
     // replays unchanged and never mutates the immutable prior revision; the
     // 60-minute boundary is derived at the publication read.
     enqueue(
-      command(restored, "2026-08-19T19:45:00.000Z"),
+      harness.command(restored, "2026-08-19T19:45:00.000Z"),
       "2026-08-19T19:45:00.000Z",
     );
     time.set("2026-08-19T19:45:30.000Z");
@@ -354,7 +391,7 @@ test("recomputation converges evidence changes into immutable revisions with det
       observedAt: "2026-08-19T18:40:00.000Z",
     });
     enqueue(
-      command(staleObservation, "2026-08-19T19:50:00.000Z"),
+      harness.command(staleObservation, "2026-08-19T19:50:00.000Z"),
       "2026-08-19T19:50:00.000Z",
     );
     time.set("2026-08-19T19:50:30.000Z");
@@ -388,7 +425,7 @@ test("recomputation converges evidence changes into immutable revisions with det
       observedAt: "2026-08-19T19:55:00.000Z",
     });
     enqueue(
-      command(recovered, "2026-08-19T19:56:00.000Z"),
+      harness.command(recovered, "2026-08-19T19:56:00.000Z"),
       "2026-08-19T19:56:00.000Z",
     );
     time.set("2026-08-19T19:56:30.000Z");

@@ -179,6 +179,19 @@ test("dashboard and errors expose repack vocabulary with no partial data", () =>
     },
   };
   assert.equal(getDashboardBundleResultSchema.safeParse(result).success, true);
+  assert.equal(
+    getDashboardBundleResultSchema.safeParse({
+      ...result,
+      data: {
+        ...result.data,
+        kpis: {
+          ...result.data.kpis,
+          positiveEvRepacks: 3,
+        },
+      },
+    }).success,
+    false,
+  );
 
   for (const code of [
     "INVALID_QUERY",

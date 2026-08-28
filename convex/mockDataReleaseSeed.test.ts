@@ -411,6 +411,7 @@ describe("mock V2 data release", () => {
     if (!dashboard.ok) throw new Error("Expected dashboard success.");
     expect(dashboard.data.metadata.publicReleaseId).toBe(seeded.publicReleaseId);
     expect(dashboard.data.kpis.totalRepacks).toBe(3);
+    expect(dashboard.data.kpis.positiveEvRepacks).toBe(2);
     expect(dashboard.data.selectedRepack).not.toBeNull();
     expect(dashboard.data.details.every(({ heat }) =>
       heat.status === "unavailable" && heat.reason === "NOT_PUBLISHED"

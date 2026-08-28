@@ -189,7 +189,7 @@ export const providerSourceCanonicalEvInputContentV1Schema = z
     currency: normalizedCurrencyTickerSchema,
     unitBasis: z.enum(["per_draw", "per_pack"]),
     drawCount: positiveSafeIntegerSchema,
-    buybackPercent: percentageSchema,
+    buybackPercent: percentageSchema.nullable(),
     inventory: z
       .object({
         totalQuantity: positiveSafeIntegerSchema,

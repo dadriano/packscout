@@ -13,6 +13,8 @@ import {
   type CanonicalObservationPackCandidate,
   type CanonicalPullCandidate,
 } from "../provider-observation-mapper.ts";
+import { canonicalProviderObservationContent } from
+  "../provider-observation-canonical-content.ts";
 import { createProviderObservationMapperRegistryFromManifest } from "./provider-mapper-manifest.ts";
 import {
   cardObservation,
@@ -124,6 +126,142 @@ test("ClutchPacks native pack name reaches an accepted canonical pack", () => {
     outcome.candidate.identity.providerRecordId,
     "clutchpacks-pack-native-name",
   );
+});
+
+test("ClutchPacks v3 pack facts keep EV unavailable without buyback evidence", () => {
+  const observation = normalizeDataforrestEventRecord(
+    dataforrestEventRecordV1Schema.parse({
+      platform: "clutchpacks",
+      stream: "catalog",
+      entity: "pack",
+      record_id: "clutchpacks-pack-rich-v3",
+      occurred_at: "2026-08-01T00:00:00.000Z",
+      collected_at: "2026-08-01T00:00:01.000Z",
+      first_seen_at: "2026-08-01T00:00:00.000Z",
+      available: true,
+      data: {
+        name: "Champions Only",
+        description: "One graded card per pack.",
+        category: { name: "Sports" },
+        price: {
+          currency: { code: "USD", decimals: 2 },
+          price_amount: "250",
+        },
+        series: { description: "Champions Only" },
+        average_value: "999",
+        image_url: "https://images.example.invalid/champions.jpg",
+        sold_out: false,
+        price_bucket_odds: [
+          {
+            bucket_id: "high",
+            name: "High",
+            min_price: "$250",
+            max_price: "$1,000",
+            drawable_count: 1,
+          },
+          {
+            bucket_id: "base",
+            name: "Base",
+            min_price: "$100",
+            max_price: "$249.99",
+            drawable_count: 3,
+          },
+        ],
+      },
+    }),
+    "clutchpacks",
+    "page_record:0",
+  );
+  const outcome = mapped(mapperInput("clutchpacks", observation));
+  assert.equal(outcome.candidate.candidateKind, "pack");
+  if (outcome.candidate.candidateKind !== "pack") {
+    assert.fail("expected canonical pack candidate");
+  }
+  assert.deepEqual(outcome.candidate.price, { amount: 250, currency: "USD" });
+  assert.equal(outcome.candidate.category, "Sports");
+  assert.equal(outcome.candidate.description, "One graded card per pack.");
+  assert.deepEqual(outcome.candidate.imageReferences, [
+    "https://images.example.invalid/champions.jpg",
+  ]);
+  assert.deepEqual(outcome.candidate.providerReportedEv, {
+    amount: 999,
+    currency: "USD",
+  });
+  assert.equal(outcome.candidate.buybackPercent, null);
+  assert.equal(outcome.candidate.drawCount, 1);
+  assert.equal(outcome.candidate.availability, "available");
+  assert.equal(outcome.evInputStatus, "unavailable");
+  assert.equal(outcome.evInputCandidate, null);
+  const canonicalPack = canonicalProviderObservationContent(outcome.candidate);
+  assert.equal(canonicalPack.providerReportedEvValueMinor, 99_900);
+  assert.equal(canonicalPack.providerReportedEvCurrency, "USD");
+  assert.deepEqual(outcome.warnings, [
+    {
+      code: "ev_input_unavailable",
+      fieldPath: "providerFacts.evInput",
+    },
+  ]);
+});
+
+test("ClutchPacks V1 asset facts reach a publishable canonical catalog asset", () => {
+  const observation = normalizeDataforrestEventRecord(
+    dataforrestEventRecordV1Schema.parse({
+      platform: "clutchpacks",
+      stream: "catalog",
+      entity: "card",
+      record_id: "clutchpacks-card-native-asset",
+      occurred_at: "2026-08-01T00:00:00.000Z",
+      collected_at: "2026-08-01T00:00:01.000Z",
+      first_seen_at: "2026-08-01T00:00:00.000Z",
+      available: true,
+      data: {
+        asset: {
+          card_id: "nested-id-is-not-identity",
+          title: "2022 Select Courtside #1",
+          name: "Subject name",
+          type: "Sports",
+          subtype: "Basketball",
+          description: "Courtside parallel",
+          formatted_current_price: "$1,234.50",
+          front_image_url: "https://images.example.invalid/front.jpg",
+          back_image_url: "https://images.example.invalid/back.jpg",
+        },
+      },
+    }),
+    "clutchpacks",
+    "page_record:0",
+  );
+  const outcome = mapped(mapperInput("clutchpacks", observation));
+  assert.equal(outcome.candidate.candidateKind, "catalog_asset");
+  if (outcome.candidate.candidateKind !== "catalog_asset") {
+    assert.fail("expected canonical catalog asset candidate");
+  }
+  assert.deepEqual(outcome.candidate, {
+    candidateKind: "catalog_asset",
+    identity: {
+      organizationId: "org-task-005",
+      providerId: "provider-clutchpacks",
+      provider: "clutchpacks",
+      canonicalKind: "catalog_asset",
+      providerRecordId: "clutchpacks-card-native-asset",
+    },
+    recordIdScopeKey: "catalog-card-v1",
+    effectiveAt: "2026-08-01T00:00:00.000Z",
+    firstSeenAt: "2026-08-01T00:00:00.000Z",
+    assetType: "card",
+    displayName: "2022 Select Courtside #1",
+    description: "Courtside parallel",
+    category: "Basketball",
+    imageReferences: [
+      "https://images.example.invalid/front.jpg",
+      "https://images.example.invalid/back.jpg",
+    ],
+    availability: "available",
+    estimatedValue: { amount: 1_234.5, currency: "USD" },
+    valueSource: "clutchpacks_formatted_current_price",
+  });
+  assert.equal(outcome.warnings.length, 0);
+  assert.equal(outcome.protectedNativeEvidenceRef, "page_record:0");
 });
 
 test("Phygitals native pack name reaches an accepted canonical pack", () => {

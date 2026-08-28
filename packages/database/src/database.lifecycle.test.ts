@@ -118,6 +118,9 @@ const PINNED_MIGRATIONS = [
   "20260819010000_buyback_ev_revisions",
   "20260824223000_fix_normalized_text_vertical_tab",
   "20260825041000_raise_provider_source_raw_response_limit",
+  "20260826005000_source_relationship_confirmations",
+  "20260826010000_heat_relationship_causality",
+  "20260827020000_buyback_ev_provider_source_origin",
 ] as const;
 
 test("startup fails closed when an expected Prisma migration is not ready", async () => {

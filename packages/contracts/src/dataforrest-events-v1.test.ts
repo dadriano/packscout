@@ -4,6 +4,8 @@ import { test } from "node:test";
 import { dataforestEventsV1EvidenceFixture } from "./__fixtures__/dataforest-events-v1.fixture.ts";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+  DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   dataforrestContinuation,
@@ -14,6 +16,7 @@ import {
   dataforrestNextCursor,
   dataforrestOpaqueCursorV1Schema,
   normalizeDataforrestEventRecord,
+  normalizeDataforrestEventRecordForAdapter,
 } from "./dataforrest-events-v1.ts";
 import {
   normalizedProviderObservationPageSchema,
@@ -258,10 +261,14 @@ test("Phygitals and ClutchPacks pack names use the native name field", () => {
     if (observation.kind !== "catalog") {
       assert.fail("expected catalog observation");
     }
-    assert.deepEqual(observation.providerFacts, {
+    const expectedFacts = {
       ...emptyNormalizedProviderFacts("pack"),
       displayName: { state: "present", value: fixture.nativeName },
-    });
+      ...(fixture.provider === "clutchpacks"
+        ? { drawCount: { state: "present" as const, value: 1 } }
+        : {}),
+    };
+    assert.deepEqual(observation.providerFacts, expectedFacts);
 
     const legacyLabelOnly = normalizeDataforrestEventRecord(
       { ...raw, data: { provider_label: fixture.legacyName } },
@@ -274,9 +281,238 @@ test("Phygitals and ClutchPacks pack names use the native name field", () => {
     }
     assert.deepEqual(
       legacyLabelOnly.providerFacts,
-      emptyNormalizedProviderFacts("pack"),
+      fixture.provider === "clutchpacks"
+        ? {
+            ...emptyNormalizedProviderFacts("pack"),
+            drawCount: { state: "present", value: 1 },
+          }
+        : emptyNormalizedProviderFacts("pack"),
     );
   }
+});
+
+test("ClutchPacks adapter v2 pack semantics remain reproducible under v3", () => {
+  const raw = dataforrestEventRecordV1Schema.parse({
+    platform: "clutchpacks",
+    stream: "catalog",
+    entity: "pack",
+    record_id: "clutchpacks-pack-versioned",
+    occurred_at: "2026-08-01T00:00:00.000Z",
+    collected_at: "2026-08-01T00:00:01.000Z",
+    first_seen_at: "2026-08-01T00:00:00.000Z",
+    available: true,
+    data: {
+      name: "Ascent",
+      description: "One card per pack.",
+      category: { name: "Sports" },
+      price: {
+        currency: { code: "USD", decimals: 2 },
+        price_amount: "100",
+      },
+      image_url: "https://images.example.invalid/ascent.jpg",
+      sold_out: false,
+      price_bucket_odds: [{
+        bucket_id: "base",
+        name: "Base",
+        min_price: "$20",
+        max_price: "$99.99",
+        drawable_count: 4,
+      }],
+    },
+  });
+  const v2 = normalizeDataforrestEventRecordForAdapter(
+    raw,
+    "clutchpacks",
+    "fixture:clutchpacks-pack-v2",
+    DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+  );
+  assert.equal(v2.kind, "catalog");
+  if (v2.kind !== "catalog") assert.fail("expected v2 catalog observation");
+  assert.deepEqual(v2.providerFacts, {
+    ...emptyNormalizedProviderFacts("pack"),
+    displayName: { state: "present", value: "Ascent" },
+  });
+
+  const v3 = normalizeDataforrestEventRecordForAdapter(
+    raw,
+    "clutchpacks",
+    "fixture:clutchpacks-pack-v3",
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  );
+  assert.equal(v3.kind, "catalog");
+  if (v3.kind !== "catalog") assert.fail("expected v3 catalog observation");
+  assert.equal(v3.providerFacts.kind, "pack");
+  if (v3.providerFacts.kind !== "pack") {
+    assert.fail("expected v3 pack provider facts");
+  }
+  assert.deepEqual(v3.providerFacts.description, {
+    state: "present",
+    value: "One card per pack.",
+  });
+  assert.equal(v3.providerFacts.evInput.state, "present");
+});
+
+test("ClutchPacks card facts normalize from the exact V1 asset allowlist", () => {
+  const raw = dataforrestEventRecordV1Schema.parse({
+    platform: "clutchpacks",
+    stream: "catalog",
+    entity: "card",
+    record_id: "clutchpacks-card-one",
+    occurred_at: "2026-08-01T00:00:00.000Z",
+    collected_at: "2026-08-01T00:00:01.000Z",
+    first_seen_at: "2026-08-01T00:00:00.000Z",
+    available: true,
+    data: {
+      asset: {
+        card_id: "nested-context-id",
+        title: "  2022 Select Courtside #1  ",
+        name: "Subject name remains protected",
+        type: "Sports",
+        subtype: "  Basketball  ",
+        year: 2022,
+        set: "Protected Set Name",
+        card_no: "1",
+        description: "  Courtside parallel  ",
+        formatted_current_price: " $1,234.50 ",
+        front_image_url: " https://images.example.invalid/front.jpg ",
+        front_image_medium_url: "https://images.example.invalid/front.jpg",
+        front_image_thumbnail_url:
+          "https://images.example.invalid/front-thumb.jpg",
+        back_image_url: "https://images.example.invalid/back.jpg",
+        back_image_medium_url: null,
+        back_image_thumbnail_url:
+          "https://images.example.invalid/back-thumb.jpg",
+        certificate_no: "protected-certificate",
+      },
+      provider_label: "must not override the V1 asset title",
+    },
+  });
+  const observation = normalizeDataforrestEventRecord(
+    raw,
+    "clutchpacks",
+    "fixture:clutchpacks-card-v1",
+  );
+  assert.equal(observation.kind, "catalog");
+  if (observation.kind !== "catalog") assert.fail("expected catalog observation");
+  assert.deepEqual(observation.providerFacts, {
+    ...emptyNormalizedProviderFacts("card"),
+    displayName: { state: "present", value: "2022 Select Courtside #1" },
+    description: { state: "present", value: "Courtside parallel" },
+    category: { state: "present", value: "Basketball" },
+    imageReferences: {
+      state: "present",
+      value: [
+        "https://images.example.invalid/front.jpg",
+        "https://images.example.invalid/front-thumb.jpg",
+        "https://images.example.invalid/back.jpg",
+        "https://images.example.invalid/back-thumb.jpg",
+      ],
+    },
+    estimatedValue: {
+      state: "present",
+      value: { amount: 1_234.5, currency: "USD" },
+    },
+    valueSource: {
+      state: "present",
+      value: "clutchpacks_formatted_current_price",
+    },
+  });
+  const factsJson = JSON.stringify(observation.providerFacts);
+  for (const protectedValue of [
+    "nested-context-id",
+    "Subject name remains protected",
+    "Protected Set Name",
+    "protected-certificate",
+    "must not override",
+  ]) {
+    assert.equal(factsJson.includes(protectedValue), false, protectedValue);
+  }
+  assert.equal(
+    observation.providerRecordIdentity.providerRecordId,
+    "clutchpacks-card-one",
+  );
+
+  const v2 = normalizeDataforrestEventRecordForAdapter(
+    raw,
+    "clutchpacks",
+    "fixture:clutchpacks-card-v2",
+    DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+  );
+  assert.equal(v2.kind, "catalog");
+  if (v2.kind !== "catalog") assert.fail("expected v2 catalog observation");
+  assert.deepEqual(v2.providerFacts, observation.providerFacts);
+
+  const legacy = normalizeDataforrestEventRecordForAdapter(
+    raw,
+    "clutchpacks",
+    "fixture:clutchpacks-card-legacy-v1",
+    DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+  );
+  assert.equal(legacy.kind, "catalog");
+  if (legacy.kind !== "catalog") assert.fail("expected legacy catalog observation");
+  assert.deepEqual(
+    legacy.providerFacts,
+    {
+      ...emptyNormalizedProviderFacts("card"),
+      displayName: {
+        state: "present",
+        value: "must not override the V1 asset title",
+      },
+    },
+  );
+  assert.notEqual(
+    JSON.stringify(legacy.providerFacts),
+    JSON.stringify(observation.providerFacts),
+  );
+});
+
+test("ClutchPacks card facts fail closed for malformed asset fields", () => {
+  const base = dataforrestEventRecordV1Schema.parse({
+    platform: "clutchpacks",
+    stream: "catalog",
+    entity: "card",
+    record_id: "clutchpacks-card-malformed",
+    occurred_at: "2026-08-01T00:00:00.000Z",
+    collected_at: "2026-08-01T00:00:01.000Z",
+    first_seen_at: "2026-08-01T00:00:00.000Z",
+    available: null,
+    data: {},
+  });
+  const absent = normalizeDataforrestEventRecord(
+    base,
+    "clutchpacks",
+    "fixture:clutchpacks-card-absent",
+  );
+  assert.equal(absent.kind, "catalog");
+  if (absent.kind !== "catalog") assert.fail("expected catalog observation");
+  assert.deepEqual(absent.providerFacts, emptyNormalizedProviderFacts("card"));
+
+  const malformed = normalizeDataforrestEventRecord(
+    {
+      ...base,
+      data: {
+        asset: {
+          title: " ",
+          description: 42,
+          subtype: {},
+          formatted_current_price: "USD 10",
+          front_image_url: 42,
+        },
+      },
+    },
+    "clutchpacks",
+    "fixture:clutchpacks-card-malformed",
+  );
+  assert.equal(malformed.kind, "catalog");
+  if (malformed.kind !== "catalog") assert.fail("expected catalog observation");
+  assert.deepEqual(malformed.providerFacts, {
+    ...emptyNormalizedProviderFacts("card"),
+    displayName: { state: "malformed" },
+    description: { state: "malformed" },
+    category: { state: "malformed" },
+    imageReferences: { state: "malformed" },
+    estimatedValue: { state: "malformed" },
+  });
 });
 
 test("raw IDs may repeat across evidenced scopes without aliasing", () => {

@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestIdentityNamespaceByProvider,
   dataforrestEventsPageV1Schema,
+  dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
   launchRecordIdScopeDeclarations,
   sourceAdapterFailureSchema,
@@ -588,17 +590,29 @@ test("request shapes are operation-specific and preserve an opaque cursor exactl
   }
 });
 
-test("the sole v1 adapter refuses a removed v2 interpretation pin", async () => {
+test("a legacy adapter instance refuses the current v3 interpretation pin", async () => {
   const httpClient = async () =>
     jsonResponse(dataforestEventsV1EvidenceFixture.collector_crypt.initial);
-  const v1 = adapterWithClient(httpClient);
+  const v1 = adapterWithClient(
+    httpClient,
+    dataforrestEventsV1LegacySourceAdapterManifest,
+  );
   const testRuntime = runtime();
-  const operation = await pageOperation(testRuntime, "collector_crypt", null);
+  const operation = await pageOperation(
+    testRuntime,
+    "collector_crypt",
+    null,
+    bounds,
+    {
+      adapterVersion: DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+      normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    },
+  );
   const captured = await successfulCapture(v1, operation);
   const interpreted = await v1.interpretPage(
     {
       ...sourceAdapterInterpretationContextOf(operation),
-      adapterVersion: "dataforrest-events-adapter-v2",
+      adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     },
     captured,
   );
@@ -1368,7 +1382,7 @@ test("the 480,000-node boundary is accepted and one additional node is rejected"
   }
 });
 
-test("the sole v1 adapter captures valid pages above 4 MiB and rejects pages above 8 MiB", async () => {
+test("the DataForrest events adapter captures valid pages above 4 MiB and rejects pages above 8 MiB", async () => {
   const formerMaximumResponseBytes = 4 * 1024 * 1024;
   const currentBounds = dataforrestEventsV1SourceAdapterManifest.requestBounds;
   const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;

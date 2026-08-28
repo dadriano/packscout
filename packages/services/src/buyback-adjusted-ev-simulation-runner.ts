@@ -164,7 +164,10 @@ implements PackScoutBuybackEvRevisionPersistencePortV1 {
       }),
       organizationId: input.organizationId,
       providerId: input.providerId,
-      configurationRevisionId: input.configurationRevisionId,
+      providerSourceRevisionId: input.providerSourceRevisionId,
+      sourceInstanceId: packScoutBuybackEvSimulatedUuidV1("source-instance", {
+        providerSourceRevisionId: input.providerSourceRevisionId,
+      }),
       platformKey: input.platformKey,
       productKey: input.productKey,
       productRevisionId: input.productRevisionId,

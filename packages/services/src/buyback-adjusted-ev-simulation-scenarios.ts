@@ -127,7 +127,7 @@ export interface PackScoutBuybackEvSimulationFrameV1 {
   /** The frame's calculation and release read clock. */
   readonly readAt: string;
   readonly organizationId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
   readonly scenarios: readonly PackScoutBuybackEvSimulationScenarioFrameV1[];
   readonly snapshot: DataReleaseV3CanonicalSnapshot;
 }
@@ -151,7 +151,7 @@ interface ScenarioBuildContext {
   readonly readAt: string;
   readonly seedTag: string;
   readonly organizationId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
   readonly categoryId: string;
   readonly evidenceContext: (evaluatedAt: string) =>
     PackScoutBuybackEvEvidenceContextV1;
@@ -287,7 +287,7 @@ function scenarioFrame(input: {
     command: {
       organizationId: input.build.organizationId,
       providerId: providerId(input.build, revision.providerKey),
-      configurationRevisionId: input.build.configurationRevisionId,
+      providerSourceRevisionId: input.build.providerSourceRevisionId,
       evidence,
       calculatedAt: input.calculatedAt,
     },
@@ -1188,8 +1188,8 @@ export function buildPackScoutBuybackEvSimulationFrameV1(
     organizationId: packScoutBuybackEvSimulatedUuidV1("organization", {
       seedTag,
     }),
-    configurationRevisionId: packScoutBuybackEvSimulatedUuidV1(
-      "configuration",
+    providerSourceRevisionId: packScoutBuybackEvSimulatedUuidV1(
+      "provider-source-revision",
       { seedTag, scenarioVersion: validated.scenarioVersion },
     ),
     categoryId: packScoutBuybackEvSimulatedUuidV1("category", {
@@ -1241,7 +1241,7 @@ export function buildPackScoutBuybackEvSimulationFrameV1(
     frameIndex,
     readAt,
     organizationId: build.organizationId,
-    configurationRevisionId: build.configurationRevisionId,
+    providerSourceRevisionId: build.providerSourceRevisionId,
     scenarios,
     snapshot: {
       organizationId: build.organizationId,

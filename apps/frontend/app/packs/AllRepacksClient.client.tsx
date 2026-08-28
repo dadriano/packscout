@@ -33,8 +33,10 @@ import {
   DEFAULT_CATALOG_QUERY,
   type CatalogPageSize,
   type CatalogViewLayout,
+  catalogQueryForPageNavigation,
   catalogSheetInspectorInitiallyOpen,
   clearCatalogRepackSelection,
+  formatDollarAmount,
   nextCatalogPage,
   previousCatalogPage,
   resetCatalogPagination,
@@ -91,7 +93,7 @@ function activeConstraints(page: ListPublicRepacksPageV3) {
   if (page.activeQuery.filters.price.mode === "narrowed") {
     constraints.push({
       label: "Repack Price",
-      value: `$${page.activeQuery.filters.price.minMinor / 100}–$${page.activeQuery.filters.price.maxMinor / 100}`,
+      value: `$${formatDollarAmount(page.activeQuery.filters.price.minMinor)}–$${formatDollarAmount(page.activeQuery.filters.price.maxMinor)}`,
     });
   }
   if (page.desiredCollectible) {
@@ -121,24 +123,47 @@ export function AllRepacksClient({
 }: AllRepacksClientProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const navigationQuery = catalogQueryForPageNavigation(query, page);
+  const navigationHref = serializeCatalogViewState(
+    navigationQuery,
+    initialLayout,
+  );
+  const initialInspectorOpen = catalogSheetInspectorInitiallyOpen(
+    navigationQuery.selectedPublicRepackId,
+  );
   const [selectedPublicRepackId, setSelectedPublicRepackId] = useState<
     string | null
-  >(page.selectedRepack?.publicRepackId ?? null);
+  >(initialInspectorOpen ? page.selectedRepack?.publicRepackId ?? null : null);
   const [actionFeedback, setActionFeedback] = useState("");
-  const [inspectorOpen, setInspectorOpen] = useState(() =>
-    catalogSheetInspectorInitiallyOpen(query.selectedPublicRepackId),
-  );
+  const [inspectorOpen, setInspectorOpen] = useState(initialInspectorOpen);
+  const actionFeedbackRepackIdRef = useRef<string | null>(null);
   const selectionTriggerRef = useRef<HTMLElement | null>(null);
   const detailById = useMemo(
     () => new Map(details.map((detail) => [detail.publicRepackId, detail])),
     [details],
   );
+  const repackHrefById = useMemo(() => {
+    const hrefs = new Map<string, string>();
+    for (const detail of details) {
+      const outbound = buildPublishedRepackHref(
+        detail.actions.repackLink,
+        detail.availability,
+      );
+      if (outbound.ok) hrefs.set(detail.publicRepackId, outbound.href);
+    }
+    return hrefs;
+  }, [details]);
   const selectedRepack = selectedPublicRepackId
     ? detailById.get(selectedPublicRepackId) ??
       (page.selectedRepack?.publicRepackId === selectedPublicRepackId
         ? page.selectedRepack
         : null)
     : null;
+
+  useEffect(() => {
+    if (page.paginationReset !== "release_changed") return;
+    router.replace(navigationHref);
+  }, [navigationHref, page.paginationReset, router]);
 
   useEffect(() => {
     queueProductTelemetry(
@@ -206,30 +231,34 @@ export function AllRepacksClient({
   }
 
   function applyFilters(filters: PublicRepackFilters) {
-    navigate(resetCatalogPagination(query, { filters }));
+    navigate(resetCatalogPagination(navigationQuery, { filters }));
   }
 
   function selectRepack(publicRepackId: string) {
+    actionFeedbackRepackIdRef.current = null;
+    setActionFeedback("");
     setSelectedPublicRepackId(publicRepackId);
     setInspectorOpen(true);
-    navigate(selectCatalogRepack(query, publicRepackId));
+    navigate(selectCatalogRepack(navigationQuery, publicRepackId));
   }
 
   function closeInspector() {
     setInspectorOpen(false);
-    navigate(clearCatalogRepackSelection(query));
+    setSelectedPublicRepackId(null);
+    navigate(clearCatalogRepackSelection(navigationQuery));
   }
 
   function sortCatalog(sort: PublicRepackSort, direction: "asc" | "desc") {
-    navigate(resetCatalogPagination(query, { sort, direction }));
+    navigate(resetCatalogPagination(navigationQuery, { sort, direction }));
   }
 
   function changePageSize(pageSize: CatalogPageSize) {
-    navigate(resetCatalogPagination(query, { pageSize }));
+    navigate(resetCatalogPagination(navigationQuery, { pageSize }));
   }
 
   async function copyPromo(publicRepackId: string) {
-    selectRepack(publicRepackId);
+    actionFeedbackRepackIdRef.current = publicRepackId;
+    setActionFeedback("");
     const detail = detailById.get(publicRepackId);
     const promo = detail?.actions.promo;
     if (!promo) {
@@ -250,9 +279,11 @@ export function AllRepacksClient({
       return;
     }
     const outcome = await copyPublicPromoCode(promo.code);
-    setActionFeedback(
-      outcome.ok ? "Promo code copied." : `Copy manually: ${promo.code}`,
-    );
+    if (actionFeedbackRepackIdRef.current === publicRepackId) {
+      setActionFeedback(
+        outcome.ok ? "Promo code copied." : `Copy manually: ${promo.code}`,
+      );
+    }
     queueProductTelemetry(
       createPromoCopiedEvent({
         publicReleaseId: page.release.publicReleaseId,
@@ -264,7 +295,8 @@ export function AllRepacksClient({
   }
 
   function openRepack(publicRepackId: string) {
-    selectRepack(publicRepackId);
+    actionFeedbackRepackIdRef.current = publicRepackId;
+    setActionFeedback("");
     const detail = detailById.get(publicRepackId);
     const outbound = detail
       ? buildPublishedRepackHref(
@@ -289,7 +321,6 @@ export function AllRepacksClient({
       }
       return;
     }
-    window.open(outbound.href, "_blank", "noopener,noreferrer");
     setActionFeedback("Vendor listing opened in a new tab.");
     queueProductTelemetry(
       createRepackLinkOpenedEvent({
@@ -307,7 +338,7 @@ export function AllRepacksClient({
       desiredSearchActive={page.desiredCollectible !== null}
       direction={page.activeQuery.direction}
       layout={initialLayout}
-      onLayoutChange={(layout) => navigate(query, layout)}
+      onLayoutChange={(layout) => navigate(navigationQuery, layout)}
       onPageSizeChange={changePageSize}
       onSort={sortCatalog}
       pageSize={page.activeQuery.pageSize as CatalogPageSize}
@@ -351,6 +382,7 @@ export function AllRepacksClient({
               }}
               onSort={sortCatalog}
               page={page}
+              repackHrefById={repackHrefById}
               selectedPublicRepackId={selectedPublicRepackId}
             />
           ) : (
@@ -369,11 +401,17 @@ export function AllRepacksClient({
             hasPrevious={page.hasPrevious}
             onNext={() =>
               navigate(
-                nextCatalogPage(query, page.nextCursor, page.queryFingerprint),
+                nextCatalogPage(
+                  navigationQuery,
+                  page.nextCursor,
+                  page.queryFingerprint,
+                ),
               )
             }
             onPrevious={() =>
-              navigate(previousCatalogPage(query, page.queryFingerprint))
+              navigate(
+                previousCatalogPage(navigationQuery, page.queryFingerprint),
+              )
             }
             pending={pending}
             range={page.range}

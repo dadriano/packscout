@@ -216,9 +216,9 @@ For each stable provider root:
 
 Activation pins the exact source, adapter, normalized contract, mapper,
 connection revision, schedule, and cursor generation. The DataForrest runtime
-accepts only the current v1/v1/v1 adapter, observation, and mapper tuple. During
-early development, changing those semantic pins requires the guarded full local
-database reset and a complete reimport; it is not an in-place source operation.
+accepts only the current adapter-v3 / observation-v1 / mapper-v1 tuple. A
+database containing adapter-v1 or adapter-v2 pins must use the guarded full
+local reset and complete reimport; it is not an in-place source operation.
 
 ### 3. Begin ingestion
 

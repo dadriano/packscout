@@ -4,6 +4,7 @@ import type {
 } from "./provider-source-contract-v1.ts";
 
 export interface ProviderSourceCanonicalRevisionState {
+  readonly canonicalRevisionId?: string | null;
   readonly contentFingerprint: string;
   readonly effectiveAt: string;
 }
@@ -20,6 +21,7 @@ export type ProviderSourceCanonicalLifecycleDecision =
   | Readonly<{
       disposition: "duplicate";
       becomesCurrent: false;
+      reuseCanonicalRevisionId: string | null;
     }>
   | Readonly<{
       disposition: "quarantined";
@@ -61,14 +63,17 @@ export function decideProviderSourceCanonicalLifecycle(input: Readonly<{
       becomesCurrent: false,
     };
   }
-  if (
-    input.revisions.some(
-      (revision) =>
-        revision.contentFingerprint === input.contentFingerprint &&
-        revision.effectiveAt === input.effectiveAt,
-    )
-  ) {
-    return { disposition: "duplicate", becomesCurrent: false };
+  const exact = input.revisions.find(
+    (revision) =>
+      revision.contentFingerprint === input.contentFingerprint &&
+      revision.effectiveAt === input.effectiveAt,
+  );
+  if (exact !== undefined) {
+    return {
+      disposition: "duplicate",
+      becomesCurrent: false,
+      reuseCanonicalRevisionId: exact.canonicalRevisionId ?? null,
+    };
   }
   const current = input.revisions.reduce<ProviderSourceCanonicalRevisionState | null>(
     (winner, revision) =>
@@ -78,7 +83,11 @@ export function decideProviderSourceCanonicalLifecycle(input: Readonly<{
     null,
   );
   if (current?.contentFingerprint === input.contentFingerprint) {
-    return { disposition: "duplicate", becomesCurrent: false };
+    return {
+      disposition: "duplicate",
+      becomesCurrent: false,
+      reuseCanonicalRevisionId: current.canonicalRevisionId ?? null,
+    };
   }
   if (
     input.revisions.length > 0 &&

@@ -62,7 +62,7 @@ const activeConnectionRevision = {
 const catalog = providerSourceAdminCatalogSchema.parse({
   availableSourceTypes: [{
     sourceTypeKey: "dataforrest-events-v1",
-    sourceAdapterVersion: "dataforrest-events-adapter-v1",
+    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     label: "Registered event source",
   }],
   providers: providers.map((provider, index) => ({
@@ -70,7 +70,7 @@ const catalog = providerSourceAdminCatalogSchema.parse({
     provider,
     sourceRegistration: {
       sourceTypeKey: "dataforrest-events-v1",
-      sourceAdapterVersion: "dataforrest-events-adapter-v1",
+      sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
       normalizedContractVersion: "packscout.provider-observation.v1",
       mapperKey: `${provider}-mapper`,
       mapperVersion: "v1",
@@ -106,7 +106,7 @@ const catalog = providerSourceAdminCatalogSchema.parse({
       ...ids,
       provider,
       sourceTypeKey: "dataforrest-events-v1",
-      sourceAdapterVersion: "dataforrest-events-adapter-v1",
+      sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
       connectionProfileId,
       connectionRevisionId,
       state: index === 1 ? "paused" : "active",
@@ -184,7 +184,7 @@ const snapshot = providerSourceSupervisorSnapshotSchema.parse({
       connectionProfileId,
       connectionRevisionId,
       sourceTypeKey: "dataforrest-events-v1",
-      sourceAdapterVersion: "dataforrest-events-adapter-v1",
+      sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
       normalizedContractVersion: "packscout.provider-observation.v1",
       mapperKey: `${provider}-mapper`,
       mapperVersion: "v1",

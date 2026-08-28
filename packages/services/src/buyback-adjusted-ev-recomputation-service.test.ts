@@ -44,14 +44,14 @@ const CALCULATED_AT = "2026-08-19T18:05:00.000Z";
 
 function fingerprintOf(
   evidence: PackScoutBuybackEvEvidenceOutcomeV1,
-  configurationRevisionId: string = RECOMPUTATION_TEST_IDS.configuration,
+  providerSourceRevisionId: string = RECOMPUTATION_TEST_IDS.configuration,
 ): string {
   const binding = derivePackScoutBuybackEvRecomputationBindingV1(evidence);
   assert.equal(binding.kind, "bindable");
   if (binding.kind !== "bindable") throw new Error("unbindable");
   return computePackScoutBuybackEvRecomputationFingerprintV1(
     binding,
-    configurationRevisionId,
+    providerSourceRevisionId,
   );
 }
 
@@ -242,7 +242,7 @@ test("the change matrix maps every governing change to a new fingerprint and dis
         }),
       ),
     ],
-    approvedConfiguration: () => [
+    providerSourceRevision: () => [
       fingerprintOf(completeEvidenceOutcome()),
       fingerprintOf(
         completeEvidenceOutcome(),

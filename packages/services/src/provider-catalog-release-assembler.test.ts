@@ -326,6 +326,68 @@ test("unsettled ready checkpoint and incomplete backfill fail closed", async () 
   }
 });
 
+test("source head completion recorded after the final settlement remains publishable", async () => {
+  const checkpoint = providerFixtureCheckpoint();
+  assert.ok(checkpoint.settledAt);
+  const plan = await fixtureAssembler({
+    checkpoint,
+    snapshot: providerFixtureSnapshot({
+      checkpoint,
+      completedBackfillAt: new Date(checkpoint.settledAt.getTime() + 10_000),
+      lastSuccessfulObservationAt: new Date(
+        checkpoint.settledAt.getTime() + 10_000,
+      ),
+    }),
+  }).assembler.assemble({ trigger: "settled_change" });
+
+  assert.equal(plan.classification, "publish");
+});
+
+test("association confirmation after observation time does not block publication", async () => {
+  const checkpoint = providerFixtureCheckpoint();
+  const snapshot = providerFixtureSnapshot({
+    checkpoint,
+    lastSuccessfulObservationAt: new Date("2026-08-15T02:30:00.000Z"),
+  });
+  const plan = await fixtureAssembler({
+    checkpoint,
+    snapshot: {
+      ...snapshot,
+      assetPackAssociations: snapshot.assetPackAssociations.map((association) => ({
+        ...association,
+        associatedAt: new Date("2026-08-15T02:45:00.000Z"),
+      })),
+    },
+  }).assembler.assemble({ trigger: "settled_change" });
+
+  assert.equal(plan.classification, "publish");
+});
+
+test("asset-pack associations cannot exceed the exact settled boundary", async () => {
+  const checkpoint = providerFixtureCheckpoint();
+  const base = providerFixtureSnapshot({ checkpoint });
+  for (const association of [
+    {
+      ...base.assetPackAssociations[0]!,
+      publicChangeSequence: checkpoint.settledSequence + 1n,
+    },
+    {
+      ...base.assetPackAssociations[0]!,
+      associatedAt: new Date(checkpoint.settledAt!.getTime() + 1),
+    },
+  ]) {
+    const plan = await fixtureAssembler({
+      checkpoint,
+      snapshot: { ...base, assetPackAssociations: [association] },
+    }).assembler.assemble({ trigger: "settled_change" });
+
+    assert.equal(plan.classification, "blocked");
+    if (plan.classification === "blocked") {
+      assert.equal(plan.reason, "PROVIDER_SOURCE_INVALID");
+    }
+  }
+});
+
 test("missing identity, invalid references, origins, arithmetic, and protected data fail closed", async () => {
   const base = providerFixtureSnapshot();
   const missingIdentity = await fixtureAssembler({
@@ -338,16 +400,10 @@ test("missing identity, invalid references, origins, arithmetic, and protected d
 
   const badReferenceSnapshot: ProviderCatalogReleaseSourceSnapshot = {
     ...base,
-    revisions: base.revisions.map((revision) =>
-      revision.recordKind === "catalog_asset"
-        ? {
-            ...revision,
-            content: {
-              ...(revision.content as Record<string, unknown>),
-              relatedPackExternalId: "missing-pack",
-            },
-          }
-        : revision),
+    assetPackAssociations: base.assetPackAssociations.map((association) => ({
+      ...association,
+      packExternalId: "missing-pack",
+    })),
   };
   const badReference = await fixtureAssembler({
     snapshot: badReferenceSnapshot,

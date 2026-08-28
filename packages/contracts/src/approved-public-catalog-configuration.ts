@@ -2,12 +2,14 @@ import { z } from "zod";
 import {
   canonicalArraySchema,
   nonBlankTextSchema,
+  parsedHttpsUrl,
   publicCategoryIdSchema,
   publicCategorySchema,
   publicChaseEvidenceKindSchema,
   publicCollectibleIdSchema,
   publicCollectibleTypeSchema,
   publicHttpsOriginSchema,
+  publicHttpsUrlSchema,
   publicRepackIdSchema,
   publicVendorSchema,
   timestampSchema,
@@ -76,6 +78,7 @@ export const approvedPublicRepackIdentityMappingSchema = z.object({
   platformKey: providerPlatformKeySchema,
   packExternalId: nonBlankTextSchema(500),
   publicRepackId: publicRepackIdSchema,
+  listingUrl: publicHttpsUrlSchema.nullable().optional(),
 }).strict();
 
 export const approvedPublicConfidencePolicySchema = z.object({
@@ -144,6 +147,26 @@ export const approvedPublicCatalogConfigurationV1Schema = z.object({
       new Set(configuration.collectibles.map(({ publicCollectibleId }) => publicCollectibleId)).size !==
         configuration.collectibles.length) {
     context.addIssue({ code: "custom", message: "public_config.identity_mapping_invalid" });
+  }
+  const platformByKey = new Map(configuration.platforms.map((platform) => [
+    platform.platformKey,
+    platform,
+  ]));
+  if (configuration.repacks.some((repack) => {
+    if (repack.listingUrl === undefined || repack.listingUrl === null) {
+      return false;
+    }
+    const listingHost = parsedHttpsUrl(repack.listingUrl)?.host;
+    return listingHost === undefined ||
+      !platformByKey.get(repack.platformKey)?.vendor.listingHosts.includes(
+        listingHost,
+      );
+  })) {
+    context.addIssue({
+      code: "custom",
+      path: ["repacks"],
+      message: "public_config.listing_host_not_approved",
+    });
   }
   const governedOrigins = new Set(configuration.publicAssetOrigins);
   if (configuration.platforms.some(({ vendor }) =>

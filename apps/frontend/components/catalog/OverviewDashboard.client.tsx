@@ -75,6 +75,7 @@ export function OverviewDashboard({
         <OpportunityTable
           onSelectOpportunity={onSelectOpportunity}
           opportunities={bundle.opportunities}
+          repacksHref={repacksHref}
           selectedPublicRepackId={selectedId}
         />
         <div className={styles.summaryGrid}>
