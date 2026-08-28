@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { createAdminApp } from "../app.ts";
 import type { AdminRuntime } from "../runtime.ts";
@@ -33,6 +36,7 @@ function fixtureRuntime(app = createAdminApp()): AdminRuntime {
 async function withServer(
   getRuntime: () => Promise<AdminRuntime>,
   visit: (baseUrl: string) => Promise<void>,
+  spaIndexPath = "/unused/index.html",
 ): Promise<void> {
   const app = createVercelAdminApp({
     getRuntime,
@@ -45,7 +49,7 @@ async function withServer(
       }),
       reportFailure: () => undefined,
     },
-    spaIndexPath: "/unused/index.html",
+    spaIndexPath,
     serveSpa: (_request, response) => {
       response.status(200).type("html").send("<main>PackScout Admin</main>");
     },
@@ -62,6 +66,85 @@ async function withServer(
     );
   }
 }
+
+test("Vercel dispatch serves built assets before the SPA fallback", async () => {
+  const publicDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "packscout-admin-vercel-"),
+  );
+  try {
+    const assetsDirectory = path.join(publicDirectory, "assets");
+    await mkdir(assetsDirectory);
+    await Promise.all([
+      writeFile(
+        path.join(assetsDirectory, "admin.js"),
+        "globalThis.packscoutAdminLoaded = true;",
+      ),
+      writeFile(
+        path.join(assetsDirectory, "admin.css"),
+        ":root { color-scheme: light dark; }",
+      ),
+    ]);
+
+    await withServer(
+      async () => fixtureRuntime(),
+      async (baseUrl) => {
+        const script = await fetch(`${baseUrl}/assets/admin.js`);
+        assert.equal(script.status, 200);
+        assert.match(
+          script.headers.get("content-type") ?? "",
+          /javascript/,
+        );
+        assert.equal(
+          script.headers.get("cache-control"),
+          "public, max-age=31536000, immutable",
+        );
+        assert.match(await script.text(), /packscoutAdminLoaded/);
+
+        const unsatisfiableRange = await fetch(
+          `${baseUrl}/assets/admin.js`,
+          { headers: { Range: "bytes=10000-10001" } },
+        );
+        assert.equal(unsatisfiableRange.status, 416);
+        assert.equal(
+          unsatisfiableRange.headers.get("cache-control"),
+          "private, no-cache, no-store, max-age=0, must-revalidate",
+        );
+        assert.equal(
+          await unsatisfiableRange.text(),
+          "Admin asset request rejected.",
+        );
+
+        const failedPrecondition = await fetch(
+          `${baseUrl}/assets/admin.js`,
+          { headers: { "If-Match": '"not-the-current-etag"' } },
+        );
+        assert.equal(failedPrecondition.status, 412);
+        assert.equal(
+          failedPrecondition.headers.get("cache-control"),
+          "private, no-cache, no-store, max-age=0, must-revalidate",
+        );
+
+        const stylesheet = await fetch(`${baseUrl}/assets/admin.css`);
+        assert.equal(stylesheet.status, 200);
+        assert.match(
+          stylesheet.headers.get("content-type") ?? "",
+          /text\/css/,
+        );
+
+        const missingAsset = await fetch(`${baseUrl}/assets/not-real.js`);
+        assert.equal(missingAsset.status, 404);
+        assert.match(
+          missingAsset.headers.get("content-type") ?? "",
+          /text\/plain/,
+        );
+        assert.equal(await missingAsset.text(), "Admin asset not found.");
+      },
+      path.join(publicDirectory, "index.html"),
+    );
+  } finally {
+    await rm(publicDirectory, { force: true, recursive: true });
+  }
+});
 
 test("Vercel dispatch preserves API JSON and serves deep SPA routes", async () => {
   let initializations = 0;
