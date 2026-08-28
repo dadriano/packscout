@@ -80,6 +80,10 @@ const EXPECTED_MIGRATIONS = Object.freeze([
     name: "20260827010000_provider_source_platform_request_lanes",
     checksum: "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
   }),
+  Object.freeze({
+    name: "20260827020000_buyback_ev_provider_source_origin",
+    checksum: "10ae3670f6fbafb0ed529154ac7aad227b60bab735630e1079e805ddf8e7b24e",
+  }),
 ]);
 const EXPECTED_TABLE_COUNT = 91;
 

@@ -19,6 +19,8 @@ import {
   PrismaProviderCatalogReleaseSourceRepository,
   ProviderCatalogReleaseSourcePersistenceError,
 } from "./provider-catalog-release-source-repository.ts";
+import { loadProviderV1AssetPackAssociations } from
+  "./provider-v1-asset-pack-association-reader.ts";
 import {
   PrismaProviderCatalogSettlementRepository,
   type ProviderCatalogCheckpointRecord,
@@ -2234,6 +2236,52 @@ test("provider snapshot accepts production-writer V1 pull causality and pairs it
       assetExternalId: "asset-associated",
       packExternalId: "a-1",
       associatedAt: association.associatedAt,
+      publicChangeSequence: association.publicChangeSequence,
+    }]);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a post-read-clock V1 confirmation stays out even when its sequence is eligible", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const fixture = await seedProviderRelease(harness);
+    const associatedAt = new Date("2026-08-16T11:41:00.000Z");
+    const readAt = new Date("2026-08-16T11:40:00.000Z");
+    const association = await harness.client.$transaction((transaction) =>
+      addWriterPullAssetPackAssociation(transaction, fixture, {
+        associationKey: "later-than-read-clock",
+        relationshipAt: associatedAt,
+      }));
+
+    const historical = await loadProviderV1AssetPackAssociations(
+      harness.client,
+      {
+        organizationId,
+        platformKey: "alpha",
+        sourceRevisionId: fixture.alphaSourceRevisionId,
+        // Deliberately include the confirmation's native sequence. The clock,
+        // not the sequence, is what keeps this later write out of the replay.
+        throughSequence: association.publicChangeSequence,
+        throughOccurredAt: readAt,
+      },
+    );
+    assert.deepEqual(historical, []);
+
+    const current = await loadProviderV1AssetPackAssociations(harness.client, {
+      organizationId,
+      platformKey: "alpha",
+      sourceRevisionId: fixture.alphaSourceRevisionId,
+      throughSequence: association.publicChangeSequence,
+      throughOccurredAt: associatedAt,
+    });
+    assert.deepEqual(current, [{
+      sourceEntityId: association.sourceEntityId,
+      platformKey: "alpha",
+      assetExternalId: "asset-later-than-read-clock",
+      packExternalId: "a-1",
+      associatedAt,
       publicChangeSequence: association.publicChangeSequence,
     }]);
   } finally {

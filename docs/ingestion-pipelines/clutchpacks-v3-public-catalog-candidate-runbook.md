@@ -11,6 +11,9 @@ the active multi-provider V1 database.
 
 Both dry-run and execute open the exact query-free loopback database
 `packscout_clutchpacks_v3_canary` in a read-only repeatable-read transaction.
+The dry-run binds the connected server's database name, database OID, and
+PostgreSQL system identifier into its confirmation. Execute re-reads and
+exact-matches that identity before any write.
 Generation fails closed unless all of the following remain true:
 
 - the target has one ClutchPacks provider and one paused adapter-v3 source;
@@ -32,8 +35,12 @@ fail-closed ClutchPacks taxonomy for the exact observed values `Sports`, `TCG`,
 `One Piece`, and `Pokemon`; an unknown non-null source category stops
 generation. Public IDs are
 UUIDv5 values derived from an explicitly approved namespace and stable source
-keys. HTTPS origins are derived from current canonical content and revalidated
-by the approved public catalog schema. Each UUID pack identity also receives
+keys. Pack and catalog-asset content must parse with the exported canonical
+content schemas. Only their schema-validated `imageUrls` fields participate in
+origin discovery; a URL-like name, description, or other string never grants
+an origin. Every observed image origin must appear in the explicit protected
+allowlist, and the candidate emits only the exact sorted set of observed
+allowed origins. Each UUID pack identity also receives
 the reviewed `https://clutchpacks.io/checkout/<pack-id>/` listing URL, governed
 by the vendor's exact `clutchpacks.io` listing-host allowlist.
 
@@ -57,13 +64,17 @@ PACKSCOUT_CLUTCHPACKS_CATALOG_COMPLETE_SCORE_BPS=<0..10000>
 PACKSCOUT_CLUTCHPACKS_CATALOG_PARTIAL_SCORE_BPS=<0..10000>
 PACKSCOUT_CLUTCHPACKS_CATALOG_UNKNOWN_SCORE_BPS=<0..10000>
 PACKSCOUT_CLUTCHPACKS_CATALOG_LIMITATION_PENALTY_BPS=<0..10000>
+PACKSCOUT_CLUTCHPACKS_CATALOG_PUBLIC_ASSET_ORIGINS_JSON=["https://approved-cdn.example"]
 PACKSCOUT_CLUTCHPACKS_CATALOG_VENDOR_DISPLAY_NAME=ClutchPacks
 PACKSCOUT_CLUTCHPACKS_CATALOG_FORMAT=repack
 ```
 
-The database URL must not contain a password, query string, or non-loopback
-host. Keep the output outside the repository in a private local runtime
-directory.
+The origin allowlist is a canonical JSON array: at most 64 unique root HTTPS
+origins, strictly sorted, with no JSON whitespace, paths, queries, fragments,
+or trailing slashes. It is an operator authorization boundary, not a source of
+origins to publish. The database URL must not contain a password, query string,
+or non-loopback host. Keep the output outside the repository in a private local
+runtime directory.
 
 ## Generate and approve
 
@@ -74,8 +85,11 @@ directory.
      --output /absolute/private/path/clutchpacks-v3-catalog.json
    ```
 
-   Review the target, head run, counts, serialized size, configuration hash,
-   and candidate digest. The command emits no canonical names or external IDs.
+   Review the connected database identity, target, head run, counts,
+   `observedPublicAssetOrigins`, serialized size, configuration hash, and
+   candidate digest. The origin list must exactly match the origins currently
+   present in canonical `imageUrls`. The command emits no canonical names or
+   external IDs.
 
 2. Copy the exact `requiredConfirmation` from that same plan and create the
    candidate. Execute re-runs every database proof and refuses an existing
@@ -90,27 +104,23 @@ directory.
 
    Verify the resulting file is a regular file with mode `0600`.
 
-3. Bind the isolated local target to the preproduction approval lane and run
-   approval dry-run:
+3. For a later refresh of the approved local configuration, run the refresh
+   approval dry-run against the same protected local environment:
 
    ```bash
-   PACKSCOUT_RUNTIME_ENVIRONMENT=preproduction \
-   PACKSCOUT_PUBLIC_ORGANIZATION_ID=<target UUID> \
-   PACKSCOUT_CATALOG_DEPLOYMENT_KEY=clutchpacks-canary-v1 \
-   PACKSCOUT_DATABASE_URL=<same local target URL> \
-   npm run approve:catalog-configuration:clutchpacks:preproduction -- \
-     /absolute/private/path/clutchpacks-v3-catalog.json --dry-run
+   npm run approve:catalog-refresh:clutchpacks:local -- --dry-run
    ```
 
-4. Review exact canonical/configured coverage and zero unnamed associated
-   assets. Then repeat with `--execute` and the emitted digest-bound approval
-   confirmation:
+4. Review exact canonical/configured coverage, zero unnamed associated assets,
+   and the exact `addedPublicAssetOrigins` and `removedPublicAssetOrigins`
+   arrays relative to the predecessor. Then repeat with `--execute`, the
+   dry-run's exact `approvedAt`, and its digest-bound confirmation:
 
    ```bash
-   npm run approve:catalog-configuration:clutchpacks:preproduction -- \
-     /absolute/private/path/clutchpacks-v3-catalog.json \
+   npm run approve:catalog-refresh:clutchpacks:local -- \
      --execute \
-     --confirmation "APPROVE CLUTCHPACKS PREPRODUCTION <16hex>"
+     --approved-at <dry-run-approvedAt> \
+     --confirmation "APPROVE CLUTCHPACKS V3 CATALOG LOCAL <16hex>"
    ```
 
 Approval changes only the isolated local PostgreSQL target. Convex publication

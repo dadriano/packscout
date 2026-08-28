@@ -44,6 +44,9 @@ const PAUSE_CONFIRMATION_PREFIX = "PAUSE ORIGINAL CLUTCHPACKS V1 LOCAL";
 const PAUSE_TARGET_CONFIRMATION_PREFIX =
   "PAUSE CLUTCHPACKS V3 TARGET LOCAL";
 const RESUME_CONFIRMATION_PREFIX = "RESUME CLUTCHPACKS V3 LOCAL";
+const RESET_TARGET_CURSOR_CONFIRMATION_PREFIX =
+  "RESET CLUTCHPACKS V3 TARGET CURSOR LOCAL";
+const SERVICE_CURSOR_RESET_CONFIRMATION = "RESET CLUTCHPACKS";
 
 export class ClutchpacksV3CanaryDriverError extends Error {
   override readonly name = "ClutchpacksV3CanaryDriverError";
@@ -62,6 +65,7 @@ export interface ClutchpacksV3CanaryDriverConfirmations {
   readonly pauseOriginal: string;
   readonly pauseTarget: string;
   readonly resume: string;
+  readonly resetTargetCursor: string;
 }
 
 export function clutchpacksV3CanaryDriverConfirmations(
@@ -73,6 +77,8 @@ export function clutchpacksV3CanaryDriverConfirmations(
     pauseOriginal: `${PAUSE_CONFIRMATION_PREFIX} ${binding}`,
     pauseTarget: `${PAUSE_TARGET_CONFIRMATION_PREFIX} ${binding}`,
     resume: `${RESUME_CONFIRMATION_PREFIX} ${binding}`,
+    resetTargetCursor:
+      `${RESET_TARGET_CURSOR_CONFIRMATION_PREFIX} ${binding}`,
   });
 }
 
@@ -84,7 +90,11 @@ export type ClutchpacksV3CanaryDriverCommand = Readonly<
       expectedStage: string;
     }
   | {
-      action: "pause_original" | "pause_target" | "resume";
+      action:
+        | "pause_original"
+        | "pause_target"
+        | "resume"
+        | "reset_target_cursor";
       confirmation: string;
     }
 >;
@@ -100,7 +110,12 @@ export function parseClutchpacksV3CanaryDriverCommand(
     return Object.freeze({ action: "plan", confirmation: null });
   }
   const declared = new Map<string, Readonly<{
-    action: "advance" | "pause_original" | "pause_target" | "resume";
+    action:
+      | "advance"
+      | "pause_original"
+      | "pause_target"
+      | "resume"
+      | "reset_target_cursor";
     confirmation: string;
   }>>([
     ["--advance", Object.freeze({
@@ -118,6 +133,10 @@ export function parseClutchpacksV3CanaryDriverCommand(
     ["--resume", Object.freeze({
       action: "resume" as const,
       confirmation: confirmations.resume,
+    })],
+    ["--reset-target-cursor", Object.freeze({
+      action: "reset_target_cursor" as const,
+      confirmation: confirmations.resetTargetCursor,
     })],
   ]);
   const expected = argv[0] ? declared.get(argv[0]) : undefined;
@@ -282,10 +301,12 @@ export interface ClutchpacksV3CanaryTargetEvidence {
   readonly canonicalEntityCount: number;
   readonly quarantineRecordCount: number;
   readonly warningErrorCriticalDiagnosticCount: number;
+  readonly unresolvedCurrentCursorGenerationDiagnosticCount: number;
   readonly legacyProviderConfigRevisionCount: number;
   readonly legacyProviderSecretVersionCount: number;
   readonly legacyProviderCursorCheckpointCount: number;
   readonly queuedOrRunningRunCount: number;
+  readonly currentCursorGenerationImportRunCount: number;
   readonly latestRun: Readonly<{
     id: string;
     organizationId: string;
@@ -400,12 +421,18 @@ export function assertClutchpacksV3CanaryTargetIsExact(
     !cursor ||
     cursor.sourceInstanceId !== source.id ||
     cursor.sourceRevisionId !== sourceRevision.id ||
-    cursor.generation !== 1n ||
+    cursor.generation < 1n ||
     cursor.adapterVersion !== CLUTCHPACKS_V3_CANARY_SOURCE_PINS.adapterVersion ||
     !Number.isSafeInteger(snapshot.quarantineRecordCount) ||
     snapshot.quarantineRecordCount < 0 ||
     !Number.isSafeInteger(snapshot.warningErrorCriticalDiagnosticCount) ||
     snapshot.warningErrorCriticalDiagnosticCount < 0 ||
+    !Number.isSafeInteger(
+      snapshot.unresolvedCurrentCursorGenerationDiagnosticCount,
+    ) ||
+    snapshot.unresolvedCurrentCursorGenerationDiagnosticCount < 0 ||
+    !Number.isSafeInteger(snapshot.currentCursorGenerationImportRunCount) ||
+    snapshot.currentCursorGenerationImportRunCount < 0 ||
     snapshot.legacyProviderConfigRevisionCount !== 0 ||
     snapshot.legacyProviderSecretVersionCount !== 0 ||
     snapshot.legacyProviderCursorCheckpointCount !== 0
@@ -440,9 +467,14 @@ export function clutchpacksV3CanaryTargetWideSafetyEvidence(
     quarantineRecords: snapshot.quarantineRecordCount,
     warningErrorCriticalDiagnostics:
       snapshot.warningErrorCriticalDiagnosticCount,
+    unresolvedCurrentCursorGenerationDiagnostics:
+      snapshot.unresolvedCurrentCursorGenerationDiagnosticCount,
     targetWideEvidenceClean:
       snapshot.quarantineRecordCount === 0 &&
       snapshot.warningErrorCriticalDiagnosticCount === 0,
+    protectiveActionEvidenceClear:
+      snapshot.quarantineRecordCount === 0 &&
+      snapshot.unresolvedCurrentCursorGenerationDiagnosticCount === 0,
   });
 }
 
@@ -452,11 +484,33 @@ export function assertClutchpacksV3CanaryTargetIsPristine(
   const cursor = snapshot.cursors[0];
   if (
     !cursor ||
+    cursor.generation !== 1n ||
     cursor.fingerprint !== null ||
     cursor.advancedByRunId !== null ||
     cursor.advancedByPageId !== null ||
+    snapshot.currentCursorGenerationImportRunCount !== 0 ||
+    snapshot.queuedOrRunningRunCount !== 0 ||
+    snapshot.quarantineRecordCount !== 0 ||
+    snapshot.unresolvedCurrentCursorGenerationDiagnosticCount !== 0 ||
     clutchpacksV3CanaryLineageCount(snapshot) !== 0
   ) refuse("TARGET_NOT_PRISTINE_FOR_RESUME");
+}
+
+export function assertClutchpacksV3CanaryResetGenerationAtFeedStart(
+  snapshot: ClutchpacksV3CanaryTargetEvidence,
+): void {
+  const cursor = snapshot.cursors[0];
+  if (
+    !cursor ||
+    cursor.generation <= 1n ||
+    cursor.fingerprint !== null ||
+    cursor.advancedByRunId !== null ||
+    cursor.advancedByPageId !== null ||
+    snapshot.currentCursorGenerationImportRunCount !== 0 ||
+    snapshot.queuedOrRunningRunCount !== 0 ||
+    snapshot.quarantineRecordCount !== 0 ||
+    snapshot.unresolvedCurrentCursorGenerationDiagnosticCount !== 0
+  ) refuse("TARGET_RESET_GENERATION_NOT_AT_FEED_START");
 }
 
 export function clutchpacksV3CanaryHasExactSucceededHeadRun(
@@ -467,6 +521,7 @@ export function clutchpacksV3CanaryHasExactSucceededHeadRun(
   const connectionRevision = snapshot.connectionRevisions[0];
   const source = snapshot.sources[0];
   const sourceRevision = snapshot.sourceRevisions[0];
+  const cursor = snapshot.cursors[0];
   const run = snapshot.latestRun;
   return Boolean(
     provider &&
@@ -474,7 +529,9 @@ export function clutchpacksV3CanaryHasExactSucceededHeadRun(
       connectionRevision &&
       source &&
       sourceRevision &&
+      cursor &&
       run &&
+      cursor.generation >= 1n &&
       sourceRevision.sourceTypeKey ===
         CLUTCHPACKS_V3_CANARY_SOURCE_PINS.sourceTypeKey &&
       sourceRevision.adapterVersion ===
@@ -503,7 +560,7 @@ export function clutchpacksV3CanaryHasExactSucceededHeadRun(
       run.connectionProfileId === profile.id &&
       run.connectionRevisionId === connectionRevision.id &&
       run.cursorCodecVersion === sourceRevision.cursorCodecVersion &&
-      run.cursorGeneration === 1n &&
+      run.cursorGeneration === cursor.generation &&
       run.configRevisionId === null &&
       run.state === "succeeded" &&
       run.reachedProviderHead &&
@@ -524,8 +581,8 @@ export function assertClutchpacksV3CanaryTargetCanPause(
   if (snapshot.quarantineRecordCount !== 0) {
     refuse("TARGET_QUARANTINE_NOT_EMPTY");
   }
-  if (snapshot.warningErrorCriticalDiagnosticCount !== 0) {
-    refuse("TARGET_WARNING_ERROR_CRITICAL_DIAGNOSTICS_PRESENT");
+  if (snapshot.unresolvedCurrentCursorGenerationDiagnosticCount !== 0) {
+    refuse("TARGET_CURRENT_GENERATION_DIAGNOSTICS_UNRESOLVED");
   }
 }
 
@@ -784,10 +841,12 @@ async function readTargetEvidence(
       canonicalEntityCount,
       quarantineRecordCount,
       warningErrorCriticalDiagnosticRows,
+      unresolvedCurrentCursorGenerationDiagnosticRows,
       legacyProviderConfigRevisionCount,
       legacyProviderSecretVersionCount,
       legacyProviderCursorCheckpointCount,
       queuedOrRunningRunCount,
+      currentCursorGenerationImportRunRows,
       latestRun,
       liveEpochs,
     ] = await Promise.all([
@@ -882,6 +941,62 @@ async function readTargetEvidence(
         from public.source_processor_diagnostic_events
         where severity::text <> 'info'
       `),
+      transaction.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+        with current_cursor as (
+          select cursor.organization_id,
+                 cursor.provider_id,
+                 cursor.source_instance_id,
+                 cursor.source_revision_id,
+                 cursor.cursor_generation,
+                 cursor.updated_at as cursor_updated_at
+          from public.provider_source_cursors cursor
+          where cursor.organization_id =
+            ${environment.targetOrganizationId}::uuid
+        ), current_runs as (
+          select run.id, run.created_at, run.finished_at, run.state,
+                 run.reached_provider_head, run.failure_code
+          from public.import_runs run
+          join current_cursor cursor
+            on cursor.organization_id = run.organization_id
+           and cursor.provider_id = run.provider_id
+           and cursor.source_instance_id = run.source_instance_id
+           and cursor.source_revision_id = run.source_revision_id
+           and cursor.cursor_generation = run.cursor_generation
+        ), generation_bounds as (
+          select coalesce(
+                   min(run.created_at),
+                   max(cursor.cursor_updated_at)
+                 ) as started_at
+          from current_cursor cursor
+          left join current_runs run on true
+        ), latest_succeeded_head as (
+          select max(run.finished_at) as finished_at
+          from current_runs run
+          where run.state = 'succeeded'::public.import_run_state
+            and run.reached_provider_head
+            and run.finished_at is not null
+            and run.failure_code is null
+        )
+        select count(diagnostic.id)::integer as "count"
+        from current_cursor cursor
+        cross join generation_bounds generation
+        cross join latest_succeeded_head succeeded
+        join public.source_processor_diagnostic_events diagnostic
+          on diagnostic.organization_id = cursor.organization_id
+         and diagnostic.provider_id = cursor.provider_id
+         and diagnostic.source_instance_id = cursor.source_instance_id
+         and diagnostic.source_revision_id = cursor.source_revision_id
+         and diagnostic.occurred_at >= generation.started_at
+        where diagnostic.severity::text <> 'info'
+          and (
+            diagnostic.run_id is null
+            or diagnostic.run_id in (select id from current_runs)
+          )
+          and (
+            succeeded.finished_at is null
+            or diagnostic.occurred_at > succeeded.finished_at
+          )
+      `),
       transaction.provider_config_revisions.count(),
       transaction.provider_secret_versions.count(),
       transaction.provider_cursor_checkpoints.count(),
@@ -891,6 +1006,18 @@ async function readTargetEvidence(
           state: { in: ["queued", "running"] },
         },
       }),
+      transaction.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+        select count(run.id)::integer as "count"
+        from public.provider_source_cursors cursor
+        left join public.import_runs run
+          on run.organization_id = cursor.organization_id
+         and run.provider_id = cursor.provider_id
+         and run.source_instance_id = cursor.source_instance_id
+         and run.source_revision_id = cursor.source_revision_id
+         and run.cursor_generation = cursor.cursor_generation
+        where cursor.organization_id =
+          ${environment.targetOrganizationId}::uuid
+      `),
       transaction.import_runs.findFirst({
         where: { organization_id: environment.targetOrganizationId },
         orderBy: [{ created_at: "desc" }, { id: "desc" }],
@@ -938,11 +1065,27 @@ async function readTargetEvidence(
     const connectionRevision = connectionRevisions[0];
     const warningErrorCriticalDiagnosticCount =
       warningErrorCriticalDiagnosticRows[0]?.count;
+    const unresolvedCurrentCursorGenerationDiagnosticCount =
+      unresolvedCurrentCursorGenerationDiagnosticRows[0]?.count;
+    const currentCursorGenerationImportRunCount =
+      currentCursorGenerationImportRunRows[0]?.count;
     if (
       warningErrorCriticalDiagnosticCount === undefined ||
       !Number.isSafeInteger(warningErrorCriticalDiagnosticCount) ||
       warningErrorCriticalDiagnosticCount < 0
     ) refuse("TARGET_DIAGNOSTIC_EVIDENCE_INVALID");
+    if (
+      unresolvedCurrentCursorGenerationDiagnosticCount === undefined ||
+      !Number.isSafeInteger(
+        unresolvedCurrentCursorGenerationDiagnosticCount,
+      ) ||
+      unresolvedCurrentCursorGenerationDiagnosticCount < 0
+    ) refuse("TARGET_CURRENT_GENERATION_DIAGNOSTIC_EVIDENCE_INVALID");
+    if (
+      currentCursorGenerationImportRunCount === undefined ||
+      !Number.isSafeInteger(currentCursorGenerationImportRunCount) ||
+      currentCursorGenerationImportRunCount < 0
+    ) refuse("TARGET_CURSOR_GENERATION_EVIDENCE_INVALID");
     const [connectionTest, sourceTest] = await Promise.all([
       latestConnectionTest(
         transaction as unknown as PackscoutPrismaClient,
@@ -1037,10 +1180,12 @@ async function readTargetEvidence(
         canonicalEntityCount,
         quarantineRecordCount,
         warningErrorCriticalDiagnosticCount,
+        unresolvedCurrentCursorGenerationDiagnosticCount,
         legacyProviderConfigRevisionCount,
         legacyProviderSecretVersionCount,
         legacyProviderCursorCheckpointCount,
         queuedOrRunningRunCount,
+        currentCursorGenerationImportRunCount,
         latestRun: latestRun
           ? Object.freeze({
               id: latestRun.id,
@@ -1169,6 +1314,8 @@ function publicStatus(
       requestLimit: target.profiles[0]!.requestLimit,
       cursorGeneration: target.cursors[0]!.generation.toString(),
       cursorAtFeedStart: target.cursors[0]!.fingerprint === null,
+      currentCursorGenerationImportRuns:
+        target.currentCursorGenerationImportRunCount,
       lineageRows: clutchpacksV3CanaryLineageCount(target),
       latestRunState: target.latestRun?.state ?? null,
       latestRunReachedProviderHead:
@@ -1330,6 +1477,166 @@ export async function pauseClutchpacksV3CanaryTarget(
   });
 }
 
+interface ClutchpacksV3CanaryCursorResetPreview {
+  readonly providerId: string;
+  readonly provider: string;
+  readonly sourceInstanceId: string;
+  readonly sourceRevisionId: string;
+  readonly sourceState: string;
+  readonly cursorGeneration: string;
+  readonly cursorFingerprint: string | null;
+  readonly confirmation: string;
+}
+
+export interface ClutchpacksV3CanaryTargetCursorResetDependencies {
+  readonly previewCursorReset: (input: Readonly<{
+    organizationId: string;
+    providerId: string;
+    sourceInstanceId: string;
+    sourceRevisionId: string;
+  }>) => Promise<ClutchpacksV3CanaryCursorResetPreview>;
+  readonly resetCursor: (input: Readonly<{
+    organizationId: string;
+    providerId: string;
+    sourceInstanceId: string;
+    sourceRevisionId: string;
+    expectedCursorGeneration: string;
+    expectedCursorFingerprint: string | null;
+    confirmation: string;
+  }>) => Promise<Readonly<{
+    cursorGeneration: string;
+    cursorFingerprint: null;
+  }>>;
+  readonly readTarget: () => Promise<Readonly<{
+    snapshot: ClutchpacksV3CanaryTargetEvidence;
+    supervisor: ClutchpacksV3CanarySupervisorEvidence;
+  }>>;
+}
+
+export async function resetClutchpacksV3CanaryTargetCursor(
+  database: PackscoutPrismaClient,
+  environment: ClutchpacksV3CanaryBootstrapEnvironment,
+  before: ClutchpacksV3CanaryTargetEvidence,
+  supervisorBefore: ClutchpacksV3CanarySupervisorEvidence,
+  providedDependencies?: ClutchpacksV3CanaryTargetCursorResetDependencies,
+): Promise<Readonly<Record<string, unknown>>> {
+  assertClutchpacksV3CanaryTargetCanPause(before);
+  assertClutchpacksV3CanarySupervisorStopped(supervisorBefore);
+  const provider = before.providers[0]!;
+  const source = before.sources[0]!;
+  const sourceRevision = before.sourceRevisions[0]!;
+  const cursor = before.cursors[0]!;
+  if (source.state !== "paused" || source.pauseRequested) {
+    refuse("TARGET_CURSOR_RESET_REQUIRES_PAUSED_SOURCE");
+  }
+  const dependencies = providedDependencies ?? (() => {
+    const lifecycle = sourceServices(database, environment).lifecycle;
+    return Object.freeze({
+      previewCursorReset: async (input: Readonly<{
+        organizationId: string;
+        providerId: string;
+        sourceInstanceId: string;
+        sourceRevisionId: string;
+      }>) => lifecycle.previewCursorReset(
+        { organizationId: input.organizationId, actorKey: ACTOR_KEY },
+        input.providerId,
+        input.sourceInstanceId,
+        { expectedSourceRevisionId: input.sourceRevisionId },
+      ),
+      resetCursor: async (input: Readonly<{
+        organizationId: string;
+        providerId: string;
+        sourceInstanceId: string;
+        sourceRevisionId: string;
+        expectedCursorGeneration: string;
+        expectedCursorFingerprint: string | null;
+        confirmation: string;
+      }>) => lifecycle.resetCursor(
+        { organizationId: input.organizationId, actorKey: ACTOR_KEY },
+        input.providerId,
+        input.sourceInstanceId,
+        {
+          expectedSourceRevisionId: input.sourceRevisionId,
+          expectedCursorGeneration: input.expectedCursorGeneration,
+          expectedCursorFingerprint: input.expectedCursorFingerprint,
+          confirmation: input.confirmation,
+        },
+      ),
+      readTarget: () => readTargetEvidence(database, environment),
+    });
+  })();
+  const resetPins = Object.freeze({
+    organizationId: environment.targetOrganizationId,
+    providerId: provider.id,
+    sourceInstanceId: source.id,
+    sourceRevisionId: sourceRevision.id,
+  });
+  const preview = await dependencies.previewCursorReset(resetPins).catch(() =>
+    refuse("TARGET_CURSOR_RESET_PREVIEW_FAILED")
+  );
+  if (
+    preview.providerId !== provider.id ||
+    preview.provider !== "clutchpacks" ||
+    preview.sourceInstanceId !== source.id ||
+    preview.sourceRevisionId !== sourceRevision.id ||
+    preview.sourceState !== "paused" ||
+    preview.cursorGeneration !== cursor.generation.toString() ||
+    preview.cursorFingerprint !== cursor.fingerprint ||
+    preview.confirmation !== SERVICE_CURSOR_RESET_CONFIRMATION
+  ) refuse("TARGET_CURSOR_RESET_PREVIEW_CHANGED");
+  const expectedNextGeneration = cursor.generation + 1n;
+  const reset = await dependencies.resetCursor({
+    ...resetPins,
+    expectedCursorGeneration: preview.cursorGeneration,
+    expectedCursorFingerprint: preview.cursorFingerprint,
+    confirmation: preview.confirmation,
+  }).catch(() => refuse("TARGET_CURSOR_RESET_FAILED"));
+  if (
+    reset.cursorGeneration !== expectedNextGeneration.toString() ||
+    reset.cursorFingerprint !== null
+  ) refuse("TARGET_CURSOR_RESET_RECEIPT_INVALID");
+  const after = await dependencies.readTarget().catch(() =>
+    refuse("TARGET_CURSOR_RESET_EVIDENCE_READ_FAILED")
+  );
+  assertClutchpacksV3CanaryTargetIsExact(after.snapshot, environment);
+  assertClutchpacksV3CanarySupervisorStopped(after.supervisor);
+  assertClutchpacksV3CanaryResetGenerationAtFeedStart(after.snapshot);
+  const afterSource = after.snapshot.sources[0];
+  const afterCursor = after.snapshot.cursors[0];
+  if (
+    afterSource?.state !== "paused" ||
+    afterSource.pauseRequested ||
+    afterCursor?.generation !== expectedNextGeneration ||
+    clutchpacksV3CanaryLineageCount(after.snapshot) !==
+      clutchpacksV3CanaryLineageCount(before)
+  ) refuse("TARGET_CURSOR_RESET_PROOF_FAILED");
+  return Object.freeze({
+    ok: true,
+    operation: WORKFLOW,
+    mode: "reset_target_cursor",
+    outcome: "cursor_reset",
+    sourceDatabase: environment.sourceDatabaseName,
+    targetDatabase: environment.targetDatabaseName,
+    targetDigest: environment.targetDigest,
+    target: Object.freeze({
+      state: afterSource.state,
+      previousCursorGeneration: cursor.generation.toString(),
+      cursorGeneration: afterCursor.generation.toString(),
+      cursorAtFeedStart: true,
+      currentCursorGenerationImportRuns:
+        after.snapshot.currentCursorGenerationImportRunCount,
+      queuedOrRunningRuns: after.snapshot.queuedOrRunningRunCount,
+      quarantineRecords: after.snapshot.quarantineRecordCount,
+      warningErrorCriticalDiagnostics:
+        after.snapshot.warningErrorCriticalDiagnosticCount,
+      unresolvedCurrentCursorGenerationDiagnostics:
+        after.snapshot.unresolvedCurrentCursorGenerationDiagnosticCount,
+    }),
+    supervisorLiveEpochCount: after.supervisor.liveEpochCount,
+    providerCallMadeDirectly: false,
+  });
+}
+
 async function advanceOneStep(
   database: PackscoutPrismaClient,
   environment: ClutchpacksV3CanaryBootstrapEnvironment,
@@ -1400,17 +1707,40 @@ async function advanceOneStep(
   return Object.freeze({ outcome: "advanced" as const, previousStage: stage });
 }
 
+export function clutchpacksV3CanaryResumeMode(
+  before: ClutchpacksV3CanaryTargetEvidence,
+): "initial" | "reset" | "refresh" | "already_active" {
+  const stage = determineClutchpacksV3CanaryQualificationStage(before);
+  if (stage === "replay_active") return "already_active";
+  if (stage === "ready_to_resume") {
+    const cursor = before.cursors[0];
+    if (cursor?.generation === 1n) {
+      assertClutchpacksV3CanaryTargetIsPristine(before);
+      return "initial";
+    }
+    assertClutchpacksV3CanaryResetGenerationAtFeedStart(before);
+    return "reset";
+  } else if (stage === "replay_paused") {
+    // A completed one-shot canary may be resumed for a new provider-head
+    // refresh only from its exact, clean, drained succeeded-head proof. This
+    // preserves the original pristine first-run gate while avoiding a bulk
+    // reimport merely to refresh source-native evidence.
+    assertClutchpacksV3CanaryTargetCanPause(before);
+    return "refresh";
+  } else {
+    refuse("TARGET_NOT_READY_TO_RESUME");
+  }
+}
+
 async function resumeCanary(
   database: PackscoutPrismaClient,
   environment: ClutchpacksV3CanaryBootstrapEnvironment,
   before: ClutchpacksV3CanaryTargetEvidence,
-): Promise<"resumed" | "already_resumed"> {
-  const stage = determineClutchpacksV3CanaryQualificationStage(before);
-  if (stage === "replay_active") return "already_resumed";
-  if (stage !== "ready_to_resume") {
-    refuse("TARGET_NOT_READY_TO_RESUME");
-  }
-  assertClutchpacksV3CanaryTargetIsPristine(before);
+): Promise<
+  "resumed" | "reset_replay_started" | "refreshed" | "already_resumed"
+> {
+  const mode = clutchpacksV3CanaryResumeMode(before);
+  if (mode === "already_active") return "already_resumed";
   const provider = before.providers[0]!;
   const source = before.sources[0]!;
   const sourceRevision = before.sourceRevisions[0]!;
@@ -1424,7 +1754,11 @@ async function resumeCanary(
   } catch {
     refuse("TARGET_RESUME_FAILED");
   }
-  return "resumed";
+  return mode === "refresh"
+    ? "refreshed"
+    : mode === "reset"
+    ? "reset_replay_started"
+    : "resumed";
 }
 
 export function safeClutchpacksV3CanaryDriverFailure(error: unknown) {
@@ -1456,6 +1790,10 @@ export function clutchpacksV3CanaryDriverUsage(): string {
     --pause-target \\
     --confirmation "${PAUSE_TARGET_CONFIRMATION_PREFIX} <digest>"
 
+  npm run advance:clutchpacks-v3-canary:local -- \\
+    --reset-target-cursor \\
+    --confirmation "${RESET_TARGET_CURSOR_CONFIRMATION_PREFIX} <digest>"
+
 This driver requires the protected local bootstrap environment. It never starts
 a worker and never calls DataForrest directly. Start the target-only supervisor
 separately with PACKSCOUT_SOURCE_EXECUTION_SLOTS=1. The target profile retains
@@ -1467,9 +1805,14 @@ The required expected stage fences a retry after a transition already committed.
 Every advance and resume fails closed until the original adapter-v1 ClutchPacks
 source is paused and has no queued or running import runs. Stop the target
 supervisor after a succeeded provider-head run and before --pause-target; that
-command requires no live target supervisor, zero target-wide quarantine or
-warning/error/critical diagnostics, and proves the canary paused and drained
-after the service transition.`;
+command requires no live target supervisor and zero target-wide quarantine,
+and proves the canary paused and drained after the service transition.
+Historical processor diagnostics remain visible but do not defeat a terminal
+succeeded-head proof. --reset-target-cursor additionally requires the target
+already paused and drained with the supervisor stopped, then binds the service
+preview's source revision, cursor generation, fingerprint, and typed ClutchPacks
+confirmation before it clears the cursor into the next generation at Feed
+start.`;
 }
 
 async function connectedIdentity(
@@ -1557,7 +1900,16 @@ async function main(): Promise<void> {
     const stage = determineClutchpacksV3CanaryQualificationStage(
       targetRead.snapshot,
     );
-    if (stage !== "replay_active" && stage !== "replay_paused") {
+    if (stage === "ready_to_resume") {
+      const cursor = targetRead.snapshot.cursors[0];
+      if (cursor?.generation === 1n) {
+        assertClutchpacksV3CanaryTargetIsPristine(targetRead.snapshot);
+      } else {
+        assertClutchpacksV3CanaryResetGenerationAtFeedStart(
+          targetRead.snapshot,
+        );
+      }
+    } else if (stage !== "replay_active" && stage !== "replay_paused") {
       assertClutchpacksV3CanaryTargetIsPristine(targetRead.snapshot);
     }
     if (command.action === "status" || command.action === "plan") {
@@ -1589,6 +1941,19 @@ async function main(): Promise<void> {
       ))}\n`);
       return;
     }
+    if (command.action === "reset_target_cursor") {
+      assertOriginalClutchpacksV1PausedAndDrained(original);
+      assertClutchpacksV3CanarySupervisorStopped(targetRead.supervisor);
+      process.stdout.write(`${JSON.stringify(
+        await resetClutchpacksV3CanaryTargetCursor(
+          targetDatabase.client,
+          environment,
+          targetRead.snapshot,
+          targetRead.supervisor,
+        ),
+      )}\n`);
+      return;
+    }
     assertOriginalClutchpacksV1PausedAndDrained(original);
     assertClutchpacksV3CanaryOneSlotSupervisor(targetRead.supervisor);
     if (command.action === "resume") {
@@ -1605,6 +1970,10 @@ async function main(): Promise<void> {
         mode: "resume",
         outcome: resumeOutcome === "resumed"
           ? "replay_started"
+          : resumeOutcome === "refreshed"
+          ? "replay_refresh_started"
+          : resumeOutcome === "reset_replay_started"
+          ? "replay_reset_started"
           : "already_resumed",
         sourceDatabase: environment.sourceDatabaseName,
         targetDatabase: environment.targetDatabaseName,
@@ -1628,7 +1997,16 @@ async function main(): Promise<void> {
     const afterStage = determineClutchpacksV3CanaryQualificationStage(
       after.snapshot,
     );
-    if (afterStage !== "replay_active" && afterStage !== "replay_paused") {
+    if (afterStage === "ready_to_resume") {
+      const cursor = after.snapshot.cursors[0];
+      if (cursor?.generation === 1n) {
+        assertClutchpacksV3CanaryTargetIsPristine(after.snapshot);
+      } else {
+        assertClutchpacksV3CanaryResetGenerationAtFeedStart(after.snapshot);
+      }
+    } else if (
+      afterStage !== "replay_active" && afterStage !== "replay_paused"
+    ) {
       assertClutchpacksV3CanaryTargetIsPristine(after.snapshot);
     }
     process.stdout.write(`${JSON.stringify({

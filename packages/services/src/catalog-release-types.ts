@@ -27,7 +27,9 @@ export interface CatalogProviderReadinessSnapshot {
   readonly platformKey: string;
   readonly state: string | null;
   readonly lifecycleSequence: bigint | null;
-  readonly configurationRevisionId: string | null;
+  readonly providerId: string | null;
+  readonly sourceInstanceId: string | null;
+  readonly sourceRevisionId: string | null;
   readonly completedBackfillAt: Date | null;
 }
 

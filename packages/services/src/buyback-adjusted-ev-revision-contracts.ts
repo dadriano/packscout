@@ -42,7 +42,7 @@ function sha256(value: unknown): string {
 /**
  * One calculation identity: the method version, its confidence-policy
  * version, one product revision, one coherent observation set, and the
- * approved provider configuration the evidence was normalized under.
+ * provider-source revision that governed the evidence normalization.
  */
 export interface PackScoutBuybackEvCalculationIdentityV1 {
   readonly methodVersion: typeof PACKSCOUT_BUYBACK_EV_METHOD_VERSION;
@@ -54,7 +54,7 @@ export interface PackScoutBuybackEvCalculationIdentityV1 {
   readonly sourceRevisionId: string;
   readonly sourceManifestSha256: string | null;
   readonly observationCoherence: "provider_revision" | "guarded_collection";
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
 }
 
 export function computePackScoutBuybackEvCalculationIdentityKeyV1(
@@ -72,7 +72,7 @@ export function computePackScoutBuybackEvCalculationIdentityKeyV1(
       sourceManifestSha256: identity.sourceManifestSha256,
       observationCoherence: identity.observationCoherence,
     },
-    configurationRevisionId: identity.configurationRevisionId,
+    providerSourceRevisionId: identity.providerSourceRevisionId,
   });
 }
 
@@ -199,7 +199,8 @@ export interface PackScoutBuybackEvRevisionRecordV1 {
   readonly revisionId: string;
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
+  readonly sourceInstanceId: string;
   readonly platformKey: string;
   readonly productKey: string;
   readonly productRevisionId: string;

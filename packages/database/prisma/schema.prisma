@@ -2350,7 +2350,8 @@ model buyback_ev_revisions {
   id                                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organization_id                   String   @db.Uuid
   provider_id                       String   @db.Uuid
-  configuration_revision_id         String   @db.Uuid
+  provider_source_revision_id       String   @db.Uuid
+  source_instance_id                String   @db.Uuid
   platform_key                      String
   product_key                       String
   product_revision_id               String

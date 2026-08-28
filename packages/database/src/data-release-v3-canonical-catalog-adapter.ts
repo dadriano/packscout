@@ -4,6 +4,12 @@ import {
   PrismaCatalogReleaseSourceRepository,
   type CatalogReleaseSourceSnapshot,
 } from "./catalog-release-source-repository.ts";
+import {
+  loadProviderV1AssetPackAssociations,
+  type ProviderV1AssetPackAssociationSnapshot,
+} from "./provider-v1-asset-pack-association-reader.ts";
+import { loadProviderV1RelationshipConfirmationReadiness } from
+  "./source-relationship-confirmation-repository.ts";
 
 /**
  * readAt-keyed canonical source read for the data_release_v3 publication
@@ -47,6 +53,8 @@ export interface DataReleaseV3CanonicalSourceSnapshot {
   readonly revisions: CatalogReleaseSourceSnapshot["revisions"];
   readonly providers: CatalogReleaseSourceSnapshot["providers"];
   readonly repackIdentities: CatalogReleaseSourceSnapshot["repackIdentities"];
+  readonly assetPackAssociations:
+    readonly ProviderV1AssetPackAssociationSnapshot[];
   readonly soldOutTransitions: readonly DataReleaseV3SoldOutTransition[];
 }
 
@@ -116,6 +124,11 @@ export class PrismaDataReleaseV3CanonicalCatalogSource {
     const soldOutTransitions = await this.loadSoldOutTransitions(
       throughSequence,
     );
+    const assetPackAssociations = await this.loadAssetPackAssociations(
+      snapshot,
+      throughSequence,
+      readAt,
+    );
     return {
       organizationId: this.organizationId,
       readAt,
@@ -124,8 +137,57 @@ export class PrismaDataReleaseV3CanonicalCatalogSource {
       revisions: snapshot.revisions,
       providers: snapshot.providers,
       repackIdentities: snapshot.repackIdentities,
+      assetPackAssociations,
       soldOutTransitions,
     };
+  }
+
+  private async loadAssetPackAssociations(
+    snapshot: CatalogReleaseSourceSnapshot,
+    throughSequence: bigint,
+    throughOccurredAt: Date,
+  ): Promise<ProviderV1AssetPackAssociationSnapshot[]> {
+    const activeProviders = snapshot.providers.filter(
+      (provider) => provider.state === "active",
+    );
+    const associations = await Promise.all(activeProviders.map(
+      async (provider) => {
+        if (
+          provider.providerId === null ||
+          provider.sourceInstanceId === null ||
+          provider.sourceRevisionId === null
+        ) {
+          return [];
+        }
+        const readiness = await loadProviderV1RelationshipConfirmationReadiness(
+          this.database,
+          {
+            organizationId: this.organizationId,
+            providerId: provider.providerId,
+            sourceInstanceId: provider.sourceInstanceId,
+            sourceRevisionId: provider.sourceRevisionId,
+          },
+        );
+        if (!readiness.ready) {
+          throw new DataReleaseV3CanonicalSourceError(
+            "CANONICAL_STATE_UNSETTLED",
+          );
+        }
+        return loadProviderV1AssetPackAssociations(this.database, {
+          organizationId: this.organizationId,
+          platformKey: provider.platformKey,
+          sourceRevisionId: provider.sourceRevisionId,
+          throughSequence,
+          throughOccurredAt,
+        });
+      },
+    ));
+    return associations.flat().sort((left, right) =>
+      left.platformKey.localeCompare(right.platformKey) ||
+      left.assetExternalId.localeCompare(right.assetExternalId) ||
+      left.packExternalId.localeCompare(right.packExternalId) ||
+      left.sourceEntityId.localeCompare(right.sourceEntityId)
+    );
   }
 
   /**

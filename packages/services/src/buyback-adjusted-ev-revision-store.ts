@@ -60,7 +60,7 @@ export class PackScoutBuybackEvRevisionStoreError extends Error {
 export interface PersistBuybackEvRevisionPortInput {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
   readonly platformKey: string;
   readonly productKey: string;
   readonly productRevisionId: string;
@@ -133,7 +133,7 @@ export interface PackScoutBuybackEvRevisionPersistencePortV1 {
 export interface PersistPackScoutBuybackEvRevisionCommandV1 {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
   /** Expected to be a `PackScoutBuybackEvProtectedCalculationResultV1`. */
   readonly calculation: unknown;
   /**
@@ -462,9 +462,9 @@ export class PackScoutBuybackEvRevisionStore {
       "organizationId",
     );
     const providerId = requireCanonicalUuid(command.providerId, "providerId");
-    const configurationRevisionId = requireCanonicalUuid(
-      command.configurationRevisionId,
-      "configurationRevisionId",
+    const providerSourceRevisionId = requireCanonicalUuid(
+      command.providerSourceRevisionId,
+      "providerSourceRevisionId",
     );
     if (!HEX_64_PATTERN.test(command.effectiveFingerprint)) {
       throw violation(
@@ -518,12 +518,12 @@ export class PackScoutBuybackEvRevisionStore {
       sourceRevisionId: provenance.sourceRevisionId,
       sourceManifestSha256: provenance.sourceManifestSha256,
       observationCoherence: provenance.observationCoherence,
-      configurationRevisionId,
+      providerSourceRevisionId,
     };
     const persisted = await this.persistence.persistCompletedRevision({
       organizationId,
       providerId,
-      configurationRevisionId,
+      providerSourceRevisionId,
       platformKey: identity.platformKey,
       productKey: identity.productKey,
       productRevisionId: identity.productRevisionId,

@@ -74,6 +74,11 @@ const TARGET_COMPOSITE_MIGRATIONS = Object.freeze([
     name: PLATFORM_REQUEST_LANES_MIGRATION,
     checksum: PLATFORM_REQUEST_LANES_MIGRATION_CHECKSUM,
   }),
+  Object.freeze({
+    name: "20260827020000_buyback_ev_provider_source_origin",
+    checksum:
+      "10ae3670f6fbafb0ed529154ac7aad227b60bab735630e1079e805ddf8e7b24e",
+  }),
 ]);
 const ACTIVE_SOURCE_APPLICATION_TABLE_COUNT = 84;
 const TARGET_APPLICATION_TABLE_COUNT = 91;
