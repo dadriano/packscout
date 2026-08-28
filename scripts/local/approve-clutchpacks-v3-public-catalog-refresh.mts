@@ -305,13 +305,17 @@ export function assertClutchpacksCatalogGrowthOnly(
   assertStableSubset(previous.repacks, candidate.repacks,
     ({ platformKey, packExternalId }) => `${platformKey}\0${packExternalId}`);
   const removableKeys = new Set((evidence?.assets ?? [])
-    .filter(clutchpacksAssetIsOmittablePublicShell)
+    .filter((asset) =>
+      asset.associated === false &&
+      clutchpacksAssetIsOmittablePublicShell(asset))
     .map(({ externalId }) => `${PLATFORM_KEY}\0${externalId}`));
   // Immutable identity normally grows monotonically. The sole removal case is
   // a previously mapped source shell whose exact current, settled evidence is
-  // both unassociated and unable to satisfy the public name contract. The
-  // caller binds this candidate hash and evidence watermark into confirmation,
-  // then the persistence transaction rechecks the source and predecessor CAS.
+  // both unassociated and structurally empty. Associated empty shells may be
+  // omitted when first observed, but association never authorizes deleting an
+  // already approved identity. The caller binds this candidate hash and
+  // evidence watermark into confirmation, then the persistence transaction
+  // rechecks the source and predecessor CAS.
   assertCollectibleEnrichment(
     previous.collectibles,
     candidate.collectibles,
@@ -596,6 +600,9 @@ export async function runClutchpacksCatalogRefresh(input: Readonly<{
       return refuse("PERSISTENCE_FAILED");
     }
   }
+  const omittedShells = state.evidence.assets.filter(
+    clutchpacksAssetIsOmittablePublicShell,
+  );
   const summary = Object.freeze({
     ok: true,
     operation: WORKFLOW,
@@ -612,7 +619,12 @@ export async function runClutchpacksCatalogRefresh(input: Readonly<{
     revision: candidate.revision,
     approvedAt: candidate.approvedAt,
     repackCount: candidate.repacks.length,
-    collectibleMappingCount: candidate.collectibles.length,
+    canonicalAssetCount: state.evidence.assets.length,
+    publicMappedAssetCount: candidate.collectibles.length,
+    omittedShellCount: omittedShells.length,
+    omittedAssociatedShellCount: omittedShells.filter(
+      ({ associated }) => associated,
+    ).length,
     addedRepackCount: candidate.repacks.length - previous.repacks.length,
     addedCollectibleMappingCount: candidate.collectibles.filter((mapping) =>
       !previous.collectibles.some((previousMapping) =>
@@ -649,7 +661,9 @@ Dry-run derives the next immutable configuration key and revision from the
 current approved local canary configuration. Execute requires the exact
 approvedAt and target/snapshot/configuration-bound confirmation emitted by a
 dry-run. Both modes require the exact local canary to be paused, drained, at
-provider head, causally settled, healthy, and free of active promotion work.`;
+provider head, causally settled, healthy, and free of active promotion work.
+The result audits canonicalAssetCount, publicMappedAssetCount,
+omittedShellCount, and omittedAssociatedShellCount.`;
 }
 
 if (process.argv[1] &&

@@ -81,6 +81,21 @@ function assetContent(overrides = {}) {
   };
 }
 
+function emptyAssetShellContent(overrides = {}) {
+  return assetContent({
+    name: null,
+    description: null,
+    category: null,
+    availability: "unknown",
+    providerValueMinor: null,
+    providerValueCurrency: null,
+    valueSource: null,
+    imageUrls: [],
+    dataQualityEvidence: [],
+    ...overrides,
+  });
+}
+
 function environment(overrides = {}) {
   return {
     NODE_ENV: "development",
@@ -307,7 +322,10 @@ test("dry-run derives v3 and execute persists only its bound snapshot", async ()
   assert.deepEqual(dryRun.databaseIdentity, DATABASE_IDENTITY);
   assert.equal(dryRun.addedCollectibleMappingCount, 1);
   assert.equal(dryRun.removedCollectibleMappingCount, 0);
-  assert.equal(dryRun.collectibleMappingCount, 2);
+  assert.equal(dryRun.canonicalAssetCount, 2);
+  assert.equal(dryRun.publicMappedAssetCount, 2);
+  assert.equal(dryRun.omittedShellCount, 0);
+  assert.equal(dryRun.omittedAssociatedShellCount, 0);
   assert.deepEqual(dryRun.addedPublicAssetOrigins, [
     "https://cdn.example.test",
   ]);
@@ -538,7 +556,7 @@ test("refresh permits only a mapping removal proven by exact current unassociate
     canonicalAssetCount: 1,
     assets: [{
       externalId: previous.collectibles[0].externalId,
-      content: assetContent({ name: null }),
+      content: emptyAssetShellContent(),
       associated: false,
     }],
   });
@@ -552,7 +570,7 @@ test("refresh permits only a mapping removal proven by exact current unassociate
 
   for (const changedAsset of [{
     externalId: previous.collectibles[0].externalId,
-    content: assetContent({ name: null }),
+    content: emptyAssetShellContent(),
     associated: true,
   }, {
     externalId: previous.collectibles[0].externalId,

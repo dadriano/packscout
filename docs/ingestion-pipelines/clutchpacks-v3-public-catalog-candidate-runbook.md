@@ -25,8 +25,13 @@ Generation fails closed unless all of the following remain true:
 - every current pull has one exact native relationship confirmation set, every
   physical member is resolved, and the backfill proof is complete;
 - provider and global settlement equal source head with no pending obligation;
-- every current pack and catalog asset is mapped, and every associated asset
-  has a nonblank public name.
+- every current pack is mapped; every catalog asset either has a nonblank
+  public name and an approved mapping, or is an exact schema-valid empty shell
+  omitted under the bounded ClutchPacks policy. An empty shell has null
+  name/description/category/value/relationship/source-status fields, unknown
+  availability, no images, and no data-quality evidence. Association alone
+  does not make that shell public. Any later public-bearing delivery ends the
+  omission automatically and requires a mapping on the next refresh.
 
 The candidate deliberately does not infer card metadata. Year, brand, series,
 card number, grade, and grader remain unset. It does apply the reviewed,
@@ -89,7 +94,10 @@ runtime directory.
    `observedPublicAssetOrigins`, serialized size, configuration hash, and
    candidate digest. The origin list must exactly match the origins currently
    present in canonical `imageUrls`. The command emits no canonical names or
-   external IDs.
+   external IDs. Reconcile `canonicalAssetCount` exactly to
+   `publicMappedAssetCount + omittedShellCount`, and separately review
+   `omittedAssociatedShellCount`; only exact empty shells may appear in either
+   omission count.
 
 2. Copy the exact `requiredConfirmation` from that same plan and create the
    candidate. Execute re-runs every database proof and refuses an existing
@@ -111,10 +119,14 @@ runtime directory.
    npm run approve:catalog-refresh:clutchpacks:local -- --dry-run
    ```
 
-4. Review exact canonical/configured coverage, zero unnamed associated assets,
-   and the exact `addedPublicAssetOrigins` and `removedPublicAssetOrigins`
-   arrays relative to the predecessor. Then repeat with `--execute`, the
-   dry-run's exact `approvedAt`, and its digest-bound confirmation:
+4. Review exact canonical/configured coverage: `canonicalAssetCount` must equal
+   `publicMappedAssetCount + omittedShellCount`. Review
+   `omittedAssociatedShellCount` explicitly; it may contain only exact empty
+   shells, while every named or otherwise public-bearing asset remains mapped.
+   Also review the exact `addedPublicAssetOrigins` and
+   `removedPublicAssetOrigins` arrays relative to the predecessor. Then repeat
+   with `--execute`, the dry-run's exact `approvedAt`, and its digest-bound
+   confirmation:
 
    ```bash
    npm run approve:catalog-refresh:clutchpacks:local -- \

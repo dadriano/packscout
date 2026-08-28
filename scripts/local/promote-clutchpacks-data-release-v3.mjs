@@ -421,6 +421,152 @@ function exactIdSet(values) {
   return [...new Set(values)].sort();
 }
 
+function clutchpacksCanonicalAssetKey(externalId) {
+  return `${CLUTCHPACKS_PLATFORM_KEY}\0${externalId}`;
+}
+
+/**
+ * ClutchPacks alone currently emits schema-valid, metadata-free catalog rows
+ * before some provider records receive their public payload. Keep the generic
+ * V3 adapter fail-closed: this local boundary removes only unconfigured exact
+ * shells and their otherwise-valid relationship rows. Once any public-bearing
+ * field arrives, the predicate returns false and the next catalog refresh must
+ * map the asset before this source can assemble it. Every other ClutchPacks
+ * asset must have both a valid public name and an approved mapping here,
+ * including unavailable and unassociated records that the generic adapter can
+ * otherwise omit.
+ */
+export function clutchpacksCatalogSourceWithEmptyShellOmissions(
+  source,
+  { parseConfiguration, hasPublicName, isOmittablePublicShell },
+) {
+  if (
+    typeof source?.loadSourceSnapshot !== "function" ||
+    typeof parseConfiguration !== "function" ||
+    typeof hasPublicName !== "function" ||
+    typeof isOmittablePublicShell !== "function"
+  ) {
+    throw new TypeError("Invalid ClutchPacks catalog source policy.");
+  }
+  return Object.freeze({
+    async loadSourceSnapshot(input) {
+      const snapshot = await source.loadSourceSnapshot(input);
+      const parsedConfiguration = parseConfiguration(
+        snapshot?.configuration?.configuration,
+      );
+      if (
+        parsedConfiguration?.success !== true ||
+        !Array.isArray(snapshot?.revisions) ||
+        !Array.isArray(snapshot?.assetPackAssociations) ||
+        !(snapshot?.readAt instanceof Date) ||
+        !Number.isFinite(snapshot.readAt.getTime())
+      ) {
+        return snapshot;
+      }
+      const configuredAssetKeys = new Set(
+        parsedConfiguration.data.collectibles
+          .filter(({ platformKey }) =>
+            platformKey === CLUTCHPACKS_PLATFORM_KEY)
+          .map(({ externalId }) => clutchpacksCanonicalAssetKey(externalId)),
+      );
+      const assetRevisionCounts = new Map();
+      const packKeys = new Set();
+      for (const revision of snapshot.revisions) {
+        if (revision?.platformKey !== CLUTCHPACKS_PLATFORM_KEY) continue;
+        const revisionKey = clutchpacksCanonicalAssetKey(revision.externalId);
+        if (revision.recordKind === "pack") packKeys.add(revisionKey);
+        if (revision.recordKind === "catalog_asset") {
+          assetRevisionCounts.set(
+            revisionKey,
+            (assetRevisionCounts.get(revisionKey) ?? 0) + 1,
+          );
+        }
+      }
+      const associationSourceIds = new Set();
+      const associationPairs = new Set();
+      const associatedAssetKeys = new Set();
+      let relationshipsAreValid = true;
+      for (const association of snapshot.assetPackAssociations) {
+        if (association?.platformKey !== CLUTCHPACKS_PLATFORM_KEY) continue;
+        const assetKey = clutchpacksCanonicalAssetKey(
+          association.assetExternalId,
+        );
+        const packKey = clutchpacksCanonicalAssetKey(
+          association.packExternalId,
+        );
+        const pairKey = `${assetKey}\0${association.packExternalId}`;
+        if (
+          typeof association.assetExternalId !== "string" ||
+          association.assetExternalId.length === 0 ||
+          typeof association.packExternalId !== "string" ||
+          association.packExternalId.length === 0 ||
+          typeof association.sourceEntityId !== "string" ||
+          association.sourceEntityId.length === 0 ||
+          typeof association.publicChangeSequence !== "bigint" ||
+          association.publicChangeSequence <= 0n ||
+          !(association.associatedAt instanceof Date) ||
+          !Number.isFinite(association.associatedAt.getTime()) ||
+          association.associatedAt.getTime() > snapshot.readAt.getTime() ||
+          assetRevisionCounts.get(assetKey) !== 1 ||
+          !packKeys.has(packKey) ||
+          associationSourceIds.has(association.sourceEntityId) ||
+          associationPairs.has(pairKey)
+        ) {
+          relationshipsAreValid = false;
+          break;
+        }
+        associationSourceIds.add(association.sourceEntityId);
+        associationPairs.add(pairKey);
+        associatedAssetKeys.add(assetKey);
+      }
+      if (!relationshipsAreValid) return snapshot;
+
+      const omittedAssetKeys = new Set();
+      for (const revision of snapshot.revisions) {
+        if (
+          revision?.platformKey !== CLUTCHPACKS_PLATFORM_KEY ||
+          revision.recordKind !== "catalog_asset"
+        ) {
+          continue;
+        }
+        const assetKey = clutchpacksCanonicalAssetKey(revision.externalId);
+        const asset = {
+          externalId: revision.externalId,
+          content: revision.content,
+          associated: associatedAssetKeys.has(assetKey),
+        };
+        const configured = configuredAssetKeys.has(assetKey);
+        const omittable = assetRevisionCounts.get(assetKey) === 1 &&
+          isOmittablePublicShell(asset);
+        if (omittable && !configured) {
+          omittedAssetKeys.add(assetKey);
+          continue;
+        }
+        if (!configured || !hasPublicName(asset)) {
+          refuse("CLUTCHPACKS_V3_SCOPE_INVALID");
+        }
+      }
+      if (omittedAssetKeys.size === 0) return snapshot;
+      return Object.freeze({
+        ...snapshot,
+        revisions: Object.freeze(snapshot.revisions.filter((revision) =>
+          revision?.platformKey !== CLUTCHPACKS_PLATFORM_KEY ||
+          revision.recordKind !== "catalog_asset" ||
+          !omittedAssetKeys.has(
+            clutchpacksCanonicalAssetKey(revision.externalId),
+          ))),
+        assetPackAssociations: Object.freeze(
+          snapshot.assetPackAssociations.filter((association) =>
+            association?.platformKey !== CLUTCHPACKS_PLATFORM_KEY ||
+            !omittedAssetKeys.has(
+              clutchpacksCanonicalAssetKey(association.assetExternalId),
+            )),
+        ),
+      });
+    },
+  });
+}
+
 export function assertClutchpacksCatalogScope(snapshot) {
   const products = snapshot?.products;
   const categories = snapshot?.categories;
@@ -1550,18 +1696,38 @@ export function createProductionDependencies() {
       }
     },
     async open(command) {
-      const [database, services] = await Promise.all([
+      const [
+        database,
+        services,
+        contracts,
+        catalogCandidate,
+      ] = await Promise.all([
         import("../../packages/database/src/index.ts"),
         import("../../packages/services/src/index.ts"),
+        import("../../packages/contracts/src/index.ts"),
+        import("./generate-clutchpacks-v3-public-catalog-candidate.mts"),
       ]);
       const lifecycle = database.createPrismaClientLifecycle({
         databaseUrl: command.databaseUrl,
       });
       await lifecycle.start();
       try {
-        const source = new database.PrismaDataReleaseV3CanonicalCatalogSource(
-          lifecycle.client,
-          command.organizationId,
+        const canonicalSource =
+          new database.PrismaDataReleaseV3CanonicalCatalogSource(
+            lifecycle.client,
+            command.organizationId,
+          );
+        const source = clutchpacksCatalogSourceWithEmptyShellOmissions(
+          canonicalSource,
+          {
+            parseConfiguration: (value) =>
+              contracts.approvedPublicCatalogConfigurationV1Schema.safeParse(
+                value,
+              ),
+            hasPublicName: catalogCandidate.clutchpacksAssetHasPublicName,
+            isOmittablePublicShell:
+              catalogCandidate.clutchpacksAssetIsOmittablePublicShell,
+          },
         );
         const catalog = new services.DataReleaseV3CanonicalCatalogAdapter(source);
         const repository = new database.BuybackEvRevisionRepository(
