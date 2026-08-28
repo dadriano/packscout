@@ -15,6 +15,7 @@ import {
   type CatalogConstraint,
 } from "@/components/catalog-state";
 import {
+  formatDollarAmount,
   serializeDashboardFilters,
 } from "@/lib/catalog-query-state.client";
 import { useNarrowCatalogInspector } from "@/lib/catalog-viewport.client";
@@ -84,7 +85,7 @@ function activeConstraints(
   if (filters.price.mode === "narrowed") {
     constraints.push({
       label: "Repack Price",
-      value: `$${filters.price.minMinor / 100}–$${filters.price.maxMinor / 100}`,
+      value: `$${formatDollarAmount(filters.price.minMinor)}–$${formatDollarAmount(filters.price.maxMinor)}`,
     });
   }
   return constraints;

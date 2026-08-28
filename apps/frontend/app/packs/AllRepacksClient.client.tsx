@@ -36,6 +36,7 @@ import {
   catalogQueryForPageNavigation,
   catalogSheetInspectorInitiallyOpen,
   clearCatalogRepackSelection,
+  formatDollarAmount,
   nextCatalogPage,
   previousCatalogPage,
   resetCatalogPagination,
@@ -92,7 +93,7 @@ function activeConstraints(page: ListPublicRepacksPage) {
   if (page.activeQuery.filters.price.mode === "narrowed") {
     constraints.push({
       label: "Repack Price",
-      value: `$${page.activeQuery.filters.price.minMinor / 100}–$${page.activeQuery.filters.price.maxMinor / 100}`,
+      value: `$${formatDollarAmount(page.activeQuery.filters.price.minMinor)}–$${formatDollarAmount(page.activeQuery.filters.price.maxMinor)}`,
     });
   }
   if (page.desiredCollectible) {

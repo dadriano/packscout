@@ -110,7 +110,7 @@ function readPublishedLimit(raw: unknown): number | null {
 }
 
 function readPublishedCursor(raw: unknown): string | null | undefined {
-  if (raw === undefined) return null;
+  if (raw === undefined || raw === "") return null;
   return typeof raw === "string" && raw.length <= 4_096 ? raw : undefined;
 }
 

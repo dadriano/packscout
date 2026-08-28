@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 import { convexTest } from "convex-test";
+import { ConvexError } from "convex/values";
 import { describe, expect, test, vi } from "vitest";
 import { seedMockCatalogManifestGraph } from "./mockCatalogManifestSeed";
 import {
@@ -13,6 +14,7 @@ import {
   MAX_ID_PAGE_ITEMS,
   MAX_PAGE_ITEMS,
 } from "./providerCatalogInspection";
+import { isInvalidProviderCatalogCursor } from "./http";
 import schema from "./schema";
 
 const SEED_TIME = "2026-08-24T00:00:00.000Z";
@@ -258,6 +260,42 @@ describe("entity paging is stable, complete, and server-bounded", () => {
     ).json()) as { status: string; items: unknown[] };
     expect(page.status).toBe("ok");
     expect(page.items.length).toBeGreaterThan(0);
+  });
+
+  test("a malformed cursor returns a stable recovery response", async () => {
+    const convex = createTest();
+    authorize();
+    const first = await seedActiveCatalog(convex);
+
+    const malformed = await post(convex, ENTITIES_PATH, {
+      platformKey: first.platformKey,
+      expectedPublicProviderReleaseId: first.publicProviderReleaseId,
+      entityKind: "collectibles",
+      paginationOpts: { numItems: 1, cursor: "not-a-convex-cursor" },
+    });
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({
+      code: "PROVIDER_CATALOG_CURSOR_INVALID",
+    });
+  });
+
+  test("stale Convex cursor markers select the same recovery response", () => {
+    expect(
+      isInvalidProviderCatalogCursor(
+        new ConvexError({
+          isConvexSystemError: true,
+          paginationError: "InvalidCursor",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isInvalidProviderCatalogCursor(
+        new Error("Pagination failed: InvalidCursor"),
+      ),
+    ).toBe(true);
+    expect(
+      isInvalidProviderCatalogCursor(new Error("unrelated query failure")),
+    ).toBe(false);
   });
 
   test("an unknown release is representable, not an error", async () => {

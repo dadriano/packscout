@@ -260,7 +260,7 @@ test("a non-complete release is inspectable but carries an explicit lifecycle wa
   assert.match(text, /Golden Repack/);
 });
 
-test("backend unavailability and forbidden reads have distinct operator-facing states", async (t) => {
+test("backend unavailability has an operator-facing danger state", async (t) => {
   stubFetch(
     t,
     publishedFetch({
@@ -272,7 +272,15 @@ test("backend unavailability and forbidden reads have distinct operator-facing s
   cleanupPage(t, unavailable);
   await settlePublished();
   assert.match(pageText(unavailable), /product backend is temporarily unreachable/i);
+  assert.equal(unavailable.container.querySelector(".admin-notice"), null);
+  assert.ok(
+    unavailable.container
+      .querySelector('[role="alert"]')
+      ?.classList.contains("admin-note"),
+  );
+});
 
+test("forbidden reads have a distinct operator-facing danger state", async (t) => {
   stubFetch(
     t,
     publishedFetch({
@@ -284,6 +292,11 @@ test("backend unavailability and forbidden reads have distinct operator-facing s
   cleanupPage(t, forbidden);
   await settlePublished();
   assert.match(pageText(forbidden), /no longer includes permission/i);
+  assert.ok(
+    forbidden.container
+      .querySelector('[role="alert"]')
+      ?.classList.contains("admin-note-danger"),
+  );
 });
 
 test("an invalid deep-linked cursor offers a truthful return to page one", async (t) => {
@@ -291,7 +304,13 @@ test("an invalid deep-linked cursor offers a truthful return to page one", async
     t,
     publishedFetch({
       "/entities?": () =>
-        jsonResponse({ error: "bad cursor", code: "INVALID_CURSOR" }, 400),
+        jsonResponse(
+          {
+            error: "bad cursor",
+            code: "PUBLISHED_CATALOG_REQUEST_INVALID",
+          },
+          400,
+        ),
     }),
   );
   const page = await renderPage(

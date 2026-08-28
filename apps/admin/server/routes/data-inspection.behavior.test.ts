@@ -413,6 +413,34 @@ test("published routes use one atomic backend read per requested document", asyn
   );
 });
 
+test("an empty published cursor selects the first page", async () => {
+  let receivedCursor: string | null | undefined;
+  const published = publishedStub({
+    async listEntities(input) {
+      receivedCursor = input.cursor;
+      return {
+        status: "ok",
+        items: [],
+        isDone: true,
+        continueCursor: "",
+      };
+    },
+  });
+  await withServer(
+    ["data_inspection:view"],
+    async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/data-inspection/published/providers/clutchpacks/entities?entityKind=repacks&expectedPublicProviderReleaseId=${publishedReleaseId}&cursor=`,
+        { headers: { cookie: "packscout_session=operator-session" } },
+      );
+      assert.equal(response.status, 200);
+    },
+    canonicalStub() as never,
+    published.reader,
+  );
+  assert.equal(receivedCursor, null);
+});
+
 test("a provider outside the actor organization is rejected before any published read", async () => {
   const published = publishedStub();
   const canonical = canonicalStub({

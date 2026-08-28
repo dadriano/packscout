@@ -1087,6 +1087,7 @@ http.route({
  * path here can write.
  */
 const PROVIDER_CATALOG_REQUEST_INVALID = "PROVIDER_CATALOG_REQUEST_INVALID";
+const PROVIDER_CATALOG_CURSOR_INVALID = "PROVIDER_CATALOG_CURSOR_INVALID";
 
 const IDENTIFIED_ENTITY_KINDS = new Set([
   "vendors",
@@ -1094,6 +1095,38 @@ const IDENTIFIED_ENTITY_KINDS = new Set([
   "repacks",
   "collectibles",
 ]);
+
+/**
+ * Convex invalidates a pagination cursor when its originating query no longer
+ * matches, including after a manifest promotion changes the release-scoped
+ * index range. Recognize only Convex's documented system marker, the SDK's
+ * legacy marker, and its cursor-decoder failure so unrelated query failures
+ * still fail closed.
+ */
+export function isInvalidProviderCatalogCursor(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (
+    error.message.includes("InvalidCursor") ||
+    error.message.endsWith("is not valid JSON")
+  ) {
+    return true;
+  }
+  if (!(error instanceof ConvexError)) return false;
+  const data = error.data as {
+    isConvexSystemError?: unknown;
+    paginationError?: unknown;
+  } | null;
+  return (
+    data?.isConvexSystemError === true &&
+    data.paginationError === "InvalidCursor"
+  );
+}
+
+function providerCatalogPageRefusal(error: unknown): Response {
+  return isInvalidProviderCatalogCursor(error)
+    ? badRequest(PROVIDER_CATALOG_CURSOR_INVALID)
+    : refusalResponse(error);
+}
 
 function readPlatformKey(value: unknown): string | null {
   return typeof value === "string" &&
@@ -1160,7 +1193,7 @@ const listProviderCatalogEntities = httpAction(async (ctx, request) => {
       }),
     );
   } catch (error) {
-    return refusalResponse(error);
+    return providerCatalogPageRefusal(error);
   }
 });
 
@@ -1188,7 +1221,7 @@ const listProviderCatalogEntityIds = httpAction(async (ctx, request) => {
       }),
     );
   } catch (error) {
-    return refusalResponse(error);
+    return providerCatalogPageRefusal(error);
   }
 });
 

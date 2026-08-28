@@ -7,6 +7,7 @@ import {
   catalogQueryForPageNavigation,
   catalogSheetInspectorInitiallyOpen,
   clearCatalogRepackSelection,
+  formatDollarAmount,
   nextCatalogPage,
   parseCatalogViewLayout,
   parseCatalogQueryState,
@@ -21,6 +22,12 @@ import {
 const CATEGORY_ID = "00000000-0000-5000-8000-000000000101";
 const COLLECTIBLE_ID = "00000000-0000-5000-8000-000000000201";
 const REPACK_ID = "00000000-0000-5000-8000-000000000301";
+
+test("minor-unit dollar formatting preserves cents", () => {
+  assert.equal(formatDollarAmount(1), "0.01");
+  assert.equal(formatDollarAmount(2_550), "25.50");
+  assert.equal(formatDollarAmount(10_500), "105");
+});
 
 test("the empty URL restores the complete default repack query", () => {
   const parsed = parseCatalogQueryState(new URLSearchParams());

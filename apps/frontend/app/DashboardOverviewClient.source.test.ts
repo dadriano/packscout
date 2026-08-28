@@ -18,3 +18,9 @@ test("dashboard telemetry counts the availability constraint", () => {
   assert.match(source, /Number\(filters\.availability === "all"\)/);
   assert.match(source, /0 \| 1 \| 2 \| 3 \| 4 \| 5/);
 });
+
+test("dashboard price constraints preserve cents", () => {
+  assert.match(source, /formatDollarAmount\(filters\.price\.minMinor\)/);
+  assert.match(source, /formatDollarAmount\(filters\.price\.maxMinor\)/);
+  assert.doesNotMatch(source, /filters\.price\.(?:min|max)Minor \/ 100/);
+});

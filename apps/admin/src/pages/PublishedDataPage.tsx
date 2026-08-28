@@ -262,7 +262,9 @@ function DocumentDetail({
           Stored published document
         </h3>
         {documentError ? (
-          <p className="admin-notice" role="alert">{documentError}</p>
+          <p className="admin-note admin-note-danger" role="alert">
+            {documentError}
+          </p>
         ) : null}
         {!document && !documentError ? (
           <p aria-live="polite" aria-busy="true">Loading document…</p>
@@ -298,7 +300,9 @@ function DocumentDetail({
             is the publication record for their parent repack.
           </p>
           {chaseError ? (
-            <p className="admin-notice" role="alert">{chaseError}</p>
+            <p className="admin-note admin-note-danger" role="alert">
+              {chaseError}
+            </p>
           ) : null}
           {!chase && !chaseError ? (
             <p aria-live="polite" aria-busy="true">
@@ -673,7 +677,9 @@ function PublishedDataView() {
       </aside>
 
       {providerError ? (
-        <p className="admin-notice" role="alert">{providerError}</p>
+        <p className="admin-note admin-note-danger" role="alert">
+          {providerError}
+        </p>
       ) : null}
       {providersLoaded && providers.length === 0 && !providerError ? (
         <EmptyState
@@ -823,7 +829,7 @@ function PublishedDataView() {
                 </p>
               ) : null}
               {entityPage && entityPage.status !== "ok" ? (
-                <p className="admin-notice" role="alert">
+                <p className="admin-note admin-note-warning" role="alert">
                   The active manifest selection changed while this page was
                   loading. Refresh the published read before continuing.
                 </p>

@@ -117,65 +117,70 @@ export function createPublishedCatalogReader(input: {
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let response: Response;
     try {
-      response = await (input.fetchImplementation ?? fetch)(
-        new URL(path, input.config.baseUrl),
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${input.config.token}`,
+      let response: Response;
+      try {
+        response = await (input.fetchImplementation ?? fetch)(
+          new URL(path, input.config.baseUrl),
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${input.config.token}`,
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
           },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        },
-      );
-    } catch {
-      // A transport failure carries a host and sometimes a port. Neither
-      // belongs in an operator's browser, so nothing from it is forwarded.
+        );
+      } catch {
+        // A transport failure carries a host and sometimes a port. Neither
+        // belongs in an operator's browser, so nothing from it is forwarded.
+        throw new PublishedCatalogError(
+          "PUBLISHED_CATALOG_UNAVAILABLE",
+          "The published catalog is temporarily unreachable.",
+          503,
+        );
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        throw new PublishedCatalogError(
+          "PUBLISHED_CATALOG_UNAUTHORIZED",
+          "The published catalog integration is not authorized.",
+          502,
+        );
+      }
+      if (response.status === 400) {
+        throw new PublishedCatalogError(
+          "PUBLISHED_CATALOG_REQUEST_INVALID",
+          "That published catalog request was not valid.",
+          400,
+        );
+      }
+      if (!response.ok) {
+        throw new PublishedCatalogError(
+          "PUBLISHED_CATALOG_UNAVAILABLE",
+          "The published catalog is temporarily unavailable.",
+          503,
+        );
+      }
+      try {
+        const parsed = schema.safeParse(await response.json());
+        if (parsed.success) return parsed.data;
+      } catch {
+        // Fall through to the same stable refusal as a schema mismatch. Neither
+        // raw JSON nor validator detail may cross this server boundary.
+      }
       throw new PublishedCatalogError(
         "PUBLISHED_CATALOG_UNAVAILABLE",
-        "The published catalog is temporarily unreachable.",
+        "The published catalog returned an unreadable response.",
         503,
       );
     } finally {
+      // Fetch resolves when response headers arrive. Keep the deadline armed
+      // until status handling and body consumption are both complete so a
+      // stalled upstream body cannot hold the admin request open forever.
       clearTimeout(timer);
     }
-
-    if (response.status === 401 || response.status === 403) {
-      throw new PublishedCatalogError(
-        "PUBLISHED_CATALOG_UNAUTHORIZED",
-        "The published catalog integration is not authorized.",
-        502,
-      );
-    }
-    if (response.status === 400) {
-      throw new PublishedCatalogError(
-        "PUBLISHED_CATALOG_REQUEST_INVALID",
-        "That published catalog request was not valid.",
-        400,
-      );
-    }
-    if (!response.ok) {
-      throw new PublishedCatalogError(
-        "PUBLISHED_CATALOG_UNAVAILABLE",
-        "The published catalog is temporarily unavailable.",
-        503,
-      );
-    }
-    try {
-      const parsed = schema.safeParse(await response.json());
-      if (parsed.success) return parsed.data;
-    } catch {
-      // Fall through to the same stable refusal as a schema mismatch. Neither
-      // raw JSON nor validator detail may cross this server boundary.
-    }
-    throw new PublishedCatalogError(
-      "PUBLISHED_CATALOG_UNAVAILABLE",
-      "The published catalog returned an unreadable response.",
-      503,
-    );
   };
 
   return {

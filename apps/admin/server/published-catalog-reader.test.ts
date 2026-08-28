@@ -221,6 +221,41 @@ test("reader maps upstream status without forwarding its response body", async (
   }
 });
 
+test("reader deadline covers a response body that stalls after headers", async () => {
+  let bodyAborted = false;
+  const reader = createPublishedCatalogReader({
+    config,
+    timeoutMs: 20,
+    fetchImplementation: (async (_url, init) => {
+      const signal = init?.signal;
+      assert.ok(signal);
+      const body = new ReadableStream({
+        start(controller) {
+          const fallback = setTimeout(() => {
+            controller.error(new Error("test body fallback"));
+          }, 250);
+          signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(fallback);
+              bodyAborted = true;
+              controller.error(new Error("response body aborted"));
+            },
+            { once: true },
+          );
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as typeof fetch,
+  });
+
+  await expectCode(
+    reader.activeRelease("clutchpacks"),
+    "PUBLISHED_CATALOG_UNAVAILABLE",
+  );
+  assert.equal(bodyAborted, true);
+});
+
 test("reader collapses missing configuration, transport, JSON, and schema failures", async () => {
   await expectCode(
     createPublishedCatalogReader({ config: null }).activeRelease("clutchpacks"),

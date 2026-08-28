@@ -72,3 +72,18 @@ test("selecting a repack clears feedback from the previously used row action", (
     /if \(actionFeedbackRepackIdRef\.current === publicRepackId\) \{\s*setActionFeedback/,
   );
 });
+
+test("all-repacks price constraints preserve cents", () => {
+  assert.match(
+    source,
+    /formatDollarAmount\(page\.activeQuery\.filters\.price\.minMinor\)/,
+  );
+  assert.match(
+    source,
+    /formatDollarAmount\(page\.activeQuery\.filters\.price\.maxMinor\)/,
+  );
+  assert.doesNotMatch(
+    source,
+    /page\.activeQuery\.filters\.price\.(?:min|max)Minor \/ 100/,
+  );
+});

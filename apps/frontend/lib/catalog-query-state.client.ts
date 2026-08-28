@@ -70,7 +70,7 @@ function parseDollarAmount(value: string | null): number | null {
   return Number.isSafeInteger(minorUnits) ? minorUnits : null;
 }
 
-function formatDollarAmount(minorUnits: number): string {
+export function formatDollarAmount(minorUnits: number): string {
   const dollars = Math.trunc(minorUnits / 100);
   const cents = minorUnits % 100;
   return cents === 0
