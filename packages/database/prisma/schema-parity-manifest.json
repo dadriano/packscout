@@ -1,13 +1,13 @@
 {
-  "source": "provider-source V1 relationship confirmation, relationship-causal Heat evidence, platform request lanes, and buyback-adjusted EV revisions",
+  "source": "provider-source V1 relationship confirmation, relationship-causal Heat evidence, platform request lanes, and source-native buyback-adjusted EV revisions",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260827010000_provider_source_platform_request_lanes/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260827020000_buyback_ev_provider_source_origin/migration.sql"
   },
   "expectedCounts": {
     "tables": 91,
     "enums": 40,
-    "columns": 1449,
+    "columns": 1450,
     "indexes": 166,
     "uniqueConstraints": 64,
     "foreignKeys": 304,
@@ -1178,13 +1178,6 @@
           "identity": null,
           "default": null
         },
-        "configuration_revision_id": {
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true,
-          "identity": null,
-          "default": null
-        },
         "created_at": {
           "type": "timestamp(6) with time zone",
           "primaryKey": false,
@@ -1346,6 +1339,13 @@
           "identity": null,
           "default": null
         },
+        "provider_source_revision_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "public_primary_reason": {
           "type": "text",
           "primaryKey": false,
@@ -1371,6 +1371,13 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_instance_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
           "identity": null,
           "default": null
         },
@@ -1456,32 +1463,6 @@
         }
       },
       "foreignKeys": {
-        "buyback_ev_revisions_configuration_fk": {
-          "columns": [
-            "configuration_revision_id"
-          ],
-          "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "buyback_ev_revisions_configuration_tenant_fk": {
-          "columns": [
-            "configuration_revision_id",
-            "provider_id",
-            "organization_id"
-          ],
-          "referencedTable": "provider_config_revisions",
-          "referencedColumns": [
-            "id",
-            "provider_id",
-            "organization_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "buyback_ev_revisions_organization_fk": {
           "columns": [
             "organization_id"
@@ -1502,6 +1483,34 @@
             "id"
           ],
           "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revisions_provider_source_revision_fk": {
+          "columns": [
+            "provider_source_revision_id"
+          ],
+          "referencedTable": "provider_source_revisions",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revisions_provider_source_revision_scope_fk": {
+          "columns": [
+            "provider_source_revision_id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "referencedTable": "provider_source_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id",
+            "provider_id",
+            "source_instance_id"
+          ],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "buyback_ev_revisions_provider_tenant_fk": {

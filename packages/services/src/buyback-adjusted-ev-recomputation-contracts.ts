@@ -153,9 +153,9 @@ export const PACKSCOUT_BUYBACK_EV_CHANGE_MATRIX_V1: Readonly<
     effect: "new_fingerprint",
     carrier: "identity.productRevisionId",
   },
-  approvedConfiguration: {
+  providerSourceRevision: {
     effect: "new_fingerprint",
-    carrier: "identity.configurationRevisionId",
+    carrier: "identity.providerSourceRevisionId",
   },
   methodVersion: {
     effect: "new_fingerprint",
@@ -196,7 +196,7 @@ export interface PackScoutBuybackEvRecomputationSourceRevisionV1 {
 export interface PackScoutBuybackEvRecomputationCommandV1 {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
   /**
    * Expected to be a task-004 `PackScoutBuybackEvEvidenceOutcomeV1`.
    * Accepted as `unknown` for defense in depth; the strict schema is
@@ -349,7 +349,7 @@ export function packScoutBuybackEvRecomputationIdentityV1(
     PackScoutBuybackEvRecomputationBindingV1,
     { kind: "bindable" }
   >,
-  configurationRevisionId: string,
+  providerSourceRevisionId: string,
 ): PackScoutBuybackEvCalculationIdentityV1 {
   return {
     methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
@@ -360,7 +360,7 @@ export function packScoutBuybackEvRecomputationIdentityV1(
     sourceRevisionId: binding.sourceRevisionId,
     sourceManifestSha256: binding.sourceManifestSha256,
     observationCoherence: binding.observationCoherence,
-    configurationRevisionId,
+    providerSourceRevisionId,
   };
 }
 
@@ -370,12 +370,12 @@ export function computePackScoutBuybackEvRecomputationFingerprintV1(
     PackScoutBuybackEvRecomputationBindingV1,
     { kind: "bindable" }
   >,
-  configurationRevisionId: string,
+  providerSourceRevisionId: string,
 ): string {
   return computePackScoutBuybackEvEffectiveFingerprintV1({
     identity: packScoutBuybackEvRecomputationIdentityV1(
       binding,
-      configurationRevisionId,
+      providerSourceRevisionId,
     ),
     evidence: binding.evidence,
   });
@@ -389,7 +389,7 @@ export function computePackScoutBuybackEvRecomputationFingerprintV1(
 export function computePackScoutBuybackEvUnbindableFingerprintV1(input: {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
   readonly evidence: Extract<
     PackScoutBuybackEvEvidenceOutcomeV1,
     { status: "unavailable" }
@@ -401,7 +401,7 @@ export function computePackScoutBuybackEvUnbindableFingerprintV1(input: {
         hashDomain: UNBINDABLE_HASH_DOMAIN,
         organizationId: input.organizationId,
         providerId: input.providerId,
-        configurationRevisionId: input.configurationRevisionId,
+        providerSourceRevisionId: input.providerSourceRevisionId,
         product: input.evidence.product,
         observation: input.evidence.observation,
         dataAsOf: input.evidence.dataAsOf,

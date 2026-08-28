@@ -20,6 +20,7 @@ import {
   allocatePublicChangeCauses,
   prismaApprovedPublicRepackIdentityMaterializer,
   PrismaCatalogReleaseSourceRepository,
+  ProviderSourceLifecycleRepository,
 } from "@packscout/database";
 import type { MigratedTestDatabase } from "@packscout/database/test-support";
 import {
@@ -76,7 +77,8 @@ export * from "./buyback-adjusted-ev-launch-certification.fixtures.test-support.
 
 export interface CertificationSeededPlatform {
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly sourceInstanceId: string;
+  readonly providerSourceRevisionId: string;
 }
 
 export interface CertificationSeed {
@@ -161,6 +163,7 @@ function certificationPackContent(fixture: CertificationProviderFixtureV1) {
   return {
     schemaVersion: "catalog-projection-v1",
     entityType: "pack",
+    evInputStatus: "unavailable",
     parentExternalId: null,
     name: fixture.packName,
     category: null,
@@ -198,11 +201,53 @@ export async function seedBuybackEvCertificationCatalog(
   const platforms = new Map<string, CertificationSeededPlatform>();
   const ingestion = new Map<
     string,
-    { providerId: string; sourceRecordId: string; configurationRevisionId: string }
+    {
+      providerId: string;
+      sourceInstanceId: string;
+      providerSourceRevisionId: string;
+      sourceRecordId: string;
+    }
   >();
+  const sourceTypeKey = "dataforrest-events-v1";
+  const sourceAdapterVersion = "dataforrest-events-adapter-v1";
+  const normalizedContractVersion = "packscout.provider-observation.v1";
+  const mapperKey = "dataforrest-catalog-v1";
+  const mapperVersion = "1";
+  const cursorCodecVersion = "dataforrest-cursor-v1";
+  const createdAt = new Date(CERTIFICATION_TIMELINE.configApprovedAt);
+  const lifecycle = new ProviderSourceLifecycleRepository(harness.client);
+  const connection = await lifecycle.createConnectionProfileRevision({
+    organizationId: input.organizationId,
+    sourceTypeKey,
+    connectionTypeKey: "dataforrest-events-connection-v1",
+    displayName: "DataForrest certification",
+    requestLimit: 1,
+    sourceAdapterVersion,
+    revisionNumber: 1,
+    configurationCiphertext: new Uint8Array(32).fill(1),
+    configurationNonce: new Uint8Array(12).fill(2),
+    configurationAuthTag: new Uint8Array(16).fill(3),
+    encryptionKeyVersion: 1,
+    configurationFingerprint: "a".repeat(64),
+    actorKey: "operator:protected-certification-actor",
+    createdAt,
+  });
+  await harness.client.$transaction(async (transaction) => {
+    await transaction.source_connection_revisions.update({
+      where: { id: connection.revisionId },
+      data: { state: "active", activated_at: createdAt },
+    });
+    await transaction.source_connection_profiles.update({
+      where: { id: connection.profileId },
+      data: {
+        state: "active",
+        active_revision_id: connection.revisionId,
+        updated_at: createdAt,
+      },
+    });
+  });
   for (const fixture of fixtures) {
     const providerId = randomUUID();
-    const configurationRevisionId = randomUUID();
     const runId = randomUUID();
     const pageId = randomUUID();
     await harness.client.provider_sources.create({
@@ -213,33 +258,67 @@ export async function seedBuybackEvCertificationCatalog(
         display_name: `Vendor ${fixture.providerKey}`,
       },
     });
-    await harness.client.provider_config_revisions.create({
-      data: {
-        id: configurationRevisionId,
-        organization_id: input.organizationId,
-        provider_id: providerId,
-        version: 1,
-        adapter_key: "http-cursor-v1",
-        endpoint_url: "https://certified-vendor.example/protected-feed",
-        auth_mode: "none",
-        created_by_actor_key: "operator:protected-certification-actor",
-      },
+    const source = await lifecycle.createSourceInstanceRevision({
+      organizationId: input.organizationId,
+      providerId,
+      connectionProfileId: connection.profileId,
+      sourceTypeKey,
+      sourceAdapterVersion,
+      normalizedContractVersion,
+      mapperKey,
+      mapperVersion,
+      identityNamespaceKey: `dataforrest-${fixture.providerKey}-v1`,
+      cursorCodecVersion,
+      revisionNumber: 1,
+      intervalSeconds: 300,
+      configuration: { provider: fixture.providerKey },
+      configurationHash: createHash("sha256")
+        .update(fixture.providerKey, "utf8")
+        .digest("hex"),
+      recordIdScopes: ["catalog-pack-v1", "catalog-card-v1"],
+      actorKey: "operator:protected-certification-actor",
+      createdAt,
     });
-    await harness.client.provider_sources.update({
-      where: { id: providerId },
-      data: { state: "active", active_revision_id: configurationRevisionId },
+    await harness.client.$transaction(async (transaction) => {
+      await transaction.provider_sources.update({
+        where: { id: providerId },
+        data: { state: "active", updated_at: createdAt },
+      });
+      await transaction.provider_source_instances.update({
+        where: { id: source.sourceInstanceId },
+        data: {
+          state: "active",
+          activated_at: createdAt,
+          updated_at: createdAt,
+        },
+      });
     });
     await harness.client.import_runs.create({
       data: {
         id: runId,
         organization_id: input.organizationId,
         provider_id: providerId,
-        config_revision_id: configurationRevisionId,
+        config_revision_id: null,
         trigger: "scheduled",
         state: "succeeded",
         started_at: new Date("2026-08-19T17:02:00.000Z"),
         finished_at: new Date(CERTIFICATION_TIMELINE.backfillFinishedAt),
         reached_provider_head: true,
+        source_instance_id: source.sourceInstanceId,
+        source_revision_id: source.sourceRevisionId,
+        source_type_key: sourceTypeKey,
+        source_adapter_version: sourceAdapterVersion,
+        normalized_contract_version: normalizedContractVersion,
+        mapper_key: mapperKey,
+        mapper_version: mapperVersion,
+        identity_namespace_key: `dataforrest-${fixture.providerKey}-v1`,
+        connection_profile_id: connection.profileId,
+        connection_revision_id: connection.revisionId,
+        cursor_codec_version: cursorCodecVersion,
+        cursor_generation: 1n,
+        requested_cursor_key: "initial",
+        current_cursor_key: "initial",
+        next_page_number: 1,
       },
     });
     await harness.client.import_pages.create({
@@ -272,11 +351,16 @@ export async function seedBuybackEvCertificationCatalog(
         expires_at: new Date("2026-11-19T17:00:00.000Z"),
       },
     });
-    platforms.set(fixture.providerKey, { providerId, configurationRevisionId });
+    platforms.set(fixture.providerKey, {
+      providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      providerSourceRevisionId: source.sourceRevisionId,
+    });
     ingestion.set(fixture.providerKey, {
       providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      providerSourceRevisionId: source.sourceRevisionId,
       sourceRecordId,
-      configurationRevisionId,
     });
   }
   // The configuration approval settles its own approval-time watermark, so it
@@ -290,7 +374,12 @@ export async function seedBuybackEvCertificationCatalog(
     prismaApprovedPublicRepackIdentityMaterializer,
   );
   for (const fixture of fixtures) {
-    const { providerId, sourceRecordId, configurationRevisionId } =
+    const {
+      providerId,
+      sourceInstanceId,
+      providerSourceRevisionId,
+      sourceRecordId,
+    } =
       ingestion.get(fixture.providerKey)!;
     await harness.client.$transaction(async (transaction) => {
       const causes = await allocatePublicChangeCauses(transaction, {
@@ -300,12 +389,13 @@ export async function seedBuybackEvCertificationCatalog(
             changeKind: "provider_lifecycle" as const,
             entityKey: `provider:v1:${providerId}`,
             sourceKey: fixture.providerKey,
-            sourceRevisionKey: configurationRevisionId,
+            sourceRevisionKey: providerSourceRevisionId,
             metadata: {
               providerId,
               platformKey: fixture.providerKey,
               state: "active",
-              configurationRevisionId,
+              sourceInstanceId,
+              sourceRevisionId: providerSourceRevisionId,
             },
             occurredAt: new Date(CERTIFICATION_TIMELINE.lifecycleAt),
             catalogImpact: {
@@ -503,13 +593,16 @@ export function certificationForbiddenTokens(
     "oddsSource",
     "sourceRevisionId",
     "configurationRevisionId",
+    "providerSourceRevisionId",
+    "sourceInstanceId",
     CERTIFICATION_EVIDENCE_SHAS.manifest,
     CERTIFICATION_EVIDENCE_SHAS.homogeneity,
     CERTIFICATION_EVIDENCE_SHAS.collectionGuard,
     seed.organizationId,
     ...[...seed.platforms.values()].flatMap((platform) => [
       platform.providerId,
-      platform.configurationRevisionId,
+      platform.sourceInstanceId,
+      platform.providerSourceRevisionId,
     ]),
     ...CERTIFICATION_PROVIDER_FIXTURES.map(
       ({ sourceRevisionId }) => sourceRevisionId,
@@ -618,7 +711,7 @@ export async function runBuybackEvLaunchCertificationHarness(
     return {
       organizationId: input.organizationId,
       providerId: platform.providerId,
-      configurationRevisionId: platform.configurationRevisionId,
+      providerSourceRevisionId: platform.providerSourceRevisionId,
       evidence: fixture.normalize(),
       calculatedAt: CERTIFICATION_TIMELINE.calculatedAt,
     };
@@ -705,12 +798,12 @@ export async function runBuybackEvLaunchCertificationHarness(
       binding.kind === "bindable"
         ? computePackScoutBuybackEvRecomputationFingerprintV1(
             binding,
-            platform.configurationRevisionId,
+            platform.providerSourceRevisionId,
           )
         : computePackScoutBuybackEvUnbindableFingerprintV1({
             organizationId: input.organizationId,
             providerId: platform.providerId,
-            configurationRevisionId: platform.configurationRevisionId,
+            providerSourceRevisionId: platform.providerSourceRevisionId,
             evidence: evidence as Extract<
               PackScoutBuybackEvEvidenceOutcomeV1,
               { status: "unavailable" }
@@ -985,7 +1078,7 @@ export async function runBuybackEvLaunchCertificationHarness(
   const pullsCommand: PackScoutBuybackEvRecomputationCommandV1 = {
     organizationId: input.organizationId,
     providerId: clutchpacks.providerId,
-    configurationRevisionId: clutchpacks.configurationRevisionId,
+    providerSourceRevisionId: clutchpacks.providerSourceRevisionId,
     evidence: normalizeClutchpacksBuybackEvEvidenceV1(
       clutchpacksCertificationSource({
         siteRevisionId: "cert-clutch-rev-2",
@@ -1037,7 +1130,7 @@ export async function runBuybackEvLaunchCertificationHarness(
   const unprovenCommand: PackScoutBuybackEvRecomputationCommandV1 = {
     organizationId: input.organizationId,
     providerId: clutchpacks.providerId,
-    configurationRevisionId: clutchpacks.configurationRevisionId,
+    providerSourceRevisionId: clutchpacks.providerSourceRevisionId,
     evidence: normalizeClutchpacksBuybackEvEvidenceV1(
       clutchpacksCertificationSource({
         siteRevisionId: "cert-clutch-rev-3",

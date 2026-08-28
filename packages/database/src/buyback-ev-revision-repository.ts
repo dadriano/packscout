@@ -101,7 +101,8 @@ export interface BuybackEvRevisionRecord {
   readonly revisionId: string;
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
+  readonly sourceInstanceId: string;
   readonly platformKey: string;
   readonly productKey: string;
   readonly productRevisionId: string;
@@ -134,7 +135,7 @@ export interface BuybackEvRevisionRecord {
 export interface PersistBuybackEvRevisionRowInput {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
+  readonly providerSourceRevisionId: string;
   readonly platformKey: string;
   readonly productKey: string;
   readonly productRevisionId: string;
@@ -309,7 +310,8 @@ function rowToRecord(
     revisionId: row.id,
     organizationId: row.organization_id,
     providerId: row.provider_id,
-    configurationRevisionId: row.configuration_revision_id,
+    providerSourceRevisionId: row.provider_source_revision_id,
+    sourceInstanceId: row.source_instance_id,
     platformKey: row.platform_key,
     productKey: row.product_key,
     productRevisionId: row.product_revision_id,
@@ -401,7 +403,7 @@ export function validateRecordInvariants(record: BuybackEvRevisionRecord): void 
 function validateRowInput(input: PersistBuybackEvRevisionRowInput): void {
   requireUuid(input.organizationId, "organizationId");
   requireUuid(input.providerId, "providerId");
-  requireUuid(input.configurationRevisionId, "configurationRevisionId");
+  requireUuid(input.providerSourceRevisionId, "providerSourceRevisionId");
   requirePattern(input.platformKey, PLATFORM_KEY_PATTERN, "platformKey");
   requirePattern(input.productKey, PRODUCT_KEY_PATTERN, "productKey");
   requirePattern(
@@ -505,7 +507,7 @@ export class BuybackEvRevisionRepository {
     transaction: PackscoutTransactionClient,
     input: PersistBuybackEvRevisionRowInput,
   ): Promise<PersistBuybackEvRevisionRowResult> {
-    await this.assertTenantScope(transaction, input);
+    const sourceInstanceId = await this.assertTenantScope(transaction, input);
     const existing = await transaction.buyback_ev_revisions.findFirst({
       where: {
         organization_id: input.organizationId,
@@ -567,7 +569,8 @@ export class BuybackEvRevisionRepository {
       data: {
         organization_id: input.organizationId,
         provider_id: input.providerId,
-        configuration_revision_id: input.configurationRevisionId,
+        provider_source_revision_id: input.providerSourceRevisionId,
+        source_instance_id: sourceInstanceId,
         platform_key: input.platformKey,
         product_key: input.productKey,
         product_revision_id: input.productRevisionId,
@@ -646,7 +649,7 @@ export class BuybackEvRevisionRepository {
   private async assertTenantScope(
     transaction: PackscoutTransactionClient,
     input: PersistBuybackEvRevisionRowInput,
-  ): Promise<void> {
+  ): Promise<string> {
     const provider = await transaction.provider_sources.findFirst({
       where: { id: input.providerId },
       select: { organization_id: true, platform_key: true },
@@ -661,37 +664,60 @@ export class BuybackEvRevisionRepository {
         "The provider does not belong to the organization and platform scope.",
       );
     }
-    const configuration = await transaction.provider_config_revisions.findFirst({
-      where: { id: input.configurationRevisionId },
-      select: { organization_id: true, provider_id: true },
+    const sourceRevision = await transaction.provider_source_revisions.findFirst({
+      where: { id: input.providerSourceRevisionId },
+      select: {
+        organization_id: true,
+        provider_id: true,
+        source_instance_id: true,
+      },
     });
     if (
-      !configuration ||
-      configuration.organization_id !== input.organizationId ||
-      configuration.provider_id !== input.providerId
+      !sourceRevision ||
+      sourceRevision.organization_id !== input.organizationId ||
+      sourceRevision.provider_id !== input.providerId
     ) {
       throw new PersistenceError(
         "TENANT_SCOPE_VIOLATION",
-        "The configuration revision does not belong to the provider scope.",
+        "The provider source revision does not belong to the provider scope.",
       );
     }
     const canonicalRevisionIds = input.sourceReferences
       .map((reference) => reference.canonicalRevisionId)
       .filter((value): value is string => value !== null);
     if (canonicalRevisionIds.length > 0) {
-      const matched = await transaction.canonical_revisions.count({
+      // A platform identifies one provider inside an organization. Bind the
+      // immutable canonical entity instead of its origin source revision:
+      // duplicate-content and time-only replays may legitimately reuse an
+      // older canonical revision across provider source revisions.
+      const uniqueCanonicalRevisionIds = [...new Set(canonicalRevisionIds)];
+      const matched = await transaction.canonical_revisions.findMany({
         where: {
-          id: { in: canonicalRevisionIds },
+          id: { in: uniqueCanonicalRevisionIds },
           organization_id: input.organizationId,
         },
+        select: {
+          id: true,
+          canonical_entities_canonical_revisions_entity_id_organization_idTocanonical_entities:
+            { select: { platform_key: true } },
+        },
       });
-      if (matched !== new Set(canonicalRevisionIds).size) {
+      if (
+        matched.length !== uniqueCanonicalRevisionIds.length ||
+        matched.some(
+          (revision) =>
+            revision
+              .canonical_entities_canonical_revisions_entity_id_organization_idTocanonical_entities
+              .platform_key !== input.platformKey,
+        )
+      ) {
         throw new PersistenceError(
           "TENANT_SCOPE_VIOLATION",
-          "A canonical source revision reference is outside the organization scope.",
+          "A canonical source revision reference is outside the provider platform scope.",
         );
       }
     }
+    return sourceRevision.source_instance_id;
   }
 
   async recordPersistenceFailure(

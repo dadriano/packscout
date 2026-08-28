@@ -28,7 +28,9 @@ import {
 } from "./buyback-adjusted-ev-calculator.test-support.ts";
 import { evaluatePackScoutBuybackEvConfidenceV1 } from "./buyback-adjusted-ev-confidence.ts";
 
-const CONFIGURATION_REVISION_ID = "40000000-0000-4000-8000-000000000003";
+const PROVIDER_SOURCE_REVISION_ID =
+  "40000000-0000-4000-8000-000000000003";
+const SOURCE_INSTANCE_ID = "40000000-0000-4000-8000-000000000004";
 
 function identityFor(
   input: PackScoutBuybackEvInputV1,
@@ -42,7 +44,7 @@ function identityFor(
     sourceRevisionId: input.observation.sourceRevisionId,
     sourceManifestSha256: input.observation.sourceManifestSha256,
     observationCoherence: input.observation.coherenceKind,
-    configurationRevisionId: CONFIGURATION_REVISION_ID,
+    providerSourceRevisionId: PROVIDER_SOURCE_REVISION_ID,
   };
 }
 
@@ -58,7 +60,8 @@ function availableRecord(): PackScoutBuybackEvRevisionRecordV1 {
     revisionId: "40000000-0000-4000-8000-0000000000aa",
     organizationId: "40000000-0000-4000-8000-000000000001",
     providerId: "40000000-0000-4000-8000-000000000002",
-    configurationRevisionId: CONFIGURATION_REVISION_ID,
+    providerSourceRevisionId: PROVIDER_SOURCE_REVISION_ID,
+    sourceInstanceId: SOURCE_INSTANCE_ID,
     platformKey: "courtyard",
     productKey: "courtyard-ironman-repack",
     productRevisionId: "product-revision-42",
@@ -140,7 +143,7 @@ test("the calculation identity key is deterministic and covers every identity co
     { sourceRevisionId: "catalog-revision-101" },
     { sourceManifestSha256: null },
     { observationCoherence: "guarded_collection" },
-    { configurationRevisionId: "40000000-0000-4000-8000-000000000004" },
+    { providerSourceRevisionId: "40000000-0000-4000-8000-000000000004" },
   ];
   const baseline = computePackScoutBuybackEvCalculationIdentityKeyV1(identity);
   for (const variant of variants) {
@@ -233,7 +236,7 @@ test("the effective fingerprint is replay-stable and changes with every governin
     computePackScoutBuybackEvEffectiveFingerprintV1({
       identity: {
         ...identity,
-        configurationRevisionId: "40000000-0000-4000-8000-000000000004",
+        providerSourceRevisionId: "40000000-0000-4000-8000-000000000004",
       },
       evidence: { kind: "complete_input", input },
     }),

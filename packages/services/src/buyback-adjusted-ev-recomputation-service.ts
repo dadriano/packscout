@@ -146,7 +146,7 @@ export class PackScoutBuybackAdjustedEvRecomputationService {
     const effectiveFingerprint =
       computePackScoutBuybackEvRecomputationFingerprintV1(
         binding,
-        command.configurationRevisionId,
+        command.providerSourceRevisionId,
       );
     const current = await this.store.getCurrentPublication({
       organizationId: command.organizationId,
@@ -190,7 +190,7 @@ export class PackScoutBuybackAdjustedEvRecomputationService {
     const persisted = await this.store.persistCompletedCalculation({
       organizationId: command.organizationId,
       providerId: command.providerId,
-      configurationRevisionId: command.configurationRevisionId,
+      providerSourceRevisionId: command.providerSourceRevisionId,
       calculation,
       confidenceEvaluation: this.resolveEvaluation(calculation),
       effectiveFingerprint,
@@ -391,7 +391,7 @@ export class PackScoutBuybackAdjustedEvRecomputationService {
     const persisted = await this.store.persistCompletedCalculation({
       organizationId: command.organizationId,
       providerId: command.providerId,
-      configurationRevisionId: command.configurationRevisionId,
+      providerSourceRevisionId: command.providerSourceRevisionId,
       calculation: synthesizePackScoutBuybackEvUnavailableCalculationV1({
         evidence,
         calculatedAt: command.calculatedAt,
@@ -401,7 +401,7 @@ export class PackScoutBuybackAdjustedEvRecomputationService {
       effectiveFingerprint: computePackScoutBuybackEvUnbindableFingerprintV1({
         organizationId: command.organizationId,
         providerId: command.providerId,
-        configurationRevisionId: command.configurationRevisionId,
+        providerSourceRevisionId: command.providerSourceRevisionId,
         evidence,
       }),
       sourceRevisions: command.sourceRevisions ?? [],
