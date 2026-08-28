@@ -129,3 +129,72 @@ test("the root is the landing surface's address and carries its marketing metada
   // landing surface (asserted behaviorally in lib/access-gate.server.test.ts).
   assert.match(rootRouteSource, /rootRouteMetadata\(await resolveVisitorAccess\(\)\)/);
 });
+
+test("a completed sign-in hands off to the server instead of asking for a click", () => {
+  // The visitor should not have to press Continue after signing in: only the
+  // server knows whether they belong in the product or the holding surface,
+  // so the surface navigates to the enter action's href and lets the gate
+  // decide.
+  assert.match(
+    ctaSource,
+    /const destination = action\.kind === "enter" \? action\.href : null;/u,
+  );
+  assert.match(ctaSource, /router\.replace\(destination\)/u);
+  // Only a verified session is handed off automatically. An established but
+  // unverifiable one would be refused by the same gate and bounce right back.
+  assert.match(
+    ctaSource,
+    /const automatic = action\.kind === "enter" && action\.automatic;/u,
+  );
+  assert.match(ctaSource, /if \(!automatic \|\| destination === null/u);
+});
+
+test("the surface a sign-out lands on says nothing about it", () => {
+  // Signing out replaces the document, which is what makes the exit a real
+  // boundary — the client router and every cached segment go with it — and
+  // which also destroys the page that would otherwise have reported a
+  // failure. The answer is not to smuggle a message across that boundary:
+  // the exit runs for successes and failures alike, so any message carried
+  // here would attach a warning to sign-outs that worked, and one that
+  // outlives its tab would attach it to a later, unrelated visit.
+  assert.equal(
+    existsSync(new URL("./SignOutNotice.client.tsx", import.meta.url)),
+    false,
+  );
+  for (const source of [...allLandingSources, stylesSource]) {
+    assert.equal(source.includes("SignOutNotice"), false);
+    assert.equal(source.includes("signOutNotice"), false);
+    assert.equal(source.includes("sessionStorage"), false);
+  }
+});
+
+test("the hand-off travels with a credential of this session, not any cookie", () => {
+  // Presence proves nothing: this page is what the gate serves when it
+  // refused the cookie the browser still holds, so the decision is taken on
+  // the value and on when this document wrote it. The rules themselves are
+  // proven in lib/identity-cookie.test.ts.
+  assert.match(ctaSource, /decideIdentityHandoff\(\{/u);
+  assert.match(ctaSource, /cookieToken: readBrowserIdentityCookie\(\),/u);
+  assert.match(ctaSource, /mountedAtMs: mountedAtMs\.current,/u);
+  assert.equal(ctaSource.includes("browserHasIdentityCookie"), false);
+  // Cookie writes render nothing on their own, so the surface subscribes to
+  // them rather than polling a value it cannot interpret.
+  assert.match(ctaSource, /useSyncExternalStore\(/u);
+  assert.match(ctaSource, /subscribeToIdentityCookieWrites,/u);
+});
+
+test("the hand-off is bounded, re-armable, and leaves the link as the fallback", () => {
+  // It must give up rather than retry forever, leaving the visible link as a
+  // working manual fallback.
+  assert.match(ctaSource, /IDENTITY_HANDOFF_TIMEOUT_MS/u);
+  assert.match(ctaSource, /IDENTITY_HANDOFF_MAX_ATTEMPTS/u);
+  assert.match(ctaSource, /surrendered\.current = true;/u);
+  // The guard records which credential travelled, not merely that one did:
+  // a spent boolean strands a signed-in visitor when the fresh credential
+  // arrives after a failed attempt.
+  assert.match(
+    ctaSource,
+    /attempted\.current = \[\.\.\.attempted\.current, decision\.token\];/u,
+  );
+  assert.equal(ctaSource.includes("const entered = useRef(false)"), false);
+});

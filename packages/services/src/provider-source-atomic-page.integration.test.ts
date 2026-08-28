@@ -1855,6 +1855,39 @@ test("mixed normalized page commits valid siblings, quarantine, EV, diagnostic, 
   }
 });
 
+test("provider page persistence updates settlement watermark without reading source heads", async () => {
+  const runtime = await createRuntime("settlement-write-only");
+  let sourceHeadReadCount = 0;
+  const stopObserving = runtime.observeQueries((query) => {
+    const normalized = query.replace(/\s+/gu, " ").toLowerCase();
+    if (
+      normalized.includes("select distinct on (source_key)") &&
+      normalized.includes("from public.public_change_causes")
+    ) {
+      sourceHeadReadCount += 1;
+    }
+  });
+  try {
+    const result = await service(runtime).importPage({
+      pins: runtime.pins,
+      adapterResult: runtime.adapterResult,
+      committedAt: await databaseNow(runtime.database),
+    });
+    stopObserving();
+
+    assert.equal(result.kind, "committed");
+    assert.equal(sourceHeadReadCount, 0);
+    const watermark =
+      await runtime.database.settled_public_watermarks.findUniqueOrThrow({
+        where: { organization_id: runtime.organizationId },
+    });
+    assert.ok(watermark.source_head_sequence > 0n);
+  } finally {
+    stopObserving();
+    await runtime.close();
+  }
+});
+
 test("representative mixed commit measures normalized, canonical, evidence, operational, and lineage storage", async () => {
   const runtime = await createRuntime("capacity-measurement");
   try {

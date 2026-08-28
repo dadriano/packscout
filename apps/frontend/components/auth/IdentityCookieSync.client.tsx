@@ -6,7 +6,11 @@ import {
   buildIdentityCookieValue,
   clearIdentityCookieValue,
   IDENTITY_COOKIE_REFRESH_INTERVAL_MS,
+  identityCookieAssignmentStores,
   identityTokenShapeValid,
+  identityWriteSupersededByClear,
+  readLastIdentityCookieWrite,
+  recordIdentityCookieWrite,
 } from "@/lib/identity-cookie";
 
 function cookieSecurityForLocation(): boolean {
@@ -21,6 +25,9 @@ function cookieSecurityForLocation(): boolean {
 export function clearBrowserIdentityCookie(): void {
   if (typeof document === "undefined") return;
   document.cookie = clearIdentityCookieValue(cookieSecurityForLocation());
+  // Logged so an in-flight refresh cannot write the credential back, and so
+  // the sign-in hand-off can tell a cleared cookie from a live one.
+  recordIdentityCookieWrite({ kind: "cleared", token: null, atMs: Date.now() });
 }
 
 /**
@@ -53,16 +60,36 @@ export function IdentityAccessCookieSync() {
 
     let disposed = false;
     const sync = async () => {
+      // A sign-out that lands while this fetch is outstanding must win. The
+      // effect's own cleanup only closes after React commits the signed-out
+      // render, so `disposed` alone would let a resolving refresh restore a
+      // live credential the visitor just ended.
+      const seenSeq = readLastIdentityCookieWrite()?.seq ?? 0;
       try {
         const token = await getAccessToken();
         if (disposed) return;
-        document.cookie = token !== null && identityTokenShapeValid(token)
-          ? buildIdentityCookieValue({
-            token,
-            nowMs: Date.now(),
-            secure: cookieSecurityForLocation(),
+        if (
+          identityWriteSupersededByClear({
+            seenSeq,
+            latest: readLastIdentityCookieWrite(),
           })
-          : clearIdentityCookieValue(cookieSecurityForLocation());
+        ) {
+          return;
+        }
+        const secure = cookieSecurityForLocation();
+        const assignment = token !== null && identityTokenShapeValid(token)
+          ? buildIdentityCookieValue({ token, nowMs: Date.now(), secure })
+          : clearIdentityCookieValue(secure);
+        document.cookie = assignment;
+        // An expired or malformed token becomes a clearing write, so the log
+        // records what the cookie jar actually holds rather than what was
+        // offered to it.
+        const stored = identityCookieAssignmentStores(assignment, secure);
+        recordIdentityCookieWrite({
+          kind: stored ? "written" : "cleared",
+          token: stored ? token : null,
+          atMs: Date.now(),
+        });
       } catch {
         // Keep whatever cookie exists; the server re-verifies every request,
         // and an expired value only ever reads as signed out.

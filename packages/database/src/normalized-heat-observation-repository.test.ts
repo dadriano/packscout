@@ -19,6 +19,7 @@ import type { CommitPageInput } from "./pipeline-types.ts";
 import {
   advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
+  PrismaPublicChangeSettlementRepository,
 } from "./public-change-settlement-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
@@ -878,6 +879,9 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     const reader = new PrismaNormalizedHeatObservationRepository(harness.client, {
       organizationId: ids.organization,
     });
+    const settlement = new PrismaPublicChangeSettlementRepository(
+      harness.client,
+    );
     const unsettled = await reader.listSettledNormalizedHeatObservations({
       organizationId: ids.organization,
       publicRepackIds: [ids.publicRepack],
@@ -900,7 +904,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     );
 
     const settledAt = new Date(committedAt.getTime() + 1_000);
-    const checkpoint = await harness.client.$transaction(async (transaction) => {
+    await harness.client.$transaction(async (transaction) => {
       await transaction.public_derivation_obligations.updateMany({
         where: { organization_id: ids.organization },
         data: {
@@ -911,11 +915,12 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           updated_at: settledAt,
         },
       });
-      return advanceSettledPublicWatermark(transaction, {
+      await advanceSettledPublicWatermark(transaction, {
         organizationId: ids.organization,
         settledAt,
       });
     });
+    const checkpoint = await settlement.getSettledWatermark(ids.organization);
     assert.equal(checkpoint.settledSequence, sourceWatermark);
 
     const settled = await reader.listSettledNormalizedHeatObservations({
@@ -1176,9 +1181,9 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
         ["deferred", "MAPPING_MISSING"],
       ],
     );
-    const settledAfterLate = await harness.client.$transaction(
+    const lateSettledAt = new Date(settledAt.getTime() + 10_001);
+    await harness.client.$transaction(
       async (transaction) => {
-        const lateSettledAt = new Date(settledAt.getTime() + 10_001);
         await transaction.public_derivation_obligations.updateMany({
           where: {
             organization_id: ids.organization,
@@ -1192,11 +1197,14 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
             updated_at: lateSettledAt,
           },
         });
-        return advanceSettledPublicWatermark(transaction, {
+        await advanceSettledPublicWatermark(transaction, {
           organizationId: ids.organization,
           settledAt: lateSettledAt,
         });
       },
+    );
+    const settledAfterLate = await settlement.getSettledWatermark(
+      ids.organization,
     );
     const unrelatedUnmappedCoverage =
       await reader.listSettledNormalizedHeatObservations({
@@ -1305,9 +1313,9 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
       9,
       "a newly mapped pull contributes both pull and completed catalog relationship evidence",
     );
-    const mappedAfterApprovalSettled = await harness.client.$transaction(
+    const mappedSettledAt = new Date(settledAt.getTime() + 20_000);
+    await harness.client.$transaction(
       async (transaction) => {
-        const mappedSettledAt = new Date(settledAt.getTime() + 20_000);
         await transaction.public_derivation_obligations.updateMany({
           where: {
             organization_id: ids.organization,
@@ -1321,11 +1329,14 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
             updated_at: mappedSettledAt,
           },
         });
-        return advanceSettledPublicWatermark(transaction, {
+        await advanceSettledPublicWatermark(transaction, {
           organizationId: ids.organization,
           settledAt: mappedSettledAt,
         });
       },
+    );
+    const mappedAfterApprovalSettled = await settlement.getSettledWatermark(
+      ids.organization,
     );
     const newlyMapped = await reader.listSettledNormalizedHeatObservations({
       organizationId: ids.organization,
@@ -1456,9 +1467,9 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     assert.equal(highObservation.observation_kind, "pull");
     assert.ok(highObservation.public_change_sequence >= highSequence);
     assert.equal(highObservation.catalog_sequence, null);
-    const highSequenceSettled = await harness.client.$transaction(
+    const highSettledAt = new Date(settledAt.getTime() + 30_000);
+    await harness.client.$transaction(
       async (transaction) => {
-        const highSettledAt = new Date(settledAt.getTime() + 30_000);
         await transaction.public_derivation_obligations.updateMany({
           where: {
             organization_id: ids.organization,
@@ -1472,11 +1483,14 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
             updated_at: highSettledAt,
           },
         });
-        return advanceSettledPublicWatermark(transaction, {
+        await advanceSettledPublicWatermark(transaction, {
           organizationId: ids.organization,
           settledAt: highSettledAt,
         });
       },
+    );
+    const highSequenceSettled = await settlement.getSettledWatermark(
+      ids.organization,
     );
     const highSequenceRead =
       await reader.listSettledNormalizedHeatObservations({

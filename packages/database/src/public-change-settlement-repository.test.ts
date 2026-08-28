@@ -88,11 +88,14 @@ test("causes roll back with their authoritative write and settlement never skips
       1,
     );
 
-    const blocked = await harness.client.$transaction((transaction) =>
+    const reader = new PrismaPublicChangeSettlementRepository(harness.client);
+    const writeOnlyResult = await harness.client.$transaction((transaction) =>
       advanceSettledPublicWatermark(transaction, {
         organizationId: firstOrganizationId,
         settledAt: new Date("2026-08-15T01:01:01.000Z"),
       }));
+    assert.equal(writeOnlyResult, undefined);
+    const blocked = await reader.getSettledWatermark(firstOrganizationId);
     assert.equal(blocked.settledSequence, 1n);
     assert.equal(blocked.sourceHeadSequence, 3n);
 
@@ -111,21 +114,22 @@ test("causes roll back with their authoritative write and settlement never skips
         updated_at: completedAt,
       },
     });
-    const settled = await harness.client.$transaction((transaction) =>
+    await harness.client.$transaction((transaction) =>
       advanceSettledPublicWatermark(transaction, {
         organizationId: firstOrganizationId,
         settledAt: completedAt,
       }));
+    const settled = await reader.getSettledWatermark(firstOrganizationId);
     assert.equal(settled.settledSequence, 3n);
-    const stale = await harness.client.$transaction((transaction) =>
+    await harness.client.$transaction((transaction) =>
       advanceSettledPublicWatermark(transaction, {
         organizationId: firstOrganizationId,
         settledAt: new Date("2026-08-15T01:00:00.000Z"),
       }));
+    const stale = await reader.getSettledWatermark(firstOrganizationId);
     assert.equal(stale.settledSequence, 3n);
     assert.equal(stale.settledAt?.toISOString(), completedAt.toISOString());
 
-    const reader = new PrismaPublicChangeSettlementRepository(harness.client);
     const settledCauses = await reader.listSettledCauses({
       organizationId: firstOrganizationId,
       afterSequence: 0n,

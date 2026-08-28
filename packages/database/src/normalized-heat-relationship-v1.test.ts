@@ -43,6 +43,7 @@ import {
 import {
   advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
+  PrismaPublicChangeSettlementRepository,
 } from "./public-change-settlement-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
@@ -773,7 +774,7 @@ async function settleAll(input: {
   database: TestDatabase;
   settledAt: Date;
 }): Promise<bigint> {
-  return input.database.$transaction(async (transaction) => {
+  await input.database.$transaction(async (transaction) => {
     await transaction.public_derivation_obligations.updateMany({
       where: { organization_id: ids.organization },
       data: {
@@ -784,12 +785,15 @@ async function settleAll(input: {
         updated_at: input.settledAt,
       },
     });
-    const watermark = await advanceSettledPublicWatermark(transaction, {
+    await advanceSettledPublicWatermark(transaction, {
       organizationId: ids.organization,
       settledAt: input.settledAt,
     });
-    return watermark.settledSequence;
   });
+  const watermark = await new PrismaPublicChangeSettlementRepository(
+    input.database,
+  ).getSettledWatermark(ids.organization);
+  return watermark.settledSequence;
 }
 
 test("same-page V1 relationships cause pull and deduplicated catalog Heat evidence", async () => {

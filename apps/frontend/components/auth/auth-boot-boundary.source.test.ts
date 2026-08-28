@@ -111,6 +111,29 @@ test("the identity cookie follows the session and only exists inside the initial
   assert.match(cookieSyncSource, /visibilitychange/);
   assert.match(cookieSyncSource, /clearBrowserIdentityCookie/);
   assert.match(initializedSource, /clearBrowserIdentityCookie\(\);/);
+  // The credential dies with the sign-out attempt, not with its success: a
+  // provider failure must not leave the gate admitting someone who asked to
+  // leave.
+  assert.match(
+    initializedSource,
+    /\} finally \{[\s\S]*?clearBrowserIdentityCookie\(\);/,
+  );
+  // And not with its answer either. The awaited call bounds the provider at
+  // SIGN_OUT_CEILING_MS (proven in auth-boot.test.ts), which is what makes
+  // that `finally` reachable when the provider never answers — and reachable
+  // before the surface is told anything and leaves. Awaiting the raw provider
+  // logout here instead would put the clear behind a promise that never
+  // settles.
+  assert.match(
+    initializedSource,
+    /await logoutAndClearReturningSessionHint\(\s*privyLogout,/,
+  );
+  // Every assignment is logged, so the sign-in hand-off can tell a credential
+  // this session wrote from the one the gate already refused.
+  assert.match(cookieSyncSource, /recordIdentityCookieWrite\(\{/);
+  // And a sign-out that lands mid-refresh wins: the resolving fetch must not
+  // write a live credential back over the clear.
+  assert.match(cookieSyncSource, /identityWriteSupersededByClear\(\{/);
   // Transport, not trust: nothing here decides admission client-side.
   assert.equal(cookieSyncSource.includes("admitted"), false);
   assert.equal(cookieSyncSource.includes("getMyAccess"), false);

@@ -142,10 +142,13 @@ export interface StatementCounter {
   reset(): void;
 }
 
+export type QueryObserver = (query: string) => void;
+
 export interface MigratedTestDatabase {
   client: PackscoutPrismaClient;
   database: PackscoutPrismaClient;
   statementCounter: StatementCounter;
+  observeQueries(observer: QueryObserver): () => void;
   createIndependentClient(): Promise<PackscoutPrismaClient>;
   createClientLifecycle(): PrismaClientLifecycle;
   close(): Promise<void>;
@@ -175,16 +178,16 @@ function databaseUrlFor(adminUrl: URL, databaseName: string): string {
 
 function createInstrumentedClient(
   databaseUrl: string,
-  onQuery: () => void,
+  onQuery: QueryObserver,
 ): PackscoutPrismaClient {
   const client = new PrismaClient({
     datasources: { db: { url: databaseUrl } },
     log: [{ emit: "event", level: "query" }],
   });
   const eventClient = client as unknown as {
-    $on(event: "query", callback: () => void): void;
+    $on(event: "query", callback: (event: { query: string }) => void): void;
   };
-  eventClient.$on("query", onQuery);
+  eventClient.$on("query", ({ query }) => onQuery(query));
   return client;
 }
 
@@ -198,6 +201,7 @@ export async function createMigratedTestDatabase(): Promise<MigratedTestDatabase
   const admin = new Pool({ connectionString: adminUrl.toString(), max: 1 });
   const databaseUrl = databaseUrlFor(adminUrl, databaseName);
   const clients = new Set<PackscoutPrismaClient>();
+  const queryObservers = new Set<QueryObserver>();
   let statementCount = 0;
   let closePromise: Promise<void> | undefined;
 
@@ -233,8 +237,9 @@ export async function createMigratedTestDatabase(): Promise<MigratedTestDatabase
   }
 
   const createClient = (): PackscoutPrismaClient => {
-    const client = createInstrumentedClient(databaseUrl, () => {
+    const client = createInstrumentedClient(databaseUrl, (query) => {
       statementCount += 1;
+      for (const observer of queryObservers) observer(query);
     });
     clients.add(client);
     return client;
@@ -274,6 +279,10 @@ export async function createMigratedTestDatabase(): Promise<MigratedTestDatabase
     client,
     database: client,
     statementCounter,
+    observeQueries(observer) {
+      queryObservers.add(observer);
+      return () => queryObservers.delete(observer);
+    },
     async createIndependentClient() {
       const independent = createClient();
       try {
