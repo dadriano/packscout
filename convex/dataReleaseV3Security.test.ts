@@ -18,6 +18,7 @@ import {
   v3BatchRequest,
   v3FinalizeRequest,
   v3StartRequest,
+  V3_VENDOR_ID,
   V3_REPACK_ID_A,
   type V3FixturePlan,
 } from "./dataReleaseV3Fixture.test-support";
@@ -157,6 +158,32 @@ async function buildSecurityPlan(): Promise<V3FixturePlan> {
   });
 }
 
+function providerObservationRequest(plan: V3FixturePlan) {
+  const observedAtMilliseconds = Date.now();
+  const observedAt = new Date(observedAtMilliseconds).toISOString();
+  return {
+    schemaVersion: "data_release_v3" as const,
+    operationId: `v3-security-provider-observation:${plan.publicReleaseId}`,
+    idempotencyKey: `v3-security-provider-observation:${plan.publicReleaseId}`,
+    publicReleaseId: plan.publicReleaseId,
+    releaseFingerprint: plan.releaseFingerprint,
+    publicVendorId: V3_VENDOR_ID,
+    vendorKey: "collector_example",
+    observationSequence: 1,
+    observedAt,
+    freshThrough: new Date(
+      observedAtMilliseconds + 15 * 60_000,
+    ).toISOString(),
+    lastHeadReachedAt: observedAt,
+    sourceHeadSequence: "100",
+    settledSequence: "100",
+    sourceLifecycle: "active" as const,
+    connectionState: "healthy" as const,
+    qualityState: "healthy" as const,
+    releaseAlignment: "aligned" as const,
+  };
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -242,6 +269,21 @@ describe("data_release_v3 HTTP transport", () => {
     expect(activateReceipt).toMatchObject({
       operationKind: "activate",
       result: "activated",
+    });
+    const observationReceipt = await expectSignedV3Receipt(await postV3(
+      t,
+      PRODUCTION_DATA_RELEASE_V3_PATHS.refreshProviderObservation,
+      providerObservationRequest(plan),
+    ));
+    expect(observationReceipt).toMatchObject({
+      operationKind: "refreshProviderObservation",
+      result: "provider_observation_created",
+      publicReleaseId: RELEASE_ID,
+      details: {
+        publicVendorId: V3_VENDOR_ID,
+        vendorKey: "collector_example",
+        observationSequence: 1,
+      },
     });
     const activeState = await expectSignedV3Receipt(await postV3(
       t,

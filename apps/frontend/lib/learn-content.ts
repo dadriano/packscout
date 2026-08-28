@@ -52,11 +52,11 @@ export const PACKSCOUT_EV_METHOD = Object.freeze({
     },
     {
       title: "Confidence measures evidence, not upside",
-      body: `Available estimates start at full confidence, and only the approved evidence penalties reduce it: platform-published odds used instead of verified current-pool odds, midpoint value ranges, and delayed source data. Bands are Low, Medium, and High. ${METRIC_TRUST_COPY.confidenceExplanation}`,
+      body: `Available estimates start at full confidence, and only the approved evidence penalties reduce it: platform-published odds used instead of verified current-pool odds, midpoint value ranges, and delayed source data. Through 60 minutes, confidence matches the calculation-time score; after 60 minutes, the estimate becomes Last-known and its confidence continues to decay toward zero without hiding its economics. Bands are Low, Medium, and High. ${METRIC_TRUST_COPY.confidenceExplanation}`,
     },
     {
       title: "Unavailable beats a guess",
-      body: `Incomplete or conflicting odds, missing stated values, unknown buyback eligibility, an unsupported currency, or source data older than 60 minutes produce Unavailable or Expired — never a partial estimate, a silent zero, or a low-confidence guess. ${METRIC_TRUST_COPY.unavailableExplanation}`,
+      body: `Incomplete or conflicting odds, missing stated values, unknown buyback eligibility, or an unsupported currency produce Unavailable — never a partial estimate, a silent zero, or a low-confidence guess. A calculable estimate stays visible as Last-known when its evidence ages. Unavailable means required supported inputs are missing. Age alone does not make an estimate unavailable. ${METRIC_TRUST_COPY.unavailableExplanation}`,
     },
     {
       title: "What EV is not",

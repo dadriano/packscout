@@ -137,6 +137,7 @@ export const productionDataReleaseV3PathSchema = z.enum([
   PRODUCTION_DATA_RELEASE_V3_PATHS.activate,
   PRODUCTION_DATA_RELEASE_V3_PATHS.rollback,
   PRODUCTION_DATA_RELEASE_V3_PATHS.status,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.refreshProviderObservation,
 ]);
 
 export const productionPublicationPathSchema = z.union([

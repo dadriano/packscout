@@ -219,6 +219,27 @@
   padding-top: 0.85rem;
 }
 
+.providerHealth {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 38%, var(--color-border));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  padding: 0.65rem 0.72rem;
+  color: var(--color-warning-strong);
+  font-size: 0.64rem;
+  line-height: 1.4;
+}
+
+.providerHealth strong {
+  font-size: 0.68rem;
+}
+
+.providerHealth time {
+  color: var(--color-text-muted);
+}
+
 .vendorEstimateMetrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

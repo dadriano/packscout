@@ -1,7 +1,7 @@
-import type { PackScoutBuybackEvConfidenceLimitationCodeV1 } from "@packscout/contracts";
+import type { PackScoutPublicEvPresentationLimitationCodeV1 } from "@packscout/contracts";
 
 export type PackScoutConfidenceLimitationCode =
-  PackScoutBuybackEvConfidenceLimitationCodeV1;
+  PackScoutPublicEvPresentationLimitationCodeV1;
 
 /**
  * Public copy for the exact confidence-policy V1 limitation vocabulary. Each
@@ -17,6 +17,8 @@ export const PUBLIC_CONFIDENCE_LIMITATION_COPY = Object.freeze({
     "Source data delayed (15–30 minutes old).",
   source_age_over_30_through_60_minutes:
     "Source data delayed (30–60 minutes old).",
+  source_age_over_60_minutes:
+    "Source evidence is over 60 minutes old; confidence continues to decay while the last-known estimate remains visible.",
 } satisfies Readonly<Record<PackScoutConfidenceLimitationCode, string>>);
 
 export function presentConfidenceLimitations(

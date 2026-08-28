@@ -25,7 +25,9 @@ import {
   type DataReleaseV3ApplyBatchRequest,
   type DataReleaseV3FinalizeRequest,
   type DataReleaseV3PublicationPort,
+  type DataReleaseV3ProviderObservationPort,
   type DataReleaseV3Receipt,
+  type DataReleaseV3RefreshProviderObservationRequest,
   type DataReleaseV3ReleaseStatus,
   type DataReleaseV3RollbackRequest,
   type DataReleaseV3StartRequest,
@@ -199,7 +201,7 @@ type WriteOperationBinding = Readonly<{
 }>;
 
 export class SignedConvexDataReleaseV3PublicationClient
-  implements DataReleaseV3PublicationPort
+  implements DataReleaseV3PublicationPort, DataReleaseV3ProviderObservationPort
 {
   readonly #http: SignedConvexPublicationHttpClient;
 
@@ -239,6 +241,7 @@ export class SignedConvexDataReleaseV3PublicationClient
       | DataReleaseV3ApplyBatchRequest
       | DataReleaseV3FinalizeRequest
       | DataReleaseV3ActivateRequest
+      | DataReleaseV3RefreshProviderObservationRequest
       | DataReleaseV3RollbackRequest,
     binding: WriteOperationBinding,
     signal?: AbortSignal,
@@ -380,6 +383,17 @@ export class SignedConvexDataReleaseV3PublicationClient
       path: PRODUCTION_DATA_RELEASE_V3_PATHS.rollback,
       operationKind: "rollback",
       publicReleaseId: request.targetPublicReleaseId,
+    }, signal);
+  }
+
+  async refreshProviderObservation(
+    request: DataReleaseV3RefreshProviderObservationRequest,
+    signal?: AbortSignal,
+  ): Promise<DataReleaseV3Receipt> {
+    return this.#write(request, {
+      path: PRODUCTION_DATA_RELEASE_V3_PATHS.refreshProviderObservation,
+      operationKind: "refreshProviderObservation",
+      publicReleaseId: request.publicReleaseId,
     }, signal);
   }
 }

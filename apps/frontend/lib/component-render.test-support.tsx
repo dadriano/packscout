@@ -23,8 +23,8 @@ const { registerHooks } = nodeModule as unknown as {
  * Server-render support for component behavior tests. CSS module imports are
  * stubbed with a proxy that returns the class name, so components render
  * under node:test exactly as the Next.js server would render them; effects
- * and subscriptions do not run, which is precisely the hydration-safe
- * server-snapshot path the deadline behavior must preserve.
+ * and subscriptions do not run, which exercises the hydration-safe server
+ * snapshot the browser receives.
  *
  * Import this module before any component import so the hook is registered
  * first (ES module evaluation is depth-first in declaration order).

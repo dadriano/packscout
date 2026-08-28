@@ -65,9 +65,9 @@ test("the backfill classifies every canonical repack, reconciles the staged rele
           evidence: operationsEvidence({
             productKey,
             sourceRevisionId: "catalog-revision-available-1",
-            observedAt: OPERATIONS_TIMELINE.activeObservedAt,
+            observedAt: "2026-08-18T00:59:59.999Z",
           }),
-          calculatedAt: OPERATIONS_TIMELINE.calculatedAt,
+          calculatedAt: "2026-08-18T01:05:00.000Z",
         });
       }
       if (productKey === OPERATIONS_PACKS.noBuyback) {
@@ -145,10 +145,10 @@ test("the backfill classifies every canonical repack, reconciles the staged rele
       high: 2,
     });
     assert.deepEqual(ledger.counts.bySourceAge, {
-      fresh_within_15_minutes: 3,
+      fresh_within_15_minutes: 2,
       delayed_over_15_through_30_minutes: 0,
       delayed_over_30_through_60_minutes: 0,
-      stale_or_expired: 1,
+      stale_or_expired: 2,
       unknown_source_time: 1,
     });
     assert.deepEqual(ledger.methodVersions, [
@@ -179,6 +179,10 @@ test("the backfill classifies every canonical repack, reconciles the staged rele
     assert.equal(
       byProduct.get(OPERATIONS_PACKS.available)?.classification,
       "recomputed_available",
+    );
+    assert.equal(
+      byProduct.get(OPERATIONS_PACKS.available)?.sourceAgeBucket,
+      "stale_or_expired",
     );
     assert.equal(
       byProduct.get(OPERATIONS_PACKS.noBuyback)?.publicReason,
@@ -238,6 +242,7 @@ test("the backfill classifies every canonical repack, reconciles the staged rele
       unbindable: 0,
       skippedNoEvidence: 1,
     });
+
     assert.equal(await harness.database.buyback_ev_revisions.count(), 4);
     assert.equal(port.state.activeRelease, null);
 

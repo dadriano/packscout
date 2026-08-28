@@ -1,6 +1,5 @@
 import type {
   DashboardKpis,
-  PackScoutPublicEvV3,
   PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import {
@@ -93,8 +92,8 @@ export function presentDashboardKpis(
       id: "medianEv",
       label: "Median EV",
       value: median.displayValue,
-      helper: `Median EV % · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
-      accessibleLabel: median.accessibleLabel,
+      helper: `Known current + last-known EV · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
+      accessibleLabel: `${median.accessibleLabel} Includes known current and last-known estimates. ${countLabel(kpis.highConfidenceRepacks)} high-confidence repacks.`,
       state: median.semanticState ?? "plain",
       stateLabel: median.semanticLabel,
       ...(median.availability === "unavailable"
@@ -119,13 +118,14 @@ export function presentDashboardKpis(
 
 /**
  * Presents one server-ranked opportunity row. The rank comes from the
- * server's signed-EV-dollar ordering, and `estimate` is the deadline-resolved
- * PackScout estimate for the row (defaults to the served projection).
+ * server's signed-EV-dollar ordering, and `estimate` is the server-evaluated
+ * PackScout presentation for the row (defaults to the served projection).
  */
 export function presentOpportunityRow(
   repack: PublicRepackViewSummaryV3,
   rank: number,
-  estimate: PackScoutPublicEvV3 = repack.evEstimates.packScout,
+  estimate: PublicRepackViewSummaryV3["packScoutEvPresentation"] =
+    repack.packScoutEvPresentation,
 ): OpportunityPresentation {
   return Object.freeze({
     rank,
@@ -187,7 +187,7 @@ export function presentCatalogSummaries(
         repackCountLabel: repacks,
         barRatio: largestCount === 0 ? 0 : summary.repackCount / largestCount,
         medianEvPercent: median,
-        accessibleLabel: `${summary.label}: ${repacks} repacks. Median EV %: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
+        accessibleLabel: `${summary.label}: ${repacks} repacks. Median known current and last-known EV %: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
       };
     }),
   );

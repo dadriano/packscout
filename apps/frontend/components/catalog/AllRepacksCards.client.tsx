@@ -13,9 +13,9 @@ import {
   presentRepackPrice,
   presentTopChaseValue,
 } from "@/lib/packscout-ev-presentation";
-import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
+import { presentProviderHealthV3 } from "@/lib/provider-health-presentation";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import styles from "./AllRepacksCards.module.css";
 
@@ -39,9 +39,8 @@ function RepackCard({
   desiredSearchActive: boolean;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
 }>) {
-  const boundEstimate = useDeadlineBoundPackScoutEv(repack.evEstimates.packScout);
   const estimate = presentPackScoutEvV3({
-    estimate: boundEstimate,
+    estimate: repack.packScoutEvPresentation,
     price: repack.price,
     availability: repack.availability,
     repackName: repack.name,
@@ -54,6 +53,7 @@ function RepackCard({
     desiredSearchActive ? "Desired Chase Value" : "Top Chase Value",
   );
   const availability = presentPackAvailability(repack.availability);
+  const providerHealth = presentProviderHealthV3(repack.providerHealth);
 
   return (
     <article className={styles.card} data-selected={selected ? "true" : "false"}>
@@ -94,10 +94,36 @@ function RepackCard({
         <MetricValue compact metric={buyback} showReason={false} />
       </div>
 
+      {estimate.status === "last_known" || !providerHealth.rankingEligible ? (
+        <div
+          className={styles.evidence}
+          data-health={providerHealth.state}
+        >
+          {estimate.status === "last_known" ? (
+            <>
+              <strong>{estimate.statusLabel}</strong>
+              {estimate.freshness.sourceAgeLabel ? (
+                <span>{estimate.freshness.sourceAgeLabel}</span>
+              ) : null}
+              {estimate.freshness.dataAsOf ? (
+                <time dateTime={estimate.freshness.dataAsOf}>
+                  {estimate.freshness.dataAsOfLabel}
+                </time>
+              ) : null}
+            </>
+          ) : null}
+          {!providerHealth.rankingEligible ? (
+            <span>{providerHealth.rankingLabel}</span>
+          ) : null}
+        </div>
+      ) : null}
+
       <dl className={styles.details}>
         <div>
           <dt>EV confidence</dt>
-          <dd>{estimate.confidence.displayValue}</dd>
+          <dd aria-label={estimate.confidence.accessibleLabel}>
+            {estimate.confidence.displayValue}
+          </dd>
         </div>
         <div>
           <dt>{desiredSearchActive ? "Desired chase" : "Top chase"}</dt>
@@ -132,7 +158,7 @@ export function AllRepacksCards({
           <p className={styles.eyebrow}>
             {desiredCollectibleIdentity
               ? `Exact chase matches · ${desiredCollectibleIdentity}`
-              : "Current repack data"}
+              : "Published repack data"}
           </p>
           <h2 className={styles.title} id="all-repacks-cards-title">All repacks</h2>
         </div>

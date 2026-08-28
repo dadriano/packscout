@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { PublicRepackViewSummaryV3 } from "@packscout/contracts";
 import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
-import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
+import type { DashboardBundleV3 } from "@/lib/public-repacks-v3";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { CatalogImage } from "./CatalogImage.client";
 import { presentOpportunityRow } from "./overview-presentation";
@@ -16,6 +16,7 @@ export type OpportunitySelectionHandler = (
 
 type OpportunityTableProps = Readonly<{
   opportunities: readonly PublicRepackViewSummaryV3[];
+  opportunityEligibility: DashboardBundleV3["opportunityEligibility"];
   repacksHref: string;
   selectedPublicRepackId: string | null;
   onSelectOpportunity: OpportunitySelectionHandler;
@@ -78,8 +79,7 @@ function OpportunityRow({
   selected: boolean;
   onSelectOpportunity: OpportunitySelectionHandler;
 }>) {
-  const estimate = useDeadlineBoundPackScoutEv(repack.evEstimates.packScout);
-  const row = presentOpportunityRow(repack, rank, estimate);
+  const row = presentOpportunityRow(repack, rank);
 
   return (
     <tr data-selected={selected ? "true" : "false"}>
@@ -133,9 +133,25 @@ function OpportunityRow({
       </td>
       <td>
         <MetricCell metric={row.packScoutEv.evPercent} />
-        <span className={styles.unavailableReason}>
+        <span
+          aria-label={row.packScoutEv.confidence.accessibleLabel}
+          className={styles.unavailableReason}
+        >
           Confidence: {row.packScoutEv.confidence.displayValue}
         </span>
+        {row.packScoutEv.status === "last_known" ? (
+          <span className={styles.estimateEvidence}>
+            {row.packScoutEv.statusLabel}
+            {row.packScoutEv.freshness.sourceAgeLabel ? (
+              <span>{row.packScoutEv.freshness.sourceAgeLabel}</span>
+            ) : null}
+            {row.packScoutEv.freshness.dataAsOf ? (
+              <time dateTime={row.packScoutEv.freshness.dataAsOf}>
+                {row.packScoutEv.freshness.dataAsOfLabel}
+              </time>
+            ) : null}
+          </span>
+        ) : null}
       </td>
       <td>
         <MetricCell metric={row.buyback} />
@@ -149,10 +165,14 @@ function OpportunityRow({
 
 export function OpportunityTable({
   opportunities,
+  opportunityEligibility,
   repacksHref,
   selectedPublicRepackId,
   onSelectOpportunity,
 }: OpportunityTableProps) {
+  const hasProviderExclusions =
+    opportunityEligibility.providerIneligibleRepackCount > 0;
+
   return (
     <section aria-labelledby="top-opportunities-heading" className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -167,6 +187,16 @@ export function OpportunityTable({
           {opportunities.length === 1 ? "repack" : "repacks"}
         </span>
       </div>
+
+      {hasProviderExclusions ? (
+        <p className={styles.eligibilityNotice}>
+          Provider feed delayed; excluded from Top Opportunities. Last-known EV
+          remains available in All Repacks for {opportunityEligibility.providerIneligibleRepackCount}{" "}
+          {opportunityEligibility.providerIneligibleRepackCount === 1
+            ? "repack"
+            : "repacks"}.
+        </p>
+      ) : null}
 
       {opportunities.length > 0 ? (
         <div
@@ -222,7 +252,11 @@ export function OpportunityTable({
         </div>
       ) : (
         <div className={styles.emptyState}>
-          <p role="status">No estimated opportunities match these filters.</p>
+          <p role="status">
+            {hasProviderExclusions
+              ? "No repacks are currently eligible for Top Opportunities because provider data is delayed."
+              : "No estimated opportunities match these filters."}
+          </p>
           <Link className={styles.emptyAction} href={repacksHref}>
             View matching repacks
           </Link>

@@ -27,6 +27,7 @@ export const CONVEX_APP_TABLES = Object.freeze([
   "dataReleaseV3Chases",
   "dataReleaseV3Collectibles",
   "dataReleaseV3Operations",
+  "dataReleaseV3ProviderObservations",
   "dataReleaseV3Releases",
   "dataReleaseV3Repacks",
   "dataReleaseV3SearchShards",

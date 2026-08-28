@@ -11,6 +11,7 @@ const everyLimitationCode: readonly PackScoutConfidenceLimitationCode[] = [
   "platform_published_odds",
   "source_age_over_15_through_30_minutes",
   "source_age_over_30_through_60_minutes",
+  "source_age_over_60_minutes",
 ];
 
 test("maps the exact confidence-policy V1 limitation vocabulary to copy", () => {
@@ -38,5 +39,9 @@ test("limitation copy describes evidence, never profit or predicted outcomes", (
   assert.match(
     PUBLIC_CONFIDENCE_LIMITATION_COPY.closed_range_midpoint,
     /Midpoint value ranges/,
+  );
+  assert.match(
+    PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_60_minutes,
+    /last-known estimate remains visible/,
   );
 });
