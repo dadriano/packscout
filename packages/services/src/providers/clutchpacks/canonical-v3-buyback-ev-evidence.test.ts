@@ -424,6 +424,7 @@ test("canonical V3 exact uniform 90% terms and normalized counts produce strict 
     },
     {
       sourceRevisionId: `delivery:${product.observation.deliveryOccurrenceId}`,
+      sourceManifestSha256: product.observation.normalizedContentHash,
     },
     {
       sourceRevisionId: `canonical:${product.productRevisionId}`,
@@ -470,7 +471,7 @@ test("canonical V3 does not invent a 90% default when only one normalized buybac
   );
 });
 
-test("a coherent duplicate delivery refreshes source age once the governed read clock covers it", async () => {
+test("delivery identity replays exactly and advances for a newer coherent collection", async () => {
   const productKey = uuid(40_000);
   const product = productObservation({ productKey, sequence: 1 });
   const first = sourceFor(snapshot([product]));
@@ -489,8 +490,9 @@ test("a coherent duplicate delivery refreshes source age once the governed read 
     readAt: READ_AT,
   } as const;
   const before = await first.source.loadCommand(commandInput);
+  const sameOccurrence = await first.source.loadCommand(commandInput);
   const after = await replayed.source.loadCommand(commandInput);
-  assert.ok(before && after);
+  assert.ok(before && sameOccurrence && after);
   const beforeInput = (before.evidence as {
     input: { observation: { observedAt: string; collectionGuardSha256: string } };
   }).input;
@@ -511,6 +513,25 @@ test("a coherent duplicate delivery refreshes source age once the governed read 
     before.sourceRevisions?.[1]?.sourceRevisionId,
     after.sourceRevisions?.[1]?.sourceRevisionId,
   );
+
+  const port = new InMemoryBuybackEvRevisionPort();
+  const service = new PackScoutBuybackAdjustedEvRecomputationService(
+    new PackScoutBuybackEvRevisionStore(port),
+  );
+  assert.equal((await service.recompute(before)).outcome, "created");
+  assert.equal((await service.recompute(sameOccurrence)).outcome, "unchanged");
+  assert.equal((await service.recompute(after)).outcome, "created");
+  assert.equal(port.rows.length, 2);
+  assert.notEqual(port.rows[0]?.calculationKey, port.rows[1]?.calculationKey);
+  assert.notEqual(
+    port.rows[0]?.effectiveFingerprint,
+    port.rows[1]?.effectiveFingerprint,
+  );
+  assert.equal(
+    port.rows[0]?.sourceRevisionId,
+    `delivery:${product.observation.deliveryOccurrenceId}`,
+  );
+  assert.equal(port.rows[1]?.sourceRevisionId, "delivery:99999");
 });
 
 test("a time-only semantic replay creates a fresh current EV revision while retaining the canonical origin", async () => {
@@ -574,7 +595,7 @@ test("a time-only semantic replay creates a fresh current EV revision while reta
   assert.equal(port.rows[1]?.status, "available");
   assert.equal(
     port.rows[1]?.sourceRevisionId,
-    `semantic:${replayedProduct.observation.semanticObservationId}`,
+    `delivery:${replayedProduct.observation.deliveryOccurrenceId}`,
   );
   assert.equal(
     (await port.getCurrentCompletedRevision({
@@ -863,6 +884,8 @@ test("a ready-to-unavailable inventory transition emits deterministic unavailabl
     {
       sourceRevisionId:
         `delivery:${unavailableProduct.observation.deliveryOccurrenceId}`,
+      sourceManifestSha256:
+        unavailableProduct.observation.normalizedContentHash,
     },
     {
       sourceRevisionId: `canonical:${unavailableProduct.productRevisionId}`,

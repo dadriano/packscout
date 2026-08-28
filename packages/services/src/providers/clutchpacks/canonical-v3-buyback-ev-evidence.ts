@@ -494,7 +494,10 @@ async function evidenceDraft(
   return {
     observation: {
       providerKey: CLUTCHPACKS_CANONICAL_V3_PLATFORM_KEY,
-      sourceRevisionId: `semantic:${observation.semanticObservationId}`,
+      // Freshness and the guarded collection proof belong to this exact
+      // delivery. A later delivery of the same semantic observation must not
+      // reuse the immutable calculation identity of the earlier collection.
+      sourceRevisionId: `delivery:${observation.deliveryOccurrenceId}`,
       sourceManifestSha256: observation.normalizedContentHash,
       observedAt: observation.collectedAt,
       coherence: { kind: "guarded_collection", collectionGuardSha256: guard },
@@ -637,6 +640,9 @@ implements PackScoutBuybackEvBackfillEvidenceSourceV1 {
         },
         {
           sourceRevisionId: `delivery:${observation.deliveryOccurrenceId}`,
+          // Bind the delivery identity to the independently retained semantic
+          // bytes while preserving the semantic observation reference above.
+          sourceManifestSha256: observation.normalizedContentHash,
         },
         {
           sourceRevisionId: `canonical:${product.productRevisionId}`,
