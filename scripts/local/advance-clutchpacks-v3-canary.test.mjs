@@ -341,20 +341,34 @@ test("the original proof selects one exact active adapter-v1 Clutch source", () 
 });
 
 test("every driver action requires the exact active-source migration subset", async () => {
-  const valid = Object.freeze({
-    migrationName: "20260827010000_provider_source_platform_request_lanes",
-    checksum:
-      "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+  const valid = [
+    {
+      migrationName: "20260819010000_buyback_ev_revisions",
+      checksum:
+        "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
+    },
+    {
+      migrationName: "20260827010000_provider_source_platform_request_lanes",
+      checksum:
+        "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+    },
+  ].map((migration) => Object.freeze({
+    ...migration,
     finishedAt: new Date("2026-08-27T08:00:00.000Z"),
     rolledBackAt: null,
-    tableCount: 84,
-  });
+    tableCount: 87,
+  }));
   await assert.doesNotReject(
-    assertOriginalClutchpacksV1DatabaseReady(async () => [valid]),
+    assertOriginalClutchpacksV1DatabaseReady(async () => valid),
   );
   for (const readEvidence of [
-    async () => [{ ...valid, checksum: "0".repeat(64) }],
-    async () => [{ ...valid, tableCount: 88 }],
+    async () => valid.slice(1),
+    async () => valid.map((row, index) =>
+      index === 0 ? { ...row, checksum: "0".repeat(64) } : row
+    ),
+    async () => valid.map((row, index) =>
+      index === 1 ? { ...row, tableCount: 88 } : row
+    ),
     async () => {
       throw new Error("database details must remain private");
     },

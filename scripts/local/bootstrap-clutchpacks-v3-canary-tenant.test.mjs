@@ -207,26 +207,51 @@ test("replay capacity requires only the original Clutch lane paused and drained"
   );
 });
 
-test("the active source requires the exact 84-table migration subset", () => {
-  const valid = Object.freeze({
-    migrationName: "20260827010000_provider_source_platform_request_lanes",
-    checksum:
-      "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+test("the active source requires both exact migrations and 87 tables", () => {
+  const migrations = [
+    {
+      migrationName: "20260819010000_buyback_ev_revisions",
+      checksum:
+        "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
+    },
+    {
+      migrationName: "20260827010000_provider_source_platform_request_lanes",
+      checksum:
+        "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+    },
+  ].map((migration) => Object.freeze({
+    ...migration,
     finishedAt: new Date("2026-08-27T08:00:00.000Z"),
     rolledBackAt: null,
-    tableCount: 84,
-  });
+    tableCount: 87,
+  }));
   assert.doesNotThrow(() =>
-    assertClutchpacksV3ActiveSourceMigrationReadiness([valid])
+    assertClutchpacksV3ActiveSourceMigrationReadiness(migrations)
   );
   for (const evidence of [
     [],
-    [{ ...valid, checksum: "0".repeat(64) }],
-    [{ ...valid, finishedAt: null }],
-    [{ ...valid, rolledBackAt: new Date("2026-08-27T09:00:00.000Z") }],
-    [{ ...valid, tableCount: 83 }],
-    [{ ...valid, tableCount: 88 }],
-    [valid, valid],
+    migrations.slice(1),
+    migrations.map((row, index) =>
+      index === 0 ? { ...row, checksum: "0".repeat(64) } : row
+    ),
+    migrations.map((row, index) =>
+      index === 1 ? { ...row, checksum: "0".repeat(64) } : row
+    ),
+    migrations.map((row, index) =>
+      index === 0 ? { ...row, finishedAt: null } : row
+    ),
+    migrations.map((row, index) =>
+      index === 1
+        ? { ...row, rolledBackAt: new Date("2026-08-27T09:00:00.000Z") }
+        : row
+    ),
+    migrations.map((row, index) =>
+      index === 0 ? { ...row, tableCount: 86 } : row
+    ),
+    migrations.map((row, index) =>
+      index === 1 ? { ...row, tableCount: 88 } : row
+    ),
+    [migrations[0], migrations[0]],
   ]) {
     assert.throws(
       () => assertClutchpacksV3ActiveSourceMigrationReadiness(evidence),
@@ -455,7 +480,7 @@ test("safe failures and help never expose credentials or require an admin", () =
   assert.match(result.stdout, /--dry-run/u);
   assert.match(result.stdout, /PACKSCOUT_CLUTCHPACKS_V1_DATABASE_URL/u);
   assert.match(result.stdout, /PACKSCOUT_DATABASE_URL/u);
-  assert.match(result.stdout, /84-table active-source migration subset/u);
+  assert.match(result.stdout, /87-table active-source migration subset/u);
   assert.match(result.stdout, /91-table composite schema/u);
   assert.match(result.stdout, /does not queue tests,/u);
   assert.match(result.stdout, /call DataForrest/u);
