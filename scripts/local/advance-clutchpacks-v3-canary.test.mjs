@@ -54,6 +54,41 @@ function hasCode(code) {
     error instanceof ClutchpacksV3CanaryDriverError && error.code === code;
 }
 
+function currentCompositeMigrationEvidence(tableCount = 91) {
+  return [
+    {
+      migrationName: "20260819010000_buyback_ev_revisions",
+      checksum:
+        "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
+    },
+    {
+      migrationName: "20260826005000_source_relationship_confirmations",
+      checksum:
+        "19cfc4cdae5fc3615159c5ead740fdc3e3e83945bf6c9ec2176ce36067ce9a21",
+    },
+    {
+      migrationName: "20260826010000_heat_relationship_causality",
+      checksum:
+        "5ac08e4eb77bc83838d94796ace095c93dbdfab2344a2658cb87b46e3397193d",
+    },
+    {
+      migrationName: "20260827010000_provider_source_platform_request_lanes",
+      checksum:
+        "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+    },
+    {
+      migrationName: "20260827020000_buyback_ev_provider_source_origin",
+      checksum:
+        "10ae3670f6fbafb0ed529154ac7aad227b60bab735630e1079e805ddf8e7b24e",
+    },
+  ].map((migration) => Object.freeze({
+    ...migration,
+    finishedAt: new Date("2026-08-27T08:00:00.000Z"),
+    rolledBackAt: null,
+    tableCount,
+  }));
+}
+
 function successfulTest() {
   return { state: "succeeded", hasSuccessfulResult: true };
 }
@@ -340,34 +375,34 @@ test("the original proof selects one exact active adapter-v1 Clutch source", () 
   }
 });
 
-test("every driver action requires the exact active-source migration subset", async () => {
-  const valid = [
-    {
-      migrationName: "20260819010000_buyback_ev_revisions",
-      checksum:
-        "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
-    },
-    {
-      migrationName: "20260827010000_provider_source_platform_request_lanes",
-      checksum:
-        "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
-    },
-  ].map((migration) => Object.freeze({
-    ...migration,
-    finishedAt: new Date("2026-08-27T08:00:00.000Z"),
-    rolledBackAt: null,
-    tableCount: 87,
-  }));
+test("every driver action requires the exact current source schema", async () => {
+  const valid = currentCompositeMigrationEvidence();
+  const legacy87 = currentCompositeMigrationEvidence(87).filter((row) =>
+    row.migrationName === "20260819010000_buyback_ev_revisions" ||
+    row.migrationName ===
+      "20260827010000_provider_source_platform_request_lanes"
+  );
   await assert.doesNotReject(
     assertOriginalClutchpacksV1DatabaseReady(async () => valid),
   );
   for (const readEvidence of [
+    async () => legacy87,
     async () => valid.slice(1),
+    async () => valid.filter((row) =>
+      row.migrationName !==
+        "20260826010000_heat_relationship_causality"
+    ),
     async () => valid.map((row, index) =>
       index === 0 ? { ...row, checksum: "0".repeat(64) } : row
     ),
     async () => valid.map((row, index) =>
-      index === 1 ? { ...row, tableCount: 88 } : row
+      index === 4 ? { ...row, checksum: "0".repeat(64) } : row
+    ),
+    async () => valid.map((row, index) =>
+      index === 2 ? { ...row, tableCount: 87 } : row
+    ),
+    async () => valid.map((row, index) =>
+      index === 3 ? { ...row, tableCount: 92 } : row
     ),
     async () => {
       throw new Error("database details must remain private");
@@ -1070,6 +1105,8 @@ test("failures and help output are stable and credential-free", () => {
   assert.match(usage, /PACKSCOUT_SOURCE_EXECUTION_SLOTS=1/u);
   assert.match(usage, /requestLimit of 2/u);
   assert.match(usage, /never calls DataForrest directly/u);
+  assert.match(usage, /exact 91-table/u);
+  assert.match(usage, /current-composite migration set/u);
   const help = spawnSync(
     process.execPath,
     ["--import", "tsx", scriptPath, "--help"],

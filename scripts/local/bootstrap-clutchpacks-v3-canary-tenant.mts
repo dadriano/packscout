@@ -58,17 +58,7 @@ const PLATFORM_REQUEST_LANES_MIGRATION =
   "20260827010000_provider_source_platform_request_lanes";
 const PLATFORM_REQUEST_LANES_MIGRATION_CHECKSUM =
   "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7";
-const ACTIVE_SOURCE_MIGRATIONS = Object.freeze([
-  Object.freeze({
-    name: BUYBACK_EV_REVISIONS_MIGRATION,
-    checksum: BUYBACK_EV_REVISIONS_MIGRATION_CHECKSUM,
-  }),
-  Object.freeze({
-    name: PLATFORM_REQUEST_LANES_MIGRATION,
-    checksum: PLATFORM_REQUEST_LANES_MIGRATION_CHECKSUM,
-  }),
-]);
-const TARGET_COMPOSITE_MIGRATIONS = Object.freeze([
+const CURRENT_COMPOSITE_MIGRATIONS = Object.freeze([
   Object.freeze({
     name: BUYBACK_EV_REVISIONS_MIGRATION,
     checksum: BUYBACK_EV_REVISIONS_MIGRATION_CHECKSUM,
@@ -93,8 +83,7 @@ const TARGET_COMPOSITE_MIGRATIONS = Object.freeze([
       "10ae3670f6fbafb0ed529154ac7aad227b60bab735630e1079e805ddf8e7b24e",
   }),
 ]);
-const ACTIVE_SOURCE_APPLICATION_TABLE_COUNT = 87;
-const TARGET_APPLICATION_TABLE_COUNT = 91;
+const CURRENT_APPLICATION_TABLE_COUNT = 91;
 
 export class ClutchpacksV3CanaryBootstrapError extends Error {
   override readonly name = "ClutchpacksV3CanaryBootstrapError";
@@ -327,10 +316,10 @@ export interface ClutchpacksV3MigrationEvidence {
 export function assertClutchpacksV3ActiveSourceMigrationReadiness(
   evidence: readonly ClutchpacksV3MigrationEvidence[],
 ): void {
-  if (evidence.length !== ACTIVE_SOURCE_MIGRATIONS.length) {
+  if (evidence.length !== CURRENT_COMPOSITE_MIGRATIONS.length) {
     refuse("ACTIVE_SOURCE_MIGRATION_READINESS_REQUIRED");
   }
-  for (const expected of ACTIVE_SOURCE_MIGRATIONS) {
+  for (const expected of CURRENT_COMPOSITE_MIGRATIONS) {
     const row = evidence.find((candidate) =>
       candidate.migrationName === expected.name
     );
@@ -339,7 +328,7 @@ export function assertClutchpacksV3ActiveSourceMigrationReadiness(
       row.checksum !== expected.checksum ||
       row.finishedAt === null ||
       row.rolledBackAt !== null ||
-      row.tableCount !== ACTIVE_SOURCE_APPLICATION_TABLE_COUNT
+      row.tableCount !== CURRENT_APPLICATION_TABLE_COUNT
     ) refuse("ACTIVE_SOURCE_MIGRATION_READINESS_REQUIRED");
   }
 }
@@ -347,10 +336,10 @@ export function assertClutchpacksV3ActiveSourceMigrationReadiness(
 export function assertClutchpacksV3TargetCompositeMigrations(
   evidence: readonly ClutchpacksV3MigrationEvidence[],
 ): void {
-  if (evidence.length !== TARGET_COMPOSITE_MIGRATIONS.length) {
+  if (evidence.length !== CURRENT_COMPOSITE_MIGRATIONS.length) {
     refuse("TARGET_COMPOSITE_MIGRATIONS_REQUIRED");
   }
-  for (const expected of TARGET_COMPOSITE_MIGRATIONS) {
+  for (const expected of CURRENT_COMPOSITE_MIGRATIONS) {
     const row = evidence.find((candidate) =>
       candidate.migrationName === expected.name
     );
@@ -359,7 +348,7 @@ export function assertClutchpacksV3TargetCompositeMigrations(
       row.checksum !== expected.checksum ||
       row.finishedAt === null ||
       row.rolledBackAt !== null ||
-      row.tableCount !== TARGET_APPLICATION_TABLE_COUNT
+      row.tableCount !== CURRENT_APPLICATION_TABLE_COUNT
     ) refuse("TARGET_COMPOSITE_MIGRATIONS_REQUIRED");
   }
 }
@@ -653,7 +642,7 @@ export function readClutchpacksV3ActiveSourceMigrationEvidence(
 ): Promise<readonly ClutchpacksV3MigrationEvidence[]> {
   return readMigrationEvidence(
     database,
-    ACTIVE_SOURCE_MIGRATIONS.map(({ name }) => name),
+    CURRENT_COMPOSITE_MIGRATIONS.map(({ name }) => name),
   );
 }
 
@@ -968,10 +957,11 @@ Required protected environment:
   PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION
 
 The source database is read in a read-only transaction and must prove the exact
-87-table active-source migration subset. The target must be a different, fresh,
-fully migrated local database containing the 91-table composite schema. Execute
-stages one ClutchPacks adapter-v3 draft at Feed start; it does not queue tests,
-call DataForrest, pause the original source, activate anything, or start replay.`;
+91-table current-composite migration set. The target must be a different, fresh,
+fully migrated local database containing that same 91-table composite schema.
+Execute stages one ClutchPacks adapter-v3 draft at Feed start; it does not queue
+tests, call DataForrest, pause the original source, activate anything, or start
+replay.`;
 }
 
 async function main(): Promise<void> {
@@ -1026,7 +1016,7 @@ async function main(): Promise<void> {
       readClutchpacksV3ActiveSourceMigrationEvidence(sourceDatabase),
       readMigrationEvidence(
         targetLifecycle.client,
-        TARGET_COMPOSITE_MIGRATIONS.map(({ name }) => name),
+        CURRENT_COMPOSITE_MIGRATIONS.map(({ name }) => name),
       ),
     ]);
     assertClutchpacksV3ActiveSourceMigrationReadiness(sourceMigration);

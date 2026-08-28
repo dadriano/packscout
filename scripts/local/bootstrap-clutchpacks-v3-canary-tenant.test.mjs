@@ -67,6 +67,41 @@ function emptySnapshot(overrides = {}) {
   };
 }
 
+function currentCompositeMigrationEvidence(tableCount = 91) {
+  return [
+    {
+      migrationName: "20260819010000_buyback_ev_revisions",
+      checksum:
+        "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
+    },
+    {
+      migrationName: "20260826005000_source_relationship_confirmations",
+      checksum:
+        "19cfc4cdae5fc3615159c5ead740fdc3e3e83945bf6c9ec2176ce36067ce9a21",
+    },
+    {
+      migrationName: "20260826010000_heat_relationship_causality",
+      checksum:
+        "5ac08e4eb77bc83838d94796ace095c93dbdfab2344a2658cb87b46e3397193d",
+    },
+    {
+      migrationName: "20260827010000_provider_source_platform_request_lanes",
+      checksum:
+        "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+    },
+    {
+      migrationName: "20260827020000_buyback_ev_provider_source_origin",
+      checksum:
+        "10ae3670f6fbafb0ed529154ac7aad227b60bab735630e1079e805ddf8e7b24e",
+    },
+  ].map((migration) => Object.freeze({
+    ...migration,
+    finishedAt: new Date("2026-08-27T08:00:00.000Z"),
+    rolledBackAt: null,
+    tableCount,
+  }));
+}
+
 test("source and target bindings are separate, stable, and credential-free", () => {
   const parsed = readClutchpacksV3CanaryBootstrapEnvironment(validEnvironment);
   assert.equal(parsed.sourceDatabaseName, "packscout_dev");
@@ -207,49 +242,43 @@ test("replay capacity requires only the original Clutch lane paused and drained"
   );
 });
 
-test("the active source requires both exact migrations and 87 tables", () => {
-  const migrations = [
-    {
-      migrationName: "20260819010000_buyback_ev_revisions",
-      checksum:
-        "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
-    },
-    {
-      migrationName: "20260827010000_provider_source_platform_request_lanes",
-      checksum:
-        "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
-    },
-  ].map((migration) => Object.freeze({
-    ...migration,
-    finishedAt: new Date("2026-08-27T08:00:00.000Z"),
-    rolledBackAt: null,
-    tableCount: 87,
-  }));
+test("the active source requires all current migrations and 91 tables", () => {
+  const migrations = currentCompositeMigrationEvidence();
+  const legacy87 = currentCompositeMigrationEvidence(87).filter((row) =>
+    row.migrationName === "20260819010000_buyback_ev_revisions" ||
+    row.migrationName ===
+      "20260827010000_provider_source_platform_request_lanes"
+  );
   assert.doesNotThrow(() =>
     assertClutchpacksV3ActiveSourceMigrationReadiness(migrations)
   );
   for (const evidence of [
     [],
+    legacy87,
     migrations.slice(1),
+    migrations.filter((row) =>
+      row.migrationName !==
+        "20260826005000_source_relationship_confirmations"
+    ),
     migrations.map((row, index) =>
       index === 0 ? { ...row, checksum: "0".repeat(64) } : row
     ),
     migrations.map((row, index) =>
-      index === 1 ? { ...row, checksum: "0".repeat(64) } : row
+      index === 4 ? { ...row, checksum: "0".repeat(64) } : row
     ),
     migrations.map((row, index) =>
       index === 0 ? { ...row, finishedAt: null } : row
     ),
     migrations.map((row, index) =>
-      index === 1
+      index === 3
         ? { ...row, rolledBackAt: new Date("2026-08-27T09:00:00.000Z") }
         : row
     ),
     migrations.map((row, index) =>
-      index === 0 ? { ...row, tableCount: 86 } : row
+      index === 0 ? { ...row, tableCount: 87 } : row
     ),
     migrations.map((row, index) =>
-      index === 1 ? { ...row, tableCount: 88 } : row
+      index === 1 ? { ...row, tableCount: 92 } : row
     ),
     [migrations[0], migrations[0]],
   ]) {
@@ -261,38 +290,7 @@ test("the active source requires both exact migrations and 87 tables", () => {
 });
 
 test("the target requires all composite migrations and 91 application tables", () => {
-  const migrations = [
-    {
-      migrationName: "20260819010000_buyback_ev_revisions",
-      checksum:
-        "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
-    },
-    {
-      migrationName: "20260826005000_source_relationship_confirmations",
-      checksum:
-        "19cfc4cdae5fc3615159c5ead740fdc3e3e83945bf6c9ec2176ce36067ce9a21",
-    },
-    {
-      migrationName: "20260826010000_heat_relationship_causality",
-      checksum:
-        "5ac08e4eb77bc83838d94796ace095c93dbdfab2344a2658cb87b46e3397193d",
-    },
-    {
-      migrationName: "20260827010000_provider_source_platform_request_lanes",
-      checksum:
-        "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
-    },
-    {
-      migrationName: "20260827020000_buyback_ev_provider_source_origin",
-      checksum:
-        "10ae3670f6fbafb0ed529154ac7aad227b60bab735630e1079e805ddf8e7b24e",
-    },
-  ].map((migration) => Object.freeze({
-    ...migration,
-    finishedAt: new Date("2026-08-27T08:00:00.000Z"),
-    rolledBackAt: null,
-    tableCount: 91,
-  }));
+  const migrations = currentCompositeMigrationEvidence();
   assert.doesNotThrow(() =>
     assertClutchpacksV3TargetCompositeMigrations(migrations)
   );
@@ -480,9 +478,9 @@ test("safe failures and help never expose credentials or require an admin", () =
   assert.match(result.stdout, /--dry-run/u);
   assert.match(result.stdout, /PACKSCOUT_CLUTCHPACKS_V1_DATABASE_URL/u);
   assert.match(result.stdout, /PACKSCOUT_DATABASE_URL/u);
-  assert.match(result.stdout, /87-table active-source migration subset/u);
-  assert.match(result.stdout, /91-table composite schema/u);
-  assert.match(result.stdout, /does not queue tests,/u);
+  assert.match(result.stdout, /91-table current-composite migration set/u);
+  assert.match(result.stdout, /same 91-table composite schema/u);
+  assert.match(result.stdout, /does not queue\s+tests,/u);
   assert.match(result.stdout, /call DataForrest/u);
   assert.doesNotMatch(
     result.stdout,
