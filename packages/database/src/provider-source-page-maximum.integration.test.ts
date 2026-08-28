@@ -39,7 +39,10 @@ const UNIQUE_PAGE_RECORDS = MAXIMUM_PAGE_RECORDS - 1;
  * phase and is bounded to fewer than 40 statements per chunk; 100 additional
  * statements cover ownership, semantic, occurrence, cursor, diagnostic, and
  * settlement work. This ceiling detects any return to per-record SQL while
- * retaining headroom for fixed-shape repository evolution.
+ * retaining headroom for fixed-shape repository evolution. The shared test
+ * runner executes this file after the parallel database lane so this 30-second
+ * production bound measures the page transaction rather than unrelated schema
+ * setup and teardown in other test processes.
  */
 const MAXIMUM_COMMIT_SQL_STATEMENTS = 500;
 

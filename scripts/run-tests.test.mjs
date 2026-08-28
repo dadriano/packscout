@@ -21,6 +21,9 @@ function createFixture(t) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(path.join(root, "apps", "frontend", "e2e"), { recursive: true });
   mkdirSync(path.join(root, "apps", "admin", "src"), { recursive: true });
+  mkdirSync(path.join(root, "packages", "database", "src"), {
+    recursive: true,
+  });
   mkdirSync(path.join(root, "scripts"), { recursive: true });
   writeFileSync(path.join(root, "test-quarantine.json"), "[]\n");
   return root;
@@ -57,6 +60,18 @@ test("discovers root-level frontend tests and excludes the e2e directory", (t) =
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /proxy\.test\.ts/);
   assert.doesNotMatch(result.stdout, /browser\.test\.ts/);
+});
+
+test("discovers database tests through the shared runner", (t) => {
+  const root = createFixture(t);
+  writeFileSync(
+    path.join(root, "packages", "database", "src", "repository.test.ts"),
+    'import test from "node:test"; test("repository", () => {});\n',
+  );
+
+  const result = runList(root, "database");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /src\/repository\.test\.ts/);
 });
 
 test("rejects quarantine entries that no test lane discovers", (t) => {

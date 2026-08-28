@@ -11,7 +11,7 @@
   "scripts": {
     "lint": "eslint src prisma",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "test": "node ../../scripts/run-tests.mjs database",
     "prisma:validate": "PACKSCOUT_DATABASE_URL=postgresql://packscout:packscout@127.0.0.1:1/packscout_schema_tooling prisma validate --schema prisma/schema.prisma",
     "prisma:generate": "PACKSCOUT_DATABASE_URL=postgresql://packscout:packscout@127.0.0.1:1/packscout_schema_tooling prisma generate --schema prisma/schema.prisma",
     "prisma:migrate:deploy": "node -e \"if (!process.env.PACKSCOUT_DATABASE_URL) { console.error('PACKSCOUT_DATABASE_URL is required for Prisma migration deploy.'); process.exit(1); }\" && prisma migrate deploy --schema prisma/schema.prisma",

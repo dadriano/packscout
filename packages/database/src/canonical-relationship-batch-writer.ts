@@ -508,6 +508,7 @@ export async function persistCanonicalRelationshipConfirmations(
             relationship.createdPublicChangeSequence,
           resolvedPublicChangeSequence:
             relationship.resolvedPublicChangeSequence,
+          resolvedAt: relationship.resolvedAt,
           insertedInCurrentWrite: nativeCandidateIds.has(
             candidate.semanticObservationId,
           ),
