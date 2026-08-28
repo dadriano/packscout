@@ -33,9 +33,10 @@ A pack-only pull retains its pack relationship but has no card attribution.
 Downstream behavior uses only present edges until the provider supplies an
 authoritative missing identity.
 
-Unknown tuples fail closed. Adapters v1 and v2 remain registered for immutable
-source revisions created before the current pack normalization; each retains
-its original partial-pull behavior and is never used as a fallback.
+Unknown tuples fail closed. Production registers only adapter v3. A database
+containing adapter-v1 or adapter-v2 revisions requires the guarded full local
+reset and complete reimport; historical pages are never reinterpreted through
+the current adapter.
 
 ## Clean-slate reset and reimport
 
@@ -55,8 +56,8 @@ variable. Then recreate the encrypted DataForrest connection, create and test
 each source under the current tuple, and reimport from Feed start. Cursor reset,
 quarantine retry, and selective table deletion are not substitutes for this
 historical partial-pull remediation because previously rejected records have no
-normalized observation or semantic identity. The later versioned ClutchPacks
-card replay is documented separately in
+normalized observation or semantic identity. The archived adapter-v2
+ClutchPacks evidence is documented separately in
 [`dataforrest-clutchpacks-card-v2.md`](dataforrest-clutchpacks-card-v2.md).
 Reconcile provider outcomes and canonical catalog, pull, and market-event counts
 at provider head.

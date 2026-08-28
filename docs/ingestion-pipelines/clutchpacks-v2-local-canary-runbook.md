@@ -1,8 +1,15 @@
 # ClutchPacks V2 local canary qualification and replay
 
-Status: guarded operator runbook for the first local V2 replay
+Status: archived historical evidence; not a current operator runbook
 
-This workflow qualifies and starts only the ClutchPacks adapter-v2 source in
+This completed v2 canary record is retained for audit context only. Production
+registers adapter v3 exclusively for every DataForrest provider, the v2 package
+commands have been retired, and operators must not invoke the underlying v2
+scripts directly. Use the
+[ClutchPacks V3 local canary](./clutchpacks-v3-local-canary-runbook.md) for the
+current clean-slate replay.
+
+The historical workflow qualified and started only the ClutchPacks adapter-v2 source in
 the fresh, separate local PostgreSQL database created by
 `bootstrap:clutchpacks-v2-canary:local`. It does not use Neon, clone the active
 database, or stop the Collector Crypt, Courtyard, or Phygitals lanes.

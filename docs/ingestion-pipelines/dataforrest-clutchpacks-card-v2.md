@@ -1,6 +1,6 @@
 # DataForrest ClutchPacks card adapter v2
 
-Status: retained adapter-v2 contract; superseded for new revisions by adapter v3
+Status: historical adapter-v2 contract; superseded by adapter v3
 
 Owner: PackScout data platform
 
@@ -26,25 +26,23 @@ The outer `record_id` remains authoritative identity. Nested IDs, `name`,
 native fields remain protected provenance and cannot change canonical identity
 or content.
 
-## Deliberate legacy registration
+## Historical pin boundary
 
 Adapter v1 read ClutchPacks card display names only from top-level
 `data.provider_label`; it did not expose `data.asset`. Existing connection,
-source, cursor, run, and page rows pin that exact interpretation, so the
-production registry retains adapter v1 rather than silently changing its
-meaning. Adapter v3 is now the only version advertised when creating a
-revision; adapters v1 and v2 remain registered for their exact pinned history.
-There is no fallback, dual write, or generic provider branch.
-
-The adapter-v1 registration may be removed only after no active, paused,
-queued, running, or recoverable connection/source work is pinned to adapter v1
-and the data-platform owner confirms historical operations no longer need to
-interpret adapter-v1 evidence. The adapter-v2 registration has the same removal
-gate for adapter-v2 work and evidence; it must remain until every such pin is
-gone and the data-platform owner explicitly retires that historical
-interpretation.
+source, cursor, run, and page rows pin that exact interpretation and therefore
+must not be reinterpreted in place. Production registers only adapter v3; a
+database containing adapter-v1 or adapter-v2 pins requires the guarded full
+local reset and complete reimport. There is no fallback, compatibility adapter,
+dual write, or generic provider branch.
 
 ## ClutchPacks replay
+
+The workflow below is retained as historical evidence from the completed v2
+canary. It is not a supported current-launch procedure: production no longer
+registers adapter v2, and current databases must follow the v3 clean-slate
+reimport workflow instead. The package command names shown below are part of
+that historical record and are intentionally no longer exposed.
 
 Do not reinterpret an adapter-v1 import page in place. More importantly, do not
 replay adapter v2 into an organization whose canonical identity space already

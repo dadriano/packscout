@@ -1,8 +1,14 @@
 # ClutchPacks V2 public catalog candidate
 
-Status: guarded local candidate generation for the first isolated Convex canary
+Status: archived historical evidence; not a current operator runbook
 
-Use this workflow only after the ClutchPacks V2 replay in the separate local
+This completed v2 candidate record is retained for audit context only.
+Production registers adapter v3 exclusively for every DataForrest provider and
+the v2 package command has been retired. Use the
+[ClutchPacks V3 public catalog candidate](./clutchpacks-v3-public-catalog-candidate-runbook.md)
+for current promotion work.
+
+The historical workflow was used only after the ClutchPacks V2 replay in the separate local
 PostgreSQL target has reached provider head, its source has been paused, and its
 source supervisor has stopped. It does not use Neon and does not read or write
 the active multi-provider V1 database.

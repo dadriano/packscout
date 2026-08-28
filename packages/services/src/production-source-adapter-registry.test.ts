@@ -9,13 +9,16 @@ import {
   launchProviderKeys,
 } from "@packscout/contracts";
 import {
+  createProductionSourceAdminConfigurationCodecRegistry,
   createProductionSourceAdapterRegistry,
   productionSourceAdapterManifests,
 } from "./production-source-adapter-registry.ts";
 import { SourceAdapterRegistryError } from "./source-adapter-registry.ts";
 
-test("production registry preserves v1 and v2 pins and advertises only adapter v3", () => {
+test("production registry exposes only the current DataForrest adapter", () => {
   const registry = createProductionSourceAdapterRegistry();
+  const adminCodecs =
+    createProductionSourceAdminConfigurationCodecRegistry(registry);
   assert.deepEqual(registry.keys(), [DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY]);
   assert.deepEqual(
     productionSourceAdapterManifests.map(({ adapterVersion }) => adapterVersion),
@@ -26,22 +29,7 @@ test("production registry preserves v1 and v2 pins and advertises only adapter v
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     provider,
   ));
-  const legacy = launchProviderKeys.map((provider) => registry.resolve(
-    DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
-    provider,
-  ));
-  const v2 = launchProviderKeys.map((provider) => registry.resolve(
-    DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-    DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
-    provider,
-  ));
   assert.equal(new Set(current).size, 1);
-  assert.equal(new Set(legacy).size, 1);
-  assert.equal(new Set(v2).size, 1);
-  assert.notEqual(current[0], legacy[0]);
-  assert.notEqual(current[0], v2[0]);
-  assert.notEqual(v2[0], legacy[0]);
   assert.deepEqual(
     current[0]?.manifest.supportedProviders.map(({ provider }) => provider),
     [...launchProviderKeys],
@@ -50,16 +38,28 @@ test("production registry preserves v1 and v2 pins and advertises only adapter v
     registry.resolveCurrentVersion(DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY),
     current[0],
   );
-  assert.throws(
-    () => registry.resolve(
-      DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-      "dataforrest-events-adapter-v4",
-      "courtyard",
-    ),
-    (error) =>
-      error instanceof SourceAdapterRegistryError &&
-      error.code === "adapter_version_mismatch",
-  );
+  for (const retiredAdapterVersion of [
+    DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+    DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
+  ]) {
+    assert.throws(
+      () => registry.resolve(
+        DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+        retiredAdapterVersion,
+        "courtyard",
+      ),
+      (error) =>
+        error instanceof SourceAdapterRegistryError &&
+        error.code === "adapter_version_mismatch",
+    );
+    assert.throws(
+      () => adminCodecs.resolve(
+        DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+        retiredAdapterVersion,
+      ),
+      /not registered/u,
+    );
+  }
 });
 
 test("production registry rejects uncompiled alternate source types", () => {

@@ -6,9 +6,10 @@ Owner: PackScout data platform
 
 ## Corrected V1 source semantics
 
-The DataForrest endpoint and raw envelope remain V1. New source revisions use
-`dataforrest-events-adapter-v3`; adapter v1 and v2 remain registered only to
-interpret their already-pinned history.
+The DataForrest endpoint and raw envelope remain V1. Production registers only
+`dataforrest-events-adapter-v3`. A database containing adapter-v1 or adapter-v2
+pins must be reset and reimported rather than resumed through a compatibility
+adapter.
 
 For a ClutchPacks `catalog` / `pack` record, adapter v3 reads only this reviewed
 allowlist:

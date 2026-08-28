@@ -215,13 +215,10 @@ For each stable provider root:
    page read.
 
 Activation pins the exact source, adapter, normalized contract, mapper,
-connection revision, schedule, and cursor generation. New DataForrest sources
-use the current adapter-v3 / observation-v1 / mapper-v1 tuple. The runtime also
-retains adapters v1 and v2 for exact existing source pins; it never
-reinterprets a pinned page with newer semantics. Follow the bounded
-ClutchPacks migration and removal conditions in
-[`dataforrest-clutchpacks-card-v2.md`](dataforrest-clutchpacks-card-v2.md) and
-[`dataforrest-clutchpacks-pack-v3.md`](dataforrest-clutchpacks-pack-v3.md).
+connection revision, schedule, and cursor generation. The DataForrest runtime
+accepts only the current adapter-v3 / observation-v1 / mapper-v1 tuple. A
+database containing adapter-v1 or adapter-v2 pins must use the guarded full
+local reset and complete reimport; it is not an in-place source operation.
 
 ### 3. Begin ingestion
 

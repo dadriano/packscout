@@ -154,8 +154,9 @@ availability into `packscout.provider-observation.v1`.
 Local capture evidence reviewed on 2026-08-24 showed catalog pack names at
 `data.name` for Collector Crypt, Phygitals, and ClutchPacks. Their pack records
 therefore read exactly `data.name`; Courtyard packs and non-ClutchPacks card
-kinds read exactly their declared provider label. Adapter v2 reads ClutchPacks
-catalog-card display facts from the exact `data.asset` allowlist documented in
+kind records read exactly their declared provider label. Historical adapter v2
+read ClutchPacks catalog-card display facts from the exact `data.asset`
+allowlist documented in
 [`ingestion-pipelines/dataforrest-clutchpacks-card-v2.md`](ingestion-pipelines/dataforrest-clutchpacks-card-v2.md).
 Adapter v3 retains those card semantics and adds the exact ClutchPacks pack
 allowlist documented in
@@ -168,10 +169,10 @@ nullable, at least one must be present, and relationships remain ordered pack
 before card. A canonical pull receives only the authoritative edge or edges in
 the source record; PackScout never fabricates the missing identity.
 
-Adapter v1 remains registered only for exact connection and source revisions
-already pinned to it. Adapter v2 is the sole version advertised for new
-revisions. The registry resolves both versions explicitly; neither version is a
-fallback for the other.
+Production registers only adapter v3 for every DataForrest provider. A database
+containing adapter-v1 or adapter-v2 connection or source pins must use the
+guarded clean reset and complete reimport; neither historical version is a
+runtime compatibility path.
 
 ## Failure contract
 
