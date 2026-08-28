@@ -928,6 +928,88 @@ test("a latest semantic observation that does not reproduce governed hashes fail
   );
 });
 
+test("a JSONB-shortened derived probability still validates its governed EV-input hash", async () => {
+  const productKey = uuid(47_100);
+  const content = normalizedPackContent({
+    productKey,
+    buckets: [
+      {
+        bucketId: "common-range",
+        quantity: 3,
+        lowerValue: 50,
+        upperValue: 100,
+      },
+      {
+        bucketId: "chase-range",
+        quantity: 95,
+        lowerValue: 200,
+        upperValue: 300,
+      },
+    ],
+  });
+  const product = productObservation({
+    productKey,
+    sequence: 1,
+    content,
+  });
+  assert.ok(product.evInputRevision);
+  const evInputFact = content.providerFacts.evInput;
+  assert.equal(evInputFact.state, "present");
+  if (evInputFact.state !== "present") {
+    throw new Error("fixture EV input must be present");
+  }
+  const persistedContent: PackCatalogContent = {
+    ...content,
+    providerFacts: {
+      ...content.providerFacts,
+      evInput: {
+        state: "present",
+        value: {
+          ...evInputFact.value,
+          buckets: evInputFact.value.buckets.map((bucket) => ({
+            ...bucket,
+            // Prisma's JSONB input codec persisted 3 / 98 with this shorter
+            // decimal even though the canonical projection used the original
+            // JavaScript quotient.
+            probability: bucket.quantity === 3
+              ? 0.03061224489795918
+              : bucket.probability,
+          })),
+        },
+      },
+    },
+  };
+  const persistedProjection = canonicalProjection(
+    persistedContent,
+    COLLECTED_AT,
+  );
+  assert.notEqual(
+    persistedProjection.evInputContentHash,
+    product.evInputRevision.canonicalContentHash,
+  );
+  const persistedProduct = {
+    ...product,
+    observation: {
+      ...product.observation,
+      normalizedContent: persistedContent,
+    },
+  } as const;
+
+  const command = await sourceFor(snapshot([persistedProduct])).source
+    .loadCommand({
+      organizationId: ORGANIZATION_ID,
+      platformKey: "clutchpacks",
+      productKey,
+      readAt: READ_AT,
+    });
+
+  assert.ok(command);
+  assert.equal(
+    command.sourceRevisions?.at(-1)?.sourceManifestSha256,
+    product.evInputRevision.canonicalContentHash,
+  );
+});
+
 test("a missing or mismatched governed EV input fails closed", async () => {
   const productKey = uuid(48_000);
   const product = productObservation({ productKey, sequence: 1 });
