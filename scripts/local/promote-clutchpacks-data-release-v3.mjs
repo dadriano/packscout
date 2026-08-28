@@ -752,13 +752,45 @@ function firstMiddleLast(records) {
   return indexes.map((index) => records[index]);
 }
 
+function boundedFirstMiddleLast(records, maximumCount) {
+  if (records.length <= maximumCount) return [...records];
+  const requiredIndexes = new Set([
+    0,
+    Math.floor((records.length - 1) / 2),
+    records.length - 1,
+  ]);
+  if (maximumCount < requiredIndexes.size) {
+    refuse("CLUTCHPACKS_V3_SCOPE_INVALID");
+  }
+  for (
+    let sampleIndex = 0;
+    sampleIndex < maximumCount && requiredIndexes.size < maximumCount;
+    sampleIndex += 1
+  ) {
+    requiredIndexes.add(Math.floor(
+      sampleIndex * (records.length - 1) / (maximumCount - 1),
+    ));
+  }
+  for (
+    let recordIndex = 0;
+    recordIndex < records.length && requiredIndexes.size < maximumCount;
+    recordIndex += 1
+  ) {
+    requiredIndexes.add(recordIndex);
+  }
+  return [...requiredIndexes]
+    .sort((left, right) => left - right)
+    .map((index) => records[index]);
+}
+
 /**
  * A full public lookup sweep over thousands of standalone collectibles would
  * be both operationally unsafe and redundant: every public V3 query first
  * proves the active release's finalized accepted counts and entity-chain
  * hashes. We therefore add deterministic first/middle/last direct and search
- * probes, plus exhaustive direct probes for every collectible referenced by a
- * chase while that chase surface remains within this command's fixed budget.
+ * probes, then spend the remaining fixed direct-read budget on a deterministic
+ * sample of chase-linked collectibles. The sampled lookups prove the public
+ * relationship path without making catalog growth a publication blocker.
  */
 export function clutchpacksCollectibleReadbackProbes(scope) {
   const collectibles = sortedEntityRecords(
@@ -768,11 +800,7 @@ export function clutchpacksCollectibleReadbackProbes(scope) {
   const chaseCollectibleIds = exactIdSet(
     (scope?.entities?.chases ?? []).map((chase) => chase.publicCollectibleId),
   );
-  if (
-    collectibles.length === 0 ||
-    chaseCollectibleIds.length >
-      CLUTCHPACKS_MAX_CHASE_READBACK_COLLECTIBLES
-  ) {
+  if (collectibles.length === 0) {
     refuse("CLUTCHPACKS_V3_SCOPE_INVALID");
   }
   const byId = new Map(collectibles.map((collectible) => [
@@ -780,11 +808,23 @@ export function clutchpacksCollectibleReadbackProbes(scope) {
     collectible,
   ]));
   const directRepresentative = firstMiddleLast(collectibles);
-  const directIds = exactIdSet([
-    ...directRepresentative.map((collectible) =>
-      collectible.publicCollectibleId),
-    ...chaseCollectibleIds,
-  ]);
+  const directIdSet = new Set(directRepresentative.map((collectible) =>
+    collectible.publicCollectibleId));
+  for (const publicCollectibleId of firstMiddleLast(chaseCollectibleIds)) {
+    directIdSet.add(publicCollectibleId);
+  }
+  const remainingChaseIds = chaseCollectibleIds.filter(
+    (publicCollectibleId) => !directIdSet.has(publicCollectibleId),
+  );
+  const remainingDirectBudget =
+    CLUTCHPACKS_MAX_CHASE_READBACK_COLLECTIBLES - directIdSet.size;
+  for (const publicCollectibleId of boundedFirstMiddleLast(
+    remainingChaseIds,
+    remainingDirectBudget,
+  )) {
+    directIdSet.add(publicCollectibleId);
+  }
+  const directIds = exactIdSet([...directIdSet]);
   const direct = directIds.map((publicCollectibleId) => {
     const collectible = byId.get(publicCollectibleId);
     if (collectible === undefined) {
@@ -953,10 +993,15 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
       refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
     }
   }
+  const probedCollectibleIds = new Set(
+    probes.direct.map((collectible) => collectible.publicCollectibleId),
+  );
+  const expectedPublicChases = scope.entities.chases.filter((chase) =>
+    probedCollectibleIds.has(chase.publicCollectibleId));
   if (
     !isDeepStrictEqual(
       sortedEntityRecords("chases", publicChases),
-      sortedEntityRecords("chases", scope.entities.chases),
+      sortedEntityRecords("chases", expectedPublicChases),
     )
   ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");

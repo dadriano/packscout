@@ -841,6 +841,55 @@ test("a bounded nonzero chase set is exhaustively reconciled through its collect
   );
 });
 
+test("a large chase surface uses deterministic bounded relationship probes", () => {
+  const governedSnapshot = snapshot();
+  governedSnapshot.collectibles = Array.from(
+    { length: 100 },
+    (_, index) => collectible(index),
+  );
+  governedSnapshot.chases = governedSnapshot.collectibles.map((item, index) => ({
+    ...chase(index % 17),
+    publicCollectibleId: item.publicCollectibleId,
+    collectible: collectibleDisplay(item),
+    role: "possible_outcome",
+    displayOrder: Math.floor(index / 17),
+  }));
+  const governedScope = assertClutchpacksCatalogScope(governedSnapshot);
+  const probes = clutchpacksCollectibleReadbackProbes(governedScope);
+  const directIds = probes.direct.map((item) => item.publicCollectibleId);
+
+  assert.equal(probes.direct.length, 64);
+  assert.deepEqual(
+    directIds,
+    clutchpacksCollectibleReadbackProbes(governedScope).direct.map((item) =>
+      item.publicCollectibleId),
+  );
+  for (const index of [0, 49, 99]) {
+    assert.equal(directIds.includes(publicCollectibleId(index)), true);
+  }
+
+  const candidate = plan();
+  candidate.manifest.counts.collectibles = governedSnapshot.collectibles.length;
+  candidate.manifest.counts.chases = governedSnapshot.chases.length;
+  candidate.manifest.batchCount = 4;
+  candidate.batches.find((batch) => batch.kind === "collectibles").records =
+    governedSnapshot.collectibles;
+  candidate.batches.push({
+    batchIndex: 3,
+    kind: "chases",
+    batchHash: HASH,
+    records: governedSnapshot.chases,
+  });
+
+  assert.doesNotThrow(() =>
+    assertClutchpacksPlanCompleteness(candidate, governedScope));
+  assert.doesNotThrow(() => assertClutchpacksPublicReadBack(
+    publicReadBack(candidate, 17, governedScope),
+    candidate,
+    governedScope,
+  ));
+});
+
 test("current EV reserves Convex auth skew beyond the advertised lifetime", () => {
   const candidate = plan();
   const expiresAt = Date.parse(
