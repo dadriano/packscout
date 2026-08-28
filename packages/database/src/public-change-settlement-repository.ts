@@ -357,7 +357,7 @@ export async function createPublicDerivationObligationBatch(
 export async function advanceSettledPublicWatermark(
   database: PackscoutTransactionClient,
   input: { organizationId: string; settledAt: Date },
-): Promise<SettledPublicWatermark> {
+): Promise<void> {
   assertCatalogSettlementTransaction(database);
   await database.$queryRaw(Prisma.sql`
     select organization_id
@@ -400,7 +400,6 @@ export async function advanceSettledPublicWatermark(
     where watermark.organization_id = candidate.organization_id
   `);
   await advanceCatalogImpactCheckpoints(database, input);
-  return loadSettledPublicWatermark(database, input.organizationId);
 }
 
 async function loadSettledPublicWatermark(

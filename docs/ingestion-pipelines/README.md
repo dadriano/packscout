@@ -52,7 +52,7 @@ Admin console
 PostgreSQL control plane --- schedules, runs, leases, cursors, diagnostics
            |
            v
-One source supervisor ------ fair execution slots + shared connection permits
+One source supervisor ------ fair slots + independent platform request lanes
            |
            v
 Source adapter ------------ capture, validate, normalize, classify
@@ -63,12 +63,17 @@ Atomic importer ----------- evidence + canonical data + EV work + cursor
 
 ## Interpreting the storage estimate
 
-Do not use the 8.76 TB maximum-throughput scenario as a prediction for a local
-backfill. It assumes four new 250-record pages every minute for 365 days. The
-first live `packscout_dev` sample instead measured 7,024 marginal bytes per
+Do not use the 128.56 TB maximum-throughput scenario as a prediction for a local
+backfill. The artifact measured at 2026-08-28T11:37:55.470Z pins initial pages
+to 500 records, then assumes all four one-minute ongoing poll attempts return
+the configurable maximum of 5,000 new records for 365 days. It projects
+128,564,163,101,465 bytes and requires 171,418,884,135,287 bytes free with
+headroom. The measured 994,662,584,320-byte host volume had 822,147,469,312
+bytes used (about 82.66%) and 172,515,115,008 bytes available, so the committed
+Task010 decision is rejected. The first live `packscout_dev` sample instead measured 7,024 marginal bytes per
 committed record and 8,123 bytes per record including fixed database overhead.
 At the dated 14,526,877-record provider baseline, that is a provisional
-136.1–157.3 GB planning range with 25% free headroom, not 8.76 TB. See the
+136.1–157.3 GB planning range with 25% free headroom, not 128.56 TB. See the
 [live capacity observation](../provider-source-live-capacity-observation-2026-08-24.md)
 for the samples, assumptions, and remeasurement points.
 
@@ -76,8 +81,9 @@ The local runtime enforces the configured free-space floor on actual volume
 availability after in-flight reserves. Production continues to enforce the
 separate 80%-used emergency fence.
 
-The four provider lanes share connection health and the configured request
-limit, but each lane owns its source lifecycle, schedule, run, cursor,
+The four provider lanes share connection health and a provider maximum of two,
+but PackScout gives each platform an independent request lane operated at one
+request. Each lane owns its source lifecycle, schedule, run, cursor,
 freshness, quality, quarantine, and diagnostics. A provider-local failure must
 not stop a healthy sibling.
 
@@ -207,8 +213,10 @@ For each stable provider root:
 
 1. Create a source using the server-supplied adapter, mapper, identity namespace,
    and record-ID scopes. Do not substitute a browser-selected mapper.
-2. Bind it to the active shared connection and choose an interval from 60
-   seconds through 24 hours.
+2. Bind it to the active shared connection, choose an interval from 60 seconds
+   through 24 hours, and set **Maximum records per request** from 1 through
+   5,000. The default is 500; Task010 requires exactly 500 for all four active
+   source schedule revisions.
 3. Select **Test** and wait for both the latest connection test and latest source
    test to be current and successful.
 4. Select **Activate paused**. This establishes the schedule without starting a

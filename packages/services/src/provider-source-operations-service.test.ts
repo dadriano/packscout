@@ -165,13 +165,15 @@ const snapshot = providerSourceSupervisorSnapshotSchema.parse({
     safeCode: null,
     checkedAt: now.toISOString(),
     executionSlots: { used: 2, maximum: 4 },
-    profiles: [{
+    requestPermitLanes: providers.map((_provider, index) => ({
+      scope: "platform" as const,
       organizationId,
       connectionProfileId,
-      used: 1,
+      providerId: sourceIds(index).providerId,
+      used: index === 0 ? 1 : 0,
       maximum: 2,
-      waiting: 1,
-    }],
+      waiting: index === 0 ? 1 : 0,
+    })),
   },
   sources: providers.map((provider, index) => {
     const ids = sourceIds(index);
@@ -194,7 +196,7 @@ const snapshot = providerSourceSupervisorSnapshotSchema.parse({
       lifecycle: index === 1 ? "paused" : "active",
       phase: index === 0 ? "waiting" : index === 1 ? "paused" : "reached_head",
       activity: index === 0 ? "waiting" : index === 1 ? "paused" : "inactive",
-      waitReason: index === 0 ? "profile_capacity" : null,
+      waitReason: index === 0 ? "request_lane_capacity" : null,
       actionRequiredCode: null,
       currentRunId: index === 0 ? runId : null,
       runLeaseAgeMilliseconds: index === 0 ? 5_000 : null,
@@ -294,11 +296,13 @@ const splitProfileSnapshot = providerSourceSupervisorSnapshotSchema.parse({
   ...snapshot,
   capacity: {
     ...snapshot.capacity,
-    profiles: [
-      ...snapshot.capacity.profiles,
+    requestPermitLanes: [
+      ...snapshot.capacity.requestPermitLanes,
       {
+        scope: "platform",
         organizationId,
         connectionProfileId: splitConnectionProfileId,
+        providerId: sourceIds(1).providerId,
         used: 0,
         maximum: 2,
         waiting: 0,
@@ -444,7 +448,7 @@ test("source operations compose the registered four rows with durable supervisor
   assert.equal(overview.connection?.capacity.requestPermits.waiting, 1);
   assert.equal(overview.connection?.health.state, "blocked");
   const courtyard = overview.sources[0]!;
-  assert.equal(courtyard.processor?.waitReason, "profile_capacity");
+  assert.equal(courtyard.processor?.waitReason, "request_lane_capacity");
   assert.equal(courtyard.processor?.retryCount, 1);
   assert.equal(courtyard.source?.recordsPerRequest, 1_000);
   assert.equal(courtyard.activeRun?.recordsPerRequest, 500);

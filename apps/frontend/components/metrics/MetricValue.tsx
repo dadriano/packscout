@@ -1,5 +1,5 @@
 import { GlossaryHint } from "./GlossaryHint.client";
-import type { MetricValuePresentation } from "@/lib/metric-presentation";
+import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
 import type { GlossaryDefinition } from "@/lib/metric-vocabulary";
 import styles from "./MetricValue.module.css";
 

@@ -1211,7 +1211,8 @@ model promotion_operations {
   @@unique([organization_id, deployment_key, lane_key, operation_id], map: "promotion_operations_lane_operation_unique")
 }
 
-/// Stable, organization-scoped connection capacity shared by every source using one credential.
+/// Stable, organization-scoped credential shared by source lanes. request_limit
+/// is enforced independently per platform and for the connection-test lane.
 /// Conditional and tenant-preserving foreign keys are defined in the forward migration.
 model source_connection_profiles {
   id                   String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -1567,19 +1568,23 @@ model source_supervisor_epochs {
   @@index([environment_key, state, lease_expires_at], map: "source_supervisor_epochs_owner_idx")
 }
 
-/// Durable source-neutral request-capacity snapshot for the owning epoch.
-model source_supervisor_profile_states {
+/// Durable per-platform and connection-test request-capacity snapshot for the
+/// owning epoch. Platform lanes share a credential without sharing permits.
+model source_supervisor_request_lane_states {
   id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   supervisor_epoch_id    String   @db.Uuid
   organization_id        String   @db.Uuid
   connection_profile_id  String   @db.Uuid
+  request_scope          String
+  provider_id            String?  @db.Uuid
+  lane_key               String
   approved_request_limit Int
   active_request_permits Int      @default(0)
   waiting_operations     Int      @default(0)
   updated_at             DateTime @db.Timestamptz(6)
 
-  @@unique([supervisor_epoch_id, organization_id, connection_profile_id], map: "source_supervisor_profile_states_scope_unique")
-  @@index([organization_id, connection_profile_id, updated_at], map: "source_supervisor_profile_states_profile_idx")
+  @@unique([supervisor_epoch_id, organization_id, connection_profile_id, lane_key], map: "source_supervisor_request_lane_states_scope_unique")
+  @@index([organization_id, connection_profile_id, lane_key, updated_at], map: "source_supervisor_request_lane_states_profile_idx")
 }
 
 /// Durable supervisor-owned lane state. Admin reads this snapshot instead of
@@ -1619,7 +1624,7 @@ model provider_source_runtime_states {
   @@index([supervisor_epoch_id, updated_at], map: "provider_source_runtime_states_epoch_idx")
 }
 
-/// Sanitized pre-call record. It is terminalized before its profile permit wakes another waiter.
+/// Sanitized pre-call record. It is terminalized before its exact request-lane permit wakes another waiter.
 model source_request_attempts {
   id                                      String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organization_id                         String                        @db.Uuid
@@ -2222,6 +2227,95 @@ model source_records {
   @@unique([id, organization_id], map: "source_records_id_organization_unique")
   @@unique([organization_id, provider_id, record_kind, external_id, source_time, content_hash], map: "source_records_immutable_identity_unique")
   @@index([organization_id, expires_at], map: "source_records_expiry_idx")
+}
+
+/// Immutable buyback-adjusted EV revision under packscout-buyback-adjusted-ev-v1.
+/// Foreign keys, shape/arithmetic check constraints, and the append-only trigger
+/// are defined in its migration; historical pre-buyback estimated EV rows stay in
+/// canonical_revisions under their original method identity.
+model buyback_ev_revisions {
+  id                                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                   String   @db.Uuid
+  provider_id                       String   @db.Uuid
+  configuration_revision_id         String   @db.Uuid
+  platform_key                      String
+  product_key                       String
+  product_revision_id               String
+  method_version                    String
+  confidence_policy_version         String
+  lifecycle                         String   @default("completed")
+  status                            String
+  revision_number                   Int
+  calculation_key                   String
+  effective_fingerprint             String
+  result_hash                       String
+  source_revision_id                String
+  source_manifest_sha256            String?
+  observation_coherence             String
+  odds_source                       String
+  used_closed_range_midpoint        Boolean
+  calculated_at                     DateTime  @db.Timestamptz(6)
+  data_as_of_state                  String
+  data_observed_at                  DateTime? @db.Timestamptz(6)
+  pack_price_minor_units            BigInt?
+  underlying_outcome_ev_minor_units BigInt?
+  draw_multiplier                   Int?
+  gross_ev_minor_units              BigInt?
+  gross_return_basis_points         BigInt?
+  ev_dollars_minor_units            BigInt?
+  ev_percent_basis_points           BigInt?
+  confidence_score_basis_points     Int?
+  confidence_band                   String?
+  confidence_limitation_codes       String[]  @default([])
+  freshness_state                   String
+  source_age_milliseconds           BigInt?
+  freshness_expires_at              DateTime? @db.Timestamptz(6)
+  internal_reasons                  String[]  @default([])
+  public_primary_reason             String?
+  created_at                        DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([id, organization_id], map: "buyback_ev_revisions_id_organization_unique")
+  @@unique([organization_id, calculation_key], map: "buyback_ev_revisions_identity_unique")
+  @@unique([organization_id, effective_fingerprint], map: "buyback_ev_revisions_fingerprint_unique")
+  @@unique([organization_id, platform_key, product_key, revision_number], map: "buyback_ev_revisions_product_number_unique")
+  @@index([organization_id, platform_key, product_key, lifecycle, revision_number], map: "buyback_ev_revisions_current_idx")
+}
+
+/// Protected trace from one buyback-adjusted EV revision to its normalized
+/// source revisions. Foreign keys, bounds, and the immutability trigger are
+/// defined in its migration.
+model buyback_ev_revision_source_refs {
+  organization_id        String   @db.Uuid
+  revision_id            String   @db.Uuid
+  reference_index        Int
+  source_revision_id     String
+  source_manifest_sha256 String?
+  canonical_revision_id  String?  @db.Uuid
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([revision_id, reference_index], map: "buyback_ev_revision_source_refs_pkey")
+  @@unique([revision_id, source_revision_id], map: "buyback_ev_revision_source_refs_revision_source_unique")
+  @@index([organization_id, source_revision_id], map: "buyback_ev_revision_source_refs_lookup_idx")
+}
+
+/// Deduplicated ledger for failed or unbindable buyback-adjusted EV persistence
+/// work. Kept structurally separate from completed revisions so repeated invalid
+/// evidence accumulates occurrences instead of history; its guard trigger and
+/// check constraints are defined in its migration.
+model buyback_ev_persistence_failures {
+  organization_id  String   @db.Uuid
+  failure_key      String
+  lifecycle        String   @default("failed")
+  reason_code      String
+  provider_id      String?  @db.Uuid
+  platform_key     String?
+  product_key      String?
+  occurrence_count Int      @default(1)
+  first_seen_at    DateTime @db.Timestamptz(6)
+  last_seen_at     DateTime @db.Timestamptz(6)
+
+  @@id([organization_id, failure_key], map: "buyback_ev_persistence_failures_pkey")
+  @@index([organization_id, last_seen_at], map: "buyback_ev_persistence_failures_seen_idx")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.

@@ -48,12 +48,11 @@ export const ACCESS_HOLDING_COPY: Readonly<
     kicker: "Closed beta",
     heading: "Your access request is in review",
     body:
-      "You are signed in, and your request to join the PackScout beta is " +
-      "with the team. There is nothing more you need to do.",
+      "You are signed in and your request is with the team. There is " +
+      "nothing more you need to do.",
     detail:
-      "The moment your request is approved, this page brings you straight " +
-      "in. You can keep it open, or come back later and sign in with the " +
-      "same address.",
+      "The moment it is approved, this page brings you straight in. Keep " +
+      "it open, or come back and sign in with the same address.",
     retry: null,
   }),
   declined: Object.freeze({
@@ -61,12 +60,11 @@ export const ACCESS_HOLDING_COPY: Readonly<
     kicker: "Closed beta",
     heading: "Access is not available for this account",
     body:
-      "Your request to join the PackScout beta was not approved, so this " +
-      "account cannot use PackScout.",
+      "Your request was not approved, so this account cannot use " +
+      "PackScout.",
     detail:
       "Signing in again with this address will not change the answer. If a " +
-      "different email or wallet address of yours was invited, you can sign " +
-      "out and use that one instead.",
+      "different address of yours was invited, sign out and use that one.",
     retry: null,
   }),
   suspended: Object.freeze({
@@ -74,12 +72,11 @@ export const ACCESS_HOLDING_COPY: Readonly<
     kicker: "Account notice",
     heading: "This account is suspended",
     body:
-      "Your account has been suspended, so PackScout is not available to " +
-      "it right now. This is a decision about this account, separate from " +
-      "the beta.",
+      "This account is suspended, so PackScout is not available to it. " +
+      "This is separate from the beta.",
     detail:
-      "Signing in with a different address does not lift a suspension of " +
-      "this account. You can sign out below.",
+      "Signing in with another address does not lift it. You can sign " +
+      "out below.",
     retry: null,
   }),
   undetermined: Object.freeze({
@@ -87,9 +84,8 @@ export const ACCESS_HOLDING_COPY: Readonly<
     kicker: "One moment",
     heading: "We can't confirm your access right now",
     body:
-      "PackScout could not reach the service that checks beta access. This " +
-      "is a temporary problem on our side — not a decision about you or " +
-      "your request.",
+      "PackScout could not reach the service that checks access. A " +
+      "temporary problem on our side, not a decision about you.",
     detail: "Nothing about your request has changed. Try again in a moment.",
     retry: Object.freeze({ href: "/", label: "Try again" }),
   }),

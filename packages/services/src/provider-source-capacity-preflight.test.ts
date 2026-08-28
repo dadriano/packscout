@@ -14,6 +14,7 @@ import {
   ProviderSourceCapacityInputError,
   buildProviderSourceCapacityForecast,
   evaluateProviderSourceCapacityPreflight,
+  providerSourceCapacityModelMatchesLaunchBounds,
   type ProviderSourceCapacityForecast,
   type ProviderSourceCapacityModelInput,
   type ProviderSourceCapacityPreflightDecision,
@@ -21,12 +22,13 @@ import {
 } from "./provider-source-capacity-preflight.ts";
 
 interface MemoryMeasurement {
-  readonly version: "provider-source-page-memory-v1";
+  readonly version: "provider-source-page-memory-v2";
   readonly path: "authentic-capture-terminalize-interpret-complete-import-plan";
   readonly sourceAdapterVersion: typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION;
   readonly trialCount: number;
   readonly pagesPerTrial: number;
   readonly pageCount: number;
+  readonly concurrentPages: 4;
   readonly recordsPerPage: number;
   readonly responseBytesPerPage: number;
   readonly jsonNodesPerPage: number;
@@ -122,7 +124,7 @@ test("capacity artifact is derived from measured relations and exact retention v
   const artifact = await capacityArtifact();
   assert.equal(
     artifact.storageMeasurement.environment.schemaMigration,
-    "20260826010000_provider_source_records_per_request",
+    "20260827010000_provider_source_platform_request_lanes",
   );
   assert.equal(
     artifact.forecastInput.measuredStructuredPhysicalBytesPerRecord,
@@ -208,9 +210,13 @@ test("capacity artifact is derived from measured relations and exact retention v
     artifact.forecastInput.incrementalRecordsPerPollAttempt,
     providerSourceRecordsPerRequest.maximum,
   );
-  assert.equal(artifact.forecast.initialPageCount, 58_108);
+  assert.equal(
+    providerSourceCapacityModelMatchesLaunchBounds(artifact.forecastInput),
+    true,
+  );
+  assert.equal(artifact.forecast.initialPageCount, 29_054);
   assert.equal(artifact.forecast.thirtyDayPollAttempts, 172_800);
-  assert.equal(artifact.forecast.firstWindowAttempts, 230_908);
+  assert.equal(artifact.forecast.firstWindowAttempts, 201_854);
   assert.equal(artifact.forecast.incrementalPollAttempts, 2_102_400);
   assert.equal(artifact.forecast.incrementalRecordCount, 10_512_000_000);
   assert.equal(
@@ -229,11 +235,30 @@ test("capacity artifact is derived from measured relations and exact retention v
   );
 });
 
-test("fresh authentic 100-page import planning stays within measured memory limits", async () => {
+test("capacity launch binding rejects stale initial and ongoing record limits", async () => {
+  const { forecastInput } = await capacityArtifact();
+  for (const patch of [
+    { pageRecordLimit: providerSourceLaunchBounds.pageTargetRecords - 1 },
+    {
+      incrementalRecordsPerPollAttempt:
+        providerSourceRecordsPerRequest.maximum - 1,
+    },
+  ]) {
+    assert.equal(
+      providerSourceCapacityModelMatchesLaunchBounds({
+        ...forecastInput,
+        ...patch,
+      }),
+      false,
+    );
+  }
+});
+
+test("fresh four-concurrent-page authentic 100-page import planning stays within measured memory limits", async () => {
   const { memoryMeasurement: memory } = await capacityArtifact();
   const fresh = await freshMemoryMeasurement();
   assert.ok(memory.pageCount >= 100);
-  assert.equal(memory.version, "provider-source-page-memory-v1");
+  assert.equal(memory.version, "provider-source-page-memory-v2");
   assert.equal(
     memory.path,
     "authentic-capture-terminalize-interpret-complete-import-plan",
@@ -245,6 +270,9 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   assert.equal(memory.retainedMetric, "theil-sen-managed-bytes-per-page");
   assert.ok(memory.trialCount >= 3);
   assert.equal(memory.trialCount * memory.pagesPerTrial, memory.pageCount);
+  assert.equal(memory.concurrentPages, 4);
+  assert.equal(memory.pagesPerTrial % memory.concurrentPages, 0);
+  assert.equal(memory.pageCount % memory.concurrentPages, 0);
   assert.equal(
     memory.recordsPerPage,
     providerSourceRecordsPerRequest.maximum,
@@ -253,11 +281,19 @@ test("fresh authentic 100-page import planning stays within measured memory limi
     memory.responseBytesPerPage,
     dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes,
   );
-  assert.equal(memory.jsonNodesPerPage, 235_004);
-  assert.equal(memory.emptyObjectFactsPerRecord, 34);
+  assert.equal(memory.jsonNodesPerPage, 475_004);
+  assert.equal(memory.emptyObjectFactsPerRecord, 82);
   assert.equal(
     memory.totalRecordsProcessed,
     memory.pageCount * memory.recordsPerPage,
+  );
+  assert.equal(
+    memory.limits.peakDeltaBytes,
+    memory.concurrentPages * 64 * 1024 * 1024,
+  );
+  assert.equal(
+    memory.limits.retainedGrowthBytes,
+    memory.concurrentPages * 8 * 1024 * 1024,
   );
   assert.ok(memory.peakDeltaBytes <= memory.limits.peakDeltaBytes);
   assert.ok(memory.retainedGrowthBytes <= memory.limits.retainedGrowthBytes);
@@ -266,6 +302,7 @@ test("fresh authentic 100-page import planning stays within measured memory limi
   assert.equal(fresh.path, memory.path);
   assert.equal(fresh.sourceAdapterVersion, memory.sourceAdapterVersion);
   assert.equal(fresh.pageCount, memory.pageCount);
+  assert.equal(fresh.concurrentPages, memory.concurrentPages);
   assert.equal(fresh.recordsPerPage, memory.recordsPerPage);
   assert.equal(fresh.responseBytesPerPage, memory.responseBytesPerPage);
   assert.equal(fresh.jsonNodesPerPage, memory.jsonNodesPerPage);

@@ -11,7 +11,7 @@ And the first newly created run pins 500
 
 Given a provider source existed before this setting was introduced
 When the schema migration completes
-Then its configured maximum records per request is 250
+Then its configured maximum records per request is 500
 And deployment alone does not change the request size of its next run
 
 ## Save for the next run

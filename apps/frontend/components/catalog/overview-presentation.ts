@@ -1,29 +1,26 @@
 import type {
-  DashboardBundle,
   DashboardKpis,
-  PublicRepackHeat,
-  PublicRepackViewSummary,
+  PackScoutPublicEvV3,
+  PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import {
   formatMoneyMinorUnits,
-  formatSignedEvPercent,
-  presentBuyback,
-  presentPackScoutConfidence,
-  presentPackScoutEvPercent,
+  isSimulatedRepackListing,
+  presentBuybackSummaryV3,
+  presentPackScoutEvV3,
+  presentRepackPrice,
+  presentSignedEvPercentMetric,
   presentTopChaseValue,
-  semanticStateForSignedBasisPoints,
-  type ConfidencePresentation,
   type MetricSemanticState,
   type MetricValuePresentation,
-} from "@/lib/metric-presentation";
+  type PackScoutEvV3Presentation,
+} from "@/lib/packscout-ev-presentation";
 import { getPublicReasonCopy } from "@/lib/metric-vocabulary";
+import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
 
 const COUNT_FORMATTER = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
-
-type RepackSummaryGroup = DashboardBundle["vendorSummaries"][number];
-type PublicPrice = PublicRepackViewSummary["price"];
 
 export type KpiPresentation = Readonly<{
   id: "repacks" | "positiveEv" | "medianEv" | "highestChase";
@@ -36,13 +33,6 @@ export type KpiPresentation = Readonly<{
   reasonCopy?: string;
 }>;
 
-export type DisplayField = Readonly<{
-  displayValue: string;
-  accessibleLabel: string;
-  availability: "available" | "unavailable";
-  reasonCopy?: string;
-}>;
-
 export type OpportunityPresentation = Readonly<{
   rank: number;
   publicRepackId: string;
@@ -50,11 +40,10 @@ export type OpportunityPresentation = Readonly<{
   category: string;
   vendorDisplayName: string;
   vendorLogoUrl: string | null;
-  primaryImage: PublicRepackViewSummary["primaryImage"];
-  heat: PublicRepackHeat;
-  repackPrice: DisplayField;
-  packScoutEvPercent: MetricValuePresentation;
-  packScoutConfidence: ConfidencePresentation;
+  primaryImage: PublicRepackViewSummaryV3["primaryImage"];
+  simulated: boolean;
+  packPrice: MetricValuePresentation;
+  packScoutEv: PackScoutEvV3Presentation;
   buyback: MetricValuePresentation;
   topChaseValue: MetricValuePresentation;
 }>;
@@ -73,45 +62,20 @@ function countLabel(count: number): string {
   return COUNT_FORMATTER.format(count);
 }
 
-function presentSummaryEvPercent(
-  metric: DashboardKpis["medianPackScoutEvPercent"],
-): MetricValuePresentation {
-  if (metric.status === "unavailable") {
-    const reasonCopy = getPublicReasonCopy(metric.reason);
-    return {
-      availability: "unavailable",
-      label: "EV %",
-      displayValue: "Unavailable",
-      accessibleLabel: `EV %: Unavailable. ${reasonCopy}`,
-      glossaryKey: "evPercent",
-      semanticState: "unavailable",
-      semanticLabel: "Unavailable",
-      reason: metric.reason,
-      reasonCopy,
-    };
-  }
-  const semanticState = semanticStateForSignedBasisPoints(metric.basisPoints);
-  const semanticLabel = semanticState === "positive"
-    ? "Positive"
-    : semanticState === "negative"
-      ? "Negative"
-      : "Neutral";
-  const displayValue = formatSignedEvPercent(metric.basisPoints);
-  return {
-    availability: "available",
-    label: "EV %",
-    displayValue,
-    accessibleLabel: `EV %: ${displayValue}. ${semanticLabel}.`,
-    glossaryKey: "evPercent",
-    semanticState,
-    semanticLabel,
-  };
-}
-
+/**
+ * Formats the server-materialized dashboard KPIs. The positive-EV count is
+ * computed server-side over available packs with a current estimate above zero
+ * only — `unavailable`, `unknown`, and `sold_out` packs are all excluded from
+ * the count while staying discoverable in the catalog — and the browser never
+ * recounts or re-ranks.
+ */
 export function presentDashboardKpis(
   kpis: DashboardKpis,
 ): readonly KpiPresentation[] {
-  const median = presentSummaryEvPercent(kpis.medianPackScoutEvPercent);
+  const median = presentSignedEvPercentMetric(
+    kpis.medianPackScoutEvPercent,
+    "Median EV %",
+  );
   const highestValue = kpis.highestChaseValueUsdMinor === null
     ? "Unavailable"
     : formatMoneyMinorUnits({
@@ -128,15 +92,15 @@ export function presentDashboardKpis(
       label: "Repacks",
       value: countLabel(kpis.totalRepacks),
       helper: "",
-      accessibleLabel: `View all repacks: ${countLabel(kpis.totalRepacks)} active public repacks matching the applied filters.`,
+      accessibleLabel: `View all repacks: ${countLabel(kpis.totalRepacks)} public repacks matching the applied filters.`,
       state: "plain",
     },
     {
       id: "positiveEv",
       label: "Positive EV",
       value: countLabel(kpis.positiveEvRepacks),
-      helper: "Repacks with positive EV",
-      accessibleLabel: `${countLabel(kpis.positiveEvRepacks)} active repacks have positive EV.`,
+      helper: "Available repacks with EV $ above zero",
+      accessibleLabel: `${countLabel(kpis.positiveEvRepacks)} available repacks have a current PackScout estimate with EV $ above zero. Excludes packs labeled Unavailable, Availability unknown, or Sold out, and packs whose estimate is unavailable or expired.`,
       state: "positive",
       stateLabel: "Positive",
     },
@@ -144,7 +108,7 @@ export function presentDashboardKpis(
       id: "medianEv",
       label: "Median EV",
       value: median.displayValue,
-      helper: `Median EV · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
+      helper: `Median EV % · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
       accessibleLabel: median.accessibleLabel,
       state: median.semanticState ?? "plain",
       stateLabel: median.semanticLabel,
@@ -168,61 +132,40 @@ export function presentDashboardKpis(
   ] satisfies readonly KpiPresentation[]);
 }
 
-export function presentRepackPrice(price: PublicPrice): DisplayField {
-  if (price.displayMoney !== null) {
-    const displayValue = formatMoneyMinorUnits(price.displayMoney);
-    return Object.freeze({
-      availability: "available" as const,
-      displayValue,
-      accessibleLabel: `Repack Price: ${displayValue}.`,
-    });
-  }
-  if (price.usdComparison.status === "available") {
-    const money = price.usdComparison.value;
-    const displayValue = formatMoneyMinorUnits(money);
-    return Object.freeze({
-      availability: "available" as const,
-      displayValue,
-      accessibleLabel: `Repack Price: ${displayValue}.`,
-    });
-  }
-  const reasonCopy = getPublicReasonCopy(price.usdComparison.reason);
+/**
+ * Presents one server-ranked opportunity row. The rank comes from the
+ * server's signed-EV-dollar ordering, and `estimate` is the deadline-resolved
+ * PackScout estimate for the row (defaults to the served projection).
+ */
+export function presentOpportunityRow(
+  repack: PublicRepackViewSummaryV3,
+  rank: number,
+  estimate: PackScoutPublicEvV3 = repack.evEstimates.packScout,
+): OpportunityPresentation {
   return Object.freeze({
-    availability: "unavailable" as const,
-    displayValue: "Unavailable",
-    reasonCopy,
-    accessibleLabel: `Repack Price: Unavailable. ${reasonCopy}`,
+    rank,
+    publicRepackId: repack.publicRepackId,
+    name: repack.name,
+    category:
+      repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized",
+    vendorDisplayName: repack.vendorDisplayName,
+    vendorLogoUrl: repack.vendorLogoUrl,
+    primaryImage: repack.primaryImage,
+    simulated: isSimulatedRepackListing(repack.name),
+    packPrice: presentRepackPrice(repack.price),
+    packScoutEv: presentPackScoutEvV3({
+      estimate,
+      price: repack.price,
+      availability: repack.availability,
+      repackName: repack.name,
+    }),
+    buyback: presentBuybackSummaryV3(repack.buyback),
+    topChaseValue: presentTopChaseValue(repack.topChase),
   });
 }
 
-export function presentOpportunities(
-  opportunities: readonly PublicRepackViewSummary[],
-): readonly OpportunityPresentation[] {
-  return Object.freeze(
-    opportunities.map((repack, index) => ({
-      rank: index + 1,
-      publicRepackId: repack.publicRepackId,
-      name: repack.name,
-      category: repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized",
-      vendorDisplayName: repack.vendorDisplayName,
-      vendorLogoUrl: repack.vendorLogoUrl,
-      primaryImage: repack.primaryImage,
-      heat: repack.heat,
-      repackPrice: presentRepackPrice(repack.price),
-      packScoutEvPercent: presentPackScoutEvPercent(repack.evEstimates.packScout),
-      packScoutConfidence: presentPackScoutConfidence(
-        repack.evEstimates.packScout.status === "available"
-          ? repack.evEstimates.packScout.confidence
-          : null,
-      ),
-      buyback: presentBuyback(repack.buyback),
-      topChaseValue: presentTopChaseValue(repack.topChase),
-    })),
-  );
-}
-
 export function resolveOverviewSelection(
-  opportunities: readonly Pick<PublicRepackViewSummary, "publicRepackId">[],
+  opportunities: readonly Pick<PublicRepackViewSummaryV3, "publicRepackId">[],
   selectedPublicRepackId: string | null | undefined,
 ): string | null {
   if (
@@ -237,7 +180,7 @@ export function resolveOverviewSelection(
 }
 
 export function presentCatalogSummaries(
-  summaries: readonly RepackSummaryGroup[],
+  summaries: readonly RepackSummaryGroupV3[],
 ): readonly CatalogSummaryPresentation[] {
   const largestCount = Math.max(
     0,
@@ -245,7 +188,10 @@ export function presentCatalogSummaries(
   );
   return Object.freeze(
     summaries.map((summary) => {
-      const median = presentSummaryEvPercent(summary.medianPackScoutEvPercent);
+      const median = presentSignedEvPercentMetric(
+        summary.medianPackScoutEvPercent,
+        "Median EV %",
+      );
       const repacks = countLabel(summary.repackCount);
       const reasonCopy =
         median.availability === "unavailable" ? median.reasonCopy : undefined;
@@ -256,7 +202,7 @@ export function presentCatalogSummaries(
         repackCountLabel: repacks,
         barRatio: largestCount === 0 ? 0 : summary.repackCount / largestCount,
         medianEvPercent: median,
-        accessibleLabel: `${summary.label}: ${repacks} repacks. Median EV: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
+        accessibleLabel: `${summary.label}: ${repacks} repacks. Median EV %: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
       };
     }),
   );

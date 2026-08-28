@@ -1,4 +1,31 @@
+import { PUBLIC_CONFIDENCE_LIMITATION_COPY } from "../confidence-limitations";
+import { METRIC_TRUST_COPY, type GlossaryFieldKey } from "../metric-vocabulary";
+import {
+  BREAK_EVEN_GROSS_EV_PERCENT_LABEL,
+  CANONICAL_BUYBACK_EQUATION,
+  getPackScoutEvWorkedExample,
+  PACKSCOUT_EV_WORKED_EXAMPLE_IDS,
+} from "../packscout-ev-examples";
 import type { LearnGuide } from "./types";
+
+const CANONICAL_EXAMPLE = getPackScoutEvWorkedExample("canonical_buyback");
+
+/**
+ * Every EV term taught by the Expected Value guide. The definitions render
+ * from the one canonical glossary registry, so Learn and every glossary hint
+ * always show identical wording.
+ */
+export const EXPECTED_VALUE_METRIC_KEYS = [
+  "repackPrice",
+  "grossEv",
+  "grossEvPercent",
+  "evDollars",
+  "evPercent",
+  "evConfidence",
+  "buybackPercent",
+  "vendorReportedEv",
+  "topChase",
+] as const satisfies readonly GlossaryFieldKey[];
 
 export const EXPECTED_VALUE_GUIDE = {
   slug: "expected-value",
@@ -256,6 +283,192 @@ export const EXPECTED_VALUE_GUIDE = {
         {
           type: "paragraph",
           text: "It resets expectations around variance. Understanding that a repack is negative EV by design, in the same way a lottery ticket or a casino game is, reframes the purchase as entertainment spending rather than an investment. That's a healthier and more accurate way to approach the category, and it matches how thoughtful collectors already think about sealed wax generally.",
+        },
+      ],
+    },
+    {
+      id: "packscout-buyback-method",
+      heading: "How PackScout Calculates Its EV Metrics",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "The market-value exercise above is how a buyer can size up any repack by hand. The metrics PackScout publishes are calculated differently and more strictly: they are buyback-adjusted, built only from platform-provided data, and never from independent market valuations.",
+        },
+        {
+          type: "paragraph",
+          text: "PackScout starts from each supported outcome’s platform-stated value. Weighting those stated values by their odds produces the Underlying Outcome EV — a protected intermediate number that stays calculation evidence and is never shown as a public metric.",
+        },
+        {
+          type: "paragraph",
+          text: "Documented buyback terms then convert each outcome’s stated value into the final guaranteed buyback payout the platform would actually pay. Exact outcome-specific terms take priority; a product-wide rate applies only when the platform documents that one uniform rate governs every eligible outcome — which is also the only case where Buyback % shows a number instead of a bounded summary.",
+        },
+        {
+          type: "paragraph",
+          text: "Mandatory fees, caps, floors, and fixed offers are applied in the approved payout order, an explicitly ineligible outcome contributes a $0.00 payout, and unknown eligibility makes the estimate Unavailable. A value the platform already states as a final buyback payout is never discounted a second time.",
+        },
+        {
+          type: "paragraph",
+          text: `Gross EV $ is the probability-weighted sum of those final guaranteed payouts, multiplied across a pack’s approved number of draws. With one documented uniform rate the whole conversion reads as ${CANONICAL_BUYBACK_EQUATION}.`,
+        },
+      ],
+      callout: {
+        label: "Important limitation",
+        paragraphs: [
+          METRIC_TRUST_COPY.longRunExplanation,
+          METRIC_TRUST_COPY.sourceExplanation,
+        ],
+      },
+    },
+    {
+      id: "packscout-metrics",
+      heading: "The Metrics PackScout Shows",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "PackScout uses the same metric definitions on Dashboard, All Repacks, and Learn, so a label keeps one meaning wherever you see it.",
+        },
+        {
+          type: "paragraph",
+          text: `Gross EV % of ${BREAK_EVEN_GROSS_EV_PERCENT_LABEL} is the break-even point: the expected guaranteed payout exactly equals Pack Price. EV $ and EV % are signed against Pack Price, so values above break-even carry an explicit plus sign and values below render negative — in the shared example, a Gross EV % of ${CANONICAL_EXAMPLE.presentation.grossEvPercent.displayValue} is exactly an EV % of ${CANONICAL_EXAMPLE.presentation.evPercent.displayValue}.`,
+        },
+      ],
+      metricKeys: EXPECTED_VALUE_METRIC_KEYS,
+    },
+    {
+      id: "packscout-worked-examples",
+      heading: "Worked Examples From the Shared Formulas",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "These hypothetical examples do not describe a current repack or vendor listing. Every number below is rendered by the same shared presentation code that renders the catalog, so the examples cannot drift from the live formulas.",
+        },
+      ],
+      evExampleIds: PACKSCOUT_EV_WORKED_EXAMPLE_IDS,
+    },
+    {
+      id: "packscout-odds-and-values",
+      heading: "Where the Odds and Stated Values Come From",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "For a finite pool, complete current remaining-inventory odds take priority: when platform data deterministically shows what remains, PackScout calculates the odds from that pool. Complete platform-published odds are the fallback, and using them adds a confidence limitation.",
+        },
+        {
+          type: "paragraph",
+          text: "The supported odds must cover every outcome completely and come from one atomic observation. Partial probability coverage, a material conflict between odds sources, or a non-atomic observation makes the estimate Unavailable instead of a blended guess.",
+        },
+        {
+          type: "paragraph",
+          text: "Exact stated values are preferred. A closed platform range uses its midpoint and adds a confidence limitation; a missing, inverted, or open-ended range makes the estimate Unavailable.",
+        },
+      ],
+    },
+    {
+      id: "packscout-confidence",
+      heading: "Confidence, Freshness, and Unavailable",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "An available estimate starts at full confidence, and only the approved evidence penalties reduce it. The published bands are Low, Medium, and High.",
+        },
+        {
+          type: "paragraph",
+          text: METRIC_TRUST_COPY.confidenceExplanation,
+        },
+        {
+          type: "paragraph",
+          text: "Evidence age uses the oldest essential source observation. Data at most 15 minutes old carries no penalty, older data is progressively penalized, and once the oldest essential evidence is over 60 minutes old an active estimate becomes Expired and leaves the EV rankings. A sold-out repack instead freezes its last valid estimate as an explicit historical state.",
+        },
+        {
+          type: "paragraph",
+          text: METRIC_TRUST_COPY.unavailableExplanation,
+        },
+        {
+          type: "paragraph",
+          text: "Missing essential evidence is never a low-confidence estimate: price, currency, probabilities, stated values, eligibility, buyback terms, draw count, provenance, and observation times must all be complete, or the estimate is Unavailable. An unavailable value is not zero.",
+        },
+      ],
+      callout: {
+        label: "The only confidence limitations",
+        paragraphs: [
+          PUBLIC_CONFIDENCE_LIMITATION_COPY.platform_published_odds,
+          PUBLIC_CONFIDENCE_LIMITATION_COPY.closed_range_midpoint,
+          PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_15_through_30_minutes,
+          PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_30_through_60_minutes,
+        ],
+      },
+    },
+    {
+      id: "packscout-recent-pulls",
+      heading: "Recent Pulls Never Predict the Next Pack",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "Recent pulls change a PackScout estimate only when they deterministically update verified remaining inventory: pulled outcomes leave the pool, and the odds recalculate from what verifiably remains.",
+        },
+        {
+          type: "paragraph",
+          text: "Recent realized hit frequency is never odds evidence. A hot or cold streak does not estimate future odds, and PackScout never infers a realized EV from recent pulls, wallets, or historical hit rates.",
+        },
+      ],
+    },
+    {
+      id: "packscout-vendor-separation",
+      heading: "Vendor-Reported EV and PackScout EV Stay Separate",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "A vendor may publish its own EV using its inventory, odds, and valuation approach. PackScout independently calculates PackScout Gross EV from platform-provided evidence, and each estimate carries its own observation time.",
+        },
+        {
+          type: "paragraph",
+          text: METRIC_TRUST_COPY.sourceExplanation,
+        },
+        {
+          type: "paragraph",
+          text: "A missing estimate is never filled from the other source, and disagreement does not mean either value was silently changed.",
+        },
+      ],
+    },
+    {
+      id: "packscout-not-modeled",
+      heading: "What PackScout Does Not Model",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "PackScout Gross EV is a guaranteed-payout comparison, not a net-profit forecast. These costs and adjustments are explicitly out of scope:",
+        },
+      ],
+      checklist: [
+        {
+          title: "Liquidity and resale friction",
+          body: "No modeling of how quickly — or whether — an item could actually be resold.",
+        },
+        {
+          title: "Shipping, resale fees, and taxes",
+          body: "No shipping costs, marketplace or resale fees, or taxes are subtracted from any payout.",
+        },
+        {
+          title: "Personalized prices",
+          body: "Pack Price is the current public listed price before personalized, membership, or promo discounts.",
+        },
+        {
+          title: "Unsupported currencies and live FX",
+          body: "Calculations use canonical USD or an approved USD-equivalent at documented parity; mixed unnormalized money or live FX conversion makes the estimate Unavailable.",
+        },
+        {
+          title: "Independent market valuation",
+          body: "PackScout does not independently value collectibles, use external sales comps, or apply a proprietary valuation model at launch.",
+        },
+      ],
+    },
+    {
+      id: "packscout-one-input",
+      heading: "Use EV as One Comparison Input",
+      blocks: [
+        {
+          type: "paragraph",
+          text: "Two repacks with similar EV can still have very different odds, inventory depth, buyback terms, and ranges of possible outcomes. Review the underlying listing and evidence alongside the estimate — PackScout labels platform-derived claims with observation times and does not independently verify every underlying data point.",
         },
       ],
     },

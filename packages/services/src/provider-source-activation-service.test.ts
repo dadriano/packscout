@@ -278,11 +278,25 @@ test("activation resolves production pins and persists only the exact safe candi
   }]);
   assert.deepEqual(activated.requestBounds,
     dataforrestEventsV1SourceAdapterManifest.requestBounds);
-  assert.equal(activated.approvedAggregateRequestCap, 2);
+  assert.equal(activated.approvedPlatformRequestCap, 2);
   assert.equal(
     Object.hasOwn(repository.activations[0]!, "connectionConfiguration"),
     false,
   );
+});
+
+test("activation accepts an operating limit below the adapter maximum", async () => {
+  const baseline = validCandidate();
+  const candidate = {
+    ...baseline,
+    connectionProfile: { ...baseline.connectionProfile, requestLimit: 1 },
+  };
+  const { service, repository } = buildService({ candidate });
+
+  const activated = await service.activatePaused(request);
+
+  assert.equal(repository.activations[0]?.connectionRequestLimit, 1);
+  assert.equal(activated.approvedPlatformRequestCap, 1);
 });
 
 test("source configuration hashing is canonical and domain separated", () => {
@@ -352,10 +366,10 @@ test("activation rejects source hash, source schema, scope, connection type, cap
       code: "adapter_manifest_mismatch",
     },
     {
-      name: "connection cap below the frozen manifest cap",
+      name: "connection cap below the valid range",
       candidate: {
         ...baseline,
-        connectionProfile: { ...baseline.connectionProfile, requestLimit: 1 },
+        connectionProfile: { ...baseline.connectionProfile, requestLimit: 0 },
       },
       code: "adapter_manifest_mismatch",
     },

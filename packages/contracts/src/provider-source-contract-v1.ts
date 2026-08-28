@@ -129,11 +129,12 @@ export const providerSourceRecordsPerRequest = Object.freeze({
 });
 
 export const providerSourceLaunchBounds = Object.freeze({
-  pageTargetRecords: 250,
+  pageTargetRecords: providerSourceRecordsPerRequest.default,
   recordsPerRequest: providerSourceRecordsPerRequest,
   maximumResponseBytes: 8 * 1024 * 1024,
   requestTimeoutMilliseconds: 10_000,
-  stableProfileRequestCap: 2,
+  requestConcurrencyPerLane: 1,
+  stablePlatformRequestCap: 2,
   genericExecutionSlots: 4,
   sourceIntervalSeconds: Object.freeze({
     minimum: 60,
@@ -335,6 +336,7 @@ export const sourceAdapterFailureCodes = [
   "cancelled",
   "lost_ownership",
   "request_timeout",
+  "response_too_large",
   "network_interruption",
   "server_failure",
   "rate_limited",
@@ -366,6 +368,7 @@ export const sourceAdapterFailureSchema = z
         disposition: z.literal("retryable"),
         code: z.enum([
           "request_timeout",
+          "response_too_large",
           "network_interruption",
           "server_failure",
           "rate_limited",
@@ -468,7 +471,7 @@ export const sourceAdapterManifestV1Schema = z
     cursorCodecKey: registrationKeySchema,
     operatorLabel: z.string().trim().min(1).max(80),
     requestBounds: providerSourceRequestBoundsSchema,
-    maximumConnectionRequestCap: z.number().int().min(1).max(4),
+    maximumPlatformRequestCap: z.number().int().min(1).max(4),
     capabilities: z
       .object({
         connectionTest: z.literal(true),

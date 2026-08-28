@@ -309,9 +309,32 @@ function connectionSummary(input: Readonly<{
         ? "candidate"
         : connection.latestRevision.test.state,
     );
-  const profileCapacity = input.snapshot.capacity.profiles.find(
+  const requestPermitLanes = input.snapshot.capacity.requestPermitLanes.filter(
     ({ connectionProfileId }) => connectionProfileId === connection.id,
   );
+  const platformRequestPermitLanes = requestPermitLanes.filter(
+    (lane) => lane.scope === "platform",
+  );
+  const selectedRequestPermitLane = input.source === null
+    ? platformRequestPermitLanes.length === 0
+      ? requestPermitLanes.find((lane) => lane.scope === "connection_test")
+      : {
+          used: platformRequestPermitLanes.reduce(
+            (total, lane) => total + lane.used,
+            0,
+          ),
+          maximum: platformRequestPermitLanes.reduce(
+            (total, lane) => total + lane.maximum,
+            0,
+          ),
+          waiting: platformRequestPermitLanes.reduce(
+            (total, lane) => total + lane.waiting,
+            0,
+          ),
+        }
+    : platformRequestPermitLanes.find(
+        ({ providerId }) => providerId === input.source!.providerId,
+      );
   return {
     connectionProfileId: connection.id,
     displayName: connection.displayName,
@@ -356,9 +379,9 @@ function connectionSummary(input: Readonly<{
       safeCode: input.snapshot.capacity.safeCode,
       executionSlots: { ...input.snapshot.capacity.executionSlots },
       requestPermits: {
-        used: profileCapacity?.used ?? 0,
-        maximum: profileCapacity?.maximum ?? connection.requestLimit,
-        waiting: profileCapacity?.waiting ?? 0,
+        used: selectedRequestPermitLane?.used ?? 0,
+        maximum: selectedRequestPermitLane?.maximum ?? connection.requestLimit,
+        waiting: selectedRequestPermitLane?.waiting ?? 0,
       },
     },
   };
@@ -584,7 +607,13 @@ export class ProviderSourceOperationsService {
           source: null,
         })
       : connectionProfileIds.size === 1
-        ? configuredConnections[0] ?? null
+        ? connectionSummary({
+            dependencies: this.#dependencies,
+            catalog,
+            snapshot,
+            facts,
+            source: null,
+          })
         : null;
     let connectionMode: "none" | "shared" | "split";
     if (configuredConnections.length === 0) {

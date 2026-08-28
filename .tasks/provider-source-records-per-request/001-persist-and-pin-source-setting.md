@@ -6,8 +6,8 @@
 
 - Source creation stores 500 by default or the supplied integer from 1 through
   5,000.
-- Existing schedule revisions migrate with 250, preserving their prior implicit
-  request size until an administrator saves another value.
+- Existing schedule revisions migrate with 500, preserving the current request
+  target until an administrator saves another value.
 - A guarded admin save changes only this operational setting; it does not create
   a source test or change lifecycle, cursor, checkpoint, or active work.
 - Every new scheduled, manual, continuation, or recovery run pins the setting.

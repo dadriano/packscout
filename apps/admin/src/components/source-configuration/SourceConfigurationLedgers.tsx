@@ -161,7 +161,7 @@ export function SourceConnectionLedger({
               <dl className="source-config-ledger__facts">
                 <div><dt>Credential</dt><dd>{revision.credentialMask} configured</dd></div>
                 <div><dt>Adapter</dt><dd>{revision.sourceAdapterVersion}</dd></div>
-                <div><dt>Request cap</dt><dd>{connection.requestLimit} shared requests</dd></div>
+                <div><dt>Request cap</dt><dd>{connection.requestLimit} per platform</dd></div>
                 <div><dt>Revision state</dt><dd>{label(revision.state)}</dd></div>
               </dl>
               {canManage ? (

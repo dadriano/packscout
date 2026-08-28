@@ -17,6 +17,7 @@ import type { CommitPageInput } from "./pipeline-types.ts";
 import {
   advanceSettledPublicWatermark,
   allocatePublicChangeCauses,
+  PrismaPublicChangeSettlementRepository,
 } from "./public-change-settlement-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
@@ -707,7 +708,7 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
     );
 
     const settledAt = new Date(committedAt.getTime() + 1_000);
-    const checkpoint = await harness.client.$transaction(async (transaction) => {
+    await harness.client.$transaction(async (transaction) => {
       await transaction.public_derivation_obligations.updateMany({
         where: { organization_id: ids.organization },
         data: {
@@ -718,11 +719,14 @@ test("canonical writes persist settled, bounded, public-safe Heat observations w
           updated_at: settledAt,
         },
       });
-      return advanceSettledPublicWatermark(transaction, {
+      await advanceSettledPublicWatermark(transaction, {
         organizationId: ids.organization,
         settledAt,
       });
     });
+    const checkpoint = await new PrismaPublicChangeSettlementRepository(
+      harness.client,
+    ).getSettledWatermark(ids.organization);
     assert.equal(checkpoint.settledSequence, 6n);
 
     const settled = await reader.listSettledNormalizedHeatObservations({

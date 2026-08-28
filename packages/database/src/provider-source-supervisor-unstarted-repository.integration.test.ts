@@ -12,6 +12,8 @@ import { ProviderSourceSupervisorRepository } from
   "./provider-source-supervisor-repository.ts";
 import { ProviderSourceSupervisorWorkRepository } from
   "./provider-source-supervisor-work-repository.ts";
+import { SourceConnectionAdminRepository } from
+  "./source-connection-admin-repository.ts";
 
 async function databaseNow(
   database: Awaited<ReturnType<typeof createProviderSourceAcceptanceFixture>>["database"],
@@ -148,6 +150,109 @@ test("a capacity wait preserves the page retry budget and next backoff", async (
         orderBy: { occurred_at: "desc" },
       });
     assert.equal(retryEvent.retry_delay_ms, 5_000);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("saturated request lanes exclude only the exact platform or connection-test lane", async () => {
+  const fixture = await createProviderSourceAcceptanceFixture(
+    "request-lane-exclusion",
+  );
+  try {
+    const [courtyard, phygitals] = await Promise.all([
+      createAcceptanceProviderSource(fixture, {
+        platformKey: "courtyard",
+        displayName: "Courtyard",
+        mapperKey: "courtyard-provider-observation",
+        identityNamespaceKey: "dataforrest-courtyard-records-v1",
+        intervalSeconds: 60,
+        hashCharacter: "b",
+      }),
+      createAcceptanceProviderSource(fixture, {
+        platformKey: "phygitals",
+        displayName: "Phygitals",
+        mapperKey: "phygitals-provider-observation",
+        identityNamespaceKey: "dataforrest-phygitals-records-v1",
+        intervalSeconds: 60,
+        hashCharacter: "d",
+      }),
+    ]);
+    const now = await databaseNow(fixture.database);
+    await activateAcceptanceRuntime(fixture.database, fixture, courtyard, now);
+    await activateAcceptanceRuntime(fixture.database, fixture, phygitals, now);
+
+    await new SourceConnectionAdminRepository(fixture.database)
+      .requestConnectionTest({
+        organizationId: fixture.organizationId,
+        connectionProfileId: fixture.connectionProfileId,
+        connectionRevisionId: fixture.connectionRevisionId,
+        expectedHealthGeneration: 0n,
+        requestedByActorKey: "operator-admin",
+        requestedAt: new Date(now.getTime() - 2_000),
+      });
+    const runs = new ProviderSourceImportRunRepository(fixture.database);
+    const courtyardRun = await runs.requestRun({
+      organizationId: fixture.organizationId,
+      providerId: courtyard.providerId,
+      runId: randomUUID(),
+      trigger: "manual",
+      requestedByActorKey: "operator-admin",
+      requestedAt: new Date(now.getTime() - 1_000),
+      expectedSourceRevisionId: courtyard.sourceRevisionId,
+    });
+    const phygitalsRun = await runs.requestRun({
+      organizationId: fixture.organizationId,
+      providerId: phygitals.providerId,
+      runId: randomUUID(),
+      trigger: "manual",
+      requestedByActorKey: "operator-admin",
+      requestedAt: now,
+      expectedSourceRevisionId: phygitals.sourceRevisionId,
+    });
+    assert.equal(courtyardRun.kind, "created");
+    assert.equal(phygitalsRun.kind, "created");
+
+    const ownerKey = "request-lane-exclusion-owner";
+    const leaseToken = randomUUID();
+    const epoch = await new ProviderSourceSupervisorRepository(
+      fixture.database,
+    ).acquire({
+      environmentKey: "request-lane-exclusion-environment",
+      ownerKey,
+      leaseToken,
+      now,
+    });
+    const claimed = await new ProviderSourceSupervisorWorkRepository(
+      fixture.database,
+    ).claimNext({
+      epochId: epoch.epochId,
+      ownerKey,
+      leaseToken,
+      claimOwner: ownerKey,
+      claimToken: randomUUID(),
+      claimLeaseId: randomUUID(),
+      excludedRequestLanes: [
+        {
+          scope: "connection_test",
+          organizationId: fixture.organizationId,
+          connectionProfileId: fixture.connectionProfileId,
+          providerId: null,
+        },
+        {
+          scope: "platform",
+          organizationId: fixture.organizationId,
+          connectionProfileId: fixture.connectionProfileId,
+          providerId: courtyard.providerId,
+        },
+      ],
+    });
+
+    assert.equal(claimed?.kind, "page_read");
+    assert.equal(
+      claimed?.kind === "page_read" ? claimed.providerId : null,
+      phygitals.providerId,
+    );
   } finally {
     await fixture.close();
   }

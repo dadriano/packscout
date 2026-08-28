@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
+  DATAFORREST_EVENTS_V1_ENDPOINT,
+  DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  dataforrestEventsV1SourceAdapterManifest,
   dataforrestIdentityNamespaceByProvider,
   providerSourceLaunchBounds,
   launchRecordIdScopeDeclarations,
@@ -18,13 +23,16 @@ import {
   ConnectionPermitCoordinator,
   ControlPlaneRetryExhaustedError,
   ControlPlaneTransactionError,
+  DataforrestEventsSourceAdapter,
   RuntimeControlPlaneFence,
   RuntimeLocallyFencedError,
   SourceSupervisorStaleWorkError,
   SourceAdapterRegistry,
+  SourceRequestLeaseError,
   SourceRequestLeaseAuthority,
   type UnboundSourceAdapterRequestResult,
   type SourceAdapterCaptureInvocation,
+  type SourceAdapter,
   type SourceAdapterOperation,
   type SourceSupervisorExecutionContext,
 } from "@packscout/services";
@@ -57,6 +65,17 @@ function encryptedConfiguration() {
   });
 }
 
+function encryptedDataforrestConfiguration() {
+  return cipher.encrypt(JSON.stringify({
+    endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+    bearerToken: "executor-fixture-token",
+  }), {
+    organizationId: "organization-1",
+    connectionProfileId: "profile-1",
+    connectionRevisionId: "connection-revision-1",
+  });
+}
+
 function connectionWork(): ClaimedConnectionTestWork {
   return {
     id: "connection-test-1",
@@ -68,7 +87,7 @@ function connectionWork(): ClaimedConnectionTestWork {
     connectionProfileId: "profile-1",
     connectionRevisionId: "connection-revision-1",
     connectionHealthGeneration: 3n,
-    profileRequestLimit: 2,
+    platformRequestLimit: 2,
     connectionConfiguration: encryptedConfiguration(),
     claimOwner: "executor-test-owner",
     claimToken: "65000000-0000-4000-8000-000000000003",
@@ -103,9 +122,12 @@ function sourceWork(recordsPerRequest = 500): ClaimedSourceTestWork {
   };
 }
 
-function pageWork(): ClaimedPageReadWork {
+function pageWork(
+  recordsPerRequest = 500,
+  retryAttempt = 0,
+): ClaimedPageReadWork {
   return {
-    ...sourceWork(),
+    ...sourceWork(recordsPerRequest),
     id: "page-run-1",
     kind: "page_read",
     runId: "page-run-1",
@@ -113,7 +135,7 @@ function pageWork(): ClaimedPageReadWork {
     runStartedAt: new Date("2026-08-21T12:00:00.000Z"),
     committedPages: 0,
     committedRecords: 0,
-    retryAttempt: 0,
+    retryAttempt,
     pageNumber: 1,
     cursorGeneration: 1n,
     requestedCursorValue: null,
@@ -122,10 +144,25 @@ function pageWork(): ClaimedPageReadWork {
   };
 }
 
+function dataforrestPageWork(retryAttempt: number): ClaimedPageReadWork {
+  return {
+    ...pageWork(),
+    sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+    sourceAdapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    connectionConfiguration: encryptedDataforrestConfiguration(),
+    sourceConfiguration: { platform: "courtyard" },
+    cursorCodecVersion: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
+    requestedCursorValue: "opaque-retry-cursor",
+    requestedCursorFingerprint: "a".repeat(64),
+    retryAttempt,
+  };
+}
+
 class RecordingAdapter extends AlternateBookmarkSourceAdapter {
   throwOnCapture = false;
   failRequest = false;
   readonly capturedOperations: SourceAdapterOperation[] = [];
+  readonly pageLimits: number[] = [];
   constructor(private readonly events: string[], payload?: unknown) {
     super(payload);
   }
@@ -136,6 +173,9 @@ class RecordingAdapter extends AlternateBookmarkSourceAdapter {
   ) {
     this.events.push("capture");
     this.capturedOperations.push(operation);
+    if (operation.operationKind === "page_read") {
+      this.pageLimits.push(operation.correlation.pageLimit);
+    }
     if (this.throwOnCapture) throw new Error("unknown capture state");
     if (this.failRequest) {
       invocation.consume(operation);
@@ -160,6 +200,15 @@ interface ExecutorFixture {
   releaseRetained(): void;
 }
 
+function activeRequestPermitCount(
+  coordinator: ConnectionPermitCoordinator,
+): number {
+  return coordinator.snapshot().requestPermitLanes.reduce(
+    (total, lane) => total + lane.activeRequestPermits,
+    0,
+  );
+}
+
 function fixture(overrides: Readonly<{
   begin?: () => Promise<string>;
   terminalize?: () => Promise<void>;
@@ -168,14 +217,24 @@ function fixture(overrides: Readonly<{
   resolveMapper?: () => void;
   importPage?: () => Promise<never>;
   adapterPayload?: unknown;
+  sourceAdapter?: SourceAdapter;
 }> = {}): ExecutorFixture {
   const events: string[] = [];
   const adapter = new RecordingAdapter(events, overrides.adapterPayload);
   const coordinator = new ConnectionPermitCoordinator();
-  coordinator.configureProfile({
+  coordinator.configureRequestPermitLane({
     organizationId: "organization-1",
     connectionProfileId: "profile-1",
-    approvedAggregateRequestCap: 2,
+    scope: "connection_test",
+    providerId: null,
+    approvedRequestCap: 1,
+  });
+  coordinator.configureRequestPermitLane({
+    organizationId: "organization-1",
+    connectionProfileId: "profile-1",
+    scope: "platform",
+    providerId: "provider-1",
+    approvedRequestCap: 1,
   });
   let retained: (() => void) | undefined;
   const requestRepository = {
@@ -229,7 +288,9 @@ function fixture(overrides: Readonly<{
     },
   };
   const executor = new ProviderSourceSupervisorWorkExecutor({
-    sourceAdapters: new SourceAdapterRegistry([adapter]),
+    sourceAdapters: new SourceAdapterRegistry([
+      overrides.sourceAdapter ?? adapter,
+    ]),
     mappers: {
       resolve() {
         overrides.resolveMapper?.();
@@ -270,7 +331,7 @@ function fixture(overrides: Readonly<{
   };
 }
 
-test("a bounded page persistence timeout preserves the cursor for retry", async () => {
+test("a bounded page persistence timeout preserves the cursor and exact request pin for retry", async () => {
   const execution = fixture({
     async importPage() {
       throw new ControlPlaneTransactionError("timeout");
@@ -278,7 +339,7 @@ test("a bounded page persistence timeout preserves the cursor for retry", async 
   });
 
   const result = await execution.executor.execute(
-    pageWork(),
+    pageWork(137),
     execution.context,
   );
 
@@ -286,14 +347,25 @@ test("a bounded page persistence timeout preserves the cursor for retry", async 
     kind: "retryable",
     safeCode: "PAGE_PERSISTENCE_TIMEOUT",
   });
+  assert.deepEqual(execution.adapter.pageLimits, [137]);
   assert.deepEqual(execution.coordinator.snapshot(), {
     maximumExecutionSlots: 4,
     activeExecutionSlots: 1,
     queuedOperations: 0,
-    profiles: [{
+    requestPermitLanes: [{
       organizationId: "organization-1",
       connectionProfileId: "profile-1",
-      approvedAggregateRequestCap: 2,
+      scope: "connection_test",
+      providerId: null,
+      approvedRequestCap: 1,
+      activeRequestPermits: 0,
+      queuedOperations: 0,
+    }, {
+      organizationId: "organization-1",
+      connectionProfileId: "profile-1",
+      scope: "platform",
+      providerId: "provider-1",
+      approvedRequestCap: 1,
       activeRequestPermits: 0,
       queuedOperations: 0,
     }],
@@ -301,6 +373,95 @@ test("a bounded page persistence timeout preserves the cursor for retry", async 
 
   execution.releaseRetained();
   assert.equal(execution.coordinator.snapshot().activeExecutionSlots, 0);
+
+  const retry = await execution.executor.execute(
+    pageWork(137, 1),
+    execution.context,
+  );
+  assert.deepEqual(retry, {
+    kind: "retryable",
+    safeCode: "PAGE_PERSISTENCE_TIMEOUT",
+  });
+  assert.deepEqual(execution.adapter.pageLimits, [137, 137]);
+  execution.releaseRetained();
+  assert.equal(execution.coordinator.snapshot().activeExecutionSlots, 0);
+});
+
+test("DataForrest retries an oversized cursor with the exact durable request pin", async () => {
+  const urls: URL[] = [];
+  const bounds: Array<Readonly<{
+    pageLimit: number;
+    maximumResponseBytes: number;
+    timeoutMilliseconds: number;
+  }>> = [];
+  class ExecutorDataforrestAdapter extends DataforrestEventsSourceAdapter {
+    override async captureUnboundRequest(
+      operation: SourceAdapterOperation,
+      invocation: SourceAdapterCaptureInvocation,
+    ) {
+      bounds.push(operation.bounds);
+      return await super.captureUnboundRequest(operation, invocation);
+    }
+  }
+  const adapter = new ExecutorDataforrestAdapter({
+    resolveHost: async () => ["198.204.245.26"],
+    httpClient: async (url) => {
+      urls.push(new URL(url));
+      return new Response(null, {
+        status: 200,
+        headers: { "content-length": "8388609" },
+      });
+    },
+  }, dataforrestEventsV1SourceAdapterManifest);
+  const execution = fixture({ sourceAdapter: adapter });
+
+  const initial = await execution.executor.execute(
+    dataforrestPageWork(0),
+    execution.context,
+  );
+  assert.deepEqual(initial, {
+    kind: "retryable",
+    safeCode: "RESPONSE_TOO_LARGE",
+  });
+  execution.releaseRetained();
+
+  const retry = await execution.executor.execute(
+    dataforrestPageWork(1),
+    execution.context,
+  );
+  assert.deepEqual(retry, {
+    kind: "retryable",
+    safeCode: "RESPONSE_TOO_LARGE",
+  });
+  execution.releaseRetained();
+
+  assert.deepEqual(
+    urls.map((url) => ({
+      cursor: url.searchParams.get("cursor"),
+      limit: url.searchParams.get("limit"),
+      platform: url.searchParams.get("platform"),
+    })),
+    [{
+      cursor: "opaque-retry-cursor",
+      limit: "500",
+      platform: "courtyard",
+    }, {
+      cursor: "opaque-retry-cursor",
+      limit: "500",
+      platform: "courtyard",
+    }],
+  );
+  assert.deepEqual(bounds, [{
+    pageLimit: 500,
+    maximumResponseBytes: 8_388_608,
+    timeoutMilliseconds: 10_000,
+  }, {
+    pageLimit: 500,
+    maximumResponseBytes: 8_388_608,
+    timeoutMilliseconds: 10_000,
+  }]);
+  assert.equal(execution.coordinator.snapshot().activeExecutionSlots, 0);
+  assert.equal(activeRequestPermitCount(execution.coordinator), 0);
 });
 
 test("an uncertain page commit connection loss fences local execution", async () => {
@@ -335,7 +496,7 @@ test("production executor begins and terminalizes once before publishing a test 
   );
   subject.releaseRetained();
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
 });
 
 test("a captured connection interpretation failure publishes its test result", async () => {
@@ -405,7 +566,10 @@ test("profile-only connection tests do not inherit a source request-size pin", a
   assert.equal(operation.operationKind, "connection_test");
   assert.equal(
     operation.bounds.pageLimit,
-    providerSourceLaunchBounds.pageTargetRecords,
+    Math.min(
+      providerSourceLaunchBounds.pageTargetRecords,
+      alternateBookmarkSourceManifest.requestBounds.pageLimit,
+    ),
   );
   assert.equal("recordsPerRequest" in operation, false);
   subject.releaseRetained();
@@ -425,7 +589,7 @@ test("an unresolved mapper pin retains its slot through durable finalization", a
   assert.equal(subject.adapter.captureCount, 0);
   assert.ok(!subject.events.includes("begin"));
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 1);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
   subject.releaseRetained();
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
 });
@@ -451,14 +615,27 @@ test("corrupted encrypted configuration opens the shared boundary with zero upst
   assert.ok(subject.events.includes("begin"));
   assert.ok(subject.events.includes("terminalize"));
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 1);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
   subject.releaseRetained();
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
 });
 
-test("the exact adapter manifest is the admission cap authority", () => {
+test("runtime uses one request per lane beneath the exact adapter maximum", () => {
   const subject = fixture();
-  assert.equal(subject.executor.registeredProfileRequestLimit(connectionWork()), 2);
+  assert.deepEqual(subject.executor.registeredRequestPermitLane(connectionWork()), {
+    organizationId: "organization-1",
+    connectionProfileId: "profile-1",
+    scope: "connection_test",
+    providerId: null,
+    approvedRequestCap: 1,
+  });
+  assert.deepEqual(subject.executor.registeredRequestPermitLane(sourceWork()), {
+    organizationId: "organization-1",
+    connectionProfileId: "profile-1",
+    scope: "platform",
+    providerId: "provider-1",
+    approvedRequestCap: 1,
+  });
 });
 
 test("pre-call control-plane exhaustion makes zero calls and releases the pair", async () => {
@@ -473,7 +650,7 @@ test("pre-call control-plane exhaustion makes zero calls and releases the pair",
   );
   assert.equal(subject.adapter.captureCount, 0);
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
 });
 
 test("a stale pre-call claim is typed without an upstream call or permit leak", async () => {
@@ -491,7 +668,7 @@ test("a stale pre-call claim is typed without an upstream call or permit leak", 
   );
   assert.equal(subject.adapter.captureCount, 0);
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
 });
 
 test("pre-call owner loss is promoted to a whole-runtime local fence", async () => {
@@ -506,7 +683,7 @@ test("pre-call owner loss is promoted to a whole-runtime local fence", async () 
   );
   assert.equal(subject.adapter.captureCount, 0);
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
 });
 
 test("retrospective diagnostic failure retains a cleanup callback after terminalization", async () => {
@@ -520,7 +697,7 @@ test("retrospective diagnostic failure retains a cleanup callback after terminal
     /diagnostic unavailable/u,
   );
   assert.equal(subject.adapter.captureCount, 1);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
   subject.releaseRetained();
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
 });
@@ -538,9 +715,51 @@ test("postterminal capacity publication failure retains exact slot cleanup", asy
     /snapshot unavailable/u,
   );
   assert.equal(subject.adapter.captureCount, 1);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
   subject.releaseRetained();
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
+});
+
+test("owner fencing handles queued admission cancellation while capacity publication is pending", async () => {
+  let capacityEntered!: () => void;
+  let releaseCapacity!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    capacityEntered = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    releaseCapacity = resolve;
+  });
+  const subject = fixture({
+    async capacityChanged() {
+      capacityEntered();
+      await held;
+    },
+  });
+  const requestPermitLane = {
+    organizationId: "organization-1",
+    connectionProfileId: "profile-1",
+    scope: "connection_test" as const,
+    providerId: null,
+  };
+  const occupyingPermits = [
+    await subject.coordinator.acquire({ requestPermitLane }),
+  ];
+  const execution = subject.executor.execute(connectionWork(), subject.context);
+
+  await entered;
+  subject.context.runtimeFence.fence();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  releaseCapacity();
+
+  await assert.rejects(
+    execution,
+    (error: unknown) => error instanceof SourceRequestLeaseError &&
+      error.code === "cancelled",
+  );
+  assert.equal(subject.adapter.captureCount, 0);
+  for (const permit of occupyingPermits) permit.releaseAll();
+  assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
 });
 
 test("terminalization exhaustion makes one call and drains after owner fencing", async () => {
@@ -555,7 +774,7 @@ test("terminalization exhaustion makes one call and drains after owner fencing",
   );
   assert.equal(subject.adapter.captureCount, 1);
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
 });
 
 test("unknown capture failure drains process capacity only after admission stops", async () => {
@@ -566,5 +785,5 @@ test("unknown capture failure drains process capacity only after admission stops
     RuntimeLocallyFencedError,
   );
   assert.equal(subject.coordinator.snapshot().activeExecutionSlots, 0);
-  assert.equal(subject.coordinator.snapshot().profiles[0]?.activeRequestPermits, 0);
+  assert.equal(activeRequestPermitCount(subject.coordinator), 0);
 });

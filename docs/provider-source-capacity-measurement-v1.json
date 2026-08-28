@@ -1,6 +1,6 @@
 {
   "version": "provider-source-capacity-measurement-v1",
-  "measuredAt": "2026-08-27T03:36:59.137Z",
+  "measuredAt": "2026-08-28T11:37:55.470Z",
   "reproduction": {
     "generatorCommand": "node --import tsx scripts/local/generate-provider-source-capacity-artifact.mts",
     "storageCommand": "PACKSCOUT_PRINT_PROVIDER_SOURCE_CAPACITY=1 node --import tsx --test --test-name-pattern='representative mixed commit measures' packages/services/src/provider-source-atomic-page.integration.test.ts",
@@ -20,13 +20,13 @@
     "incrementalGrowthAssumption": {
       "horizonDays": 365,
       "recordsPerPollAttempt": 5000,
-      "basis": "split bound: the dated initial backfill uses 250-record pages; ongoing growth assumes every source returns the full 5,000-record configured page on every 60-second poll"
+      "basis": "split bound: the current initial backfill uses 500-record pages; ongoing growth assumes every source returns the full 5,000-record configured page on every 60-second poll"
     }
   },
   "storageMeasurement": {
     "environment": {
       "postgresVersionMajor": 16,
-      "schemaMigration": "20260826010000_provider_source_records_per_request"
+      "schemaMigration": "20260827010000_provider_source_platform_request_lanes"
     },
     "sample": {
       "inputRecords": 288,
@@ -36,11 +36,11 @@
       "windows": 3,
       "pagesPerWindow": 24
     },
-    "pageDurationMilliseconds": 113.243,
+    "pageDurationMilliseconds": 116.99,
     "pageStatementCount": 160,
     "allocationPageBytes": 8192,
     "structuredPhysicalBytesPerRecord": 11947,
-    "normalizedPayloadPhysicalBytesPerRecord": 3237,
+    "normalizedPayloadPhysicalBytesPerRecord": 3322,
     "importPagePhysicalBytes": 15020,
     "quarantinePhysicalBytes": 6145,
     "quarantineEvidencePhysicalBytes": 2049,
@@ -77,9 +77,9 @@
       {
         "window": 3,
         "inputRecords": 96,
-        "structuredPhysicalBytes": 753664,
-        "structuredPhysicalBytesPerRecord": 7851,
-        "normalizedPayloadPhysicalBytesPerRecord": 3151,
+        "structuredPhysicalBytes": 761856,
+        "structuredPhysicalBytesPerRecord": 7936,
+        "normalizedPayloadPhysicalBytesPerRecord": 3236,
         "importPagePhysicalBytes": 10354,
         "quarantinePhysicalBytes": 2390,
         "quarantineEvidencePhysicalBytes": 1707,
@@ -93,10 +93,10 @@
         "relation": "import_pages",
         "rows": 72,
         "logicalRowBytes": 88038,
-        "tableBytes": 147456,
+        "tableBytes": 98304,
         "indexBytes": 172032,
-        "toastAndAuxiliaryBytes": 57344,
-        "totalBytes": 376832
+        "toastAndAuxiliaryBytes": 0,
+        "totalBytes": 270336
       },
       {
         "relation": "source_record_identities",
@@ -129,19 +129,19 @@
         "relation": "canonical_entities",
         "rows": 288,
         "logicalRowBytes": 36797,
-        "tableBytes": 65536,
+        "tableBytes": 49152,
         "indexBytes": 212992,
-        "toastAndAuxiliaryBytes": 32768,
-        "totalBytes": 311296
+        "toastAndAuxiliaryBytes": 24576,
+        "totalBytes": 286720
       },
       {
         "relation": "canonical_revisions",
         "rows": 288,
         "logicalRowBytes": 273008,
         "tableBytes": 294912,
-        "indexBytes": 294912,
+        "indexBytes": 286720,
         "toastAndAuxiliaryBytes": 24576,
-        "totalBytes": 614400
+        "totalBytes": 606208
       },
       {
         "relation": "canonical_relationships",
@@ -155,11 +155,11 @@
       {
         "relation": "public_change_causes",
         "rows": 576,
-        "logicalRowBytes": 142848,
-        "tableBytes": 147456,
+        "logicalRowBytes": 147456,
+        "tableBytes": 155648,
         "indexBytes": 114688,
         "toastAndAuxiliaryBytes": 24576,
-        "totalBytes": 286720
+        "totalBytes": 294912
       },
       {
         "relation": "public_derivation_obligations",
@@ -183,10 +183,10 @@
         "relation": "quarantine_records",
         "rows": 72,
         "logicalRowBytes": 17856,
-        "tableBytes": 32768,
+        "tableBytes": 24576,
         "indexBytes": 57344,
         "toastAndAuxiliaryBytes": 0,
-        "totalBytes": 90112
+        "totalBytes": 81920
       },
       {
         "relation": "source_processor_diagnostic_events",
@@ -218,8 +218,8 @@
     ]
   },
   "memoryMeasurement": {
-    "version": "provider-source-page-memory-v1",
-    "measuredAt": "2026-08-27T03:36:59.118Z",
+    "version": "provider-source-page-memory-v2",
+    "measuredAt": "2026-08-28T11:37:55.427Z",
     "environment": {
       "node": "v22.22.3",
       "platform": "darwin",
@@ -227,39 +227,40 @@
     },
     "path": "authentic-capture-terminalize-interpret-complete-import-plan",
     "sourceAdapterVersion": "dataforrest-events-adapter-v1",
-    "warmupPageCount": 10,
+    "warmupPageCount": 12,
     "trialCount": 5,
     "pagesPerTrial": 20,
     "pageCount": 100,
+    "concurrentPages": 4,
     "recordsPerPage": 5000,
     "responseBytesPerPage": 8388608,
-    "jsonNodesPerPage": 235004,
-    "emptyObjectFactsPerRecord": 34,
+    "jsonNodesPerPage": 475004,
+    "emptyObjectFactsPerRecord": 82,
     "totalRecordsProcessed": 500000,
-    "elapsedMilliseconds": 116155.198,
-    "idleRssBytes": 387039232,
-    "peakRssBytes": 395444224,
-    "peakDeltaBytes": 8404992,
+    "elapsedMilliseconds": 115950.788,
+    "idleRssBytes": 896253952,
+    "peakRssBytes": 1020067840,
+    "peakDeltaBytes": 123813888,
     "settledManagedBytes": [
-      66972181,
-      67085549,
-      67101653,
-      67061277,
-      67048861,
-      67083941
+      74245118,
+      73776231,
+      73827607,
+      73828359,
+      73835375,
+      73822199
     ],
     "retainedMetric": "theil-sen-managed-bytes-per-page",
-    "theilSenBytesPerPage": 566.6,
-    "retainedGrowthBytes": 56660,
+    "theilSenBytesPerPage": -90.133,
+    "retainedGrowthBytes": 0,
     "limits": {
-      "peakDeltaBytes": 67108864,
-      "retainedGrowthBytes": 8388608
+      "peakDeltaBytes": 268435456,
+      "retainedGrowthBytes": 33554432
     },
     "passes": true
   },
   "forecastInput": {
     "baselineRecordCount": 14526877,
-    "pageRecordLimit": 250,
+    "pageRecordLimit": 500,
     "sourceCount": 4,
     "pollIntervalSeconds": 60,
     "rawRetentionDays": 7,
@@ -270,7 +271,7 @@
     "conservativeRawHistoryBytes": 98700000000,
     "measuredAverageRawPageBytes": 642434,
     "measuredAverageRawRecordBytes": 2570,
-    "measuredPreExpiryNormalizedPayloadPhysicalBytesPerRecord": 3237,
+    "measuredPreExpiryNormalizedPayloadPhysicalBytesPerRecord": 3322,
     "measuredImportPagePhysicalBytes": 15020,
     "measuredQuarantinePhysicalBytes": 6145,
     "measuredQuarantineEvidencePhysicalBytes": 2049,
@@ -284,10 +285,10 @@
   "forecast": {
     "version": "provider-source-capacity-forecast-v2",
     "baselineRecordCount": 14526877,
-    "initialPageCount": 58108,
+    "initialPageCount": 29054,
     "sevenDayPollAttempts": 40320,
     "thirtyDayPollAttempts": 172800,
-    "firstWindowAttempts": 230908,
+    "firstWindowAttempts": 201854,
     "incrementalPollAttempts": 2102400,
     "incrementalRecordCount": 10512000000,
     "sevenDayIncrementalRecordCount": 201600000,
@@ -297,23 +298,23 @@
       "structuredAndCanonical": 125760416599519,
       "conservativeRawHistory": 98700000000,
       "retainedSteadyPollRaw": 25902938880,
-      "retainedPreExpiryNormalizedPagePayload": 699602700849,
-      "permanentImportPageLineage": 32450830160,
+      "retainedPreExpiryNormalizedPagePayload": 717973485394,
+      "permanentImportPageLineage": 32014439080,
       "quarantineEvidence": 1914090433264,
-      "pageDiagnostics": 473130492,
-      "terminalRequestAttempts": 946030076,
-      "permanentCompactAttemptLineage": 14013054888,
-      "total": 128546595718128
+      "pageDiagnostics": 413598846,
+      "terminalRequestAttempts": 826995838,
+      "permanentCompactAttemptLineage": 13824610644,
+      "total": 128564163101465
     },
-    "requiredFreeBytesWithHeadroom": 171395460957504,
-    "task010MinimumAvailableBytes": 171395460957504,
+    "requiredFreeBytesWithHeadroom": 171418884135287,
+    "task010MinimumAvailableBytes": 171418884135287,
     "abortThresholdBasisPoints": 8000,
     "nonterminalAttemptBytesEach": 4097
   },
   "task010AdmissionPreflight": {
     "input": {
       "volumeCapacityBytes": 994662584320,
-      "volumeAvailableBytes": 108201979904,
+      "volumeAvailableBytes": 172515115008,
       "unreconciledNonterminalAttemptCount": 0
     },
     "decision": {
@@ -324,11 +325,11 @@
         "volume_above_abort_threshold",
         "projected_abort_threshold_exceeded"
       ],
-      "volumeUsedBytes": 886460604416,
-      "projectedAdditionalBytes": 128546595718128,
-      "projectedVolumeUsedBytes": 129433056322544,
+      "volumeUsedBytes": 822147469312,
+      "projectedAdditionalBytes": 128564163101465,
+      "projectedVolumeUsedBytes": 129386310570777,
       "abortAtUsedBytes": 795730067456,
-      "requiredAvailableBytes": 171395460957504
+      "requiredAvailableBytes": 171418884135287
     }
   }
 }

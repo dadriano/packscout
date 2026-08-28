@@ -21,4 +21,3 @@
 - Component/page tests for default, valid save, invalid value, permissions,
   read-only display, and current/next copy.
 - Browser smoke for create/edit and read-only overview/detail at a desktop viewport.
-

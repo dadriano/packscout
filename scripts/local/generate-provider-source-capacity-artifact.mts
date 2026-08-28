@@ -152,7 +152,7 @@ const memoryMeasurement = JSON.parse(
 
 const forecastInput = {
   baselineRecordCount: 14_526_877,
-  // The dated full-history evidence was collected at 250 records per page.
+  // The current live-evidenced baseline and new-source default are 500.
   pageRecordLimit: providerSourceLaunchBounds.pageTargetRecords,
   sourceCount: 4,
   pollIntervalSeconds: 60,
@@ -221,13 +221,14 @@ const artifact = {
       horizonDays: forecastInput.incrementalGrowthDays,
       recordsPerPollAttempt: forecastInput.incrementalRecordsPerPollAttempt,
       basis:
-        "split bound: the dated initial backfill uses 250-record pages; ongoing growth assumes every source returns the full 5,000-record configured page on every 60-second poll",
+        "split bound: the current initial backfill uses 500-record pages; ongoing growth assumes every source returns the full 5,000-record configured page on every 60-second poll",
     },
   },
   storageMeasurement: {
     environment: {
       postgresVersionMajor: 16,
-      schemaMigration: "20260826010000_provider_source_records_per_request",
+      schemaMigration:
+        "20260827010000_provider_source_platform_request_lanes",
     },
     ...storageMeasurement,
   },

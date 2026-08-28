@@ -4,6 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "../../../../convex/_generated/api";
 import { usePackScoutAuth } from "@/components/auth/AuthContext.client";
+import {
+  browserSignOutEffects,
+  presentSignOutControl,
+  reduceSignOut,
+  runSignOutFollowUp,
+  type SignOutDestination,
+  type SignOutEvent,
+  type SignOutPhase,
+  signOutFollowUp,
+  signOutRequestAccepted,
+} from "@/components/auth/sign-out-handoff";
 import { useTolerantQuery } from "@/components/auth/tolerant-query.client";
 import {
   ACCESS_APPROVED_NOTICE,
@@ -54,9 +65,7 @@ export function AccessHoldingNotice({
   const [liveDecision, setLiveDecision] = useState<AccessLiveDecision | null>(
     null,
   );
-  const [logoutState, setLogoutState] = useState<
-    "idle" | "pending" | "failed"
-  >("idle");
+  const [logoutState, setLogoutState] = useState<SignOutPhase>("idle");
 
   // The server rendered this page only after verifying a session, so ask the
   // boundary to establish it client-side. No login intent: an existing
@@ -105,22 +114,34 @@ export function AccessHoldingNotice({
     router.replace(notice.destination);
   }, [notice, router]);
 
-  async function signOutThen(next: "landing" | "sign_in") {
-    if (logoutState === "pending") return;
-    setLogoutState("pending");
+  async function signOutThen(next: SignOutDestination) {
+    if (!signOutRequestAccepted(logoutState)) return;
+    setLogoutState((phase) => reduceSignOut(phase, { type: "requested" }));
+    let settled: SignOutEvent;
     try {
+      // Bounded, and not by this component: the ceiling is applied around the
+      // provider call inside the context's logout, because both credential
+      // clears run downstream of it. See SIGN_OUT_CEILING_MS in
+      // components/auth/sign-out-handoff.
       await auth.logout();
-      setLogoutState("idle");
-      if (next === "landing") {
-        // The sign-out path cleared the server-readable credential, so the
-        // root now serves the landing page.
-        router.replace("/");
-      } else {
-        auth.login();
-      }
+      settled = { type: "succeeded", next };
     } catch {
-      setLogoutState("failed");
+      // Leaving still leaves: the credential is cleared whether the provider
+      // succeeded, failed, or never answered, so a failed sign-out that
+      // stayed here would strand a server-side signed-out person on a page
+      // rendered for a session that is gone. A failed identity *switch* is
+      // the case that stays, because staying is its whole contract and this
+      // surface renders no admitted data — signOutFollowUp draws that line.
+      settled = { type: "failed", next };
     }
+    setLogoutState((phase) => reduceSignOut(phase, settled));
+    // The follow-up runs outside the try, so an exit or dialog failure is
+    // never reported as a sign-out that did not happen. Leaving replaces the
+    // document rather than navigating the client router — the router keeps a
+    // per-document cache of every segment this tab rendered and serves it
+    // back on a Back press without re-running the gate. See `SignOutExit` in
+    // components/auth/sign-out-handoff.
+    runSignOutFollowUp(signOutFollowUp(settled), browserSignOutEffects(auth.login));
   }
 
   if (notice.kind === "enter") {
@@ -146,7 +167,9 @@ export function AccessHoldingNotice({
   }
 
   const copy = ACCESS_HOLDING_COPY[notice.state];
-  const pending = logoutState === "pending";
+  // "Signing out…" and the disabled state hold across the hand-off too: the
+  // session is already gone while the navigation is in flight.
+  const busy = presentSignOutControl(logoutState).disabled;
 
   return (
     <section aria-labelledby="access-holding-heading" className={styles.surface}>
@@ -187,17 +210,17 @@ export function AccessHoldingNotice({
             <>
               <button
                 className={styles.action}
-                disabled={!controls.signOutEnabled || pending}
+                disabled={!controls.signOutEnabled || busy}
                 onClick={() => void signOutThen("landing")}
                 type="button"
               >
-                {pending
+                {busy
                   ? ACCESS_CONTROL_COPY.signOutBusy
                   : ACCESS_CONTROL_COPY.signOut}
               </button>
               <button
                 className={styles.action}
-                disabled={!controls.switchEnabled || pending}
+                disabled={!controls.switchEnabled || busy}
                 onClick={() => void signOutThen("sign_in")}
                 type="button"
               >

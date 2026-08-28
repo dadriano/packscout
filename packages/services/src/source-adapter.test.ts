@@ -98,6 +98,7 @@ const sourcePins: SourceTestRequestPins = {
   requestLeaseId: "request-lease-source-1",
   operationKind: "source_test",
   provider: "courtyard",
+  providerId: "provider-1",
   sourceInstanceId: "source-1",
   sourceRevisionId: "source-revision-1",
   normalizedContractVersion: "packscout.provider-observation.v1",
@@ -122,6 +123,7 @@ const pagePins: PageReadRequestPins = {
   requestLeaseId: "request-lease-page-1",
   operationKind: "page_read",
   provider: "courtyard",
+  providerId: "provider-1",
   sourceInstanceId: "source-1",
   sourceRevisionId: "source-revision-1",
   normalizedContractVersion: "packscout.provider-observation.v1",
@@ -140,10 +142,19 @@ function leaseAuthority(): Readonly<{
   authority: SourceRequestLeaseAuthority;
 }> {
   const coordinator = new ConnectionPermitCoordinator();
-  coordinator.configureProfile({
+  coordinator.configureRequestPermitLane({
     organizationId: commonPins.organizationId,
     connectionProfileId: commonPins.connectionProfileId,
-    approvedAggregateRequestCap: 2,
+    scope: "connection_test",
+    providerId: null,
+    approvedRequestCap: 2,
+  });
+  coordinator.configureRequestPermitLane({
+    organizationId: commonPins.organizationId,
+    connectionProfileId: commonPins.connectionProfileId,
+    scope: "platform",
+    providerId: sourcePins.providerId,
+    approvedRequestCap: 2,
   });
   return {
     coordinator,
@@ -240,6 +251,7 @@ async function sourceFixture() {
     bounds,
     operationKind: "source_test",
     provider: pins.provider,
+    providerId: pins.providerId,
     sourceInstanceId: pins.sourceInstanceId,
     sourceRevisionId: pins.sourceRevisionId,
     normalizedContractVersion: pins.normalizedContractVersion,
@@ -289,6 +301,7 @@ async function pageFixture(overrides: Readonly<{
     bounds,
     operationKind: "page_read",
     provider: pins.provider,
+    providerId: pins.providerId,
     sourceInstanceId: pins.sourceInstanceId,
     sourceRevisionId: pins.sourceRevisionId,
     normalizedContractVersion: pins.normalizedContractVersion,
@@ -695,12 +708,14 @@ test("capture can terminalize before permit release and interpretation supplies 
   requestLease.close();
 });
 
-test("a queued same-profile request cannot wake before durable terminalization succeeds", async () => {
+test("a queued request in the same lane cannot wake before durable terminalization succeeds", async () => {
   const coordinator = new ConnectionPermitCoordinator();
-  coordinator.configureProfile({
+  coordinator.configureRequestPermitLane({
     organizationId: commonPins.organizationId,
     connectionProfileId: commonPins.connectionProfileId,
-    approvedAggregateRequestCap: 1,
+    scope: "connection_test",
+    providerId: null,
+    approvedRequestCap: 1,
   });
   const authority = new SourceRequestLeaseAuthority(coordinator);
   const first = await connectionOperationForAuthority(authority, "gate-a");
@@ -755,7 +770,10 @@ test("a queued same-profile request cannot wake before durable terminalization s
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(secondAdmitted, false);
   assert.equal(first.requestLease.requestPermitHeld, true);
-  assert.equal(coordinator.snapshot().profiles[0]?.activeRequestPermits, 1);
+  assert.equal(
+    coordinator.snapshot().requestPermitLanes[0]?.activeRequestPermits,
+    1,
+  );
   assert.equal(coordinator.snapshot().queuedOperations, 1);
 
   allowTerminalization();
@@ -791,7 +809,10 @@ test("a mismatched durable receipt retains both request ownership resources", as
   assert.equal(requestLease.state, "consumed");
   assert.equal(requestLease.requestPermitHeld, true);
   assert.equal(requestLease.executionSlotHeld, true);
-  assert.equal(coordinator.snapshot().profiles[0]?.activeRequestPermits, 1);
+  assert.equal(
+    coordinator.snapshot().requestPermitLanes[0]?.activeRequestPermits,
+    1,
+  );
   assert.throws(
     () => requestLease.releaseExecutionSlot(),
     (error) =>

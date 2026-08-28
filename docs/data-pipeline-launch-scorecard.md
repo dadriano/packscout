@@ -1,8 +1,8 @@
 # Data Pipeline Launch Scorecard
 
-**Evidence date:** 2026-08-20
+**Evidence date:** 2026-08-28
 
-**DataForrest Events V1 transport gate:** PASS WITH 250-RECORD LIVE EVIDENCE AND AN 8 MIB RESPONSE BOUND
+**DataForrest Events V1 transport gate:** PASS WITH A 500-RECORD LIVE BASELINE, CONFIGURABLE 1–5,000 PIN, AND 8 MIB CAP
 
 **DataForrest V1 record gate:** PASS — current catalog, pull, and trade envelopes
 
@@ -19,19 +19,30 @@ The authenticated read-only evidence package in
 supersedes the transport unknowns recorded below. It proves one profile-only
 probe, four filtered initial/continuation/restart paths, cursor/filter isolation,
 the `records` / `next_cursor` / `poll_after_seconds` wrapper, `payment_method`,
-tri-state `available`, and a safe aggregate concurrency of two.
+tri-state `available`, and two successful overlapping cross-platform requests.
+That historical capture did not establish an aggregate connection-profile cap.
+DataForrest's authoritative limit is two concurrent requests per platform.
+The dedicated Task 010 safety fixture now pins four execution slots beneath one
+singleton supervisor, and the database-backed in-process runtime fixture
+exercises four independent platform permit lanes operated at one request each,
+beneath DataForrest's hard maximum of two per platform. Because
+each source owns one sequential page cursor, useful page-read concurrency is at
+most four: one page for each provider. Connection tests use a separate lane. A
+live four-lane soak is pending; this is not live throughput or memory proof.
 
-A 500-record Phygitals response exceeded the original 2 MiB capture cap, so the
-live-evidenced page target remains 250 records. Each source can now pin a
-request size from 1 through 5,000 (default 500), while every request remains
-subject to the same 8 MiB hard cap and rejects a response that exceeds its
-pinned record count. Later 250-record pages crossed the earlier transport
-bounds; a protected replay measured the failing page at 4,730,013 bytes. The
-current fail-closed Task 010 stress bound keeps the dated initial backfill at
-250 records per page but reserves 5,000 records for every later poll. It
-requires 171,395,460,957,504 available bytes and is not an operational local
-estimate. Current local operation uses measured
-whole-database growth plus an explicit free-space floor; see
+A bounded live probe on 2026-08-26 established a 500-record initial page target:
+all four platforms completed under the unchanged 8 MiB and 10-second guards.
+Phygitals exceeded 8 MiB at both 1,000 and 2,500 records, so 500 is the largest
+shared baseline. Each source pins a maximum from 1 through 5,000, defaulting to
+500 for new sources. Queued and running work keeps that exact pin across every
+retry; the runtime never silently downshifts it. A response above 8 MiB or above
+the pinned record count fails that page without advancing its checkpoint. The
+current Task 010 capacity result reserves a full 5,000-record page for every
+ongoing poll as a maximum-throughput stress ceiling, not an operational local
+estimate. The regenerated model projects 128,564,163,101,465 bytes and requires
+171,418,884,135,287 available bytes with headroom; the measured host had only
+172,515,115,008 bytes available, so admission remains rejected. Current local
+operation uses measured whole-database growth plus an explicit free-space floor; see
 [`provider-source-live-capacity-observation-2026-08-24.md`](./provider-source-live-capacity-observation-2026-08-24.md).
 
 ## Current launch boundary
@@ -51,11 +62,12 @@ upgrade, or source replacement is registered.
 
 | Current launch evidence | Current state | Verdict |
 | --- | --- | --- |
-| Live request, wrapper, cursor isolation, configurable 1–5,000 request pin, and 250-record evidence target | Reviewed authenticated capture plus pinned-bound tests | PASS |
+| Live request, wrapper, cursor isolation, 500-record baseline, and configurable 1–5,000 durable request pin | Reviewed authenticated capture, sanitized 2026-08-26 all-platform page-limit probe, and pinned-bound tests | PASS |
 | Catalog, partial pull, and trade normalization under the exact V1 tuple | Contract and mapper tests | PASS |
 | Sole adapter/observation/mapper runtime registration | Production registries and Task 010 fail-closed topology gate | PASS |
+| Four Task 010 source lanes, singleton ownership, one operating request per platform, and provider maximum of two | Safety tooling fixture plus database-backed in-process supervisor integration; live four-lane soak pending | PARTIAL |
 | Historical database-pin handling | Guarded full local reset and reimport; no in-place upgrade path | REQUIRED |
-| 8 MiB / 5,000-record maximum-page bounded-memory proof | Committed authentic 100-page measurement passed unchanged gates | PASS |
+| Four concurrent 8 MiB / 5,000-record maximum-page bounded-memory proof | Committed authentic 100-page measurement passed the 256 MiB peak-delta and 32 MiB retained-growth aggregate gates | PASS |
 | Full-history provider-head reconciliation | Requires the controlled local backfill | PENDING |
 
 Everything below under the aggregate V1 fixture scorecard is retained as
@@ -163,7 +175,7 @@ The durable EV row is valid only after the repository-wide gate recorded below p
 3. Stop local admin and worker runtimes and follow the [local reset and first-administrator bootstrap](local-development-first-admin-bootstrap.md): run `npm run db:reset:local`, then the guarded `npm run db:bootstrap-first-admin:local` stdin-secret workflow. This is a full relational reset and canonical reseed, not a selective provider-data delete. Recreate and test the encrypted DataForrest connection and all four current v1 source revisions afterward.
 4. Create and test one connection and four sources. Verify every immutable diagnostic pin is the exact current source-adapter/observation/mapper tuple before activation.
 5. Run the dedicated Task 010 topology checks. Any historical or mixed tuple must fail closed; cursor reset, adapter upgrade, and source replacement are not reset substitutes.
-6. Begin Task 010 at the dedicated runner's reviewed one-execution-slot setting. The 8 MiB measurement passes the unchanged 64 MiB peak and 8 MiB retained-growth gates; any concurrency increase requires its own reviewed measurement.
+6. Begin Task 010 with exactly one supervisor process and active epoch. The dedicated runner pins four execution slots and one fair request-permit lane for each configured platform, operated at one request per lane beneath the provider maximum of two; connection tests use their own one-request lane. A source still has only one sequential page cursor, so the maximum useful page-read concurrency is four, one per provider. The safety fixture and database-backed in-process integration prove that topology; the live four-lane soak, capacity observation, and reconciliation remain pending.
 7. Backfill each source to its evidenced terminal state, restart from every source cursor, and verify that only the source whose validated page commits advances.
 8. Run real incrementals with an exact event replay, a conflicting pull/trade repeat, a catalog correction, a malformed record, timeout, rate limit, authentication failure, stale/recovery, and lost-worker recovery. Reconcile accepted, duplicate, quarantined, canonical-revision, Estimated EV, unavailable, and exported counts using only sanitized stable evidence.
 9. Resolve every real count difference and define numeric release thresholds for quarantine rate and unresolved relationships. Run the focused V1 checks and `npm run verify:framework`; Product and Engineering owners must review the persisted evidence before enabling incremental schedules or labeling the public catalog live.

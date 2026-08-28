@@ -232,6 +232,13 @@
   line-height: 1.45;
 }
 
+.releaseNote {
+  margin: 0.6rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  line-height: 1.4;
+}
+
 .estimateLearnMore {
   display: flex;
   align-items: center;

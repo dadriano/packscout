@@ -37,7 +37,7 @@ export const alternateBookmarkSourceManifest = sourceAdapterManifestV1Schema.par
     maximumResponseBytes: 2_097_152,
     timeoutMilliseconds: 10_000,
   },
-  maximumConnectionRequestCap: 2,
+  maximumPlatformRequestCap: 2,
   capabilities: {
     connectionTest: true,
     sourceTest: true,

@@ -1,17 +1,17 @@
 {
-  "source": "provider-source integration plus configurable records per request",
+  "source": "provider-source integration, configurable records per request, platform request lanes, and buyback-adjusted EV revisions",
   "target": {
     "schema": "packages/database/prisma/schema.prisma",
-    "migration": "packages/database/prisma/migrations/20260826010000_provider_source_records_per_request/migration.sql"
+    "migration": "packages/database/prisma/migrations/20260827010000_provider_source_platform_request_lanes/migration.sql"
   },
   "expectedCounts": {
-    "tables": 84,
+    "tables": 87,
     "enums": 40,
-    "columns": 1328,
-    "indexes": 151,
-    "uniqueConstraints": 54,
-    "foreignKeys": 276,
-    "checkConstraints": 284
+    "columns": 1387,
+    "indexes": 154,
+    "uniqueConstraints": 59,
+    "foreignKeys": 290,
+    "checkConstraints": 317
   },
   "enums": {
     "admin_alert_state": [
@@ -841,6 +841,748 @@
       "checkConstraints": {
         "auth_rate_limits_attempt_count_nonnegative": {
           "value": "(attempt_count >= 0)"
+        }
+      }
+    },
+    "buyback_ev_persistence_failures": {
+      "columns": {
+        "failure_key": {
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "first_seen_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "last_seen_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "lifecycle": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'failed'::text"
+        },
+        "occurrence_count": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "1"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "product_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "provider_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "reason_code": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "buyback_ev_persistence_failures_seen_idx": {
+          "columns": [
+            "organization_id",
+            "last_seen_at"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {},
+      "foreignKeys": {
+        "buyback_ev_persistence_failures_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_persistence_failures_provider_fk": {
+          "columns": [
+            "provider_id"
+          ],
+          "referencedTable": "provider_sources",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_persistence_failures_provider_tenant_fk": {
+          "columns": [
+            "provider_id",
+            "organization_id"
+          ],
+          "referencedTable": "provider_sources",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "buyback_ev_persistence_failures_key_check": {
+          "value": "(failure_key ~ '^[0-9a-f]{64}$'::text)"
+        },
+        "buyback_ev_persistence_failures_lifecycle_check": {
+          "value": "(lifecycle = 'failed'::text)"
+        },
+        "buyback_ev_persistence_failures_occurrence_check": {
+          "value": "((occurrence_count >= 1) AND (occurrence_count <= 1000000000))"
+        },
+        "buyback_ev_persistence_failures_platform_key_check": {
+          "value": "((platform_key IS NULL) OR (platform_key ~ '^[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?$'::text))"
+        },
+        "buyback_ev_persistence_failures_product_key_check": {
+          "value": "((product_key IS NULL) OR (product_key ~ '^[a-z0-9]([a-z0-9._:-]{0,126}[a-z0-9])?$'::text))"
+        },
+        "buyback_ev_persistence_failures_reason_check": {
+          "value": "(reason_code = ANY (ARRAY['CONTRACT_VIOLATION'::text, 'IDENTITY_REUSE_CONFLICT'::text, 'RESULT_CONFLICT'::text, 'UNBINDABLE_RESULT'::text]))"
+        },
+        "buyback_ev_persistence_failures_seen_check": {
+          "value": "((last_seen_at >= first_seen_at) AND (date_trunc('milliseconds'::text, first_seen_at) = first_seen_at) AND (date_trunc('milliseconds'::text, last_seen_at) = last_seen_at))"
+        }
+      }
+    },
+    "buyback_ev_revision_source_refs": {
+      "columns": {
+        "canonical_revision_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "reference_index": {
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "revision_id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_manifest_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_revision_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "buyback_ev_revision_source_refs_lookup_idx": {
+          "columns": [
+            "organization_id",
+            "source_revision_id"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "buyback_ev_revision_source_refs_revision_source_unique": {
+          "columns": [
+            "revision_id",
+            "source_revision_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "buyback_ev_revision_source_refs_canonical_fk": {
+          "columns": [
+            "canonical_revision_id"
+          ],
+          "referencedTable": "canonical_revisions",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revision_source_refs_canonical_tenant_fk": {
+          "columns": [
+            "canonical_revision_id",
+            "organization_id"
+          ],
+          "referencedTable": "canonical_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revision_source_refs_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revision_source_refs_revision_fk": {
+          "columns": [
+            "revision_id"
+          ],
+          "referencedTable": "buyback_ev_revisions",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revision_source_refs_revision_tenant_fk": {
+          "columns": [
+            "revision_id",
+            "organization_id"
+          ],
+          "referencedTable": "buyback_ev_revisions",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "buyback_ev_revision_source_refs_index_check": {
+          "value": "((reference_index >= 0) AND (reference_index <= 15))"
+        },
+        "buyback_ev_revision_source_refs_manifest_check": {
+          "value": "((source_manifest_sha256 IS NULL) OR (source_manifest_sha256 ~ '^[0-9a-f]{64}$'::text))"
+        },
+        "buyback_ev_revision_source_refs_source_revision_check": {
+          "value": "(source_revision_id ~ '^[A-Za-z0-9]([A-Za-z0-9._:@/-]{0,126}[A-Za-z0-9])?$'::text)"
+        }
+      }
+    },
+    "buyback_ev_revisions": {
+      "columns": {
+        "calculated_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "calculation_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "confidence_band": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "confidence_limitation_codes": {
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "ARRAY[]::text[]"
+        },
+        "confidence_policy_version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "confidence_score_basis_points": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "configuration_revision_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "created_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "data_as_of_state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "data_observed_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "draw_multiplier": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "effective_fingerprint": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "ev_dollars_minor_units": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "ev_percent_basis_points": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "freshness_expires_at": {
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "freshness_state": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "gross_ev_minor_units": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "gross_return_basis_points": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "id": {
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": null,
+          "default": "gen_random_uuid()"
+        },
+        "internal_reasons": {
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "ARRAY[]::text[]"
+        },
+        "lifecycle": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": "'completed'::text"
+        },
+        "method_version": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "observation_coherence": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "odds_source": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "organization_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "pack_price_minor_units": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "platform_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "product_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "product_revision_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "public_primary_reason": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "result_hash": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "revision_number": {
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "source_age_milliseconds": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_manifest_sha256": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "source_revision_id": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "status": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "underlying_outcome_ev_minor_units": {
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "used_closed_range_midpoint": {
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        }
+      },
+      "indexes": {
+        "buyback_ev_revisions_current_idx": {
+          "columns": [
+            "organization_id",
+            "platform_key",
+            "product_key",
+            "lifecycle",
+            "revision_number"
+          ],
+          "unique": false,
+          "where": null
+        }
+      },
+      "uniqueConstraints": {
+        "buyback_ev_revisions_fingerprint_unique": {
+          "columns": [
+            "organization_id",
+            "effective_fingerprint"
+          ],
+          "nullsNotDistinct": false
+        },
+        "buyback_ev_revisions_id_organization_unique": {
+          "columns": [
+            "id",
+            "organization_id"
+          ],
+          "nullsNotDistinct": false
+        },
+        "buyback_ev_revisions_identity_unique": {
+          "columns": [
+            "organization_id",
+            "calculation_key"
+          ],
+          "nullsNotDistinct": false
+        },
+        "buyback_ev_revisions_product_number_unique": {
+          "columns": [
+            "organization_id",
+            "platform_key",
+            "product_key",
+            "revision_number"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "foreignKeys": {
+        "buyback_ev_revisions_configuration_fk": {
+          "columns": [
+            "configuration_revision_id"
+          ],
+          "referencedTable": "provider_config_revisions",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revisions_configuration_tenant_fk": {
+          "columns": [
+            "configuration_revision_id",
+            "provider_id",
+            "organization_id"
+          ],
+          "referencedTable": "provider_config_revisions",
+          "referencedColumns": [
+            "id",
+            "provider_id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revisions_organization_fk": {
+          "columns": [
+            "organization_id"
+          ],
+          "referencedTable": "organizations",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revisions_provider_fk": {
+          "columns": [
+            "provider_id"
+          ],
+          "referencedTable": "provider_sources",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "buyback_ev_revisions_provider_tenant_fk": {
+          "columns": [
+            "provider_id",
+            "organization_id"
+          ],
+          "referencedTable": "provider_sources",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "checkConstraints": {
+        "buyback_ev_revisions_arithmetic_check": {
+          "value": "((status <> 'available'::text) OR ((ev_dollars_minor_units = (gross_ev_minor_units - pack_price_minor_units)) AND (ev_percent_basis_points = (gross_return_basis_points - 10000)) AND (gross_return_basis_points = (((gross_ev_minor_units * 20000) + pack_price_minor_units) / (pack_price_minor_units * 2)))))"
+        },
+        "buyback_ev_revisions_available_shape_check": {
+          "value": "((status <> 'available'::text) OR ((gross_ev_minor_units IS NOT NULL) AND (gross_return_basis_points IS NOT NULL) AND (ev_dollars_minor_units IS NOT NULL) AND (ev_percent_basis_points IS NOT NULL) AND (pack_price_minor_units IS NOT NULL) AND (underlying_outcome_ev_minor_units IS NOT NULL) AND (draw_multiplier IS NOT NULL) AND (confidence_score_basis_points IS NOT NULL) AND (confidence_band IS NOT NULL) AND (data_as_of_state = 'known'::text) AND (freshness_state = 'current'::text) AND (cardinality(internal_reasons) = 0) AND (public_primary_reason IS NULL)))"
+        },
+        "buyback_ev_revisions_bounds_check": {
+          "value": "(((pack_price_minor_units IS NULL) OR ((pack_price_minor_units >= 1) AND (pack_price_minor_units <= '1000000000000'::bigint))) AND ((underlying_outcome_ev_minor_units IS NULL) OR ((underlying_outcome_ev_minor_units >= 0) AND (underlying_outcome_ev_minor_units <= '1000000000000'::bigint))) AND ((gross_ev_minor_units IS NULL) OR ((gross_ev_minor_units >= 0) AND (gross_ev_minor_units <= '1000000000000'::bigint))) AND ((draw_multiplier IS NULL) OR ((draw_multiplier >= 1) AND (draw_multiplier <= 100))) AND ((ev_dollars_minor_units IS NULL) OR ((ev_dollars_minor_units >= '-1000000000000'::bigint) AND (ev_dollars_minor_units <= '1000000000000'::bigint))) AND ((gross_return_basis_points IS NULL) OR ((gross_return_basis_points >= 0) AND (gross_return_basis_points <= '10000000000000000'::bigint))) AND ((ev_percent_basis_points IS NULL) OR ((ev_percent_basis_points >= '-10000'::integer) AND (ev_percent_basis_points <= '10000000000000000'::bigint))) AND ((confidence_score_basis_points IS NULL) OR ((confidence_score_basis_points >= 0) AND (confidence_score_basis_points <= 10000))) AND ((confidence_band IS NULL) OR (confidence_band = ANY (ARRAY['low'::text, 'medium'::text, 'high'::text]))) AND ((source_age_milliseconds IS NULL) OR (source_age_milliseconds >= 0)))"
+        },
+        "buyback_ev_revisions_confidence_band_check": {
+          "value": "((status <> 'available'::text) OR (((confidence_score_basis_points >= 0) AND (confidence_score_basis_points <= 4999)) AND (confidence_band = 'low'::text)) OR (((confidence_score_basis_points >= 5000) AND (confidence_score_basis_points <= 7999)) AND (confidence_band = 'medium'::text)) OR (((confidence_score_basis_points >= 8000) AND (confidence_score_basis_points <= 10000)) AND (confidence_band = 'high'::text)))"
+        },
+        "buyback_ev_revisions_confidence_policy_check": {
+          "value": "(confidence_policy_version = 'packscout-buyback-adjusted-ev-confidence-v1'::text)"
+        },
+        "buyback_ev_revisions_data_as_of_check": {
+          "value": "((data_as_of_state = ANY (ARRAY['known'::text, 'unknown_source_time'::text])) AND ((data_as_of_state = 'known'::text) = (data_observed_at IS NOT NULL)))"
+        },
+        "buyback_ev_revisions_freshness_check": {
+          "value": "(((freshness_state = 'current'::text) AND (data_as_of_state = 'known'::text) AND (source_age_milliseconds = ((EXTRACT(epoch FROM (calculated_at - data_observed_at)) * (1000)::numeric))::bigint) AND ((source_age_milliseconds >= 0) AND (source_age_milliseconds <= 3600000)) AND (freshness_expires_at = (data_observed_at + '01:00:00'::interval))) OR ((freshness_state = 'expired'::text) AND (status = 'unavailable'::text) AND (data_as_of_state = 'known'::text) AND (source_age_milliseconds = ((EXTRACT(epoch FROM (calculated_at - data_observed_at)) * (1000)::numeric))::bigint) AND (source_age_milliseconds > 3600000) AND (freshness_expires_at = (data_observed_at + '01:00:00'::interval))) OR ((freshness_state = 'unknown_source_time'::text) AND (status = 'unavailable'::text) AND (data_as_of_state = 'unknown_source_time'::text) AND (source_age_milliseconds IS NULL) AND (freshness_expires_at IS NULL)))"
+        },
+        "buyback_ev_revisions_hash_check": {
+          "value": "((calculation_key ~ '^[0-9a-f]{64}$'::text) AND (effective_fingerprint ~ '^[0-9a-f]{64}$'::text) AND (result_hash ~ '^[0-9a-f]{64}$'::text) AND ((source_manifest_sha256 IS NULL) OR (source_manifest_sha256 ~ '^[0-9a-f]{64}$'::text)))"
+        },
+        "buyback_ev_revisions_internal_reasons_check": {
+          "value": "((cardinality(internal_reasons) <= 21) AND (internal_reasons <@ ARRAY['MISSING_PROVENANCE'::text, 'MISSING_PRODUCT_IDENTITY'::text, 'MISSING_SOURCE_TIME'::text, 'NON_ATOMIC_OBSERVATION'::text, 'INVALID_PRICE'::text, 'UNSUPPORTED_CURRENCY'::text, 'UNSUPPORTED_MONEY_PRECISION'::text, 'EXPIRED_PARITY_APPROVAL'::text, 'MIXED_CURRENCY_BASIS'::text, 'AMBIGUOUS_DRAW_SEMANTICS'::text, 'INCOMPLETE_PROBABILITIES'::text, 'ODDS_CONFLICT'::text, 'INCOMPLETE_VALUES'::text, 'INVALID_VALUE_RANGE'::text, 'UNKNOWN_BUYBACK_ELIGIBILITY'::text, 'MISSING_BUYBACK'::text, 'INVALID_BUYBACK_TERMS'::text, 'CONDITIONAL_BUYBACK_TERMS'::text, 'HETEROGENEOUS_OUTCOME_BUCKET'::text, 'STALE_EVIDENCE'::text, 'ARITHMETIC_OVERFLOW'::text]))"
+        },
+        "buyback_ev_revisions_lifecycle_check": {
+          "value": "(lifecycle = 'completed'::text)"
+        },
+        "buyback_ev_revisions_limitation_codes_check": {
+          "value": "((cardinality(confidence_limitation_codes) <= 4) AND (confidence_limitation_codes <@ ARRAY['closed_range_midpoint'::text, 'platform_published_odds'::text, 'source_age_over_15_through_30_minutes'::text, 'source_age_over_30_through_60_minutes'::text]))"
+        },
+        "buyback_ev_revisions_method_version_check": {
+          "value": "(method_version = 'packscout-buyback-adjusted-ev-v1'::text)"
+        },
+        "buyback_ev_revisions_milliseconds_check": {
+          "value": "((date_trunc('milliseconds'::text, calculated_at) = calculated_at) AND ((data_observed_at IS NULL) OR (date_trunc('milliseconds'::text, data_observed_at) = data_observed_at)) AND ((freshness_expires_at IS NULL) OR (date_trunc('milliseconds'::text, freshness_expires_at) = freshness_expires_at)))"
+        },
+        "buyback_ev_revisions_observation_coherence_check": {
+          "value": "(observation_coherence = ANY (ARRAY['provider_revision'::text, 'guarded_collection'::text]))"
+        },
+        "buyback_ev_revisions_odds_source_check": {
+          "value": "(odds_source = ANY (ARRAY['current_remaining_inventory'::text, 'platform_published'::text]))"
+        },
+        "buyback_ev_revisions_platform_key_check": {
+          "value": "(platform_key ~ '^[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?$'::text)"
+        },
+        "buyback_ev_revisions_product_key_check": {
+          "value": "(product_key ~ '^[a-z0-9]([a-z0-9._:-]{0,126}[a-z0-9])?$'::text)"
+        },
+        "buyback_ev_revisions_public_reason_check": {
+          "value": "((public_primary_reason IS NULL) OR (public_primary_reason = ANY (ARRAY['SOURCE_EVIDENCE_UNAVAILABLE'::text, 'PRICE_UNAVAILABLE'::text, 'CURRENCY_UNSUPPORTED'::text, 'ODDS_UNAVAILABLE'::text, 'VALUE_UNAVAILABLE'::text, 'BUYBACK_UNAVAILABLE'::text, 'SOURCE_DATA_STALE'::text, 'CALCULATION_UNAVAILABLE'::text])))"
+        },
+        "buyback_ev_revisions_revision_number_check": {
+          "value": "((revision_number >= 1) AND (revision_number <= 2147483647))"
+        },
+        "buyback_ev_revisions_source_revision_check": {
+          "value": "((product_revision_id ~ '^[A-Za-z0-9]([A-Za-z0-9._:@/-]{0,126}[A-Za-z0-9])?$'::text) AND (source_revision_id ~ '^[A-Za-z0-9]([A-Za-z0-9._:@/-]{0,126}[A-Za-z0-9])?$'::text))"
+        },
+        "buyback_ev_revisions_status_check": {
+          "value": "(status = ANY (ARRAY['available'::text, 'unavailable'::text]))"
+        },
+        "buyback_ev_revisions_unavailable_shape_check": {
+          "value": "((status <> 'unavailable'::text) OR ((gross_ev_minor_units IS NULL) AND (gross_return_basis_points IS NULL) AND (ev_dollars_minor_units IS NULL) AND (ev_percent_basis_points IS NULL) AND (pack_price_minor_units IS NULL) AND (underlying_outcome_ev_minor_units IS NULL) AND (draw_multiplier IS NULL) AND (confidence_score_basis_points IS NULL) AND (confidence_band IS NULL) AND (cardinality(confidence_limitation_codes) = 0) AND (cardinality(internal_reasons) >= 1) AND (public_primary_reason IS NOT NULL)))"
         }
       }
     },
@@ -10925,7 +11667,7 @@
           "value": "(phase = ANY (ARRAY['idle'::text, 'due'::text, 'queued'::text, 'claimed'::text, 'requesting'::text, 'validating'::text, 'committing'::text, 'retry_wait'::text, 'waiting'::text, 'paused'::text, 'action_required'::text, 'reached_head'::text, 'terminal'::text]))"
         },
         "provider_source_runtime_states_wait_reason_check": {
-          "value": "((wait_reason IS NULL) OR (wait_reason = ANY (ARRAY['not_due'::text, 'profile_capacity'::text, 'execution_capacity'::text, 'capacity_blocked'::text, 'connection_blocked'::text, 'paused'::text, 'retry_backoff'::text, 'action_required'::text, 'supervisor_offline'::text, 'graceful_shutdown'::text, 'source_lane_busy'::text])))"
+          "value": "((wait_reason IS NULL) OR (wait_reason = ANY (ARRAY['not_due'::text, 'request_lane_capacity'::text, 'execution_capacity'::text, 'capacity_blocked'::text, 'connection_blocked'::text, 'paused'::text, 'retry_backoff'::text, 'action_required'::text, 'supervisor_offline'::text, 'graceful_shutdown'::text, 'source_lane_busy'::text])))"
         },
         "provider_source_runtime_states_wait_shape_check": {
           "value": "(((activity = 'waiting'::text) AND (wait_reason IS NOT NULL)) OR ((activity <> 'waiting'::text) AND (wait_reason IS NULL)))"
@@ -16789,7 +17531,7 @@
         }
       }
     },
-    "source_supervisor_profile_states": {
+    "source_supervisor_request_lane_states": {
       "columns": {
         "active_request_permits": {
           "type": "integer",
@@ -16819,8 +17561,29 @@
           "identity": null,
           "default": "gen_random_uuid()"
         },
+        "lane_key": {
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
         "organization_id": {
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": null,
+          "default": null
+        },
+        "provider_id": {
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "identity": null,
+          "default": null
+        },
+        "request_scope": {
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "identity": null,
@@ -16849,10 +17612,11 @@
         }
       },
       "indexes": {
-        "source_supervisor_profile_states_profile_idx": {
+        "source_supervisor_request_lane_states_profile_idx": {
           "columns": [
             "organization_id",
             "connection_profile_id",
+            "lane_key",
             "updated_at"
           ],
           "unique": false,
@@ -16860,17 +17624,18 @@
         }
       },
       "uniqueConstraints": {
-        "source_supervisor_profile_states_scope_unique": {
+        "source_supervisor_request_lane_states_scope_unique": {
           "columns": [
             "supervisor_epoch_id",
             "organization_id",
-            "connection_profile_id"
+            "connection_profile_id",
+            "lane_key"
           ],
           "nullsNotDistinct": false
         }
       },
       "foreignKeys": {
-        "source_supervisor_profile_states_epoch_fk": {
+        "source_supervisor_request_lane_states_epoch_fk": {
           "columns": [
             "supervisor_epoch_id"
           ],
@@ -16881,7 +17646,7 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "source_supervisor_profile_states_profile_fk": {
+        "source_supervisor_request_lane_states_profile_fk": {
           "columns": [
             "connection_profile_id",
             "organization_id"
@@ -16893,11 +17658,27 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "source_supervisor_request_lane_states_provider_fk": {
+          "columns": [
+            "provider_id",
+            "organization_id"
+          ],
+          "referencedTable": "provider_sources",
+          "referencedColumns": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "checkConstraints": {
-        "source_supervisor_profile_states_capacity_check": {
-          "value": "(((approved_request_limit >= 1) AND (approved_request_limit <= 64)) AND ((active_request_permits >= 0) AND (active_request_permits <= approved_request_limit)) AND ((waiting_operations >= 0) AND (waiting_operations <= 2147483647)))"
+        "source_supervisor_request_lane_states_capacity_check": {
+          "value": "(((approved_request_limit >= 1) AND (approved_request_limit <= 2)) AND ((active_request_permits >= 0) AND (active_request_permits <= approved_request_limit)) AND ((waiting_operations >= 0) AND (waiting_operations <= 2147483647)))"
+        },
+        "source_supervisor_request_lane_states_identity_check": {
+          "value": "(((request_scope = 'platform'::text) AND (provider_id IS NOT NULL) AND (lane_key = (provider_id)::text)) OR ((request_scope = 'connection_test'::text) AND (provider_id IS NULL) AND (lane_key = 'connection_test'::text)))"
         }
       }
     },

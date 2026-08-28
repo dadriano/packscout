@@ -105,53 +105,75 @@ test("startup failures are stable and do not expose connection details", async (
   }
 });
 
-test("startup fails closed when the expected Prisma migration is not ready", async () => {
-  const harness = await createMigratedTestDatabase();
-  try {
-    await harness.client.$executeRaw`
-      delete from public."_prisma_migrations"
-      where migration_name = '20260826010000_provider_source_records_per_request'
-    `;
-    const lifecycle = harness.createClientLifecycle();
+/**
+ * Migrations that must each independently gate startup.
+ *
+ * Every current feature migration is checked on its own: corrupting them as a
+ * group would still pass if a pin were silently dropped, so a pin that stops
+ * being enforced has to fail here rather than hide behind a sibling that still
+ * fails closed.
+ */
+const PINNED_MIGRATIONS = [
+  "20260819010000_buyback_ev_revisions",
+  "20260824223000_fix_normalized_text_vertical_tab",
+  "20260825041000_raise_provider_source_raw_response_limit",
+  "20260826010000_provider_source_records_per_request",
+  "20260827010000_provider_source_platform_request_lanes",
+] as const;
+
+test("startup fails closed when an expected Prisma migration is not ready", async () => {
+  for (const migrationName of PINNED_MIGRATIONS) {
+    const harness = await createMigratedTestDatabase();
     try {
-      await assert.rejects(
-        lifecycle.start(),
-        (error: unknown) => {
-          assert.ok(error instanceof Error);
-          assert.equal(error.message, "PackScout database schema is not ready.");
-          return true;
-        },
-      );
+      await harness.client.$executeRaw`
+        delete from public."_prisma_migrations"
+        where migration_name = ${migrationName}
+      `;
+      const lifecycle = harness.createClientLifecycle();
+      try {
+        await assert.rejects(
+          lifecycle.start(),
+          (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.equal(error.message, "PackScout database schema is not ready.");
+            return true;
+          },
+          `a missing ${migrationName} row must fail startup closed`,
+        );
+      } finally {
+        await lifecycle.close();
+      }
     } finally {
-      await lifecycle.close();
+      await harness.close();
     }
-  } finally {
-    await harness.close();
   }
 });
 
-test("startup fails closed when the expected migration checksum is inconsistent", async () => {
-  const harness = await createMigratedTestDatabase();
-  try {
-    await harness.client.$executeRaw`
-      update public."_prisma_migrations"
-      set checksum = ${"0".repeat(64)}
-      where migration_name = '20260826010000_provider_source_records_per_request'
-    `;
-    const lifecycle = harness.createClientLifecycle();
+test("startup fails closed when an expected migration checksum is inconsistent", async () => {
+  for (const migrationName of PINNED_MIGRATIONS) {
+    const harness = await createMigratedTestDatabase();
     try {
-      await assert.rejects(
-        lifecycle.start(),
-        (error: unknown) => {
-          assert.ok(error instanceof Error);
-          assert.equal(error.message, "PackScout database schema is not ready.");
-          return true;
-        },
-      );
+      await harness.client.$executeRaw`
+        update public."_prisma_migrations"
+        set checksum = ${"0".repeat(64)}
+        where migration_name = ${migrationName}
+      `;
+      const lifecycle = harness.createClientLifecycle();
+      try {
+        await assert.rejects(
+          lifecycle.start(),
+          (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.equal(error.message, "PackScout database schema is not ready.");
+            return true;
+          },
+          `a rewritten ${migrationName} checksum must fail startup closed`,
+        );
+      } finally {
+        await lifecycle.close();
+      }
     } finally {
-      await lifecycle.close();
+      await harness.close();
     }
-  } finally {
-    await harness.close();
   }
 });

@@ -19,6 +19,7 @@ const priorMigrationNames = [
   "20260816030000_heat_manifest_alignment",
   "20260816040000_catalog_promotion_retention",
   "20260819000000_worker_presence",
+  "20260819010000_buyback_ev_revisions",
   "20260820000000_machinery_alerts",
   "20260820010000_provider_source_persistence",
   "20260821010000_provider_source_admin_lifecycle",
@@ -247,7 +248,7 @@ async function seedPreMigrationPins(database: Pool): Promise<void> {
 }
 
 test(
-  "records-per-request migration backfills legacy execution pins without pinning config-owned runs",
+  "records-per-request migration backfills the current execution pins without pinning config-owned runs",
   { concurrency: false },
   async () => {
     const supported = await createPreRecordsPerRequestDatabase();
@@ -276,7 +277,7 @@ test(
       `);
 
       assert.deepEqual(scheduleRevisions.rows, [
-        { id: ids.legacyScheduleRevision, recordsPerRequest: 250 },
+        { id: ids.legacyScheduleRevision, recordsPerRequest: 500 },
         { id: ids.newScheduleRevision, recordsPerRequest: 500 },
       ]);
 
@@ -289,7 +290,7 @@ test(
         where id = '${ids.sourceTestJob}'
       `);
       assert.deepEqual(sourceTest.rows, [
-        { id: ids.sourceTestJob, recordsPerRequest: 250 },
+        { id: ids.sourceTestJob, recordsPerRequest: 500 },
       ]);
 
       const importRuns = await supported.database.query<{
@@ -316,13 +317,13 @@ test(
           id: ids.queuedSourceRun,
           state: "queued",
           sourceInstanceId: ids.source,
-          recordsPerRequest: 250,
+          recordsPerRequest: 500,
         },
         {
           id: ids.runningSourceRun,
           state: "running",
           sourceInstanceId: ids.runningSource,
-          recordsPerRequest: 250,
+          recordsPerRequest: 500,
         },
         {
           id: ids.configOwnedRun,
@@ -389,7 +390,7 @@ test(
            where id = '${ids.runningSourceRun}') as "runningRun"
       `);
       assert.deepEqual(preservedPins.rows, [
-        { sourceTest: 250, queuedRun: 250, runningRun: 250 },
+        { sourceTest: 500, queuedRun: 500, runningRun: 500 },
       ]);
     } finally {
       await supported.close();

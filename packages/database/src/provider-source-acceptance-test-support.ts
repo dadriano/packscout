@@ -55,7 +55,7 @@ export async function createProviderSourceAcceptanceFixture(
     sourceTypeKey: ACCEPTANCE_SOURCE_TYPE_KEY,
     connectionTypeKey: "dataforrest-events-connection-v1",
     displayName: `DataForrest ${testKey}`,
-    requestLimit: providerSourceLaunchBounds.stableProfileRequestCap,
+    requestLimit: providerSourceLaunchBounds.stablePlatformRequestCap,
     sourceAdapterVersion: ACCEPTANCE_SOURCE_ADAPTER_VERSION,
     revisionNumber: 1,
     configurationCiphertext: new Uint8Array(32).fill(1),

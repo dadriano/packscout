@@ -3,6 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { usePackScoutAuth } from "./AuthContext.client";
 import { useAccountNotice } from "./SavedItemsContext.client";
+import {
+  browserSignOutEffects,
+  presentSignOutControl,
+  reduceSignOut,
+  runSignOutFollowUp,
+  type SignOutEvent,
+  type SignOutPhase,
+  signOutFollowUp,
+  signOutRequestAccepted,
+} from "./sign-out-handoff";
 import styles from "./AccountControl.module.css";
 
 function AccountIcon() {
@@ -19,6 +29,24 @@ function AccountIcon() {
   );
 }
 
+/**
+ * The shell's account menu, which renders on every surface — product pages,
+ * the landing page, and the holding surface alike — so signing in and signing
+ * out stay reachable from all of them.
+ *
+ * Signing out here ends the session *and* leaves the product, by replacing
+ * the document rather than navigating the client router. Access is decided
+ * server-side per request, so a sign-out that only flipped local state left
+ * this person reading a fully rendered catalog they were no longer admitted
+ * to; a sign-out that only asked the router to navigate left that same
+ * catalog one Back press away, restored from the router's per-document cache
+ * with no request and no gate. The reasoning for the document replacement is
+ * on `SignOutExit` in ./sign-out-handoff.
+ *
+ * The hand-off is in the handler, never in an effect watching the session
+ * status: such an effect would also fire during the holding surface's
+ * switch-identity flow and yank that visitor away mid-switch.
+ */
 export function AccountControl() {
   const auth = usePackScoutAuth();
   /**
@@ -30,9 +58,8 @@ export function AccountControl() {
   const accountNotice = useAccountNotice();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
-  const [logoutState, setLogoutState] = useState<
-    "idle" | "pending" | "failed"
-  >("idle");
+  const [logoutState, setLogoutState] = useState<SignOutPhase>("idle");
+  const signOutControl = presentSignOutControl(logoutState);
 
   useEffect(() => {
     function closeOnOutsidePress(event: PointerEvent) {
@@ -50,14 +77,32 @@ export function AccountControl() {
   }, []);
 
   async function signOut() {
-    if (logoutState === "pending") return;
-    setLogoutState("pending");
+    if (!signOutRequestAccepted(logoutState)) return;
+    setLogoutState((phase) => reduceSignOut(phase, { type: "requested" }));
+    let settled: SignOutEvent;
     try {
+      // Bounded, and not by this component: the ceiling is applied around the
+      // provider call inside the context's logout, because both credential
+      // clears run downstream of it. A bound here would leave for the landing
+      // page while a hung call still held them. See SIGN_OUT_CEILING_MS in
+      // ./sign-out-handoff.
       await auth.logout();
-      setLogoutState("idle");
+      settled = { type: "succeeded", next: "landing" };
     } catch {
-      setLogoutState("failed");
+      // A sign-out whose provider call failed — or never answered — still
+      // leaves. Logout clears the server-readable credential in a `finally`,
+      // so this person is already signed out as far as the gate is concerned;
+      // keeping them on a rendered admitted page would be the very thing this
+      // hand-off exists to prevent.
+      settled = { type: "failed", next: "landing" };
     }
+    setLogoutState((phase) => reduceSignOut(phase, settled));
+    // The awaited logout already cleared the server-readable credential, so
+    // the request this exit makes is the first one the gate reads as signed
+    // out and the root answers it with the public landing page. Running the
+    // follow-up outside the try keeps an exit failure from being reported as
+    // a failed sign-out.
+    runSignOutFollowUp(signOutFollowUp(settled), browserSignOutEffects(auth.login));
   }
 
   if (auth.status === "unavailable") {
@@ -152,14 +197,14 @@ export function AccountControl() {
           </p>
           <button
             className={styles.signOut}
-            disabled={logoutState === "pending"}
+            disabled={signOutControl.disabled}
             onClick={() => void signOut()}
             type="button"
           >
-            {logoutState === "pending" ? "Signing out…" : "Sign out"}
+            {signOutControl.label}
           </button>
           <p aria-live="polite" className={styles.status} role="status">
-            {logoutState === "failed" ? "Sign out failed. Try again." : ""}
+            {signOutControl.status}
           </p>
         </div>
       </details>

@@ -10,6 +10,7 @@ import type { PackscoutPrismaClient, ProviderSourceSupervisorClaimedWork } from
   "@packscout/database";
 import {
   buildProviderSourceCapacityForecast,
+  providerSourceCapacityModelMatchesLaunchBounds,
   PROVIDER_SOURCE_CAPACITY_FORECAST_VERSION,
   type ProviderSourceCapacityForecast,
   type ProviderSourceCapacityModelInput,
@@ -37,7 +38,9 @@ interface CapacityArtifact {
   readonly forecast: ProviderSourceCapacityForecast;
 }
 
-function capacityArtifact(value: unknown): CapacityArtifact {
+export function parseProviderSourceCapacityArtifact(
+  value: unknown,
+): CapacityArtifact {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new ProviderSourceCapacityAdmissionConfigurationError(
       "CAPACITY_ARTIFACT_INVALID",
@@ -55,9 +58,10 @@ function capacityArtifact(value: unknown): CapacityArtifact {
     );
   }
   let forecast: ProviderSourceCapacityForecast;
+  const forecastInput = record.forecastInput as ProviderSourceCapacityModelInput;
   try {
     forecast = buildProviderSourceCapacityForecast(
-      record.forecastInput as ProviderSourceCapacityModelInput,
+      forecastInput,
     );
   } catch {
     throw new ProviderSourceCapacityAdmissionConfigurationError(
@@ -66,6 +70,7 @@ function capacityArtifact(value: unknown): CapacityArtifact {
   }
   if (
     forecast.version !== PROVIDER_SOURCE_CAPACITY_FORECAST_VERSION ||
+    !providerSourceCapacityModelMatchesLaunchBounds(forecastInput) ||
     !isDeepStrictEqual(forecast, record.forecast)
   ) {
     throw new ProviderSourceCapacityAdmissionConfigurationError(
@@ -73,14 +78,16 @@ function capacityArtifact(value: unknown): CapacityArtifact {
     );
   }
   return {
-    forecastInput: record.forecastInput as ProviderSourceCapacityModelInput,
+    forecastInput,
     forecast,
   };
 }
 
 export function loadCommittedProviderSourceCapacityArtifact(): CapacityArtifact {
   try {
-    return capacityArtifact(JSON.parse(readFileSync(CAPACITY_ARTIFACT_URL, "utf8")));
+    return parseProviderSourceCapacityArtifact(
+      JSON.parse(readFileSync(CAPACITY_ARTIFACT_URL, "utf8")),
+    );
   } catch (error) {
     if (error instanceof ProviderSourceCapacityAdmissionConfigurationError) {
       throw error;

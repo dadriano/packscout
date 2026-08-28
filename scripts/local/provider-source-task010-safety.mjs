@@ -8,7 +8,8 @@ export const TASK010_SAFETY_VERSION =
   "packscout.provider-source-task010-safety.v1";
 export const TASK010_LOCAL_ACKNOWLEDGEMENT =
   "I_UNDERSTAND_THIS_TARGET_IS_LOCAL_AND_EMPTY";
-export const TASK010_SOURCE_EXECUTION_SLOTS = "1";
+export const TASK010_SOURCE_EXECUTION_SLOTS = "4";
+export const TASK010_BACKFILL_RECORDS_PER_REQUEST = 500;
 export const TASK010_BOOTSTRAP_ACTION = "provider_source.task010.bootstrap";
 export const TASK010_PAGE_RECORD_COUNT_SQL = `
   coalesce((record_counts_json->>'catalog')::bigint, 0) +
@@ -17,9 +18,9 @@ export const TASK010_PAGE_RECORD_COUNT_SQL = `
   coalesce((record_counts_json->>'adapterInvalid')::bigint, 0)
 `;
 export const TASK010_REQUIRED_MIGRATION = Object.freeze({
-  name: "20260826010000_provider_source_records_per_request",
-  checksum: "c80c4ebdb52d950dc8a1972f056339f436394ce33280ed30ba0d5cb5b5f1a5cf",
-  tableCount: 84,
+  name: "20260827010000_provider_source_platform_request_lanes",
+  checksum: "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+  tableCount: 87,
 });
 
 export const TASK010_PROVIDER_IDENTITIES = Object.freeze([
@@ -452,8 +453,10 @@ export function sanitizedTask010WorkerEnvironment(environment) {
     ),
   );
   // The sole production v1 admits the evidenced 8 MiB response boundary. The
-  // dedicated Task 010 runner owns the one-slot safety bound and cannot inherit
-  // a wider value from the ignored environment file or the ambient process.
+  // dedicated Task 010 runner owns exactly four source lanes beneath one
+  // singleton supervisor. Each platform has an independent one-request lane
+  // beneath the provider-configured maximum of two; this runner cannot inherit
+  // a different slot value from the private file or ambient process.
   sanitized.PACKSCOUT_SOURCE_EXECUTION_SLOTS =
     TASK010_SOURCE_EXECUTION_SLOTS;
   return Object.freeze(sanitized);
@@ -495,7 +498,8 @@ export function assertTask010BackfillTopologySnapshot(snapshot) {
       (source) =>
         !["paused", "active"].includes(source.state) ||
         source.activeRevisionId === null ||
-        source.connectionProfileMatches !== true,
+        source.connectionProfileMatches !== true ||
+        source.recordsPerRequest !== TASK010_BACKFILL_RECORDS_PER_REQUEST,
     )
   ) {
     throw new Task010SafetyError("BACKFILL_TOPOLOGY_NOT_READY");

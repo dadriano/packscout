@@ -1,4 +1,5 @@
 import {
+  providerSourceLaunchBounds,
   providerSourceSingletonTiming,
   providerSourceSupervisorDefaults,
   providerSourceTransientRetryPolicy,
@@ -7,6 +8,8 @@ import {
 import {
   ConnectionPermitCoordinator,
   ConnectionPermitCoordinatorError,
+  type ConnectionPermitLaneConfiguration,
+  type ConnectionPermitLaneIdentity,
 } from "./connection-permit-coordinator.ts";
 import {
   ControlPlaneRetryExhaustedError,
@@ -36,7 +39,9 @@ export interface SourceSupervisorWorkItem {
   readonly organizationId: string;
   readonly connectionProfileId: string;
   readonly connectionRevisionId: string;
-  readonly profileRequestLimit: number;
+  readonly platformRequestLimit: number;
+  /** Present for source tests and page reads; absent for connection tests. */
+  readonly providerId?: string;
   readonly sourceInstanceId?: string;
   readonly sourceRevisionId?: string;
   readonly runStartedAt?: Date;
@@ -50,10 +55,7 @@ export interface SourceSupervisorClaimCommand {
   readonly claimOwner: string;
   readonly claimToken: string;
   readonly claimLeaseId: string;
-  readonly excludedProfiles?: readonly Readonly<{
-    organizationId: string;
-    connectionProfileId: string;
-  }>[];
+  readonly excludedRequestLanes?: readonly ConnectionPermitLaneIdentity[];
   readonly excludedSourceInstanceIds?: readonly string[];
   /** Leave page lanes durably queued while a fail-closed volume probe cools down. */
   readonly skipPageReads?: boolean;
@@ -158,7 +160,7 @@ export interface SourceSupervisorWorkQueue<
   markAdmissionWaiting(
     epoch: SourceSupervisorEpoch,
     work: TWork,
-    reason: "profile_capacity" | "execution_capacity",
+    reason: "request_lane_capacity" | "execution_capacity",
   ): Promise<void>;
   markAdmissionGranted(
     epoch: SourceSupervisorEpoch,
@@ -219,7 +221,7 @@ export interface SourceSupervisorExecutionContext {
   /** Publish after enqueue/grant/permit release/slot release. */
   readonly capacityChanged: () => Promise<void>;
   readonly admissionWaiting: (
-    reason: "profile_capacity" | "execution_capacity",
+    reason: "request_lane_capacity" | "execution_capacity",
   ) => Promise<void>;
   readonly admissionGranted: () => Promise<void>;
   /** Retain the generic slot until the supervisor's durable completion lands. */
@@ -238,8 +240,10 @@ export interface SourceSupervisorExecutionContext {
 export interface SourceSupervisorWorkExecutor<
   TWork extends SourceSupervisorWorkItem,
 > {
-  /** Resolve the immutable registered cap for the exact claimed adapter. */
-  registeredProfileRequestLimit(work: TWork): number;
+  /** Resolve the immutable registered platform lane and cap for this work. */
+  registeredRequestPermitLane(
+    work: TWork,
+  ): ConnectionPermitLaneConfiguration;
   execute(
     work: TWork,
     context: SourceSupervisorExecutionContext,
@@ -329,8 +333,15 @@ function defaultSleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function workProfileKey(work: SourceSupervisorWorkItem): string {
-  return JSON.stringify([work.organizationId, work.connectionProfileId]);
+function requestPermitLaneKey(
+  lane: ConnectionPermitLaneIdentity,
+): string {
+  return JSON.stringify([
+    lane.organizationId,
+    lane.connectionProfileId,
+    lane.scope,
+    lane.providerId,
+  ]);
 }
 
 export class SourceSupervisorStaleWorkError extends Error {
@@ -353,7 +364,7 @@ export class ProviderSourceSupervisor<
   readonly #runtimeFence = new RuntimeControlPlaneFence();
   readonly #activeSources = new Set<string>();
   readonly #activeTurns = new Set<Promise<void>>();
-  readonly #activeProfileTurns = new Map<string, number>();
+  readonly #activeRequestLaneTurns = new Map<string, number>();
   #epoch: SourceSupervisorEpoch | null = null;
   #initialization: Promise<SourceSupervisorEpoch> | null = null;
   #stopPromise: Promise<void> | null = null;
@@ -501,21 +512,38 @@ export class ProviderSourceSupervisor<
         );
       }
     const claimed: TWork[] = [];
-    const pendingByProfile = new Map<string, number>();
-    const profileLimits = new Map(
-      this.#coordinator.snapshot().profiles.map((profile) => [
-        JSON.stringify([
-          profile.organizationId,
-          profile.connectionProfileId,
-        ]),
-        profile.approvedAggregateRequestCap,
-      ]),
-    );
+    const requestLaneByWorkId = new Map<
+      string,
+      ConnectionPermitLaneConfiguration
+    >();
+    const pendingByRequestLane = new Map<string, number>();
+    const requestLaneConfigurations = new Map<
+      string,
+      ConnectionPermitLaneConfiguration
+    >(this.#coordinator.snapshot().requestPermitLanes.map((lane) => {
+      const configuration: ConnectionPermitLaneConfiguration =
+        lane.scope === "platform"
+          ? {
+              organizationId: lane.organizationId,
+              connectionProfileId: lane.connectionProfileId,
+              scope: "platform",
+              providerId: lane.providerId,
+              approvedRequestCap: lane.approvedRequestCap,
+            }
+          : {
+              organizationId: lane.organizationId,
+              connectionProfileId: lane.connectionProfileId,
+              scope: "connection_test",
+              providerId: null,
+              approvedRequestCap: lane.approvedRequestCap,
+            };
+      return [requestPermitLaneKey(configuration), configuration];
+    }));
     let pendingExecutionSlots = 0;
     // Scan the bounded durable queue horizon even when old work belongs to a
-    // saturated profile. Per-profile waiter bounds below keep those claims
-    // resource-free, while the scan can still reach an independent profile in
-    // this same poll instead of leaving generic execution slots idle.
+    // saturated request lane. Per-lane waiter bounds below keep those claims
+    // resource-free, while the scan can still reach another platform behind
+    // the same connection profile in this poll.
     const claimBudget = 100;
     for (let index = 0; index < claimBudget; index += 1) {
       if (this.#stopping || this.#fenceStarted) break;
@@ -523,18 +551,27 @@ export class ProviderSourceSupervisor<
         claimOwner: this.#dependencies.ownerKey,
         claimToken: this.#dependencies.ids.id(),
         claimLeaseId: this.#dependencies.ids.id(),
-        excludedProfiles: [...profileLimits.entries()]
-          .filter(([key, limit]) =>
-            (this.#activeProfileTurns.get(key) ?? 0) +
-                (pendingByProfile.get(key) ?? 0) >= limit + 2
+        excludedRequestLanes: [...requestLaneConfigurations.entries()]
+          .filter(([key, lane]) =>
+            (this.#activeRequestLaneTurns.get(key) ?? 0) +
+                (pendingByRequestLane.get(key) ?? 0) >=
+              lane.approvedRequestCap + 2
           )
-          .map(([key]) => {
-            const [organizationId, connectionProfileId] = JSON.parse(key) as [
-              string,
-              string,
-            ];
-            return { organizationId, connectionProfileId };
-          }),
+          .map(([, lane]): ConnectionPermitLaneIdentity =>
+            lane.scope === "platform"
+              ? {
+                  organizationId: lane.organizationId,
+                  connectionProfileId: lane.connectionProfileId,
+                  scope: "platform",
+                  providerId: lane.providerId,
+                }
+              : {
+                  organizationId: lane.organizationId,
+                  connectionProfileId: lane.connectionProfileId,
+                  scope: "connection_test",
+                  providerId: null,
+                }
+          ),
         excludedSourceInstanceIds: [
           ...this.#activeSources,
           ...claimed.flatMap((candidate) =>
@@ -561,14 +598,14 @@ export class ProviderSourceSupervisor<
         );
         break;
       }
-      let registeredProfileRequestLimit: number;
+      let registeredRequestLane: ConnectionPermitLaneConfiguration;
       try {
-        registeredProfileRequestLimit =
-          this.#dependencies.executor.registeredProfileRequestLimit(work);
+        registeredRequestLane =
+          this.#dependencies.executor.registeredRequestPermitLane(work);
       } catch {
         const disposition = {
           kind: "action_required" as const,
-          safeCode: "PROFILE_ADMISSION_CONFIGURATION_INVALID",
+          safeCode: "REQUEST_LANE_CONFIGURATION_INVALID",
         };
         await this.#runControlPlane(
           () => this.#dependencies.queue.complete(epoch, work, disposition),
@@ -583,10 +620,20 @@ export class ProviderSourceSupervisor<
         );
         continue;
       }
-      if (work.profileRequestLimit !== registeredProfileRequestLimit) {
+      if (
+        work.organizationId !== registeredRequestLane.organizationId ||
+        work.connectionProfileId !==
+          registeredRequestLane.connectionProfileId ||
+        (work.kind === "connection_test"
+          ? registeredRequestLane.scope !== "connection_test" ||
+            registeredRequestLane.providerId !== null
+          : registeredRequestLane.scope !== "platform" ||
+            typeof work.providerId !== "string" ||
+            registeredRequestLane.providerId !== work.providerId)
+      ) {
         const disposition = {
           kind: "action_required" as const,
-          safeCode: "PROFILE_REQUEST_LIMIT_MISMATCH",
+          safeCode: "REQUEST_LANE_CONFIGURATION_INVALID",
         };
         await this.#runControlPlane(
           () => this.#dependencies.queue.complete(epoch, work, disposition),
@@ -601,16 +648,43 @@ export class ProviderSourceSupervisor<
         );
         continue;
       }
-      const profileKey = workProfileKey(work);
-      profileLimits.set(profileKey, registeredProfileRequestLimit);
-      const reservedForProfile =
-        (this.#activeProfileTurns.get(profileKey) ?? 0) +
-        (pendingByProfile.get(profileKey) ?? 0);
-      // Keep a tiny per-profile FIFO (one running permit plus at most two
+      if (
+        !Number.isSafeInteger(work.platformRequestLimit) ||
+        work.platformRequestLimit < registeredRequestLane.approvedRequestCap ||
+        work.platformRequestLimit >
+          providerSourceLaunchBounds.stablePlatformRequestCap ||
+        registeredRequestLane.approvedRequestCap !==
+          providerSourceLaunchBounds.requestConcurrencyPerLane
+      ) {
+        const disposition = {
+          kind: "action_required" as const,
+          safeCode: "PLATFORM_REQUEST_LIMIT_MISMATCH",
+        };
+        await this.#runControlPlane(
+          () => this.#dependencies.queue.complete(epoch, work, disposition),
+          "WORK_FINALIZATION_FAILED",
+        );
+        await this.#recordDiagnostic(
+          epoch,
+          work,
+          "terminal",
+          disposition,
+          disposition.safeCode,
+        );
+        continue;
+      }
+      const requestLaneKey = requestPermitLaneKey(registeredRequestLane);
+      requestLaneConfigurations.set(requestLaneKey, registeredRequestLane);
+      const reservedForRequestLane =
+        (this.#activeRequestLaneTurns.get(requestLaneKey) ?? 0) +
+        (pendingByRequestLane.get(requestLaneKey) ?? 0);
+      // Keep a tiny per-platform FIFO (one running permit plus at most two
       // resource-free waiters) while rotating deeper backlog to fresh DB time.
-      // This preserves fair handoff evidence without letting one profile fill
+      // This preserves fair handoff evidence without letting one platform fill
       // the global claim horizon.
-      if (reservedForProfile >= registeredProfileRequestLimit + 2) {
+      if (
+        reservedForRequestLane >= registeredRequestLane.approvedRequestCap + 2
+      ) {
         await this.#runControlPlane(
           () => this.#dependencies.queue.releaseUnstarted(
             epoch,
@@ -621,10 +695,10 @@ export class ProviderSourceSupervisor<
         );
         continue;
       }
-      const waitsForProfile =
-        reservedForProfile >= registeredProfileRequestLimit;
+      const waitsForRequestLane =
+        reservedForRequestLane >= registeredRequestLane.approvedRequestCap;
       if (
-        !waitsForProfile &&
+        !waitsForRequestLane &&
         this.#coordinator.snapshot().activeExecutionSlots +
               pendingExecutionSlots >=
           this.#coordinator.snapshot().maximumExecutionSlots
@@ -640,16 +714,13 @@ export class ProviderSourceSupervisor<
         break;
       }
       claimed.push(work);
-      pendingByProfile.set(
-        profileKey,
-        (pendingByProfile.get(profileKey) ?? 0) + 1,
+      requestLaneByWorkId.set(work.id, registeredRequestLane);
+      pendingByRequestLane.set(
+        requestLaneKey,
+        (pendingByRequestLane.get(requestLaneKey) ?? 0) + 1,
       );
-      if (!waitsForProfile) pendingExecutionSlots += 1;
-      this.#coordinator.configureProfile({
-        organizationId: work.organizationId,
-        connectionProfileId: work.connectionProfileId,
-        approvedAggregateRequestCap: registeredProfileRequestLimit,
-      });
+      if (!waitsForRequestLane) pendingExecutionSlots += 1;
+      this.#coordinator.configureRequestPermitLane(registeredRequestLane);
       await this.#recordDiagnostic(epoch, work, "work_claimed");
     }
 
@@ -665,10 +736,14 @@ export class ProviderSourceSupervisor<
         );
         continue;
       }
-      const profileKey = workProfileKey(work);
-      this.#activeProfileTurns.set(
-        profileKey,
-        (this.#activeProfileTurns.get(profileKey) ?? 0) + 1,
+      const registeredRequestLane = requestLaneByWorkId.get(work.id);
+      if (!registeredRequestLane) {
+        throw new Error("provider_source_supervisor.request_lane_missing");
+      }
+      const requestLaneKey = requestPermitLaneKey(registeredRequestLane);
+      this.#activeRequestLaneTurns.set(
+        requestLaneKey,
+        (this.#activeRequestLaneTurns.get(requestLaneKey) ?? 0) + 1,
       );
       const turn = this.#executeTurn(epoch, work)
         .catch(async () => {
@@ -676,9 +751,13 @@ export class ProviderSourceSupervisor<
         })
         .finally(() => {
           this.#activeTurns.delete(turn);
-          const remaining = (this.#activeProfileTurns.get(profileKey) ?? 1) - 1;
-          if (remaining === 0) this.#activeProfileTurns.delete(profileKey);
-          else this.#activeProfileTurns.set(profileKey, remaining);
+          const remaining =
+            (this.#activeRequestLaneTurns.get(requestLaneKey) ?? 1) - 1;
+          if (remaining === 0) {
+            this.#activeRequestLaneTurns.delete(requestLaneKey);
+          } else {
+            this.#activeRequestLaneTurns.set(requestLaneKey, remaining);
+          }
         });
       this.#activeTurns.add(turn);
     }

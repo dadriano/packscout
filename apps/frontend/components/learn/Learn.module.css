@@ -521,3 +521,258 @@
     transition: none;
   }
 }
+
+/* --- PackScout method panel, education callouts, worked examples, and
+   responsible-play blocks (buyback-adjusted Learn surfaces) --- */
+
+.methodList {
+
+  display: grid;
+  margin: 1.45rem 0 0;
+  padding: 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+}
+
+.methodList li {
+
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 1rem;
+  padding-block: 1.1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.methodNumber {
+
+  color: var(--color-action);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+}
+
+.methodList h3 {
+
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 730;
+  letter-spacing: -0.015em;
+}
+
+.methodList p {
+
+  margin: 0.42rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.methodDisclaimer {
+
+  max-width: 650px;
+  margin: 1.15rem 0 0;
+  border-left: 3px solid var(--color-action);
+  background: color-mix(in srgb, var(--color-action-soft) 68%, transparent);
+  padding: 0.75rem 0.9rem;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.metricDefinitions {
+
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 1.8rem 0 0;
+  border-top: 1px solid var(--color-border);
+  border-left: 1px solid var(--color-border);
+}
+
+.metricDefinition {
+
+  min-width: 0;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  padding: 1rem;
+}
+
+.metricDefinition dt {
+
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 760;
+}
+
+.metricDefinition dd {
+
+  margin: 0.45rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.58;
+}
+
+.evidenceList {
+
+  display: grid;
+  margin: 1.6rem 0 0;
+  padding: 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+}
+
+.evidenceList li {
+
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 1rem;
+  padding-block: 1.25rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.evidenceNumber {
+
+  color: var(--color-action);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+}
+
+.evidenceList h3, .example h3 {
+
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 730;
+}
+
+.evidenceList p {
+
+  margin: 0.45rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.educationCallout, .example {
+
+  margin-top: 1.8rem;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-action);
+  border-radius: 0.35rem;
+  background: var(--color-surface);
+  padding: 1.15rem 1.25rem;
+}
+
+.educationCallout p:not(.calloutLabel), .example > p:not(.calloutLabel) {
+
+  margin: 0.65rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.example h3 {
+
+  margin-top: 0.55rem;
+}
+
+.exampleRows {
+
+  display: grid;
+  margin: 1.15rem 0 0;
+  border-top: 1px solid var(--color-border);
+  font-variant-numeric: tabular-nums;
+}
+
+.exampleRows div {
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  padding-block: 0.68rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.exampleRows dt {
+
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.exampleRows dd {
+
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.exampleGroupLabel {
+
+  margin: 1.1rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  font-weight: 640;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.responsiblePlay {
+
+  margin-top: 2.2rem;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-action);
+  border-radius: 0.35rem;
+  background: var(--color-surface);
+  padding: 1.15rem 1.25rem;
+}
+
+.responsiblePlay p:not(.calloutLabel) {
+
+  margin: 0.65rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.responsiblePlay .responsibleContact a {
+
+  color: var(--color-text);
+  font-weight: 640;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.responsiblePlay .responsibleContact a:hover {
+
+  color: var(--color-action);
+}
+
+.responsiblePlay .responsibleMeta {
+
+  font-size: 0.78rem;
+}
+
+@media (max-width: 620px) {
+  .methodList li {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.7rem;
+  }
+
+  .metricDefinitions {
+    grid-template-columns: 1fr;
+  }
+
+  .evidenceList li {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.7rem;
+  }
+
+  .educationCallout, .example {
+    padding: 1rem;
+  }
+}
+

@@ -7,7 +7,8 @@ import {
   ConnectionPermitCoordinatorError,
   ConnectionPermitCoordinator,
   type ConnectionPermitWaitReason,
-  type ConnectionProfilePermitIdentity,
+  type ConnectionPermitLaneIdentity,
+  type ConnectionProfileIdentity,
   type PairedConnectionPermit,
 } from "./connection-permit-coordinator.ts";
 
@@ -32,6 +33,7 @@ export interface ConnectionTestRequestPins extends SourceRequestCommonPins {
 
 interface SourceScopedRequestPins extends SourceRequestCommonPins {
   readonly provider: LaunchProviderKey;
+  readonly providerId: string;
   readonly sourceInstanceId: string;
   readonly sourceRevisionId: string;
   readonly normalizedContractVersion: string;
@@ -140,6 +142,7 @@ const keysByOperation = Object.freeze({
   source_test: [
     ...commonPinKeys,
     "provider",
+    "providerId",
     "sourceInstanceId",
     "sourceRevisionId",
     "normalizedContractVersion",
@@ -150,6 +153,7 @@ const keysByOperation = Object.freeze({
   page_read: [
     ...commonPinKeys,
     "provider",
+    "providerId",
     "sourceInstanceId",
     "sourceRevisionId",
     "normalizedContractVersion",
@@ -270,6 +274,7 @@ function canonicalizePins(
   }
 
   for (const field of [
+    "providerId",
     "sourceInstanceId",
     "sourceRevisionId",
     "normalizedContractVersion",
@@ -294,6 +299,7 @@ function canonicalizePins(
     connectionProfileRevisionId: record.connectionProfileRevisionId as string,
     connectionHealthGeneration: record.connectionHealthGeneration as number,
     provider: record.provider as LaunchProviderKey,
+    providerId: record.providerId as string,
     sourceInstanceId: record.sourceInstanceId as string,
     sourceRevisionId: record.sourceRevisionId as string,
     normalizedContractVersion: record.normalizedContractVersion as string,
@@ -347,6 +353,25 @@ function canonicalizePins(
 
 function pinKey(pins: SourceRequestOperationPins): string {
   return JSON.stringify(pins);
+}
+
+function requestPermitLaneForPins(
+  pins: SourceRequestOperationPins,
+): ConnectionPermitLaneIdentity {
+  if (pins.operationKind === "connection_test") {
+    return Object.freeze({
+      organizationId: pins.organizationId,
+      connectionProfileId: pins.connectionProfileId,
+      scope: "connection_test",
+      providerId: null,
+    });
+  }
+  return Object.freeze({
+    organizationId: pins.organizationId,
+    connectionProfileId: pins.connectionProfileId,
+    scope: "platform",
+    providerId: pins.providerId,
+  });
 }
 
 function canonicalizeRequestedCursor(
@@ -522,7 +547,7 @@ export class SourceRequestLease {
     this.#removeExternalAbortListener();
     this.#abortController.abort();
     // A bounded local validation rejected the operation before a durable
-    // request attempt existed. Release only the profile permit; the generic
+    // request attempt existed. Release only the exact request-lane permit; the generic
     // execution slot remains owned by the supervisor until its durable work
     // finalizer/diagnostic boundary completes.
     this.#permit.releaseRequestPermit();
@@ -608,14 +633,14 @@ export class SourceRequestLeaseAuthority {
     this.#ownedLeases.delete(lease);
   }
 
-  cancelQueuedForProfile(profile: ConnectionProfilePermitIdentity): void {
+  cancelQueuedForProfile(profile: ConnectionProfileIdentity): void {
     this.#coordinator.cancelQueuedForProfile(profile);
   }
 
   admissionWaitReason(
-    profile: ConnectionProfilePermitIdentity,
+    requestPermitLane: ConnectionPermitLaneIdentity,
   ): ConnectionPermitWaitReason | null {
-    return this.#coordinator.waitReasonFor(profile);
+    return this.#coordinator.waitReasonFor(requestPermitLane);
   }
 
   /** Irreversible local owner fence used only for an uncertain request. */
@@ -639,14 +664,11 @@ export class SourceRequestLeaseAuthority {
       pins,
       input.requestedCursor,
     );
-    const profile: ConnectionProfilePermitIdentity = {
-      organizationId: pins.organizationId,
-      connectionProfileId: pins.connectionProfileId,
-    };
+    const requestPermitLane = requestPermitLaneForPins(pins);
     let permit: PairedConnectionPermit;
     try {
       permit = await this.#coordinator.acquire({
-        profile,
+        requestPermitLane,
         signal: input.signal,
       });
     } catch (error) {

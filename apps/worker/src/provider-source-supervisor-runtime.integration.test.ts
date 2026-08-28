@@ -303,7 +303,7 @@ async function createDataforrestFixture(input: Readonly<{
       dataforrestEventsV1SourceAdapterManifest.compatibleConnectionTypeKey,
     displayName: "Shared DataForrest fixture",
     requestLimit:
-      dataforrestEventsV1SourceAdapterManifest.maximumConnectionRequestCap,
+      dataforrestEventsV1SourceAdapterManifest.maximumPlatformRequestCap,
     sourceAdapterVersion: dataforrestEventsV1SourceAdapterManifest.adapterVersion,
     encryptedConfiguration: encrypted,
     configurationFingerprint: createHash("sha256")
@@ -460,7 +460,7 @@ async function createAlternateFixture(
     sourceTypeKey: alternateBookmarkSourceManifest.sourceTypeKey,
     connectionTypeKey: alternateBookmarkSourceManifest.compatibleConnectionTypeKey,
     displayName: "Alternate bookmark fixture",
-    requestLimit: alternateBookmarkSourceManifest.maximumConnectionRequestCap,
+    requestLimit: alternateBookmarkSourceManifest.maximumPlatformRequestCap,
     sourceAdapterVersion: alternateBookmarkSourceManifest.adapterVersion,
     encryptedConfiguration: encrypted,
     configurationFingerprint: createHash("sha256")
@@ -576,8 +576,8 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
       provider,
       Math.max(maximumByProvider.get(provider) ?? 0, providerActive),
     );
-    if (calls === 2) firstWaveStarted.resolve();
-    if (calls <= 2) await releaseFirstWave.promise;
+    if (calls === 4) firstWaveStarted.resolve();
+    if (calls <= 4) await releaseFirstWave.promise;
     const cursor = url.searchParams.get("cursor");
     const pages = dataforestEventsV1EvidenceFixture[provider];
     const body = cursor === null
@@ -616,10 +616,10 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
         select: { id: true, state: true, failure_code: true },
         orderBy: { created_at: "asc" },
       });
-      assert.ok(calls >= 2, JSON.stringify(runs));
+      assert.ok(calls >= 4, JSON.stringify(runs));
     }, 3_000);
     await firstWaveStarted.promise;
-    assert.equal(maximumActive, 2);
+    assert.equal(maximumActive, 4);
     releaseFirstWave.resolve();
     await waitFor(async () => {
       const [pageCount, runs] = await Promise.all([
@@ -654,7 +654,7 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
       }), 4);
     });
     assert.equal(calls, 12);
-    assert.equal(maximumActive, 2);
+    assert.equal(maximumActive, 4);
     assert.deepEqual(
       Object.fromEntries(maximumByProvider),
       {

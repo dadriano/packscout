@@ -23,7 +23,7 @@ interface ClaimedWorkBase {
   readonly connectionProfileId: string;
   readonly connectionRevisionId: string;
   readonly connectionHealthGeneration: bigint;
-  readonly profileRequestLimit: number;
+  readonly platformRequestLimit: number;
   readonly connectionConfiguration:
     ProviderSourceEncryptedConnectionConfiguration;
   readonly claimOwner: string;

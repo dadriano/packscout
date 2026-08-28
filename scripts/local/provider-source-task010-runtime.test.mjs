@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 import { TASK010_PROVIDER_IDENTITIES } from "./provider-source-task010-safety.mjs";
@@ -7,6 +8,7 @@ const {
   assertTask010ActiveConnectionRevisionPins,
   assertTask010ConnectionRevisionPins,
   assertTask010ProviderSourceRevisionPins,
+  parseTask010CapacityArtifact,
 } = await tsImport("./provider-source-task010-runtime.mts", import.meta.url);
 
 const mapperPins = Object.freeze({
@@ -87,6 +89,31 @@ test("Task010 topology rejects historical connection revision contamination", ()
     assert.throws(
       () => assertTask010ConnectionRevisionPins(revisions),
       hasSafetyCode("SOURCE_CONNECTION_PINS_INVALID"),
+    );
+  }
+});
+
+test("Task010 capacity artifact binds initial and ongoing launch limits", async () => {
+  const artifact = JSON.parse(
+    await readFile(
+      new URL(
+        "../../docs/provider-source-capacity-measurement-v1.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  assert.doesNotThrow(() => parseTask010CapacityArtifact(artifact));
+  for (const patch of [
+    { pageRecordLimit: 499 },
+    { incrementalRecordsPerPollAttempt: 4_999 },
+  ]) {
+    assert.throws(
+      () => parseTask010CapacityArtifact({
+        ...artifact,
+        forecastInput: { ...artifact.forecastInput, ...patch },
+      }),
+      hasSafetyCode("CAPACITY_ARTIFACT_INVALID"),
     );
   }
 });

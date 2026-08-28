@@ -10,19 +10,22 @@ import {
   useState,
 } from "react";
 import type {
-  DataReleaseMetadata,
+  DataReleaseV3Identity,
   PublicRepackChase,
-  PublicRepackViewDetail,
+  PublicRepackViewDetailV3,
 } from "@packscout/contracts";
 import { SavedRepackButton } from "@/components/auth/SavedItemButton.client";
-import { EstimatedEvMetrics } from "@/components/metrics/EstimatedEvMetrics";
+import { PackScoutEvMetrics } from "@/components/metrics/PackScoutEvMetrics";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
-  presentBuyback,
-  presentPackScoutEv,
-  presentVendorReportedEv,
-} from "@/lib/metric-presentation";
+  presentBuybackSummaryV3,
+  presentPackScoutEvV3,
+  presentReleaseDataAsOf,
+  presentRepackPrice,
+  presentVendorReportedEvV3,
+} from "@/lib/packscout-ev-presentation";
+import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import {
   DEFAULT_CATALOG_QUERY,
@@ -40,11 +43,8 @@ import {
 } from "./pack-actions.client";
 import {
   presentEstimateCoverage,
-  presentEstimateTiming,
   presentTopChase,
-  presentVendorReportedObservation,
 } from "./pack-inspector-presentation";
-import { presentRepackPrice } from "./overview-presentation";
 import styles from "./PackInspector.module.css";
 
 export type InspectorActionOutcome =
@@ -62,8 +62,8 @@ export type InspectorActionOutcome =
     }>;
 
 export type RepackInspectorProps = Readonly<{
-  repack: PublicRepackViewDetail;
-  metadata: DataReleaseMetadata;
+  repack: PublicRepackViewDetailV3;
+  release: DataReleaseV3Identity;
   placement?: "side" | "preview" | "sheet";
   clipboardWriter?: ClipboardWriter | null;
   onActionOutcome?: (outcome: InspectorActionOutcome) => void;
@@ -75,12 +75,12 @@ export type RepackInspectorProps = Readonly<{
 type PartnerActionsProps = Pick<
   RepackInspectorProps,
   "clipboardWriter" | "onActionOutcome"
-> & { readonly repack: PublicRepackViewDetail };
+> & { readonly repack: PublicRepackViewDetailV3 };
 
 type RepackDestinationActionProps = Pick<
   RepackInspectorProps,
   "onActionOutcome"
-> & { readonly repack: PublicRepackViewDetail };
+> & { readonly repack: PublicRepackViewDetailV3 };
 
 function RepackDestinationAction({
   repack,
@@ -151,11 +151,10 @@ function PartnerActions({
     "idle" | "copied" | "manual"
   >("idle");
   const manualCodeRef = useRef<HTMLInputElement>(null);
+  // Promos are governed by `actionAvailability` alone. Pack availability gates
+  // the outbound purchase link above and nothing else, so a pack that is
+  // `unavailable`, `unknown`, or `sold_out` still shows a published promo.
   const promo = repack.actions.promo;
-
-  if (!presentPackAvailability(repack.availability).purchaseActionsAvailable) {
-    return null;
-  }
 
   async function copyPromo() {
     if (!promo) return;
@@ -194,37 +193,35 @@ function PartnerActions({
         Partner actions
       </h3>
 
-      {promo ? (
-        <div className={styles.promo}>
-          <span className={styles.promoLabel}>{promo.label}</span>
-          <code className={styles.promoCode}>{promo.code}</code>
-          <button className={styles.copyButton} onClick={copyPromo} type="button">
-            {copyState === "copied" ? "Copied" : "Copy promo"}
-          </button>
-          <span aria-live="polite" className={styles.copyStatus} role="status">
-            {copyState === "copied" ? "Promo code copied" : ""}
-            {copyState === "manual" ? "Copy the code manually" : ""}
-          </span>
-          {copyState === "manual" ? (
-            <label className={styles.manualCopy}>
-              <span>Promo code</span>
-              <input
-                onFocus={(event) => event.currentTarget.select()}
-                readOnly
-                ref={manualCodeRef}
-                value={promo.code}
-              />
-            </label>
-          ) : null}
-        </div>
-      ) : null}
+      <div className={styles.promo}>
+        <span className={styles.promoLabel}>{promo.label}</span>
+        <code className={styles.promoCode}>{promo.code}</code>
+        <button className={styles.copyButton} onClick={copyPromo} type="button">
+          {copyState === "copied" ? "Copied" : "Copy promo"}
+        </button>
+        <span aria-live="polite" className={styles.copyStatus} role="status">
+          {copyState === "copied" ? "Promo code copied" : ""}
+          {copyState === "manual" ? "Copy the code manually" : ""}
+        </span>
+        {copyState === "manual" ? (
+          <label className={styles.manualCopy}>
+            <span>Promo code</span>
+            <input
+              onFocus={(event) => event.currentTarget.select()}
+              readOnly
+              ref={manualCodeRef}
+              value={promo.code}
+            />
+          </label>
+        ) : null}
+      </div>
     </section>
   );
 }
 
 export function RepackInspector({
   repack,
-  metadata,
+  release,
   placement = "side",
   clipboardWriter,
   onActionOutcome,
@@ -234,15 +231,17 @@ export function RepackInspector({
 }: RepackInspectorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const boundEstimate = useDeadlineBoundPackScoutEv(repack.evEstimates.packScout);
   const price = presentRepackPrice(repack.price);
-  const packScoutEv = presentPackScoutEv({
-    repackPrice: repack.price.usdComparison,
-    estimate: repack.evEstimates.packScout,
+  const packScoutEv = presentPackScoutEvV3({
+    estimate: boundEstimate,
+    price: repack.price,
+    availability: repack.availability,
+    repackName: repack.name,
   });
-  const vendorEv = presentVendorReportedEv(repack.evEstimates.vendorReported);
-  const vendorObservation = presentVendorReportedObservation(vendorEv.observedAt);
-  const buyback = presentBuyback(repack.buyback);
-  const timing = presentEstimateTiming(repack.evEstimates.packScout, metadata);
+  const vendorEv = presentVendorReportedEvV3(repack.evEstimates.vendorReported);
+  const buyback = presentBuybackSummaryV3(repack.buyback);
+  const releaseDataAsOf = presentReleaseDataAsOf(release);
   const coverage = presentEstimateCoverage(repack.contentSummary);
   const availability = presentPackAvailability(repack.availability);
   const showsDesiredChase = highlightedChase !== undefined;
@@ -265,13 +264,13 @@ export function RepackInspector({
   );
   const estimatedEvHint = [
     METRIC_TRUST_COPY.longRunExplanation,
-    timing.calculatedLabel,
-    timing.releaseLabel,
+    packScoutEv.freshness.calculatedLabel,
+    releaseDataAsOf.label,
     ...estimateLimitations,
   ].join(" ");
   const vendorReportedEvHint = [
     METRIC_TRUST_COPY.sourceExplanation,
-    vendorObservation?.label,
+    vendorEv.observedLabel,
     ...vendorLimitations,
   ]
     .filter(Boolean)
@@ -396,7 +395,7 @@ export function RepackInspector({
               <GlossaryHint field="repackPrice" />
             </span>
             <span className="sr-only">{price.accessibleLabel}</span>
-            {price.reasonCopy ? (
+            {price.availability === "unavailable" ? (
               <small aria-hidden="true">{price.reasonCopy}</small>
             ) : null}
           </p>
@@ -408,15 +407,15 @@ export function RepackInspector({
 
       <div className={styles.detailsGrid}>
         <div className={styles.sectionBlock}>
-          <EstimatedEvMetrics
+          <PackScoutEvMetrics
             compact
             headingHint={{
-              label: "Estimated EV",
+              label: METRIC_TRUST_COPY.estimateLabel,
               definition: estimatedEvHint,
               learnHref: EXPECTED_VALUE_ARTICLE_HREF,
             }}
             presentation={packScoutEv}
-            showFinancialDisclaimer={false}
+            showProvenance={false}
             showRepackPrice={false}
           />
           <div className={styles.vendorEstimate}>
@@ -432,18 +431,18 @@ export function RepackInspector({
                   field="vendorReportedEv"
                 />
               </h3>
-              <span>Reported by vendor</span>
+              <span>{vendorEv.sourceNote}</span>
             </div>
             <div className={styles.vendorEstimateMetrics}>
               <MetricValue
                 compact
-                metric={vendorEv.evPercent}
+                metric={vendorEv.reported}
                 showReason={false}
                 showSemanticState={false}
               />
               <MetricValue
                 compact
-                metric={vendorEv.reportedGrossEv}
+                metric={vendorEv.usdComparison}
                 showReason={false}
                 showSemanticState={false}
               />
@@ -464,6 +463,11 @@ export function RepackInspector({
               metric={buyback}
             />
           </div>
+          <p className={styles.releaseNote}>
+            <time dateTime={releaseDataAsOf.dataAsOf}>
+              {releaseDataAsOf.label}
+            </time>
+          </p>
           <div className={styles.estimateLearnMore}>
             <Link
               className={styles.learnLink}
@@ -473,7 +477,7 @@ export function RepackInspector({
               <span aria-hidden="true"> →</span>
             </Link>
             <span className={styles.financialDisclaimer}>
-              {METRIC_TRUST_COPY.financialDisclaimer}
+              {METRIC_TRUST_COPY.dashboardDisclaimer}
             </span>
           </div>
         </div>

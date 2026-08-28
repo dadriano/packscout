@@ -10,11 +10,11 @@ import {
 } from "react";
 import type {
   ListPublicRepacksInput,
-  ListPublicRepacksPage,
   PublicRepackFilters,
   PublicRepackSort,
-  PublicRepackViewDetail,
+  PublicRepackViewDetailV3,
 } from "@packscout/contracts";
+import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import { AllRepacksTable } from "@/components/catalog/AllRepacksTable.client";
 import { AllRepacksCards } from "@/components/catalog/AllRepacksCards.client";
 import { CatalogFilters } from "@/components/catalog/CatalogFilters.client";
@@ -53,13 +53,13 @@ import {
 import styles from "./AllRepacksClient.module.css";
 
 type AllRepacksClientProps = Readonly<{
-  page: ListPublicRepacksPage;
+  page: ListPublicRepacksPageV3;
   query: ListPublicRepacksInput;
-  details: readonly PublicRepackViewDetail[];
+  details: readonly PublicRepackViewDetailV3[];
   initialLayout: CatalogViewLayout;
 }>;
 
-function activeConstraints(page: ListPublicRepacksPage) {
+function activeConstraints(page: ListPublicRepacksPageV3) {
   const constraints: Array<{ label: string; value: string }> = [];
   if (page.activeQuery.search) {
     constraints.push({ label: "Search", value: page.activeQuery.search });
@@ -143,31 +143,31 @@ export function AllRepacksClient({
   useEffect(() => {
     queueProductTelemetry(
       createDashboardViewEvent({
-        publicReleaseId: page.metadata.publicReleaseId,
+        publicReleaseId: page.release.publicReleaseId,
         surface: "all_repacks",
       }),
     );
-  }, [page.metadata.publicReleaseId]);
+  }, [page.release.publicReleaseId]);
 
   useEffect(() => {
     const normalizedSearch = page.activeQuery.search;
     if (normalizedSearch.length === 0) return;
     queueProductTelemetry(
       createRepackSearchEvent({
-        publicReleaseId: page.metadata.publicReleaseId,
+        publicReleaseId: page.release.publicReleaseId,
         queryLength: normalizedSearch.length,
         resultCount: page.range.total,
         outcome: page.range.total === 0 ? "no_matches" : "results",
       }),
     );
-  }, [page.activeQuery.search, page.metadata.publicReleaseId, page.range.total]);
+  }, [page.activeQuery.search, page.release.publicReleaseId, page.range.total]);
 
   useEffect(() => {
     const count = activeFilterCount(page.activeQuery.filters);
     if (count === 0) return;
     queueProductTelemetry(
       createFiltersAppliedEvent({
-        publicReleaseId: page.metadata.publicReleaseId,
+        publicReleaseId: page.release.publicReleaseId,
         surface: "all_repacks",
         outcome: page.range.total === 0 ? "no_matches" : "results",
         activeFilterCount: count,
@@ -176,7 +176,7 @@ export function AllRepacksClient({
     );
   }, [
     page.activeQuery.filters,
-    page.metadata.publicReleaseId,
+    page.release.publicReleaseId,
     page.range.total,
   ]);
 
@@ -184,13 +184,13 @@ export function AllRepacksClient({
     queueProductTelemetry(
       outcome.name === "promo_copied"
         ? createPromoCopiedEvent({
-            publicReleaseId: page.metadata.publicReleaseId,
+            publicReleaseId: page.release.publicReleaseId,
             publicRepackId: outcome.publicRepackId,
             vendorKey: outcome.vendorKey,
             outcome: outcome.outcome,
           })
         : createRepackLinkOpenedEvent({
-            publicReleaseId: page.metadata.publicReleaseId,
+            publicReleaseId: page.release.publicReleaseId,
             publicRepackId: outcome.publicRepackId,
             vendorKey: outcome.vendorKey,
             outcome: outcome.outcome,
@@ -240,7 +240,7 @@ export function AllRepacksClient({
       if (summary) {
         queueProductTelemetry(
           createPromoCopiedEvent({
-            publicReleaseId: page.metadata.publicReleaseId,
+            publicReleaseId: page.release.publicReleaseId,
             publicRepackId,
             vendorKey: summary.vendorKey,
             outcome: "failed",
@@ -255,7 +255,7 @@ export function AllRepacksClient({
     );
     queueProductTelemetry(
       createPromoCopiedEvent({
-        publicReleaseId: page.metadata.publicReleaseId,
+        publicReleaseId: page.release.publicReleaseId,
         publicRepackId,
         vendorKey: detail.vendorKey,
         outcome: outcome.ok ? "clipboard" : "manual_fallback",
@@ -280,7 +280,7 @@ export function AllRepacksClient({
       if (summary) {
         queueProductTelemetry(
           createRepackLinkOpenedEvent({
-            publicReleaseId: page.metadata.publicReleaseId,
+            publicReleaseId: page.release.publicReleaseId,
             publicRepackId,
             vendorKey: summary.vendorKey,
             outcome: "blocked",
@@ -293,7 +293,7 @@ export function AllRepacksClient({
     setActionFeedback("Vendor listing opened in a new tab.");
     queueProductTelemetry(
       createRepackLinkOpenedEvent({
-        publicReleaseId: page.metadata.publicReleaseId,
+        publicReleaseId: page.release.publicReleaseId,
         publicRepackId,
         vendorKey: detail!.vendorKey,
         outcome: "opened",
@@ -395,7 +395,7 @@ export function AllRepacksClient({
                 )?.chase ?? null
               : undefined
           }
-          metadata={page.metadata}
+          release={page.release}
           onActionOutcome={reportAction}
           onClose={closeInspector}
           placement="sheet"

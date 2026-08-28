@@ -1,13 +1,10 @@
 alter table public.provider_source_schedule_revisions
-  add column records_per_request integer not null default 250,
+  add column records_per_request integer not null default 500,
   add constraint provider_source_schedule_revisions_records_per_request_check
     check (records_per_request between 1 and 5000);
 
-alter table public.provider_source_schedule_revisions
-  alter column records_per_request set default 500;
-
 alter table public.provider_source_test_jobs
-  add column records_per_request integer not null default 250,
+  add column records_per_request integer not null default 500,
   add constraint provider_source_test_jobs_records_per_request_check
     check (records_per_request between 1 and 5000);
 
@@ -18,7 +15,7 @@ alter table public.import_runs
   add column records_per_request integer;
 
 update public.import_runs
-set records_per_request = 250
+set records_per_request = 500
 where source_instance_id is not null;
 
 alter table public.import_runs

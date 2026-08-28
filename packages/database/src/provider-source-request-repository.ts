@@ -12,6 +12,8 @@ import { PersistenceError } from "./persistence-error.ts";
 import { providerSourceTransactionTime } from "./provider-source-database-clock.ts";
 import { ProviderSourceDiagnosticRepository } from
   "./provider-source-diagnostic-repository.ts";
+import { lockProviderSourceSupervisorActiveEpoch } from
+  "./provider-source-supervisor-environment-lock.ts";
 import { appendTerminalRequestStartDiagnostic } from
   "./provider-source-request-diagnostic.ts";
 import { persistKnownRequestTerminalization } from "./provider-source-request-terminal-proof.ts";
@@ -83,23 +85,14 @@ export class ProviderSourceRequestRepository {
           hashtextextended(${requestAttemptId}, 719_007)
         )::text as locked
       `);
-      const epochs = await transaction.$queryRaw<Array<{
-        id: string;
-        environmentKey: string;
-        epochNumber: bigint;
-      }>>(Prisma.sql`
-        select id,
-               environment_key as "environmentKey",
-               epoch_number as "epochNumber"
-        from public.source_supervisor_epochs
-        where id = cast(${input.supervisorEpochId} as uuid)
-          and owner_key = ${input.supervisorOwnerKey}
-          and lease_token = cast(${input.supervisorLeaseToken} as uuid)
-          and state = 'active'
-          and lease_expires_at > clock_timestamp()
-        for share
-      `);
-      const epoch = epochs[0];
+      const epoch = await lockProviderSourceSupervisorActiveEpoch(
+        transaction,
+        {
+          epochId: input.supervisorEpochId,
+          ownerKey: input.supervisorOwnerKey,
+          leaseToken: input.supervisorLeaseToken,
+        },
+      );
       if (!epoch) {
         throw new PersistenceError("SUPERVISOR_OWNERSHIP_LOST", "Request epoch is not active.");
       }
@@ -467,17 +460,15 @@ export class ProviderSourceRequestRepository {
       }
     }
     return this.database.$transaction(async (transaction) => {
-      const epochs = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        select id
-        from public.source_supervisor_epochs
-        where id = cast(${input.supervisorEpochId} as uuid)
-          and owner_key = ${input.supervisorOwnerKey}
-          and lease_token = cast(${input.supervisorLeaseToken} as uuid)
-          and state = 'active'
-          and lease_expires_at > clock_timestamp()
-        for share
-      `);
-      if (!epochs[0]) {
+      const epoch = await lockProviderSourceSupervisorActiveEpoch(
+        transaction,
+        {
+          epochId: input.supervisorEpochId,
+          ownerKey: input.supervisorOwnerKey,
+          leaseToken: input.supervisorLeaseToken,
+        },
+      );
+      if (!epoch) {
         throw new PersistenceError("SUPERVISOR_OWNERSHIP_LOST", "Request epoch is no longer active.");
       }
       const rows = await transaction.$queryRaw<Array<{
@@ -1139,23 +1130,14 @@ export class ProviderSourceRequestRepository {
       throw new TypeError("Uncertain outcome hash must be a keyed lowercase digest.");
     }
     return this.database.$transaction(async (transaction) => {
-      const currentEpochs = await transaction.$queryRaw<Array<{
-        id: string;
-        environmentKey: string;
-        epochNumber: bigint;
-      }>>(Prisma.sql`
-        select id,
-               environment_key as "environmentKey",
-               epoch_number as "epochNumber"
-        from public.source_supervisor_epochs
-        where id = cast(${input.currentSupervisorEpochId} as uuid)
-          and owner_key = ${input.currentSupervisorOwnerKey}
-          and lease_token = cast(${input.currentSupervisorLeaseToken} as uuid)
-          and state = 'active'
-          and lease_expires_at > clock_timestamp()
-        for share
-      `);
-      const currentEpoch = currentEpochs[0];
+      const currentEpoch = await lockProviderSourceSupervisorActiveEpoch(
+        transaction,
+        {
+          epochId: input.currentSupervisorEpochId,
+          ownerKey: input.currentSupervisorOwnerKey,
+          leaseToken: input.currentSupervisorLeaseToken,
+        },
+      );
       if (!currentEpoch) {
         throw new PersistenceError("SUPERVISOR_OWNERSHIP_LOST", "Replacement epoch is not active.");
       }

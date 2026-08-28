@@ -94,7 +94,7 @@ export async function loadClaimedProviderSourceSupervisorWork(
     connectionProfileId,
     connectionRevisionId,
     connectionHealthGeneration: connectionRevision.health_generation,
-    profileRequestLimit: profile.request_limit,
+    platformRequestLimit: profile.request_limit,
     connectionConfiguration: {
       ciphertext: new Uint8Array(connectionRevision.configuration_ciphertext),
       nonce: new Uint8Array(connectionRevision.configuration_nonce),

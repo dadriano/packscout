@@ -117,6 +117,7 @@ async function fixture(continuation: "continue" | "poll_after" = "continue") {
         connectionProfileId: pins.connectionProfileId,
         connectionProfileRevisionId: pins.connectionRevisionId,
         connectionHealthGeneration: Number(pins.connectionHealthGeneration),
+        providerId: pins.providerId,
         provider: pins.provider,
         sourceInstanceId: pins.sourceInstanceId,
         sourceRevisionId: pins.sourceRevisionId,

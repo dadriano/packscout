@@ -14,8 +14,10 @@ import path from "node:path";
 import test from "node:test";
 import {
   TASK010_PROVIDER_IDENTITIES,
+  TASK010_BACKFILL_RECORDS_PER_REQUEST,
   TASK010_REQUIRED_MIGRATION,
   TASK010_SAFETY_VERSION,
+  TASK010_SOURCE_EXECUTION_SLOTS,
   Task010SafetyError,
   assessTask010ProviderReconciliation,
   assertBootstrapPasswordAbsent,
@@ -361,6 +363,7 @@ test("backfill topology requires four exact active roots and fully pinned source
       state: "paused",
       activeRevisionId: "revision",
       connectionProfileMatches: true,
+      recordsPerRequest: TASK010_BACKFILL_RECORDS_PER_REQUEST,
     })),
   };
   assert.doesNotThrow(() => assertTask010BackfillTopologySnapshot(ready));
@@ -385,6 +388,12 @@ test("backfill topology requires four exact active roots and fully pinned source
         index === 0 ? { ...source, activeRevisionId: null } : source,
       ),
     },
+    {
+      ...ready,
+      sources: ready.sources.map((source, index) =>
+        index === 0 ? { ...source, recordsPerRequest: 5_000 } : source,
+      ),
+    },
   ]) {
     assert.throws(
       () => assertTask010BackfillTopologySnapshot(invalid),
@@ -395,21 +404,22 @@ test("backfill topology requires four exact active roots and fully pinned source
   }
 });
 
-test("worker environment strips evidence token and starter cannot reload dotenv entrypoint", async () => {
+test("worker environment strips evidence token and pins four Task010 source lanes", async () => {
   const evidenceToken = "evidence-token-must-be-stripped";
   const sanitized = sanitizedTask010WorkerEnvironment({
     ...baseEnvironment,
     PACKSCOUT_DATA_API_TOKEN: evidenceToken,
-    PACKSCOUT_SOURCE_EXECUTION_SLOTS: "4",
+    PACKSCOUT_SOURCE_EXECUTION_SLOTS: "1",
   });
+  assert.equal(TASK010_SOURCE_EXECUTION_SLOTS, "4");
   assert.equal(sanitized.PACKSCOUT_DATA_API_TOKEN, undefined);
   assert.equal(JSON.stringify(sanitized).includes(evidenceToken), false);
   assert.equal(sanitized.PACKSCOUT_TASK010_ADMIN_PASSWORD, undefined);
-  assert.equal(sanitized.PACKSCOUT_SOURCE_EXECUTION_SLOTS, "1");
+  assert.equal(sanitized.PACKSCOUT_SOURCE_EXECUTION_SLOTS, "4");
   assert.equal(
     sanitizedTask010WorkerEnvironment(baseEnvironment)
       .PACKSCOUT_SOURCE_EXECUTION_SLOTS,
-    "1",
+    "4",
   );
   assert.throws(
     () =>

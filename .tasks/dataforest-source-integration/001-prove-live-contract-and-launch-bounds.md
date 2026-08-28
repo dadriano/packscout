@@ -33,7 +33,7 @@ Earlier PackScout plans assumed aggregate catalog/pulls/sales pages or separate 
 
 ### Parallel and request bounds
 
-- Obtain provider approval or safe bounded evidence for at least two concurrent requests using different platform filters; record the supported aggregate limit as an integer no greater than four for this first pass.
+- Obtain provider approval or safe bounded evidence for cross-platform overlap and record the provider's exact per-platform hard maximum separately from PackScout's operating concurrency.
 - Verify that parallel requests return filter-correct records and independent cursors without cross-request contamination.
 - Record a launch page target, maximum response bytes, request timeout, redirect and destination policy, and retry classification supported by the evidence.
 - Use 500 records, 2 MiB, and 10 seconds as the approved defaults when evidence does not require a stricter value.
@@ -76,7 +76,7 @@ This task delivers one reviewed evidence package:
 | Request contract | Exact profile-only connection probe plus filtered source-test and page-read method, path, bearer placement, cursor, limit, timeout, response bound, and destination policy |
 | Page contract | Wrapper, record discriminators, required fields, nullability, cursor progression, and raw-to-normalized continuation translation |
 | Failure contract | Sanitized status classes, retry classes, and action-required outcomes |
-| Parallelism contract | Approved aggregate in-flight limit from two through four, with independent-filter proof |
+| Parallelism contract | Provider maximum of two per platform, PackScout operating at one request per platform, with independent-filter proof |
 | Capacity contract | Page measurements plus full-history storage and bounded-memory forecast under the fixed retention policy |
 
 ## Acceptance Criteria
@@ -122,11 +122,11 @@ PACKSCOUT_DATA_API_TOKEN='<ignored local secret>' \
 - Implemented the fixed-endpoint, environment-only capture harness, offline
   safety tests, reviewed evidence report, synthetic structural fixture, launch
   scorecard update, storage forecast, and task-006 memory benchmark contract.
-- Evidence required one approved deviation from the provisional defaults: the
-  launch page target is 250 rather than 500 because a live 500-record Phygitals
-  response exceeded the unchanged 2 MiB bound.
-- Rate-limit headers/thresholds and a real provider 500 body remain explicitly
-  unavailable; no harmful load or manufactured failure was used. Their safe
+- Later bounded evidence superseded the provisional transport settings: the
+  launch target is 500 under an 8 MiB bound. Every retry keeps the exact durable
+  request pin; the runtime never silently downshifts an oversized page.
+- Rate-limit headers/thresholds remain explicitly unavailable; no harmful load
+  or manufactured failure was used. Their safe
   retry classifications are documented without inventing an envelope.
 - The reviewed local volume has insufficient capacity for the eventual real
   backfill. That is recorded as a task-010 preflight block, not hidden or treated

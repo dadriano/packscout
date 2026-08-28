@@ -22,21 +22,24 @@ import {
 import { completeAuthenticPageReadForTest } from
   "../../packages/services/src/source-adapter-page-result.test-support.ts";
 
-const benchmarkVersion = "provider-source-page-memory-v1";
-const warmupPageCount = 10;
+const benchmarkVersion = "provider-source-page-memory-v2";
+const concurrentPages = 4;
+const warmupPageCount = 12;
 const trialCount = 5;
 const pagesPerTrial = 20;
 const pageCount = trialCount * pagesPerTrial;
 // Exercise the largest legal per-source request pin at the adapter's current
-// byte ceiling. The live-evidenced 250-row target remains the backfill model.
+// byte ceiling. The live-evidenced 500-row target remains the backfill model.
 const recordsPerPage = providerSourceRecordsPerRequest.maximum;
 const maximumResponseBytes =
   dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes;
-// Each fixture record contributes 13 non-fact JSON nodes. Thirty-four empty
-// facts per record keeps the 5,000-row page at 235,004 nodes, immediately below
-// the interpreter's independent 240,000-node ceiling.
-const emptyObjectFactsPerRecord = 34;
+// Each fixture record contributes 13 non-fact JSON nodes. Eighty-two empty
+// facts per record keeps the 5,000-row page at 475,004 nodes, immediately below
+// the interpreter's independent 480,000-node ceiling.
+const emptyObjectFactsPerRecord = 82;
 const mebibyte = 1024 * 1024;
+const peakDeltaLimitBytes = concurrentPages * 64 * mebibyte;
+const retainedGrowthLimitBytes = concurrentPages * 8 * mebibyte;
 
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
@@ -86,7 +89,7 @@ function maximumSizeSanitizedPage(): Readonly<{
     data: {
       provider_label: `Capacity pack ${index}`,
       // Empty objects are the highest-overhead JSON nodes admitted by the
-      // parser. This keeps the maximum-byte fixture close to the 240k-node cap
+      // parser. This keeps the maximum-byte fixture close to the 480k-node cap
       // instead of measuring a large string in isolation.
       native_facts: Array.from(
         { length: emptyObjectFactsPerRecord },
@@ -229,6 +232,7 @@ const requestPins = Object.freeze({
   connectionProfileId: pins.connectionProfileId,
   connectionProfileRevisionId: pins.connectionRevisionId,
   connectionHealthGeneration: Number(pins.connectionHealthGeneration),
+  providerId: pins.providerId,
   provider: pins.provider,
   sourceInstanceId: pins.sourceInstanceId,
   sourceRevisionId: pins.sourceRevisionId,
@@ -299,8 +303,31 @@ async function processMaximumSizePage(): Promise<Readonly<{
   };
 }
 
-for (let pageIndex = 0; pageIndex < warmupPageCount; pageIndex += 1) {
-  await processMaximumSizePage();
+async function processMaximumSizePageWave(): Promise<Readonly<{
+  activeRssBytes: number;
+  recordCount: number;
+}>> {
+  const measuredPages = await Promise.all(
+    Array.from({ length: concurrentPages }, () => processMaximumSizePage()),
+  );
+  return {
+    activeRssBytes: Math.max(
+      process.memoryUsage().rss,
+      ...measuredPages.map(({ activeRssBytes }) => activeRssBytes),
+    ),
+    recordCount: measuredPages.reduce(
+      (total, { recordCount }) => total + recordCount,
+      0,
+    ),
+  };
+}
+
+for (
+  let pageIndex = 0;
+  pageIndex < warmupPageCount;
+  pageIndex += concurrentPages
+) {
+  await processMaximumSizePageWave();
   await collectGarbage();
 }
 await collectGarbage();
@@ -311,8 +338,12 @@ const settledManagedBytes = [managedBytes()];
 const startedAt = performance.now();
 
 for (let trialIndex = 0; trialIndex < trialCount; trialIndex += 1) {
-  for (let pageIndex = 0; pageIndex < pagesPerTrial; pageIndex += 1) {
-    const measured = await processMaximumSizePage();
+  for (
+    let pageIndex = 0;
+    pageIndex < pagesPerTrial;
+    pageIndex += concurrentPages
+  ) {
+    const measured = await processMaximumSizePageWave();
     checksum += measured.recordCount;
     peakRssBytes = Math.max(peakRssBytes, measured.activeRssBytes);
     await collectGarbage();
@@ -349,6 +380,7 @@ const result = {
   trialCount,
   pagesPerTrial,
   pageCount,
+  concurrentPages,
   recordsPerPage,
   responseBytesPerPage: maximumResponseBytes,
   jsonNodesPerPage: maximumPage.jsonNodeCount,
@@ -363,13 +395,13 @@ const result = {
   theilSenBytesPerPage: Number(theilSenBytesPerPage.toFixed(3)),
   retainedGrowthBytes,
   limits: {
-    peakDeltaBytes: 64 * mebibyte,
-    retainedGrowthBytes: 8 * mebibyte,
+    peakDeltaBytes: peakDeltaLimitBytes,
+    retainedGrowthBytes: retainedGrowthLimitBytes,
   },
   passes:
     checksum === pageCount * recordsPerPage &&
-    peakDeltaBytes <= 64 * mebibyte &&
-    retainedGrowthBytes <= 8 * mebibyte,
+    peakDeltaBytes <= peakDeltaLimitBytes &&
+    retainedGrowthBytes <= retainedGrowthLimitBytes,
 };
 
 process.stdout.write(`${JSON.stringify(result)}\n`);

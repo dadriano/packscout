@@ -19,6 +19,8 @@ import { ProviderSourceAdminLifecycleRepository } from
   "./provider-source-admin-lifecycle-repository.ts";
 import { ProviderSourceSupervisorRepository } from
   "./provider-source-supervisor-repository.ts";
+import { ProviderSourceSupervisorSnapshotRepository } from
+  "./provider-source-supervisor-snapshot-repository.ts";
 import { ProviderSourceTestResultRepository } from
   "./provider-source-test-result-repository.ts";
 import { SourceConnectionAdminRepository } from
@@ -33,6 +35,44 @@ async function databaseNow(
     select clock_timestamp() as "now"
   `;
   return rows[0]!.now;
+}
+
+async function within<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("operation did not settle within the bound")),
+          milliseconds,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function waitForBlockedSourceTestWrite(
+  database: Awaited<ReturnType<typeof createProviderSourceAcceptanceFixture>>["database"],
+): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const rows = await database.$queryRaw<Array<{ blocked: bigint }>>`
+      select count(*)::bigint as blocked
+      from pg_catalog.pg_stat_activity
+      where datname = current_database()
+        and pid <> pg_backend_pid()
+        and state = 'active'
+        and wait_event_type = 'Lock'
+        and query ilike '%provider_source_test_jobs%'
+        and query ilike '%update%'
+    `;
+    if ((rows[0]?.blocked ?? 0n) > 0n) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("claim renewal did not reach the blocked source-test write");
 }
 
 async function recoveryFixture(testKey: string) {
@@ -402,7 +442,7 @@ test("paired-capacity wait and grant are durable exact-claim lane states", async
       ownerKey,
       leaseToken,
       work: claimed,
-      reason: "profile_capacity",
+      reason: "request_lane_capacity",
     });
     let runtime = await fixture.database.provider_source_runtime_states
       .findUniqueOrThrow({
@@ -410,7 +450,7 @@ test("paired-capacity wait and grant are durable exact-claim lane states", async
       });
     assert.equal(runtime.phase, "waiting");
     assert.equal(runtime.activity, "waiting");
-    assert.equal(runtime.wait_reason, "profile_capacity");
+    assert.equal(runtime.wait_reason, "request_lane_capacity");
     assert.equal(runtime.current_run_id, claimed.runId);
     assert.equal(runtime.connection_profile_id, claimed.connectionProfileId);
     assert.equal(runtime.connection_revision_id, claimed.connectionRevisionId);
@@ -610,6 +650,133 @@ test("claim renewal loss atomically records one exact diagnostic before fencing"
     assert.equal(events[0]!.correlation_kind, "source_test");
     assert.equal(events[0]!.request_attempt_id, null);
   } finally {
+    await fixture.close();
+  }
+});
+
+test("a blocked claim renewal does not block supervisor heartbeat writes", async () => {
+  const { fixture, source, ownerKey, leaseToken, epoch } =
+    await recoveryFixture("claim-renewal-heartbeat-lock-separation");
+  const blocker = await fixture.createIndependentClient();
+  const renewalClient = await fixture.createIndependentClient();
+  let releaseBlocker: (() => void) | undefined;
+  let blockerReady!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    blockerReady = resolve;
+  });
+  const holdBlocker = new Promise<void>((resolve) => {
+    releaseBlocker = resolve;
+  });
+  let blockingTransaction: Promise<void> | null = null;
+  let renewing: Promise<Date | null> | null = null;
+  let fencing: Promise<void> | null = null;
+  try {
+    const now = await databaseNow(fixture.database);
+    const job = await fixture.database.provider_source_test_jobs.create({
+      data: {
+        organization_id: fixture.organizationId,
+        provider_id: source.providerId,
+        source_instance_id: source.sourceInstanceId,
+        source_revision_id: source.sourceRevisionId,
+        connection_profile_id: fixture.connectionProfileId,
+        connection_revision_id: fixture.connectionRevisionId,
+        expected_health_generation: 0n,
+        records_per_request: 500,
+        requested_by_actor_key: "operator-admin",
+        queued_at: now,
+      },
+    });
+    const repository = new ProviderSourceSupervisorWorkRepository(
+      renewalClient,
+    );
+    const claimed = await repository.claimNext({
+      epochId: epoch.epochId,
+      ownerKey,
+      leaseToken,
+      claimOwner: ownerKey,
+      claimToken: randomUUID(),
+      claimLeaseId: randomUUID(),
+    });
+    assert.equal(claimed?.kind, "source_test");
+    assert.equal(claimed?.id, job.id);
+    if (!claimed || claimed.kind !== "source_test") {
+      throw new Error("Expected a claimed source test.");
+    }
+
+    blockingTransaction = blocker.$transaction(async (transaction) => {
+      await transaction.$queryRaw`
+        select id
+        from public.provider_source_test_jobs
+        where id = ${job.id}::uuid
+        for update
+      `;
+      blockerReady();
+      await holdBlocker;
+    });
+    await blocked;
+
+    renewing = repository.renewClaim({
+      epochId: epoch.epochId,
+      ownerKey,
+      leaseToken,
+      work: claimed,
+    });
+    await waitForBlockedSourceTestWrite(fixture.database);
+
+    const supervisors = new ProviderSourceSupervisorRepository(
+      fixture.database,
+    );
+    const snapshots = new ProviderSourceSupervisorSnapshotRepository(
+      fixture.database,
+    );
+    const [renewedLease] = await within(Promise.all([
+      supervisors.renew({
+        epochId: epoch.epochId,
+        ownerKey,
+        leaseToken,
+        now: new Date(0),
+      }),
+      snapshots.publish({
+        epochId: epoch.epochId,
+        ownerKey,
+        leaseToken,
+        capacity: {
+          maximumExecutionSlots: 2,
+          activeExecutionSlots: 2,
+          requestPermitLanes: [],
+        },
+        admission: { state: "available", safeCode: null },
+      }),
+    ]), 1_000);
+    assert.ok(renewedLease > epoch.leaseExpiresAt);
+
+    fencing = supervisors.fence({
+      epochId: epoch.epochId,
+      ownerKey,
+      leaseToken,
+      safeReasonCode: "TEST_FENCE",
+      fencedAt: new Date(0),
+    });
+    await assert.rejects(
+      within(fencing, 100),
+      /operation did not settle within the bound/u,
+    );
+    assert.equal((await fixture.database.source_supervisor_epochs
+      .findUniqueOrThrow({ where: { id: epoch.epochId } })).state, "active");
+
+    releaseBlocker?.();
+    await blockingTransaction;
+    assert.ok((await renewing) instanceof Date);
+    await fencing;
+    assert.equal((await fixture.database.source_supervisor_epochs
+      .findUniqueOrThrow({ where: { id: epoch.epochId } })).state, "fenced_draining");
+  } finally {
+    releaseBlocker?.();
+    await Promise.allSettled([
+      ...(blockingTransaction ? [blockingTransaction] : []),
+      ...(renewing ? [renewing] : []),
+      ...(fencing ? [fencing] : []),
+    ]);
     await fixture.close();
   }
 });

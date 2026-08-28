@@ -20,10 +20,11 @@ Tasks 002 and 003 may run in parallel after task 001.
 
 ## Fixed decisions
 
-- One setting per provider source, independent of the shared request-concurrency cap.
+- One setting per provider source, independent of per-platform request-lane
+  concurrency.
 - Whole number from 1 through 5,000; default 500 for newly created sources.
-- Existing source schedules migrate with 250, matching the prior implicit
-  runtime value, so deployment alone does not change their next run.
+- Existing source schedules migrate with 500, matching the current runtime
+  target, so deployment alone does not change their next run.
 - Existing queued or running work keeps its pin. The next newly created run uses
   the saved value, as do all later runs until the next save.
 - Source tests pin the current value when their job is created. A profile-only
